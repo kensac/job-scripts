@@ -22,7 +22,7 @@ jobs:
       - name: Restore cached virtualenv
         uses: actions/cache/restore@v4
         with:
-          key: venv-${{ runner.os }}-${{ steps.setup_python.outputs.python-version }}-${{ hashFiles('**/requirements.txt') }}
+          key: venv-${{ github.job }}-${{ runner.os }}-${{ steps.setup_python.outputs.python-version }}-${{ hashFiles('**/requirements.txt') }}
           path: .venv
 
       - name: Install & activate virtualenv
@@ -37,7 +37,7 @@ jobs:
       - name: Save cached virtualenv
         uses: actions/cache/save@v4
         with:
-          key: venv-${{ runner.os }}-${{ steps.setup_python.outputs.python-version }}-${{ hashFiles('**/requirements.txt') }}
+          key: venv-${{ github.job }}-${{ runner.os }}-${{ steps.setup_python.outputs.python-version }}-${{ hashFiles('**/requirements.txt') }}
           path: .venv
 
       - name: Configure Google credentials
@@ -69,7 +69,7 @@ jobs:
       - name: Restore cached virtualenv
         uses: actions/cache/restore@v4
         with:
-          key: venv-${{ runner.os }}-${{ steps.setup_python.outputs.python-version }}-${{ hashFiles('**/requirements.txt') }}
+          key: venv-${{ github.job }}-${{ runner.os }}-${{ steps.setup_python.outputs.python-version }}-${{ hashFiles('**/requirements.txt') }}
           path: .venv
 
       - name: Install & activate virtualenv
@@ -84,7 +84,7 @@ jobs:
       - name: Save cached virtualenv
         uses: actions/cache/save@v4
         with:
-          key: venv-${{ runner.os }}-${{ steps.setup_python.outputs.python-version }}-${{ hashFiles('**/requirements.txt') }}
+          key: venv-${{ github.job }}-${{ runner.os }}-${{ steps.setup_python.outputs.python-version }}-${{ hashFiles('**/requirements.txt') }}
           path: .venv
 
       - name: Configure Google credentials
@@ -115,7 +115,7 @@ jobs:
       - name: Restore cached virtualenv
         uses: actions/cache/restore@v4
         with:
-          key: venv-${{ runner.os }}-${{ steps.setup_python.outputs.python-version }}-${{ hashFiles('**/requirements.txt') }}
+          key: venv-${{ github.job }}-${{ runner.os }}-${{ steps.setup_python.outputs.python-version }}-${{ hashFiles('**/requirements.txt') }}
           path: .venv
 
       - name: Install & activate virtualenv
@@ -130,7 +130,7 @@ jobs:
       - name: Save cached virtualenv
         uses: actions/cache/save@v4
         with:
-          key: venv-${{ runner.os }}-${{ steps.setup_python.outputs.python-version }}-${{ hashFiles('**/requirements.txt') }}
+          key: venv-${{ github.job }}-${{ runner.os }}-${{ steps.setup_python.outputs.python-version }}-${{ hashFiles('**/requirements.txt') }}
           path: .venv
 
       - name: Configure Google credentials
