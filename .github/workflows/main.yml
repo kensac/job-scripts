@@ -14,31 +14,23 @@ jobs:
         uses: actions/checkout@v3
 
       - name: Set up Python
-        id: setup_python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v4
         with:
           python-version: "3.x"
 
-      - name: Restore cached virtualenv
-        uses: actions/cache/restore@v4
+      - name: Cache pip
+        id: pip-cache
+        uses: actions/cache@v4
         with:
-          key: venv-${{ github.job }}-${{ runner.os }}-${{ steps.setup_python.outputs.python-version }}-${{ hashFiles('**/requirements.txt') }}
-          path: .venv
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
 
-      - name: Install & activate virtualenv
+      - name: Install dependencies
         run: |
-          python -m venv .venv
-          source .venv/bin/activate
           pip install --upgrade pip
           pip install -r requirements.txt
-          echo "$VIRTUAL_ENV/bin" >> $GITHUB_PATH
-          echo "VIRTUAL_ENV=$VIRTUAL_ENV" >> $GITHUB_ENV
-
-      - name: Save cached virtualenv
-        uses: actions/cache/save@v4
-        with:
-          key: venv-${{ github.job }}-${{ runner.os }}-${{ steps.setup_python.outputs.python-version }}-${{ hashFiles('**/requirements.txt') }}
-          path: .venv
 
       - name: Configure Google credentials
         env:
@@ -58,34 +50,27 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout code
+        uses: actions/checkout@v3
 
       - name: Set up Python
-        id: setup_python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v4
         with:
           python-version: "3.x"
 
-      - name: Restore cached virtualenv
-        uses: actions/cache/restore@v4
+      - name: Cache pip
+        id: pip-cache
+        uses: actions/cache@v4
         with:
-          key: venv-${{ github.job }}-${{ runner.os }}-${{ steps.setup_python.outputs.python-version }}-${{ hashFiles('**/requirements.txt') }}
-          path: .venv
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
 
-      - name: Install & activate virtualenv
+      - name: Install dependencies
         run: |
-          python -m venv .venv
-          source .venv/bin/activate
           pip install --upgrade pip
           pip install -r requirements.txt
-          echo "$VIRTUAL_ENV/bin" >> $GITHUB_PATH
-          echo "VIRTUAL_ENV=$VIRTUAL_ENV" >> $GITHUB_ENV
-
-      - name: Save cached virtualenv
-        uses: actions/cache/save@v4
-        with:
-          key: venv-${{ github.job }}-${{ runner.os }}-${{ steps.setup_python.outputs.python-version }}-${{ hashFiles('**/requirements.txt') }}
-          path: .venv
 
       - name: Configure Google credentials
         env:
@@ -104,34 +89,27 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout code
+        uses: actions/checkout@v3
 
       - name: Set up Python
-        id: setup_python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v4
         with:
           python-version: "3.x"
 
-      - name: Restore cached virtualenv
-        uses: actions/cache/restore@v4
+      - name: Cache pip
+        id: pip-cache
+        uses: actions/cache@v4
         with:
-          key: venv-${{ github.job }}-${{ runner.os }}-${{ steps.setup_python.outputs.python-version }}-${{ hashFiles('**/requirements.txt') }}
-          path: .venv
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
 
-      - name: Install & activate virtualenv
+      - name: Install dependencies
         run: |
-          python -m venv .venv
-          source .venv/bin/activate
           pip install --upgrade pip
           pip install -r requirements.txt
-          echo "$VIRTUAL_ENV/bin" >> $GITHUB_PATH
-          echo "VIRTUAL_ENV=$VIRTUAL_ENV" >> $GITHUB_ENV
-
-      - name: Save cached virtualenv
-        uses: actions/cache/save@v4
-        with:
-          key: venv-${{ github.job }}-${{ runner.os }}-${{ steps.setup_python.outputs.python-version }}-${{ hashFiles('**/requirements.txt') }}
-          path: .venv
 
       - name: Configure Google credentials
         env:
