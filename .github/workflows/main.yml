@@ -1,0 +1,101 @@
+name: Job Application Tracker
+
+on:
+  schedule:
+    - cron: "0 */1 * * *"
+  workflow_dispatch:
+
+jobs:
+  run-tracker-internship:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.x"
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Configure Google credentials
+        env:
+          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+        run: |
+          echo "$GOOGLE_CREDENTIALS" > creds.json
+          echo "GOOGLE_APPLICATION_CREDENTIALS_CUSTOM=$(pwd)/creds.json" >> $GITHUB_ENV
+
+      - name: Run tracker for internships
+        env:
+          SHEET_ID: ${{ secrets.SHEET_ID_INTERNSHIP }}
+          JOB_LISTINGS_URL: ${{ secrets.JOB_LISTINGS_URL_INTERNSHIP }}
+        run: |
+          python pittcsc_simplify.py
+
+  run-tracker-internship-ouckah:
+    needs: run-tracker-internship
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.x"
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Configure Google credentials
+        env:
+          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+        run: |
+          echo "$GOOGLE_CREDENTIALS" > creds.json
+          echo "GOOGLE_APPLICATION_CREDENTIALS_CUSTOM=$(pwd)/creds.json" >> $GITHUB_ENV
+
+      - name: Run tracker for internships (Ouckah)
+        env:
+          SHEET_ID: ${{ secrets.SHEET_ID_INTERNSHIP }}
+          JOB_LISTINGS_URL: ${{ secrets.JOB_LISTINGS_URL_INTERNSHIP_OUCKAH }}
+        run: |
+          python pittcsc_simplify.py
+
+  run-full-time-tracker:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.x"
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Configure Google credentials
+        env:
+          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+        run: |
+          echo "$GOOGLE_CREDENTIALS" > creds.json
+          echo "GOOGLE_APPLICATION_CREDENTIALS_CUSTOM=$(pwd)/creds.json" >> $GITHUB_ENV
+
+      - name: Run tracker for full-time roles
+        env:
+          SHEET_ID: ${{ secrets.SHEET_ID_FULL_TIME }}
+          JOB_LISTINGS_URL: ${{ secrets.JOB_LISTINGS_URL_FULL_TIME }}
+        run: |
+          python pittcsc_simplify.py
