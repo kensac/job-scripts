@@ -160,6 +160,6 @@ jobs:
 
       - name: Run tracker for internships (Ouckah)
         env:
-          SHEET_ID: ${{ secrets.SHEET_ID_INTERNSHIP }}
+          SHEET_ID: ${{ secrets.SHEET_ID_FULL_TIME }}
           JOB_LISTINGS_URL: ${{ secrets.JOB_LISTINGS_URL_FULL_TIME_OUCKAH }}
         run: python pittcsc_simplify.py
