@@ -204,3 +204,8 @@ service_account_credentials.json
 
 # .python-version
 .python-version
+
+
+# Repository specific output artifacts
+*.csv
+*.txt
