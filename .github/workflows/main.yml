@@ -158,7 +158,7 @@ jobs:
           echo "$GOOGLE_CREDENTIALS" > creds.json
           echo "GOOGLE_APPLICATION_CREDENTIALS_CUSTOM=$(pwd)/creds.json" >> $GITHUB_ENV
 
-      - name: Run tracker for internships (Ouckah)
+      - name: Run tracker for full time (Ouckah)
         env:
           SHEET_ID: ${{ secrets.SHEET_ID_FULL_TIME }}
           JOB_LISTINGS_URL: ${{ secrets.JOB_LISTINGS_URL_FULL_TIME_OUCKAH }}
