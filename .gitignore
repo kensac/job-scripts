@@ -201,6 +201,7 @@ cython_debug/
 
 # GCP Credentials
 service_account_credentials.json
+*.json
 
 # .python-version
 .python-version
