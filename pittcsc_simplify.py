@@ -1,28 +1,37 @@
 from __future__ import annotations
+
+import datetime
 import logging
-import sys
 import os
 import random
+import sys
 import time
 from dataclasses import dataclass
-from typing import List, Set, Dict, Any
-from urllib.parse import urlparse, parse_qs, urlunparse, urlencode
-import datetime
+from typing import Any, Dict, List, Optional, Set, TypedDict
+from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 import dotenv
-import requests
 import gspread
-from oauth2client.service_account import ServiceAccountCredentials  # type: ignore
-
+import requests
 from gspread.utils import ValueInputOption
 from gspread.worksheet import Worksheet
+from oauth2client.service_account import ServiceAccountCredentials  # type: ignore
+from openai import OpenAI
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support.ui import WebDriverWait
 
-# Load environment variables
 dotenv.load_dotenv()
+
+# Initialize OpenAI client only if API key is available
+openai_api_key = os.environ.get("OPENAI_API_KEY")
+openai_client = OpenAI(api_key=openai_api_key) if openai_api_key else None
 
 # Constants
 LOG_FORMAT = "%(asctime)s - %(levelname)s - %(message)s"
-SHEET_ID: str = os.environ["SHEET_ID"]  # Raises if missing
+SHEET_ID: str = os.environ["SHEET_ID"]
 SHEET_NAME: str = "Job Application Tracker"
 EXCLUDED_LOCATIONS: Set[str] = {
     loc.lower()
@@ -57,7 +66,7 @@ FALLBACK_CUTOFF_TS: int = int(
     datetime.datetime.fromisoformat(FALLBACK_CUTOFF_DATE).timestamp()
 )
 
-# Tracking parameters to remove for URL normalization
+# URL tracking parameters
 TRACKING_PARAMS = {
     "utm_source",
     "utm_medium",
@@ -77,7 +86,15 @@ TRACKING_PARAMS = {
     "hsa_",
 }
 
-# Configure root logger to stdout only
+
+class ClearanceStats(TypedDict):
+    jobs_checked_for_clearance: int
+    jobs_filtered_by_clearance: int
+    clearance_filtered_jobs: List[JobPosting]
+    jobs_added_to_sheet: int
+
+
+# Logging setup
 logging.basicConfig(
     level=logging.DEBUG, format=LOG_FORMAT, handlers=[logging.StreamHandler(sys.stdout)]
 )
@@ -85,7 +102,6 @@ logger = logging.getLogger("job_tracker")
 
 
 class ExponentialBackoff:
-    """Handles exponential backoff with jitter for rate limiting."""
 
     def __init__(
         self,
@@ -99,17 +115,16 @@ class ExponentialBackoff:
         self.attempt = 0
 
     def wait(self) -> None:
-        """Wait for the calculated backoff time."""
         if self.attempt == 0:
             self.attempt += 1
             return
 
-        # Calculate exponential backoff with jitter
+        # Exponential backoff with jitter
         delay = min(
             self.base_delay * (self.backoff_factor ** (self.attempt - 1)),
             self.max_delay,
         )
-        # Add jitter (±25% randomness)
+        # Add ±25% jitter
         jitter = delay * 0.25 * (2 * random.random() - 1)
         final_delay = max(0, delay + jitter)
 
@@ -120,7 +135,6 @@ class ExponentialBackoff:
         self.attempt += 1
 
     def reset(self) -> None:
-        """Reset backoff counter."""
         self.attempt = 0
 
 
@@ -133,13 +147,10 @@ class JobPosting:
     terms: List[str]
     active: bool
     date_posted: int
-    raw_url: str = ""  # Keep original URL for backwards compatibility checks
+    raw_url: str = ""
 
 
 def authenticate_gspread() -> gspread.client.Client:
-    """
-    Authenticate with Google Sheets API via service account.
-    """
     scope = [
         "https://spreadsheets.google.com/feeds",
         "https://www.googleapis.com/auth/spreadsheets",
@@ -154,7 +165,6 @@ def authenticate_gspread() -> gspread.client.Client:
 
 
 def normalize_url(url: str) -> str:
-    """Remove tracking parameters and canonicalize URL."""
     if not url:
         return url
 
@@ -176,23 +186,229 @@ def normalize_url(url: str) -> str:
     normalized = urlunparse(
         (
             parsed.scheme,
-            parsed.netloc.lower(),  # Normalize domain to lowercase
-            parsed.path.rstrip("/") or "/",  # Remove trailing slash except root
+            parsed.netloc.lower(),
+            parsed.path.rstrip("/") or "/",
             parsed.params,
             new_query,
-            "",  # Remove fragment
+            "",
         )
     )
 
     return normalized
 
 
+def extract_url_content(url: str, timeout: float = 10.0) -> Optional[str]:
+    # Skip content extraction if no OpenAI client available
+    if not openai_client:
+        return None
+
+    # First try simple requests for basic content
+    try:
+        response = requests.get(
+            url,
+            timeout=timeout,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            },
+        )
+        response.raise_for_status()
+
+        # Simple text extraction - remove HTML tags
+        import re
+
+        content = re.sub(r"<[^>]+>", " ", response.text)
+        content = re.sub(r"\s+", " ", content).strip()
+
+        # Use all content from HTTP request if available
+        if len(content) > 100:
+            logger.debug(f"Extracted content via HTTP request: {len(content)} chars")
+            return content
+
+    except Exception as exc:
+        logger.debug(f"HTTP request failed for {url}: {exc}")
+
+    # Fallback to visible browser for JavaScript-heavy sites
+    driver = None
+    try:
+        # Chrome options
+        chrome_options = Options()
+        # Visible browser mode
+        # chrome_options.add_argument("--headless")
+        chrome_options.add_argument("--no-sandbox")
+        chrome_options.add_argument("--disable-dev-shm-usage")
+        chrome_options.add_argument("--window-size=1920,1080")
+        chrome_options.add_argument(
+            "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        )
+        chrome_options.add_argument("--enable-javascript")
+        chrome_options.add_argument("--disable-web-security")
+        chrome_options.add_argument("--allow-running-insecure-content")
+
+        # Create driver
+        driver = webdriver.Chrome(options=chrome_options)
+        driver.set_page_load_timeout(max(timeout, 15))
+
+        # Load the page
+        logger.info(f"Opening browser to load: {url}")
+        driver.get(url)
+
+        # Wait for content to load
+        try:
+            # Wait for body to be present
+            WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.TAG_NAME, "body"))
+            )
+
+            # Wait for JavaScript execution
+            import time
+
+            logger.debug("Waiting for JavaScript to load content...")
+            time.sleep(5)
+
+            # Wait for page to fully stabilize
+            logger.debug("Allowing additional time for dynamic content...")
+            time.sleep(5)
+
+            # Extract body text
+            body_element = driver.find_element(By.TAG_NAME, "body")
+            content = body_element.text.strip()
+
+            if content:
+                logger.info(f"Extracted all body content: {len(content)} chars")
+                return content
+            else:
+                logger.warning(
+                    f"No content found in body element for {url} - page may require manual interaction"
+                )
+                return None
+
+        except Exception as wait_exc:
+            logger.debug(f"Wait/content extraction failed for {url}: {wait_exc}")
+            return None
+
+    except Exception as exc:
+        logger.debug(f"Headless browser failed for {url}: {exc}")
+        return None
+
+    finally:
+        if driver:
+            try:
+                driver.quit()
+            except Exception:
+                pass
+
+
+def check_security_clearance_requirement(content: str) -> bool:
+    if not content or not openai_client:
+        return False
+
+    try:
+        response = openai_client.chat.completions.create(
+            model="gpt-5-nano",
+            messages=[
+                {
+                    "role": "system",
+                    "content": """You are analyzing job postings to determine if they should be filtered out. 
+
+                    Respond 'YES' to filter out jobs if you find ANY of these EXPLICIT conditions:
+                    
+                    SECURITY/CITIZENSHIP REQUIREMENTS:
+                    - "Security Clearance" or "security clearance required"
+                    - "U.S. Security Clearance" 
+                    - "Secret Clearance", "Top Secret", "TS/SCI", "Public Trust"
+                    - "Must be a U.S. citizen" or "U.S. citizenship required"
+                    - "U.S. Person" as defined by export control regulations
+                    
+                    Respond 'YES' if ANY of these conditions are clearly stated.
+                    Respond 'NO' only if NONE of these conditions are mentioned.
+                    
+                    IMPORTANT: Only respond 'YES' if you are absolutely certain. If content is unclear, vague, or insufficient, respond 'NO' to avoid false positives.
+                    Do not make assumptions based on job title or company type.
+                    Do not respond with anything other than 'YES' or 'NO'.
+                    """,
+                },
+                {
+                    "role": "user",
+                    "content": f"Should this job posting be filtered out (security clearance/citizenship required)? Content: {content}",
+                },
+            ],
+            max_completion_tokens=5000,
+        )
+
+        result = response.choices[0].message.content
+        if result is None or result == "":
+            logger.warning("AI returned null or empty response")
+            return False
+
+        result = result.strip().upper()
+        logger.info(f"AI clearance check result: '{result}'")
+
+        # Handle various ways AI might respond positively
+        positive_responses = [
+            "YES",
+            "Y",
+            "TRUE",
+            "REQUIRED",
+            "CLEARANCE REQUIRED",
+            "CITIZENSHIP REQUIRED",
+        ]
+        if any(pos in result for pos in positive_responses):
+            return True
+
+        return False
+
+    except Exception as exc:
+        logger.warning(f"AI security clearance check failed: {exc}")
+        return False
+
+
+def preprocess_job_posting(job: JobPosting) -> JobPosting:
+    if not job.url or not job.active:
+        return job
+
+    # Skip AI checks if no OpenAI client available
+    if not openai_client:
+        logger.debug("No OpenAI API key found - skipping AI preprocessing")
+        return job
+
+    # Extract content from URL
+    content = extract_url_content(job.url)
+    if not content:
+        logger.debug(f"Could not extract content from {job.url} - keeping job active")
+        return job
+
+    # Require substantial content
+    if len(content.strip()) < 100:
+        logger.debug(f"Insufficient content from {job.url} - keeping job active")
+        return job
+
+    # Check for security clearance/citizenship requirement
+    requires_clearance = check_security_clearance_requirement(content)
+
+    if requires_clearance:
+        logger.info(
+            f"FILTERED: Job blocked by AI (security clearance/citizenship/closed) for {job.company} - {job.title} ({job.url})"
+        )
+        # Mark as inactive when certain
+        return JobPosting(
+            company=job.company,
+            locations=job.locations,
+            title=job.title,
+            url=job.url,
+            terms=job.terms,
+            active=False,
+            date_posted=job.date_posted,
+            raw_url=job.raw_url,
+        )
+    else:
+        logger.debug(f"No issues detected by AI for {job.company} - {job.title}")
+
+    return job
+
+
 def fetch_job_postings(
     url: str, timeout: float = 10.0, max_retries: int = 3
 ) -> List[JobPosting]:
-    """
-    Fetch and parse job postings from JSON endpoint with exponential backoff.
-    """
     backoff = ExponentialBackoff()
 
     for attempt in range(max_retries + 1):
@@ -249,22 +465,22 @@ def fetch_job_postings(
         raw_url = entry.get("url", "")
         normalized_url = normalize_url(raw_url)
 
-        postings.append(
-            JobPosting(
-                company=entry.get("company_name", ""),
-                locations=(
-                    entry.get("locations", [])
-                    if isinstance(entry.get("locations"), list)
-                    else []
-                ),
-                title=entry.get("title", ""),
-                url=normalized_url,
-                terms=terms,
-                active=bool(entry.get("active", False)),
-                date_posted=int(entry.get("date_posted", 0)),
-                raw_url=raw_url,
-            )
+        job = JobPosting(
+            company=entry.get("company_name", ""),
+            locations=(
+                entry.get("locations", [])
+                if isinstance(entry.get("locations"), list)
+                else []
+            ),
+            title=entry.get("title", ""),
+            url=normalized_url,
+            terms=terms,
+            active=bool(entry.get("active", False)),
+            date_posted=int(entry.get("date_posted", 0)),
+            raw_url=raw_url,
         )
+
+        postings.append(job)
     logger.info(f"Fetched {len(postings)} job postings.")
     return postings
 
@@ -280,9 +496,6 @@ def is_terms_included(terms: List[str]) -> bool:
 def filter_job_postings(
     postings: List[JobPosting], existing_urls: Set[str]
 ) -> List[JobPosting]:
-    """
-    Filter postings by activity, location, terms (or fallback), and duplicates.
-    """
     filtered: List[JobPosting] = []
     for job in postings:
         if not job.active:
@@ -302,7 +515,7 @@ def filter_job_postings(
                     f"Skipping no terms and date < {FALLBACK_CUTOFF_DATE}: {job.date_posted}"
                 )
                 continue
-        # Check for duplicates against both normalized and raw URLs for backwards compatibility
+        # Check for duplicates
         if job.url in existing_urls or job.raw_url in existing_urls:
             logger.debug(f"Skipping duplicate URL: {job.url} (raw: {job.raw_url})")
             continue
@@ -316,19 +529,43 @@ def get_existing_urls(sheet: Worksheet) -> Set[str]:
     return {row[5] for row in rows if len(row) > 5}  # type: ignore
 
 
-def write_to_sheet(sheet: Worksheet, jobs: List[JobPosting]) -> None:
-    """
-    Append new job postings to the Google Sheet.
-    """
+def write_to_sheet(sheet: Worksheet, jobs: List[JobPosting]) -> ClearanceStats:
+
+    clearance_stats: ClearanceStats = {
+        "jobs_checked_for_clearance": 0,
+        "jobs_filtered_by_clearance": 0,
+        "clearance_filtered_jobs": [],
+        "jobs_added_to_sheet": 0,
+    }
+
     if not jobs:
-        logger.info("No new jobs to add.")
-        return
+        return clearance_stats
+
+    # Final security clearance check (if AI is available)
+    if openai_client:
+        clearance_stats["jobs_checked_for_clearance"] = len(jobs)
+        jobs_to_add: List[JobPosting] = []
+
+        for job in jobs:
+            # Apply final preprocessing check
+            final_job = preprocess_job_posting(job)
+            if final_job.active:
+                jobs_to_add.append(final_job)
+            else:
+                clearance_stats["jobs_filtered_by_clearance"] += 1
+                clearance_stats["clearance_filtered_jobs"].append(job)
+    else:
+        logger.info("No OpenAI API key found - skipping AI security clearance checks")
+        jobs_to_add = jobs
+
+    if not jobs_to_add:
+        return clearance_stats
 
     existing_rows = sheet.get_all_values()
     start_row = len(existing_rows) + 1
     rows_to_add: List[List[str]] = []
 
-    for job in jobs:
+    for job in jobs_to_add:
         row: List[str] = [""] * 15
         row[1] = job.company
         row[3] = ", ".join(job.locations)
@@ -344,12 +581,19 @@ def write_to_sheet(sheet: Worksheet, jobs: List[JobPosting]) -> None:
         sheet.update(
             rows_to_add, cell_range, value_input_option=ValueInputOption.user_entered
         )
-        logger.info(f"Added {len(rows_to_add)} new rows.")
+        clearance_stats["jobs_added_to_sheet"] = len(rows_to_add)
     except Exception as exc:
         logger.error(f"Failed to update sheet: {exc}")
+        clearance_stats["jobs_added_to_sheet"] = 0
+
+    return clearance_stats
 
 
-def summarize_filters(postings: List[JobPosting], existing_urls: Set[str]) -> None:
+def summarize_filters(
+    postings: List[JobPosting],
+    existing_urls: Set[str],
+    clearance_stats: ClearanceStats | None = None,
+) -> None:
     excluded_locations: Set[str] = set()
     excluded_terms: Set[str] = set()
     summary: Dict[str, Any] = {
@@ -362,6 +606,14 @@ def summarize_filters(postings: List[JobPosting], existing_urls: Set[str]) -> No
         "passed_jobs": [],
         "inactive_jobs": [],
     }
+
+    if clearance_stats is None:
+        clearance_stats = {
+            "jobs_checked_for_clearance": 0,
+            "jobs_filtered_by_clearance": 0,
+            "clearance_filtered_jobs": [],
+            "jobs_added_to_sheet": 0,
+        }
 
     inactive_jobs = summary["inactive_jobs"]
     location_excluded_jobs = summary["location_excluded_jobs"]
@@ -400,15 +652,42 @@ def summarize_filters(postings: List[JobPosting], existing_urls: Set[str]) -> No
 
         passed_jobs.append(job)
 
-    logger.info("Filter Summary:")
-    logger.info(f"Excluded Locations: {excluded_locations}")
-    logger.info(f"Excluded Terms: {excluded_terms}")
-    logger.info(f"Location Excluded Jobs: {len(location_excluded_jobs)}")
-    logger.info(f"Term Excluded Jobs: {len(term_excluded_jobs)}")
-    logger.info(f"Date Excluded Jobs: {len(date_excluded_jobs)}")
-    logger.info(f"Duplicate Jobs: {len(duplicate_jobs)}")
-    logger.info(f"Passed Jobs: {len(passed_jobs)}")
-    logger.info(f"Inactive Jobs: {len(inactive_jobs)}")
+    logger.info("=" * 60)
+    logger.info("FINAL FILTERING SUMMARY")
+    logger.info("=" * 60)
+    logger.info(f"Total Jobs Fetched: {len(postings)}")
+    logger.info("")
+    logger.info("EXCLUDED JOBS:")
+    logger.info(f"  ├─ Inactive Jobs: {len(inactive_jobs)}")
+    logger.info(f"  ├─ Location Excluded: {len(location_excluded_jobs)}")
+    logger.info(f"  ├─ Term Excluded: {len(term_excluded_jobs)}")
+    logger.info(f"  ├─ Date Excluded: {len(date_excluded_jobs)}")
+    logger.info(f"  ├─ Duplicate Jobs: {len(duplicate_jobs)}")
+    logger.info(
+        f"  └─ AI Filtered (Clearance/Closed): {clearance_stats['jobs_filtered_by_clearance']}"
+    )
+    logger.info("")
+    logger.info("RESULTS:")
+    logger.info(f"  ├─ Jobs Passed Initial Filters: {len(passed_jobs)}")
+    logger.info(
+        f"  ├─ Jobs Checked for Security Clearance: {clearance_stats['jobs_checked_for_clearance']}"
+    )
+    logger.info(
+        f"  └─ Jobs Added to Sheet: {clearance_stats.get('jobs_added_to_sheet', 0)}"
+    )
+    logger.info("")
+    logger.info(f"Excluded Locations: {sorted(excluded_locations)}")
+    logger.info(f"Excluded Terms: {sorted(excluded_terms)}")
+
+    # Show AI filtered jobs with URLs
+    if clearance_stats["jobs_filtered_by_clearance"] > 0:
+        logger.info("")
+        logger.info("AI FILTERED JOBS (Security Clearance/Citizenship/Closed):")
+        for job in clearance_stats["clearance_filtered_jobs"]:
+            logger.info(f"  - {job.company}: {job.title}")
+            logger.info(f"    URL: {job.url}")
+
+    logger.info("=" * 60)
 
 
 def main() -> None:
@@ -417,9 +696,12 @@ def main() -> None:
     postings = fetch_job_postings(JOB_LISTINGS_URL)
     existing_urls = get_existing_urls(sheet)
     new_jobs = filter_job_postings(postings, existing_urls)
-    summarize_filters(postings, existing_urls)
 
-    write_to_sheet(sheet, new_jobs)
+    # Apply security clearance filtering
+    clearance_stats = write_to_sheet(sheet, new_jobs)
+
+    # Print comprehensive summary at the end
+    summarize_filters(postings, existing_urls, clearance_stats)
 
 
 if __name__ == "__main__":
