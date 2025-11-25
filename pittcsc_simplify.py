@@ -25,7 +25,6 @@ from openai import OpenAI
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
-from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
 
@@ -54,7 +53,6 @@ logging.basicConfig(level=logging.DEBUG, handlers=[handler])
 logger = logging.getLogger("job_tracker")
 
 # Google Sheets Configuration
-SHEET_ID: str = os.environ["SHEET_ID"]
 SHEET_NAME: str = "Job Application Tracker"
 FOUND_SOURCE_DEFAULT: str = "Direct Application"
 
@@ -94,14 +92,16 @@ FALLBACK_CUTOFF_TS: int = int(
 )
 
 # File Configuration
-JOB_LISTINGS_URL: str = os.environ["JOB_LISTINGS_URL"]
 AI_RESULTS_FILE: str = "ai_results.json"
 
 # Content Extraction Configuration
 BROWSER_PAGE_LOAD_TIMEOUT: float = 15.0
 BROWSER_ELEMENT_WAIT_TIMEOUT: float = 10.0
+BROWSER_CONTENT_WAIT: float = 5.0
+BROWSER_TAB_POOL_SIZE: int = 10
+BROWSER_STAGGER_DELAY: float = 1.0
 MIN_CONTENT_LENGTH: int = 100
-OPENAI_TIMEOUT: float = 30.0
+OPENAI_TIMEOUT: float = 120.0
 OPENAI_MAX_RETRIES: int = 3
 NETWORK_CHECK_TIMEOUT: float = 5.0
 NETWORK_RETRY_DELAY: float = 10.0
@@ -251,9 +251,14 @@ def save_ai_results(ai_results: Dict[str, Dict[str, str]]) -> None:
         logger.warning(f"Failed to save AI results to {AI_RESULTS_FILE}: {exc}")
 
 
-def add_ai_result(url: str, status: str, reason: str = "") -> None:
+def add_ai_result(url: str, status: str, reason: str = "", check_type: str = "") -> None:
     ai_results = load_ai_results()
-    ai_results[url] = {"status": status, "reason": reason}
+    ai_results[url] = {
+        "status": status,
+        "reason": reason,
+        "check_type": check_type,
+        "timestamp": datetime.datetime.now().isoformat()
+    }
     save_ai_results(ai_results)
 
 
@@ -272,9 +277,24 @@ def is_url_passed(url: str) -> bool:
     return result is not None and result.get("status") == "passed"
 
 
+def is_url_failed(url: str) -> bool:
+    result = get_ai_result(url)
+    return result is not None and result.get("status") == "failed"
+
+
+@dataclass
+class TabInfo:
+    handle: str
+    url: str
+    load_time: float
+
+
 class BrowserManager:
     def __init__(self) -> None:
         self.driver: Optional[webdriver.Chrome] = None
+        self.tab_queue: List[TabInfo] = []
+        self.pending_urls: List[str] = []
+        self.completed_extractions: Dict[str, Optional[str]] = {}
 
     def _get_chrome_options(self) -> Options:
         chrome_options = Options()
@@ -302,31 +322,93 @@ class BrowserManager:
         logger.warning("Recreating browser instance after failure")
         self.close()
         self.driver = None
+        self.tab_queue = []
+        self.pending_urls = []
+        self.completed_extractions = {}
 
-    def extract_content(self, url: str) -> Optional[str]:
+    def _start_loading_url(self, url: str) -> None:
         try:
             driver = self._ensure_driver()
-            logger.info(f"Loading URL in browser: {url}")
+
+            driver.execute_script("window.open('');")
+            driver.switch_to.window(driver.window_handles[-1])
+
+            logger.debug(f"Starting load for: {url}")
             driver.get(url)
 
-            WebDriverWait(driver, BROWSER_ELEMENT_WAIT_TIMEOUT).until(
-                EC.presence_of_element_located((By.TAG_NAME, "body"))
+            tab_info = TabInfo(
+                handle=driver.current_window_handle,
+                url=url,
+                load_time=time.time()
             )
+            self.tab_queue.append(tab_info)
+
+        except Exception as exc:
+            logger.debug(f"Failed to start loading {url}: {exc}")
+
+    def add_to_pipeline(self, urls: List[str]) -> None:
+        self.pending_urls.extend(urls)
+
+    def fill_pipeline(self) -> None:
+        while len(self.tab_queue) < BROWSER_TAB_POOL_SIZE and self.pending_urls:
+            url = self.pending_urls.pop(0)
+            self._start_loading_url(url)
+            if self.pending_urls:
+                time.sleep(BROWSER_STAGGER_DELAY)
+
+    def extract_next(self) -> None:
+        self.fill_pipeline()
+
+        if not self.tab_queue:
+            return
+
+        tab_info = self.tab_queue.pop(0)
+
+        try:
+            driver = self._ensure_driver()
+
+            elapsed = time.time() - tab_info.load_time
+            remaining_wait = BROWSER_CONTENT_WAIT - elapsed
+            if remaining_wait > 0:
+                logger.debug(f"Waiting {remaining_wait:.1f}s for {tab_info.url}")
+                time.sleep(remaining_wait)
+
+            driver.switch_to.window(tab_info.handle)
+
+            WebDriverWait(driver, BROWSER_ELEMENT_WAIT_TIMEOUT).until(
+                lambda d: d.execute_script('return document.readyState') == 'complete'
+            )
+
+            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
 
             body_element = driver.find_element(By.TAG_NAME, "body")
             content = body_element.text.strip()
 
+            driver.close()
+            if driver.window_handles:
+                driver.switch_to.window(driver.window_handles[0])
+
             if content:
-                logger.info(f"Extracted body content: {len(content)} chars")
-                return content
+                logger.info(f"Extracted {len(content)} chars from {tab_info.url}")
+                self.completed_extractions[tab_info.url] = content
             else:
-                logger.warning(f"No content found in body for {url}")
-                return None
+                logger.warning(f"No content found for {tab_info.url}")
+                self.completed_extractions[tab_info.url] = None
 
         except Exception as exc:
-            logger.debug(f"Browser extraction failed for {url}: {exc}")
-            self._recreate_driver()
-            return None
+            logger.debug(f"Extraction failed for {tab_info.url}: {exc}")
+            self.completed_extractions[tab_info.url] = None
+
+    def get_content(self, url: str) -> Optional[str]:
+        max_wait_iterations = 20
+        wait_iterations = 0
+
+        while url not in self.completed_extractions and wait_iterations < max_wait_iterations:
+            if self.tab_queue or self.pending_urls:
+                self.extract_next()
+            wait_iterations += 1
+
+        return self.completed_extractions.get(url)
 
     def close(self) -> None:
         if self.driver:
@@ -337,19 +419,111 @@ class BrowserManager:
                 pass
             finally:
                 self.driver = None
+                self.tab_queue = []
+                self.pending_urls = []
+                self.completed_extractions = {}
 
 
 def extract_url_content(
     url: str, browser_manager: Optional[BrowserManager] = None
 ) -> Optional[str]:
-    if not openai_client:
+    if not openai_client or not browser_manager:
         return None
 
-    if browser_manager:
-        logger.debug(f"Using browser extraction for {url}")
-        return browser_manager.extract_content(url)
+    return browser_manager.get_content(url)
 
-    return None
+
+def check_if_job_closed(content: str, url: str = "") -> bool:
+    if not content or not openai_client:
+        return False
+
+    if url:
+        cached_result = get_ai_result(url)
+        if cached_result and cached_result.get("check_type") == "closed":
+            logger.info(f"Using cached closed status for {url}")
+            return cached_result["status"] == "rejected"
+
+    backoff = ExponentialBackoff(base_delay=2.0, max_delay=30.0)
+
+    for attempt in range(OPENAI_MAX_RETRIES):
+        try:
+            response = openai_client.chat.completions.create(
+                model="gpt-5-nano",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": """You are checking if a job posting is closed or no longer available.
+
+Respond 'YES' if you find ANY of these indicators:
+- "Job posting no longer available"
+- "This job is closed"
+- "Position has been filled"
+- "No longer accepting applications"
+- "This posting has expired"
+- "Application deadline has passed"
+- "Position is no longer open"
+- Similar phrases indicating the job is closed
+
+Respond 'NO' if the job appears to be open and accepting applications.
+
+IMPORTANT: Only respond 'YES' if you are absolutely certain the job is closed.
+If unclear or no indication, respond 'NO'.
+Do not respond with anything other than 'YES' or 'NO'.""",
+                    },
+                    {
+                        "role": "user",
+                        "content": f"Is this job posting closed? Content: {content}",
+                    },
+                ],
+                max_completion_tokens=5000,
+                timeout=OPENAI_TIMEOUT,
+            )
+
+            result = response.choices[0].message.content
+            if result is None or result == "":
+                logger.warning("AI returned null or empty response for closed check")
+                return False
+
+            result = result.strip().upper()
+
+            if "YES" not in result and "NO" not in result:
+                logger.warning(f"AI returned invalid response for closed check: '{result}'")
+                return False
+
+            logger.info(f"AI closed check result: '{result}'")
+
+            is_closed = "YES" in result
+
+            if url:
+                if is_closed:
+                    add_ai_result(url, "rejected", "job closed", "closed")
+                else:
+                    add_ai_result(url, "passed", "job open", "closed")
+
+            return is_closed
+
+        except Exception as exc:
+            exc_str = str(exc).lower()
+            if "timeout" in exc_str or "connection" in exc_str or "network" in exc_str:
+                logger.warning(f"Network error during AI closed check: {exc}")
+                wait_for_network()
+                continue
+            if attempt < OPENAI_MAX_RETRIES - 1:
+                logger.warning(
+                    f"AI closed check failed (attempt {attempt + 1}/{OPENAI_MAX_RETRIES}): {exc}"
+                )
+                backoff.wait()
+            else:
+                logger.warning(
+                    f"AI closed check failed after {OPENAI_MAX_RETRIES} attempts: {exc}"
+                )
+                if url:
+                    add_ai_result(url, "failed", f"AI check failed: {str(exc)[:100]}", "closed")
+                return False
+
+    if url:
+        add_ai_result(url, "failed", "AI check failed: unknown error", "closed")
+    return False
 
 
 def check_security_clearance_requirement(content: str, url: str = "") -> bool:
@@ -358,8 +532,8 @@ def check_security_clearance_requirement(content: str, url: str = "") -> bool:
 
     if url:
         cached_result = get_ai_result(url)
-        if cached_result:
-            logger.info(f"Using cached AI result for {url}: {cached_result['status']}")
+        if cached_result and cached_result.get("check_type") == "clearance":
+            logger.info(f"Using cached clearance result for {url}: {cached_result['status']}")
             return cached_result["status"] == "rejected"
 
     backoff = ExponentialBackoff(base_delay=2.0, max_delay=30.0)
@@ -446,10 +620,10 @@ def check_security_clearance_requirement(content: str, url: str = "") -> bool:
             if url:
                 if requires_clearance:
                     add_ai_result(
-                        url, "rejected", "security clearance/citizenship/closed"
+                        url, "rejected", "security clearance/citizenship/visa restrictions", "clearance"
                     )
                 else:
-                    add_ai_result(url, "passed", "no security clearance required")
+                    add_ai_result(url, "passed", "no security clearance required", "clearance")
 
             return requires_clearance
 
@@ -468,8 +642,12 @@ def check_security_clearance_requirement(content: str, url: str = "") -> bool:
                 logger.warning(
                     f"AI security clearance check failed after {OPENAI_MAX_RETRIES} attempts: {exc}"
                 )
+                if url:
+                    add_ai_result(url, "failed", f"AI check failed: {str(exc)[:100]}", "clearance")
                 return False
 
+    if url:
+        add_ai_result(url, "failed", "AI check failed: unknown error", "clearance")
     return False
 
 
@@ -507,11 +685,29 @@ def preprocess_job_posting(
     content = extract_url_content(job.url, browser_manager)
     if not content:
         logger.debug(f"Could not extract content from {job.url} - keeping job active")
+        add_ai_result(job.url, "failed", "failed to extract content", "extraction")
         return job
 
     if len(content.strip()) < MIN_CONTENT_LENGTH:
         logger.debug(f"Insufficient content from {job.url} - keeping job active")
+        add_ai_result(job.url, "failed", f"insufficient content (only {len(content)} chars)", "extraction")
         return job
+
+    is_closed = check_if_job_closed(content, job.url)
+    if is_closed:
+        logger.info(
+            f"FILTERED: Job is closed for {job.company} - {job.title} ({job.url})"
+        )
+        return JobPosting(
+            company=job.company,
+            locations=job.locations,
+            title=job.title,
+            url=job.url,
+            terms=job.terms,
+            active=False,
+            date_posted=job.date_posted,
+            raw_url=job.raw_url,
+        )
 
     requires_clearance = check_security_clearance_requirement(content, job.url)
 
@@ -687,15 +883,34 @@ def filter_jobs_by_clearance(
 
     clearance_stats["jobs_checked_for_clearance"] = len(jobs)
     jobs_passed: List[JobPosting] = []
+    jobs_to_check: List[JobPosting] = []
 
     for job in jobs:
-        wait_for_network()
-        final_job = preprocess_job_posting(job, browser_manager)
-        if final_job.active:
-            jobs_passed.append(final_job)
-        else:
+        if not job.url or not job.active:
+            jobs_passed.append(job)
+        elif is_url_rejected(job.url):
+            logger.info(f"FILTERED: Job already rejected by AI (cached) for {job.company} - {job.title}")
             clearance_stats["jobs_filtered_by_clearance"] += 1
             clearance_stats["clearance_filtered_jobs"].append(job)
+        elif is_url_passed(job.url):
+            logger.info(f"Job already passed AI check (cached) for {job.company} - {job.title}")
+            jobs_passed.append(job)
+        else:
+            jobs_to_check.append(job)
+
+    if browser_manager and jobs_to_check:
+        urls_to_check = [job.url for job in jobs_to_check]
+        logger.info(f"Adding {len(urls_to_check)} URLs to pipeline")
+        browser_manager.add_to_pipeline(urls_to_check)
+
+        for job in jobs_to_check:
+            wait_for_network()
+            final_job = preprocess_job_posting(job, browser_manager)
+            if final_job.active:
+                jobs_passed.append(final_job)
+            else:
+                clearance_stats["jobs_filtered_by_clearance"] += 1
+                clearance_stats["clearance_filtered_jobs"].append(job)
 
     clearance_stats["jobs_passed"] = jobs_passed
     return clearance_stats
@@ -857,16 +1072,25 @@ def wait_for_network() -> None:
 
 
 def main() -> RunSummary | None:
+    sheet_id = os.environ.get("SHEET_ID")
+    job_listings_url = os.environ.get("JOB_LISTINGS_URL")
+
+    if not sheet_id or not job_listings_url:
+        logger.error("SHEET_ID and JOB_LISTINGS_URL environment variables must be set")
+        raise ValueError("Missing required environment variables")
+
     with wakepy.keep.presenting():
         logger.info("System sleep prevention enabled")
+        logger.info(f"Using SHEET_ID: {sheet_id}")
+        logger.info(f"Using JOB_LISTINGS_URL: {job_listings_url}")
         browser_manager: BrowserManager = BrowserManager()
         try:
             wait_for_network()
             client: gspread.client.Client = authenticate_gspread()
-            sheet: Worksheet = client.open_by_key(SHEET_ID).worksheet(SHEET_NAME)
+            sheet: Worksheet = client.open_by_key(sheet_id).worksheet(SHEET_NAME)
 
             wait_for_network()
-            postings: List[JobPosting] = fetch_job_postings(JOB_LISTINGS_URL)
+            postings: List[JobPosting] = fetch_job_postings(job_listings_url)
             existing_urls: Set[str] = get_existing_urls(sheet)
             new_jobs: List[JobPosting] = filter_job_postings(postings, existing_urls)
 
@@ -879,6 +1103,7 @@ def main() -> RunSummary | None:
             clearance_stats["jobs_added_to_sheet"] = jobs_added
 
             summary = summarize_filters(postings, existing_urls, clearance_stats)
+            summary["config_name"] = os.environ.get("CONFIG_NAME", "unknown")
             return summary
         except Exception as e:
             logger.error(f"Fatal error in main: {e}")
