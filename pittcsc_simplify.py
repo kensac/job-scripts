@@ -5,7 +5,6 @@ import json
 import logging
 import os
 import random
-import re
 import sys
 import time
 from dataclasses import dataclass
@@ -99,7 +98,6 @@ JOB_LISTINGS_URL: str = os.environ["JOB_LISTINGS_URL"]
 AI_RESULTS_FILE: str = "ai_results.json"
 
 # Content Extraction Configuration
-HTTP_REQUEST_TIMEOUT: float = 10.0
 BROWSER_PAGE_LOAD_TIMEOUT: float = 15.0
 BROWSER_ELEMENT_WAIT_TIMEOUT: float = 10.0
 MIN_CONTENT_LENGTH: int = 100
@@ -347,33 +345,8 @@ def extract_url_content(
     if not openai_client:
         return None
 
-    while True:
-        try:
-            response = requests.get(
-                url,
-                timeout=HTTP_REQUEST_TIMEOUT,
-                headers={
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-                },
-            )
-            response.raise_for_status()
-
-            content = re.sub(r"<[^>]+>", " ", response.text)
-            content = re.sub(r"\s+", " ", content).strip()
-
-            if len(content) > MIN_CONTENT_LENGTH:
-                logger.debug(f"Extracted content via HTTP request: {len(content)} chars")
-                return content
-
-        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as exc:
-            logger.debug(f"Network error for {url}: {exc}")
-            wait_for_network()
-            continue
-        except Exception as exc:
-            logger.debug(f"HTTP request failed for {url}: {exc}")
-            break
-
     if browser_manager:
+        logger.debug(f"Using browser extraction for {url}")
         return browser_manager.extract_content(url)
 
     return None
