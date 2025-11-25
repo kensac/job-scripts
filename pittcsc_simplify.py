@@ -152,6 +152,20 @@ class ClearanceStats(TypedDict):
     jobs_passed: List[JobPosting]
 
 
+class RunSummary(TypedDict):
+    config_name: str
+    total_fetched: int
+    inactive: int
+    location_excluded: int
+    term_excluded: int
+    date_excluded: int
+    duplicates: int
+    ai_filtered: int
+    passed_initial: int
+    checked_clearance: int
+    added_to_sheet: int
+
+
 class ExponentialBackoff:
     def __init__(
         self,
@@ -749,7 +763,7 @@ def summarize_filters(
     postings: List[JobPosting],
     existing_urls: Set[str],
     clearance_stats: Optional[ClearanceStats] = None,
-) -> None:
+) -> RunSummary:
     excluded_locations: Set[str] = set()
     excluded_terms: Set[str] = set()
 
@@ -835,6 +849,22 @@ def summarize_filters(
 
     logger.info("=" * 60)
 
+    summary: RunSummary = {
+        "config_name": "",
+        "total_fetched": len(postings),
+        "inactive": len(inactive_jobs),
+        "location_excluded": len(location_excluded_jobs),
+        "term_excluded": len(term_excluded_jobs),
+        "date_excluded": len(date_excluded_jobs),
+        "duplicates": len(duplicate_jobs),
+        "ai_filtered": clearance_stats["jobs_filtered_by_clearance"],
+        "passed_initial": len(passed_jobs),
+        "checked_clearance": clearance_stats["jobs_checked_for_clearance"],
+        "added_to_sheet": clearance_stats.get("jobs_added_to_sheet", 0),
+    }
+
+    return summary
+
 
 def check_network() -> bool:
     try:
@@ -853,7 +883,7 @@ def wait_for_network() -> None:
     logger.info("Network connection restored")
 
 
-def main() -> None:
+def main() -> RunSummary | None:
     with wakepy.keep.presenting():
         logger.info("System sleep prevention enabled")
         browser_manager: BrowserManager = BrowserManager()
@@ -875,7 +905,11 @@ def main() -> None:
             jobs_added: int = write_to_sheet(sheet, clearance_stats["jobs_passed"])
             clearance_stats["jobs_added_to_sheet"] = jobs_added
 
-            summarize_filters(postings, existing_urls, clearance_stats)
+            summary = summarize_filters(postings, existing_urls, clearance_stats)
+            return summary
+        except Exception as e:
+            logger.error(f"Fatal error in main: {e}")
+            raise
         finally:
             browser_manager.close()
 
