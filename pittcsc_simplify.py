@@ -13,10 +13,12 @@ from pathlib import Path
 from typing import Dict, List, Optional, Set, TypedDict
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
+import socket
 import colorlog
 import dotenv
 import gspread
 import requests
+import wakepy
 from gspread.utils import ValueInputOption
 from gspread.worksheet import Worksheet
 from oauth2client.service_account import ServiceAccountCredentials  # type: ignore
@@ -103,6 +105,8 @@ BROWSER_ELEMENT_WAIT_TIMEOUT: float = 10.0
 MIN_CONTENT_LENGTH: int = 100
 OPENAI_TIMEOUT: float = 30.0
 OPENAI_MAX_RETRIES: int = 3
+NETWORK_CHECK_TIMEOUT: float = 5.0
+NETWORK_RETRY_DELAY: float = 10.0
 
 # Sheet Configuration
 SHEET_COLUMNS: int = 15
@@ -329,25 +333,31 @@ def extract_url_content(
     if not openai_client:
         return None
 
-    try:
-        response = requests.get(
-            url,
-            timeout=HTTP_REQUEST_TIMEOUT,
-            headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-            },
-        )
-        response.raise_for_status()
+    while True:
+        try:
+            response = requests.get(
+                url,
+                timeout=HTTP_REQUEST_TIMEOUT,
+                headers={
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                },
+            )
+            response.raise_for_status()
 
-        content = re.sub(r"<[^>]+>", " ", response.text)
-        content = re.sub(r"\s+", " ", content).strip()
+            content = re.sub(r"<[^>]+>", " ", response.text)
+            content = re.sub(r"\s+", " ", content).strip()
 
-        if len(content) > MIN_CONTENT_LENGTH:
-            logger.debug(f"Extracted content via HTTP request: {len(content)} chars")
-            return content
+            if len(content) > MIN_CONTENT_LENGTH:
+                logger.debug(f"Extracted content via HTTP request: {len(content)} chars")
+                return content
 
-    except Exception as exc:
-        logger.debug(f"HTTP request failed for {url}: {exc}")
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as exc:
+            logger.debug(f"Network error for {url}: {exc}")
+            wait_for_network()
+            continue
+        except Exception as exc:
+            logger.debug(f"HTTP request failed for {url}: {exc}")
+            break
 
     if browser_manager:
         return browser_manager.extract_content(url)
@@ -457,6 +467,11 @@ def check_security_clearance_requirement(content: str, url: str = "") -> bool:
             return requires_clearance
 
         except Exception as exc:
+            exc_str = str(exc).lower()
+            if "timeout" in exc_str or "connection" in exc_str or "network" in exc_str:
+                logger.warning(f"Network error during AI call: {exc}")
+                wait_for_network()
+                continue
             if attempt < OPENAI_MAX_RETRIES - 1:
                 logger.warning(
                     f"AI call failed (attempt {attempt + 1}/{OPENAI_MAX_RETRIES}): {exc}"
@@ -687,6 +702,7 @@ def filter_jobs_by_clearance(
     jobs_passed: List[JobPosting] = []
 
     for job in jobs:
+        wait_for_network()
         final_job = preprocess_job_posting(job, browser_manager)
         if final_job.active:
             jobs_passed.append(final_job)
@@ -820,25 +836,48 @@ def summarize_filters(
     logger.info("=" * 60)
 
 
-def main() -> None:
-    browser_manager: BrowserManager = BrowserManager()
+def check_network() -> bool:
     try:
-        client: gspread.client.Client = authenticate_gspread()
-        sheet: Worksheet = client.open_by_key(SHEET_ID).worksheet(SHEET_NAME)
-        postings: List[JobPosting] = fetch_job_postings(JOB_LISTINGS_URL)
-        existing_urls: Set[str] = get_existing_urls(sheet)
-        new_jobs: List[JobPosting] = filter_job_postings(postings, existing_urls)
+        socket.create_connection(("8.8.8.8", 53), timeout=NETWORK_CHECK_TIMEOUT)
+        return True
+    except (socket.timeout, OSError):
+        return False
 
-        clearance_stats: ClearanceStats = filter_jobs_by_clearance(
-            new_jobs, browser_manager
-        )
 
-        jobs_added: int = write_to_sheet(sheet, clearance_stats["jobs_passed"])
-        clearance_stats["jobs_added_to_sheet"] = jobs_added
+def wait_for_network() -> None:
+    if check_network():
+        return
+    while not check_network():
+        logger.warning("Network unavailable, waiting to reconnect...")
+        time.sleep(NETWORK_RETRY_DELAY)
+    logger.info("Network connection restored")
 
-        summarize_filters(postings, existing_urls, clearance_stats)
-    finally:
-        browser_manager.close()
+
+def main() -> None:
+    with wakepy.keep.presenting():
+        logger.info("System sleep prevention enabled")
+        browser_manager: BrowserManager = BrowserManager()
+        try:
+            wait_for_network()
+            client: gspread.client.Client = authenticate_gspread()
+            sheet: Worksheet = client.open_by_key(SHEET_ID).worksheet(SHEET_NAME)
+
+            wait_for_network()
+            postings: List[JobPosting] = fetch_job_postings(JOB_LISTINGS_URL)
+            existing_urls: Set[str] = get_existing_urls(sheet)
+            new_jobs: List[JobPosting] = filter_job_postings(postings, existing_urls)
+
+            clearance_stats: ClearanceStats = filter_jobs_by_clearance(
+                new_jobs, browser_manager
+            )
+
+            wait_for_network()
+            jobs_added: int = write_to_sheet(sheet, clearance_stats["jobs_passed"])
+            clearance_stats["jobs_added_to_sheet"] = jobs_added
+
+            summarize_filters(postings, existing_urls, clearance_stats)
+        finally:
+            browser_manager.close()
 
 
 if __name__ == "__main__":
