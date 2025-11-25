@@ -210,3 +210,8 @@ service_account_credentials.json
 # Repository specific output artifacts
 *.csv
 *.txt
+
+*.err
+
+# Backup files
+*.bak.*

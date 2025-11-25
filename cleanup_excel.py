@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import csv
 import logging
+import random
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
@@ -34,12 +35,52 @@ KEYWORD_LIST: List[str] = [
     "the page you are looking for doesn't exist.",
 ]
 
+# Configurable URL skip patterns with reasons
+URL_SKIP_PATTERNS: dict[str, str] = {
+    "tesla.com": "Tesla URLs don't work reliably with automated checking",
+    "citadel": "Citadel URLs have special handling requirements",
+}
+
+
+
+
+class ExponentialBackoff:
+    """Handles exponential backoff with jitter for rate limiting."""
+    
+    def __init__(self, base_delay: float = 1.0, max_delay: float = 60.0, backoff_factor: float = 2.0):
+        self.base_delay = base_delay
+        self.max_delay = max_delay
+        self.backoff_factor = backoff_factor
+        self.attempt = 0
+    
+    def wait(self) -> None:
+        """Wait for the calculated backoff time."""
+        if self.attempt == 0:
+            self.attempt += 1
+            return
+            
+        # Calculate exponential backoff with jitter
+        delay = min(self.base_delay * (self.backoff_factor ** (self.attempt - 1)), self.max_delay)
+        # Add jitter (±25% randomness)
+        jitter = delay * 0.25 * (2 * random.random() - 1)
+        final_delay = max(0, delay + jitter)
+        
+        logger.debug(f"Exponential backoff: waiting {final_delay:.2f}s (attempt {self.attempt})")
+        time.sleep(final_delay)
+        self.attempt += 1
+    
+    def reset(self) -> None:
+        """Reset backoff counter."""
+        self.attempt = 0
+
+
 @dataclass(frozen=True)
 class URLCheckResult:
     url: str
     status: Optional[int]
     expired: bool
     reason: str
+
 
 class JobURLChecker:
     """
@@ -52,12 +93,17 @@ class JobURLChecker:
         retries: int = 0,
         max_workers: int = 10,
         delay: float = 0.0,
+        skip_patterns: Optional[dict[str, str]] = None,
     ) -> None:
         self.verify_content = verify_content
         self.retries = retries
         self.max_workers = max_workers
         self.delay = delay
         self.session: requests.Session = requests.Session()
+        self.backoff = ExponentialBackoff()
+        
+        # Use provided patterns or fall back to defaults
+        self.skip_patterns = skip_patterns if skip_patterns is not None else URL_SKIP_PATTERNS
 
         if retries > 0:
             retry_strategy = Retry(
@@ -70,12 +116,47 @@ class JobURLChecker:
             self.session.mount("https://", adapter)
             self.session.mount("http://", adapter)
 
+    def add_skip_pattern(self, pattern: str, reason: str = "Custom skip pattern") -> None:
+        """Add a new URL pattern to skip during checking."""
+        self.skip_patterns[pattern] = reason
+        logger.info(f"Added skip pattern: {pattern} - {reason}")
+
+    def remove_skip_pattern(self, pattern: str) -> None:
+        """Remove a URL pattern from skip list."""
+        if pattern in self.skip_patterns:
+            del self.skip_patterns[pattern]
+            logger.info(f"Removed skip pattern: {pattern}")
+
+    def should_skip_url(self, url: str) -> Optional[str]:
+        """Check if URL should be skipped based on configured patterns."""
+        url_lower = url.lower()
+        for pattern, reason in self.skip_patterns.items():
+            if pattern.lower() in url_lower:
+                return reason
+        return None
+    
+    def list_skip_patterns(self) -> dict[str, str]:
+        """Get current skip patterns and their reasons."""
+        return self.skip_patterns.copy()
+    
+    def clear_skip_patterns(self) -> None:
+        """Remove all skip patterns."""
+        self.skip_patterns.clear()
+        logger.info("Cleared all skip patterns")
+
     def check_url(self, url: str) -> URLCheckResult:
         url = url.strip()
         if not url:
-            return URLCheckResult(url=url, status=None, expired=False, reason="Empty URL")
+            return URLCheckResult(
+                url=url, status=None, expired=False, reason="Empty URL"
+            )
+        
+        # Check if URL should be skipped based on configured patterns
+        skip_reason = self.should_skip_url(url)
+        if skip_reason:
+            return URLCheckResult(url, None, False, skip_reason)
 
-        # Attempt HEAD request first
+        """         # Attempt HEAD request first
         try:
             head_resp = self.session.head(url, timeout=HEAD_TIMEOUT)
             status = head_resp.status_code
@@ -85,7 +166,7 @@ class JobURLChecker:
                 return URLCheckResult(url, status, True, f"HTTP {status} (HEAD)")
         except requests.RequestException:
             logger.debug("HEAD request failed for %s", url)
-            status = None
+            status = None """
 
         # Fallback to GET request
         try:
@@ -94,9 +175,15 @@ class JobURLChecker:
 
             if status == 429:
                 retry_after = get_resp.headers.get("Retry-After")
-                wait = int(retry_after) if retry_after and retry_after.isdigit() else 60
-                logger.warning("429 for %s, sleeping %ds", url, wait)
-                time.sleep(wait)
+                if retry_after and retry_after.isdigit():
+                    wait = int(retry_after)
+                    logger.warning("429 for %s, using server Retry-After: %ds", url, wait)
+                    time.sleep(wait)
+                else:
+                    logger.warning("429 for %s, using exponential backoff", url)
+                    self.backoff.wait()
+                return URLCheckResult(url, status, False, "Rate limited, will retry")
+
 
             if status == 404:
                 return URLCheckResult(url, status, True, "404 Not Found (GET)")
@@ -114,19 +201,23 @@ class JobURLChecker:
 
                 lower_url = url.lower()
                 # Workday-specific logic
-                if 'workday' in lower_url:
-                    soup = BeautifulSoup(get_resp.text, 'html.parser')
-                    meta = soup.find('meta', {'property': 'og:description'})
-                    if not meta or not meta.get('content', '').strip():
+                if "workday" in lower_url:
+                    soup = BeautifulSoup(get_resp.text, "html.parser")
+                    meta = soup.find("meta", {"property": "og:description"})
+                    if not meta or not meta.get("content", "").strip():  # type: ignore
                         return URLCheckResult(
                             url, status, True, "Workday page missing og:description"
                         )
                 # Greenhouse-specific logic
-                if 'greenhouse' in lower_url and '?error=true' in get_resp.url:
-                    return URLCheckResult(url, status, True, "Greenhouse page indicates expired job")
+                if "greenhouse" in lower_url and "?error=true" in get_resp.url:
+                    return URLCheckResult(
+                        url, status, True, "Greenhouse page indicates expired job"
+                    )
                 # Jobvite-specific logic
-                if 'jobvite' in lower_url and '?error=404' in get_resp.url:
-                    return URLCheckResult(url, status, True, "Jobvite page indicates expired job")
+                if "jobvite" in lower_url and "?error=404" in get_resp.url:
+                    return URLCheckResult(
+                        url, status, True, "Jobvite page indicates expired job"
+                    )
 
             return URLCheckResult(url, status, False, "OK")
 
@@ -137,26 +228,42 @@ class JobURLChecker:
             return URLCheckResult(url, status, False, f"Request Error: {exc}")
 
     def _single_task(self, url: str) -> URLCheckResult:
+        backoff = ExponentialBackoff()  # Per-URL backoff instance
         attempt = 0
         last: Optional[URLCheckResult] = None
+        
         while attempt <= self.retries:
             if self.delay:
                 time.sleep(self.delay)
+                
             result = self.check_url(url)
-            if result.status is not None:
+            
+            # Success or permanent failure
+            if result.status is not None and result.status != 429:
+                backoff.reset()
                 return result
+            
+            # Rate limited - use backoff
+            if result.status == 429:
+                backoff.wait()
+            
             last = result
             attempt += 1
-        # Max retries but uncertain if expired
+            
+        # Max retries exceeded
         return last or URLCheckResult(url, None, False, "Max retries exceeded")
 
     def process_urls(self, urls: List[str]) -> List[URLCheckResult]:
         total = len(urls)
-        results: List[URLCheckResult] = [URLCheckResult(u, None, False, "Not processed") for u in urls]
+        results: List[URLCheckResult] = [
+            URLCheckResult(u, None, False, "Not processed") for u in urls
+        ]
         start = time.time()
 
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            future_to_idx = {executor.submit(self._single_task, u): i for i, u in enumerate(urls)}
+            future_to_idx = {
+                executor.submit(self._single_task, u): i for i, u in enumerate(urls)
+            }
             for future in as_completed(future_to_idx):
                 idx = future_to_idx[future]
                 try:
@@ -173,21 +280,25 @@ class JobURLChecker:
 
     def save_to_csv(self, results: List[URLCheckResult], path: Path) -> None:
         """Writes URLCheckResults to CSV, preserving sheet text column."""
-        with path.open('w', newline='', encoding='utf-8') as f:
+        with path.open("w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
             writer.writerow(["URL", "Status", "Expired", "Reason", "Sheet Text"])
             for r in results:
                 sheet_text = "No Longer Interested" if r.expired else ""
-                writer.writerow([r.url, r.status or '', r.expired, r.reason, sheet_text])
+                writer.writerow(
+                    [r.url + " ", r.status or "", r.expired, r.reason, sheet_text]
+                )
         logger.info("Results saved to %s", path)
 
-    def run(self, urls: List[str], output: Optional[Path] = None) -> List[URLCheckResult]:
+    def run(
+        self, urls: List[str], output: Optional[Path] = None
+    ) -> List[URLCheckResult]:
         results = self.process_urls(urls)
         if output:
             self.save_to_csv(results, output)
         # also write out the sheet text column to a seperate file
-        sheet_text_path = output.with_suffix('.sheet_text.csv')
-        with sheet_text_path.open('w', newline='', encoding='utf-8') as f:
+        sheet_text_path = output.with_suffix(".sheet_text.csv")  # type: ignore
+        with sheet_text_path.open("w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
             for r in results:
                 sheet_text = "No Longer Interested" if r.expired else " "
@@ -198,12 +309,25 @@ class JobURLChecker:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Check job URLs for expiration.")
     parser.add_argument(
-        '--input', '-i', type=Path, default=Path('urls.txt'),
-        help='Path to file with one URL per line'
+        "--input",
+        "-i",
+        type=Path,
+        default=Path("urls.txt"),
+        help="Path to file with one URL per line",
     )
     parser.add_argument(
-        '--output', '-o', type=Path, default=Path('output.csv'),
-        help='CSV file to write results'
+        "--output",
+        "-o",
+        type=Path,
+        default=Path("output.csv"),
+        help="CSV file to write results",
+    )
+    parser.add_argument(
+        "--skip-pattern",
+        action="append",
+        nargs=2,
+        metavar=("PATTERN", "REASON"),
+        help="Add custom skip pattern and reason (can be used multiple times)",
     )
     args = parser.parse_args()
 
@@ -211,9 +335,35 @@ def main() -> None:
         logger.error("Input file not found: %s", args.input)
         return
 
-    urls = [line.strip() for line in args.input.read_text(encoding='utf-8').splitlines() if line.strip()]
-    checker = JobURLChecker(verify_content=True, retries=1, max_workers=5, delay=0.5)
+    # Custom skip patterns from command line
+    custom_skip_patterns = {}
+    if args.skip_pattern:
+        for pattern, reason in args.skip_pattern:
+            custom_skip_patterns[pattern] = reason
+
+    urls = [
+        line.strip()
+        for line in args.input.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    
+    checker = JobURLChecker(
+        verify_content=True, 
+        retries=1, 
+        max_workers=5, 
+        delay=0.5,
+        skip_patterns=custom_skip_patterns if custom_skip_patterns else None
+    )
+    
+    # Log current skip patterns
+    patterns = checker.list_skip_patterns()
+    if patterns:
+        logger.info("Active skip patterns:")
+        for pattern, reason in patterns.items():
+            logger.info(f"  {pattern}: {reason}")
+    
     checker.run(urls, args.output)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()

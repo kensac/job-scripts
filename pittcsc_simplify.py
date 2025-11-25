@@ -10,9 +10,10 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, TypedDict
+from typing import Dict, List, Optional, Set, TypedDict
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
+import colorlog
 import dotenv
 import gspread
 import requests
@@ -33,11 +34,22 @@ dotenv.load_dotenv()
 openai_api_key = os.environ.get("OPENAI_API_KEY")
 openai_client = OpenAI(api_key=openai_api_key) if openai_api_key else None
 
-# Logging Configuration
-LOG_FORMAT = "%(asctime)s - %(levelname)s - %(message)s"
-logging.basicConfig(
-    level=logging.DEBUG, format=LOG_FORMAT, handlers=[logging.StreamHandler(sys.stdout)]
+handler = colorlog.StreamHandler(sys.stdout)
+handler.setFormatter(
+    colorlog.ColoredFormatter(
+        "%(asctime)s - %(log_color)s%(levelname)s%(reset)s - %(message)s",
+        datefmt=None,
+        reset=True,
+        log_colors={
+            "DEBUG": "cyan",
+            "INFO": "green",
+            "WARNING": "yellow",
+            "ERROR": "red",
+            "CRITICAL": "bold_red",
+        },
+    )
 )
+logging.basicConfig(level=logging.DEBUG, handlers=[handler])
 logger = logging.getLogger("job_tracker")
 
 # Google Sheets Configuration
@@ -82,7 +94,18 @@ FALLBACK_CUTOFF_TS: int = int(
 
 # File Configuration
 JOB_LISTINGS_URL: str = os.environ["JOB_LISTINGS_URL"]
-REJECTED_URLS_FILE: str = "ai_rejected_urls.json"
+AI_RESULTS_FILE: str = "ai_results.json"
+
+# Content Extraction Configuration
+HTTP_REQUEST_TIMEOUT: float = 10.0
+BROWSER_PAGE_LOAD_TIMEOUT: float = 15.0
+BROWSER_ELEMENT_WAIT_TIMEOUT: float = 10.0
+MIN_CONTENT_LENGTH: int = 100
+OPENAI_TIMEOUT: float = 30.0
+OPENAI_MAX_RETRIES: int = 3
+
+# Sheet Configuration
+SHEET_COLUMNS: int = 15
 
 # URL Tracking Parameters to Remove
 TRACKING_PARAMS = {
@@ -122,6 +145,7 @@ class ClearanceStats(TypedDict):
     jobs_filtered_by_clearance: int
     clearance_filtered_jobs: List[JobPosting]
     jobs_added_to_sheet: int
+    jobs_passed: List[JobPosting]
 
 
 class ExponentialBackoff:
@@ -165,11 +189,12 @@ def normalize_url(url: str) -> str:
     parsed = urlparse(url)
     query_params = parse_qs(parsed.query, keep_blank_values=True)
 
+    tracking_params_lower = {p.lower() for p in TRACKING_PARAMS}
     filtered_params = {
         k: v
         for k, v in query_params.items()
-        if not any(k.lower().startswith(param.lower()) for param in TRACKING_PARAMS)
-        and k.lower() not in {p.lower() for p in TRACKING_PARAMS}
+        if k.lower() not in tracking_params_lower
+        and not any(k.lower().startswith(param) for param in tracking_params_lower)
     }
 
     new_query = urlencode(filtered_params, doseq=True) if filtered_params else ""
@@ -188,72 +213,56 @@ def normalize_url(url: str) -> str:
     return normalized
 
 
-def load_rejected_urls() -> Set[str]:
-    rejected_file = Path(REJECTED_URLS_FILE)
-    if not rejected_file.exists():
-        return set()
+def load_ai_results() -> Dict[str, Dict[str, str]]:
+    results_file = Path(AI_RESULTS_FILE)
+    if not results_file.exists():
+        return {}
 
     try:
-        with open(rejected_file, "r") as f:
+        with open(results_file, "r") as f:
             data = json.load(f)
-            return set(data.get("rejected_urls", []))
+            return data.get("ai_results", {})
     except (json.JSONDecodeError, KeyError, Exception) as exc:
-        logger.warning(f"Failed to load rejected URLs from {REJECTED_URLS_FILE}: {exc}")
-        return set()
+        logger.warning(f"Failed to load AI results from {AI_RESULTS_FILE}: {exc}")
+        return {}
 
 
-def save_rejected_urls(rejected_urls: Set[str]) -> None:
+def save_ai_results(ai_results: Dict[str, Dict[str, str]]) -> None:
     try:
-        with open(REJECTED_URLS_FILE, "w") as f:
-            json.dump({"rejected_urls": list(rejected_urls)}, f, indent=2)
+        with open(AI_RESULTS_FILE, "w") as f:
+            json.dump({"ai_results": ai_results}, f, indent=2)
     except Exception as exc:
-        logger.warning(f"Failed to save rejected URLs to {REJECTED_URLS_FILE}: {exc}")
+        logger.warning(f"Failed to save AI results to {AI_RESULTS_FILE}: {exc}")
 
 
-def add_rejected_url(url: str) -> None:
-    rejected_urls = load_rejected_urls()
-    rejected_urls.add(url)
-    save_rejected_urls(rejected_urls)
+def add_ai_result(url: str, status: str, reason: str = "") -> None:
+    ai_results = load_ai_results()
+    ai_results[url] = {"status": status, "reason": reason}
+    save_ai_results(ai_results)
+
+
+def get_ai_result(url: str) -> Optional[Dict[str, str]]:
+    ai_results = load_ai_results()
+    return ai_results.get(url)
 
 
 def is_url_rejected(url: str) -> bool:
-    rejected_urls = load_rejected_urls()
-    return url in rejected_urls
+    result = get_ai_result(url)
+    return result is not None and result.get("status") == "rejected"
 
 
-def extract_url_content(url: str, timeout: float = 10.0) -> Optional[str]:
-    if not openai_client:
-        return None
-
-    # Try HTTP request first
-    try:
-        response = requests.get(
-            url,
-            timeout=timeout,
-            headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-            },
-        )
-        response.raise_for_status()
-
-        content = re.sub(r"<[^>]+>", " ", response.text)
-        content = re.sub(r"\s+", " ", content).strip()
-
-        if len(content) > 100:
-            logger.debug(f"Extracted content via HTTP request: {len(content)} chars")
-            return content
-
-    except Exception as exc:
-        logger.debug(f"HTTP request failed for {url}: {exc}")
-
-    # Fallback to browser for JavaScript-heavy sites
-    return _extract_with_browser(url, timeout)
+def is_url_passed(url: str) -> bool:
+    result = get_ai_result(url)
+    return result is not None and result.get("status") == "passed"
 
 
-def _extract_with_browser(url: str, timeout: float) -> Optional[str]:
-    driver = None
-    try:
+class BrowserManager:
+    def __init__(self) -> None:
+        self.driver: Optional[webdriver.Chrome] = None
+
+    def _get_chrome_options(self) -> Options:
         chrome_options = Options()
+        chrome_options.add_argument("--headless")
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
         chrome_options.add_argument("--window-size=1920,1080")
@@ -263,99 +272,208 @@ def _extract_with_browser(url: str, timeout: float) -> Optional[str]:
         chrome_options.add_argument("--enable-javascript")
         chrome_options.add_argument("--disable-web-security")
         chrome_options.add_argument("--allow-running-insecure-content")
+        return chrome_options
 
-        driver = webdriver.Chrome(options=chrome_options)
-        driver.set_page_load_timeout(max(timeout, 15))
+    def _ensure_driver(self) -> webdriver.Chrome:
+        if self.driver is None:
+            chrome_options = self._get_chrome_options()
+            self.driver = webdriver.Chrome(options=chrome_options)
+            self.driver.set_page_load_timeout(BROWSER_PAGE_LOAD_TIMEOUT)
+            logger.debug("Created new browser instance")
+        return self.driver
 
-        logger.info(f"Opening browser to load: {url}")
-        driver.get(url)
+    def _recreate_driver(self) -> None:
+        logger.warning("Recreating browser instance after failure")
+        self.close()
+        self.driver = None
 
-        WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located((By.TAG_NAME, "body"))
-        )
+    def extract_content(self, url: str) -> Optional[str]:
+        try:
+            driver = self._ensure_driver()
+            logger.info(f"Loading URL in browser: {url}")
+            driver.get(url)
 
-        logger.debug("Waiting for JavaScript to load content...")
-        time.sleep(5)
-        logger.debug("Allowing additional time for dynamic content...")
-        time.sleep(5)
-
-        body_element = driver.find_element(By.TAG_NAME, "body")
-        content = body_element.text.strip()
-
-        if content:
-            logger.info(f"Extracted all body content: {len(content)} chars")
-            return content
-        else:
-            logger.warning(
-                f"No content found in body element for {url} - page may require manual interaction"
+            WebDriverWait(driver, BROWSER_ELEMENT_WAIT_TIMEOUT).until(
+                EC.presence_of_element_located((By.TAG_NAME, "body"))
             )
+
+            body_element = driver.find_element(By.TAG_NAME, "body")
+            content = body_element.text.strip()
+
+            if content:
+                logger.info(f"Extracted body content: {len(content)} chars")
+                return content
+            else:
+                logger.warning(f"No content found in body for {url}")
+                return None
+
+        except Exception as exc:
+            logger.debug(f"Browser extraction failed for {url}: {exc}")
+            self._recreate_driver()
             return None
 
-    except Exception as exc:
-        logger.debug(f"Browser extraction failed for {url}: {exc}")
-        return None
-
-    finally:
-        if driver:
+    def close(self) -> None:
+        if self.driver:
             try:
-                driver.quit()
+                self.driver.quit()
+                logger.debug("Closed browser instance")
             except Exception:
                 pass
+            finally:
+                self.driver = None
 
 
-def check_security_clearance_requirement(content: str) -> bool:
+def extract_url_content(
+    url: str, browser_manager: Optional[BrowserManager] = None
+) -> Optional[str]:
+    if not openai_client:
+        return None
+
+    try:
+        response = requests.get(
+            url,
+            timeout=HTTP_REQUEST_TIMEOUT,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            },
+        )
+        response.raise_for_status()
+
+        content = re.sub(r"<[^>]+>", " ", response.text)
+        content = re.sub(r"\s+", " ", content).strip()
+
+        if len(content) > MIN_CONTENT_LENGTH:
+            logger.debug(f"Extracted content via HTTP request: {len(content)} chars")
+            return content
+
+    except Exception as exc:
+        logger.debug(f"HTTP request failed for {url}: {exc}")
+
+    if browser_manager:
+        return browser_manager.extract_content(url)
+
+    return None
+
+
+def check_security_clearance_requirement(content: str, url: str = "") -> bool:
     if not content or not openai_client:
         return False
 
-    try:
-        response = openai_client.chat.completions.create(
-            model="gpt-5-nano",
-            messages=[
-                {
-                    "role": "system",
-                    "content": """You are analyzing job postings to determine if they should be filtered out. 
+    if url:
+        cached_result = get_ai_result(url)
+        if cached_result:
+            logger.info(f"Using cached AI result for {url}: {cached_result['status']}")
+            return cached_result["status"] == "rejected"
 
-                    Respond 'YES' to filter out jobs if you find ANY of these EXPLICIT conditions:
-                    
-                    SECURITY/CITIZENSHIP REQUIREMENTS:
-                    - "Security Clearance" or "security clearance required"
-                    - "U.S. Security Clearance" 
-                    - "Secret Clearance", "Top Secret", "TS/SCI", "Public Trust"
-                    - "Must be a U.S. citizen" or "U.S. citizenship required"
-                    - "U.S. Person" as defined by export control regulations
-                    
-                    Respond 'YES' if ANY of these conditions are clearly stated.
-                    Respond 'NO' only if NONE of these conditions are mentioned.
-                    
-                    IMPORTANT: Only respond 'YES' if you are absolutely certain. If content is unclear, vague, or insufficient, respond 'NO' to avoid false positives.
-                    Do not make assumptions based on job title or company type.
-                    Do not respond with anything other than 'YES' or 'NO'.
-                    """,
-                },
-                {
-                    "role": "user",
-                    "content": f"Should this job posting be filtered out (security clearance/citizenship required)? Content: {content}",
-                },
-            ],
-            max_completion_tokens=5000,
-        )
+    backoff = ExponentialBackoff(base_delay=2.0, max_delay=30.0)
 
-        result = response.choices[0].message.content
-        if result is None or result == "":
-            logger.warning("AI returned null or empty response")
-            return False
+    for attempt in range(OPENAI_MAX_RETRIES):
+        try:
+            response = openai_client.chat.completions.create(
+                model="gpt-5-nano",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": """You are analyzing job postings to determine if they should be filtered out.
 
-        result = result.strip().upper()
-        logger.info(f"AI clearance check result: '{result}'")
+            Respond 'YES' to filter out jobs if you find ANY of these EXPLICIT conditions:
 
-        return "YES" in result
+            SECURITY/CITIZENSHIP REQUIREMENTS:
+            - "Security Clearance" or "security clearance required"
+            - "U.S. Security Clearance"
+            - "Secret Clearance", "Top Secret", "TS/SCI", "Public Trust"
+            - "Must be a U.S. citizen" or "U.S. citizenship required"
+            - "U.S. Person" as defined by export control regulations
 
-    except Exception as exc:
-        logger.warning(f"AI security clearance check failed: {exc}")
-        return False
+            VISA SPONSORSHIP RESTRICTIONS:
+            - "Will not sponsor" or "does not sponsor" (visa/work authorization)
+            - "No sponsorship" or "sponsorship not available"
+            - "Will not provide sponsorship" or "does not provide sponsorship"
+            - "Cannot sponsor" or "unable to sponsor"
+            - "Not sponsoring" or "no visa sponsorship"
+            - "Will not sponsor now or in the future"
+            - "Does not sponsor now or in the future"
+            - "No current or future sponsorship"
+            - "Will not sponsor for any visa type"
+            - "Does not sponsor H1B", "No H1B sponsorship", "Will not sponsor H1B"
+            - "Does not sponsor work visas" or "No work visa sponsorship"
+            - "Must be authorized to work" combined with "no sponsorship"
+            - "Authorized to work without sponsorship"
+            - "No visa sponsorship provided"
+            - "Sponsorship will not be provided"
+            - Variations like "we do not sponsor", "company does not sponsor", "employer will not sponsor"
+
+            F1 VISA RESTRICTIONS:
+            - "F1 visa not eligible" or "F1 students not eligible"
+            - "No F1 visa" or "F1 not accepted"
+            - "F1 visa holders not considered"
+            - "Not open to F1 students"
+            - "F1 status not eligible"
+            - "Does not accept F1 visa"
+            - "F1 visa students cannot apply"
+            - "Not available for F1 visa holders"
+
+            Respond 'YES' if ANY of these conditions are clearly stated.
+            Respond 'NO' only if NONE of these conditions are mentioned.
+
+            IMPORTANT: Only respond 'YES' if you are absolutely certain the language explicitly states no sponsorship or F1 restrictions.
+            If content is unclear, vague, or insufficient, respond 'NO' to avoid false positives.
+            Do not make assumptions based on job title or company type.
+            Do not respond with anything other than 'YES' or 'NO'.
+            """,
+                    },
+                    {
+                        "role": "user",
+                        "content": f"Should this job posting be filtered out (security clearance/citizenship required OR no visa sponsorship OR F1 visa restrictions)? Content: {content}",
+                    },
+                ],
+                max_completion_tokens=5000,
+                timeout=OPENAI_TIMEOUT,
+            )
+
+            result = response.choices[0].message.content
+            if result is None or result == "":
+                logger.warning("AI returned null or empty response")
+                return False
+
+            result = result.strip().upper()
+
+            if "YES" not in result and "NO" not in result:
+                logger.warning(f"AI returned invalid response: '{result}'")
+                return False
+
+            logger.info(f"AI clearance check result: '{result}'")
+
+            requires_clearance = "YES" in result
+
+            if url:
+                if requires_clearance:
+                    add_ai_result(
+                        url, "rejected", "security clearance/citizenship/closed"
+                    )
+                else:
+                    add_ai_result(url, "passed", "no security clearance required")
+
+            return requires_clearance
+
+        except Exception as exc:
+            if attempt < OPENAI_MAX_RETRIES - 1:
+                logger.warning(
+                    f"AI call failed (attempt {attempt + 1}/{OPENAI_MAX_RETRIES}): {exc}"
+                )
+                backoff.wait()
+            else:
+                logger.warning(
+                    f"AI security clearance check failed after {OPENAI_MAX_RETRIES} attempts: {exc}"
+                )
+                return False
+
+    return False
 
 
-def preprocess_job_posting(job: JobPosting) -> JobPosting:
+def preprocess_job_posting(
+    job: JobPosting, browser_manager: Optional[BrowserManager] = None
+) -> JobPosting:
     if not job.url or not job.active:
         return job
 
@@ -365,7 +483,7 @@ def preprocess_job_posting(job: JobPosting) -> JobPosting:
 
     if is_url_rejected(job.url):
         logger.info(
-            f"FILTERED: Job already rejected by AI (cached) for {job.company} - {job.title} ({job.url})"
+            f"FILTERED: Job already rejected by AI (cached) for {job.company} - {job.title}"
         )
         return JobPosting(
             company=job.company,
@@ -378,22 +496,27 @@ def preprocess_job_posting(job: JobPosting) -> JobPosting:
             raw_url=job.raw_url,
         )
 
-    content = extract_url_content(job.url)
+    if is_url_passed(job.url):
+        logger.info(
+            f"Job already passed AI check (cached) for {job.company} - {job.title}"
+        )
+        return job
+
+    content = extract_url_content(job.url, browser_manager)
     if not content:
         logger.debug(f"Could not extract content from {job.url} - keeping job active")
         return job
 
-    if len(content.strip()) < 100:
+    if len(content.strip()) < MIN_CONTENT_LENGTH:
         logger.debug(f"Insufficient content from {job.url} - keeping job active")
         return job
 
-    requires_clearance = check_security_clearance_requirement(content)
+    requires_clearance = check_security_clearance_requirement(content, job.url)
 
     if requires_clearance:
         logger.info(
             f"FILTERED: Job blocked by AI (security clearance/citizenship/closed) for {job.company} - {job.title} ({job.url})"
         )
-        add_rejected_url(job.url)
         return JobPosting(
             company=job.company,
             locations=job.locations,
@@ -541,41 +664,51 @@ def get_existing_urls(sheet: Worksheet) -> Set[str]:
     return {row[5] for row in rows if len(row) > 5}  # type: ignore
 
 
-def write_to_sheet(sheet: Worksheet, jobs: List[JobPosting]) -> ClearanceStats:
+def filter_jobs_by_clearance(
+    jobs: List[JobPosting], browser_manager: Optional[BrowserManager] = None
+) -> ClearanceStats:
     clearance_stats: ClearanceStats = {
         "jobs_checked_for_clearance": 0,
         "jobs_filtered_by_clearance": 0,
         "clearance_filtered_jobs": [],
         "jobs_added_to_sheet": 0,
+        "jobs_passed": [],
     }
 
     if not jobs:
         return clearance_stats
 
-    if openai_client:
-        clearance_stats["jobs_checked_for_clearance"] = len(jobs)
-        jobs_to_add: List[JobPosting] = []
-
-        for job in jobs:
-            final_job = preprocess_job_posting(job)
-            if final_job.active:
-                jobs_to_add.append(final_job)
-            else:
-                clearance_stats["jobs_filtered_by_clearance"] += 1
-                clearance_stats["clearance_filtered_jobs"].append(job)
-    else:
+    if not openai_client:
         logger.info("No OpenAI API key found - skipping AI security clearance checks")
-        jobs_to_add = jobs
-
-    if not jobs_to_add:
+        clearance_stats["jobs_passed"] = jobs
         return clearance_stats
 
-    existing_rows = sheet.get_all_values()
-    start_row = len(existing_rows) + 1
-    rows_to_add: List[List[str]] = []
+    clearance_stats["jobs_checked_for_clearance"] = len(jobs)
+    jobs_passed: List[JobPosting] = []
 
-    for job in jobs_to_add:
-        row: List[str] = [""] * 15
+    for job in jobs:
+        final_job = preprocess_job_posting(job, browser_manager)
+        if final_job.active:
+            jobs_passed.append(final_job)
+        else:
+            clearance_stats["jobs_filtered_by_clearance"] += 1
+            clearance_stats["clearance_filtered_jobs"].append(job)
+
+    clearance_stats["jobs_passed"] = jobs_passed
+    return clearance_stats
+
+
+def write_to_sheet(sheet: Worksheet, jobs: List[JobPosting]) -> int:
+    if not jobs:
+        return 0
+
+    existing_rows: List[List[str]] = sheet.get_all_values()
+    start_row: int = len(existing_rows) + 1
+    rows_to_add: List[List[str]] = []
+    jobs.sort(key=lambda x: x.date_posted)
+
+    for job in jobs:
+        row: List[str] = [""] * SHEET_COLUMNS
         row[1] = job.company
         row[3] = ", ".join(job.locations)
         row[4] = FOUND_SOURCE_DEFAULT
@@ -584,37 +717,32 @@ def write_to_sheet(sheet: Worksheet, jobs: List[JobPosting]) -> ClearanceStats:
         row[7] = ", ".join(job.terms)
         rows_to_add.append(row)
 
-    end_row = start_row + len(rows_to_add) - 1
-    cell_range = f"A{start_row}:O{end_row}"
+    end_row: int = start_row + len(rows_to_add) - 1
+    cell_range: str = f"A{start_row}:O{end_row}"
     try:
         sheet.update(
             rows_to_add, cell_range, value_input_option=ValueInputOption.user_entered
         )
-        clearance_stats["jobs_added_to_sheet"] = len(rows_to_add)
+        return len(rows_to_add)
     except Exception as exc:
         logger.error(f"Failed to update sheet: {exc}")
-        clearance_stats["jobs_added_to_sheet"] = 0
-
-    return clearance_stats
+        return 0
 
 
 def summarize_filters(
     postings: List[JobPosting],
     existing_urls: Set[str],
-    clearance_stats: ClearanceStats | None = None,
+    clearance_stats: Optional[ClearanceStats] = None,
 ) -> None:
     excluded_locations: Set[str] = set()
     excluded_terms: Set[str] = set()
-    summary: Dict[str, Any] = {
-        "excluded_locations": excluded_locations,
-        "excluded_terms": excluded_terms,
-        "location_excluded_jobs": [],
-        "term_excluded_jobs": [],
-        "date_excluded_jobs": [],
-        "duplicate_jobs": [],
-        "passed_jobs": [],
-        "inactive_jobs": [],
-    }
+
+    inactive_jobs: List[JobPosting] = []
+    location_excluded_jobs: List[JobPosting] = []
+    term_excluded_jobs: List[JobPosting] = []
+    date_excluded_jobs: List[JobPosting] = []
+    duplicate_jobs: List[JobPosting] = []
+    passed_jobs: List[JobPosting] = []
 
     if clearance_stats is None:
         clearance_stats = {
@@ -622,14 +750,8 @@ def summarize_filters(
             "jobs_filtered_by_clearance": 0,
             "clearance_filtered_jobs": [],
             "jobs_added_to_sheet": 0,
+            "jobs_passed": [],
         }
-
-    inactive_jobs = summary["inactive_jobs"]
-    location_excluded_jobs = summary["location_excluded_jobs"]
-    term_excluded_jobs = summary["term_excluded_jobs"]
-    date_excluded_jobs = summary["date_excluded_jobs"]
-    duplicate_jobs = summary["duplicate_jobs"]
-    passed_jobs = summary["passed_jobs"]
 
     for job in postings:
         if not job.active:
@@ -699,15 +821,24 @@ def summarize_filters(
 
 
 def main() -> None:
-    client = authenticate_gspread()
-    sheet = client.open_by_key(SHEET_ID).worksheet(SHEET_NAME)
-    postings = fetch_job_postings(JOB_LISTINGS_URL)
-    existing_urls = get_existing_urls(sheet)
-    new_jobs = filter_job_postings(postings, existing_urls)
+    browser_manager: BrowserManager = BrowserManager()
+    try:
+        client: gspread.client.Client = authenticate_gspread()
+        sheet: Worksheet = client.open_by_key(SHEET_ID).worksheet(SHEET_NAME)
+        postings: List[JobPosting] = fetch_job_postings(JOB_LISTINGS_URL)
+        existing_urls: Set[str] = get_existing_urls(sheet)
+        new_jobs: List[JobPosting] = filter_job_postings(postings, existing_urls)
 
-    clearance_stats = write_to_sheet(sheet, new_jobs)
+        clearance_stats: ClearanceStats = filter_jobs_by_clearance(
+            new_jobs, browser_manager
+        )
 
-    summarize_filters(postings, existing_urls, clearance_stats)
+        jobs_added: int = write_to_sheet(sheet, clearance_stats["jobs_passed"])
+        clearance_stats["jobs_added_to_sheet"] = jobs_added
+
+        summarize_filters(postings, existing_urls, clearance_stats)
+    finally:
+        browser_manager.close()
 
 
 if __name__ == "__main__":
