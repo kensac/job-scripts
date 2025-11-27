@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import datetime
 import json
 import logging
@@ -20,8 +21,9 @@ import requests
 import wakepy
 from gspread.utils import ValueInputOption
 from gspread.worksheet import Worksheet
+from filelock import FileLock
 from oauth2client.service_account import ServiceAccountCredentials  # type: ignore
-from openai import OpenAI
+from openai import AsyncOpenAI
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
@@ -32,7 +34,7 @@ dotenv.load_dotenv()
 
 # API Configuration
 openai_api_key = os.environ.get("OPENAI_API_KEY")
-openai_client = OpenAI(api_key=openai_api_key) if openai_api_key else None
+openai_client = AsyncOpenAI(api_key=openai_api_key) if openai_api_key else None
 
 handler = colorlog.StreamHandler(sys.stdout)
 handler.setFormatter(
@@ -98,13 +100,14 @@ AI_RESULTS_FILE: str = "ai_results.json"
 BROWSER_PAGE_LOAD_TIMEOUT: float = 15.0
 BROWSER_ELEMENT_WAIT_TIMEOUT: float = 10.0
 BROWSER_CONTENT_WAIT: float = 5.0
-BROWSER_TAB_POOL_SIZE: int = 10
-BROWSER_STAGGER_DELAY: float = 1.0
 MIN_CONTENT_LENGTH: int = 100
 OPENAI_TIMEOUT: float = 120.0
 OPENAI_MAX_RETRIES: int = 3
 NETWORK_CHECK_TIMEOUT: float = 5.0
 NETWORK_RETRY_DELAY: float = 10.0
+
+# Concurrent Processing Configuration
+MAX_CONCURRENT_JOBS: int = 5
 
 # Sheet Configuration
 SHEET_COLUMNS: int = 15
@@ -252,14 +255,18 @@ def save_ai_results(ai_results: Dict[str, Dict[str, str]]) -> None:
 
 
 def add_ai_result(url: str, status: str, reason: str = "", check_type: str = "") -> None:
-    ai_results = load_ai_results()
-    ai_results[url] = {
-        "status": status,
-        "reason": reason,
-        "check_type": check_type,
-        "timestamp": datetime.datetime.now().isoformat()
-    }
-    save_ai_results(ai_results)
+    lock_path = f"{AI_RESULTS_FILE}.lock"
+    lock = FileLock(lock_path)
+    
+    with lock:
+        ai_results = load_ai_results()
+        ai_results[url] = {
+            "status": status,
+            "reason": reason,
+            "check_type": check_type,
+            "timestamp": datetime.datetime.now().isoformat()
+        }
+        save_ai_results(ai_results)
 
 
 def get_ai_result(url: str) -> Optional[Dict[str, str]]:
@@ -282,158 +289,64 @@ def is_url_failed(url: str) -> bool:
     return result is not None and result.get("status") == "failed"
 
 
-@dataclass
-class TabInfo:
-    handle: str
-    url: str
-    load_time: float
+def get_chrome_options() -> Options:
+    chrome_options = Options()
+    chrome_options.add_argument("--headless")
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument("--window-size=1920,1080")
+    chrome_options.add_argument(
+        "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    )
+    chrome_options.add_argument("--enable-javascript")
+    chrome_options.add_argument("--disable-web-security")
+    chrome_options.add_argument("--allow-running-insecure-content")
+    return chrome_options
 
 
-class BrowserManager:
-    def __init__(self) -> None:
-        self.driver: Optional[webdriver.Chrome] = None
-        self.tab_queue: List[TabInfo] = []
-        self.pending_urls: List[str] = []
-        self.completed_extractions: Dict[str, Optional[str]] = {}
-
-    def _get_chrome_options(self) -> Options:
-        chrome_options = Options()
-        chrome_options.add_argument("--headless")
-        chrome_options.add_argument("--no-sandbox")
-        chrome_options.add_argument("--disable-dev-shm-usage")
-        chrome_options.add_argument("--window-size=1920,1080")
-        chrome_options.add_argument(
-            "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-        )
-        chrome_options.add_argument("--enable-javascript")
-        chrome_options.add_argument("--disable-web-security")
-        chrome_options.add_argument("--allow-running-insecure-content")
-        return chrome_options
-
-    def _ensure_driver(self) -> webdriver.Chrome:
-        if self.driver is None:
-            chrome_options = self._get_chrome_options()
-            self.driver = webdriver.Chrome(options=chrome_options)
-            self.driver.set_page_load_timeout(BROWSER_PAGE_LOAD_TIMEOUT)
-            logger.debug("Created new browser instance")
-        return self.driver
-
-    def _recreate_driver(self) -> None:
-        logger.warning("Recreating browser instance after failure")
-        self.close()
-        self.driver = None
-        self.tab_queue = []
-        self.pending_urls = []
-        self.completed_extractions = {}
-
-    def _start_loading_url(self, url: str) -> None:
-        try:
-            driver = self._ensure_driver()
-
-            driver.execute_script("window.open('');")
-            driver.switch_to.window(driver.window_handles[-1])
-
-            logger.debug(f"Starting load for: {url}")
-            driver.get(url)
-
-            tab_info = TabInfo(
-                handle=driver.current_window_handle,
-                url=url,
-                load_time=time.time()
-            )
-            self.tab_queue.append(tab_info)
-
-        except Exception as exc:
-            logger.debug(f"Failed to start loading {url}: {exc}")
-
-    def add_to_pipeline(self, urls: List[str]) -> None:
-        self.pending_urls.extend(urls)
-
-    def fill_pipeline(self) -> None:
-        while len(self.tab_queue) < BROWSER_TAB_POOL_SIZE and self.pending_urls:
-            url = self.pending_urls.pop(0)
-            self._start_loading_url(url)
-            if self.pending_urls:
-                time.sleep(BROWSER_STAGGER_DELAY)
-
-    def extract_next(self) -> None:
-        self.fill_pipeline()
-
-        if not self.tab_queue:
-            return
-
-        tab_info = self.tab_queue.pop(0)
-
-        try:
-            driver = self._ensure_driver()
-
-            elapsed = time.time() - tab_info.load_time
-            remaining_wait = BROWSER_CONTENT_WAIT - elapsed
-            if remaining_wait > 0:
-                logger.debug(f"Waiting {remaining_wait:.1f}s for {tab_info.url}")
-                time.sleep(remaining_wait)
-
-            driver.switch_to.window(tab_info.handle)
-
-            WebDriverWait(driver, BROWSER_ELEMENT_WAIT_TIMEOUT).until(
-                lambda d: d.execute_script('return document.readyState') == 'complete'
-            )
-
-            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-
-            body_element = driver.find_element(By.TAG_NAME, "body")
-            content = body_element.text.strip()
-
-            driver.close()
-            if driver.window_handles:
-                driver.switch_to.window(driver.window_handles[0])
-
-            if content:
-                logger.info(f"Extracted {len(content)} chars from {tab_info.url}")
-                self.completed_extractions[tab_info.url] = content
-            else:
-                logger.warning(f"No content found for {tab_info.url}")
-                self.completed_extractions[tab_info.url] = None
-
-        except Exception as exc:
-            logger.debug(f"Extraction failed for {tab_info.url}: {exc}")
-            self.completed_extractions[tab_info.url] = None
-
-    def get_content(self, url: str) -> Optional[str]:
-        max_wait_iterations = 20
-        wait_iterations = 0
-
-        while url not in self.completed_extractions and wait_iterations < max_wait_iterations:
-            if self.tab_queue or self.pending_urls:
-                self.extract_next()
-            wait_iterations += 1
-
-        return self.completed_extractions.get(url)
-
-    def close(self) -> None:
-        if self.driver:
-            try:
-                self.driver.quit()
-                logger.debug("Closed browser instance")
-            except Exception:
-                pass
-            finally:
-                self.driver = None
-                self.tab_queue = []
-                self.pending_urls = []
-                self.completed_extractions = {}
-
-
-def extract_url_content(
-    url: str, browser_manager: Optional[BrowserManager] = None
-) -> Optional[str]:
-    if not openai_client or not browser_manager:
+def extract_url_content(url: str) -> Optional[str]:
+    if not openai_client:
         return None
 
-    return browser_manager.get_content(url)
+    driver = None
+    try:
+        chrome_options = get_chrome_options()
+        driver = webdriver.Chrome(options=chrome_options)
+        driver.set_page_load_timeout(BROWSER_PAGE_LOAD_TIMEOUT)
+
+        logger.debug(f"Starting load for: {url}")
+        driver.get(url)
+
+        WebDriverWait(driver, BROWSER_ELEMENT_WAIT_TIMEOUT).until(
+            lambda d: d.execute_script('return document.readyState') == 'complete'
+        )
+
+        time.sleep(BROWSER_CONTENT_WAIT)
+
+        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+        
+        body_element = driver.find_element(By.TAG_NAME, "body")
+        content = body_element.text.strip()
+
+        if content:
+            logger.info(f"Extracted {len(content)} chars from {url}")
+            return content
+        else:
+            logger.warning(f"No content found for {url}")
+            return None
+
+    except Exception as exc:
+        logger.debug(f"Extraction failed for {url}: {exc}")
+        return None
+    finally:
+        if driver:
+            try:
+                driver.quit()
+            except Exception:
+                pass
 
 
-def check_if_job_closed(content: str, url: str = "") -> bool:
+async def check_if_job_closed(content: str, url: str = "") -> bool:
     if not content or not openai_client:
         return False
 
@@ -447,7 +360,7 @@ def check_if_job_closed(content: str, url: str = "") -> bool:
 
     for attempt in range(OPENAI_MAX_RETRIES):
         try:
-            response = openai_client.chat.completions.create(
+            response = await openai_client.chat.completions.create(
                 model="gpt-5-nano",
                 messages=[
                     {
@@ -506,13 +419,13 @@ Do not respond with anything other than 'YES' or 'NO'.""",
             exc_str = str(exc).lower()
             if "timeout" in exc_str or "connection" in exc_str or "network" in exc_str:
                 logger.warning(f"Network error during AI closed check: {exc}")
-                wait_for_network()
+                await asyncio.to_thread(wait_for_network)
                 continue
             if attempt < OPENAI_MAX_RETRIES - 1:
                 logger.warning(
                     f"AI closed check failed (attempt {attempt + 1}/{OPENAI_MAX_RETRIES}): {exc}"
                 )
-                backoff.wait()
+                await asyncio.to_thread(backoff.wait)
             else:
                 logger.warning(
                     f"AI closed check failed after {OPENAI_MAX_RETRIES} attempts: {exc}"
@@ -526,7 +439,7 @@ Do not respond with anything other than 'YES' or 'NO'.""",
     return False
 
 
-def check_security_clearance_requirement(content: str, url: str = "") -> bool:
+async def check_security_clearance_requirement(content: str, url: str = "") -> bool:
     if not content or not openai_client:
         return False
 
@@ -540,7 +453,7 @@ def check_security_clearance_requirement(content: str, url: str = "") -> bool:
 
     for attempt in range(OPENAI_MAX_RETRIES):
         try:
-            response = openai_client.chat.completions.create(
+            response = await openai_client.chat.completions.create(
                 model="gpt-5-nano",
                 messages=[
                     {
@@ -631,13 +544,13 @@ def check_security_clearance_requirement(content: str, url: str = "") -> bool:
             exc_str = str(exc).lower()
             if "timeout" in exc_str or "connection" in exc_str or "network" in exc_str:
                 logger.warning(f"Network error during AI call: {exc}")
-                wait_for_network()
+                await asyncio.to_thread(wait_for_network)
                 continue
             if attempt < OPENAI_MAX_RETRIES - 1:
                 logger.warning(
                     f"AI call failed (attempt {attempt + 1}/{OPENAI_MAX_RETRIES}): {exc}"
                 )
-                backoff.wait()
+                await asyncio.to_thread(backoff.wait)
             else:
                 logger.warning(
                     f"AI security clearance check failed after {OPENAI_MAX_RETRIES} attempts: {exc}"
@@ -651,8 +564,8 @@ def check_security_clearance_requirement(content: str, url: str = "") -> bool:
     return False
 
 
-def preprocess_job_posting(
-    job: JobPosting, browser_manager: Optional[BrowserManager] = None
+async def preprocess_job_posting(
+    job: JobPosting
 ) -> JobPosting:
     if not job.url or not job.active:
         return job
@@ -682,7 +595,7 @@ def preprocess_job_posting(
         )
         return job
 
-    content = extract_url_content(job.url, browser_manager)
+    content = await asyncio.to_thread(extract_url_content, job.url)
     if not content:
         logger.debug(f"Could not extract content from {job.url} - keeping job active")
         add_ai_result(job.url, "failed", "failed to extract content", "extraction")
@@ -693,7 +606,7 @@ def preprocess_job_posting(
         add_ai_result(job.url, "failed", f"insufficient content (only {len(content)} chars)", "extraction")
         return job
 
-    is_closed = check_if_job_closed(content, job.url)
+    is_closed = await check_if_job_closed(content, job.url)
     if is_closed:
         logger.info(
             f"FILTERED: Job is closed for {job.company} - {job.title} ({job.url})"
@@ -709,7 +622,7 @@ def preprocess_job_posting(
             raw_url=job.raw_url,
         )
 
-    requires_clearance = check_security_clearance_requirement(content, job.url)
+    requires_clearance = await check_security_clearance_requirement(content, job.url)
 
     if requires_clearance:
         logger.info(
@@ -862,8 +775,8 @@ def get_existing_urls(sheet: Worksheet) -> Set[str]:
     return {row[5] for row in rows if len(row) > 5}  # type: ignore
 
 
-def filter_jobs_by_clearance(
-    jobs: List[JobPosting], browser_manager: Optional[BrowserManager] = None
+async def filter_jobs_by_clearance(
+    jobs: List[JobPosting]
 ) -> ClearanceStats:
     clearance_stats: ClearanceStats = {
         "jobs_checked_for_clearance": 0,
@@ -898,14 +811,22 @@ def filter_jobs_by_clearance(
         else:
             jobs_to_check.append(job)
 
-    if browser_manager and jobs_to_check:
-        urls_to_check = [job.url for job in jobs_to_check]
-        logger.info(f"Adding {len(urls_to_check)} URLs to pipeline")
-        browser_manager.add_to_pipeline(urls_to_check)
+    if jobs_to_check:
+        logger.info(f"Processing {len(jobs_to_check)} jobs for clearance check")
 
-        for job in jobs_to_check:
-            wait_for_network()
-            final_job = preprocess_job_posting(job, browser_manager)
+        semaphore = asyncio.Semaphore(MAX_CONCURRENT_JOBS)
+
+        async def process_job_with_semaphore(job: JobPosting) -> JobPosting:
+            async with semaphore:
+                await asyncio.to_thread(wait_for_network)
+                return await preprocess_job_posting(job)
+
+        logger.info(f"Processing {len(jobs_to_check)} jobs concurrently (max {MAX_CONCURRENT_JOBS} at a time)")
+        processed_jobs = await asyncio.gather(
+            *[process_job_with_semaphore(job) for job in jobs_to_check]
+        )
+
+        for job, final_job in zip(jobs_to_check, processed_jobs):
             if final_job.active:
                 jobs_passed.append(final_job)
             else:
@@ -1071,7 +992,7 @@ def wait_for_network() -> None:
     logger.info("Network connection restored")
 
 
-def main() -> RunSummary | None:
+async def async_main() -> RunSummary | None:
     sheet_id = os.environ.get("SHEET_ID")
     job_listings_url = os.environ.get("JOB_LISTINGS_URL")
 
@@ -1079,37 +1000,37 @@ def main() -> RunSummary | None:
         logger.error("SHEET_ID and JOB_LISTINGS_URL environment variables must be set")
         raise ValueError("Missing required environment variables")
 
+    logger.info("System sleep prevention enabled")
+    logger.info(f"Using SHEET_ID: {sheet_id}")
+    logger.info(f"Using JOB_LISTINGS_URL: {job_listings_url}")
+    
+    try:
+        await asyncio.to_thread(wait_for_network)
+        client: gspread.client.Client = await asyncio.to_thread(authenticate_gspread)
+        sheet: Worksheet = client.open_by_key(sheet_id).worksheet(SHEET_NAME)
+
+        await asyncio.to_thread(wait_for_network)
+        postings: List[JobPosting] = await asyncio.to_thread(fetch_job_postings, job_listings_url)
+        existing_urls: Set[str] = await asyncio.to_thread(get_existing_urls, sheet)
+        new_jobs: List[JobPosting] = filter_job_postings(postings, existing_urls)
+
+        clearance_stats: ClearanceStats = await filter_jobs_by_clearance(new_jobs)
+
+        await asyncio.to_thread(wait_for_network)
+        jobs_added: int = await asyncio.to_thread(write_to_sheet, sheet, clearance_stats["jobs_passed"])
+        clearance_stats["jobs_added_to_sheet"] = jobs_added
+
+        summary = summarize_filters(postings, existing_urls, clearance_stats)
+        summary["config_name"] = os.environ.get("CONFIG_NAME", "unknown")
+        return summary
+    except Exception as e:
+        logger.error(f"Fatal error in main: {e}")
+        raise
+
+
+def main() -> RunSummary | None:
     with wakepy.keep.presenting():
-        logger.info("System sleep prevention enabled")
-        logger.info(f"Using SHEET_ID: {sheet_id}")
-        logger.info(f"Using JOB_LISTINGS_URL: {job_listings_url}")
-        browser_manager: BrowserManager = BrowserManager()
-        try:
-            wait_for_network()
-            client: gspread.client.Client = authenticate_gspread()
-            sheet: Worksheet = client.open_by_key(sheet_id).worksheet(SHEET_NAME)
-
-            wait_for_network()
-            postings: List[JobPosting] = fetch_job_postings(job_listings_url)
-            existing_urls: Set[str] = get_existing_urls(sheet)
-            new_jobs: List[JobPosting] = filter_job_postings(postings, existing_urls)
-
-            clearance_stats: ClearanceStats = filter_jobs_by_clearance(
-                new_jobs, browser_manager
-            )
-
-            wait_for_network()
-            jobs_added: int = write_to_sheet(sheet, clearance_stats["jobs_passed"])
-            clearance_stats["jobs_added_to_sheet"] = jobs_added
-
-            summary = summarize_filters(postings, existing_urls, clearance_stats)
-            summary["config_name"] = os.environ.get("CONFIG_NAME", "unknown")
-            return summary
-        except Exception as e:
-            logger.error(f"Fatal error in main: {e}")
-            raise
-        finally:
-            browser_manager.close()
+        return asyncio.run(async_main())
 
 
 if __name__ == "__main__":
