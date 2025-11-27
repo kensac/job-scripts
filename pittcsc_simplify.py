@@ -318,12 +318,12 @@ def extract_url_content(url: str) -> Optional[str]:
         driver.get(url)
 
         WebDriverWait(driver, BROWSER_ELEMENT_WAIT_TIMEOUT).until(
-            lambda d: d.execute_script('return document.readyState') == 'complete'
+            lambda d: d.execute_script('return document.readyState') == 'complete' # type: ignore
         )
 
         time.sleep(BROWSER_CONTENT_WAIT)
 
-        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);") # type: ignore
         
         body_element = driver.find_element(By.TAG_NAME, "body")
         content = body_element.text.strip()
