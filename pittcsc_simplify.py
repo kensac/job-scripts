@@ -10,7 +10,7 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Set, TypedDict
+from typing import Dict, List, Literal, Optional, Set, TypedDict
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 import socket
@@ -24,6 +24,7 @@ from gspread.worksheet import Worksheet
 from filelock import FileLock
 from oauth2client.service_account import ServiceAccountCredentials  # type: ignore
 from openai import AsyncOpenAI
+from pydantic import BaseModel, Field
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
@@ -102,10 +103,11 @@ AI_RESULTS_FILE: str = "ai_results.json"
 # Content Extraction Configuration
 BROWSER_PAGE_LOAD_TIMEOUT: float = 15.0
 BROWSER_ELEMENT_WAIT_TIMEOUT: float = 10.0
-BROWSER_CONTENT_WAIT: float = 5.0
+BROWSER_CONTENT_WAIT: float = 7.5
 MIN_CONTENT_LENGTH: int = 0
 OPENAI_TIMEOUT: float = 120.0
 OPENAI_MAX_RETRIES: int = 3
+OPENAI_MAX_COMPLETION_TOKENS: int = 2500
 NETWORK_CHECK_TIMEOUT: float = 5.0
 NETWORK_RETRY_DELAY: float = 10.0
 
@@ -257,18 +259,35 @@ def save_ai_results(ai_results: Dict[str, Dict[str, str]]) -> None:
         logger.warning(f"Failed to save AI results to {AI_RESULTS_FILE}: {exc}")
 
 
-def add_ai_result(url: str, status: str, reason: str = "", check_type: str = "") -> None:
+def add_ai_result(
+    url: str,
+    status: str,
+    reason: str = "",
+    check_type: str = "",
+    prompt_tokens: Optional[int] = None,
+    completion_tokens: Optional[int] = None,
+    total_tokens: Optional[int] = None
+) -> None:
     lock_path = f"{AI_RESULTS_FILE}.lock"
     lock = FileLock(lock_path)
-    
+
     with lock:
         ai_results = load_ai_results()
-        ai_results[url] = {
+        result_data = {
             "status": status,
             "reason": reason,
             "check_type": check_type,
             "timestamp": datetime.datetime.now().isoformat()
         }
+
+        if prompt_tokens is not None:
+            result_data["prompt_tokens"] = prompt_tokens
+        if completion_tokens is not None:
+            result_data["completion_tokens"] = completion_tokens
+        if total_tokens is not None:
+            result_data["total_tokens"] = total_tokens
+
+        ai_results[url] = result_data
         save_ai_results(ai_results)
 
 
@@ -290,6 +309,44 @@ def is_url_passed(url: str) -> bool:
 def is_url_failed(url: str) -> bool:
     result = get_ai_result(url)
     return result is not None and result.get("status") == "failed"
+
+
+def get_all_failed_jobs() -> List[Dict[str, str]]:
+    ai_results = load_ai_results()
+    failed_jobs = []
+    for url, result in ai_results.items():
+        if result.get("status") == "failed":
+            failed_jobs.append({"url": url, **result})
+    return failed_jobs
+
+
+def get_all_custom_filter_jobs() -> List[Dict[str, str]]:
+    ai_results = load_ai_results()
+    custom_jobs = []
+    for url, result in ai_results.items():
+        if result.get("check_type") == "custom":
+            custom_jobs.append({"url": url, **result})
+    return custom_jobs
+
+
+class JobClosedResponse(BaseModel):
+    is_closed: bool = Field(description="Whether the job posting is closed or no longer available")
+    reason: Optional[str] = Field(None, description="Brief explanation if job is closed")
+
+
+class ClearanceRequirementResponse(BaseModel):
+    requires_clearance_or_restrictions: bool = Field(
+        description="Whether job requires security clearance, citizenship, or has visa/sponsorship restrictions"
+    )
+    restriction_type: Optional[Literal["security_clearance", "citizenship", "visa_sponsorship", "f1_restriction"]] = Field(
+        None, description="Type of restriction if any"
+    )
+    reason: Optional[str] = Field(None, description="Brief explanation of the restriction")
+
+
+class CustomFilterResponse(BaseModel):
+    should_filter: bool = Field(description="Whether the job should be filtered out based on custom criteria")
+    reason: Optional[str] = Field(None, description="Brief explanation why job was filtered or kept")
 
 
 def get_chrome_options() -> Options:
@@ -363,14 +420,19 @@ async def check_if_job_closed(content: str, url: str = "") -> bool:
 
     for attempt in range(OPENAI_MAX_RETRIES):
         try:
-            response = await openai_client.chat.completions.create(
+            response = await openai_client.beta.chat.completions.parse(
                 model="gpt-5-nano",
                 messages=[
                     {
                         "role": "system",
-                        "content": """You are checking if a job posting is closed or no longer available.
+                        "content": """You are analyzing job posting content to determine availability status. Be thorough and persistent in your analysis.
 
-Respond 'YES' if you find ANY of these indicators:
+<objective>
+Determine if the job posting is closed/unavailable or still accepting applications.
+</objective>
+
+<explicit_closed_indicators>
+Mark is_closed=true ONLY when you find explicit language such as:
 - "Job posting no longer available"
 - "This job is closed"
 - "Position has been filled"
@@ -378,46 +440,87 @@ Respond 'YES' if you find ANY of these indicators:
 - "This posting has expired"
 - "Application deadline has passed"
 - "Position is no longer open"
-- "The page you are looking for doesn't exist."
-- Similar phrases indicating the job is closed
+- "The page you are looking for doesn't exist"
+- "404" or "Page not found" errors
+- Page shows error messages instead of job details
+</explicit_closed_indicators>
 
-Respond 'NO' if the job appears to be open and accepting applications.
+<verification_process>
+1. Thoroughly scan the ENTIRE content for closed indicators
+2. Check both explicit statements and error messages
+3. Verify there is actual job content (description, requirements, etc.)
+4. If you find a closed indicator, quote it exactly in the reason field
+</verification_process>
 
-IMPORTANT: Only respond 'YES' if you are absolutely certain the job is closed.
-If unclear or no indication, respond 'NO'.
-Do not respond with anything other than 'YES' or 'NO'.""",
+<decision_framework>
+- If explicit closed indicator found → is_closed=true with specific phrase quoted
+- If job details present and no closed indicators → is_closed=false
+- If ambiguous or unclear → Default to is_closed=false to avoid false positives
+</decision_framework>
+
+<examples>
+Example 1 - Explicitly closed:
+Content: "This position has been filled. Thank you for your interest."
+Response: {"is_closed": true, "reason": "Position has been filled"}
+
+Example 2 - Error page (closed):
+Content: "404 - The page you are looking for doesn't exist."
+Response: {"is_closed": true, "reason": "404 - page doesn't exist"}
+
+Example 3 - Active job:
+Content: "We're seeking a Software Engineer to join our team. Apply now! Requirements: 3+ years..."
+Response: {"is_closed": false, "reason": "Active job posting"}
+
+Example 4 - Ambiguous (default to open):
+Content: "Senior Developer role at TechCorp [minimal content]"
+Response: {"is_closed": false, "reason": null}
+</examples>
+
+<output_guidelines>
+- Keep reason field concise (≤15 words)
+- Quote the exact closed indicator phrase if found
+- Be decisive: don't hedge with "might be" or "seems like"
+</output_guidelines>""",
                     },
                     {
                         "role": "user",
-                        "content": f"Is this job posting closed? Content: {content}",
+                        "content": f"Analyze this job posting thoroughly:\n\n{content}",
                     },
                 ],
-                max_completion_tokens=5000,
+                response_format=JobClosedResponse,
+                max_completion_tokens=OPENAI_MAX_COMPLETION_TOKENS,
                 timeout=OPENAI_TIMEOUT,
             )
 
-            result = response.choices[0].message.content
-            if result is None or result == "":
-                logger.warning("AI returned null or empty response for closed check")
+            if response.choices[0].message.refusal:
+                logger.warning(f"AI refused closed check: {response.choices[0].message.refusal}")
                 return False
 
-            result = result.strip().upper()
-
-            if "YES" not in result and "NO" not in result:
-                logger.warning(f"AI returned invalid response for closed check: '{result}'")
+            parsed = response.choices[0].message.parsed
+            if not parsed:
+                logger.warning("AI returned no parsed response for closed check")
                 return False
 
-            logger.info(f"AI closed check result: '{result}'")
+            logger.info(f"AI closed check: is_closed={parsed.is_closed}, reason={parsed.reason}")
 
-            is_closed = "YES" in result
-
+            usage = response.usage
             if url:
-                if is_closed:
-                    add_ai_result(url, "rejected", "job closed", "closed")
+                if parsed.is_closed:
+                    add_ai_result(
+                        url, "rejected", parsed.reason or "job closed", "closed",
+                        prompt_tokens=usage.prompt_tokens if usage else None,
+                        completion_tokens=usage.completion_tokens if usage else None,
+                        total_tokens=usage.total_tokens if usage else None
+                    )
                 else:
-                    add_ai_result(url, "passed", "job open", "closed")
+                    add_ai_result(
+                        url, "passed", parsed.reason or "job open", "closed",
+                        prompt_tokens=usage.prompt_tokens if usage else None,
+                        completion_tokens=usage.completion_tokens if usage else None,
+                        total_tokens=usage.total_tokens if usage else None
+                    )
 
-            return is_closed
+            return parsed.is_closed
 
         except Exception as exc:
             exc_str = str(exc).lower()
@@ -457,92 +560,139 @@ async def check_security_clearance_requirement(content: str, url: str = "") -> b
 
     for attempt in range(OPENAI_MAX_RETRIES):
         try:
-            response = await openai_client.chat.completions.create(
+            response = await openai_client.beta.chat.completions.parse(
                 model="gpt-5-nano",
                 messages=[
                     {
                         "role": "system",
-                        "content": """You are analyzing job postings to determine if they should be filtered out.
+                        "content": """You are analyzing job postings to identify restrictions that disqualify international candidates. Be thorough and scan the entire content.
 
-            Respond 'YES' to filter out jobs if you find ANY of these EXPLICIT conditions:
+<objective>
+Detect explicit restrictions: security clearance, citizenship requirements, visa sponsorship limitations, or F1 visa restrictions.
+</objective>
 
-            SECURITY/CITIZENSHIP REQUIREMENTS:
-            - "Security Clearance" or "security clearance required"
-            - "U.S. Security Clearance"
-            - "Secret Clearance", "Top Secret", "TS/SCI", "Public Trust"
-            - "Must be a U.S. citizen" or "U.S. citizenship required"
-            - "U.S. Person" as defined by export control regulations
+<restriction_categories>
+SECURITY/CITIZENSHIP:
+- "Security Clearance required" or "must obtain clearance"
+- "U.S. citizenship required" or "must be a U.S. citizen"
+- "U.S. Person" (export control definition)
+- "Secret", "Top Secret", "TS/SCI", "Public Trust" clearances
 
-            VISA SPONSORSHIP RESTRICTIONS:
-            - "Will not sponsor" or "does not sponsor" (visa/work authorization)
-            - "No sponsorship" or "sponsorship not available"
-            - "Will not provide sponsorship" or "does not provide sponsorship"
-            - "Cannot sponsor" or "unable to sponsor"
-            - "Not sponsoring" or "no visa sponsorship"
-            - "Will not sponsor now or in the future"
-            - "Does not sponsor now or in the future"
-            - "No current or future sponsorship"
-            - "Will not sponsor for any visa type"
-            - "Does not sponsor H1B", "No H1B sponsorship", "Will not sponsor H1B"
-            - "Does not sponsor work visas" or "No work visa sponsorship"
-            - "Must be authorized to work" combined with "no sponsorship"
-            - "Authorized to work without sponsorship"
-            - "No visa sponsorship provided"
-            - "Sponsorship will not be provided"
-            - Variations like "we do not sponsor", "company does not sponsor", "employer will not sponsor"
+VISA SPONSORSHIP:
+- "Will not sponsor" or "does not sponsor" (work authorization/visas)
+- "No visa sponsorship" or "sponsorship not available"
+- "Will not provide sponsorship" or "cannot sponsor"
+- "No H1B sponsorship" or "does not sponsor H1B"
+- "Must be authorized to work without sponsorship"
+- "Authorized to work without company sponsorship"
+- "No current or future sponsorship"
+- Variations: "we do not sponsor", "company does not sponsor", "employer will not sponsor"
 
-            F1 VISA RESTRICTIONS:
-            - "F1 visa not eligible" or "F1 students not eligible"
-            - "No F1 visa" or "F1 not accepted"
-            - "F1 visa holders not considered"
-            - "Not open to F1 students"
-            - "F1 status not eligible"
-            - "Does not accept F1 visa"
-            - "F1 visa students cannot apply"
-            - "Not available for F1 visa holders"
+F1 VISA:
+- "F1 visa not eligible" or "F1 students not eligible"
+- "No F1 visa" or "F1 not accepted"
+- "F1 visa holders not considered"
+- "Not open to F1 students"
+</restriction_categories>
 
-            Respond 'YES' if ANY of these conditions are clearly stated.
-            Respond 'NO' only if NONE of these conditions are mentioned.
+<verification_process>
+1. Thoroughly scan ENTIRE job content for restriction language
+2. Check qualifications, requirements, and legal sections carefully
+3. Distinguish between:
+   - EXPLICIT restrictions ("will not sponsor") → Flag as restriction
+   - Preference statements ("preference for clearance") → Do NOT flag
+   - Silent/absent mentions → Do NOT flag
+4. If restriction found, identify the specific type and quote the phrase
+</verification_process>
 
-            IMPORTANT: Only respond 'YES' if you are absolutely certain the language explicitly states no sponsorship or F1 restrictions.
-            If content is unclear, vague, or insufficient, respond 'NO' to avoid false positives.
-            Do not make assumptions based on job title or company type.
-            Do not respond with anything other than 'YES' or 'NO'.
-            """,
+<decision_framework>
+- Explicit restriction found → requires_clearance_or_restrictions=true, categorize type, quote phrase
+- Preference or "nice to have" → requires_clearance_or_restrictions=false
+- Not mentioned or unclear → requires_clearance_or_restrictions=false (avoid false positives)
+- Multiple restrictions → pick the most restrictive type
+</decision_framework>
+
+<examples>
+Example 1 - Clear sponsorship restriction:
+Content: "...candidates must be authorized to work in the US without sponsorship..."
+Response: {"requires_clearance_or_restrictions": true, "restriction_type": "visa_sponsorship", "reason": "No sponsorship provided"}
+
+Example 2 - Security clearance:
+Content: "...must obtain Secret clearance within 6 months of hire..."
+Response: {"requires_clearance_or_restrictions": true, "restriction_type": "security_clearance", "reason": "Secret clearance required"}
+
+Example 3 - F1 restriction:
+Content: "...this position is not open to F1 visa holders..."
+Response: {"requires_clearance_or_restrictions": true, "restriction_type": "f1_restriction", "reason": "F1 visa not eligible"}
+
+Example 4 - No restrictions (sponsorship available):
+Content: "...we sponsor H1B visas for qualified candidates..."
+Response: {"requires_clearance_or_restrictions": false, "restriction_type": null, "reason": "Visa sponsorship available"}
+
+Example 5 - Preference only (not a restriction):
+Content: "...clearance eligible candidates preferred..."
+Response: {"requires_clearance_or_restrictions": false, "restriction_type": null, "reason": "Preference only, not required"}
+
+Example 6 - Not mentioned:
+Content: "We're hiring a Software Engineer. Requirements: 3+ years Python..."
+Response: {"requires_clearance_or_restrictions": false, "restriction_type": null, "reason": null}
+
+Example 7 - Question only (no restriction):
+Content: ""\"Will you now or will you in the future require employment visa sponsorship?\"","
+Response: {"requires_clearance_or_restrictions": false, "restriction_type": null, "reason": "Question only, no restriction"}
+</examples>
+
+<output_guidelines>
+- Be decisive: don't use hedging language like "may require" or "possibly"
+- Quote the specific restriction phrase in reason field (≤20 words)
+- If no restriction, reason can be null or brief explanation
+- Prefer false negatives over false positives: when in doubt, do NOT flag
+</output_guidelines>""",
                     },
                     {
                         "role": "user",
-                        "content": f"Should this job posting be filtered out (security clearance/citizenship required OR no visa sponsorship OR F1 visa restrictions)? Content: {content}",
+                        "content": f"Analyze this job posting for restrictions:\n\n{content}",
                     },
                 ],
-                max_completion_tokens=5000,
+                response_format=ClearanceRequirementResponse,
+                max_completion_tokens=OPENAI_MAX_COMPLETION_TOKENS,
                 timeout=OPENAI_TIMEOUT,
             )
 
-            result = response.choices[0].message.content
-            if result is None or result == "":
-                logger.warning("AI returned null or empty response")
+            if response.choices[0].message.refusal:
+                logger.warning(f"AI refused clearance check: {response.choices[0].message.refusal}")
                 return False
 
-            result = result.strip().upper()
-
-            if "YES" not in result and "NO" not in result:
-                logger.warning(f"AI returned invalid response: '{result}'")
+            parsed = response.choices[0].message.parsed
+            if not parsed:
+                logger.warning("AI returned no parsed response for clearance check")
                 return False
 
-            logger.info(f"AI clearance check result: '{result}'")
+            logger.info(
+                f"AI clearance check: requires={parsed.requires_clearance_or_restrictions}, "
+                f"type={parsed.restriction_type}, reason={parsed.reason}"
+            )
 
-            requires_clearance = "YES" in result
-
+            usage = response.usage
             if url:
-                if requires_clearance:
+                if parsed.requires_clearance_or_restrictions:
                     add_ai_result(
-                        url, "rejected", "security clearance/citizenship/visa restrictions", "clearance"
+                        url, "rejected",
+                        parsed.reason or f"{parsed.restriction_type} restriction",
+                        "clearance",
+                        prompt_tokens=usage.prompt_tokens if usage else None,
+                        completion_tokens=usage.completion_tokens if usage else None,
+                        total_tokens=usage.total_tokens if usage else None
                     )
                 else:
-                    add_ai_result(url, "passed", "no security clearance required", "clearance")
+                    add_ai_result(
+                        url, "passed", parsed.reason or "no restrictions", "clearance",
+                        prompt_tokens=usage.prompt_tokens if usage else None,
+                        completion_tokens=usage.completion_tokens if usage else None,
+                        total_tokens=usage.total_tokens if usage else None
+                    )
 
-            return requires_clearance
+            return parsed.requires_clearance_or_restrictions
 
         except Exception as exc:
             exc_str = str(exc).lower()
@@ -582,53 +732,98 @@ async def check_custom_filter(content: str, url: str = "", job_title: str = "", 
 
     for attempt in range(OPENAI_MAX_RETRIES):
         try:
-            response = await openai_client.chat.completions.create(
+            response = await openai_client.beta.chat.completions.parse(
                 model="gpt-5-nano",
                 messages=[
                     {
                         "role": "system",
-                        "content": f"""You are analyzing job postings based on custom filtering criteria.
+                        "content": f"""You are analyzing job postings against custom filtering criteria. Be thorough and evaluate the complete job description.
 
+<objective>
+Determine if the job should be filtered out (rejected) or kept based on the user-defined criteria below.
+</objective>
+
+<user_criteria>
 {CUSTOM_FILTER_PROMPT}
+</user_criteria>
 
-Respond 'YES' to filter out (reject) the job if it does NOT match the criteria above.
-Respond 'NO' to keep the job if it DOES match the criteria above.
+<verification_process>
+1. Thoroughly read the ENTIRE job content, including company, title, description, requirements, and responsibilities
+2. Evaluate against ALL criteria specified in user_criteria
+3. Look for both explicit matches and strong implicit indicators
+4. When the criteria mention specific companies, verify the exact company name
+5. When the criteria mention specific roles, check both title and job description for alignment
+6. When the criteria mention technical requirements, scan for those technologies/skills
+</verification_process>
 
-IMPORTANT: Only respond 'YES' if you are absolutely certain the job should be filtered out.
-If unclear or insufficient information, respond 'NO' to avoid false positives.
-Do not respond with anything other than 'YES' or 'NO'.""",
+<decision_framework>
+- KEEP (should_filter=false) if:
+  * Job clearly matches the criteria (right company, right role type, right skills)
+  * Multiple criteria are satisfied even if not all are met
+  * Ambiguous but leans toward matching
+- FILTER OUT (should_filter=true) if:
+  * Job clearly does NOT match the criteria (wrong company tier, wrong role focus)
+  * Explicitly excluded in the criteria
+  * Definitely misaligned with stated preferences
+- When uncertain: Default to should_filter=false to avoid losing potentially good opportunities
+</decision_framework>
+
+<output_guidelines>
+- Provide a clear, concise reason (≤25 words) explaining your decision
+- Reference specific aspects: company tier, role type, or technical match
+- Be decisive: avoid hedging phrases like "might be" or "possibly"
+- If keeping, highlight what matched; if filtering, explain what disqualified it
+</output_guidelines>
+
+IMPORTANT: Prefer false negatives over false positives. When in doubt about whether a job matches the criteria, keep it (should_filter=false).""",
                     },
                     {
                         "role": "user",
-                        "content": f"Job Title: {job_title}\nCompany: {company}\n\nJob Content: {content}",
+                        "content": f"""Evaluate this job against the criteria:
+
+Company: {company}
+Job Title: {job_title}
+
+Job Content:
+{content}""",
                     },
                 ],
-                max_completion_tokens=5000,
+                response_format=CustomFilterResponse,
+                max_completion_tokens=OPENAI_MAX_COMPLETION_TOKENS,
                 timeout=OPENAI_TIMEOUT,
             )
 
-            result = response.choices[0].message.content
-            if result is None or result == "":
-                logger.warning("AI returned null or empty response for custom filter")
+            if response.choices[0].message.refusal:
+                logger.warning(f"AI refused custom filter: {response.choices[0].message.refusal}")
                 return False
 
-            result = result.strip().upper()
-
-            if "YES" not in result and "NO" not in result:
-                logger.warning(f"AI returned invalid response for custom filter: '{result}'")
+            parsed = response.choices[0].message.parsed
+            if not parsed:
+                logger.warning("AI returned no parsed response for custom filter")
                 return False
 
-            logger.info(f"AI custom filter result: '{result}'")
+            logger.info(
+                f"AI custom filter: should_filter={parsed.should_filter}, reason={parsed.reason}"
+            )
 
-            should_filter = "YES" in result
-
+            usage = response.usage
             if url:
-                if should_filter:
-                    add_ai_result(url, "rejected", "custom filter criteria not met", "custom")
+                if parsed.should_filter:
+                    add_ai_result(
+                        url, "rejected", parsed.reason or "custom filter criteria not met", "custom",
+                        prompt_tokens=usage.prompt_tokens if usage else None,
+                        completion_tokens=usage.completion_tokens if usage else None,
+                        total_tokens=usage.total_tokens if usage else None
+                    )
                 else:
-                    add_ai_result(url, "passed", "custom filter criteria met", "custom")
+                    add_ai_result(
+                        url, "passed", parsed.reason or "custom filter criteria met", "custom",
+                        prompt_tokens=usage.prompt_tokens if usage else None,
+                        completion_tokens=usage.completion_tokens if usage else None,
+                        total_tokens=usage.total_tokens if usage else None
+                    )
 
-            return should_filter
+            return parsed.should_filter
 
         except Exception as exc:
             exc_str = str(exc).lower()
@@ -749,6 +944,173 @@ async def preprocess_job_posting(
     logger.debug(f"No issues detected by AI for {job.company} - {job.title}")
 
     return job
+
+
+async def retry_failed_job(url: str, check_type: str) -> bool:
+    if not openai_client:
+        logger.warning("No OpenAI API key found - cannot retry failed jobs")
+        return False
+
+    logger.info(f"Retrying failed job: {url} (check_type: {check_type})")
+
+    try:
+        await asyncio.to_thread(wait_for_network)
+        content = await asyncio.to_thread(extract_url_content, url)
+
+        if not content:
+            logger.warning(f"Failed to extract content for {url}")
+            add_ai_result(url, "failed", "Content extraction failed", check_type)
+            return False
+
+        if check_type == "closed":
+            is_closed = await check_if_job_closed(content, url)
+            logger.info(f"Retry result for {url}: is_closed={is_closed}")
+            return True
+
+        elif check_type == "clearance":
+            requires_clearance = await check_security_clearance_requirement(content, url)
+            logger.info(f"Retry result for {url}: requires_clearance={requires_clearance}")
+            return True
+
+        elif check_type == "custom":
+            if not CUSTOM_FILTER_PROMPT:
+                logger.warning(f"Cannot retry custom filter for {url}: CUSTOM_FILTER_PROMPT not set")
+                return False
+            should_filter = await check_custom_filter(content, url, "", "")
+            logger.info(f"Retry result for {url}: should_filter={should_filter}")
+            return True
+
+        else:
+            logger.warning(f"Unknown check_type for retry: {check_type}")
+            return False
+
+    except Exception as exc:
+        logger.error(f"Error retrying failed job {url}: {exc}")
+        add_ai_result(url, "failed", f"Retry failed: {str(exc)[:100]}", check_type)
+        return False
+
+
+async def reevaluate_custom_filter(url: str, job_title: str = "", company: str = "") -> Optional[bool]:
+    if not openai_client or not CUSTOM_FILTER_PROMPT:
+        logger.warning("No OpenAI API key or CUSTOM_FILTER_PROMPT found - cannot reevaluate")
+        return None
+
+    logger.info(f"Reevaluating custom filter for: {url}")
+
+    try:
+        await asyncio.to_thread(wait_for_network)
+        content = await asyncio.to_thread(extract_url_content, url)
+
+        if not content:
+            logger.warning(f"Failed to extract content for {url}")
+            add_ai_result(url, "failed", "Content extraction failed", "custom")
+            return None
+
+        should_filter = await check_custom_filter(content, url, job_title, company)
+        logger.info(f"Reevaluation result for {url}: should_filter={should_filter}")
+        return not should_filter
+
+    except Exception as exc:
+        logger.error(f"Error reevaluating custom filter for {url}: {exc}")
+        add_ai_result(url, "failed", f"Reevaluation failed: {str(exc)[:100]}", "custom")
+        return None
+
+
+async def retry_all_failed_jobs() -> Dict[str, int]:
+    failed_jobs = get_all_failed_jobs()
+
+    if not failed_jobs:
+        logger.info("No failed jobs found in ai_results.json")
+        return {"total": 0, "success": 0, "failed": 0}
+
+    logger.info(f"Found {len(failed_jobs)} failed jobs to retry")
+
+    semaphore = asyncio.Semaphore(MAX_CONCURRENT_JOBS)
+    success_count = 0
+    failed_count = 0
+
+    async def retry_with_semaphore(job: Dict[str, str]) -> bool:
+        nonlocal success_count, failed_count
+        async with semaphore:
+            await asyncio.to_thread(wait_for_network)
+            success = await retry_failed_job(job["url"], job.get("check_type", "closed"))
+            if success:
+                success_count += 1
+            else:
+                failed_count += 1
+            return success
+
+    logger.info(f"Processing {len(failed_jobs)} failed jobs concurrently (max {MAX_CONCURRENT_JOBS} at a time)")
+    await asyncio.gather(*[retry_with_semaphore(job) for job in failed_jobs])
+
+    logger.info(f"Retry complete: {success_count} succeeded, {failed_count} failed")
+    return {"total": len(failed_jobs), "success": success_count, "failed": failed_count}
+
+
+async def reevaluate_all_custom_filtered_jobs(sheet_id: str, job_listings_url: str) -> Dict[str, int]:
+    custom_jobs = get_all_custom_filter_jobs()
+
+    if not custom_jobs:
+        logger.info("No custom filter jobs found in ai_results.json")
+        return {"total": 0, "reevaluated": 0, "now_passed": 0, "added_to_sheet": 0}
+
+    if not CUSTOM_FILTER_PROMPT:
+        logger.error("CUSTOM_FILTER_PROMPT not set - cannot reevaluate")
+        return {"total": len(custom_jobs), "reevaluated": 0, "now_passed": 0, "added_to_sheet": 0}
+
+    logger.info(f"Found {len(custom_jobs)} custom filter jobs to reevaluate")
+
+    await asyncio.to_thread(wait_for_network)
+    client = await asyncio.to_thread(authenticate_gspread)
+    sheet = client.open_by_key(sheet_id).worksheet(SHEET_NAME)
+
+    await asyncio.to_thread(wait_for_network)
+    all_postings = await asyncio.to_thread(fetch_job_postings, job_listings_url)
+    existing_sheet_urls = await asyncio.to_thread(get_existing_urls, sheet)
+
+    url_to_posting = {job.url: job for job in all_postings}
+    custom_job_urls = {job["url"] for job in custom_jobs}
+    jobs_to_reevaluate = [url_to_posting[url] for url in custom_job_urls if url in url_to_posting]
+
+    logger.info(f"Found {len(jobs_to_reevaluate)} jobs in current listings that need reevaluation")
+
+    semaphore = asyncio.Semaphore(MAX_CONCURRENT_JOBS)
+    reevaluated_count = 0
+    now_passed_count = 0
+    jobs_to_add = []
+
+    async def reevaluate_with_semaphore(job: JobPosting) -> Optional[JobPosting]:
+        nonlocal reevaluated_count, now_passed_count
+        async with semaphore:
+            await asyncio.to_thread(wait_for_network)
+            passed = await reevaluate_custom_filter(job.url, job.title, job.company)
+            reevaluated_count += 1
+
+            if passed:
+                now_passed_count += 1
+                if job.url not in existing_sheet_urls:
+                    return job
+            return None
+
+    logger.info(f"Reevaluating {len(jobs_to_reevaluate)} jobs concurrently (max {MAX_CONCURRENT_JOBS} at a time)")
+    results = await asyncio.gather(*[reevaluate_with_semaphore(job) for job in jobs_to_reevaluate])
+
+    jobs_to_add = [job for job in results if job is not None]
+
+    if jobs_to_add:
+        logger.info(f"Adding {len(jobs_to_add)} newly passed jobs to sheet")
+        await asyncio.to_thread(wait_for_network)
+        added_count = await asyncio.to_thread(write_to_sheet, sheet, jobs_to_add)
+    else:
+        added_count = 0
+
+    logger.info(f"Reevaluation complete: {reevaluated_count} jobs reevaluated, {now_passed_count} now pass, {added_count} added to sheet")
+    return {
+        "total": len(custom_jobs),
+        "reevaluated": reevaluated_count,
+        "now_passed": now_passed_count,
+        "added_to_sheet": added_count
+    }
 
 
 def fetch_job_postings(
@@ -1099,7 +1461,17 @@ def wait_for_network() -> None:
     logger.info("Network connection restored")
 
 
-async def async_main() -> RunSummary | None:
+async def async_main(retry_failed: bool = False, reevaluate_custom: bool = False) -> RunSummary | None:
+    if retry_failed:
+        logger.info("RETRY MODE: Processing failed jobs from ai_results.json")
+        try:
+            stats = await retry_all_failed_jobs()
+            logger.info(f"Retry summary: {stats['success']}/{stats['total']} jobs succeeded")
+            return None
+        except Exception as e:
+            logger.error(f"Fatal error in retry mode: {e}")
+            raise
+
     sheet_id = os.environ.get("SHEET_ID")
     job_listings_url = os.environ.get("JOB_LISTINGS_URL")
 
@@ -1107,10 +1479,23 @@ async def async_main() -> RunSummary | None:
         logger.error("SHEET_ID and JOB_LISTINGS_URL environment variables must be set")
         raise ValueError("Missing required environment variables")
 
+    if reevaluate_custom:
+        logger.info("REEVALUATE MODE: Rechecking custom filter jobs and updating sheet")
+        try:
+            stats = await reevaluate_all_custom_filtered_jobs(sheet_id, job_listings_url)
+            logger.info(
+                f"Reevaluation summary: {stats['reevaluated']} jobs reevaluated, "
+                f"{stats['now_passed']} now pass, {stats['added_to_sheet']} added to sheet"
+            )
+            return None
+        except Exception as e:
+            logger.error(f"Fatal error in reevaluate mode: {e}")
+            raise
+
     logger.info("System sleep prevention enabled")
     logger.info(f"Using SHEET_ID: {sheet_id}")
     logger.info(f"Using JOB_LISTINGS_URL: {job_listings_url}")
-    
+
     try:
         await asyncio.to_thread(wait_for_network)
         client: gspread.client.Client = await asyncio.to_thread(authenticate_gspread)
@@ -1135,10 +1520,16 @@ async def async_main() -> RunSummary | None:
         raise
 
 
-def main() -> RunSummary | None:
+def main(retry_failed: bool = False, reevaluate_custom: bool = False) -> RunSummary | None:
     with wakepy.keep.presenting():
-        return asyncio.run(async_main())
+        return asyncio.run(async_main(retry_failed=retry_failed, reevaluate_custom=reevaluate_custom))
 
 
 if __name__ == "__main__":
-    main()
+    import argparse
+    parser = argparse.ArgumentParser(description="Job posting tracker and AI filter")
+    parser.add_argument("--retry", action="store_true", help="Retry all failed jobs from ai_results.json")
+    parser.add_argument("--reevaluate-custom", action="store_true", help="Reevaluate all custom filter jobs and update sheet")
+    args = parser.parse_args()
+
+    main(retry_failed=args.retry, reevaluate_custom=args.reevaluate_custom)
