@@ -36,6 +36,9 @@ dotenv.load_dotenv()
 openai_api_key = os.environ.get("OPENAI_API_KEY")
 openai_client = AsyncOpenAI(api_key=openai_api_key) if openai_api_key else None
 
+# Custom Filtering Configuration
+CUSTOM_FILTER_PROMPT = os.environ.get("CUSTOM_FILTER_PROMPT", "")
+
 handler = colorlog.StreamHandler(sys.stdout)
 handler.setFormatter(
     colorlog.ColoredFormatter(
@@ -100,7 +103,7 @@ AI_RESULTS_FILE: str = "ai_results.json"
 BROWSER_PAGE_LOAD_TIMEOUT: float = 15.0
 BROWSER_ELEMENT_WAIT_TIMEOUT: float = 10.0
 BROWSER_CONTENT_WAIT: float = 5.0
-MIN_CONTENT_LENGTH: int = 100
+MIN_CONTENT_LENGTH: int = 0
 OPENAI_TIMEOUT: float = 120.0
 OPENAI_MAX_RETRIES: int = 3
 NETWORK_CHECK_TIMEOUT: float = 5.0
@@ -375,6 +378,7 @@ Respond 'YES' if you find ANY of these indicators:
 - "This posting has expired"
 - "Application deadline has passed"
 - "Position is no longer open"
+- "The page you are looking for doesn't exist."
 - Similar phrases indicating the job is closed
 
 Respond 'NO' if the job appears to be open and accepting applications.
@@ -564,6 +568,92 @@ async def check_security_clearance_requirement(content: str, url: str = "") -> b
     return False
 
 
+async def check_custom_filter(content: str, url: str = "", job_title: str = "", company: str = "") -> bool:
+    if not content or not openai_client or not CUSTOM_FILTER_PROMPT:
+        return False
+
+    if url:
+        cached_result = get_ai_result(url)
+        if cached_result and cached_result.get("check_type") == "custom":
+            logger.info(f"Using cached custom filter result for {url}: {cached_result['status']}")
+            return cached_result["status"] == "rejected"
+
+    backoff = ExponentialBackoff(base_delay=2.0, max_delay=30.0)
+
+    for attempt in range(OPENAI_MAX_RETRIES):
+        try:
+            response = await openai_client.chat.completions.create(
+                model="gpt-5-nano",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": f"""You are analyzing job postings based on custom filtering criteria.
+
+{CUSTOM_FILTER_PROMPT}
+
+Respond 'YES' to filter out (reject) the job if it does NOT match the criteria above.
+Respond 'NO' to keep the job if it DOES match the criteria above.
+
+IMPORTANT: Only respond 'YES' if you are absolutely certain the job should be filtered out.
+If unclear or insufficient information, respond 'NO' to avoid false positives.
+Do not respond with anything other than 'YES' or 'NO'.""",
+                    },
+                    {
+                        "role": "user",
+                        "content": f"Job Title: {job_title}\nCompany: {company}\n\nJob Content: {content}",
+                    },
+                ],
+                max_completion_tokens=5000,
+                timeout=OPENAI_TIMEOUT,
+            )
+
+            result = response.choices[0].message.content
+            if result is None or result == "":
+                logger.warning("AI returned null or empty response for custom filter")
+                return False
+
+            result = result.strip().upper()
+
+            if "YES" not in result and "NO" not in result:
+                logger.warning(f"AI returned invalid response for custom filter: '{result}'")
+                return False
+
+            logger.info(f"AI custom filter result: '{result}'")
+
+            should_filter = "YES" in result
+
+            if url:
+                if should_filter:
+                    add_ai_result(url, "rejected", "custom filter criteria not met", "custom")
+                else:
+                    add_ai_result(url, "passed", "custom filter criteria met", "custom")
+
+            return should_filter
+
+        except Exception as exc:
+            exc_str = str(exc).lower()
+            if "timeout" in exc_str or "connection" in exc_str or "network" in exc_str:
+                logger.warning(f"Network error during AI custom filter: {exc}")
+                await asyncio.to_thread(wait_for_network)
+                continue
+            if attempt < OPENAI_MAX_RETRIES - 1:
+                logger.warning(
+                    f"AI custom filter failed (attempt {attempt + 1}/{OPENAI_MAX_RETRIES}): {exc}"
+                )
+                await asyncio.to_thread(backoff.wait)
+            else:
+                logger.warning(
+                    f"AI custom filter failed after {OPENAI_MAX_RETRIES} attempts: {exc}"
+                )
+                if url:
+                    add_ai_result(url, "failed", f"AI custom filter failed: {str(exc)[:100]}", "custom")
+                return False
+
+    if url:
+        add_ai_result(url, "failed", "AI custom filter failed: unknown error", "custom")
+    return False
+
+
 async def preprocess_job_posting(
     job: JobPosting
 ) -> JobPosting:
@@ -638,8 +728,25 @@ async def preprocess_job_posting(
             date_posted=job.date_posted,
             raw_url=job.raw_url,
         )
-    else:
-        logger.debug(f"No issues detected by AI for {job.company} - {job.title}")
+
+    if CUSTOM_FILTER_PROMPT:
+        should_filter_custom = await check_custom_filter(content, job.url, job.title, job.company)
+        if should_filter_custom:
+            logger.info(
+                f"FILTERED: Job blocked by custom filter for {job.company} - {job.title} ({job.url})"
+            )
+            return JobPosting(
+                company=job.company,
+                locations=job.locations,
+                title=job.title,
+                url=job.url,
+                terms=job.terms,
+                active=False,
+                date_posted=job.date_posted,
+                raw_url=job.raw_url,
+            )
+
+    logger.debug(f"No issues detected by AI for {job.company} - {job.title}")
 
     return job
 
