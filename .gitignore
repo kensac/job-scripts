@@ -215,3 +215,11 @@ service_account_credentials.json
 
 # Backup files
 *.bak.*
+# Job-apply local files (PII / progress)
+profile.json
+applied_actalent.txt
+
+# SQLite database
+*.db
+*.db-wal
+*.db-shm

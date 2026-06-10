@@ -1,0 +1,13 @@
+services:
+  job-tracker:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    env_file:
+      - ../.env
+    environment:
+      - GOOGLE_APPLICATION_CREDENTIALS_CUSTOM=/app/config/credentials.json
+    volumes:
+      - ../config/credentials.json:/app/config/credentials.json:ro
+      - ../data/ai_results.json:/app/data/ai_results.json
+    command: python -m trackers.run_tracker ${CONFIG:-all}

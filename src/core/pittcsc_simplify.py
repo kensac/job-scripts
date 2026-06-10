@@ -2,15 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import datetime
-import json
 import logging
 import os
 import random
 import sys
 import time
-from dataclasses import dataclass
-from pathlib import Path
-from typing import Dict, List, Literal, Optional, Set, TypedDict
+from dataclasses import dataclass, replace
+from typing import Any, Dict, List, Literal, Optional, Set, TypedDict
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 import socket
@@ -21,14 +19,30 @@ import requests
 import wakepy
 from gspread.utils import ValueInputOption
 from gspread.worksheet import Worksheet
-from filelock import FileLock
 from oauth2client.service_account import ServiceAccountCredentials  # type: ignore
 from openai import AsyncOpenAI
+from openai.lib._pydantic import to_strict_json_schema
 from pydantic import BaseModel, Field
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
+
+from core.batch import BatchSpec, batch_enabled, run_responses_batch
+from core.filters import compute_prompt_hash, get_filter_prompt, list_filter_names
+from core.store import (
+    add_ai_result,
+    get_ai_result,
+    get_all_custom_filter_jobs,
+    get_all_failed_jobs,
+    get_content,
+    get_custom_result,
+    get_latest,
+    is_prelim_rejected,
+    is_url_failed,
+    is_url_passed,
+    is_url_rejected,
+)
 
 
 dotenv.load_dotenv()
@@ -92,22 +106,22 @@ INCLUDED_TERMS: Set[str] = {
 }
 
 # Date Configuration
-FALLBACK_CUTOFF_DATE: str = "2025-03-01"
+# FALLBACK_CUTOFF_DATE: str = "2025-03-01"
+FALLBACK_CUTOFF_DATE = '2026-05-01'
 FALLBACK_CUTOFF_TS: int = int(
     datetime.datetime.fromisoformat(FALLBACK_CUTOFF_DATE).timestamp()
 )
-
-# File Configuration
-AI_RESULTS_FILE: str = "ai_results.json"
 
 # Content Extraction Configuration
 BROWSER_PAGE_LOAD_TIMEOUT: float = 15.0
 BROWSER_ELEMENT_WAIT_TIMEOUT: float = 10.0
 BROWSER_CONTENT_WAIT: float = 7.5
 MIN_CONTENT_LENGTH: int = 0
+OPENAI_MODEL: str = "gpt-5-nano"
 OPENAI_TIMEOUT: float = 120.0
 OPENAI_MAX_RETRIES: int = 3
 OPENAI_MAX_COMPLETION_TOKENS: int = 2500
+OPENAI_REASONING_EFFORT: str = "low"
 NETWORK_CHECK_TIMEOUT: float = 5.0
 NETWORK_RETRY_DELAY: float = 10.0
 
@@ -237,96 +251,33 @@ def normalize_url(url: str) -> str:
     return normalized
 
 
-def load_ai_results() -> Dict[str, Dict[str, str]]:
-    results_file = Path(AI_RESULTS_FILE)
-    if not results_file.exists():
+def _usage_to_kwargs(response) -> Dict[str, Any]:
+    usage = getattr(response, "usage", None)
+    if not usage:
         return {}
+    input_details = getattr(usage, "input_tokens_details", None)
+    output_details = getattr(usage, "output_tokens_details", None)
+    return {
+        "prompt_tokens": getattr(usage, "input_tokens", None),
+        "completion_tokens": getattr(usage, "output_tokens", None),
+        "total_tokens": getattr(usage, "total_tokens", None),
+        "cached_tokens": getattr(input_details, "cached_tokens", None),
+        "reasoning_tokens": getattr(output_details, "reasoning_tokens", None),
+    }
 
-    try:
-        with open(results_file, "r") as f:
-            data = json.load(f)
-            return data.get("ai_results", {})
-    except (json.JSONDecodeError, KeyError, Exception) as exc:
-        logger.warning(f"Failed to load AI results from {AI_RESULTS_FILE}: {exc}")
+
+def _usage_dict_to_kwargs(usage: Optional[dict]) -> Dict[str, Any]:
+    if not usage:
         return {}
-
-
-def save_ai_results(ai_results: Dict[str, Dict[str, str]]) -> None:
-    try:
-        with open(AI_RESULTS_FILE, "w") as f:
-            json.dump({"ai_results": ai_results}, f, indent=2)
-    except Exception as exc:
-        logger.warning(f"Failed to save AI results to {AI_RESULTS_FILE}: {exc}")
-
-
-def add_ai_result(
-    url: str,
-    status: str,
-    reason: str = "",
-    check_type: str = "",
-    prompt_tokens: Optional[int] = None,
-    completion_tokens: Optional[int] = None,
-    total_tokens: Optional[int] = None
-) -> None:
-    lock_path = f"{AI_RESULTS_FILE}.lock"
-    lock = FileLock(lock_path)
-
-    with lock:
-        ai_results = load_ai_results()
-        result_data = {
-            "status": status,
-            "reason": reason,
-            "check_type": check_type,
-            "timestamp": datetime.datetime.now().isoformat()
-        }
-
-        if prompt_tokens is not None:
-            result_data["prompt_tokens"] = prompt_tokens
-        if completion_tokens is not None:
-            result_data["completion_tokens"] = completion_tokens
-        if total_tokens is not None:
-            result_data["total_tokens"] = total_tokens
-
-        ai_results[url] = result_data
-        save_ai_results(ai_results)
-
-
-def get_ai_result(url: str) -> Optional[Dict[str, str]]:
-    ai_results = load_ai_results()
-    return ai_results.get(url)
-
-
-def is_url_rejected(url: str) -> bool:
-    result = get_ai_result(url)
-    return result is not None and result.get("status") == "rejected"
-
-
-def is_url_passed(url: str) -> bool:
-    result = get_ai_result(url)
-    return result is not None and result.get("status") == "passed"
-
-
-def is_url_failed(url: str) -> bool:
-    result = get_ai_result(url)
-    return result is not None and result.get("status") == "failed"
-
-
-def get_all_failed_jobs() -> List[Dict[str, str]]:
-    ai_results = load_ai_results()
-    failed_jobs = []
-    for url, result in ai_results.items():
-        if result.get("status") == "failed":
-            failed_jobs.append({"url": url, **result})
-    return failed_jobs
-
-
-def get_all_custom_filter_jobs() -> List[Dict[str, str]]:
-    ai_results = load_ai_results()
-    custom_jobs = []
-    for url, result in ai_results.items():
-        if result.get("check_type") == "custom":
-            custom_jobs.append({"url": url, **result})
-    return custom_jobs
+    input_details = usage.get("input_tokens_details") or {}
+    output_details = usage.get("output_tokens_details") or {}
+    return {
+        "prompt_tokens": usage.get("input_tokens"),
+        "completion_tokens": usage.get("output_tokens"),
+        "total_tokens": usage.get("total_tokens"),
+        "cached_tokens": input_details.get("cached_tokens"),
+        "reasoning_tokens": output_details.get("reasoning_tokens"),
+    }
 
 
 class JobClosedResponse(BaseModel):
@@ -406,119 +357,114 @@ def extract_url_content(url: str) -> Optional[str]:
                 pass
 
 
-async def check_if_job_closed(content: str, url: str = "") -> bool:
+CLOSED_INSTRUCTIONS = """Decide if a job posting is closed or still accepting applications.
+
+Set is_closed=true ONLY on explicit signals: "no longer available/accepting applications", "position filled", "posting expired", "deadline passed", "no longer open", "404"/"page not found", or an error page shown instead of job details.
+Otherwise is_closed=false. If job details are present or it is ambiguous, default to false (avoid false positives).
+
+reason: <=15 words; quote the exact closed phrase when found. Be decisive, no hedging."""
+
+CLEARANCE_INSTRUCTIONS = """Flag job postings that disqualify international candidates via explicit restrictions.
+
+Set requires_clearance_or_restrictions=true ONLY for explicit restrictions, and set restriction_type:
+- security_clearance: required clearance or citizenship ("US citizen required", "US Person", "Secret/Top Secret/TS-SCI/Public Trust").
+- visa_sponsorship: "will not / does not sponsor", "no H1B sponsorship", "must be authorized to work without sponsorship".
+- f1_restriction: "F1 not eligible/accepted/considered".
+
+Do NOT flag: preferences ("clearance preferred"), sponsorship offered, application questions ("will you require sponsorship?"), or absent mentions. When in doubt, set false (prefer false negatives). If several apply, pick the most restrictive type.
+
+reason: <=20 words, quote the phrase."""
+
+def build_custom_instructions(prompt: str) -> str:
+    if not prompt:
+        return ""
+    return f"""Evaluate a job against the user criteria below and decide whether to filter it out.
+
+<user_criteria>
+{prompt}
+</user_criteria>
+
+should_filter=true only if the job clearly violates the criteria; false if it matches or is ambiguous (prefer false negatives, do not lose good roles).
+
+reason: <=25 words citing the deciding factor (company/role/skills)."""
+
+
+CUSTOM_INSTRUCTIONS = build_custom_instructions(CUSTOM_FILTER_PROMPT)
+
+# The custom filter the current run applies. Defaults to the .env prompt;
+# --apply-filter swaps it so the whole pipeline (new + cached jobs) uses it.
+ACTIVE_FILTER_NAME = "default"
+ACTIVE_CUSTOM_INSTRUCTIONS = CUSTOM_INSTRUCTIONS
+
+
+def set_active_filter(name: str) -> bool:
+    global ACTIVE_FILTER_NAME, ACTIVE_CUSTOM_INSTRUCTIONS
+    prompt = get_filter_prompt(name)
+    if not prompt:
+        return False
+    ACTIVE_FILTER_NAME = name
+    ACTIVE_CUSTOM_INSTRUCTIONS = build_custom_instructions(prompt)
+    return True
+
+
+def _build_custom_input(content: str, job_title: str, company: str) -> str:
+    return f"Company: {company}\nJob Title: {job_title}\n\nJob Content:\n{content}"
+
+
+async def check_if_job_closed(
+    content: str, url: str = "", job_title: str = "", company: str = ""
+) -> bool:
     if not content or not openai_client:
         return False
 
     if url:
-        cached_result = get_ai_result(url)
-        if cached_result and cached_result.get("check_type") == "closed":
+        cached_result = get_latest(url, "closed")
+        if cached_result:
             logger.info(f"Using cached closed status for {url}")
             return cached_result["status"] == "rejected"
+
+    instructions = CLOSED_INSTRUCTIONS
 
     backoff = ExponentialBackoff(base_delay=2.0, max_delay=30.0)
 
     for attempt in range(OPENAI_MAX_RETRIES):
         try:
-            response = await openai_client.beta.chat.completions.parse(
-                model="gpt-5-nano",
-                messages=[
-                    {
-                        "role": "system",
-                        "content": """You are analyzing job posting content to determine availability status. Be thorough and persistent in your analysis.
-
-<objective>
-Determine if the job posting is closed/unavailable or still accepting applications.
-</objective>
-
-<explicit_closed_indicators>
-Mark is_closed=true ONLY when you find explicit language such as:
-- "Job posting no longer available"
-- "This job is closed"
-- "Position has been filled"
-- "No longer accepting applications"
-- "This posting has expired"
-- "Application deadline has passed"
-- "Position is no longer open"
-- "The page you are looking for doesn't exist"
-- "404" or "Page not found" errors
-- Page shows error messages instead of job details
-</explicit_closed_indicators>
-
-<verification_process>
-1. Thoroughly scan the ENTIRE content for closed indicators
-2. Check both explicit statements and error messages
-3. Verify there is actual job content (description, requirements, etc.)
-4. If you find a closed indicator, quote it exactly in the reason field
-</verification_process>
-
-<decision_framework>
-- If explicit closed indicator found → is_closed=true with specific phrase quoted
-- If job details present and no closed indicators → is_closed=false
-- If ambiguous or unclear → Default to is_closed=false to avoid false positives
-</decision_framework>
-
-<examples>
-Example 1 - Explicitly closed:
-Content: "This position has been filled. Thank you for your interest."
-Response: {"is_closed": true, "reason": "Position has been filled"}
-
-Example 2 - Error page (closed):
-Content: "404 - The page you are looking for doesn't exist."
-Response: {"is_closed": true, "reason": "404 - page doesn't exist"}
-
-Example 3 - Active job:
-Content: "We're seeking a Software Engineer to join our team. Apply now! Requirements: 3+ years..."
-Response: {"is_closed": false, "reason": "Active job posting"}
-
-Example 4 - Ambiguous (default to open):
-Content: "Senior Developer role at TechCorp [minimal content]"
-Response: {"is_closed": false, "reason": null}
-</examples>
-
-<output_guidelines>
-- Keep reason field concise (≤15 words)
-- Quote the exact closed indicator phrase if found
-- Be decisive: don't hedge with "might be" or "seems like"
-</output_guidelines>""",
-                    },
-                    {
-                        "role": "user",
-                        "content": f"Analyze this job posting thoroughly:\n\n{content}",
-                    },
-                ],
-                response_format=JobClosedResponse,
-                max_completion_tokens=OPENAI_MAX_COMPLETION_TOKENS,
+            start = time.monotonic()
+            response = await openai_client.responses.parse(
+                model=OPENAI_MODEL,
+                instructions=instructions,
+                input=content,
+                text_format=JobClosedResponse,
+                reasoning={"effort": OPENAI_REASONING_EFFORT},
+                max_output_tokens=OPENAI_MAX_COMPLETION_TOKENS,
+                store=False,
                 timeout=OPENAI_TIMEOUT,
             )
+            duration_ms = int((time.monotonic() - start) * 1000)
 
-            if response.choices[0].message.refusal:
-                logger.warning(f"AI refused closed check: {response.choices[0].message.refusal}")
-                return False
-
-            parsed = response.choices[0].message.parsed
+            parsed = response.output_parsed
             if not parsed:
                 logger.warning("AI returned no parsed response for closed check")
                 return False
 
             logger.info(f"AI closed check: is_closed={parsed.is_closed}, reason={parsed.reason}")
 
-            usage = response.usage
             if url:
+                record: Dict[str, Any] = dict(
+                    model=OPENAI_MODEL,
+                    reasoning_effort=OPENAI_REASONING_EFFORT,
+                    company=company,
+                    job_title=job_title,
+                    instructions=instructions,
+                    input_content=content,
+                    parsed_json=parsed.model_dump_json(),
+                    duration_ms=duration_ms,
+                    **_usage_to_kwargs(response),
+                )
                 if parsed.is_closed:
-                    add_ai_result(
-                        url, "rejected", parsed.reason or "job closed", "closed",
-                        prompt_tokens=usage.prompt_tokens if usage else None,
-                        completion_tokens=usage.completion_tokens if usage else None,
-                        total_tokens=usage.total_tokens if usage else None
-                    )
+                    add_ai_result(url, "rejected", parsed.reason or "job closed", "closed", **record)
                 else:
-                    add_ai_result(
-                        url, "passed", parsed.reason or "job open", "closed",
-                        prompt_tokens=usage.prompt_tokens if usage else None,
-                        completion_tokens=usage.completion_tokens if usage else None,
-                        total_tokens=usage.total_tokens if usage else None
-                    )
+                    add_ai_result(url, "passed", parsed.reason or "job open", "closed", **record)
 
             return parsed.is_closed
 
@@ -538,132 +484,56 @@ Response: {"is_closed": false, "reason": null}
                     f"AI closed check failed after {OPENAI_MAX_RETRIES} attempts: {exc}"
                 )
                 if url:
-                    add_ai_result(url, "failed", f"AI check failed: {str(exc)[:100]}", "closed")
+                    add_ai_result(
+                        url, "failed", f"AI check failed: {str(exc)[:100]}", "closed",
+                        model=OPENAI_MODEL, reasoning_effort=OPENAI_REASONING_EFFORT,
+                        company=company, job_title=job_title,
+                        instructions=instructions, input_content=content, error=str(exc),
+                    )
                 return False
 
     if url:
-        add_ai_result(url, "failed", "AI check failed: unknown error", "closed")
+        add_ai_result(
+            url, "failed", "AI check failed: unknown error", "closed",
+            model=OPENAI_MODEL, reasoning_effort=OPENAI_REASONING_EFFORT,
+            company=company, job_title=job_title,
+            instructions=instructions, input_content=content,
+        )
     return False
 
 
-async def check_security_clearance_requirement(content: str, url: str = "") -> bool:
+async def check_security_clearance_requirement(
+    content: str, url: str = "", job_title: str = "", company: str = ""
+) -> bool:
     if not content or not openai_client:
         return False
 
     if url:
-        cached_result = get_ai_result(url)
-        if cached_result and cached_result.get("check_type") == "clearance":
+        cached_result = get_latest(url, "clearance")
+        if cached_result:
             logger.info(f"Using cached clearance result for {url}: {cached_result['status']}")
             return cached_result["status"] == "rejected"
+
+    instructions = CLEARANCE_INSTRUCTIONS
 
     backoff = ExponentialBackoff(base_delay=2.0, max_delay=30.0)
 
     for attempt in range(OPENAI_MAX_RETRIES):
         try:
-            response = await openai_client.beta.chat.completions.parse(
-                model="gpt-5-nano",
-                messages=[
-                    {
-                        "role": "system",
-                        "content": """You are analyzing job postings to identify restrictions that disqualify international candidates. Be thorough and scan the entire content.
-
-<objective>
-Detect explicit restrictions: security clearance, citizenship requirements, visa sponsorship limitations, or F1 visa restrictions.
-</objective>
-
-<restriction_categories>
-SECURITY/CITIZENSHIP:
-- "Security Clearance required" or "must obtain clearance"
-- "U.S. citizenship required" or "must be a U.S. citizen"
-- "U.S. Person" (export control definition)
-- "Secret", "Top Secret", "TS/SCI", "Public Trust" clearances
-
-VISA SPONSORSHIP:
-- "Will not sponsor" or "does not sponsor" (work authorization/visas)
-- "No visa sponsorship" or "sponsorship not available"
-- "Will not provide sponsorship" or "cannot sponsor"
-- "No H1B sponsorship" or "does not sponsor H1B"
-- "Must be authorized to work without sponsorship"
-- "Authorized to work without company sponsorship"
-- "No current or future sponsorship"
-- Variations: "we do not sponsor", "company does not sponsor", "employer will not sponsor"
-
-F1 VISA:
-- "F1 visa not eligible" or "F1 students not eligible"
-- "No F1 visa" or "F1 not accepted"
-- "F1 visa holders not considered"
-- "Not open to F1 students"
-</restriction_categories>
-
-<verification_process>
-1. Thoroughly scan ENTIRE job content for restriction language
-2. Check qualifications, requirements, and legal sections carefully
-3. Distinguish between:
-   - EXPLICIT restrictions ("will not sponsor") → Flag as restriction
-   - Preference statements ("preference for clearance") → Do NOT flag
-   - Silent/absent mentions → Do NOT flag
-4. If restriction found, identify the specific type and quote the phrase
-</verification_process>
-
-<decision_framework>
-- Explicit restriction found → requires_clearance_or_restrictions=true, categorize type, quote phrase
-- Preference or "nice to have" → requires_clearance_or_restrictions=false
-- Not mentioned or unclear → requires_clearance_or_restrictions=false (avoid false positives)
-- Multiple restrictions → pick the most restrictive type
-</decision_framework>
-
-<examples>
-Example 1 - Clear sponsorship restriction:
-Content: "...candidates must be authorized to work in the US without sponsorship..."
-Response: {"requires_clearance_or_restrictions": true, "restriction_type": "visa_sponsorship", "reason": "No sponsorship provided"}
-
-Example 2 - Security clearance:
-Content: "...must obtain Secret clearance within 6 months of hire..."
-Response: {"requires_clearance_or_restrictions": true, "restriction_type": "security_clearance", "reason": "Secret clearance required"}
-
-Example 3 - F1 restriction:
-Content: "...this position is not open to F1 visa holders..."
-Response: {"requires_clearance_or_restrictions": true, "restriction_type": "f1_restriction", "reason": "F1 visa not eligible"}
-
-Example 4 - No restrictions (sponsorship available):
-Content: "...we sponsor H1B visas for qualified candidates..."
-Response: {"requires_clearance_or_restrictions": false, "restriction_type": null, "reason": "Visa sponsorship available"}
-
-Example 5 - Preference only (not a restriction):
-Content: "...clearance eligible candidates preferred..."
-Response: {"requires_clearance_or_restrictions": false, "restriction_type": null, "reason": "Preference only, not required"}
-
-Example 6 - Not mentioned:
-Content: "We're hiring a Software Engineer. Requirements: 3+ years Python..."
-Response: {"requires_clearance_or_restrictions": false, "restriction_type": null, "reason": null}
-
-Example 7 - Question only (no restriction):
-Content: ""\"Will you now or will you in the future require employment visa sponsorship?\"","
-Response: {"requires_clearance_or_restrictions": false, "restriction_type": null, "reason": "Question only, no restriction"}
-</examples>
-
-<output_guidelines>
-- Be decisive: don't use hedging language like "may require" or "possibly"
-- Quote the specific restriction phrase in reason field (≤20 words)
-- If no restriction, reason can be null or brief explanation
-- Prefer false negatives over false positives: when in doubt, do NOT flag
-</output_guidelines>""",
-                    },
-                    {
-                        "role": "user",
-                        "content": f"Analyze this job posting for restrictions:\n\n{content}",
-                    },
-                ],
-                response_format=ClearanceRequirementResponse,
-                max_completion_tokens=OPENAI_MAX_COMPLETION_TOKENS,
+            start = time.monotonic()
+            response = await openai_client.responses.parse(
+                model=OPENAI_MODEL,
+                instructions=instructions,
+                input=content,
+                text_format=ClearanceRequirementResponse,
+                reasoning={"effort": OPENAI_REASONING_EFFORT},
+                max_output_tokens=OPENAI_MAX_COMPLETION_TOKENS,
+                store=False,
                 timeout=OPENAI_TIMEOUT,
             )
+            duration_ms = int((time.monotonic() - start) * 1000)
 
-            if response.choices[0].message.refusal:
-                logger.warning(f"AI refused clearance check: {response.choices[0].message.refusal}")
-                return False
-
-            parsed = response.choices[0].message.parsed
+            parsed = response.output_parsed
             if not parsed:
                 logger.warning("AI returned no parsed response for clearance check")
                 return False
@@ -673,23 +543,29 @@ Response: {"requires_clearance_or_restrictions": false, "restriction_type": null
                 f"type={parsed.restriction_type}, reason={parsed.reason}"
             )
 
-            usage = response.usage
             if url:
+                record: Dict[str, Any] = dict(
+                    model=OPENAI_MODEL,
+                    reasoning_effort=OPENAI_REASONING_EFFORT,
+                    company=company,
+                    job_title=job_title,
+                    instructions=instructions,
+                    input_content=content,
+                    parsed_json=parsed.model_dump_json(),
+                    duration_ms=duration_ms,
+                    **_usage_to_kwargs(response),
+                )
                 if parsed.requires_clearance_or_restrictions:
                     add_ai_result(
                         url, "rejected",
                         parsed.reason or f"{parsed.restriction_type} restriction",
                         "clearance",
-                        prompt_tokens=usage.prompt_tokens if usage else None,
-                        completion_tokens=usage.completion_tokens if usage else None,
-                        total_tokens=usage.total_tokens if usage else None
+                        **record,
                     )
                 else:
                     add_ai_result(
                         url, "passed", parsed.reason or "no restrictions", "clearance",
-                        prompt_tokens=usage.prompt_tokens if usage else None,
-                        completion_tokens=usage.completion_tokens if usage else None,
-                        total_tokens=usage.total_tokens if usage else None
+                        **record,
                     )
 
             return parsed.requires_clearance_or_restrictions
@@ -710,94 +586,65 @@ Response: {"requires_clearance_or_restrictions": false, "restriction_type": null
                     f"AI security clearance check failed after {OPENAI_MAX_RETRIES} attempts: {exc}"
                 )
                 if url:
-                    add_ai_result(url, "failed", f"AI check failed: {str(exc)[:100]}", "clearance")
+                    add_ai_result(
+                        url, "failed", f"AI check failed: {str(exc)[:100]}", "clearance",
+                        model=OPENAI_MODEL, reasoning_effort=OPENAI_REASONING_EFFORT,
+                        company=company, job_title=job_title,
+                        instructions=instructions, input_content=content, error=str(exc),
+                    )
                 return False
 
     if url:
-        add_ai_result(url, "failed", "AI check failed: unknown error", "clearance")
+        add_ai_result(
+            url, "failed", "AI check failed: unknown error", "clearance",
+            model=OPENAI_MODEL, reasoning_effort=OPENAI_REASONING_EFFORT,
+            company=company, job_title=job_title,
+            instructions=instructions, input_content=content,
+        )
     return False
 
 
-async def check_custom_filter(content: str, url: str = "", job_title: str = "", company: str = "") -> bool:
-    if not content or not openai_client or not CUSTOM_FILTER_PROMPT:
+async def check_custom_filter(
+    content: str,
+    url: str = "",
+    job_title: str = "",
+    company: str = "",
+    instructions: Optional[str] = None,
+    filter_name: Optional[str] = None,
+) -> bool:
+    instructions = instructions if instructions is not None else ACTIVE_CUSTOM_INSTRUCTIONS
+    filter_name = filter_name if filter_name is not None else ACTIVE_FILTER_NAME
+    if not content or not openai_client or not instructions:
         return False
 
+    phash = compute_prompt_hash(instructions)
+
     if url:
-        cached_result = get_ai_result(url)
-        if cached_result and cached_result.get("check_type") == "custom":
+        cached_result = get_custom_result(url, phash)
+        if cached_result:
             logger.info(f"Using cached custom filter result for {url}: {cached_result['status']}")
             return cached_result["status"] == "rejected"
+
+    input_text = _build_custom_input(content, job_title, company)
 
     backoff = ExponentialBackoff(base_delay=2.0, max_delay=30.0)
 
     for attempt in range(OPENAI_MAX_RETRIES):
         try:
-            response = await openai_client.beta.chat.completions.parse(
-                model="gpt-5-nano",
-                messages=[
-                    {
-                        "role": "system",
-                        "content": f"""You are analyzing job postings against custom filtering criteria. Be thorough and evaluate the complete job description.
-
-<objective>
-Determine if the job should be filtered out (rejected) or kept based on the user-defined criteria below.
-</objective>
-
-<user_criteria>
-{CUSTOM_FILTER_PROMPT}
-</user_criteria>
-
-<verification_process>
-1. Thoroughly read the ENTIRE job content, including company, title, description, requirements, and responsibilities
-2. Evaluate against ALL criteria specified in user_criteria
-3. Look for both explicit matches and strong implicit indicators
-4. When the criteria mention specific companies, verify the exact company name
-5. When the criteria mention specific roles, check both title and job description for alignment
-6. When the criteria mention technical requirements, scan for those technologies/skills
-</verification_process>
-
-<decision_framework>
-- KEEP (should_filter=false) if:
-  * Job clearly matches the criteria (right company, right role type, right skills)
-  * Multiple criteria are satisfied even if not all are met
-  * Ambiguous but leans toward matching
-- FILTER OUT (should_filter=true) if:
-  * Job clearly does NOT match the criteria (wrong company tier, wrong role focus)
-  * Explicitly excluded in the criteria
-  * Definitely misaligned with stated preferences
-- When uncertain: Default to should_filter=false to avoid losing potentially good opportunities
-</decision_framework>
-
-<output_guidelines>
-- Provide a clear, concise reason (≤25 words) explaining your decision
-- Reference specific aspects: company tier, role type, or technical match
-- Be decisive: avoid hedging phrases like "might be" or "possibly"
-- If keeping, highlight what matched; if filtering, explain what disqualified it
-</output_guidelines>
-
-IMPORTANT: Prefer false negatives over false positives. When in doubt about whether a job matches the criteria, keep it (should_filter=false).""",
-                    },
-                    {
-                        "role": "user",
-                        "content": f"""Evaluate this job against the criteria:
-
-Company: {company}
-Job Title: {job_title}
-
-Job Content:
-{content}""",
-                    },
-                ],
-                response_format=CustomFilterResponse,
-                max_completion_tokens=OPENAI_MAX_COMPLETION_TOKENS,
+            start = time.monotonic()
+            response = await openai_client.responses.parse(
+                model=OPENAI_MODEL,
+                instructions=instructions,
+                input=input_text,
+                text_format=CustomFilterResponse,
+                reasoning={"effort": OPENAI_REASONING_EFFORT},
+                max_output_tokens=OPENAI_MAX_COMPLETION_TOKENS,
+                store=False,
                 timeout=OPENAI_TIMEOUT,
             )
+            duration_ms = int((time.monotonic() - start) * 1000)
 
-            if response.choices[0].message.refusal:
-                logger.warning(f"AI refused custom filter: {response.choices[0].message.refusal}")
-                return False
-
-            parsed = response.choices[0].message.parsed
+            parsed = response.output_parsed
             if not parsed:
                 logger.warning("AI returned no parsed response for custom filter")
                 return False
@@ -806,22 +653,24 @@ Job Content:
                 f"AI custom filter: should_filter={parsed.should_filter}, reason={parsed.reason}"
             )
 
-            usage = response.usage
             if url:
+                record: Dict[str, Any] = dict(
+                    model=OPENAI_MODEL,
+                    reasoning_effort=OPENAI_REASONING_EFFORT,
+                    filter_name=filter_name,
+                    prompt_hash=phash,
+                    company=company,
+                    job_title=job_title,
+                    instructions=instructions,
+                    input_content=input_text,
+                    parsed_json=parsed.model_dump_json(),
+                    duration_ms=duration_ms,
+                    **_usage_to_kwargs(response),
+                )
                 if parsed.should_filter:
-                    add_ai_result(
-                        url, "rejected", parsed.reason or "custom filter criteria not met", "custom",
-                        prompt_tokens=usage.prompt_tokens if usage else None,
-                        completion_tokens=usage.completion_tokens if usage else None,
-                        total_tokens=usage.total_tokens if usage else None
-                    )
+                    add_ai_result(url, "rejected", parsed.reason or "custom filter criteria not met", "custom", **record)
                 else:
-                    add_ai_result(
-                        url, "passed", parsed.reason or "custom filter criteria met", "custom",
-                        prompt_tokens=usage.prompt_tokens if usage else None,
-                        completion_tokens=usage.completion_tokens if usage else None,
-                        total_tokens=usage.total_tokens if usage else None
-                    )
+                    add_ai_result(url, "passed", parsed.reason or "custom filter criteria met", "custom", **record)
 
             return parsed.should_filter
 
@@ -841,11 +690,23 @@ Job Content:
                     f"AI custom filter failed after {OPENAI_MAX_RETRIES} attempts: {exc}"
                 )
                 if url:
-                    add_ai_result(url, "failed", f"AI custom filter failed: {str(exc)[:100]}", "custom")
+                    add_ai_result(
+                        url, "failed", f"AI custom filter failed: {str(exc)[:100]}", "custom",
+                        model=OPENAI_MODEL, reasoning_effort=OPENAI_REASONING_EFFORT,
+                        filter_name=filter_name, prompt_hash=phash,
+                        company=company, job_title=job_title,
+                        instructions=instructions, input_content=input_text, error=str(exc),
+                    )
                 return False
 
     if url:
-        add_ai_result(url, "failed", "AI custom filter failed: unknown error", "custom")
+        add_ai_result(
+            url, "failed", "AI custom filter failed: unknown error", "custom",
+            model=OPENAI_MODEL, reasoning_effort=OPENAI_REASONING_EFFORT,
+            filter_name=filter_name, prompt_hash=phash,
+            company=company, job_title=job_title,
+            instructions=instructions, input_content=input_text,
+        )
     return False
 
 
@@ -859,28 +720,15 @@ async def preprocess_job_posting(
         logger.debug("No OpenAI API key found - skipping AI preprocessing")
         return job
 
-    if is_url_rejected(job.url):
+    if is_prelim_rejected(job.url):
         logger.info(
-            f"FILTERED: Job already rejected by AI (cached) for {job.company} - {job.title}"
+            f"FILTERED: Job already rejected by closed/clearance (cached) for {job.company} - {job.title}"
         )
-        return JobPosting(
-            company=job.company,
-            locations=job.locations,
-            title=job.title,
-            url=job.url,
-            terms=job.terms,
-            active=False,
-            date_posted=job.date_posted,
-            raw_url=job.raw_url,
-        )
+        return replace(job, active=False)
 
-    if is_url_passed(job.url):
-        logger.info(
-            f"Job already passed AI check (cached) for {job.company} - {job.title}"
-        )
-        return job
-
-    content = await asyncio.to_thread(extract_url_content, job.url)
+    content = await asyncio.to_thread(get_content, job.url)
+    if not content:
+        content = await asyncio.to_thread(extract_url_content, job.url)
     if not content:
         logger.debug(f"Could not extract content from {job.url} - keeping job active")
         add_ai_result(job.url, "failed", "failed to extract content", "extraction")
@@ -891,7 +739,7 @@ async def preprocess_job_posting(
         add_ai_result(job.url, "failed", f"insufficient content (only {len(content)} chars)", "extraction")
         return job
 
-    is_closed = await check_if_job_closed(content, job.url)
+    is_closed = await check_if_job_closed(content, job.url, job.title, job.company)
     if is_closed:
         logger.info(
             f"FILTERED: Job is closed for {job.company} - {job.title} ({job.url})"
@@ -907,7 +755,9 @@ async def preprocess_job_posting(
             raw_url=job.raw_url,
         )
 
-    requires_clearance = await check_security_clearance_requirement(content, job.url)
+    requires_clearance = await check_security_clearance_requirement(
+        content, job.url, job.title, job.company
+    )
 
     if requires_clearance:
         logger.info(
@@ -924,7 +774,7 @@ async def preprocess_job_posting(
             raw_url=job.raw_url,
         )
 
-    if CUSTOM_FILTER_PROMPT:
+    if ACTIVE_CUSTOM_INSTRUCTIONS:
         should_filter_custom = await check_custom_filter(content, job.url, job.title, job.company)
         if should_filter_custom:
             logger.info(
@@ -1020,7 +870,7 @@ async def retry_all_failed_jobs() -> Dict[str, int]:
     failed_jobs = get_all_failed_jobs()
 
     if not failed_jobs:
-        logger.info("No failed jobs found in ai_results.json")
+        logger.info("No failed jobs found in ai_results.db")
         return {"total": 0, "success": 0, "failed": 0}
 
     logger.info(f"Found {len(failed_jobs)} failed jobs to retry")
@@ -1051,7 +901,7 @@ async def reevaluate_all_custom_filtered_jobs(sheet_id: str, job_listings_url: s
     custom_jobs = get_all_custom_filter_jobs()
 
     if not custom_jobs:
-        logger.info("No custom filter jobs found in ai_results.json")
+        logger.info("No custom filter jobs found in ai_results.db")
         return {"total": 0, "reevaluated": 0, "now_passed": 0, "added_to_sheet": 0}
 
     if not CUSTOM_FILTER_PROMPT:
@@ -1244,6 +1094,146 @@ def get_existing_urls(sheet: Worksheet) -> Set[str]:
     return {row[5] for row in rows if len(row) > 5}  # type: ignore
 
 
+async def _extract_contents(jobs: List[JobPosting]) -> Dict[str, Optional[str]]:
+    semaphore = asyncio.Semaphore(MAX_CONCURRENT_JOBS)
+
+    async def _one(job: JobPosting):
+        async with semaphore:
+            cached = await asyncio.to_thread(get_content, job.url)
+            if cached:
+                return job.url, cached
+            await asyncio.to_thread(wait_for_network)
+            return job.url, await asyncio.to_thread(extract_url_content, job.url)
+
+    contents: Dict[str, Optional[str]] = {}
+    for url, content in await asyncio.gather(*[_one(job) for job in jobs]):
+        contents[url] = content
+    return contents
+
+
+async def _run_batch_stage(
+    jobs: List[JobPosting],
+    active: Dict[str, bool],
+    contents: Dict[str, Optional[str]],
+    check_type: str,
+    model_cls,
+    instructions_for,
+    input_for,
+    reject_of,
+    reason_of,
+) -> None:
+    specs: List[BatchSpec] = []
+    ctx: Dict[str, tuple] = {}
+    for job in jobs:
+        if not active.get(job.url):
+            continue
+        content = contents.get(job.url)
+        if not content:
+            continue
+        instructions = instructions_for(job)
+        if check_type == "custom":
+            cached = get_custom_result(job.url, compute_prompt_hash(instructions))
+        else:
+            cached = get_latest(job.url, check_type)
+        if cached:
+            if cached["status"] == "rejected":
+                active[job.url] = False
+            continue
+        input_text = input_for(job, content)
+        specs.append(
+            BatchSpec(job.url, instructions, input_text, model_cls.__name__, to_strict_json_schema(model_cls))
+        )
+        ctx[job.url] = (job, instructions, input_text)
+
+    if not specs:
+        return
+
+    logger.info(f"Batch stage '{check_type}': {len(specs)} jobs to check")
+    results = await run_responses_batch(
+        specs,
+        model=OPENAI_MODEL,
+        reasoning_effort=OPENAI_REASONING_EFFORT,
+        max_output_tokens=OPENAI_MAX_COMPLETION_TOKENS,
+    )
+
+    for url, (job, instructions, input_text) in ctx.items():
+        res = results.get(url)
+        if res is None or res.error or not res.text:
+            err = res.error if res else "no result"
+            logger.warning(f"Batch {check_type} failed for {url}: {err}")
+            add_ai_result(
+                url, "failed", f"batch {check_type} failed: {str(err)[:100]}", check_type,
+                model=OPENAI_MODEL, reasoning_effort=OPENAI_REASONING_EFFORT,
+                instructions=instructions, input_content=input_text, error=str(err),
+            )
+            continue
+        try:
+            parsed = model_cls.model_validate_json(res.text)
+        except Exception as exc:
+            logger.warning(f"Batch {check_type} parse failed for {url}: {exc}")
+            add_ai_result(
+                url, "failed", f"batch {check_type} parse failed: {str(exc)[:100]}", check_type,
+                model=OPENAI_MODEL, reasoning_effort=OPENAI_REASONING_EFFORT,
+                instructions=instructions, input_content=input_text, error=str(exc),
+            )
+            continue
+        rejected = reject_of(parsed)
+        extra = (
+            {"filter_name": ACTIVE_FILTER_NAME, "prompt_hash": compute_prompt_hash(instructions)}
+            if check_type == "custom"
+            else {}
+        )
+        add_ai_result(
+            url, "rejected" if rejected else "passed", reason_of(parsed), check_type,
+            model=OPENAI_MODEL, reasoning_effort=OPENAI_REASONING_EFFORT,
+            company=job.company, job_title=job.title,
+            instructions=instructions, input_content=input_text,
+            parsed_json=parsed.model_dump_json(), **extra, **_usage_dict_to_kwargs(res.usage),
+        )
+        if rejected:
+            logger.info(f"FILTERED (batch/{check_type}): {job.company} - {job.title} ({url})")
+            active[url] = False
+
+
+async def _process_jobs_batched(jobs: List[JobPosting]) -> List[JobPosting]:
+    logger.info(f"BATCH MODE: processing {len(jobs)} jobs via OpenAI Batch API")
+    contents = await _extract_contents(jobs)
+
+    active: Dict[str, bool] = {}
+    for job in jobs:
+        if not contents.get(job.url):
+            add_ai_result(job.url, "failed", "failed to extract content", "extraction")
+            logger.debug(f"Could not extract content from {job.url} - keeping job active")
+        active[job.url] = True
+
+    await _run_batch_stage(
+        jobs, active, contents, "closed", JobClosedResponse,
+        lambda job: CLOSED_INSTRUCTIONS,
+        lambda job, content: content,
+        lambda p: p.is_closed,
+        lambda p: p.reason or ("job closed" if p.is_closed else "job open"),
+    )
+    await _run_batch_stage(
+        jobs, active, contents, "clearance", ClearanceRequirementResponse,
+        lambda job: CLEARANCE_INSTRUCTIONS,
+        lambda job, content: content,
+        lambda p: p.requires_clearance_or_restrictions,
+        lambda p: p.reason
+        or (f"{p.restriction_type} restriction" if p.requires_clearance_or_restrictions else "no restrictions"),
+    )
+    if ACTIVE_CUSTOM_INSTRUCTIONS:
+        await _run_batch_stage(
+            jobs, active, contents, "custom", CustomFilterResponse,
+            lambda job: ACTIVE_CUSTOM_INSTRUCTIONS,
+            lambda job, content: _build_custom_input(content, job.title, job.company),
+            lambda p: p.should_filter,
+            lambda p: p.reason
+            or ("custom filter criteria not met" if p.should_filter else "custom filter criteria met"),
+        )
+
+    return [job if active.get(job.url) else replace(job, active=False) for job in jobs]
+
+
 async def filter_jobs_by_clearance(
     jobs: List[JobPosting]
 ) -> ClearanceStats:
@@ -1270,30 +1260,35 @@ async def filter_jobs_by_clearance(
     for job in jobs:
         if not job.url or not job.active:
             jobs_passed.append(job)
-        elif is_url_rejected(job.url):
-            logger.info(f"FILTERED: Job already rejected by AI (cached) for {job.company} - {job.title}")
+        elif is_prelim_rejected(job.url):
+            logger.info(f"FILTERED: Job already rejected by closed/clearance (cached) for {job.company} - {job.title}")
             clearance_stats["jobs_filtered_by_clearance"] += 1
             clearance_stats["clearance_filtered_jobs"].append(job)
-        elif is_url_passed(job.url):
-            logger.info(f"Job already passed AI check (cached) for {job.company} - {job.title}")
-            jobs_passed.append(job)
         else:
             jobs_to_check.append(job)
+
+    limit = int(os.environ.get("PROCESS_LIMIT", "0") or "0")
+    if limit > 0 and len(jobs_to_check) > limit:
+        logger.info(f"PROCESS_LIMIT={limit}: capping {len(jobs_to_check)} unseen jobs to {limit} for this run")
+        jobs_to_check = jobs_to_check[:limit]
 
     if jobs_to_check:
         logger.info(f"Processing {len(jobs_to_check)} jobs for clearance check")
 
-        semaphore = asyncio.Semaphore(MAX_CONCURRENT_JOBS)
+        if batch_enabled():
+            processed_jobs = await _process_jobs_batched(jobs_to_check)
+        else:
+            semaphore = asyncio.Semaphore(MAX_CONCURRENT_JOBS)
 
-        async def process_job_with_semaphore(job: JobPosting) -> JobPosting:
-            async with semaphore:
-                await asyncio.to_thread(wait_for_network)
-                return await preprocess_job_posting(job)
+            async def process_job_with_semaphore(job: JobPosting) -> JobPosting:
+                async with semaphore:
+                    await asyncio.to_thread(wait_for_network)
+                    return await preprocess_job_posting(job)
 
-        logger.info(f"Processing {len(jobs_to_check)} jobs concurrently (max {MAX_CONCURRENT_JOBS} at a time)")
-        processed_jobs = await asyncio.gather(
-            *[process_job_with_semaphore(job) for job in jobs_to_check]
-        )
+            logger.info(f"Processing {len(jobs_to_check)} jobs concurrently (max {MAX_CONCURRENT_JOBS} at a time)")
+            processed_jobs = await asyncio.gather(
+                *[process_job_with_semaphore(job) for job in jobs_to_check]
+            )
 
         for job, final_job in zip(jobs_to_check, processed_jobs):
             if final_job.active:
@@ -1461,9 +1456,13 @@ def wait_for_network() -> None:
     logger.info("Network connection restored")
 
 
-async def async_main(retry_failed: bool = False, reevaluate_custom: bool = False) -> RunSummary | None:
+async def async_main(
+    retry_failed: bool = False,
+    reevaluate_custom: bool = False,
+    apply_filter: Optional[str] = None,
+) -> RunSummary | None:
     if retry_failed:
-        logger.info("RETRY MODE: Processing failed jobs from ai_results.json")
+        logger.info("RETRY MODE: Processing failed jobs from ai_results.db")
         try:
             stats = await retry_all_failed_jobs()
             logger.info(f"Retry summary: {stats['success']}/{stats['total']} jobs succeeded")
@@ -1491,6 +1490,17 @@ async def async_main(retry_failed: bool = False, reevaluate_custom: bool = False
         except Exception as e:
             logger.error(f"Fatal error in reevaluate mode: {e}")
             raise
+
+    if apply_filter:
+        if not set_active_filter(apply_filter):
+            logger.error(
+                f"Filter '{apply_filter}' not found. Available: {list_filter_names()}"
+            )
+            raise ValueError(f"Unknown filter: {apply_filter}")
+        logger.info(
+            f"APPLY FILTER MODE: running full pipeline with filter '{apply_filter}' "
+            "(new jobs processed, cached content + closed/clearance reused)"
+        )
 
     logger.info("System sleep prevention enabled")
     logger.info(f"Using SHEET_ID: {sheet_id}")
@@ -1520,16 +1530,38 @@ async def async_main(retry_failed: bool = False, reevaluate_custom: bool = False
         raise
 
 
-def main(retry_failed: bool = False, reevaluate_custom: bool = False) -> RunSummary | None:
+def main(
+    retry_failed: bool = False,
+    reevaluate_custom: bool = False,
+    apply_filter: Optional[str] = None,
+) -> RunSummary | None:
     with wakepy.keep.presenting():
-        return asyncio.run(async_main(retry_failed=retry_failed, reevaluate_custom=reevaluate_custom))
+        return asyncio.run(
+            async_main(
+                retry_failed=retry_failed,
+                reevaluate_custom=reevaluate_custom,
+                apply_filter=apply_filter,
+            )
+        )
 
 
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Job posting tracker and AI filter")
-    parser.add_argument("--retry", action="store_true", help="Retry all failed jobs from ai_results.json")
+    parser.add_argument("--retry", action="store_true", help="Retry all failed jobs from ai_results.db")
     parser.add_argument("--reevaluate-custom", action="store_true", help="Reevaluate all custom filter jobs and update sheet")
+    parser.add_argument("--batch", action="store_true", help="Use the OpenAI Batch API (50%% cheaper, async) for AI checks")
+    parser.add_argument("--limit", type=int, default=None, help="Only AI-check the first N unseen jobs (for testing)")
+    parser.add_argument("--apply-filter", default=None, help="Apply a named filter from filters.toml to cached jobs and add passing ones to the sheet")
     args = parser.parse_args()
 
-    main(retry_failed=args.retry, reevaluate_custom=args.reevaluate_custom)
+    if args.batch:
+        os.environ["BATCH_MODE"] = "1"
+    if args.limit is not None:
+        os.environ["PROCESS_LIMIT"] = str(args.limit)
+
+    main(
+        retry_failed=args.retry,
+        reevaluate_custom=args.reevaluate_custom,
+        apply_filter=args.apply_filter,
+    )

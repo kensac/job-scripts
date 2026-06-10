@@ -43,7 +43,7 @@ jobs:
         env:
           SHEET_ID: ${{ secrets.SHEET_ID_INTERNSHIP }}
           JOB_LISTINGS_URL: ${{ secrets.JOB_LISTINGS_URL_INTERNSHIP }}
-        run: python pittcsc_simplify.py
+        run: PYTHONPATH=src python -m core.pittcsc_simplify
 
   run-tracker-internship-ouckah:
     needs: run-tracker-internship
@@ -83,7 +83,7 @@ jobs:
         env:
           SHEET_ID: ${{ secrets.SHEET_ID_INTERNSHIP }}
           JOB_LISTINGS_URL: ${{ secrets.JOB_LISTINGS_URL_INTERNSHIP_OUCKAH }}
-        run: python pittcsc_simplify.py
+        run: PYTHONPATH=src python -m core.pittcsc_simplify
 
   # run-full-time-tracker:
   #   runs-on: ubuntu-latest
