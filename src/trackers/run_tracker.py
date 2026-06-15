@@ -10,6 +10,7 @@ from typing import Dict, List
 
 import colorlog
 from core import pittcsc_simplify
+from core.configs import load_configs, load_groups
 from core.pittcsc_simplify import RunSummary
 
 handler = colorlog.StreamHandler(sys.stdout)
@@ -30,32 +31,7 @@ handler.setFormatter(
 logging.basicConfig(level=logging.INFO, handlers=[handler])
 logger = logging.getLogger(__name__)
 
-CONFIGS: Dict[str, Dict[str, str]] = {
-    "internships": {
-        "SHEET_ID": "1kICSTt1U3DajANKj_eQ1tq5y3DKDRc3p8b1NBP_ZQY4",
-        "JOB_LISTINGS_URL": "https://raw.githubusercontent.com/SimplifyJobs/Summer2026-Internships/refs/heads/dev/.github/scripts/listings.json"
-    },
-    "internships_ouckah": {
-        "SHEET_ID": "1kICSTt1U3DajANKj_eQ1tq5y3DKDRc3p8b1NBP_ZQY4",
-        "JOB_LISTINGS_URL": "https://raw.githubusercontent.com/vanshb03/Summer2026-Internships/refs/heads/dev/.github/scripts/listings.json"
-    },
-    "fulltime": {
-        "SHEET_ID": "1pVpdvetKl5L8TYWuX-7E_2TBVbZBUgqgWNUT6caHAmk",
-        "JOB_LISTINGS_URL": "https://raw.githubusercontent.com/SimplifyJobs/New-Grad-Positions/refs/heads/dev/.github/scripts/listings.json"
-    },
-    "fulltime_ouckah": {
-        "SHEET_ID": "1pVpdvetKl5L8TYWuX-7E_2TBVbZBUgqgWNUT6caHAmk",
-        "JOB_LISTINGS_URL": "https://raw.githubusercontent.com/vanshb03/New-Grad-2026/refs/heads/dev/.github/scripts/listings.json"
-    },
-    "fulltime_ouckah_2027": {
-        "SHEET_ID": "1pVpdvetKl5L8TYWuX-7E_2TBVbZBUgqgWNUT6caHAmk",
-        "JOB_LISTINGS_URL": "https://raw.githubusercontent.com/vanshb03/New-Grad-2027/refs/heads/dev/.github/scripts/listings.json"
-    },
-    "testing": {
-        "SHEET_ID": "1NUc-aKgartwAA-4PsY0eOEFSFfH9ky0dVgpKf5mZxFo",
-        "JOB_LISTINGS_URL": "https://raw.githubusercontent.com/SimplifyJobs/New-Grad-Positions/refs/heads/dev/.github/scripts/listings.json"
-    },
-}
+CONFIGS: Dict[str, Dict[str, str]] = load_configs()
 
 
 def run_tracker(config_name: str, retry_failed: bool = False, reevaluate_custom: bool = False, apply_filter: str | None = None) -> tuple[int, RunSummary | None]:
@@ -138,14 +114,13 @@ def print_aggregate_summary(summaries: List[RunSummary]) -> None:
     logger.info("=" * 60)
 
 
-def run_all_configs() -> int:
-    configs_to_run = ["internships", "fulltime", "internships_ouckah", "fulltime_ouckah"]
+def run_configs(config_names: List[str]) -> int:
     failed_configs: List[str] = []
     summaries: List[RunSummary] = []
 
     logger.info("Running all configurations sequentially (limited by OpenAI API rate limits)")
 
-    for config in configs_to_run:
+    for config in config_names:
         exit_code, summary = run_tracker(config)
         if exit_code != 0:
             failed_configs.append(config)
@@ -162,38 +137,12 @@ def run_all_configs() -> int:
 
     logger.info("All configurations completed successfully")
     return 0
-
-def run_full_time_configs() -> int:
-    configs_to_run = [ "fulltime", "fulltime_ouckah", "fulltime_ouckah_2027"]
-    failed_configs: List[str] = []
-    summaries: List[RunSummary] = []
-
-    logger.info("Running all configurations sequentially (limited by OpenAI API rate limits)")
-
-    for config in configs_to_run:
-        exit_code, summary = run_tracker(config)
-        if exit_code != 0:
-            failed_configs.append(config)
-            logger.warning(f"Continuing despite failure in {config}")
-        elif summary:
-            summaries.append(summary)
-
-    if summaries:
-        print_aggregate_summary(summaries)
-
-    if failed_configs:
-        logger.error(f"Failed configurations: {', '.join(failed_configs)}")
-        return 1
-
-    logger.info("All configurations completed successfully")
-    return 0
-
 
 
 def main() -> int:
     import argparse
     parser = argparse.ArgumentParser(description="Run job tracker for various configurations")
-    parser.add_argument("config_name", help=f"Configuration to run: {', '.join(CONFIGS.keys())}, all, ft")
+    parser.add_argument("config_name", help=f"Configuration to run: {', '.join(CONFIGS.keys())}; groups: {', '.join(load_groups().keys())}")
     parser.add_argument("--retry", action="store_true", help="Retry all failed jobs from ai_results.db")
     parser.add_argument("--reevaluate-custom", action="store_true", help="Reevaluate all custom filter jobs and update sheet")
     parser.add_argument("--batch", action="store_true", help="Use the OpenAI Batch API (50%% cheaper, async) for AI checks")
@@ -208,11 +157,9 @@ def main() -> int:
 
     config_name = args.config_name.lower()
 
-    if config_name == "all":
-        return run_all_configs()
-
-    if config_name == "ft":
-        return run_full_time_configs()
+    groups = load_groups()
+    if config_name in groups:
+        return run_configs(groups[config_name])
 
     exit_code, _ = run_tracker(
         config_name,

@@ -5,15 +5,17 @@ import datetime
 import logging
 import os
 import random
+import re
 import sys
 import time
 from dataclasses import dataclass, replace
 from typing import Any, Dict, List, Literal, Optional, Set, TypedDict
-from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
+from urllib.parse import parse_qs, unquote, urlencode, urlparse, urlunparse
 
 import socket
 import colorlog
 import dotenv
+import ftfy
 import gspread
 import requests
 import wakepy
@@ -42,6 +44,7 @@ from core.store import (
     is_url_failed,
     is_url_passed,
     is_url_rejected,
+    prefetch,
 )
 
 
@@ -337,7 +340,7 @@ def extract_url_content(url: str) -> Optional[str]:
         driver.execute_script("window.scrollTo(0, document.body.scrollHeight);") # type: ignore
         
         body_element = driver.find_element(By.TAG_NAME, "body")
-        content = body_element.text.strip()
+        content = ftfy.fix_text(body_element.text).strip()
 
         if content:
             logger.info(f"Extracted {len(content)} chars from {url}")
@@ -963,9 +966,107 @@ async def reevaluate_all_custom_filtered_jobs(sheet_id: str, job_listings_url: s
     }
 
 
+AIRTABLE_HOST = "https://airtable.com"
+AIRTABLE_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+    "x-requested-with": "XMLHttpRequest",
+    "x-time-zone": "America/New_York",
+    "x-user-locale": "en",
+    "Accept": "application/json",
+}
+
+
+def _parse_airtable_date(value: Any) -> int:
+    if not value:
+        return 0
+    try:
+        return int(datetime.datetime.fromisoformat(str(value).strip()).timestamp())
+    except ValueError:
+        return 0
+
+
+def fetch_airtable_postings(
+    url: str, timeout: float = 30.0, max_retries: int = 3
+) -> List[JobPosting]:
+    backoff = ExponentialBackoff()
+    data: Optional[dict] = None
+
+    for attempt in range(max_retries + 1):
+        try:
+            page = requests.get(url, headers=AIRTABLE_HEADERS, timeout=timeout)
+            page.raise_for_status()
+
+            match = re.search(r'urlWithParams:\s*"([^"]+)"', page.text)
+            if not match:
+                raise ValueError("Airtable share payload not found")
+            path = match.group(1).encode().decode("unicode_escape")
+
+            app_id = re.search(r'"applicationId":"(app[A-Za-z0-9]+)"', unquote(path))
+            if not app_id:
+                raise ValueError("Airtable applicationId not found")
+
+            resp = requests.get(
+                AIRTABLE_HOST + path,
+                headers={**AIRTABLE_HEADERS, "x-airtable-application-id": app_id.group(1)},
+                timeout=timeout,
+            )
+            resp.raise_for_status()
+            data = resp.json().get("data", {})
+            backoff.reset()
+            break
+
+        except (requests.RequestException, ValueError) as exc:
+            if attempt == max_retries:
+                logger.error(
+                    f"Failed to fetch Airtable postings after {max_retries + 1} attempts: {exc}"
+                )
+                return []
+            logger.warning(
+                f"Airtable attempt {attempt + 1} failed: {exc}, retrying with backoff..."
+            )
+            backoff.wait()
+
+    table = (data or {}).get("table", {})
+    name_by_id = {c["id"]: c.get("name", "") for c in table.get("columns", [])}
+
+    postings: List[JobPosting] = []
+    for row in table.get("rows", []):
+        values = {
+            name_by_id.get(cid, ""): val
+            for cid, val in row.get("cellValuesByColumnId", {}).items()
+        }
+
+        apply_cell = values.get("Apply")
+        raw_url = apply_cell.get("url", "") if isinstance(apply_cell, dict) else ""
+        if not raw_url:
+            continue
+
+        location = ftfy.fix_text(str(values.get("Location") or ""))
+        locations = [loc.strip() for loc in location.splitlines() if loc.strip()]
+
+        postings.append(
+            JobPosting(
+                company=ftfy.fix_text(str(values.get("Company", ""))),
+                locations=locations,
+                title=ftfy.fix_text(str(values.get("Position Title", ""))),
+                url=normalize_url(raw_url),
+                terms=[],
+                active=True,
+                date_posted=_parse_airtable_date(values.get("Date")),
+                raw_url=raw_url,
+            )
+        )
+
+    logger.info(f"Fetched {len(postings)} job postings from Airtable.")
+    return postings
+
+
 def fetch_job_postings(
     url: str, timeout: float = 10.0, max_retries: int = 3
 ) -> List[JobPosting]:
+    if "airtable.com" in urlparse(url).netloc:
+        return fetch_airtable_postings(url, max_retries=max_retries)
+
     backoff = ExponentialBackoff()
 
     for attempt in range(max_retries + 1):
@@ -1256,6 +1357,15 @@ async def filter_jobs_by_clearance(
     clearance_stats["jobs_checked_for_clearance"] = len(jobs)
     jobs_passed: List[JobPosting] = []
     jobs_to_check: List[JobPosting] = []
+
+    prompt_hashes = (
+        (compute_prompt_hash(ACTIVE_CUSTOM_INSTRUCTIONS),)
+        if ACTIVE_CUSTOM_INSTRUCTIONS
+        else ()
+    )
+    await asyncio.to_thread(
+        prefetch, [job.url for job in jobs], prompt_hashes=prompt_hashes
+    )
 
     for job in jobs:
         if not job.url or not job.active:

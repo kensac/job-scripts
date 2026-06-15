@@ -8,7 +8,7 @@ export async function GET(req: NextRequest) {
   const sp = req.nextUrl.searchParams;
   const page = Math.max(1, Number(sp.get("page") ?? "1"));
   const pageSize = Math.min(200, Math.max(1, Number(sp.get("pageSize") ?? "50")));
-  const result = listQueries({
+  const result = await listQueries({
     check_type: sp.get("check_type") ?? undefined,
     status: sp.get("status") ?? undefined,
     config: sp.get("config") ?? undefined,

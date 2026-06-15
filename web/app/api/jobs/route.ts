@@ -9,7 +9,7 @@ export async function GET(req: NextRequest) {
   const page = Math.max(1, Number(sp.get("page") ?? "1"));
   const pageSize = Math.min(200, Math.max(1, Number(sp.get("pageSize") ?? "50")));
   return NextResponse.json(
-    listJobs({
+    await listJobs({
       q: sp.get("q") ?? undefined,
       config: sp.get("config") ?? undefined,
       verdict: sp.get("verdict") ?? undefined,

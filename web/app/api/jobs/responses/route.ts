@@ -9,5 +9,5 @@ export async function GET(req: NextRequest) {
   if (!url) {
     return NextResponse.json({ error: "url required" }, { status: 400 });
   }
-  return NextResponse.json({ responses: getJobResponses(url) });
+  return NextResponse.json({ responses: await getJobResponses(url) });
 }

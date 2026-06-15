@@ -9,10 +9,10 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  const query = getQuery(Number(id));
+  const query = await getQuery(Number(id));
   if (!query) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
-  const timeline = query.url ? getJobTimeline(query.url) : [];
+  const timeline = query.url ? await getJobTimeline(query.url) : [];
   return NextResponse.json({ query, timeline });
 }
