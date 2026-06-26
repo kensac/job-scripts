@@ -247,10 +247,16 @@ def get_custom_result(url: str, prompt_hash: str) -> Optional[Dict[str, Any]]:
 
 
 def get_content(url: str) -> Optional[str]:
-    """Most recent non-empty scraped content stored for a url."""
+    """Most recent non-empty raw scraped content stored for a url.
+
+    Excludes 'custom' rows: those store the wrapped _build_custom_input() text
+    (company/title prefix), not raw page content, so reusing them would re-wrap
+    the content on every subsequent custom filter.
+    """
     with _pool.connection() as conn:
         row = conn.execute(
             "SELECT input_content FROM ai_queries WHERE url = %s "
+            "AND check_type != 'custom' "
             "AND input_content IS NOT NULL AND input_content != '' "
             "ORDER BY id DESC LIMIT 1",
             (url,),
