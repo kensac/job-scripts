@@ -114,14 +114,19 @@ def print_aggregate_summary(summaries: List[RunSummary]) -> None:
     logger.info("=" * 60)
 
 
-def run_configs(config_names: List[str]) -> int:
+def run_configs(config_names: List[str], retry_failed: bool = False, reevaluate_custom: bool = False, apply_filter: str | None = None) -> int:
     failed_configs: List[str] = []
     summaries: List[RunSummary] = []
 
     logger.info("Running all configurations sequentially (limited by OpenAI API rate limits)")
 
     for config in config_names:
-        exit_code, summary = run_tracker(config)
+        exit_code, summary = run_tracker(
+            config,
+            retry_failed=retry_failed,
+            reevaluate_custom=reevaluate_custom,
+            apply_filter=apply_filter,
+        )
         if exit_code != 0:
             failed_configs.append(config)
             logger.warning(f"Continuing despite failure in {config}")
@@ -159,7 +164,12 @@ def main() -> int:
 
     groups = load_groups()
     if config_name in groups:
-        return run_configs(groups[config_name])
+        return run_configs(
+            groups[config_name],
+            retry_failed=args.retry,
+            reevaluate_custom=args.reevaluate_custom,
+            apply_filter=args.apply_filter,
+        )
 
     exit_code, _ = run_tracker(
         config_name,
