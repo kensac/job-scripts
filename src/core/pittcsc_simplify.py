@@ -31,7 +31,8 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 
 from core.batch import BatchSpec, batch_enabled, run_responses_batch
-from core.filters import compute_prompt_hash, get_filter_prompt, list_filter_names
+from core import ats
+from core.filters import compute_prompt_hash, get_filter_spec, list_filter_names
 from core.store import (
     add_ai_result,
     get_ai_result,
@@ -118,7 +119,7 @@ FALLBACK_CUTOFF_TS: int = int(
 # Content Extraction Configuration
 BROWSER_PAGE_LOAD_TIMEOUT: float = 15.0
 BROWSER_ELEMENT_WAIT_TIMEOUT: float = 10.0
-BROWSER_CONTENT_WAIT: float = 7.5
+BROWSER_CONTENT_WAIT: float = 15.0
 MIN_CONTENT_LENGTH: int = 0
 OPENAI_MODEL: str = "gpt-5-nano"
 OPENAI_TIMEOUT: float = 120.0
@@ -322,6 +323,10 @@ def extract_url_content(url: str) -> Optional[str]:
     if not openai_client:
         return None
 
+    ats_result = ats.resolve(url)
+    if ats_result.ok and ats_result.text:
+        return ats_result.text
+
     driver = None
     try:
         chrome_options = get_chrome_options()
@@ -398,15 +403,19 @@ CUSTOM_INSTRUCTIONS = build_custom_instructions(CUSTOM_FILTER_PROMPT)
 # --apply-filter swaps it so the whole pipeline (new + cached jobs) uses it.
 ACTIVE_FILTER_NAME = "default"
 ACTIVE_CUSTOM_INSTRUCTIONS = CUSTOM_INSTRUCTIONS
+ACTIVE_FILTER_FAIL_CLOSED = False
 
 
 def set_active_filter(name: str) -> bool:
-    global ACTIVE_FILTER_NAME, ACTIVE_CUSTOM_INSTRUCTIONS
-    prompt = get_filter_prompt(name)
-    if not prompt:
+    global ACTIVE_FILTER_NAME, ACTIVE_CUSTOM_INSTRUCTIONS, ACTIVE_FILTER_FAIL_CLOSED
+    spec = get_filter_spec(name)
+    if not spec:
         return False
     ACTIVE_FILTER_NAME = name
-    ACTIVE_CUSTOM_INSTRUCTIONS = build_custom_instructions(prompt)
+    ACTIVE_CUSTOM_INSTRUCTIONS = build_custom_instructions(spec.prompt)
+    ACTIVE_FILTER_FAIL_CLOSED = spec.fail_closed
+    if spec.fail_closed:
+        logger.info(f"Filter '{name}' is fail-closed: jobs whose content cannot be extracted will be filtered out")
     return True
 
 
@@ -713,6 +722,14 @@ async def check_custom_filter(
     return False
 
 
+def _on_extraction_failure(job: JobPosting, why: str) -> JobPosting:
+    if ACTIVE_FILTER_FAIL_CLOSED:
+        logger.info(f"FILTERED (fail-closed): {why} for {job.company} - {job.title} ({job.url})")
+        return replace(job, active=False)
+    logger.debug(f"{why} for {job.url} - keeping job active")
+    return job
+
+
 async def preprocess_job_posting(
     job: JobPosting
 ) -> JobPosting:
@@ -733,14 +750,12 @@ async def preprocess_job_posting(
     if not content:
         content = await asyncio.to_thread(extract_url_content, job.url)
     if not content:
-        logger.debug(f"Could not extract content from {job.url} - keeping job active")
         add_ai_result(job.url, "failed", "failed to extract content", "extraction")
-        return job
+        return _on_extraction_failure(job, "failed to extract content")
 
     if len(content.strip()) < MIN_CONTENT_LENGTH:
-        logger.debug(f"Insufficient content from {job.url} - keeping job active")
         add_ai_result(job.url, "failed", f"insufficient content (only {len(content)} chars)", "extraction")
-        return job
+        return _on_extraction_failure(job, f"insufficient content ({len(content)} chars)")
 
     is_closed = await check_if_job_closed(content, job.url, job.title, job.company)
     if is_closed:
@@ -1376,10 +1391,11 @@ async def _process_jobs_batched(jobs: List[JobPosting]) -> List[JobPosting]:
 
     active: Dict[str, bool] = {}
     for job in jobs:
-        if not contents.get(job.url):
+        extracted = bool(contents.get(job.url))
+        if not extracted:
             add_ai_result(job.url, "failed", "failed to extract content", "extraction")
-            logger.debug(f"Could not extract content from {job.url} - keeping job active")
-        active[job.url] = True
+            _on_extraction_failure(job, "failed to extract content")
+        active[job.url] = extracted or not ACTIVE_FILTER_FAIL_CLOSED
 
     await _run_batch_stage(
         jobs, active, contents, "closed", JobClosedResponse,
