@@ -53,7 +53,7 @@ SQLAlchemy==2.0.52
 tqdm==4.67.1
 trio==0.30.0
 trio-websocket==0.12.2
-typing-inspection==0.4.2
+typing-inspection==0.4.4
 typing_extensions==4.14.0
 urllib3==2.5.0
 uvicorn==0.52.4
