@@ -1094,11 +1094,62 @@ def fetch_markdown_postings(
     return postings
 
 
+def fetch_jobright_postings(url: str, max_retries: int = 3) -> List[JobPosting]:
+    """Jobright minisites (jobright.ai/minisites-jobs/...) render their newest
+    ~50 jobs server-side in __NEXT_DATA__; hourly cycles accumulate coverage.
+    Apply links are jobright interstitials - the employer URL is login-gated."""
+    import json as _json
+
+    backoff = ExponentialBackoff()
+    for attempt in range(max_retries + 1):
+        try:
+            resp = requests.get(url, headers=AIRTABLE_HEADERS, timeout=20)
+            resp.raise_for_status()
+            match = re.search(
+                r'__NEXT_DATA__" type="application/json">(.*?)</script>', resp.text, re.S
+            )
+            if not match:
+                raise ValueError("no __NEXT_DATA__ payload on page")
+            jobs = _json.loads(match.group(1))["props"]["pageProps"]["initialJobs"]
+            postings: List[JobPosting] = []
+            for j in jobs:
+                raw_apply = j.get("applyUrl") or ""
+                apply_url = raw_apply.split("?")[0]
+                if not apply_url.startswith("http"):
+                    continue
+                postings.append(
+                    JobPosting(
+                        company=ftfy.fix_text(str(j.get("company", ""))),
+                        locations=[
+                            p.strip() for p in str(j.get("location") or "").split(";") if p.strip()
+                        ],
+                        title=ftfy.fix_text(str(j.get("title", ""))),
+                        url=apply_url,
+                        terms=[],
+                        active=True,
+                        date_posted=int(j.get("postedDate") or 0) // 1000,
+                        raw_url=raw_apply,
+                    )
+                )
+            logger.info(f"Fetched {len(postings)} job postings from jobright minisite.")
+            return postings
+        except Exception as exc:
+            if attempt >= max_retries:
+                logger.error(f"Failed to fetch jobright postings: {exc}")
+                return []
+            logger.warning(f"Jobright attempt {attempt + 1} failed: {exc}, retrying...")
+            backoff.wait()
+    return []
+
+
 def fetch_job_postings(
     url: str, timeout: float = 10.0, max_retries: int = 3
 ) -> List[JobPosting]:
     if "airtable.com" in urlparse(url).netloc:
         return fetch_airtable_postings(url, max_retries=max_retries)
+
+    if "jobright.ai" in urlparse(url).netloc:
+        return fetch_jobright_postings(url, max_retries=max_retries)
 
     if urlparse(url).path.endswith(".md"):
         return fetch_markdown_postings(url, max_retries=max_retries)
