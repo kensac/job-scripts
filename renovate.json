@@ -13,6 +13,11 @@
   "platformAutomerge": false,
   "packageRules": [
     {
+      "description": "pydantic hard-pins an exact pydantic-core; it can only move with pydantic",
+      "matchPackageNames": ["pydantic_core", "pydantic-core"],
+      "enabled": false
+    },
+    {
       "matchUpdateTypes": ["minor", "patch", "digest", "pin"],
       "groupName": "non-major dependencies",
       "automerge": true,
