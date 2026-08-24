@@ -41,7 +41,7 @@ python-barcode==0.16.1
 python-dotenv==1.1.1
 qrcode==8.2
 reportlab==4.4.3
-requests==2.32.4
+requests==2.34.2
 requests-oauthlib==2.0.0
 rsa==4.9.1
 selenium==4.35.0
