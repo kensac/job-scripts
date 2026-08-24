@@ -1,151 +1,78 @@
 # Job Scripts
 
-Automated tracking and filtering of job postings. The pipeline fetches listings
-from multiple sources, runs them through AI-based filters, deduplicates against a
-PostgreSQL cache, and appends the survivors to a Google Sheet.
+A multi-user job-application tracker. Sources (GitHub job boards, Airtable
+views) are ingested hourly into a shared catalog, run through AI filters
+(closed / visa-clearance / per-user custom prompts), and served to a
+spreadsheet UI where each user tracks their applications.
 
-## Pipeline
+## Components
 
-For each configured source the tracker will:
+| Path | What it is |
+|---|---|
+| `src/api/` | FastAPI backend (`api.app`), task worker (`api.worker`), SQLAlchemy models + Alembic migrations |
+| `src/core/` | Shared pipeline: fetching, scraping (headless Chromium), AI checks, verdict/content cache, catalog |
+| `src/trackers/run_tracker.py` | Legacy CLI: appends filtered jobs to a Google Sheet |
+| `src/trackers/backfill.py` | One-time import of sources, filters, presets, and sheet rows onto a user |
+| `alembic/` | Schema migrations, applied automatically on API/worker start |
+| `openapi.json` | Generated API schema (`python -m api.export_schema`), canon for frontend types |
 
-1. **Fetch** postings from the source (a `listings.json` feed or an Airtable
-   shared view).
-2. **Pre-filter** on activity, location, application term/season, posting date,
-   and duplicates (against both the sheet and prior runs).
-3. **Extract** each posting's page content with a headless Chrome browser
-   (cached in Postgres so it is scraped at most once).
-4. **AI-filter** the content through OpenAI checks:
-   * **closed** — posting is no longer accepting applications.
-   * **clearance** — requires security clearance / citizenship, or excludes
-     visa sponsorship / F1 candidates.
-   * **custom** — an optional, user-defined prompt (see `filters.toml`).
-5. **Append** the remaining postings to the target Google Sheet.
+## Architecture
 
-All AI verdicts and scraped content are stored in Postgres, so re-runs only pay
-for work they haven't done before.
+- **API** (`uvicorn api.app:app`): multi-tenant REST API. Identity arrives via
+  trusted headers from an authenticating proxy (`X-Service-Token`,
+  `X-User-Sub`, `X-User-Groups`); Authentik groups drive entitlements and
+  weekly AI-token budgets (`group_budgets` table).
+- **Workers** (`python -m api.worker`): claim tasks from a Postgres queue
+  (`FOR UPDATE SKIP LOCKED`) — safe across any number of machines. Handle
+  source ingestion, link-upload extraction, and per-user filter runs, with
+  heartbeats, a stale-task reaper, attempt caps, and mid-task cancellation.
+  A leaderless scheduler (dedupe keys) enqueues one ingest per active source
+  per hour.
+- **AI filters**: verdicts are cached globally by (url, prompt hash, model),
+  so identical filters cost once across all users. Users bring their own key
+  (OpenAI / Anthropic / OpenAI-compatible, encrypted at rest, SSRF-guarded)
+  or spend a group budget on the shared key.
+- **Metrics**: Prometheus on an internal port (`JOBTRACKER_METRICS_PORT`,
+  default 9091). Never expose it publicly.
 
-## Sources
-
-* **`listings.json` feeds** — e.g. the Simplify / ouckah internship and new-grad
-  repos.
-* **Airtable shared views** — public share links of the form
-  `https://airtable.com/app.../shr.../tbl...`. These are read through Airtable's
-  shared-view data endpoint and mapped onto the same `JobPosting` shape, so they
-  flow through the identical pipeline. A source is treated as Airtable whenever
-  its URL points at `airtable.com`.
-
-## Prerequisites
-
-* **Python 3.11+** (uses the stdlib `tomllib`).
-* **Google Chrome + chromedriver** for headless content extraction.
-* **PostgreSQL** database for the results/content cache.
-* **OpenAI API key** for the AI filters.
-* **Google service account** with a JSON key and write access to the target
-  sheet(s).
-
-## Installation
-
-```bash
-git clone https://github.com/kensac/job-scripts.git
-cd job-scripts
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-```
-
-## Configuration
-
-### Environment (`.env`)
+## Environment
 
 ```ini
-DATABASE_URL=<postgres-connection-string>
-GOOGLE_APPLICATION_CREDENTIALS_CUSTOM=<path-to-service-account-key.json>
-OPENAI_API_KEY=<your-openai-key>
-CUSTOM_FILTER_PROMPT=<optional default custom-filter prompt>
+DATABASE_URL=postgresql://...            # required everywhere
+JOBTRACKER_SERVICE_TOKEN=...             # API auth (proxy-held secret)
+APP_ENCRYPTION_KEY=...                   # Fernet key for stored user API keys
+OPENAI_API_KEY=...                       # shared key for budgeted users + ingestion
+GOOGLE_APPLICATION_CREDENTIALS_CUSTOM=   # legacy sheet tracker only
 ```
 
-* **`DATABASE_URL`** — Postgres connection string for the AI/content cache
-  (required; the store connects on import).
-* **`GOOGLE_APPLICATION_CREDENTIALS_CUSTOM`** — path to the service account key.
-  Share each target sheet with the key's `client_email`.
-* **`OPENAI_API_KEY`** — enables the closed/clearance/custom AI checks. Without
-  it, only the non-AI pre-filters run.
-* **`CUSTOM_FILTER_PROMPT`** — optional; the `default` custom filter. Named
-  filters live in `filters.toml`.
+Optional worker knobs: `JOBTRACKER_WORKER_POLL`, `JOBTRACKER_WORKER_KINDS`
+(CSV of task kinds to claim), `JOBTRACKER_INGEST_SCHEDULER`,
+`JOBTRACKER_INGEST_INTERVAL_MINUTES`, `JOBTRACKER_INGEST_MAX_AI_PER_SOURCE`,
+`JOBTRACKER_OWNER_KEY_MODELS`, `JOBTRACKER_ADMIN_GROUPS`.
 
-`SHEET_ID` and `JOB_LISTINGS_URL` are set automatically per run from
-`configs.toml`; you only need them in `.env` when running a source directly.
-
-### Sources and groups (`configs.toml`)
-
-Each config maps a name to a sheet and a source URL; groups are named lists of
-configs run in sequence:
-
-```toml
-[configs.fulltime]
-sheet_id = "<google-sheet-id>"
-job_listings_url = "https://raw.githubusercontent.com/.../listings.json"
-
-[configs.airtable1]
-sheet_id = "<google-sheet-id>"
-job_listings_url = "https://airtable.com/app.../shr.../tbl...?viewControls=on"
-
-[groups]
-ft = ["fulltime", "fulltime_ouckah", "fulltime_ouckah_2027"]
-airtable = ["airtable1", "airtable2"]
-```
-
-Add or regroup sources by editing this file only — no code changes needed.
-
-### Custom filters (`filters.toml`)
-
-Named, prompt-based filters selectable with `--apply-filter <name>`. The
-`default` filter comes from `CUSTOM_FILTER_PROMPT`. See the comments in
-`filters.toml` for examples.
-
-## Usage
-
-Run a single config or a group by name:
+## Running
 
 ```bash
-python -m trackers.run_tracker <config-or-group>
+pip install -r requirements.txt
+export PYTHONPATH=src
+
+uvicorn api.app:app --port 8000      # API (migrates + seeds on start)
+python -m api.worker                 # worker (any number, any machine)
+python -m trackers.run_tracker ft    # legacy sheet tracker (config/group name)
+python -m trackers.backfill --help   # one-time user/sheet import
 ```
 
-Examples:
+Container images build for amd64/arm64 via GitHub Actions to
+`ghcr.io/kensac/job-scripts`; `deploy/Dockerfile` bundles Chromium for
+scraping. Healthcheck: `python -m api.healthcheck`.
 
-```bash
-python -m trackers.run_tracker fulltime      # one config
-python -m trackers.run_tracker ft            # a group of configs
-python -m trackers.run_tracker airtable      # the Airtable sources
-```
+## Configuration files
 
-### Flags
-
-* `--batch` — use the OpenAI Batch API (cheaper, asynchronous) for AI checks.
-* `--limit N` — only AI-check the first N unseen jobs (useful for testing).
-* `--apply-filter <name>` — apply a named filter from `filters.toml`, reusing
-  cached content and closed/clearance verdicts, and add newly passing jobs.
-* `--retry` — retry jobs whose AI checks previously failed.
-* `--reevaluate-custom` — re-run the custom filter over cached jobs and add any
-  that now pass to the sheet.
-
-## Project layout
-
-* **`src/core/pittcsc_simplify.py`** — fetching, filtering, AI checks, and sheet
-  writing.
-* **`src/core/configs.py`** / **`configs.toml`** — source and group definitions.
-* **`src/core/filters.py`** / **`filters.toml`** — named custom filters.
-* **`src/core/store.py`** — PostgreSQL cache for AI verdicts and scraped content.
-* **`src/core/batch.py`** — OpenAI Batch API helper.
-* **`src/trackers/run_tracker.py`** — CLI entry point.
-
-## Troubleshooting
-
-1. Confirm the service account has write access to each target sheet.
-2. Verify `DATABASE_URL` is reachable — the store connects on import.
-3. Ensure Chrome/chromedriver are installed for content extraction.
-4. Check source URLs are reachable; Airtable share links must be public.
-5. Review the logs for errors or warnings.
+- `configs.toml` — source feeds (name → listings URL + sheet id). Seeds the
+  `sources` and `source_groups` tables; runtime source management is in the
+  DB via the admin API.
+- `filters.toml` — named filter prompts for the legacy CLI
+  (`--apply-filter <name>`); product filters live per-user in the DB.
 
 ## License
 
