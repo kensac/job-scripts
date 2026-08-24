@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: jobtracker_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/jobtracker_ci
+      PYTHONPATH: src
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Compile all sources
+        run: python -m compileall -q src
+      - name: Migrations apply cleanly
+        run: python -m alembic upgrade head
+      - name: Models match migrations (autogen must be empty)
+        run: |
+          python -m alembic revision --autogenerate -m ci_drift_check
+          f=$(ls alembic/versions/*ci_drift_check*.py)
+          if grep -qE "op\.(add|drop|create|alter)" "$f"; then
+            echo "::error::ORM models drifted from migrations - generate a real migration"; cat "$f"; exit 1
+          fi
+      - name: openapi.json is current
+        env:
+          JOBTRACKER_SERVICE_TOKEN: ci
+          APP_ENCRYPTION_KEY: ci
+        run: |
+          python -m api.export_schema > openapi.json
+          git diff --exit-code -- openapi.json || {
+            echo "::error::openapi.json is stale - run 'make schema' and commit"; exit 1; }

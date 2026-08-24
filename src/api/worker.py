@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel
 
-from api import ai, budget, db, events, metrics
+from api import ai, budget, db, events, metrics, verdicts
 from api.budget import Entitlement
 from core.filters import build_custom_instructions
 from core.store import add_ai_result, get_content, get_custom_result
@@ -387,48 +387,23 @@ async def _check_filter(
     prompt_hash: str,
     filter_name: str,
 ) -> Optional[Dict[str, int]]:
-    """Runs one custom-filter check, records the verdict; returns usage or None if cached."""
+    """Runs one custom-filter check via the shared verdict primitive; returns
+    usage, or None when a cached verdict made the call unnecessary."""
     if get_custom_result(url, prompt_hash, model=cfg.model):
         return None
-    input_text = f"Company: {company}\nJob Title: {title}\n\nJob Content:\n{content}"
-    start = time.monotonic()
-    try:
-        parsed, usage = await ai.parse(cfg, instructions, input_text, FilterVerdict)
-    except Exception as exc:
-        add_ai_result(
-            url, "failed", f"AI custom filter failed: {str(exc)[:100]}", "custom",
-            model=cfg.model, filter_name=filter_name, prompt_hash=prompt_hash,
-            company=company, job_title=title, instructions=instructions,
-            input_content=input_text, error=str(exc),
-        )
-        raise
-    duration_ms = int((time.monotonic() - start) * 1000)
-    if not parsed:
-        add_ai_result(
-            url, "failed", "AI returned no parsed response", "custom",
-            model=cfg.model, filter_name=filter_name, prompt_hash=prompt_hash,
-            company=company, job_title=title, instructions=instructions,
-            input_content=input_text,
-        )
-        return usage
-    metrics.CHECKS.labels("custom", "rejected" if parsed.should_filter else "passed").inc()
-    add_ai_result(
-        url,
-        "rejected" if parsed.should_filter else "passed",
-        parsed.reason,
-        "custom",
-        model=cfg.model,
-        filter_name=filter_name,
-        prompt_hash=prompt_hash,
+    _, usage = await verdicts.run_check(
+        cfg,
+        url=url,
+        check_type="custom",
+        instructions=instructions,
+        input_text=f"Company: {company}\nJob Title: {title}\n\nJob Content:\n{content}",
+        response_model=FilterVerdict,
+        verdict_of=lambda p: (p.should_filter, p.reason),
         company=company,
         job_title=title,
-        instructions=instructions,
-        input_content=input_text,
-        parsed_json=json.dumps(parsed.model_dump()),
-        duration_ms=duration_ms,
-        prompt_tokens=usage["prompt_tokens"],
-        completion_tokens=usage["completion_tokens"],
-        total_tokens=usage["total_tokens"],
+        filter_name=filter_name,
+        prompt_hash=prompt_hash,
+        context="filter-run",
     )
     return usage
 
@@ -787,7 +762,11 @@ async def _reverify_jobs(
     async def one(r: Dict[str, Any]) -> None:
         ats_res = await asyncio.to_thread(ats.resolve, r["url"])
         if ats_res.status is ats.Status.GONE:
-            add_ai_result(r["url"], "rejected", "ATS reports posting gone (reverify)", "closed")
+            verdicts.record_manual(
+                url=r["url"], check_type="closed", rejected=True,
+                reason="ATS reports posting gone (reverify)",
+                company=r["company"], job_title=r["title"], context="reverify",
+            )
             return
         if ats_res.ok and ats_res.text:
             content = ats_res.text
@@ -796,21 +775,17 @@ async def _reverify_jobs(
                 content = await asyncio.to_thread(extract_url_content, r["url"])
         if not content:
             return
-        parsed, usage = await ai.parse(
-            cfg, CLOSED_INSTRUCTIONS, content[:60000], JobClosedResponse
-        )
-        if not parsed:
-            return
-        add_ai_result(
-            r["url"],
-            "rejected" if parsed.is_closed else "passed",
-            parsed.reason or "",
-            "closed",
-            model=cfg.model,
-            input_content=content,
-            prompt_tokens=usage["prompt_tokens"],
-            completion_tokens=usage["completion_tokens"],
-            total_tokens=usage["total_tokens"],
+        await verdicts.run_check(
+            cfg,
+            url=r["url"],
+            check_type="closed",
+            instructions=CLOSED_INSTRUCTIONS,
+            input_text=content[:60000],
+            response_model=JobClosedResponse,
+            verdict_of=lambda p: (p.is_closed, p.reason or ""),
+            company=r["company"],
+            job_title=r["title"],
+            context="reverify",
         )
 
     idx = 0
