@@ -14,7 +14,8 @@ router = APIRouter()
 
 _JOB_ROW = """
     j.id AS job_id, j.company, j.title, j.locations, j.terms, j.source,
-    j.url, j.raw_url, j.active, j.date_posted, j.extraction_status,
+    j.url, j.raw_url, j.active, j.date_posted, j.created_at AS added_at,
+    j.extraction_status,
     uj.status, uj.date_applied, uj.notes, uj.size, uj.recruiter,
     uj.connection1, uj.connection2, uj.documents,
     COALESCE(uj.hidden, FALSE) AS hidden
