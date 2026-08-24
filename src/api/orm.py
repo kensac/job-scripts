@@ -190,6 +190,7 @@ class Task(Base):
     id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
     kind: Mapped[str] = mapped_column(Text)
     payload: Mapped[dict] = mapped_column(JSONB)
+    dedupe_key: Mapped[Optional[str]] = mapped_column(Text, unique=True)
     status: Mapped[str] = mapped_column(Text, server_default=text("'pending'"))
     progress: Mapped[Optional[Any]] = mapped_column(JSONB)
     error: Mapped[Optional[str]] = mapped_column(Text)

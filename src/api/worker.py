@@ -17,6 +17,15 @@ from core.store import add_ai_result, get_content, get_custom_result
 logger = logging.getLogger("jobtracker_worker")
 
 POLL_SECONDS = float(os.environ.get("JOBTRACKER_WORKER_POLL", "5"))
+INGEST_INTERVAL_MINUTES = int(os.environ.get("JOBTRACKER_INGEST_INTERVAL_MINUTES", "60"))
+INGEST_MAX_AI_PER_SOURCE = int(os.environ.get("JOBTRACKER_INGEST_MAX_AI_PER_SOURCE", "300"))
+# Which task kinds this worker claims; lets small fleet hosts (e.g. an rpi)
+# opt out of scrape-heavy work. Default: all kinds.
+WORKER_KINDS = [
+    k.strip()
+    for k in os.environ.get("JOBTRACKER_WORKER_KINDS", "").split(",")
+    if k.strip()
+]
 
 
 class JobExtract(BaseModel):
@@ -32,14 +41,27 @@ class FilterVerdict(BaseModel):
 
 
 def _claim_task() -> Optional[Dict[str, Any]]:
+    kinds_clause = "AND kind = ANY(%(kinds)s)" if WORKER_KINDS else ""
     return db.query_one(
-        """
+        f"""
         UPDATE tasks SET status = 'running', started_at = now()
-        WHERE id = (SELECT id FROM tasks WHERE status = 'pending'
+        WHERE id = (SELECT id FROM tasks WHERE status = 'pending' {kinds_clause}
                     ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED)
         RETURNING id, kind, payload
-        """
+        """,
+        {"kinds": WORKER_KINDS},
     )
+
+
+def enqueue(kind: str, payload: Dict[str, Any], dedupe_key: Optional[str] = None) -> Optional[int]:
+    """Insert a task; with a dedupe_key, at most one task per key ever exists,
+    so every fleet worker can race to enqueue and exactly one wins."""
+    row = db.query_one(
+        "INSERT INTO tasks (kind, payload, dedupe_key) VALUES (%s, %s, %s) "
+        "ON CONFLICT (dedupe_key) DO NOTHING RETURNING id",
+        (kind, db.jsonb(payload), dedupe_key),
+    )
+    return row["id"] if row else None
 
 
 def _finish(task_id: int, status: str, error: Optional[str] = None) -> None:
@@ -261,11 +283,102 @@ async def handle_run_all_filters(task_id: int, payload: Dict[str, Any]) -> None:
         await _run_filters(task_id, payload["user_id"], filters)
 
 
+async def handle_ingest_source(task_id: int, payload: Dict[str, Any]) -> None:
+    from core import catalog
+    from core.pittcsc_simplify import (
+        FALLBACK_CUTOFF_TS,
+        check_if_job_closed,
+        check_security_clearance_requirement,
+        fetch_job_postings,
+    )
+    from core.store import get_latest
+
+    source = db.query_one(
+        "SELECT * FROM sources WHERE name = %s AND active", (payload["source"],)
+    )
+    if not source:
+        raise LookupError("unknown or inactive source")
+
+    postings = await asyncio.to_thread(fetch_job_postings, source["listings_url"])
+    upserted = catalog.upsert_postings(postings, source["name"])
+    logger.info(f"Ingest {source['name']}: fetched {len(postings)}, upserted {upserted}")
+
+    candidates = [
+        p for p in postings
+        if p.active and p.url and p.date_posted >= FALLBACK_CUTOFF_TS
+    ]
+    checked = 0
+    total = len(candidates)
+    for i, p in enumerate(candidates):
+        if checked >= INGEST_MAX_AI_PER_SOURCE:
+            logger.info(f"Ingest {source['name']}: AI cap reached ({checked})")
+            break
+        closed = get_latest(p.url, "closed")
+        clearance = get_latest(p.url, "clearance")
+        if closed and clearance:
+            continue
+        content = get_content(p.url) or await _scrape(p.url)
+        if not content:
+            continue
+        checked += 1
+        if not closed:
+            is_closed = await check_if_job_closed(content, p.url, p.title, p.company)
+            if is_closed:
+                continue
+        if not clearance:
+            await check_security_clearance_requirement(content, p.url, p.title, p.company)
+        if checked % 5 == 0:
+            _set_progress(task_id, i + 1, total, source["name"])
+    _set_progress(task_id, total, total, source["name"])
+
+    cycle = payload.get("cycle", "manual")
+    users = db.query(
+        """
+        SELECT DISTINCT u.id FROM users u
+        JOIN user_sources us ON us.user_id = u.id
+        JOIN user_filters uf ON uf.user_id = u.id AND uf.enabled
+        LEFT JOIN user_settings s ON s.user_id = u.id
+        WHERE s.api_key_enc IS NOT NULL
+           OR u.groups && ARRAY(SELECT group_name FROM group_budgets)::text[]
+        """
+    )
+    for u in users:
+        enqueue(
+            "run_all_filters",
+            {"user_id": u["id"]},
+            dedupe_key=f"runall:{u['id']}:{cycle}",
+        )
+
+
 HANDLERS = {
     "extract_upload": lambda task_id, payload: handle_extract_upload(payload),
     "run_filter": handle_run_filter,
     "run_all_filters": handle_run_all_filters,
+    "ingest_source": handle_ingest_source,
 }
+
+
+def schedule_ingest_cycle() -> None:
+    """Leaderless hourly scheduler: every worker calls this each poll; the
+    dedupe key (source + time bucket) guarantees one task per source per cycle
+    across the whole fleet."""
+    import datetime
+
+    now = datetime.datetime.now(datetime.timezone.utc)
+    bucket = now.replace(
+        minute=(now.minute // INGEST_INTERVAL_MINUTES) * INGEST_INTERVAL_MINUTES
+        if INGEST_INTERVAL_MINUTES < 60
+        else 0,
+        second=0,
+        microsecond=0,
+    )
+    cycle = bucket.strftime("%Y-%m-%dT%H:%M")
+    for s in db.query("SELECT name FROM sources WHERE active"):
+        enqueue(
+            "ingest_source",
+            {"source": s["name"], "cycle": cycle},
+            dedupe_key=f"ingest:{s['name']}:{cycle}",
+        )
 
 
 async def run_once() -> bool:
@@ -293,8 +406,16 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO)
     db.init_schema()
     metrics.serve()
-    logger.info("Worker started")
+    ingest_enabled = os.environ.get("JOBTRACKER_INGEST_SCHEDULER", "1") == "1"
+    logger.info(
+        f"Worker started (kinds={WORKER_KINDS or 'all'}, scheduler={'on' if ingest_enabled else 'off'})"
+    )
     while True:
+        if ingest_enabled:
+            try:
+                schedule_ingest_cycle()
+            except Exception:
+                logger.exception("ingest scheduling failed")
         worked = asyncio.run(run_once())
         if not worked:
             time.sleep(POLL_SECONDS)

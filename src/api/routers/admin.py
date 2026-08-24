@@ -194,6 +194,35 @@ def create_source(body: SourceBody, user: AuthedUser = Depends(require_admin)):
     )
 
 
+class IngestBody(BaseModel):
+    sources: Optional[List[str]] = None
+
+
+@router.post("/ingest")
+def trigger_ingest(body: IngestBody, user: AuthedUser = Depends(require_admin)):
+    """Off-cycle pull: enqueue ingest tasks now (no dedupe, runs regardless of
+    the hourly cycle). Omit sources to pull everything active."""
+    active = {r["name"] for r in db.query("SELECT name FROM sources WHERE active")}
+    wanted = body.sources if body.sources else sorted(active)
+    unknown = [s for s in wanted if s not in active]
+    if unknown:
+        raise HTTPException(
+            400, detail={"code": "UNKNOWN_SOURCE", "message": f"unknown or inactive: {unknown}"}
+        )
+    import time as _time
+
+    cycle = f"manual-{user.id}-{int(_time.time())}"
+    task_ids = []
+    for name in wanted:
+        row = db.query_one(
+            "INSERT INTO tasks (kind, payload) VALUES ('ingest_source', %s) RETURNING id",
+            (db.jsonb({"source": name, "cycle": cycle}),),
+        )
+        assert row is not None
+        task_ids.append({"source": name, "task_id": row["id"]})
+    return {"tasks": task_ids}
+
+
 class SourceGroupBody(BaseModel):
     members: Optional[List[str]] = None
     description: Optional[str] = Field(default=None, max_length=500)
