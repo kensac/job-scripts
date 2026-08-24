@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel
 
-from api import ai, budget, db, metrics
+from api import ai, budget, db, events, metrics
 from api.budget import Entitlement
 from core.filters import build_custom_instructions
 from core.store import add_ai_result, get_content, get_custom_result
@@ -86,6 +86,8 @@ def enqueue(kind: str, payload: Dict[str, Any], dedupe_key: Optional[str] = None
         "ON CONFLICT (dedupe_key) DO NOTHING RETURNING id",
         (kind, db.jsonb(payload), dedupe_key),
     )
+    if row:
+        events.publish_task(row["id"])
     return row["id"] if row else None
 
 
@@ -96,6 +98,7 @@ def _finish(task_id: int, status: str, error: Optional[str] = None) -> None:
         "WHERE id = %s AND status = 'running'",
         (status, error[:500] if error else None, task_id),
     )
+    events.publish_task(task_id)
 
 
 def _cancelled(task_id: int) -> bool:
@@ -262,6 +265,7 @@ def _set_progress(task_id: int, done: int, total: int, label: str) -> None:
         "UPDATE tasks SET progress = %s, last_heartbeat = now() WHERE id = %s",
         (db.jsonb({"done": done, "total": total, "label": label}), task_id),
     )
+    events.publish_task(task_id)
 
 
 def _decided_urls(urls: List[str], prompt_hash: str, model: str) -> set:
@@ -462,6 +466,7 @@ async def run_once() -> bool:
     if not task:
         return False
     handler = HANDLERS.get(task["kind"])
+    events.publish_task(task["id"])
     logger.info(f"Task {task['id']} ({task['kind']}) starting")
     if not handler:
         _finish(task["id"], "failed", f"unknown task kind: {task['kind']}")

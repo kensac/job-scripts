@@ -5,7 +5,7 @@ import os
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from api import ai, budget, db
+from api import ai, budget, db, events
 from api.auth import AuthedUser, require_user
 from api.models import FilterCreate, FilterPatch, ImprovePromptRequest
 from core.filters import ON_AMBIGUOUS_VALUES, build_custom_instructions, compute_prompt_hash
@@ -53,6 +53,7 @@ def _enqueue(user: AuthedUser, kind: str, payload: dict) -> tuple:
         (kind, db.jsonb(payload)),
     )
     assert row is not None
+    events.publish_task(row["id"])
     return row["id"], None
 
 

@@ -5,7 +5,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from api import db
+from api import db, events
 from api.auth import AuthedUser, require_user
 from api.models import UploadRequest, UserJobPatch
 from core.urls import normalize_url
@@ -205,10 +205,12 @@ def upload_links(body: UploadRequest, user: AuthedUser = Depends(require_user)):
             (user.id, row["id"]),
         )
         if row["extraction_status"] == "pending":
-            db.execute(
-                "INSERT INTO tasks (kind, payload) VALUES ('extract_upload', %s)",
+            task = db.query_one(
+                "INSERT INTO tasks (kind, payload) VALUES ('extract_upload', %s) RETURNING id",
                 (db.jsonb({"job_id": row["id"], "user_id": user.id}),),
             )
+            if task:
+                events.publish_task(task["id"])
         accepted.append({"job_id": row["id"], "url": url})
     return {"accepted": accepted}
 

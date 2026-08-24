@@ -6,7 +6,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from api import db
+from api import db, events
 from api.auth import AuthedUser, require_user
 
 router = APIRouter(prefix="/admin")
@@ -294,6 +294,7 @@ def trigger_ingest(body: IngestBody, user: AuthedUser = Depends(require_admin)):
             (db.jsonb({"source": name, "cycle": cycle}),),
         )
         assert row is not None
+        events.publish_task(row["id"])
         task_ids.append({"source": name, "task_id": row["id"]})
     return {"tasks": task_ids}
 
@@ -465,6 +466,7 @@ def reparse_job(job_id: int, user: AuthedUser = Depends(require_admin)):
         (db.jsonb({"job_id": job_id, "user_id": user.id, "force": True}),),
     )
     assert row is not None
+    events.publish_task(row["id"])
     return {"task_id": row["id"]}
 
 
