@@ -326,8 +326,34 @@ def _load_config(user_id: int) -> tuple[Entitlement, ai.AIConfig]:
 
 SCRAPE_TIMEOUT_SECONDS = int(os.environ.get("JOBTRACKER_SCRAPE_TIMEOUT_SECONDS", "180"))
 
+# Interstitial/block pages (captcha walls, geo blocks, rate limits, site-wide
+# outages) must never be cached as job content or fed to closed-checks: a
+# blocked fetch says nothing about the job. Markers are checked only on short
+# pages; real postings are long, block pages are not.
+_BLOCK_MARKERS = (
+    "captcha", "access denied", "request blocked", "are you a robot",
+    "unusual traffic", "too many requests", "rate limit", "just a moment",
+    "checking your browser", "attention required", "service unavailable",
+    "temporarily unavailable", "not available in your region",
+    "not available in your country", "error 503", "error 502",
+)
 
-async def _scrape(url: str) -> Optional[str]:
+
+def _looks_blocked(content: Optional[str]) -> bool:
+    if not content:
+        return False
+    text = content.strip()
+    if len(text) < 300:
+        return True
+    if len(text) < 6000:
+        lowered = text.lower()
+        return any(m in lowered for m in _BLOCK_MARKERS)
+    return False
+
+
+async def _fetch_page(url: str) -> Optional[str]:
+    """Timeout-bounded, block-aware chromium extraction; returns None for
+    failures, timeouts, and interstitial pages alike."""
     from core.pittcsc_simplify import extract_url_content
 
     start = time.monotonic()
@@ -343,7 +369,16 @@ async def _scrape(url: str) -> Optional[str]:
         logger.warning(f"scrape timed out after {SCRAPE_TIMEOUT_SECONDS}s: {url}")
         return None
     metrics.SCRAPE_DURATION.observe(time.monotonic() - start)
+    if _looks_blocked(content):
+        metrics.SCRAPES.labels("blocked").inc()
+        logger.info(f"scrape returned a block/interstitial page: {url}")
+        return None
     metrics.SCRAPES.labels("ok" if content else "empty").inc()
+    return content
+
+
+async def _scrape(url: str) -> Optional[str]:
+    content = await _fetch_page(url)
     if content:
         add_ai_result(url, "passed", "content cached", "content", input_content=content)
     return content
@@ -895,11 +930,7 @@ async def _reverify_jobs(
     task_id: int, rows: List[Dict[str, Any]], parent_id: Optional[int] = None
 ) -> None:
     from core import ats
-    from core.pittcsc_simplify import (
-        CLOSED_INSTRUCTIONS,
-        JobClosedResponse,
-        extract_url_content,
-    )
+    from core.pittcsc_simplify import CLOSED_INSTRUCTIONS, JobClosedResponse
 
     key = ai.server_key("openai")
     if not key:
@@ -936,12 +967,14 @@ async def _reverify_jobs(
                 company=r["company"], job_title=r["title"], context="reverify",
             )
             return
-        if ats_res.ok and ats_res.text:
+        if ats_res.ok and ats_res.text and not _looks_blocked(ats_res.text):
             content = ats_res.text
         else:
             async with scrape_sem:
-                content = await asyncio.to_thread(extract_url_content, r["url"])
+                content = await _fetch_page(r["url"])
         if not content:
+            # Fetch failed or page was a block/interstitial: says nothing about
+            # the job, so keep the prior verdict and retry next cycle.
             return
         await verdicts.run_check(
             cfg,
