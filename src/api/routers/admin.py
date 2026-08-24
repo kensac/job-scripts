@@ -194,6 +194,28 @@ def create_source(body: SourceBody, user: AuthedUser = Depends(require_admin)):
     )
 
 
+@router.get("/users")
+def list_users(user: AuthedUser = Depends(require_admin)):
+    return {
+        "users": db.query(
+            """
+            SELECT u.id, u.sub, u.email, u.name, u.groups, u.created_at, u.last_seen_at,
+                   s.api_key_enc IS NOT NULL AS has_byo_key,
+                   s.ai_provider, s.ai_model, s.bypass_sponsorship_filter,
+                   (SELECT COUNT(*) FROM user_jobs uj WHERE uj.user_id = u.id) AS board_rows,
+                   (SELECT COUNT(*) FROM user_filters uf
+                    WHERE uf.user_id = u.id AND uf.enabled) AS enabled_filters,
+                   (SELECT COUNT(*) FROM user_sources us WHERE us.user_id = u.id) AS sources,
+                   COALESCE((SELECT SUM(a.total_tokens) FROM api_usage a
+                             WHERE a.user_id = u.id AND a.key_source = 'owner'
+                               AND a.created_at > now() - interval '7 days'), 0) AS owner_tokens_week
+            FROM users u LEFT JOIN user_settings s ON s.user_id = u.id
+            ORDER BY u.last_seen_at DESC
+            """
+        )
+    }
+
+
 @router.get("/tasks")
 def list_tasks(
     status: Optional[str] = None,
