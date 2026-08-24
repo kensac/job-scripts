@@ -194,6 +194,36 @@ def create_source(body: SourceBody, user: AuthedUser = Depends(require_admin)):
     )
 
 
+@router.get("/tasks")
+def list_tasks(
+    status: Optional[str] = None,
+    kind: Optional[str] = None,
+    limit: int = 100,
+    user: AuthedUser = Depends(require_admin),
+):
+    limit = max(1, min(limit, 500))
+    clauses, params = [], {"limit": limit}
+    if status:
+        clauses.append("status = %(status)s")
+        params["status"] = status
+    if kind:
+        clauses.append("kind = %(kind)s")
+        params["kind"] = kind
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    rows = db.query(
+        f"""
+        SELECT id, kind, payload, status, attempts, progress, error,
+               created_at, started_at, last_heartbeat, finished_at
+        FROM tasks {where} ORDER BY id DESC LIMIT %(limit)s
+        """,
+        params,
+    )
+    summary = db.query(
+        "SELECT kind, status, COUNT(*) AS count FROM tasks GROUP BY kind, status ORDER BY kind, status"
+    )
+    return {"rows": rows, "summary": summary}
+
+
 class IngestBody(BaseModel):
     sources: Optional[List[str]] = None
 

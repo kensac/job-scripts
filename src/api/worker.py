@@ -40,16 +40,41 @@ class FilterVerdict(BaseModel):
     reason: str
 
 
+MAX_ATTEMPTS = 3
+HEARTBEAT_TIMEOUT_MINUTES = 15
+
+
 def _claim_task() -> Optional[Dict[str, Any]]:
     kinds_clause = "AND kind = ANY(%(kinds)s)" if WORKER_KINDS else ""
     return db.query_one(
         f"""
-        UPDATE tasks SET status = 'running', started_at = now()
+        UPDATE tasks SET status = 'running', started_at = now(),
+                         last_heartbeat = now(), attempts = attempts + 1
         WHERE id = (SELECT id FROM tasks WHERE status = 'pending' {kinds_clause}
                     ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED)
         RETURNING id, kind, payload
         """,
         {"kinds": WORKER_KINDS},
+    )
+
+
+def reap_stale_tasks() -> None:
+    """Recover tasks whose worker died mid-run (deploy, crash, OOM): heartbeat
+    goes stale -> requeue up to MAX_ATTEMPTS, then fail permanently."""
+    db.execute(
+        f"""
+        UPDATE tasks SET status = 'pending', started_at = NULL, last_heartbeat = NULL
+        WHERE status = 'running' AND attempts < {MAX_ATTEMPTS}
+          AND COALESCE(last_heartbeat, started_at) < now() - interval '{HEARTBEAT_TIMEOUT_MINUTES} minutes'
+        """
+    )
+    db.execute(
+        f"""
+        UPDATE tasks SET status = 'failed', finished_at = now(),
+                         error = 'worker lost (heartbeat timeout after ' || attempts || ' attempts)'
+        WHERE status = 'running' AND attempts >= {MAX_ATTEMPTS}
+          AND COALESCE(last_heartbeat, started_at) < now() - interval '{HEARTBEAT_TIMEOUT_MINUTES} minutes'
+        """
     )
 
 
@@ -227,7 +252,7 @@ def _candidates(user_id: int) -> List[Dict[str, Any]]:
 
 def _set_progress(task_id: int, done: int, total: int, label: str) -> None:
     db.execute(
-        "UPDATE tasks SET progress = %s WHERE id = %s",
+        "UPDATE tasks SET progress = %s, last_heartbeat = now() WHERE id = %s",
         (db.jsonb({"done": done, "total": total, "label": label}), task_id),
     )
 
@@ -410,12 +435,16 @@ def main() -> None:
     logger.info(
         f"Worker started (kinds={WORKER_KINDS or 'all'}, scheduler={'on' if ingest_enabled else 'off'})"
     )
+    last_housekeeping = 0.0
     while True:
-        if ingest_enabled:
+        if time.monotonic() - last_housekeeping > 60:
+            last_housekeeping = time.monotonic()
             try:
-                schedule_ingest_cycle()
+                reap_stale_tasks()
+                if ingest_enabled:
+                    schedule_ingest_cycle()
             except Exception:
-                logger.exception("ingest scheduling failed")
+                logger.exception("housekeeping failed")
         worked = asyncio.run(run_once())
         if not worked:
             time.sleep(POLL_SECONDS)
