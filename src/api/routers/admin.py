@@ -174,8 +174,17 @@ def admin_list_sources(user: AuthedUser = Depends(require_admin)):
             """
             SELECT s.name, s.listings_url, s.description, s.active, s.created_at,
                    (SELECT COUNT(*) FROM jobs j WHERE j.source = s.name) AS jobs,
-                   (SELECT COUNT(*) FROM user_sources us WHERE us.source = s.name) AS subscribers
-            FROM sources s ORDER BY s.active DESC, s.name
+                   (SELECT COUNT(*) FROM user_sources us WHERE us.source = s.name) AS subscribers,
+                   li.status AS last_ingest_status,
+                   li.finished_at AS last_ingest_at,
+                   li.error AS last_ingest_error
+            FROM sources s
+            LEFT JOIN LATERAL (
+                SELECT status, finished_at, error FROM tasks
+                WHERE kind = 'ingest_source' AND payload->>'source' = s.name
+                ORDER BY id DESC LIMIT 1
+            ) li ON TRUE
+            ORDER BY s.active DESC, s.name
             """
         )
     }
