@@ -170,6 +170,7 @@ def resolve_source_request(
 class SourceBody(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=80)
     listings_url: Optional[str] = Field(default=None, max_length=1000)
+    description: Optional[str] = Field(default=None, max_length=500)
     active: Optional[bool] = None
 
 
@@ -182,8 +183,14 @@ def create_source(body: SourceBody, user: AuthedUser = Depends(require_admin)):
     if db.query_one("SELECT name FROM sources WHERE name = %s", (body.name,)):
         raise HTTPException(409, detail={"code": "DUPLICATE_NAME", "message": "source name exists"})
     return db.query_one(
-        "INSERT INTO sources (name, listings_url, active) VALUES (%s, %s, %s) RETURNING *",
-        (body.name, body.listings_url, body.active if body.active is not None else True),
+        "INSERT INTO sources (name, listings_url, description, active) "
+        "VALUES (%s, %s, %s, %s) RETURNING *",
+        (
+            body.name,
+            body.listings_url,
+            body.description or "",
+            body.active if body.active is not None else True,
+        ),
     )
 
 

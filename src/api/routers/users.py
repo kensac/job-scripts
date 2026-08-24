@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from typing import List, Optional
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 
 from api import ai, budget, crypto, db
 from api.auth import AuthedUser, require_user
@@ -47,6 +49,25 @@ _PROVIDER_PARAMS = {
 }
 
 
+class ModelEntry(BaseModel):
+    model: str
+    note: str
+
+
+class ProviderEntry(BaseModel):
+    provider: str
+    default_model: Optional[str]
+    models: List[ModelEntry]
+    params: List[str]
+
+
+class ModelsResponse(BaseModel):
+    providers: List[ProviderEntry]
+    owner_key_models: List[str]
+    key_source: Optional[str]
+    addable_providers: List[str]
+
+
 def _provider_entry(provider: str, models: list) -> dict:
     return {
         "provider": provider,
@@ -56,7 +77,7 @@ def _provider_entry(provider: str, models: list) -> dict:
     }
 
 
-@router.get("/models")
+@router.get("/models", response_model=ModelsResponse)
 def models(user: AuthedUser = Depends(require_user)):
     """Only the options valid for this user right now: their BYO provider's
     catalog if they have a key (it takes precedence), else the owner-key

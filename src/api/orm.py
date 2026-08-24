@@ -105,6 +105,7 @@ class Source(Base):
 
     name: Mapped[str] = mapped_column(Text, primary_key=True)
     listings_url: Mapped[str] = mapped_column(Text)
+    description: Mapped[str] = mapped_column(Text, server_default=text("''"))
     active: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
     created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
 

@@ -27,6 +27,15 @@ def stats(user: AuthedUser = Depends(require_user)):
         """,
         (user.id,),
     )
+    by_source_status = db.query(
+        """
+        SELECT j.source, COALESCE(uj.status, '') AS status, COUNT(*) AS count
+        FROM user_jobs uj JOIN jobs j ON j.id = uj.job_id
+        WHERE uj.user_id = %s AND NOT uj.hidden
+        GROUP BY j.source, uj.status ORDER BY j.source, count DESC
+        """,
+        (user.id,),
+    )
     over_time = db.query(
         "SELECT date_trunc('week', date_applied)::date AS week, COUNT(*) AS applied "
         "FROM user_jobs WHERE user_id = %s AND date_applied IS NOT NULL "
@@ -46,5 +55,6 @@ def stats(user: AuthedUser = Depends(require_user)):
         "totals": totals,
         "by_status": by_status,
         "by_source": by_source,
+        "by_source_status": by_source_status,
         "applied_by_week": over_time,
     }

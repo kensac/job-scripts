@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 
 from api import db, metrics
+from api.auth import require_user
 from api.routers import admin, filters, jobs, sources, stats, users
 
 
@@ -38,3 +39,8 @@ metrics.instrument(app)
 def healthz():
     db.query_one("SELECT 1 AS ok")
     return {"ok": True}
+
+
+@app.get("/v1/openapi")
+def openapi_schema(user=Depends(require_user)):
+    return app.openapi()

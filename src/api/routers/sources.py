@@ -95,7 +95,7 @@ def list_sources(user: AuthedUser = Depends(require_user)):
     return {
         "sources": db.query(
             """
-            SELECT s.name, s.listings_url,
+            SELECT s.name, s.listings_url, s.description,
                    us.user_id IS NOT NULL AS enabled
             FROM sources s
             LEFT JOIN user_sources us ON us.source = s.name AND us.user_id = %s
