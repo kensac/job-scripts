@@ -58,5 +58,5 @@ typing_extensions==4.14.0
 urllib3==2.5.0
 uvicorn==0.52.4
 wakepy==0.10.2.post1
-websocket-client==1.8.0
+websocket-client==1.9.0
 wsproto==1.2.0
