@@ -55,7 +55,7 @@ trio==0.30.0
 trio-websocket==0.12.2
 typing-inspection==0.4.2
 typing_extensions==4.14.0
-urllib3==2.5.0
+urllib3==2.7.0
 uvicorn==0.52.4
 wakepy==0.10.2.post1
 websocket-client==1.8.0
