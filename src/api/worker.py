@@ -323,11 +323,24 @@ def _load_config(user_id: int) -> tuple[Entitlement, ai.AIConfig]:
     return ent, budget.resolve_ai_config(user_id, ent)
 
 
+SCRAPE_TIMEOUT_SECONDS = int(os.environ.get("JOBTRACKER_SCRAPE_TIMEOUT_SECONDS", "180"))
+
+
 async def _scrape(url: str) -> Optional[str]:
     from core.pittcsc_simplify import extract_url_content
 
     start = time.monotonic()
-    content = await asyncio.to_thread(extract_url_content, url)
+    try:
+        # A wedged chromium must not hold a scrape slot forever; the thread
+        # itself can't be killed, but freeing the slot keeps the chunk moving.
+        content = await asyncio.wait_for(
+            asyncio.to_thread(extract_url_content, url), SCRAPE_TIMEOUT_SECONDS
+        )
+    except asyncio.TimeoutError:
+        metrics.SCRAPE_DURATION.observe(time.monotonic() - start)
+        metrics.SCRAPES.labels("timeout").inc()
+        logger.warning(f"scrape timed out after {SCRAPE_TIMEOUT_SECONDS}s: {url}")
+        return None
     metrics.SCRAPE_DURATION.observe(time.monotonic() - start)
     metrics.SCRAPES.labels("ok" if content else "empty").inc()
     if content:
@@ -1069,6 +1082,20 @@ async def run_once() -> bool:
         _finish(task["id"], "failed", f"unknown task kind: {task['kind']}")
         return True
     task_start = time.monotonic()
+
+    async def _liveness() -> None:
+        # Progress-based heartbeats stall when every job in flight is slow;
+        # this proves the process is alive so the reaper only requeues tasks
+        # whose worker actually died.
+        while True:
+            await asyncio.sleep(60)
+            db.execute(
+                "UPDATE tasks SET last_heartbeat = now() "
+                "WHERE id = %s AND status = 'running'",
+                (task["id"],),
+            )
+
+    hb = asyncio.create_task(_liveness())
     try:
         await handler(task["id"], task["payload"])
         _finish(task["id"], "done")
@@ -1078,6 +1105,8 @@ async def run_once() -> bool:
         _finish(task["id"], "failed", str(exc))
         metrics.TASKS_PROCESSED.labels(task["kind"], "failed").inc()
         logger.exception(f"Task {task['id']} failed")
+    finally:
+        hb.cancel()
     metrics.TASK_DURATION.labels(task["kind"]).observe(time.monotonic() - task_start)
     if task["kind"] in CHUNK_KINDS:
         try:
