@@ -167,6 +167,20 @@ def resolve_source_request(
     return row
 
 
+@router.get("/sources")
+def admin_list_sources(user: AuthedUser = Depends(require_admin)):
+    return {
+        "sources": db.query(
+            """
+            SELECT s.name, s.listings_url, s.description, s.active, s.created_at,
+                   (SELECT COUNT(*) FROM jobs j WHERE j.source = s.name) AS jobs,
+                   (SELECT COUNT(*) FROM user_sources us WHERE us.source = s.name) AS subscribers
+            FROM sources s ORDER BY s.active DESC, s.name
+            """
+        )
+    }
+
+
 class SourceBody(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=80)
     listings_url: Optional[str] = Field(default=None, max_length=1000)
