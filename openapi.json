@@ -5757,6 +5757,21 @@
               }
             ],
             "title": "Weekly Token Budget"
+          },
+          "allowed_models": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array",
+                "maxItems": 50
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allowed Models"
           }
         },
         "type": "object",
