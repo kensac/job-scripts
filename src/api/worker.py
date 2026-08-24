@@ -17,6 +17,55 @@ from core.store import add_ai_result, get_content, get_custom_result
 logger = logging.getLogger("jobtracker_worker")
 
 POLL_SECONDS = float(os.environ.get("JOBTRACKER_WORKER_POLL", "5"))
+# Filter runs shard into chunks of this many checks; the shared queue then
+# load-balances by availability (fast workers simply claim more chunks).
+CHUNK_SIZE = int(os.environ.get("JOBTRACKER_CHUNK_SIZE", "100"))
+# In-flight jobs per worker inside a chunk (network time dominates, so calls
+# overlap); the adaptive limiter tunes the actual level per host.
+MAX_CONCURRENCY = int(os.environ.get("JOBTRACKER_MAX_CONCURRENCY", "6"))
+SCRAPE_CONCURRENCY = int(os.environ.get("JOBTRACKER_SCRAPE_CONCURRENCY", "2"))
+
+
+class AdaptiveLimiter:
+    """AIMD concurrency control on a rolling throughput window: grow while the
+    completion rate keeps improving, step down when it stalls or errors appear,
+    halve on rate limits. Each host converges to its own ceiling."""
+
+    def __init__(self, min_c: int = 1, max_c: int = MAX_CONCURRENCY, window: int = 8):
+        self.limit = min(3, max_c)
+        self.min_c = min_c
+        self.max_c = max_c
+        self.window = window
+        self._count = 0
+        self._errors = 0
+        self._win_start = time.monotonic()
+        self._prev_rate: Optional[float] = None
+
+    def record(self, error: bool = False, rate_limited: bool = False) -> None:
+        if rate_limited:
+            self.limit = max(self.min_c, self.limit // 2)
+            self._reset()
+            return
+        if error:
+            self._errors += 1
+        self._count += 1
+        if self._count < self.window:
+            return
+        elapsed = time.monotonic() - self._win_start
+        rate = self._count / elapsed if elapsed > 0 else 0.0
+        if self._errors:
+            self.limit = max(self.min_c, self.limit - 1)
+        elif self._prev_rate is None or rate >= self._prev_rate * 1.05:
+            self.limit = min(self.max_c, self.limit + 1)
+        elif rate < self._prev_rate * 0.9:
+            self.limit = max(self.min_c, self.limit - 1)
+        self._prev_rate = rate
+        self._reset()
+
+    def _reset(self) -> None:
+        self._count = 0
+        self._errors = 0
+        self._win_start = time.monotonic()
 INGEST_INTERVAL_MINUTES = int(os.environ.get("JOBTRACKER_INGEST_INTERVAL_MINUTES", "60"))
 INGEST_MAX_AI_PER_SOURCE = int(os.environ.get("JOBTRACKER_INGEST_MAX_AI_PER_SOURCE", "300"))
 # Which task kinds this worker claims; lets small fleet hosts (e.g. an rpi)
@@ -104,6 +153,73 @@ def _finish(task_id: int, status: str, error: Optional[str] = None) -> None:
 def _cancelled(task_id: int) -> bool:
     row = db.query_one("SELECT status FROM tasks WHERE id = %s", (task_id,))
     return not row or row["status"] != "running"
+
+
+def _parent_cancelled(parent_id: int) -> bool:
+    row = db.query_one("SELECT status FROM tasks WHERE id = %s", (parent_id,))
+    return not row or row["status"] == "cancelled"
+
+
+def _update_parent_progress(parent_id: int) -> None:
+    agg = db.query_one(
+        "SELECT COALESCE(SUM((progress->>'done')::int), 0) AS done FROM tasks "
+        "WHERE kind = 'run_filter_chunk' AND (payload->>'parent_id')::bigint = %s",
+        (parent_id,),
+    )
+    db.execute(
+        "UPDATE tasks SET progress = jsonb_set(COALESCE(progress, '{}'::jsonb), "
+        "'{done}', to_jsonb(%s::int)), last_heartbeat = now() "
+        "WHERE id = %s AND status = 'waiting'",
+        (agg["done"] if agg else 0, parent_id),
+    )
+    events.publish_task(parent_id)
+
+
+def _maybe_finalize_parent(parent_id: int) -> None:
+    _update_parent_progress(parent_id)
+    live = db.query_one(
+        "SELECT COUNT(*) AS c FROM tasks WHERE kind = 'run_filter_chunk' "
+        "AND (payload->>'parent_id')::bigint = %s AND status IN ('pending', 'running')",
+        (parent_id,),
+    )
+    if live and live["c"]:
+        return
+    failed = db.query_one(
+        "SELECT COUNT(*) AS c FROM tasks WHERE kind = 'run_filter_chunk' "
+        "AND (payload->>'parent_id')::bigint = %s AND status = 'failed'",
+        (parent_id,),
+    )
+    n_failed = failed["c"] if failed else 0
+    if n_failed:
+        db.execute(
+            "UPDATE tasks SET status = 'failed', error = %s, finished_at = now() "
+            "WHERE id = %s AND status = 'waiting'",
+            (f"{n_failed} chunk(s) failed", parent_id),
+        )
+    else:
+        db.execute(
+            "UPDATE tasks SET status = 'done', finished_at = now() "
+            "WHERE id = %s AND status = 'waiting'",
+            (parent_id,),
+        )
+    events.publish_task(parent_id)
+
+
+def _reconcile_chunks() -> None:
+    db.execute(
+        "UPDATE tasks SET status = 'cancelled', error = 'parent cancelled', finished_at = now() "
+        "WHERE kind = 'run_filter_chunk' AND status = 'pending' "
+        "AND (payload->>'parent_id')::bigint IN (SELECT id FROM tasks WHERE status = 'cancelled')"
+    )
+    for r in db.query(
+        """
+        SELECT id FROM tasks t WHERE t.status = 'waiting'
+        AND NOT EXISTS (SELECT 1 FROM tasks c WHERE c.kind = 'run_filter_chunk'
+            AND (c.payload->>'parent_id')::bigint = t.id
+            AND c.status IN ('pending', 'running'))
+        """
+    ):
+        _maybe_finalize_parent(r["id"])
 
 
 def _load_config(user_id: int) -> tuple[Entitlement, ai.AIConfig]:
@@ -289,54 +405,133 @@ def _decided_urls(urls: List[str], prompt_hash: str, model: str) -> set:
     return {r["url"] for r in rows}
 
 
-async def _run_filters(task_id: int, user_id: int, filters: List[Dict[str, Any]]) -> None:
-    ent, cfg = _load_config(user_id)
-    candidates = _candidates(user_id)
-    urls = [j["url"] for j in candidates]
-    total = len(candidates) * len(filters)
+async def _process_jobs(
+    task_id: int,
+    user_id: int,
+    ent,
+    cfg,
+    flt: Dict[str, Any],
+    jobs: List[Dict[str, Any]],
+    parent_id: Optional[int] = None,
+) -> None:
+    instructions = build_custom_instructions(flt["prompt"], flt["on_ambiguous"])
+    total = len(jobs)
     done = 0
-    checked = 0
-    for flt in filters:
-        instructions = build_custom_instructions(flt["prompt"], flt["on_ambiguous"])
-        decided = _decided_urls(urls, flt["prompt_hash"], cfg.model)
-        for job in candidates:
+    limiter = AdaptiveLimiter()
+    scrape_sem = asyncio.Semaphore(SCRAPE_CONCURRENCY)
+
+    async def one(job: Dict[str, Any]):
+        content = get_content(job["url"])
+        if not content:
+            async with scrape_sem:
+                content = await _scrape(job["url"])
+        if not content:
+            return None
+        return await _check_filter(
+            cfg, job["url"], job["company"], job["title"], content,
+            instructions, flt["prompt_hash"], f"user{user_id}:{flt['name']}",
+        )
+
+    idx = 0
+    pending: Dict[asyncio.Task, Dict[str, Any]] = {}
+    while idx < total or pending:
+        while idx < total and len(pending) < limiter.limit:
+            pending[asyncio.create_task(one(jobs[idx]))] = jobs[idx]
+            idx += 1
+        finished, _ = await asyncio.wait(pending.keys(), return_when=asyncio.FIRST_COMPLETED)
+        for t in finished:
+            job = pending.pop(t)
             done += 1
-            if job["url"] in decided:
-                continue
-            if checked % 10 == 0:
-                if _cancelled(task_id):
-                    logger.info(f"Task {task_id} cancelled mid-run")
-                    return
-                if (
-                    cfg.key_source == "owner"
-                    and ent.weekly_token_budget is not None
-                    and budget.spent_this_week(user_id) >= ent.weekly_token_budget
-                ):
-                    raise PermissionError(f"BUDGET_EXCEEDED after {done}/{total} checks")
-            content = get_content(job["url"]) or await _scrape(job["url"])
-            if not content:
-                continue
-            checked += 1
             try:
-                usage = await _check_filter(
-                    cfg, job["url"], job["company"], job["title"], content,
-                    instructions, flt["prompt_hash"], f"user{user_id}:{flt['name']}",
-                )
-            except Exception:
-                # One bad job (truncated output, transient API error) must not
-                # kill the whole run; the failed verdict is recorded and retried
-                # on a later pass.
+                usage = t.result()
+            except Exception as exc:
+                # One bad job must not kill the run; the failed verdict is
+                # recorded and retried later. Rate limits shrink concurrency.
+                s = str(exc).lower()
+                limiter.record(error=True, rate_limited="429" in s or "rate limit" in s)
                 logger.exception(f"Filter check failed for {job['url']}")
                 continue
+            limiter.record()
             if usage and usage["total_tokens"]:
                 budget.record_usage(
                     user_id, cfg.key_source, "filter", cfg.model,
                     usage["prompt_tokens"], usage["completion_tokens"], usage["total_tokens"],
                 )
-            if checked % 5 == 0:
+            if done % 5 == 0:
                 _set_progress(task_id, done, total, flt["name"])
-        _set_progress(task_id, done, total, flt["name"])
-    _set_progress(task_id, total, total, "")
+                if parent_id:
+                    _update_parent_progress(parent_id)
+        if _cancelled(task_id) or (parent_id and _parent_cancelled(parent_id)):
+            for t in pending:
+                t.cancel()
+            logger.info(f"Task {task_id} cancelled mid-run")
+            return
+        if (
+            cfg.key_source == "owner"
+            and ent.weekly_token_budget is not None
+            and budget.spent_this_week(user_id) >= ent.weekly_token_budget
+        ):
+            for t in pending:
+                t.cancel()
+            raise PermissionError(f"BUDGET_EXCEEDED after {done}/{total} checks")
+    _set_progress(task_id, total, total, flt["name"])
+    if parent_id:
+        _update_parent_progress(parent_id)
+
+
+async def _run_filters(task_id: int, user_id: int, filters: List[Dict[str, Any]]) -> None:
+    """Splitter: compute the undecided work, then either run it inline (small)
+    or shard it into run_filter_chunk tasks the whole fleet load-balances."""
+    ent, cfg = _load_config(user_id)
+    candidates = _candidates(user_id)
+    urls = [j["url"] for j in candidates]
+    units: List[tuple] = []
+    for flt in filters:
+        decided = _decided_urls(urls, flt["prompt_hash"], cfg.model)
+        todo = [j for j in candidates if j["url"] not in decided]
+        for start in range(0, len(todo), CHUNK_SIZE):
+            units.append((flt, todo[start : start + CHUNK_SIZE]))
+    if not units:
+        _set_progress(task_id, 0, 0, "everything already decided")
+        return
+    if len(units) == 1:
+        flt, jobs = units[0]
+        await _process_jobs(task_id, user_id, ent, cfg, flt, jobs)
+        return
+    total = sum(len(jobs) for _, jobs in units)
+    for flt, jobs in units:
+        enqueue(
+            "run_filter_chunk",
+            {
+                "parent_id": task_id,
+                "user_id": user_id,
+                "filter": {
+                    k: flt[k] for k in ("name", "prompt", "on_ambiguous", "prompt_hash")
+                },
+                "jobs": jobs,
+            },
+        )
+    db.execute(
+        "UPDATE tasks SET status = 'waiting', progress = %s WHERE id = %s AND status = 'running'",
+        (
+            db.jsonb({"done": 0, "total": total, "label": f"{len(units)} chunks across the fleet"}),
+            task_id,
+        ),
+    )
+    events.publish_task(task_id)
+
+
+async def handle_run_filter_chunk(task_id: int, payload: Dict[str, Any]) -> None:
+    ent, cfg = _load_config(payload["user_id"])
+    await _process_jobs(
+        task_id,
+        payload["user_id"],
+        ent,
+        cfg,
+        payload["filter"],
+        payload["jobs"],
+        parent_id=payload["parent_id"],
+    )
 
 
 async def handle_run_filter(task_id: int, payload: Dict[str, Any]) -> None:
@@ -424,7 +619,7 @@ async def handle_ingest_source(task_id: int, payload: Dict[str, Any]) -> None:
     for u in users:
         active = db.query_one(
             "SELECT 1 AS x FROM tasks WHERE kind = 'run_all_filters' "
-            "AND status IN ('pending', 'running') "
+            "AND status IN ('pending', 'running', 'waiting') "
             "AND (payload->>'user_id')::bigint = %s LIMIT 1",
             (u["id"],),
         )
@@ -441,6 +636,7 @@ HANDLERS = {
     "extract_upload": lambda task_id, payload: handle_extract_upload(payload),
     "run_filter": handle_run_filter,
     "run_all_filters": handle_run_all_filters,
+    "run_filter_chunk": handle_run_filter_chunk,
     "ingest_source": handle_ingest_source,
 }
 
@@ -487,6 +683,11 @@ async def run_once() -> bool:
         _finish(task["id"], "failed", str(exc))
         metrics.TASKS_PROCESSED.labels(task["kind"], "failed").inc()
         logger.exception(f"Task {task['id']} failed")
+    if task["kind"] == "run_filter_chunk":
+        try:
+            _maybe_finalize_parent(task["payload"]["parent_id"])
+        except Exception:
+            logger.exception("parent finalize failed")
     return True
 
 
@@ -504,6 +705,7 @@ def main() -> None:
             last_housekeeping = time.monotonic()
             try:
                 reap_stale_tasks()
+                _reconcile_chunks()
                 if ingest_enabled:
                     schedule_ingest_cycle()
             except Exception:
