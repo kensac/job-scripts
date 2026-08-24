@@ -264,27 +264,48 @@ def _set_progress(task_id: int, done: int, total: int, label: str) -> None:
     )
 
 
+def _decided_urls(urls: List[str], prompt_hash: str, model: str) -> set:
+    """URLs that already have a decided verdict for this filter+model - one
+    query instead of one per job, so cache-hit reruns cost nothing per row."""
+    if not urls:
+        return set()
+    rows = db.query(
+        "SELECT DISTINCT url FROM ai_queries WHERE url = ANY(%s) "
+        "AND check_type = 'custom' AND prompt_hash = %s AND model = %s "
+        "AND status IN ('passed', 'rejected')",
+        (urls, prompt_hash, model),
+    )
+    return {r["url"] for r in rows}
+
+
 async def _run_filters(task_id: int, user_id: int, filters: List[Dict[str, Any]]) -> None:
     ent, cfg = _load_config(user_id)
     candidates = _candidates(user_id)
+    urls = [j["url"] for j in candidates]
     total = len(candidates) * len(filters)
     done = 0
+    checked = 0
     for flt in filters:
         instructions = build_custom_instructions(flt["prompt"], flt["on_ambiguous"])
+        decided = _decided_urls(urls, flt["prompt_hash"], cfg.model)
         for job in candidates:
-            if done % 10 == 0 and _cancelled(task_id):
-                logger.info(f"Task {task_id} cancelled mid-run")
-                return
-            if (
-                cfg.key_source == "owner"
-                and ent.weekly_token_budget is not None
-                and budget.spent_this_week(user_id) >= ent.weekly_token_budget
-            ):
-                raise PermissionError(f"BUDGET_EXCEEDED after {done}/{total} checks")
-            content = get_content(job["url"]) or await _scrape(job["url"])
             done += 1
+            if job["url"] in decided:
+                continue
+            if checked % 10 == 0:
+                if _cancelled(task_id):
+                    logger.info(f"Task {task_id} cancelled mid-run")
+                    return
+                if (
+                    cfg.key_source == "owner"
+                    and ent.weekly_token_budget is not None
+                    and budget.spent_this_week(user_id) >= ent.weekly_token_budget
+                ):
+                    raise PermissionError(f"BUDGET_EXCEEDED after {done}/{total} checks")
+            content = get_content(job["url"]) or await _scrape(job["url"])
             if not content:
                 continue
+            checked += 1
             usage = await _check_filter(
                 cfg, job["url"], job["company"], job["title"], content,
                 instructions, flt["prompt_hash"], f"user{user_id}:{flt['name']}",
@@ -294,8 +315,9 @@ async def _run_filters(task_id: int, user_id: int, filters: List[Dict[str, Any]]
                     user_id, cfg.key_source, "filter", cfg.model,
                     usage["prompt_tokens"], usage["completion_tokens"], usage["total_tokens"],
                 )
-            if done % 5 == 0 or done == total:
+            if checked % 5 == 0:
                 _set_progress(task_id, done, total, flt["name"])
+        _set_progress(task_id, done, total, flt["name"])
     _set_progress(task_id, total, total, "")
 
 
@@ -326,7 +348,7 @@ async def handle_ingest_source(task_id: int, payload: Dict[str, Any]) -> None:
         check_security_clearance_requirement,
         fetch_job_postings,
     )
-    from core.store import get_latest
+    from core.store import get_latest, prefetch
 
     source = db.query_one(
         "SELECT * FROM sources WHERE name = %s AND active", (payload["source"],)
@@ -342,6 +364,7 @@ async def handle_ingest_source(task_id: int, payload: Dict[str, Any]) -> None:
         p for p in postings
         if p.active and p.url and p.date_posted >= FALLBACK_CUTOFF_TS
     ]
+    prefetch([p.url for p in candidates])
     checked = 0
     total = len(candidates)
     for i, p in enumerate(candidates):
