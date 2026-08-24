@@ -197,6 +197,7 @@ class Task(Base):
     dedupe_key: Mapped[Optional[str]] = mapped_column(Text, unique=True)
     status: Mapped[str] = mapped_column(Text, server_default=text("'pending'"))
     attempts: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
+    worker: Mapped[Optional[str]] = mapped_column(Text)
     last_heartbeat: Mapped[Optional[datetime.datetime]]
     progress: Mapped[Optional[Any]] = mapped_column(JSONB)
     error: Mapped[Optional[str]] = mapped_column(Text)

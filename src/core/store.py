@@ -3,6 +3,7 @@ from __future__ import annotations
 import atexit
 import datetime
 import os
+import socket
 from typing import Any, Dict, List, Optional
 
 import dotenv
@@ -36,7 +37,10 @@ _INSERT_COLUMNS = [
     "reasoning_tokens",
     "duration_ms",
     "error",
+    "worker",
 ]
+
+_WORKER = os.environ.get("JOBTRACKER_WORKER_NAME") or socket.gethostname()
 
 _pool = ConnectionPool(
     DATABASE_URL,
@@ -134,6 +138,7 @@ def init_db() -> None:
             )
             """
         )
+        conn.execute("ALTER TABLE ai_queries ADD COLUMN IF NOT EXISTS worker TEXT")
         for stmt in (
             "CREATE INDEX IF NOT EXISTS idx_ai_queries_url ON ai_queries(url)",
             "CREATE INDEX IF NOT EXISTS idx_ai_queries_url_check ON ai_queries(url, check_type)",
@@ -191,6 +196,7 @@ def add_ai_result(
         "reasoning_tokens": reasoning_tokens,
         "duration_ms": duration_ms,
         "error": error,
+        "worker": _WORKER,
     }
     columns = ", ".join(_INSERT_COLUMNS)
     placeholders = ", ".join(f"%({c})s" for c in _INSERT_COLUMNS)
