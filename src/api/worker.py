@@ -67,7 +67,9 @@ class AdaptiveLimiter:
         self._errors = 0
         self._win_start = time.monotonic()
 INGEST_INTERVAL_MINUTES = int(os.environ.get("JOBTRACKER_INGEST_INTERVAL_MINUTES", "60"))
-INGEST_MAX_AI_PER_SOURCE = int(os.environ.get("JOBTRACKER_INGEST_MAX_AI_PER_SOURCE", "300"))
+# 0 = unlimited. Fixed counts don't scale with users/fleet; per-user budgets
+# and fleet throughput are the real controls, these envs are emergency brakes.
+INGEST_MAX_AI_PER_SOURCE = int(os.environ.get("JOBTRACKER_INGEST_MAX_AI_PER_SOURCE", "0"))
 # Which task kinds this worker claims; lets small fleet hosts (e.g. an rpi)
 # opt out of scrape-heavy work. Default: all kinds.
 WORKER_KINDS = [
@@ -160,11 +162,14 @@ def _parent_cancelled(parent_id: int) -> bool:
     return not row or row["status"] == "cancelled"
 
 
+CHUNK_KINDS = ["run_filter_chunk", "reverify_chunk"]
+
+
 def _update_parent_progress(parent_id: int) -> None:
     agg = db.query_one(
         "SELECT COALESCE(SUM((progress->>'done')::int), 0) AS done FROM tasks "
-        "WHERE kind = 'run_filter_chunk' AND (payload->>'parent_id')::bigint = %s",
-        (parent_id,),
+        "WHERE kind = ANY(%s) AND (payload->>'parent_id')::bigint = %s",
+        (CHUNK_KINDS, parent_id),
     )
     db.execute(
         "UPDATE tasks SET progress = jsonb_set(COALESCE(progress, '{}'::jsonb), "
@@ -236,19 +241,24 @@ def _materialize_passing(user_id: int) -> int:
 def _maybe_finalize_parent(parent_id: int) -> None:
     _update_parent_progress(parent_id)
     live = db.query_one(
-        "SELECT COUNT(*) AS c FROM tasks WHERE kind = 'run_filter_chunk' "
+        "SELECT COUNT(*) AS c FROM tasks WHERE kind = ANY(%s) "
         "AND (payload->>'parent_id')::bigint = %s AND status IN ('pending', 'running')",
-        (parent_id,),
+        (CHUNK_KINDS, parent_id),
     )
     if live and live["c"]:
         return
     failed = db.query_one(
-        "SELECT COUNT(*) AS c FROM tasks WHERE kind = 'run_filter_chunk' "
+        "SELECT COUNT(*) AS c FROM tasks WHERE kind = ANY(%s) "
         "AND (payload->>'parent_id')::bigint = %s AND status = 'failed'",
-        (parent_id,),
+        (CHUNK_KINDS, parent_id),
     )
-    parent = db.query_one("SELECT payload FROM tasks WHERE id = %s", (parent_id,))
-    if parent and (parent["payload"] or {}).get("user_id"):
+    parent = db.query_one("SELECT kind, payload FROM tasks WHERE id = %s", (parent_id,))
+    if parent and parent["kind"] == "reverify_open":
+        try:
+            _demote_closed()
+        except Exception:
+            logger.exception("demotion failed")
+    elif parent and (parent["payload"] or {}).get("user_id"):
         try:
             _materialize_passing(parent["payload"]["user_id"])
         except Exception:
@@ -272,16 +282,18 @@ def _maybe_finalize_parent(parent_id: int) -> None:
 def _reconcile_chunks() -> None:
     db.execute(
         "UPDATE tasks SET status = 'cancelled', error = 'parent cancelled', finished_at = now() "
-        "WHERE kind = 'run_filter_chunk' AND status = 'pending' "
-        "AND (payload->>'parent_id')::bigint IN (SELECT id FROM tasks WHERE status = 'cancelled')"
+        "WHERE kind = ANY(%s) AND status = 'pending' "
+        "AND (payload->>'parent_id')::bigint IN (SELECT id FROM tasks WHERE status = 'cancelled')",
+        (CHUNK_KINDS,),
     )
     for r in db.query(
         """
         SELECT id FROM tasks t WHERE t.status = 'waiting'
-        AND NOT EXISTS (SELECT 1 FROM tasks c WHERE c.kind = 'run_filter_chunk'
+        AND NOT EXISTS (SELECT 1 FROM tasks c WHERE c.kind = ANY(%s)
             AND (c.payload->>'parent_id')::bigint = t.id
             AND c.status IN ('pending', 'running'))
-        """
+        """,
+        (CHUNK_KINDS,),
     ):
         _maybe_finalize_parent(r["id"])
 
@@ -650,7 +662,7 @@ async def handle_ingest_source(task_id: int, payload: Dict[str, Any]) -> None:
         if i % 10 == 0 and _cancelled(task_id):
             logger.info(f"Task {task_id} cancelled mid-ingest")
             return
-        if checked >= INGEST_MAX_AI_PER_SOURCE:
+        if INGEST_MAX_AI_PER_SOURCE and checked >= INGEST_MAX_AI_PER_SOURCE:
             logger.info(f"Ingest {source['name']}: AI cap reached ({checked})")
             break
         closed = get_latest(p.url, "closed")
@@ -699,7 +711,7 @@ async def handle_ingest_source(task_id: int, payload: Dict[str, Any]) -> None:
 
 
 REVERIFY_DAYS = int(os.environ.get("JOBTRACKER_REVERIFY_DAYS", "7"))
-REVERIFY_PER_CYCLE = int(os.environ.get("JOBTRACKER_REVERIFY_PER_CYCLE", "150"))
+REVERIFY_PER_CYCLE = int(os.environ.get("JOBTRACKER_REVERIFY_PER_CYCLE", "0"))  # 0 = all stale
 
 # A board row counts as untouched (machine-managed) when the user never set
 # anything on it; only these are auto-added by materialization and auto-removed
@@ -713,9 +725,26 @@ _UNTOUCHED = """
 """
 
 
-async def handle_reverify_open(task_id: int, payload: Dict[str, Any]) -> None:
-    """Re-checks 'still open?' for stale untouched board rows, then demotes
-    rows whose job turned out closed. Touched/hidden rows are never removed."""
+def _demote_closed() -> int:
+    with db.pool.connection() as conn:
+        result = conn.execute(
+            f"""
+            DELETE FROM user_jobs uj USING jobs j
+            WHERE uj.job_id = j.id AND {_UNTOUCHED}
+              AND (SELECT q.status FROM ai_queries q WHERE q.url = j.url
+                   AND q.check_type = 'closed' AND q.status IN ('passed', 'rejected')
+                   ORDER BY q.id DESC LIMIT 1) = 'rejected'
+            """
+        )
+        demoted = result.rowcount
+    if demoted:
+        logger.info(f"Demoted {demoted} closed rows from boards")
+    return demoted
+
+
+async def _reverify_jobs(
+    task_id: int, rows: List[Dict[str, Any]], parent_id: Optional[int] = None
+) -> None:
     from core import ats
     from core.pittcsc_simplify import (
         CLOSED_INSTRUCTIONS,
@@ -730,44 +759,28 @@ async def handle_reverify_open(task_id: int, payload: Dict[str, Any]) -> None:
         provider="openai", api_key=key, key_source="owner",
         model=ai.DEFAULT_MODELS["openai"],
     )
-    rows = db.query(
-        f"""
-        SELECT DISTINCT j.url, j.company, j.title FROM user_jobs uj
-        JOIN jobs j ON j.id = uj.job_id
-        WHERE {_UNTOUCHED}
-          AND COALESCE((SELECT MAX(q.created_at) FROM ai_queries q
-                        WHERE q.url = j.url AND q.check_type = 'closed'),
-                       '1970-01-01')::timestamp < now() - make_interval(days => %(days)s)
-        LIMIT %(cap)s
-        """,
-        {"days": REVERIFY_DAYS, "cap": REVERIFY_PER_CYCLE},
-    )
     total = len(rows)
-    for i, r in enumerate(rows):
-        if i % 5 == 0:
-            if _cancelled(task_id):
-                return
-            _set_progress(task_id, i, total, "reverifying open status")
-        ats_res = ats.resolve(r["url"])
+    done = 0
+    limiter = AdaptiveLimiter()
+    scrape_sem = asyncio.Semaphore(SCRAPE_CONCURRENCY)
+
+    async def one(r: Dict[str, Any]) -> None:
+        ats_res = await asyncio.to_thread(ats.resolve, r["url"])
         if ats_res.status is ats.Status.GONE:
             add_ai_result(r["url"], "rejected", "ATS reports posting gone (reverify)", "closed")
-            continue
-        content = (
-            ats_res.text
-            if ats_res.ok and ats_res.text
-            else await asyncio.to_thread(extract_url_content, r["url"])
-        )
+            return
+        if ats_res.ok and ats_res.text:
+            content = ats_res.text
+        else:
+            async with scrape_sem:
+                content = await asyncio.to_thread(extract_url_content, r["url"])
         if not content:
-            continue
-        try:
-            parsed, usage = await ai.parse(
-                cfg, CLOSED_INSTRUCTIONS, content[:60000], JobClosedResponse
-            )
-        except Exception:
-            logger.exception(f"Reverify closed-check failed for {r['url']}")
-            continue
+            return
+        parsed, usage = await ai.parse(
+            cfg, CLOSED_INSTRUCTIONS, content[:60000], JobClosedResponse
+        )
         if not parsed:
-            continue
+            return
         add_ai_result(
             r["url"],
             "rejected" if parsed.is_closed else "passed",
@@ -779,19 +792,81 @@ async def handle_reverify_open(task_id: int, payload: Dict[str, Any]) -> None:
             completion_tokens=usage["completion_tokens"],
             total_tokens=usage["total_tokens"],
         )
+
+    idx = 0
+    pending: Dict[asyncio.Task, Dict[str, Any]] = {}
+    while idx < total or pending:
+        while idx < total and len(pending) < limiter.limit:
+            pending[asyncio.create_task(one(rows[idx]))] = rows[idx]
+            idx += 1
+        finished, _ = await asyncio.wait(pending.keys(), return_when=asyncio.FIRST_COMPLETED)
+        for t in finished:
+            r = pending.pop(t)
+            done += 1
+            try:
+                t.result()
+                limiter.record()
+            except Exception as exc:
+                s = str(exc).lower()
+                limiter.record(error=True, rate_limited="429" in s or "rate limit" in s)
+                logger.exception(f"Reverify failed for {r['url']}")
+            if done % 5 == 0:
+                _set_progress(task_id, done, total, "reverifying open status")
+                if parent_id:
+                    _update_parent_progress(parent_id)
+        if _cancelled(task_id) or (parent_id and _parent_cancelled(parent_id)):
+            for t in pending:
+                t.cancel()
+            return
     _set_progress(task_id, total, total, "reverified")
-    with db.pool.connection() as conn:
-        result = conn.execute(
-            f"""
-            DELETE FROM user_jobs uj USING jobs j
-            WHERE uj.job_id = j.id AND {_UNTOUCHED}
-              AND (SELECT q.status FROM ai_queries q WHERE q.url = j.url
-                   AND q.check_type = 'closed' AND q.status IN ('passed', 'rejected')
-                   ORDER BY q.id DESC LIMIT 1) = 'rejected'
-            """
+    if parent_id:
+        _update_parent_progress(parent_id)
+
+
+async def handle_reverify_open(task_id: int, payload: Dict[str, Any]) -> None:
+    """Splitter: find every stale untouched board row, shard the re-checks
+    across the fleet, demote closed rows when the last chunk lands."""
+    cap_sql = "LIMIT %(cap)s" if REVERIFY_PER_CYCLE else ""
+    rows = db.query(
+        f"""
+        SELECT DISTINCT j.url, j.company, j.title FROM user_jobs uj
+        JOIN jobs j ON j.id = uj.job_id
+        WHERE {_UNTOUCHED}
+          AND COALESCE((SELECT MAX(q.created_at) FROM ai_queries q
+                        WHERE q.url = j.url AND q.check_type = 'closed'),
+                       '1970-01-01')::timestamp < now() - make_interval(days => %(days)s)
+        {cap_sql}
+        """,
+        {"days": REVERIFY_DAYS, "cap": REVERIFY_PER_CYCLE},
+    )
+    if not rows:
+        _set_progress(task_id, 0, 0, "nothing stale")
+        _demote_closed()
+        return
+    if len(rows) <= CHUNK_SIZE:
+        await _reverify_jobs(task_id, rows)
+        _demote_closed()
+        return
+    total = len(rows)
+    n_chunks = 0
+    for start in range(0, total, CHUNK_SIZE):
+        enqueue(
+            "reverify_chunk",
+            {"parent_id": task_id, "rows": rows[start : start + CHUNK_SIZE]},
         )
-        demoted = result.rowcount
-    logger.info(f"Reverify done: {total} checked, {demoted} closed rows demoted")
+        n_chunks += 1
+    db.execute(
+        "UPDATE tasks SET status = 'waiting', progress = %s WHERE id = %s AND status = 'running'",
+        (
+            db.jsonb({"done": 0, "total": total, "label": f"{n_chunks} chunks across the fleet"}),
+            task_id,
+        ),
+    )
+    events.publish_task(task_id)
+
+
+async def handle_reverify_chunk(task_id: int, payload: Dict[str, Any]) -> None:
+    await _reverify_jobs(task_id, payload["rows"], parent_id=payload["parent_id"])
 
 
 HANDLERS = {
@@ -801,6 +876,7 @@ HANDLERS = {
     "run_filter_chunk": handle_run_filter_chunk,
     "ingest_source": handle_ingest_source,
     "reverify_open": handle_reverify_open,
+    "reverify_chunk": handle_reverify_chunk,
 }
 
 
@@ -848,7 +924,7 @@ async def run_once() -> bool:
         _finish(task["id"], "failed", str(exc))
         metrics.TASKS_PROCESSED.labels(task["kind"], "failed").inc()
         logger.exception(f"Task {task['id']} failed")
-    if task["kind"] == "run_filter_chunk":
+    if task["kind"] in CHUNK_KINDS:
         try:
             _maybe_finalize_parent(task["payload"]["parent_id"])
         except Exception:
