@@ -130,18 +130,23 @@ def delete_preset(preset_id: int, user: AuthedUser = Depends(require_admin)):
 
 
 @router.get("/source-requests")
-def list_source_requests(status: str = "open", user: AuthedUser = Depends(require_admin)):
+def list_source_requests(
+    status: str = "open",
+    limit: int = 50,
+    offset: int = 0,
+    user: AuthedUser = Depends(require_admin),
+):
+    limit = max(1, min(limit, 200))
     where = "" if status == "all" else "WHERE sr.status = %(status)s"
-    return {
-        "rows": db.query(
-            f"""
-            SELECT sr.*, u.email AS requester_email, u.name AS requester_name
-            FROM source_requests sr JOIN users u ON u.id = sr.user_id
-            {where} ORDER BY sr.id DESC LIMIT 200
-            """,
-            {"status": status},
-        )
-    }
+    rows = db.query(
+        f"""
+        SELECT sr.*, u.email AS requester_email, u.name AS requester_name
+        FROM source_requests sr JOIN users u ON u.id = sr.user_id
+        {where} ORDER BY sr.id DESC LIMIT %(limit)s OFFSET %(offset)s
+        """,
+        {"status": status, "limit": limit + 1, "offset": max(0, offset)},
+    )
+    return {"rows": rows[:limit], "has_more": len(rows) > limit}
 
 
 class ResolveSourceRequest(BaseModel):
@@ -244,16 +249,22 @@ def list_tasks(
     status: Optional[str] = None,
     kind: Optional[str] = None,
     limit: int = 100,
+    before_id: Optional[int] = None,
     user: AuthedUser = Depends(require_admin),
 ):
+    # id-cursor pagination: stable under new tasks arriving while the admin
+    # loads more (offset would shift and duplicate rows).
     limit = max(1, min(limit, 500))
-    clauses, params = [], {"limit": limit}
+    clauses, params = [], {"limit": limit + 1}
     if status:
         clauses.append("status = %(status)s")
         params["status"] = status
     if kind:
         clauses.append("kind = %(kind)s")
         params["kind"] = kind
+    if before_id is not None:
+        clauses.append("id < %(before_id)s")
+        params["before_id"] = before_id
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     rows = db.query(
         f"""
@@ -266,7 +277,7 @@ def list_tasks(
     summary = db.query(
         "SELECT kind, status, COUNT(*) AS count FROM tasks GROUP BY kind, status ORDER BY kind, status"
     )
-    return {"rows": rows, "summary": summary}
+    return {"rows": rows[:limit], "has_more": len(rows) > limit, "summary": summary}
 
 
 class IngestBody(BaseModel):
