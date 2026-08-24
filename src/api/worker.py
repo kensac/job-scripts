@@ -175,6 +175,64 @@ def _update_parent_progress(parent_id: int) -> None:
     events.publish_task(parent_id)
 
 
+def _materialize_passing(user_id: int) -> int:
+    """Mirror of the old write_to_sheet step: every job currently passing ALL
+    of the user's enabled filters (and the structural gates) becomes a board
+    row. Existing rows (including hidden ones) are untouched, so deleting a
+    row means 'bring it back next run if it still passes' while hiding is
+    permanent."""
+    from api import criteria as crit
+
+    settings = db.query_one(
+        "SELECT bypass_sponsorship_filter, criteria FROM user_settings WHERE user_id = %s",
+        (user_id,),
+    )
+    params = {
+        "uid": user_id,
+        "bypass": settings["bypass_sponsorship_filter"] if settings else True,
+        **crit.params(settings),
+    }
+    with db.pool.connection() as conn:
+        result = conn.execute(
+            f"""
+            WITH enabled AS (
+                SELECT prompt_hash FROM user_filters WHERE user_id = %(uid)s AND enabled
+            ),
+            latest_check AS (
+                SELECT DISTINCT ON (url, check_type) url, check_type, status
+                FROM ai_queries
+                WHERE check_type IN ('closed', 'clearance') AND status IN ('passed', 'rejected')
+                ORDER BY url, check_type, id DESC
+            ),
+            pass_all AS (
+                SELECT j.id FROM jobs j
+                WHERE (j.source IN (SELECT source FROM user_sources WHERE user_id = %(uid)s)
+                       OR j.source = 'sheet_import' OR j.uploaded_by = %(uid)s)
+                  AND j.active
+                  {crit.SQL}
+                  AND EXISTS (SELECT 1 FROM latest_check lc WHERE lc.url = j.url
+                              AND lc.check_type = 'closed' AND lc.status = 'passed')
+                  AND (%(bypass)s OR EXISTS (SELECT 1 FROM latest_check lc WHERE lc.url = j.url
+                              AND lc.check_type = 'clearance' AND lc.status = 'passed'))
+                  AND (SELECT COUNT(*) FROM enabled) > 0
+                  AND (SELECT COUNT(*) FROM enabled e WHERE (
+                        SELECT status FROM ai_queries q WHERE q.url = j.url
+                          AND q.check_type = 'custom' AND q.prompt_hash = e.prompt_hash
+                          AND q.status IN ('passed', 'rejected')
+                        ORDER BY q.id DESC LIMIT 1) = 'passed') = (SELECT COUNT(*) FROM enabled)
+            )
+            INSERT INTO user_jobs (user_id, job_id)
+            SELECT %(uid)s, id FROM pass_all
+            ON CONFLICT DO NOTHING
+            """,
+            params,
+        )
+        added = result.rowcount
+    if added:
+        logger.info(f"Materialized {added} passing jobs onto user {user_id}'s board")
+    return added
+
+
 def _maybe_finalize_parent(parent_id: int) -> None:
     _update_parent_progress(parent_id)
     live = db.query_one(
@@ -189,6 +247,12 @@ def _maybe_finalize_parent(parent_id: int) -> None:
         "AND (payload->>'parent_id')::bigint = %s AND status = 'failed'",
         (parent_id,),
     )
+    parent = db.query_one("SELECT payload FROM tasks WHERE id = %s", (parent_id,))
+    if parent and (parent["payload"] or {}).get("user_id"):
+        try:
+            _materialize_passing(parent["payload"]["user_id"])
+        except Exception:
+            logger.exception("materialize failed")
     n_failed = failed["c"] if failed else 0
     if n_failed:
         db.execute(
@@ -492,11 +556,13 @@ async def _run_filters(task_id: int, user_id: int, filters: List[Dict[str, Any]]
         for start in range(0, len(todo), CHUNK_SIZE):
             units.append((flt, todo[start : start + CHUNK_SIZE]))
     if not units:
+        _materialize_passing(user_id)
         _set_progress(task_id, 0, 0, "everything already decided")
         return
     if len(units) == 1:
         flt, jobs = units[0]
         await _process_jobs(task_id, user_id, ent, cfg, flt, jobs)
+        _materialize_passing(user_id)
         return
     total = sum(len(jobs) for _, jobs in units)
     for flt, jobs in units:
