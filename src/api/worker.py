@@ -66,6 +66,7 @@ class AdaptiveLimiter:
         self._count = 0
         self._errors = 0
         self._win_start = time.monotonic()
+        metrics.WORKER_CONCURRENCY.set(self.limit)
 INGEST_INTERVAL_MINUTES = int(os.environ.get("JOBTRACKER_INGEST_INTERVAL_MINUTES", "60"))
 # 0 = unlimited. Fixed counts don't scale with users/fleet; per-user budgets
 # and fleet throughput are the real controls, these envs are emergency brakes.
@@ -112,13 +113,16 @@ def _claim_task() -> Optional[Dict[str, Any]]:
 def reap_stale_tasks() -> None:
     """Recover tasks whose worker died mid-run (deploy, crash, OOM): heartbeat
     goes stale -> requeue up to MAX_ATTEMPTS, then fail permanently."""
-    db.execute(
-        f"""
-        UPDATE tasks SET status = 'pending', started_at = NULL, last_heartbeat = NULL
-        WHERE status = 'running' AND attempts < {MAX_ATTEMPTS}
-          AND COALESCE(last_heartbeat, started_at) < now() - interval '{HEARTBEAT_TIMEOUT_MINUTES} minutes'
-        """
-    )
+    with db.pool.connection() as conn:
+        result = conn.execute(
+            f"""
+            UPDATE tasks SET status = 'pending', started_at = NULL, last_heartbeat = NULL
+            WHERE status = 'running' AND attempts < {MAX_ATTEMPTS}
+              AND COALESCE(last_heartbeat, started_at) < now() - interval '{HEARTBEAT_TIMEOUT_MINUTES} minutes'
+            """
+        )
+        if result.rowcount:
+            metrics.REAPER_REQUEUES.inc(result.rowcount)
     db.execute(
         f"""
         UPDATE tasks SET status = 'failed', finished_at = now(),
@@ -234,6 +238,7 @@ def _materialize_passing(user_id: int) -> int:
         )
         added = result.rowcount
     if added:
+        metrics.BOARD_ROWS.labels("materialized").inc(added)
         logger.info(f"Materialized {added} passing jobs onto user {user_id}'s board")
     return added
 
@@ -318,7 +323,10 @@ def _load_config(user_id: int) -> tuple[Entitlement, ai.AIConfig]:
 async def _scrape(url: str) -> Optional[str]:
     from core.pittcsc_simplify import extract_url_content
 
+    start = time.monotonic()
     content = await asyncio.to_thread(extract_url_content, url)
+    metrics.SCRAPE_DURATION.observe(time.monotonic() - start)
+    metrics.SCRAPES.labels("ok" if content else "empty").inc()
     if content:
         add_ai_result(url, "passed", "content cached", "content", input_content=content)
     return content
@@ -403,6 +411,7 @@ async def _check_filter(
             input_content=input_text,
         )
         return usage
+    metrics.CHECKS.labels("custom", "rejected" if parsed.should_filter else "passed").inc()
     add_ai_result(
         url,
         "rejected" if parsed.should_filter else "passed",
@@ -565,6 +574,7 @@ async def _run_filters(task_id: int, user_id: int, filters: List[Dict[str, Any]]
     for flt in filters:
         decided = _decided_urls(urls, flt["prompt_hash"], cfg.model)
         todo = [j for j in candidates if j["url"] not in decided]
+        metrics.CACHED_VERDICTS.inc(len(candidates) - len(todo))
         for start in range(0, len(todo), CHUNK_SIZE):
             units.append((flt, todo[start : start + CHUNK_SIZE]))
     if not units:
@@ -649,6 +659,8 @@ async def handle_ingest_source(task_id: int, payload: Dict[str, Any]) -> None:
 
     postings = await asyncio.to_thread(fetch_job_postings, source["listings_url"])
     upserted = catalog.upsert_postings(postings, source["name"])
+    metrics.INGEST_JOBS.labels(source["name"], "fetched").inc(len(postings))
+    metrics.INGEST_JOBS.labels(source["name"], "upserted").inc(upserted)
     logger.info(f"Ingest {source['name']}: fetched {len(postings)}, upserted {upserted}")
 
     candidates = [
@@ -673,12 +685,19 @@ async def handle_ingest_source(task_id: int, payload: Dict[str, Any]) -> None:
         if not content:
             continue
         checked += 1
+        metrics.INGEST_JOBS.labels(source["name"], "checked").inc()
         if not closed:
             is_closed = await check_if_job_closed(content, p.url, p.title, p.company)
+            metrics.CHECKS.labels("closed", "rejected" if is_closed else "passed").inc()
             if is_closed:
                 continue
         if not clearance:
-            await check_security_clearance_requirement(content, p.url, p.title, p.company)
+            restricted = await check_security_clearance_requirement(
+                content, p.url, p.title, p.company
+            )
+            metrics.CHECKS.labels(
+                "clearance", "rejected" if restricted else "passed"
+            ).inc()
         if checked % 5 == 0:
             _set_progress(task_id, i + 1, total, source["name"])
     _set_progress(task_id, total, total, source["name"])
@@ -738,6 +757,7 @@ def _demote_closed() -> int:
         )
         demoted = result.rowcount
     if demoted:
+        metrics.BOARD_ROWS.labels("demoted").inc(demoted)
         logger.info(f"Demoted {demoted} closed rows from boards")
     return demoted
 
@@ -915,6 +935,7 @@ async def run_once() -> bool:
     if not handler:
         _finish(task["id"], "failed", f"unknown task kind: {task['kind']}")
         return True
+    task_start = time.monotonic()
     try:
         await handler(task["id"], task["payload"])
         _finish(task["id"], "done")
@@ -924,6 +945,7 @@ async def run_once() -> bool:
         _finish(task["id"], "failed", str(exc))
         metrics.TASKS_PROCESSED.labels(task["kind"], "failed").inc()
         logger.exception(f"Task {task['id']} failed")
+    metrics.TASK_DURATION.labels(task["kind"]).observe(time.monotonic() - task_start)
     if task["kind"] in CHUNK_KINDS:
         try:
             _maybe_finalize_parent(task["payload"]["parent_id"])

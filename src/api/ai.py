@@ -117,6 +117,30 @@ async def parse(
     response_model: Type[T],
     timeout: float = 120.0,
 ) -> Tuple[Optional[T], Dict[str, int]]:
+    import time as _time
+
+    from api import metrics
+
+    start = _time.monotonic()
+    try:
+        result = await _parse(cfg, instructions, input_text, response_model, timeout)
+    except Exception as exc:
+        s = str(exc).lower()
+        outcome = "rate_limited" if ("429" in s or "rate limit" in s) else "error"
+        metrics.AI_CALLS.labels(cfg.provider, cfg.model, outcome).inc()
+        raise
+    metrics.AI_CALLS.labels(cfg.provider, cfg.model, "ok").inc()
+    metrics.AI_CALL_DURATION.labels(cfg.provider).observe(_time.monotonic() - start)
+    return result
+
+
+async def _parse(
+    cfg: AIConfig,
+    instructions: str,
+    input_text: str,
+    response_model: Type[T],
+    timeout: float = 120.0,
+) -> Tuple[Optional[T], Dict[str, int]]:
     if cfg.provider == "anthropic":
         client = AsyncAnthropic(api_key=cfg.api_key, timeout=timeout)
         kwargs: Dict[str, Any] = {}
