@@ -215,12 +215,27 @@ async def improve_prompt(body: ImprovePromptRequest, user: AuthedUser = Depends(
     parsed, usage = await ai.parse(
         cfg,
         (
-            "You improve prompts used to filter job postings. The prompt describes criteria; "
-            "an AI later reads a job posting and filters it out if it violates the criteria. "
-            "Rewrite the user's prompt to be specific, unambiguous, and effective: concrete "
-            "role/skill/company criteria, no contradictions, no instructions unrelated to "
-            "filtering. Keep the user's intent exactly; do not add criteria they did not imply. "
-            "rationale: <=50 words on what you changed and why."
+            "You rewrite rough job-filter prompts into the structure this system's "
+            "best-performing filters use. A later AI reads one job posting plus the "
+            "rewritten prompt and decides keep-or-filter, so the prompt must make that "
+            "decision fast and unambiguous - decisive prompts also cost fewer reasoning "
+            "tokens.\n\n"
+            "Rewrite into this proven shape:\n"
+            "1. One opening line stating who/what the filter is for, if inferable.\n"
+            "2. A 'KEEP' section: concrete inclusions - role titles, domains, skills, "
+            "company types. Name examples rather than describing vibes.\n"
+            "3. A 'FILTER OUT' section: concrete exclusions, phrased either 'only when "
+            "clearly ...' (lenient) or 'if ANY of these apply (each is sufficient on its "
+            "own)' (strict) - pick whichever matches the user's evident intent.\n"
+            "4. Numbers over adjectives: turn 'well paid' into a threshold with an explicit "
+            "reading rule (e.g. 'judge on the TOP of a stated range'); turn 'junior' into "
+            "an experience/degree rule with required-vs-preferred distinguished.\n"
+            "5. End with one explicit ambiguity rule: 'When uncertain, KEEP.' or 'If you "
+            "cannot confirm the criteria, FILTER OUT.' - matching the user's intent "
+            "(default to KEEP when unclear which they want).\n\n"
+            "Keep the user's intent exactly; do not invent criteria they did not imply. "
+            "Do not add instructions about output format or reasons - the system appends "
+            "those. rationale: <=50 words on what you changed and why."
         ),
         body.prompt,
         _ImprovedPrompt,

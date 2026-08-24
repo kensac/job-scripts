@@ -114,6 +114,62 @@ FILTER OUT roles that are primarily:
 When uncertain, KEEP.""",
     },
     {
+        "name": "Industrial engineering",
+        "description": "Keeps industrial, manufacturing, process, and quality engineering roles; filters unrelated roles and hourly technician work.",
+        "prompt": """For candidates targeting industrial engineering and adjacent fields.
+
+KEEP roles whose primary work is:
+- Industrial engineering, process engineering, manufacturing engineering, production engineering.
+- Quality engineering, continuous improvement, lean / Six Sigma, operational excellence.
+- Plant engineering, facilities engineering, packaging engineering, methods/standards work.
+- Supply chain engineering or operations engineering with a clear engineering component.
+
+FILTER OUT only when clearly:
+- A different discipline entirely: pure software roles, sales, marketing, finance, HR.
+- Hourly technician/operator/assembler production-floor labor rather than an engineering role.
+- Non-engineering analyst roles with no process/manufacturing content.
+
+When uncertain, KEEP.""",
+    },
+    {
+        "name": "Aerospace engineering",
+        "description": "Keeps aerospace and space-industry engineering roles across propulsion, structures, GNC, avionics, and systems.",
+        "prompt": """For candidates targeting aerospace and space-industry engineering.
+
+KEEP roles whose primary work is:
+- Aerospace, aeronautical, or astronautical engineering.
+- Propulsion, aerodynamics, thermal, structures/stress, loads, materials for flight hardware.
+- GNC (guidance, navigation, control), avionics, flight software, flight test, integration and test.
+- Spacecraft, satellite, launch vehicle, UAV/drone, or aircraft programs - including systems engineering and manufacturing engineering roles at aerospace companies.
+
+FILTER OUT only when clearly:
+- Unrelated disciplines at aerospace companies: sales, marketing, finance, HR, generic IT support.
+- Hourly technician/assembler production labor rather than an engineering role.
+- Roles with no aerospace content at non-aerospace companies.
+
+Note: do NOT filter for citizenship or clearance requirements here - a separate check handles that.
+
+When uncertain, KEEP.""",
+    },
+    {
+        "name": "Supply chain",
+        "description": "Keeps supply chain, logistics, procurement, and planning roles; filters warehouse floor labor and unrelated work.",
+        "prompt": """For candidates targeting supply chain and operations.
+
+KEEP roles whose primary work is:
+- Supply chain analyst/engineer/planner, demand or supply planning, S&OP.
+- Logistics, transportation, distribution, fulfillment, network optimization.
+- Procurement, sourcing, purchasing, supplier/vendor management, commodity management.
+- Inventory management, materials planning, operations analyst roles with supply chain content.
+
+FILTER OUT only when clearly:
+- Hourly floor labor: warehouse associate, picker/packer, forklift operator, driver, material handler.
+- Retail store operations or shift-supervisor roles.
+- Unrelated disciplines: pure software roles, sales, marketing, finance, HR.
+
+When uncertain, KEEP.""",
+    },
+    {
         "name": "No staffing agencies or consultancies",
         "description": "Filters postings from staffing/recruiting agencies, outsourcing shops, and consulting firms hiring for client work.",
         "prompt": """FILTER OUT postings where the employer is a staffing agency, recruiting firm, outsourcing/offshoring shop, or a consultancy hiring engineers for unnamed client projects (signs: the company describes itself as a staffing/talent partner, the client is unnamed, "W2/C2C" language, bench/rotational client placement).
