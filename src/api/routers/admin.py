@@ -223,25 +223,30 @@ def create_source(body: SourceBody, user: AuthedUser = Depends(require_admin)):
 
 
 @router.get("/users")
-def list_users(user: AuthedUser = Depends(require_admin)):
-    return {
-        "users": db.query(
-            """
-            SELECT u.id, u.sub, u.email, u.name, u.groups, u.created_at, u.last_seen_at,
-                   s.api_key_enc IS NOT NULL AS has_byo_key,
-                   s.ai_provider, s.ai_model, s.bypass_sponsorship_filter,
-                   (SELECT COUNT(*) FROM user_jobs uj WHERE uj.user_id = u.id) AS board_rows,
-                   (SELECT COUNT(*) FROM user_filters uf
-                    WHERE uf.user_id = u.id AND uf.enabled) AS enabled_filters,
-                   (SELECT COUNT(*) FROM user_sources us WHERE us.user_id = u.id) AS sources,
-                   COALESCE((SELECT SUM(a.total_tokens) FROM api_usage a
-                             WHERE a.user_id = u.id AND a.key_source = 'owner'
-                               AND a.created_at > now() - interval '7 days'), 0) AS owner_tokens_week
-            FROM users u LEFT JOIN user_settings s ON s.user_id = u.id
-            ORDER BY u.last_seen_at DESC
-            """
-        )
-    }
+def list_users(
+    limit: int = 50,
+    offset: int = 0,
+    user: AuthedUser = Depends(require_admin),
+):
+    limit = max(1, min(limit, 200))
+    rows = db.query(
+        """
+        SELECT u.id, u.sub, u.email, u.name, u.groups, u.created_at, u.last_seen_at,
+               s.api_key_enc IS NOT NULL AS has_byo_key,
+               s.ai_provider, s.ai_model, s.bypass_sponsorship_filter,
+               (SELECT COUNT(*) FROM user_jobs uj WHERE uj.user_id = u.id) AS board_rows,
+               (SELECT COUNT(*) FROM user_filters uf
+                WHERE uf.user_id = u.id AND uf.enabled) AS enabled_filters,
+               (SELECT COUNT(*) FROM user_sources us WHERE us.user_id = u.id) AS sources,
+               COALESCE((SELECT SUM(a.total_tokens) FROM api_usage a
+                         WHERE a.user_id = u.id AND a.key_source = 'owner'
+                           AND a.created_at > now() - interval '7 days'), 0) AS owner_tokens_week
+        FROM users u LEFT JOIN user_settings s ON s.user_id = u.id
+        ORDER BY u.last_seen_at DESC LIMIT %(limit)s OFFSET %(offset)s
+        """,
+        {"limit": limit + 1, "offset": max(0, offset)},
+    )
+    return {"users": rows[:limit], "has_more": len(rows) > limit}
 
 
 @router.get("/tasks")
@@ -408,11 +413,13 @@ def list_reports(
         """,
         {"status": status, "limit": page_size, "offset": (page - 1) * page_size},
     )
+    total = total_row["c"] if total_row else 0
     return {
         "rows": rows,
-        "total": total_row["c"] if total_row else 0,
+        "total": total,
         "page": page,
         "page_size": page_size,
+        "has_more": page * page_size < total,
     }
 
 
@@ -562,11 +569,13 @@ def list_queries(
         f"ORDER BY {sort_col} {direction} LIMIT %(limit)s OFFSET %(offset)s",
         {**params, "limit": page_size, "offset": (page - 1) * page_size},
     )
+    total = total_row["c"] if total_row else 0
     return {
         "rows": rows,
-        "total": total_row["c"] if total_row else 0,
+        "total": total,
         "page": page,
         "page_size": page_size,
+        "has_more": page * page_size < total,
     }
 
 
@@ -644,11 +653,13 @@ def list_jobs(
         r["verdict"] = (
             "rejected" if r["rejected"] > 0 else "passed" if r["passed"] > 0 else "other"
         )
+    total = total_row["c"] if total_row else 0
     return {
         "rows": rows,
-        "total": total_row["c"] if total_row else 0,
+        "total": total,
         "page": page,
         "page_size": page_size,
+        "has_more": page * page_size < total,
     }
 
 
