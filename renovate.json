@@ -6,5 +6,21 @@
   "labels": ["dependencies", "renovate"],
   "timezone": "America/New_York",
   "schedule": ["* 0-23 * * *"],
-  "pinDigests": true
+  "pinDigests": true,
+  "prHourlyLimit": 0,
+  "prConcurrentLimit": 5,
+  "minimumReleaseAge": "3 days",
+  "platformAutomerge": false,
+  "packageRules": [
+    {
+      "matchUpdateTypes": ["minor", "patch", "digest", "pin"],
+      "groupName": "non-major dependencies",
+      "automerge": true,
+      "automergeStrategy": "squash"
+    },
+    {
+      "matchUpdateTypes": ["major"],
+      "automerge": false
+    }
+  ]
 }
