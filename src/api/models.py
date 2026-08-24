@@ -46,12 +46,19 @@ class SourcesPut(BaseModel):
     enabled: List[str]
 
 
+class Criteria(BaseModel):
+    date_posted_after: Optional[datetime.date] = None
+    excluded_locations: List[str] = Field(default_factory=list, max_length=100)
+    included_terms: List[str] = Field(default_factory=list, max_length=100)
+
+
 class SettingsPut(BaseModel):
     column_layout: Optional[Any] = None
     prefs: Optional[Dict[str, Any]] = None
     ai_model: Optional[str] = Field(default=None, max_length=200)
     ai_params: Optional[Dict[str, Any]] = None
     bypass_sponsorship_filter: Optional[bool] = None
+    criteria: Optional[Criteria] = None
 
 
 class ApiKeyPut(BaseModel):

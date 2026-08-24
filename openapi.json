@@ -5504,6 +5504,40 @@
         ],
         "title": "ConfigPut"
       },
+      "Criteria": {
+        "properties": {
+          "date_posted_after": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date Posted After"
+          },
+          "excluded_locations": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "title": "Excluded Locations"
+          },
+          "included_terms": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "title": "Included Terms"
+          }
+        },
+        "type": "object",
+        "title": "Criteria"
+      },
       "DeleteQueries": {
         "properties": {
           "ids": {
@@ -6060,6 +6094,16 @@
               }
             ],
             "title": "Bypass Sponsorship Filter"
+          },
+          "criteria": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Criteria"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",

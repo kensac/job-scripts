@@ -159,6 +159,7 @@ class UserSettings(Base):
     bypass_sponsorship_filter: Mapped[bool] = mapped_column(
         Boolean, server_default=text("true")
     )
+    criteria: Mapped[dict] = mapped_column(server_default=text("'{}'::jsonb"))
     ai_provider: Mapped[str] = mapped_column(Text, server_default=text("'openai'"))
     ai_base_url: Mapped[Optional[str]] = mapped_column(Text)
     ai_model: Mapped[Optional[str]] = mapped_column(Text)

@@ -233,12 +233,14 @@ async def _check_filter(
 
 
 def _candidates(user_id: int) -> List[Dict[str, Any]]:
-    bypass = db.query_one(
-        "SELECT bypass_sponsorship_filter FROM user_settings WHERE user_id = %s",
+    from api import criteria
+
+    settings = db.query_one(
+        "SELECT bypass_sponsorship_filter, criteria FROM user_settings WHERE user_id = %s",
         (user_id,),
     )
     return db.query(
-        """
+        f"""
         WITH latest_check AS (
             SELECT DISTINCT ON (url, check_type) url, check_type, status
             FROM ai_queries
@@ -249,6 +251,7 @@ def _candidates(user_id: int) -> List[Dict[str, Any]]:
         WHERE j.active
           AND (j.source IN (SELECT source FROM user_sources WHERE user_id = %(uid)s)
                OR j.uploaded_by = %(uid)s)
+          {criteria.SQL}
           AND EXISTS (SELECT 1 FROM latest_check lc
                       WHERE lc.url = j.url AND lc.check_type = 'closed' AND lc.status = 'passed')
           AND (%(bypass)s
@@ -256,7 +259,11 @@ def _candidates(user_id: int) -> List[Dict[str, Any]]:
                           WHERE lc.url = j.url AND lc.check_type = 'clearance' AND lc.status = 'passed'))
         ORDER BY j.id DESC
         """,
-        {"uid": user_id, "bypass": bypass["bypass_sponsorship_filter"] if bypass else True},
+        {
+            "uid": user_id,
+            "bypass": settings["bypass_sponsorship_filter"] if settings else True,
+            **criteria.params(settings),
+        },
     )
 
 

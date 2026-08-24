@@ -5,7 +5,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from api import db, events
+from api import criteria, db, events
 from api.auth import AuthedUser, require_user
 from api.models import UploadRequest, UserJobPatch
 from core.urls import normalize_url
@@ -49,6 +49,7 @@ WHERE (
     OR (
         j.active
         AND j.source IN (SELECT source FROM user_sources WHERE user_id = %(uid)s)
+        {criteria}
         AND EXISTS (SELECT 1 FROM latest_check lc
                     WHERE lc.url = j.url AND lc.check_type = 'closed' AND lc.status = 'passed')
         AND (%(bypass_sponsorship)s
@@ -94,8 +95,8 @@ def list_jobs(
 ):
     limit = max(1, min(limit, 1000))
     offset = max(0, offset)
-    bypass = db.query_one(
-        "SELECT bypass_sponsorship_filter FROM user_settings WHERE user_id = %s",
+    settings = db.query_one(
+        "SELECT bypass_sponsorship_filter, criteria FROM user_settings WHERE user_id = %s",
         (user.id,),
     )
     extra = []
@@ -103,7 +104,8 @@ def list_jobs(
         "uid": user.id,
         "limit": limit + 1,
         "offset": offset,
-        "bypass_sponsorship": bypass["bypass_sponsorship_filter"] if bypass else True,
+        "bypass_sponsorship": settings["bypass_sponsorship_filter"] if settings else True,
+        **criteria.params(settings),
     }
     if not include_hidden:
         extra.append("AND COALESCE(uj.hidden, FALSE) = FALSE")
@@ -131,7 +133,9 @@ def list_jobs(
     filter_sql = "\n".join(extra)
     total = None
     if with_total:
-        count_sql = _VISIBILITY.format(columns="COUNT(*) AS c", extra=filter_sql)
+        count_sql = _VISIBILITY.format(
+            columns="COUNT(*) AS c", extra=filter_sql, criteria=criteria.SQL
+        )
         row = db.query_one(count_sql, params)
         total = row["c"] if row else 0
 
@@ -146,7 +150,9 @@ def list_jobs(
             f"ORDER BY {sort_col} {direction} NULLS LAST, j.id DESC "
             "LIMIT %(limit)s OFFSET %(offset)s"
         )
-    sql = _VISIBILITY.format(columns=_JOB_ROW, extra=f"{filter_sql}\n{order}")
+    sql = _VISIBILITY.format(
+        columns=_JOB_ROW, extra=f"{filter_sql}\n{order}", criteria=criteria.SQL
+    )
     rows = db.query(sql, params)
     has_more = len(rows) > limit
     rows = rows[:limit]
