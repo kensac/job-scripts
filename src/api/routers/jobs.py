@@ -186,6 +186,17 @@ def patch_job(job_id: int, body: UserJobPatch, user: AuthedUser = Depends(requir
     return {"ok": True}
 
 
+@router.delete("/user/jobs/{job_id}")
+def delete_user_job(job_id: int, user: AuthedUser = Depends(require_user)):
+    """Drops the user's board row only (the catalog job is untouched); a later
+    run re-materializes it if it still passes their filters. Hide is the
+    permanent alternative."""
+    db.execute(
+        "DELETE FROM user_jobs WHERE user_id = %s AND job_id = %s", (user.id, job_id)
+    )
+    return {"ok": True}
+
+
 @router.post("/uploads")
 def upload_links(body: UploadRequest, user: AuthedUser = Depends(require_user)):
     accepted = []
