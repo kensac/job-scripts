@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import signal
+import socket
 import time
 from typing import Any, Dict, List, Optional
 
@@ -79,6 +80,10 @@ WORKER_KINDS = [
     for k in os.environ.get("JOBTRACKER_WORKER_KINDS", "").split(",")
     if k.strip()
 ]
+# Stamped on every claimed task so the admin UI can attribute work (and
+# failures - e.g. one host's IP getting blocked) to a fleet host. Set it in
+# compose; the container hostname fallback is a random hex id.
+WORKER_NAME = os.environ.get("JOBTRACKER_WORKER_NAME") or socket.gethostname()
 
 
 class JobExtract(BaseModel):
@@ -102,12 +107,13 @@ def _claim_task() -> Optional[Dict[str, Any]]:
     return db.query_one(
         f"""
         UPDATE tasks SET status = 'running', started_at = now(),
-                         last_heartbeat = now(), attempts = attempts + 1
+                         last_heartbeat = now(), attempts = attempts + 1,
+                         worker = %(worker)s
         WHERE id = (SELECT id FROM tasks WHERE status = 'pending' {kinds_clause}
                     ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED)
         RETURNING id, kind, payload
         """,
-        {"kinds": WORKER_KINDS},
+        {"kinds": WORKER_KINDS, "worker": WORKER_NAME},
     )
 
 

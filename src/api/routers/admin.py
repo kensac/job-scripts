@@ -30,7 +30,7 @@ _SORTABLE = {
 _LIST_COLS = (
     "id, created_at, config_name, url, check_type, status, reason, model, "
     "company, job_title, prompt_tokens, completion_tokens, total_tokens, "
-    "cached_tokens, reasoning_tokens, duration_ms, error"
+    "cached_tokens, reasoning_tokens, duration_ms, error, worker"
 )
 
 
@@ -273,7 +273,7 @@ def list_tasks(
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     rows = db.query(
         f"""
-        SELECT id, kind, payload, status, attempts, progress, error,
+        SELECT id, kind, payload, status, attempts, worker, progress, error,
                created_at, started_at, last_heartbeat, finished_at
         FROM tasks {where} ORDER BY id DESC LIMIT %(limit)s
         """,
@@ -283,6 +283,27 @@ def list_tasks(
         "SELECT kind, status, COUNT(*) AS count FROM tasks GROUP BY kind, status ORDER BY kind, status"
     )
     return {"rows": rows[:limit], "has_more": len(rows) > limit, "summary": summary}
+
+
+@router.get("/failures")
+def failure_breakdown(hours: int = 24, user: AuthedUser = Depends(require_admin)):
+    """Failed checks pivoted by fleet host and URL host: one worker failing on
+    hosts the others handle fine is the signature of an IP block."""
+    hours = max(1, min(hours, 720))
+    rows = db.query(
+        """
+        SELECT COALESCE(worker, 'unknown') AS worker,
+               substring(url from '//([^/]+)') AS host,
+               check_type, COUNT(*) AS failures,
+               MAX(created_at) AS last_failure
+        FROM ai_queries
+        WHERE status = 'failed'
+          AND created_at::timestamptz > now() - make_interval(hours => %(hours)s)
+        GROUP BY 1, 2, 3 ORDER BY failures DESC LIMIT 100
+        """,
+        {"hours": hours},
+    )
+    return {"rows": rows}
 
 
 class IngestBody(BaseModel):
