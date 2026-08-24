@@ -166,10 +166,11 @@ def add_ai_result(
     parsed_json: Optional[str] = None,
     duration_ms: Optional[int] = None,
     error: Optional[str] = None,
+    config_name: Optional[str] = None,
 ) -> None:
     row = {
         "created_at": datetime.datetime.now().isoformat(),
-        "config_name": os.environ.get("CONFIG_NAME"),
+        "config_name": config_name or os.environ.get("CONFIG_NAME"),
         "url": url,
         "check_type": check_type,
         "status": status,

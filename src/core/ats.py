@@ -126,7 +126,14 @@ class Greenhouse(AtsResolver):
             resp = self.get(f"https://boards-api.greenhouse.io/v1/boards/{cand}/jobs/{job_id}?content=true")
             early = self.from_response(resp)
             if early is not None:
-                last = early
+                # A 404 only proves the posting is gone when the board token
+                # came explicitly from a greenhouse.io URL. For host-derived
+                # guesses (embedded boards on custom domains) a 404 usually
+                # means the guess was wrong, not that the job is dead.
+                if early.status is Status.GONE and cand != board:
+                    last = AtsResult(Status.ERROR, source=self.name)
+                else:
+                    last = early
                 continue
             assert resp is not None
             data = resp.json()
