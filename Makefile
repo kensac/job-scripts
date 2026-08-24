@@ -1,6 +1,6 @@
 export PYTHONPATH := src
 
-.PHONY: api worker check schema migrate revision db-up db-down
+.PHONY: api worker check test schema migrate revision db-up db-down
 
 api:            ## run the API locally
 	uvicorn api.app:app --port 8000 --reload
@@ -10,6 +10,9 @@ worker:         ## run a worker locally
 
 check:          ## compile-check every source file
 	python -m compileall -q src && echo OK
+
+test:           ## run the test suite
+	pytest -q tests
 
 schema:         ## regenerate openapi.json (commit it)
 	python -m api.export_schema > openapi.json

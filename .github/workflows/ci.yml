@@ -41,6 +41,14 @@ jobs:
         run: python -m compileall -q src
       - name: Migrations apply cleanly
         run: python -m alembic upgrade head
+      - name: Run tests
+        env:
+          TEST_DATABASE_URL: postgresql://ci:ci@localhost:5432/jobtracker_ci
+          JOBTRACKER_SERVICE_TOKEN: ci
+        run: |
+          export APP_ENCRYPTION_KEY=$(python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
+          pip install -r requirements-dev.txt
+          pytest -q tests
       - name: Models match migrations (autogen must be empty)
         run: |
           python -m alembic revision --autogenerate -m ci_drift_check
