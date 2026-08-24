@@ -70,6 +70,169 @@ def _where(
     return ("WHERE " + " AND ".join(clauses)) if clauses else "", params
 
 
+class PresetBody(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=80)
+    description: Optional[str] = Field(default=None, max_length=500)
+    prompt: Optional[str] = Field(default=None, min_length=1, max_length=8000)
+    on_ambiguous: Optional[str] = None
+    fail_closed: Optional[bool] = None
+    active: Optional[bool] = None
+
+
+@router.get("/filter-presets")
+def admin_list_presets(user: AuthedUser = Depends(require_admin)):
+    return {"presets": db.query("SELECT * FROM filter_presets ORDER BY name")}
+
+
+@router.post("/filter-presets")
+def create_preset(body: PresetBody, user: AuthedUser = Depends(require_admin)):
+    if not body.name or not body.prompt:
+        raise HTTPException(
+            400, detail={"code": "MISSING_FIELDS", "message": "name and prompt are required"}
+        )
+    if db.query_one("SELECT id FROM filter_presets WHERE name = %s", (body.name,)):
+        raise HTTPException(409, detail={"code": "DUPLICATE_NAME", "message": "preset name exists"})
+    return db.query_one(
+        """
+        INSERT INTO filter_presets (name, description, prompt, on_ambiguous, fail_closed, active)
+        VALUES (%s, %s, %s, %s, %s, %s) RETURNING *
+        """,
+        (
+            body.name,
+            body.description or "",
+            body.prompt,
+            body.on_ambiguous or "keep",
+            bool(body.fail_closed),
+            body.active if body.active is not None else True,
+        ),
+    )
+
+
+@router.patch("/filter-presets/{preset_id}")
+def patch_preset(preset_id: int, body: PresetBody, user: AuthedUser = Depends(require_admin)):
+    fields = body.model_dump(exclude_unset=True)
+    if not fields:
+        raise HTTPException(400, detail={"code": "EMPTY_PATCH", "message": "no fields to update"})
+    cols = ", ".join(f"{k} = %({k})s" for k in fields)
+    row = db.query_one(
+        f"UPDATE filter_presets SET {cols}, updated_at = now() WHERE id = %(pid)s RETURNING *",
+        {"pid": preset_id, **fields},
+    )
+    if not row:
+        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown preset"})
+    return row
+
+
+@router.delete("/filter-presets/{preset_id}")
+def delete_preset(preset_id: int, user: AuthedUser = Depends(require_admin)):
+    db.execute("DELETE FROM filter_presets WHERE id = %s", (preset_id,))
+    return {"ok": True}
+
+
+@router.get("/source-requests")
+def list_source_requests(status: str = "open", user: AuthedUser = Depends(require_admin)):
+    where = "" if status == "all" else "WHERE sr.status = %(status)s"
+    return {
+        "rows": db.query(
+            f"""
+            SELECT sr.*, u.email AS requester_email, u.name AS requester_name
+            FROM source_requests sr JOIN users u ON u.id = sr.user_id
+            {where} ORDER BY sr.id DESC LIMIT 200
+            """,
+            {"status": status},
+        )
+    }
+
+
+class ResolveSourceRequest(BaseModel):
+    action: str
+    note: str = ""
+
+
+@router.post("/source-requests/{request_id}/resolve")
+def resolve_source_request(
+    request_id: int, body: ResolveSourceRequest, user: AuthedUser = Depends(require_admin)
+):
+    if body.action not in ("added", "dismissed"):
+        raise HTTPException(
+            400, detail={"code": "INVALID_ACTION", "message": "action must be added or dismissed"}
+        )
+    row = db.query_one(
+        "UPDATE source_requests SET status = %s, resolution_note = %s, resolved_at = now() "
+        "WHERE id = %s RETURNING id, status",
+        (body.action, body.note[:2000] or None, request_id),
+    )
+    if not row:
+        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown request"})
+    return row
+
+
+class SourceBody(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=80)
+    listings_url: Optional[str] = Field(default=None, max_length=1000)
+    active: Optional[bool] = None
+
+
+@router.post("/sources")
+def create_source(body: SourceBody, user: AuthedUser = Depends(require_admin)):
+    if not body.name or not body.listings_url:
+        raise HTTPException(
+            400, detail={"code": "MISSING_FIELDS", "message": "name and listings_url are required"}
+        )
+    if db.query_one("SELECT name FROM sources WHERE name = %s", (body.name,)):
+        raise HTTPException(409, detail={"code": "DUPLICATE_NAME", "message": "source name exists"})
+    return db.query_one(
+        "INSERT INTO sources (name, listings_url, active) VALUES (%s, %s, %s) RETURNING *",
+        (body.name, body.listings_url, body.active if body.active is not None else True),
+    )
+
+
+class SourceGroupBody(BaseModel):
+    members: Optional[List[str]] = None
+    description: Optional[str] = Field(default=None, max_length=500)
+    active: Optional[bool] = None
+
+
+@router.post("/source-groups/{name}")
+def upsert_source_group(name: str, body: SourceGroupBody, user: AuthedUser = Depends(require_admin)):
+    if body.members is not None:
+        known = {r["name"] for r in db.query("SELECT name FROM sources")}
+        unknown = [m for m in body.members if m not in known]
+        if unknown:
+            raise HTTPException(
+                400, detail={"code": "UNKNOWN_SOURCE", "message": f"unknown sources: {unknown}"}
+            )
+    row = db.query_one(
+        """
+        INSERT INTO source_groups (name, members, description, active)
+        VALUES (%(name)s, COALESCE(%(members)s, '{}'), COALESCE(%(description)s, ''),
+                COALESCE(%(active)s, TRUE))
+        ON CONFLICT (name) DO UPDATE SET
+            members = COALESCE(%(members)s, source_groups.members),
+            description = COALESCE(%(description)s, source_groups.description),
+            active = COALESCE(%(active)s, source_groups.active)
+        RETURNING *
+        """,
+        {"name": name, "members": body.members, "description": body.description, "active": body.active},
+    )
+    return row
+
+
+@router.patch("/sources/{name}")
+def patch_source(name: str, body: SourceBody, user: AuthedUser = Depends(require_admin)):
+    fields = body.model_dump(exclude_unset=True, exclude={"name"})
+    if not fields:
+        raise HTTPException(400, detail={"code": "EMPTY_PATCH", "message": "no fields to update"})
+    cols = ", ".join(f"{k} = %({k})s" for k in fields)
+    row = db.query_one(
+        f"UPDATE sources SET {cols} WHERE name = %(name)s RETURNING *",
+        {"name": name, **fields},
+    )
+    if not row:
+        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown source"})
+    return row
+
+
 _CONFIG_KEYS = {"signups_enabled"}
 
 

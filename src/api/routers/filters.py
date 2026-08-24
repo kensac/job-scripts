@@ -148,6 +148,52 @@ def run_all_filters(user: AuthedUser = Depends(require_user)):
     return {"task_id": task_id}
 
 
+@router.get("/filter-presets")
+def list_presets(user: AuthedUser = Depends(require_user)):
+    return {
+        "presets": db.query(
+            "SELECT id, name, description, prompt, on_ambiguous, fail_closed "
+            "FROM filter_presets WHERE active ORDER BY name"
+        )
+    }
+
+
+@router.post("/filter-presets/{preset_id}/adopt")
+def adopt_preset(preset_id: int, user: AuthedUser = Depends(require_user)):
+    preset = db.query_one(
+        "SELECT * FROM filter_presets WHERE id = %s AND active", (preset_id,)
+    )
+    if not preset:
+        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown preset"})
+    name = preset["name"]
+    if db.query_one(
+        "SELECT id FROM user_filters WHERE user_id = %s AND name = %s", (user.id, name)
+    ):
+        raise HTTPException(
+            409, detail={"code": "ALREADY_ADOPTED", "message": "this preset is already in your filters"}
+        )
+    row = db.query_one(
+        f"""
+        INSERT INTO user_filters (user_id, name, prompt, on_ambiguous, fail_closed, enabled, prompt_hash)
+        VALUES (%s, %s, %s, %s, %s, TRUE, %s)
+        RETURNING {_FILTER_COLS}
+        """,
+        (
+            user.id,
+            name,
+            preset["prompt"],
+            preset["on_ambiguous"],
+            preset["fail_closed"],
+            _hash(preset["prompt"], preset["on_ambiguous"]),
+        ),
+    )
+    assert row is not None
+    task_id, blocked = _enqueue(
+        user, "run_filter", {"user_id": user.id, "filter_id": row["id"]}
+    )
+    return {**row, "task_id": task_id, "run_blocked": blocked}
+
+
 class _ImprovedPrompt(BaseModel):
     improved: str
     rationale: str

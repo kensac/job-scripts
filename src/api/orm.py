@@ -109,6 +109,16 @@ class Source(Base):
     created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
 
 
+class SourceGroup(Base):
+    __tablename__ = "source_groups"
+
+    name: Mapped[str] = mapped_column(Text, primary_key=True)
+    members: Mapped[List[str]] = mapped_column(server_default=text("'{}'"))
+    description: Mapped[str] = mapped_column(Text, server_default=text("''"))
+    active: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
+    created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+
+
 class UserSource(Base):
     __tablename__ = "user_sources"
 
@@ -182,6 +192,36 @@ class Task(Base):
     created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
     started_at: Mapped[Optional[datetime.datetime]]
     finished_at: Mapped[Optional[datetime.datetime]]
+
+
+class FilterPreset(Base):
+    __tablename__ = "filter_presets"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
+    name: Mapped[str] = mapped_column(Text, unique=True)
+    description: Mapped[str] = mapped_column(Text, server_default=text("''"))
+    prompt: Mapped[str] = mapped_column(Text)
+    on_ambiguous: Mapped[str] = mapped_column(Text, server_default=text("'keep'"))
+    fail_closed: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    active: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
+    created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+    updated_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+
+
+class SourceRequest(Base):
+    __tablename__ = "source_requests"
+    __table_args__ = (Index("idx_source_requests_status", "status", "id"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="CASCADE")
+    )
+    url: Mapped[str] = mapped_column(Text)
+    note: Mapped[str] = mapped_column(Text, server_default=text("''"))
+    status: Mapped[str] = mapped_column(Text, server_default=text("'open'"))
+    resolution_note: Mapped[Optional[str]] = mapped_column(Text)
+    created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+    resolved_at: Mapped[Optional[datetime.datetime]]
 
 
 class Report(Base):

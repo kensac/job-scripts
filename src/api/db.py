@@ -65,7 +65,7 @@ def _migrate() -> None:
 
 
 def _seed_sources() -> None:
-    from core.configs import load_configs
+    from core.configs import load_configs, load_groups
 
     for name, cfg in load_configs().items():
         execute(
@@ -74,6 +74,14 @@ def _seed_sources() -> None:
             ON CONFLICT (name) DO UPDATE SET listings_url = EXCLUDED.listings_url
             """,
             (name, cfg["JOB_LISTINGS_URL"]),
+        )
+    for name, members in load_groups().items():
+        execute(
+            """
+            INSERT INTO source_groups (name, members) VALUES (%s, %s)
+            ON CONFLICT (name) DO UPDATE SET members = EXCLUDED.members
+            """,
+            (name, members),
         )
 
 
