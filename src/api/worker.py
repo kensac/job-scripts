@@ -894,8 +894,22 @@ async def _reverify_jobs(
         provider="openai", api_key=key, key_source="owner",
         model=ai.DEFAULT_MODELS["openai"],
     )
-    total = len(rows)
-    done = 0
+    # Resumability: a requeued chunk (worker died mid-run) skips rows already
+    # re-verified in this cycle instead of redoing scrapes and AI calls.
+    import datetime as _dt
+
+    cutoff = (_dt.datetime.now() - _dt.timedelta(days=1)).isoformat()
+    fresh = {
+        r["url"]
+        for r in db.query(
+            "SELECT DISTINCT url FROM ai_queries WHERE url = ANY(%s) "
+            "AND check_type = 'closed' AND created_at > %s",
+            ([r["url"] for r in rows], cutoff),
+        )
+    }
+    rows = [r for r in rows if r["url"] not in fresh]
+    total = len(rows) + len(fresh)
+    done = len(fresh)
     limiter = AdaptiveLimiter()
     scrape_sem = asyncio.Semaphore(SCRAPE_CONCURRENCY)
 
@@ -929,11 +943,14 @@ async def _reverify_jobs(
         )
 
     idx = 0
+    n_todo = len(rows)
     pending: Dict[asyncio.Task, Dict[str, Any]] = {}
-    while idx < total or pending:
-        while idx < total and len(pending) < limiter.limit:
+    while idx < n_todo or pending:
+        while idx < n_todo and len(pending) < limiter.limit:
             pending[asyncio.create_task(one(rows[idx]))] = rows[idx]
             idx += 1
+        if not pending:
+            break
         finished, _ = await asyncio.wait(pending.keys(), return_when=asyncio.FIRST_COMPLETED)
         for t in finished:
             r = pending.pop(t)
