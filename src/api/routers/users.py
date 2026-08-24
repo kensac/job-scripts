@@ -40,23 +40,47 @@ def usage(user: AuthedUser = Depends(require_user)):
     return _grants(user)
 
 
+_PROVIDER_PARAMS = {
+    "openai": ["reasoning_effort", "max_output_tokens"],
+    "anthropic": ["effort", "max_output_tokens"],
+    "openai_compatible": ["temperature", "max_output_tokens"],
+}
+
+
+def _provider_entry(provider: str, models: list) -> dict:
+    return {
+        "provider": provider,
+        "default_model": ai.DEFAULT_MODELS[provider],
+        "models": models,
+        "params": _PROVIDER_PARAMS[provider],
+    }
+
+
 @router.get("/models")
 def models(user: AuthedUser = Depends(require_user)):
+    """Only the options valid for this user right now: their BYO provider's
+    catalog if they have a key (it takes precedence), else the owner-key
+    allowlist if granted, else nothing runnable."""
+    ent = budget.get_entitlement(user)
+    settings = db.query_one(
+        "SELECT ai_provider, api_key_enc IS NOT NULL AS has_key "
+        "FROM user_settings WHERE user_id = %s",
+        (user.id,),
+    )
+    providers = []
+    if settings and settings["has_key"]:
+        provider = settings["ai_provider"] or "openai"
+        providers.append(_provider_entry(provider, ai.MODEL_CATALOG[provider]))
+    elif ent.owner_key:
+        models_list = [
+            m for m in ai.MODEL_CATALOG["openai"] if m["model"] in ai.OWNER_KEY_MODELS
+        ]
+        providers.append(_provider_entry("openai", models_list))
     return {
-        "providers": [
-            {
-                "provider": p,
-                "default_model": ai.DEFAULT_MODELS[p],
-                "models": ai.MODEL_CATALOG[p],
-                "params": {
-                    "openai": ["reasoning_effort", "max_output_tokens"],
-                    "anthropic": ["effort", "max_output_tokens"],
-                    "openai_compatible": ["temperature", "max_output_tokens"],
-                }[p],
-            }
-            for p in ai.PROVIDERS
-        ],
-        "owner_key_models": sorted(ai.OWNER_KEY_MODELS),
+        "providers": providers,
+        "owner_key_models": sorted(ai.OWNER_KEY_MODELS) if ent.owner_key else [],
+        "key_source": ent.key_source,
+        "addable_providers": list(ai.PROVIDERS),
     }
 
 
@@ -81,14 +105,34 @@ def get_settings(user: AuthedUser = Depends(require_user)):
 
 @router.put("/user/settings")
 def put_settings(body: SettingsPut, user: AuthedUser = Depends(require_user)):
-    if body.ai_params is not None:
+    row = None
+    if body.ai_params is not None or body.ai_model is not None:
         row = db.query_one(
-            "SELECT ai_provider FROM user_settings WHERE user_id = %s", (user.id,)
+            "SELECT ai_provider, api_key_enc IS NOT NULL AS has_key "
+            "FROM user_settings WHERE user_id = %s",
+            (user.id,),
         )
-        provider = (row or {}).get("ai_provider") or "openai"
+    provider = (row or {}).get("ai_provider") or "openai"
+    if body.ai_params is not None:
         error = ai.validate_params(provider, body.ai_params)
         if error:
             raise HTTPException(400, detail={"code": "INVALID_PARAMS", "message": error})
+    if body.ai_model is not None:
+        has_key = bool(row and row["has_key"])
+        if has_key:
+            catalog = {m["model"] for m in ai.MODEL_CATALOG[provider]}
+            valid = provider == "openai_compatible" or body.ai_model in catalog
+        else:
+            ent = budget.get_entitlement(user)
+            valid = ent.owner_key and body.ai_model in ai.OWNER_KEY_MODELS
+        if not valid:
+            raise HTTPException(
+                400,
+                detail={
+                    "code": "INVALID_MODEL",
+                    "message": "that model is not available with your current key",
+                },
+            )
     db.execute(
         """
         INSERT INTO user_settings (user_id, column_layout, prefs, ai_model, ai_params, updated_at)
