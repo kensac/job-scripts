@@ -90,10 +90,17 @@ def enqueue(kind: str, payload: Dict[str, Any], dedupe_key: Optional[str] = None
 
 
 def _finish(task_id: int, status: str, error: Optional[str] = None) -> None:
+    # Only running tasks can be finished; an admin 'cancelled' status sticks.
     db.execute(
-        "UPDATE tasks SET status = %s, error = %s, finished_at = now() WHERE id = %s",
+        "UPDATE tasks SET status = %s, error = %s, finished_at = now() "
+        "WHERE id = %s AND status = 'running'",
         (status, error[:500] if error else None, task_id),
     )
+
+
+def _cancelled(task_id: int) -> bool:
+    row = db.query_one("SELECT status FROM tasks WHERE id = %s", (task_id,))
+    return not row or row["status"] != "running"
 
 
 def _load_config(user_id: int) -> tuple[Entitlement, ai.AIConfig]:
@@ -265,6 +272,9 @@ async def _run_filters(task_id: int, user_id: int, filters: List[Dict[str, Any]]
     for flt in filters:
         instructions = build_custom_instructions(flt["prompt"], flt["on_ambiguous"])
         for job in candidates:
+            if done % 10 == 0 and _cancelled(task_id):
+                logger.info(f"Task {task_id} cancelled mid-run")
+                return
             if (
                 cfg.key_source == "owner"
                 and ent.weekly_token_budget is not None
@@ -335,6 +345,9 @@ async def handle_ingest_source(task_id: int, payload: Dict[str, Any]) -> None:
     checked = 0
     total = len(candidates)
     for i, p in enumerate(candidates):
+        if i % 10 == 0 and _cancelled(task_id):
+            logger.info(f"Task {task_id} cancelled mid-ingest")
+            return
         if checked >= INGEST_MAX_AI_PER_SOURCE:
             logger.info(f"Ingest {source['name']}: AI cap reached ({checked})")
             break
