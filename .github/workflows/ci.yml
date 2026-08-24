@@ -9,6 +9,8 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     services:
       postgres:
         image: postgres:17
@@ -26,6 +28,10 @@ jobs:
       PYTHONPATH: src
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Check out the PR branch itself (not the merge ref) so the
+          # regenerated schema can be committed back to it.
+          ref: ${{ github.head_ref || github.ref_name }}
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
@@ -42,11 +48,17 @@ jobs:
           if grep -qE "op\.(add|drop|create|alter)" "$f"; then
             echo "::error::ORM models drifted from migrations - generate a real migration"; cat "$f"; exit 1
           fi
-      - name: openapi.json is current
+      - name: Regenerate openapi.json (auto-commit if stale)
         env:
           JOBTRACKER_SERVICE_TOKEN: ci
           APP_ENCRYPTION_KEY: ci
         run: |
           python -m api.export_schema > openapi.json
-          git diff --exit-code -- openapi.json || {
-            echo "::error::openapi.json is stale - run 'make schema' and commit"; exit 1; }
+          if ! git diff --quiet -- openapi.json; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add openapi.json
+            git commit -m "chore: regenerate openapi.json [skip ci]"
+            git push
+            echo "::notice::openapi.json was stale - regenerated and committed"
+          fi
