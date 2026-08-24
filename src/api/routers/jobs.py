@@ -63,17 +63,37 @@ WHERE (
 """
 
 
+# Whitelisted server-side sort columns (all NULLS LAST so empty cells sink).
+_SORTABLE = {
+    "added_at": "j.created_at",
+    "date_posted": "j.date_posted",
+    "date_applied": "uj.date_applied",
+    "company": "lower(j.company)",
+    "title": "lower(j.title)",
+    "source": "j.source",
+    "status": "uj.status",
+}
+
+NOT_APPLIED = "not_applied"
+
+
 @router.get("/user/jobs")
 def list_jobs(
     limit: int = 200,
+    offset: int = 0,
     cursor: Optional[int] = None,
+    sort: str = "added_at",
+    dir: str = "desc",
     search: Optional[str] = None,
     status: Optional[str] = None,
+    statuses: Optional[str] = None,
     source: Optional[str] = None,
     include_hidden: bool = False,
+    with_total: bool = False,
     user: AuthedUser = Depends(require_user),
 ):
     limit = max(1, min(limit, 1000))
+    offset = max(0, offset)
     bypass = db.query_one(
         "SELECT bypass_sponsorship_filter FROM user_settings WHERE user_id = %s",
         (user.id,),
@@ -82,30 +102,60 @@ def list_jobs(
     params: dict = {
         "uid": user.id,
         "limit": limit + 1,
+        "offset": offset,
         "bypass_sponsorship": bypass["bypass_sponsorship_filter"] if bypass else True,
     }
     if not include_hidden:
         extra.append("AND COALESCE(uj.hidden, FALSE) = FALSE")
-    if cursor is not None:
-        extra.append("AND j.id < %(cursor)s")
-        params["cursor"] = cursor
     if search:
-        extra.append("AND (j.company ILIKE %(search)s OR j.title ILIKE %(search)s)")
+        extra.append(
+            "AND (j.company ILIKE %(search)s OR j.title ILIKE %(search)s OR j.url ILIKE %(search)s)"
+        )
         params["search"] = f"%{search}%"
-    if status:
-        extra.append("AND uj.status = %(status)s")
-        params["status"] = status
+    wanted = [s.strip() for s in (statuses or "").split(",") if s.strip()]
+    if status and status not in wanted:
+        wanted.append(status)
+    if wanted:
+        named = [s for s in wanted if s != NOT_APPLIED]
+        clauses = []
+        if named:
+            clauses.append("uj.status = ANY(%(statuses)s)")
+            params["statuses"] = named
+        if NOT_APPLIED in wanted:
+            clauses.append("(uj.status IS NULL OR uj.status = '')")
+        extra.append(f"AND ({' OR '.join(clauses)})")
     if source:
         extra.append("AND j.source = %(source)s")
         params["source"] = source
-    extra.append("ORDER BY j.id DESC LIMIT %(limit)s")
-    sql = _VISIBILITY.format(columns=_JOB_ROW, extra="\n".join(extra))
+
+    filter_sql = "\n".join(extra)
+    total = None
+    if with_total:
+        count_sql = _VISIBILITY.format(columns="COUNT(*) AS c", extra=filter_sql)
+        row = db.query_one(count_sql, params)
+        total = row["c"] if row else 0
+
+    if cursor is not None:
+        # Legacy cursor mode: fixed newest-first by id.
+        order = "AND j.id < %(cursor)s\nORDER BY j.id DESC LIMIT %(limit)s"
+        params["cursor"] = cursor
+    else:
+        sort_col = _SORTABLE.get(sort, "j.created_at")
+        direction = "ASC" if dir == "asc" else "DESC"
+        order = (
+            f"ORDER BY {sort_col} {direction} NULLS LAST, j.id DESC "
+            "LIMIT %(limit)s OFFSET %(offset)s"
+        )
+    sql = _VISIBILITY.format(columns=_JOB_ROW, extra=f"{filter_sql}\n{order}")
     rows = db.query(sql, params)
     has_more = len(rows) > limit
     rows = rows[:limit]
     return {
         "rows": rows,
-        "next_cursor": rows[-1]["job_id"] if has_more and rows else None,
+        "next_cursor": rows[-1]["job_id"] if cursor is not None and has_more and rows else None,
+        "has_more": has_more,
+        "offset": offset,
+        "total": total,
     }
 
 
