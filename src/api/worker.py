@@ -199,7 +199,7 @@ def _candidates(user_id: int) -> List[Dict[str, Any]]:
                           WHERE lc.url = j.url AND lc.check_type = 'clearance' AND lc.status = 'passed'))
         ORDER BY j.id DESC
         """,
-        {"uid": user_id, "bypass": bool(bypass and bypass["bypass_sponsorship_filter"])},
+        {"uid": user_id, "bypass": bypass["bypass_sponsorship_filter"] if bypass else True},
     )
 
 

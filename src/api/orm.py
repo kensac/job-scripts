@@ -157,7 +157,7 @@ class UserSettings(Base):
     prefs: Mapped[dict] = mapped_column(server_default=text("'{}'::jsonb"))
     api_key_enc: Mapped[Optional[bytes]] = mapped_column(BYTEA)
     bypass_sponsorship_filter: Mapped[bool] = mapped_column(
-        Boolean, server_default=text("false")
+        Boolean, server_default=text("true")
     )
     ai_provider: Mapped[str] = mapped_column(Text, server_default=text("'openai'"))
     ai_base_url: Mapped[Optional[str]] = mapped_column(Text)

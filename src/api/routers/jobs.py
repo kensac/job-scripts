@@ -82,7 +82,7 @@ def list_jobs(
     params: dict = {
         "uid": user.id,
         "limit": limit + 1,
-        "bypass_sponsorship": bool(bypass and bypass["bypass_sponsorship_filter"]),
+        "bypass_sponsorship": bypass["bypass_sponsorship_filter"] if bypass else True,
     }
     if not include_hidden:
         extra.append("AND COALESCE(uj.hidden, FALSE) = FALSE")

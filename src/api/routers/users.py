@@ -120,7 +120,7 @@ def get_settings(user: AuthedUser = Depends(require_user)):
         "ai_base_url": None,
         "ai_model": None,
         "ai_params": {},
-        "bypass_sponsorship_filter": False,
+        "bypass_sponsorship_filter": True,
         "has_byo_key": False,
     }
 
