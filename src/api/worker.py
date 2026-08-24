@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import os
+import signal
 import time
 from typing import Any, Dict, List, Optional
 
@@ -1071,10 +1072,33 @@ def schedule_ingest_cycle() -> None:
     enqueue("reverify_open", {"cycle": day}, dedupe_key=f"reverify:{day}")
 
 
+_current_task_id: Optional[int] = None
+
+
+def _graceful_exit(signum: int, frame: Any) -> None:
+    """Deploys must not leave the in-flight task in 'running' limbo until the
+    reaper times out: requeue it immediately (chunks resume from cached
+    verdicts) without burning an attempt, then exit."""
+    if _current_task_id is not None:
+        try:
+            db.execute(
+                "UPDATE tasks SET status = 'pending', attempts = GREATEST(attempts - 1, 0), "
+                "started_at = NULL, last_heartbeat = NULL "
+                "WHERE id = %s AND status = 'running'",
+                (_current_task_id,),
+            )
+            logger.info(f"SIGTERM: requeued task {_current_task_id}, exiting")
+        except Exception:
+            pass
+    os._exit(0)
+
+
 async def run_once() -> bool:
+    global _current_task_id
     task = _claim_task()
     if not task:
         return False
+    _current_task_id = task["id"]
     handler = HANDLERS.get(task["kind"])
     events.publish_task(task["id"])
     logger.info(f"Task {task['id']} ({task['kind']}) starting")
@@ -1107,6 +1131,7 @@ async def run_once() -> bool:
         logger.exception(f"Task {task['id']} failed")
     finally:
         hb.cancel()
+        _current_task_id = None
     metrics.TASK_DURATION.labels(task["kind"]).observe(time.monotonic() - task_start)
     if task["kind"] in CHUNK_KINDS:
         try:
@@ -1118,6 +1143,8 @@ async def run_once() -> bool:
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
+    signal.signal(signal.SIGTERM, _graceful_exit)
+    signal.signal(signal.SIGINT, _graceful_exit)
     db.init_schema()
     metrics.serve()
     ingest_enabled = os.environ.get("JOBTRACKER_INGEST_SCHEDULER", "1") == "1"
