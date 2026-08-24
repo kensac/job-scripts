@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import datetime
 import logging
+import random
+import time
 from typing import TYPE_CHECKING, List
+
+from psycopg import errors
 
 from core.store import _pool as pool
 
@@ -46,10 +50,25 @@ def upsert_postings(postings: List["JobPosting"], source: str) -> int:
         for p in postings
         if p.url
     ]
-    with pool.connection() as conn:
-        with conn.cursor() as cur:
-            cur.executemany(
-                """
+    # Concurrent ingest tasks upsert overlapping url sets (boards share jobs).
+    # Deterministic ordering + small per-transaction batches + a deadlock retry
+    # keep fleet workers from deadlocking each other on the jobs unique index.
+    rows.sort(key=lambda r: r[0])
+    for start in range(0, len(rows), _BATCH):
+        _upsert_batch(rows[start : start + _BATCH])
+    return len(rows)
+
+
+_BATCH = 500
+
+
+def _upsert_batch(batch: List[tuple], retries: int = 3) -> None:
+    for attempt in range(retries):
+        try:
+            with pool.connection() as conn:
+                with conn.cursor() as cur:
+                    cur.executemany(
+                        """
                 INSERT INTO jobs (url, raw_url, company, title, locations, terms, source, active, date_posted)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (url) DO UPDATE SET
@@ -65,7 +84,13 @@ def upsert_postings(postings: List["JobPosting"], source: str) -> int:
                                   THEN EXCLUDED.source ELSE jobs.source END,
                     extraction_status = CASE WHEN jobs.source = 'upload'
                                              THEN 'done' ELSE jobs.extraction_status END
-                """,
-                rows,
-            )
-    return len(rows)
+                        """,
+                        batch,
+                    )
+            return
+        except errors.DeadlockDetected:
+            if attempt == retries - 1:
+                raise
+            delay = random.uniform(0.2, 1.0) * (attempt + 1)
+            logger.warning(f"Catalog upsert deadlock, retrying in {delay:.1f}s")
+            time.sleep(delay)
