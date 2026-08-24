@@ -21,7 +21,10 @@ MODEL_CATALOG = {
     "openai": [
         {"model": "gpt-5-nano", "note": "Cheapest, used by default; fine for most filters"},
         {"model": "gpt-5-mini", "note": "Better judgment on nuanced criteria"},
-        {"model": "gpt-5", "note": "Most capable OpenAI model, highest cost"},
+        {"model": "gpt-5", "note": "Strong general model"},
+        {"model": "gpt-5.6-luna", "note": "Newest small model, fast and cheap"},
+        {"model": "gpt-5.6-terra", "note": "Newest mid-tier, strong quality"},
+        {"model": "gpt-5.6-sol", "note": "Newest flagship, highest cost"},
     ],
     "anthropic": [
         {"model": "claude-opus-5", "note": "Most capable, best default for Anthropic keys"},
@@ -68,6 +71,9 @@ PRICES_PER_MTOK = {
     "gpt-5-nano": (0.05, 0.40),
     "gpt-5-mini": (0.25, 2.00),
     "gpt-5": (1.25, 10.00),
+    "gpt-5.6-luna": (0.20, 1.20),
+    "gpt-5.6-terra": (2.00, 12.00),
+    "gpt-5.6-sol": (4.00, 20.00),
     "claude-opus-5": (5.00, 25.00),
     "claude-sonnet-5": (3.00, 15.00),
     "claude-haiku-4-5": (1.00, 5.00),
