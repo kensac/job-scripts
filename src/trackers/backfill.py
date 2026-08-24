@@ -10,6 +10,121 @@ from core.configs import load_configs
 from core.filters import build_custom_instructions, compute_prompt_hash, load_filter_specs
 from core.urls import normalize_url
 
+PRESETS: List[Dict[str, Any]] = [
+    {
+        "name": "Early-career software roles",
+        "description": "Keeps software engineering roles at tech companies for early-career candidates; filters non-engineering roles and non-tech employers.",
+        "prompt": """Candidate: early-career software engineer looking for backend, infrastructure, full-stack, systems, or DevOps roles.
+
+KEEP (do not filter):
+- Tech or tech-adjacent companies: software, AI/ML, developer tools/infrastructure, fintech/quant, startups; especially well-known, high-growth, or well-funded ones with strong engineering reputations.
+- Software/backend/frontend/full-stack/platform/infrastructure/systems/SRE/DevOps/cloud engineering roles at any level up to staff.
+
+FILTER OUT only when clearly:
+- Non-engineering roles: product manager, business analyst, sales or sales engineer, recruiter, marketing.
+- Non-tech employers: marketing agencies, consulting firms, staffing/recruiting agencies.
+- Requires (not merely prefers) a Master's or PhD, or more than 3 years of experience.
+
+When uncertain, KEEP.""",
+    },
+    {
+        "name": "New grad / entry level only",
+        "description": "Keeps only new-grad, entry-level, or junior roles; filters anything mid-level and above or requiring experience.",
+        "prompt": """Keep only roles that are clearly new-grad, entry-level, junior, or early-career.
+
+FILTER OUT if ANY of these apply (each is sufficient on its own):
+- Mid / senior / lead / staff / principal level.
+- Requires (not merely prefers) a Master's or PhD.
+- Requires more than 1 year of professional experience (internships do not count as professional experience).
+
+When the level is genuinely unstated and the role reads as open to new grads, KEEP.""",
+    },
+    {
+        "name": "US or remote only",
+        "description": "Filters roles located outside the US that are not remote.",
+        "prompt": """KEEP roles that are US-based or remote.
+
+FILTER OUT roles clearly located outside the US with no remote option.
+
+When the location is unclear, KEEP.""",
+    },
+    {
+        "name": "Top-tier companies only",
+        "description": "A deliberately high bar: only big tech, elite AI labs, top quant/trading firms, and elite-reputation startups survive.",
+        "prompt": """Keep ONLY software/engineering roles at elite, extremely high-paying or prestigious employers. The bar is intentionally high: if a company is not clearly and recognizably in the tiers below, that is a violation of these criteria -- filter it out.
+
+KEEP only if the company is clearly one of:
+- Big tech: Google, Meta, Apple, Amazon, Microsoft, Netflix, Nvidia.
+- Elite AI labs: OpenAI, Anthropic, Google DeepMind, xAI, Mistral, Scale AI, Cohere, Thinking Machines, SSI.
+- Top quant / HFT / trading firms: Citadel, Citadel Securities, Jane Street, Two Sigma, Hudson River Trading, Jump Trading, Optiver, DRW, IMC, DE Shaw, Five Rings, SIG, Point72, Akuna, Old Mission.
+- Top-tier high-comp startups / unicorns with elite engineering reputations: Stripe, Databricks, Snowflake, Ramp, Plaid, Figma, Notion, Rippling, Coinbase, Anduril, Palantir, Airbnb, Uber, Cloudflare, Datadog, HashiCorp, Confluent, Vercel, Roblox, Pinterest, Dropbox, Robinhood, Brex, Mercury.
+
+Also acceptable: a company not on the list ONLY if the posting makes its top-tier status unmistakable (e.g. clearly states elite/FAANG-level compensation, or is a widely recognized top engineering brand).
+
+FILTER OUT everything else, including solid-but-not-elite mid-size companies, banks/insurers, consultancies, agencies, enterprise/legacy software, government/defense contractors (except Palantir/Anduril), and any company you do not clearly recognize as top-tier. When unsure whether a company is truly elite, FILTER IT OUT.""",
+    },
+    {
+        "name": "Pay: $200k+ total comp (new grad)",
+        "description": "Keeps roles plausibly paying $200k+ first-year total comp to a new grad; judges unstated pay from the employer's reputation.",
+        "fail_closed": True,
+        "on_ambiguous": "filter",
+        "prompt": """Target: first-year total compensation (base + annual equity + amortized signing) of at least $200k for a new grad.
+
+Base salary is the proxy for TC: a base of $150k/year or more implies roughly $200k+ TC once equity and bonus are counted, so treat $150k base as clearing the bar.
+
+READING STATED PAY:
+- Judge on the TOP of a stated base range. $129k-$195k -> judge $195k -> KEEP. $95k-$140k -> judge $140k -> FILTER OUT.
+- If total compensation is stated directly rather than base, use $200k as the bar instead of $150k.
+- Annualize hourly, daily or weekly rates at 2080 hrs/year before judging ($40/hr = $83k -> FILTER OUT).
+
+WHEN NO PAY IS STATED:
+Absence of a stated range is NOT ambiguity -- decide from the employer and the role. Judge whether this specific company plausibly pays $200k+ first-year TC to a new grad in this role.
+- KEEP when the employer is known to pay at that level: big tech, elite AI labs, quant/HFT and trading firms, top-tier high-comp startups and unicorns, and well-funded engineering-led companies. Equity-heavy employers frequently post base only, or nothing at all.
+- FILTER OUT when the employer and role clearly do not reach it: utilities, retail, healthcare systems, staffing and consulting agencies, government and defense contractors, non-profits, universities, banks and insurers outside their quant desks, and any hourly, field, technician, operations or support role.
+- If you genuinely cannot place the employer, FILTER OUT.
+
+FILTER OUT if ANY of these apply (each is sufficient on its own):
+- Mid / senior / lead / staff / principal level, or requires (not merely prefers) a Master's or PhD, or more than 1 year of experience.""",
+    },
+    {
+        "name": "Pay: $150k+ stated (new grad)",
+        "description": "Strict: keeps only roles that explicitly state pay reaching $150k/year; unlisted pay is filtered.",
+        "fail_closed": True,
+        "on_ambiguous": "filter",
+        "prompt": """Keep only roles whose stated pay reaches $150k/year for a new grad. Judge on the TOP of a stated range (a range of $120k-$160k clears; $100k-$140k does not). Annualize hourly, daily or weekly rates at 2080 hrs/year before judging. If no pay is listed at all, FILTER IT OUT.
+
+FILTER OUT if ANY of these apply (each is sufficient on its own):
+- Mid / senior / lead / staff / principal level, or requires (not merely prefers) a Master's or PhD, or more than 1 year of experience.""",
+    },
+    {
+        "name": "Backend & infrastructure focus",
+        "description": "Keeps backend, distributed-systems, platform, and DevOps work; filters mobile-only, embedded, QA-only, and non-engineering roles.",
+        "prompt": """KEEP roles whose primary work is:
+- Backend / API / microservices development.
+- Distributed systems, systems programming, performance, or real-time/concurrent work.
+- Infrastructure / platform / SRE / DevOps / cloud engineering.
+- Data or search infrastructure, pipelines, streaming.
+- Full-stack roles with a meaningful backend component.
+
+FILTER OUT roles that are primarily:
+- Mobile-only (iOS/Android with no backend), embedded/firmware, hardware/FPGA/ASIC.
+- QA/test-only, pure UI/UX design, research-only data science or ML research.
+- Non-engineering roles entirely.
+
+When uncertain, KEEP.""",
+    },
+    {
+        "name": "No staffing agencies or consultancies",
+        "description": "Filters postings from staffing/recruiting agencies, outsourcing shops, and consulting firms hiring for client work.",
+        "prompt": """FILTER OUT postings where the employer is a staffing agency, recruiting firm, outsourcing/offshoring shop, or a consultancy hiring engineers for unnamed client projects (signs: the company describes itself as a staffing/talent partner, the client is unnamed, "W2/C2C" language, bench/rotational client placement).
+
+KEEP direct postings from the company the engineer would actually work for, including consultancies hiring for their own product teams.
+
+When uncertain, KEEP.""",
+    },
+]
+
+
 COL = {
     "company": 1, "size": 2, "location": 3, "found": 4, "url": 5, "title": 6,
     "terms": 7, "recruiter": 8, "connection1": 9, "connection2": 10,
@@ -93,6 +208,27 @@ def backfill_filters(user_id: int, dry_run: bool) -> int:
             (user_id, name, spec.prompt, spec.on_ambiguous, spec.fail_closed, phash),
         )
     return count
+
+
+def backfill_presets(dry_run: bool) -> int:
+    for p in PRESETS:
+        if dry_run:
+            continue
+        db.execute(
+            """
+            INSERT INTO filter_presets (name, description, prompt, on_ambiguous, fail_closed)
+            VALUES (%s, %s, %s, %s, %s)
+            ON CONFLICT (name) DO NOTHING
+            """,
+            (
+                p["name"],
+                p["description"],
+                p["prompt"].strip(),
+                p.get("on_ambiguous", "keep"),
+                p.get("fail_closed", False),
+            ),
+        )
+    return len(PRESETS)
 
 
 def sheet_rows(sheet_id: str) -> List[List[str]]:
@@ -182,12 +318,21 @@ def main() -> None:
         "--sheet-id", action="append", default=[],
         help="Sheet to import (repeatable; default: every sheet in configs.toml)",
     )
+    parser.add_argument(
+        "--presets", action="store_true",
+        help="Seed the standard filter presets (user-independent; existing names untouched)",
+    )
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
-    if not args.sub and not args.email:
-        parser.error("pass --sub and/or --email")
+    if not args.sub and not args.email and not args.presets:
+        parser.error("pass --sub and/or --email (or --presets for the preset seed alone)")
 
     db.init_schema()
+    if args.presets:
+        n = backfill_presets(args.dry_run)
+        print(f"presets: {n} seeded (existing names left untouched)")
+    if not args.sub and not args.email:
+        return
     user = find_or_create_user(args.sub, args.email, args.dry_run)
     print(f"user: id={user['id']} sub={user['sub']} email={user.get('email')}")
 
