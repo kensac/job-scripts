@@ -1,0 +1,200 @@
+from __future__ import annotations
+
+import hashlib
+import re
+
+from api import criteria as crit
+from api import ai, ssrf
+from api import db
+from api import worker
+from core import filters
+
+# ---------------------------------------------------------------------------
+# api.criteria
+# ---------------------------------------------------------------------------
+
+
+def test_criteria_params_collapses_unset():
+    params = crit.params(None)
+    assert params["crit_date"] is None
+    assert params["crit_has_excl"] is False
+    assert params["crit_excl"] == []
+    assert params["crit_has_terms"] is False
+    assert params["crit_terms"] == []
+
+
+def test_criteria_params_excludes_lowercased_and_escaped():
+    params = crit.params({"criteria": {"excluded_locations": ["New York (NY)", "  UK  "]}})
+    assert params["crit_has_excl"] is True
+    assert params["crit_excl"] == [re.escape("new york (ny)"), re.escape("uk")]
+
+
+def test_criteria_word_boundary_matching_through_postgres():
+    params = crit.params({"criteria": {"excluded_locations": ["UK"]}})
+    pattern = params["crit_excl"][0]
+
+    def matches(location: str) -> bool:
+        row = db.query_one(
+            "SELECT lower(%(loc)s) ~ ('\\m' || %(pattern)s || '\\M') AS matched",
+            {"loc": location, "pattern": pattern},
+        )
+        return bool(row["matched"])
+
+    assert matches("London, UK") is True
+    assert matches("Newcastle upon Tyne, UK") is True
+    assert matches("Tukwila, WA") is False
+
+
+def test_criteria_word_boundary_matching_canada():
+    params = crit.params({"criteria": {"excluded_locations": ["Canada"]}})
+    pattern = params["crit_excl"][0]
+
+    def matches(location: str) -> bool:
+        row = db.query_one(
+            "SELECT lower(%(loc)s) ~ ('\\m' || %(pattern)s || '\\M') AS matched",
+            {"loc": location, "pattern": pattern},
+        )
+        return bool(row["matched"])
+
+    assert matches("Toronto, Canada") is True
+    assert matches("Vancouver, BC") is False
+
+
+# ---------------------------------------------------------------------------
+# api.worker._looks_blocked
+# ---------------------------------------------------------------------------
+
+
+def test_looks_blocked_none_content():
+    assert worker._looks_blocked(None) is False
+
+
+def test_looks_blocked_short_page():
+    assert worker._looks_blocked("short") is True
+
+
+def test_looks_blocked_short_page_with_markers():
+    for marker in ("just a moment", "access denied", "service unavailable"):
+        page = f"{marker} " * 30
+        assert 300 < len(page) < 6000
+        assert worker._looks_blocked(page) is True
+
+
+def test_looks_blocked_long_real_posting_with_cloudflare_word():
+    page = "We use cloudflare for our website. " + ("Great engineering culture. " * 300)
+    assert len(page) > 6000
+    assert worker._looks_blocked(page) is False
+
+
+# ---------------------------------------------------------------------------
+# api.worker.AdaptiveLimiter
+# ---------------------------------------------------------------------------
+
+
+def test_adaptive_limiter_starts_at_min_when_max_is_low():
+    limiter = worker.AdaptiveLimiter(min_c=1, max_c=1)
+    assert limiter.limit == 1
+
+
+def test_adaptive_limiter_grows_on_sustained_throughput():
+    limiter = worker.AdaptiveLimiter(min_c=1, max_c=10, window=4)
+    start = limiter.limit
+    for _ in range(4):
+        limiter.record()
+    assert limiter.limit == start + 1
+
+
+def test_adaptive_limiter_grows_across_two_windows(monkeypatch):
+    limiter = worker.AdaptiveLimiter(min_c=1, max_c=10, window=4)
+    start = limiter.limit
+    clock = iter([0, 8, 8, 15, 15])
+    monkeypatch.setattr(worker.time, "monotonic", lambda: next(clock))
+    for _ in range(8):
+        limiter.record()
+    assert limiter.limit == start + 2
+
+
+def test_adaptive_limiter_halves_on_rate_limit_signal():
+    limiter = worker.AdaptiveLimiter(min_c=1, max_c=10)
+    limiter.limit = 8
+    limiter.record(rate_limited=True)
+    assert limiter.limit == 4
+
+
+def test_adaptive_limiter_rate_limit_never_below_min():
+    limiter = worker.AdaptiveLimiter(min_c=2, max_c=10)
+    limiter.limit = 2
+    limiter.record(rate_limited=True)
+    assert limiter.limit == 2
+
+
+# ---------------------------------------------------------------------------
+# api.ai
+# ---------------------------------------------------------------------------
+
+
+def test_validate_params_rejects_unknown():
+    error = ai.validate_params("openai", {"bogus": 1})
+    assert error is not None
+
+
+def test_validate_params_accepts_valid_openai():
+    assert ai.validate_params("openai", {"reasoning_effort": "medium"}) is None
+
+
+def test_validate_params_accepts_valid_anthropic():
+    assert ai.validate_params("anthropic", {"effort": "high"}) is None
+
+
+def test_validate_params_rejects_invalid_effort():
+    assert ai.validate_params("anthropic", {"effort": "bogus"}) is not None
+
+
+def test_validate_params_temperature_only_for_openai_compatible():
+    assert ai.validate_params("openai_compatible", {"temperature": 0.5}) is None
+    assert ai.validate_params("openai", {"temperature": 0.5}) is not None
+
+
+def test_provider_of_model():
+    assert ai.provider_of_model("gpt-5-nano") == "openai"
+    assert ai.provider_of_model("claude-sonnet-5") == "anthropic"
+    assert ai.provider_of_model("no-such-model") is None
+
+
+def test_prices_cover_every_catalog_model():
+    for models in ai.MODEL_CATALOG.values():
+        for entry in models:
+            assert entry["model"] in ai.PRICES_PER_MTOK, entry["model"]
+
+
+# ---------------------------------------------------------------------------
+# api.ssrf.validate_base_url
+# ---------------------------------------------------------------------------
+
+
+def test_validate_base_url_rejects_http():
+    assert ssrf.validate_base_url("http://example.com") is not None
+
+
+def test_validate_base_url_rejects_ip_literal():
+    assert ssrf.validate_base_url("https://8.8.8.8/v1") is not None
+
+
+def test_validate_base_url_rejects_single_label_host():
+    assert ssrf.validate_base_url("https://localhost/v1") is not None
+
+
+def test_validate_base_url_accepts_public_https():
+    assert ssrf.validate_base_url("https://api.example.com/v1") is None
+
+
+# ---------------------------------------------------------------------------
+# core.filters.build_custom_instructions
+# ---------------------------------------------------------------------------
+
+
+def test_build_custom_instructions_stable_hash():
+    first = filters.build_custom_instructions("must offer visa sponsorship", "filter")
+    second = filters.build_custom_instructions("must offer visa sponsorship", "filter")
+    assert first == second
+    assert hashlib.sha256(first.encode()).hexdigest() == hashlib.sha256(second.encode()).hexdigest()
