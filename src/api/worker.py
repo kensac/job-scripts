@@ -698,12 +698,109 @@ async def handle_ingest_source(task_id: int, payload: Dict[str, Any]) -> None:
         )
 
 
+REVERIFY_DAYS = int(os.environ.get("JOBTRACKER_REVERIFY_DAYS", "7"))
+REVERIFY_PER_CYCLE = int(os.environ.get("JOBTRACKER_REVERIFY_PER_CYCLE", "150"))
+
+# A board row counts as untouched (machine-managed) when the user never set
+# anything on it; only these are auto-added by materialization and auto-removed
+# by re-verification.
+_UNTOUCHED = """
+    (uj.status IS NULL OR uj.status = '') AND uj.date_applied IS NULL
+    AND COALESCE(uj.notes, '') = '' AND COALESCE(uj.size, '') = ''
+    AND COALESCE(uj.recruiter, '') = '' AND COALESCE(uj.connection1, '') = ''
+    AND COALESCE(uj.connection2, '') = '' AND COALESCE(uj.documents, '') = ''
+    AND NOT uj.hidden
+"""
+
+
+async def handle_reverify_open(task_id: int, payload: Dict[str, Any]) -> None:
+    """Re-checks 'still open?' for stale untouched board rows, then demotes
+    rows whose job turned out closed. Touched/hidden rows are never removed."""
+    from core import ats
+    from core.pittcsc_simplify import (
+        CLOSED_INSTRUCTIONS,
+        JobClosedResponse,
+        extract_url_content,
+    )
+
+    key = ai.server_key("openai")
+    if not key:
+        raise LookupError("no server OpenAI key for reverification")
+    cfg = ai.AIConfig(
+        provider="openai", api_key=key, key_source="owner",
+        model=ai.DEFAULT_MODELS["openai"],
+    )
+    rows = db.query(
+        f"""
+        SELECT DISTINCT j.url, j.company, j.title FROM user_jobs uj
+        JOIN jobs j ON j.id = uj.job_id
+        WHERE {_UNTOUCHED}
+          AND COALESCE((SELECT MAX(q.created_at) FROM ai_queries q
+                        WHERE q.url = j.url AND q.check_type = 'closed'),
+                       '1970-01-01')::timestamp < now() - make_interval(days => %(days)s)
+        LIMIT %(cap)s
+        """,
+        {"days": REVERIFY_DAYS, "cap": REVERIFY_PER_CYCLE},
+    )
+    total = len(rows)
+    for i, r in enumerate(rows):
+        if i % 5 == 0:
+            if _cancelled(task_id):
+                return
+            _set_progress(task_id, i, total, "reverifying open status")
+        ats_res = ats.resolve(r["url"])
+        if ats_res.status is ats.Status.GONE:
+            add_ai_result(r["url"], "rejected", "ATS reports posting gone (reverify)", "closed")
+            continue
+        content = (
+            ats_res.text
+            if ats_res.ok and ats_res.text
+            else await asyncio.to_thread(extract_url_content, r["url"])
+        )
+        if not content:
+            continue
+        try:
+            parsed, usage = await ai.parse(
+                cfg, CLOSED_INSTRUCTIONS, content[:60000], JobClosedResponse
+            )
+        except Exception:
+            logger.exception(f"Reverify closed-check failed for {r['url']}")
+            continue
+        if not parsed:
+            continue
+        add_ai_result(
+            r["url"],
+            "rejected" if parsed.is_closed else "passed",
+            parsed.reason or "",
+            "closed",
+            model=cfg.model,
+            input_content=content,
+            prompt_tokens=usage["prompt_tokens"],
+            completion_tokens=usage["completion_tokens"],
+            total_tokens=usage["total_tokens"],
+        )
+    _set_progress(task_id, total, total, "reverified")
+    with db.pool.connection() as conn:
+        result = conn.execute(
+            f"""
+            DELETE FROM user_jobs uj USING jobs j
+            WHERE uj.job_id = j.id AND {_UNTOUCHED}
+              AND (SELECT q.status FROM ai_queries q WHERE q.url = j.url
+                   AND q.check_type = 'closed' AND q.status IN ('passed', 'rejected')
+                   ORDER BY q.id DESC LIMIT 1) = 'rejected'
+            """
+        )
+        demoted = result.rowcount
+    logger.info(f"Reverify done: {total} checked, {demoted} closed rows demoted")
+
+
 HANDLERS = {
     "extract_upload": lambda task_id, payload: handle_extract_upload(payload),
     "run_filter": handle_run_filter,
     "run_all_filters": handle_run_all_filters,
     "run_filter_chunk": handle_run_filter_chunk,
     "ingest_source": handle_ingest_source,
+    "reverify_open": handle_reverify_open,
 }
 
 
@@ -728,6 +825,8 @@ def schedule_ingest_cycle() -> None:
             {"source": s["name"], "cycle": cycle},
             dedupe_key=f"ingest:{s['name']}:{cycle}",
         )
+    day = now.strftime("%Y-%m-%d")
+    enqueue("reverify_open", {"cycle": day}, dedupe_key=f"reverify:{day}")
 
 
 async def run_once() -> bool:
