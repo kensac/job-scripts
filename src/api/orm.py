@@ -52,6 +52,9 @@ class GroupBudget(Base):
 
     group_name: Mapped[str] = mapped_column(Text, primary_key=True)
     weekly_token_budget: Mapped[Optional[int]] = mapped_column(BigInteger)
+    # NULL = default policy (unlimited tiers: every server-keyed model;
+    # budgeted tiers: the env allowlist). A list = exactly these models.
+    allowed_models: Mapped[Optional[List[str]]] = mapped_column(ARRAY(Text))
 
 
 class Job(Base):

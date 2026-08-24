@@ -472,14 +472,21 @@ def reparse_job(job_id: int, user: AuthedUser = Depends(require_admin)):
 
 class GroupBudgetPut(BaseModel):
     weekly_token_budget: Optional[int] = Field(default=None, ge=0)
+    allowed_models: Optional[List[str]] = Field(default=None, max_length=50)
 
 
 @router.get("/group-budgets")
 def list_group_budgets(user: AuthedUser = Depends(require_admin)):
+    from api import ai
+
     return {
         "groups": db.query(
-            "SELECT group_name, weekly_token_budget FROM group_budgets ORDER BY group_name"
-        )
+            "SELECT group_name, weekly_token_budget, allowed_models "
+            "FROM group_budgets ORDER BY group_name"
+        ),
+        "catalog_models": sorted(
+            m["model"] for models in ai.MODEL_CATALOG.values() for m in models
+        ),
     }
 
 
@@ -487,14 +494,31 @@ def list_group_budgets(user: AuthedUser = Depends(require_admin)):
 def put_group_budget(
     group_name: str, body: GroupBudgetPut, user: AuthedUser = Depends(require_admin)
 ):
+    from api import ai
+
+    if body.allowed_models is not None:
+        known = {m["model"] for models in ai.MODEL_CATALOG.values() for m in models}
+        unknown = [m for m in body.allowed_models if m not in known]
+        if unknown:
+            raise HTTPException(
+                400,
+                detail={"code": "UNKNOWN_MODEL", "message": f"unknown models: {unknown}"},
+            )
     db.execute(
         """
-        INSERT INTO group_budgets (group_name, weekly_token_budget) VALUES (%s, %s)
-        ON CONFLICT (group_name) DO UPDATE SET weekly_token_budget = EXCLUDED.weekly_token_budget
+        INSERT INTO group_budgets (group_name, weekly_token_budget, allowed_models)
+        VALUES (%s, %s, %s)
+        ON CONFLICT (group_name) DO UPDATE SET
+            weekly_token_budget = EXCLUDED.weekly_token_budget,
+            allowed_models = EXCLUDED.allowed_models
         """,
-        (group_name, body.weekly_token_budget),
+        (group_name, body.weekly_token_budget, body.allowed_models),
     )
-    return {"group_name": group_name, "weekly_token_budget": body.weekly_token_budget}
+    return {
+        "group_name": group_name,
+        "weekly_token_budget": body.weekly_token_budget,
+        "allowed_models": body.allowed_models,
+    }
 
 
 @router.delete("/group-budgets/{group_name}")

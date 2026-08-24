@@ -21,7 +21,7 @@ def _grants(user: AuthedUser) -> dict:
         "spent_this_week": ent.spent_this_week,
         "has_byo_key": ent.has_byo_key,
         "key_source": ent.key_source,
-        "owner_key_models": ai.owner_models(ent.weekly_token_budget is None)
+        "owner_key_models": budget.owner_allowed_models(user.groups)
         if ent.owner_key
         else [],
     }
@@ -96,7 +96,7 @@ def models(user: AuthedUser = Depends(require_user)):
         provider = settings["ai_provider"] or "openai"
         providers.append(_provider_entry(provider, ai.MODEL_CATALOG[provider]))
     elif ent.owner_key:
-        owner_allowed = ai.owner_models(ent.weekly_token_budget is None)
+        owner_allowed = budget.owner_allowed_models(user.groups)
         for provider in ("openai", "anthropic"):
             models_list = [
                 m for m in ai.MODEL_CATALOG[provider] if m["model"] in owner_allowed
@@ -153,8 +153,8 @@ def put_settings(body: SettingsPut, user: AuthedUser = Depends(require_user)):
             valid = provider == "openai_compatible" or body.ai_model in catalog
         else:
             ent = budget.get_entitlement(user)
-            valid = ent.owner_key and body.ai_model in ai.owner_models(
-                ent.weekly_token_budget is None
+            valid = ent.owner_key and body.ai_model in budget.owner_allowed_models(
+                user.groups
             )
         if not valid:
             raise HTTPException(

@@ -13,6 +13,7 @@ class Entitlement:
     weekly_token_budget: Optional[int]
     spent_this_week: int
     has_byo_key: bool
+    groups: List[str] = None  # type: ignore[assignment]
 
     @property
     def key_source(self) -> Optional[str]:
@@ -62,7 +63,37 @@ def get_entitlement(user: AuthedUser) -> Entitlement:
         weekly_token_budget=weekly,
         spent_this_week=spent_this_week(user.id) if owner else 0,
         has_byo_key=bool(settings and settings["has_key"]),
+        groups=list(user.groups),
     )
+
+
+def owner_allowed_models(groups: List[str]) -> List[str]:
+    """Models this user may run on the owner key: union across their tiers.
+    A tier with an explicit allowed_models list grants exactly those; a NULL
+    tier grants the default policy for its budget class. Everything is
+    intersected with what the server actually has keys for."""
+    from api import ai
+
+    if not groups:
+        return []
+    rows = db.query(
+        "SELECT weekly_token_budget, allowed_models FROM group_budgets "
+        "WHERE group_name = ANY(%s)",
+        (groups,),
+    )
+    allowed: set = set()
+    for r in rows:
+        if r["allowed_models"] is not None:
+            allowed |= set(r["allowed_models"])
+        else:
+            allowed |= set(ai.owner_models(r["weekly_token_budget"] is None))
+    keyed = {
+        m["model"]
+        for provider, models in ai.MODEL_CATALOG.items()
+        if ai.server_key(provider)
+        for m in models
+    }
+    return sorted(allowed & keyed)
 
 
 def resolve_ai_config(user_id: int, entitlement: Entitlement):
@@ -97,8 +128,7 @@ def resolve_ai_config(user_id: int, entitlement: Entitlement):
             and entitlement.spent_this_week >= entitlement.weekly_token_budget
         ):
             raise PermissionError("BUDGET_EXCEEDED")
-        unlimited = entitlement.weekly_token_budget is None
-        allowed = ai.owner_models(unlimited)
+        allowed = owner_allowed_models(entitlement.groups or [])
         model = settings.get("ai_model")
         if model not in allowed:
             model = (
