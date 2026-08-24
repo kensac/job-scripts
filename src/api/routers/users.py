@@ -88,7 +88,7 @@ def models(user: AuthedUser = Depends(require_user)):
 def get_settings(user: AuthedUser = Depends(require_user)):
     row = db.query_one(
         "SELECT column_layout, prefs, ai_provider, ai_base_url, ai_model, ai_params, "
-        "api_key_enc IS NOT NULL AS has_byo_key "
+        "bypass_sponsorship_filter, api_key_enc IS NOT NULL AS has_byo_key "
         "FROM user_settings WHERE user_id = %s",
         (user.id,),
     )
@@ -99,6 +99,7 @@ def get_settings(user: AuthedUser = Depends(require_user)):
         "ai_base_url": None,
         "ai_model": None,
         "ai_params": {},
+        "bypass_sponsorship_filter": False,
         "has_byo_key": False,
     }
 
@@ -135,14 +136,17 @@ def put_settings(body: SettingsPut, user: AuthedUser = Depends(require_user)):
             )
     db.execute(
         """
-        INSERT INTO user_settings (user_id, column_layout, prefs, ai_model, ai_params, updated_at)
+        INSERT INTO user_settings (user_id, column_layout, prefs, ai_model, ai_params,
+                                   bypass_sponsorship_filter, updated_at)
         VALUES (%(uid)s, %(layout)s, COALESCE(%(prefs)s, '{}'::jsonb),
-                %(model)s, COALESCE(%(params)s, '{}'::jsonb), now())
+                %(model)s, COALESCE(%(params)s, '{}'::jsonb),
+                COALESCE(%(bypass)s, FALSE), now())
         ON CONFLICT (user_id) DO UPDATE SET
             column_layout = COALESCE(EXCLUDED.column_layout, user_settings.column_layout),
             prefs = COALESCE(%(prefs)s, user_settings.prefs),
             ai_model = COALESCE(%(model)s, user_settings.ai_model),
             ai_params = COALESCE(%(params)s, user_settings.ai_params),
+            bypass_sponsorship_filter = COALESCE(%(bypass)s, user_settings.bypass_sponsorship_filter),
             updated_at = now()
         """,
         {
@@ -151,6 +155,7 @@ def put_settings(body: SettingsPut, user: AuthedUser = Depends(require_user)):
             "prefs": db.jsonb(body.prefs) if body.prefs is not None else None,
             "model": body.ai_model,
             "params": db.jsonb(body.ai_params) if body.ai_params is not None else None,
+            "bypass": body.bypass_sponsorship_filter,
         },
     )
     return {"ok": True}

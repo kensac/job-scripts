@@ -51,6 +51,7 @@ class SettingsPut(BaseModel):
     prefs: Optional[Dict[str, Any]] = None
     ai_model: Optional[str] = Field(default=None, max_length=200)
     ai_params: Optional[Dict[str, Any]] = None
+    bypass_sponsorship_filter: Optional[bool] = None
 
 
 class ApiKeyPut(BaseModel):

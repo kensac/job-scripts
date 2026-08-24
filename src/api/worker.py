@@ -176,6 +176,10 @@ async def _check_filter(
 
 
 def _candidates(user_id: int) -> List[Dict[str, Any]]:
+    bypass = db.query_one(
+        "SELECT bypass_sponsorship_filter FROM user_settings WHERE user_id = %s",
+        (user_id,),
+    )
     return db.query(
         """
         WITH latest_check AS (
@@ -190,11 +194,12 @@ def _candidates(user_id: int) -> List[Dict[str, Any]]:
                OR j.uploaded_by = %(uid)s)
           AND EXISTS (SELECT 1 FROM latest_check lc
                       WHERE lc.url = j.url AND lc.check_type = 'closed' AND lc.status = 'passed')
-          AND EXISTS (SELECT 1 FROM latest_check lc
-                      WHERE lc.url = j.url AND lc.check_type = 'clearance' AND lc.status = 'passed')
+          AND (%(bypass)s
+               OR EXISTS (SELECT 1 FROM latest_check lc
+                          WHERE lc.url = j.url AND lc.check_type = 'clearance' AND lc.status = 'passed'))
         ORDER BY j.id DESC
         """,
-        {"uid": user_id},
+        {"uid": user_id, "bypass": bool(bypass and bypass["bypass_sponsorship_filter"])},
     )
 
 

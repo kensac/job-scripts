@@ -50,8 +50,9 @@ WHERE (
         AND j.source IN (SELECT source FROM user_sources WHERE user_id = %(uid)s)
         AND EXISTS (SELECT 1 FROM latest_check lc
                     WHERE lc.url = j.url AND lc.check_type = 'closed' AND lc.status = 'passed')
-        AND EXISTS (SELECT 1 FROM latest_check lc
-                    WHERE lc.url = j.url AND lc.check_type = 'clearance' AND lc.status = 'passed')
+        AND (%(bypass_sponsorship)s
+             OR EXISTS (SELECT 1 FROM latest_check lc
+                        WHERE lc.url = j.url AND lc.check_type = 'clearance' AND lc.status = 'passed'))
         AND ((SELECT COUNT(*) FROM enabled_filters) = 0
              OR COALESCE((SELECT fp.passed_count FROM filter_pass fp WHERE fp.url = j.url), 0)
                 = (SELECT COUNT(*) FROM enabled_filters))
@@ -72,8 +73,16 @@ def list_jobs(
     user: AuthedUser = Depends(require_user),
 ):
     limit = max(1, min(limit, 1000))
+    bypass = db.query_one(
+        "SELECT bypass_sponsorship_filter FROM user_settings WHERE user_id = %s",
+        (user.id,),
+    )
     extra = []
-    params: dict = {"uid": user.id, "limit": limit + 1}
+    params: dict = {
+        "uid": user.id,
+        "limit": limit + 1,
+        "bypass_sponsorship": bool(bypass and bypass["bypass_sponsorship_filter"]),
+    }
     if not include_hidden:
         extra.append("AND COALESCE(uj.hidden, FALSE) = FALSE")
     if cursor is not None:
