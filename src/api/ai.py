@@ -63,6 +63,16 @@ def owner_models(unlimited: bool) -> list:
                 out.append(m["model"])
     return sorted(out)
 
+# USD per 1M tokens (input, output); models absent here emit no cost metric.
+PRICES_PER_MTOK = {
+    "gpt-5-nano": (0.05, 0.40),
+    "gpt-5-mini": (0.25, 2.00),
+    "gpt-5": (1.25, 10.00),
+    "claude-opus-5": (5.00, 25.00),
+    "claude-sonnet-5": (3.00, 15.00),
+    "claude-haiku-4-5": (1.00, 5.00),
+}
+
 _EFFORTS_OPENAI = ("minimal", "low", "medium", "high")
 _EFFORTS_ANTHROPIC = ("low", "medium", "high", "xhigh", "max")
 
@@ -131,6 +141,13 @@ async def parse(
         raise
     metrics.AI_CALLS.labels(cfg.provider, cfg.model, "ok").inc()
     metrics.AI_CALL_DURATION.labels(cfg.provider).observe(_time.monotonic() - start)
+    _, usage = result
+    price = PRICES_PER_MTOK.get(cfg.model)
+    if price and usage:
+        cost = (
+            usage["prompt_tokens"] * price[0] + usage["completion_tokens"] * price[1]
+        ) / 1_000_000
+        metrics.AI_COST_USD.labels(cfg.provider, cfg.model, cfg.key_source).inc(cost)
     return result
 
 

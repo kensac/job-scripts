@@ -85,6 +85,11 @@ INGEST_JOBS = Counter(
     "Ingest pipeline stages",
     ["source", "stage"],  # fetched | upserted | checked
 )
+AI_COST_USD = Counter(
+    "jobtracker_ai_cost_usd_total",
+    "Estimated AI spend in USD (app-side pricing tables)",
+    ["provider", "model", "key_source"],
+)
 BOARD_ROWS = Counter(
     "jobtracker_board_rows_total",
     "Automatic board row changes",
