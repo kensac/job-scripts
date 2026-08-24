@@ -325,7 +325,8 @@ def extract_url_content(url: str) -> Optional[str]:
 
 CLOSED_INSTRUCTIONS = """Decide if a job posting is closed or still accepting applications.
 
-Set is_closed=true ONLY on explicit signals: "no longer available/accepting applications", "position filled", "posting expired", "deadline passed", "no longer open", "404"/"page not found", or an error page shown instead of job details.
+Set is_closed=true ONLY on signals about THIS posting: "no longer available/accepting applications", "position filled", "posting expired", "deadline passed", "no longer open", "job not found", "404"/"page not found".
+Set is_closed=false for anything that is a fetch problem rather than a posting status: site-wide errors (500/502/503, "service unavailable", maintenance pages), access blocks (captcha, "access denied", "are you a robot", login walls, geo/region restrictions, rate limiting). These say nothing about the job.
 Otherwise is_closed=false. If job details are present or it is ambiguous, default to false (avoid false positives).
 
 reason: <=15 words; quote the exact closed phrase when found. Be decisive, no hedging."""
