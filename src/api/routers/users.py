@@ -21,7 +21,9 @@ def _grants(user: AuthedUser) -> dict:
         "spent_this_week": ent.spent_this_week,
         "has_byo_key": ent.has_byo_key,
         "key_source": ent.key_source,
-        "owner_key_models": sorted(ai.OWNER_KEY_MODELS) if ent.owner_key else [],
+        "owner_key_models": ai.owner_models(ent.weekly_token_budget is None)
+        if ent.owner_key
+        else [],
     }
 
 
@@ -89,17 +91,21 @@ def models(user: AuthedUser = Depends(require_user)):
         (user.id,),
     )
     providers = []
+    owner_allowed: list = []
     if settings and settings["has_key"]:
         provider = settings["ai_provider"] or "openai"
         providers.append(_provider_entry(provider, ai.MODEL_CATALOG[provider]))
     elif ent.owner_key:
-        models_list = [
-            m for m in ai.MODEL_CATALOG["openai"] if m["model"] in ai.OWNER_KEY_MODELS
-        ]
-        providers.append(_provider_entry("openai", models_list))
+        owner_allowed = ai.owner_models(ent.weekly_token_budget is None)
+        for provider in ("openai", "anthropic"):
+            models_list = [
+                m for m in ai.MODEL_CATALOG[provider] if m["model"] in owner_allowed
+            ]
+            if models_list:
+                providers.append(_provider_entry(provider, models_list))
     return {
         "providers": providers,
-        "owner_key_models": sorted(ai.OWNER_KEY_MODELS) if ent.owner_key else [],
+        "owner_key_models": owner_allowed,
         "key_source": ent.key_source,
         "addable_providers": list(ai.PROVIDERS),
     }
@@ -146,7 +152,9 @@ def put_settings(body: SettingsPut, user: AuthedUser = Depends(require_user)):
             valid = provider == "openai_compatible" or body.ai_model in catalog
         else:
             ent = budget.get_entitlement(user)
-            valid = ent.owner_key and body.ai_model in ai.OWNER_KEY_MODELS
+            valid = ent.owner_key and body.ai_model in ai.owner_models(
+                ent.weekly_token_budget is None
+            )
         if not valid:
             raise HTTPException(
                 400,

@@ -37,6 +37,32 @@ OWNER_KEY_MODELS = {
     if m.strip()
 }
 
+_SERVER_KEY_ENVS = {"openai": "OPENAI_API_KEY", "anthropic": "ANTHROPIC_API_KEY"}
+
+
+def server_key(provider: str) -> str:
+    return os.environ.get(_SERVER_KEY_ENVS.get(provider, ""), "")
+
+
+def provider_of_model(model: str) -> Optional[str]:
+    for provider, models in MODEL_CATALOG.items():
+        if any(m["model"] == model for m in models):
+            return provider
+    return None
+
+
+def owner_models(unlimited: bool) -> list:
+    """Models usable on the server's keys: everything for unlimited users,
+    the allowlist for budgeted ones - per provider with a key configured."""
+    out = []
+    for provider in ("openai", "anthropic"):
+        if not server_key(provider):
+            continue
+        for m in MODEL_CATALOG[provider]:
+            if unlimited or m["model"] in OWNER_KEY_MODELS:
+                out.append(m["model"])
+    return sorted(out)
+
 _EFFORTS_OPENAI = ("minimal", "low", "medium", "high")
 _EFFORTS_ANTHROPIC = ("low", "medium", "high", "xhigh", "max")
 
@@ -98,7 +124,7 @@ async def parse(
             kwargs["output_config"] = {"effort": cfg.params["effort"]}
         response = await client.messages.parse(
             model=cfg.model,
-            max_tokens=cfg.params.get("max_output_tokens", 2500),
+            max_tokens=cfg.params.get("max_output_tokens", 4000),
             system=instructions,
             messages=[{"role": "user", "content": input_text}],
             output_format=response_model,
@@ -126,7 +152,9 @@ async def parse(
             input=input_text,
             text_format=response_model,
             reasoning={"effort": cfg.params.get("reasoning_effort", "medium")},
-            max_output_tokens=cfg.params.get("max_output_tokens", 2500),
+            # Covers reasoning AND output on the Responses API; too small and
+            # the JSON gets truncated mid-string after a long reasoning pass.
+            max_output_tokens=cfg.params.get("max_output_tokens", 6000),
             store=False,
             timeout=timeout,
         )

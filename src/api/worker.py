@@ -306,10 +306,17 @@ async def _run_filters(task_id: int, user_id: int, filters: List[Dict[str, Any]]
             if not content:
                 continue
             checked += 1
-            usage = await _check_filter(
-                cfg, job["url"], job["company"], job["title"], content,
-                instructions, flt["prompt_hash"], f"user{user_id}:{flt['name']}",
-            )
+            try:
+                usage = await _check_filter(
+                    cfg, job["url"], job["company"], job["title"], content,
+                    instructions, flt["prompt_hash"], f"user{user_id}:{flt['name']}",
+                )
+            except Exception:
+                # One bad job (truncated output, transient API error) must not
+                # kill the whole run; the failed verdict is recorded and retried
+                # on a later pass.
+                logger.exception(f"Filter check failed for {job['url']}")
+                continue
             if usage and usage["total_tokens"]:
                 budget.record_usage(
                     user_id, cfg.key_source, "filter", cfg.model,

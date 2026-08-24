@@ -97,14 +97,20 @@ def resolve_ai_config(user_id: int, entitlement: Entitlement):
             and entitlement.spent_this_week >= entitlement.weekly_token_budget
         ):
             raise PermissionError("BUDGET_EXCEEDED")
-        key = os.environ.get("OPENAI_API_KEY", "")
-        if key:
-            model = settings.get("ai_model") or ai.DEFAULT_MODELS["openai"]
-            if model not in ai.OWNER_KEY_MODELS:
-                model = ai.DEFAULT_MODELS["openai"]
+        unlimited = entitlement.weekly_token_budget is None
+        allowed = ai.owner_models(unlimited)
+        model = settings.get("ai_model")
+        if model not in allowed:
+            model = (
+                ai.DEFAULT_MODELS["openai"]
+                if ai.DEFAULT_MODELS["openai"] in allowed
+                else (allowed[0] if allowed else None)
+            )
+        if model:
+            provider = ai.provider_of_model(model) or "openai"
             return ai.AIConfig(
-                provider="openai",
-                api_key=key,
+                provider=provider,
+                api_key=ai.server_key(provider),
                 key_source="owner",
                 model=model,
                 params={k: v for k, v in params.items() if k != "temperature"},
