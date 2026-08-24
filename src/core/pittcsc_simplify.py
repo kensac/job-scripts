@@ -31,8 +31,14 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 
 from core.batch import BatchSpec, batch_enabled, run_responses_batch
-from core import ats
-from core.filters import compute_prompt_hash, get_filter_spec, list_filter_names
+from core import ats, catalog
+from core.urls import TRACKING_PARAMS, normalize_url
+from core.filters import (
+    build_custom_instructions,
+    compute_prompt_hash,
+    get_filter_spec,
+    list_filter_names,
+)
 from core.store import (
     add_ai_result,
     get_ai_result,
@@ -135,25 +141,6 @@ MAX_CONCURRENT_JOBS: int = 5
 # Sheet Configuration
 SHEET_COLUMNS: int = 15
 
-# URL Tracking Parameters to Remove
-TRACKING_PARAMS = {
-    "utm_source",
-    "utm_medium",
-    "utm_campaign",
-    "utm_term",
-    "utm_content",
-    "ref",
-    "source",
-    "campaign",
-    "fbclid",
-    "gclid",
-    "_ga",
-    "_gl",
-    "mc_cid",
-    "mc_eid",
-    "hsCtaTracking",
-    "hsa_",
-}
 
 
 @dataclass(frozen=True)
@@ -224,35 +211,6 @@ class ExponentialBackoff:
         self.attempt = 0
 
 
-def normalize_url(url: str) -> str:
-    if not url:
-        return url
-
-    parsed = urlparse(url)
-    query_params = parse_qs(parsed.query, keep_blank_values=True)
-
-    tracking_params_lower = {p.lower() for p in TRACKING_PARAMS}
-    filtered_params = {
-        k: v
-        for k, v in query_params.items()
-        if k.lower() not in tracking_params_lower
-        and not any(k.lower().startswith(param) for param in tracking_params_lower)
-    }
-
-    new_query = urlencode(filtered_params, doseq=True) if filtered_params else ""
-
-    normalized = urlunparse(
-        (
-            parsed.scheme,
-            parsed.netloc.lower(),
-            parsed.path.rstrip("/") or "/",
-            parsed.params,
-            new_query,
-            "",
-        )
-    )
-
-    return normalized
 
 
 def _usage_to_kwargs(response) -> Dict[str, Any]:
@@ -383,18 +341,6 @@ Do NOT flag: preferences ("clearance preferred"), sponsorship offered, applicati
 
 reason: <=20 words, quote the phrase."""
 
-def build_custom_instructions(prompt: str) -> str:
-    if not prompt:
-        return ""
-    return f"""Evaluate a job against the user criteria below and decide whether to filter it out.
-
-<user_criteria>
-{prompt}
-</user_criteria>
-
-should_filter=true only if the job clearly violates the criteria; false if it matches or is ambiguous (prefer false negatives, do not lose good roles).
-
-reason: <=25 words citing the deciding factor (company/role/skills)."""
 
 
 CUSTOM_INSTRUCTIONS = build_custom_instructions(CUSTOM_FILTER_PROMPT)
@@ -412,10 +358,11 @@ def set_active_filter(name: str) -> bool:
     if not spec:
         return False
     ACTIVE_FILTER_NAME = name
-    ACTIVE_CUSTOM_INSTRUCTIONS = build_custom_instructions(spec.prompt)
+    ACTIVE_CUSTOM_INSTRUCTIONS = build_custom_instructions(spec.prompt, spec.on_ambiguous)
     ACTIVE_FILTER_FAIL_CLOSED = spec.fail_closed
-    if spec.fail_closed:
-        logger.info(f"Filter '{name}' is fail-closed: jobs whose content cannot be extracted will be filtered out")
+    logger.info(
+        f"Filter '{name}': on_ambiguous={spec.on_ambiguous}, fail_closed={spec.fail_closed}"
+    )
     return True
 
 
@@ -1281,7 +1228,8 @@ def authenticate_gspread() -> gspread.client.Client:
 
 def get_existing_urls(sheet: Worksheet) -> Set[str]:
     rows: List[List[str]] = sheet.get_all_values()
-    return {row[5] for row in rows if len(row) > 5}  # type: ignore
+    urls = {row[5] for row in rows if len(row) > 5 and row[5]}  # type: ignore
+    return urls | {normalize_url(url) for url in urls}
 
 
 async def _extract_contents(jobs: List[JobPosting]) -> Dict[str, Optional[str]]:
@@ -1510,7 +1458,16 @@ def write_to_sheet(sheet: Worksheet, jobs: List[JobPosting]) -> int:
     rows_to_add: List[List[str]] = []
     jobs.sort(key=lambda x: x.date_posted)
 
+    # Re-checked here rather than reusing the snapshot from the start of the run:
+    # concurrent configs sharing a sheet write during the scrape/AI phase.
+    seen: Set[str] = {row[5] for row in existing_rows if len(row) > 5 and row[5]}
+    seen |= {normalize_url(url) for url in seen}
+
     for job in jobs:
+        if job.url in seen or job.raw_url in seen:
+            logger.debug(f"Skipping duplicate at write time: {job.url}")
+            continue
+        seen.add(job.url)
         row: List[str] = [""] * SHEET_COLUMNS
         row[1] = job.company
         row[3] = ", ".join(job.locations)
@@ -1713,6 +1670,10 @@ async def async_main(
 
         await asyncio.to_thread(wait_for_network)
         postings: List[JobPosting] = await asyncio.to_thread(fetch_job_postings, job_listings_url)
+        try:
+            catalog.upsert_postings(postings, os.environ.get("CONFIG_NAME", "unknown"))
+        except Exception as exc:
+            logger.warning(f"Catalog upsert failed: {exc}")
         existing_urls: Set[str] = await asyncio.to_thread(get_existing_urls, sheet)
         new_jobs: List[JobPosting] = filter_job_postings(postings, existing_urls)
 

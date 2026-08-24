@@ -1,0 +1,63 @@
+from __future__ import annotations
+
+import hmac
+import os
+from dataclasses import dataclass
+from typing import List
+
+from fastapi import Header, HTTPException
+
+from api import db
+
+SERVICE_TOKEN = os.environ.get("JOBTRACKER_SERVICE_TOKEN", "")
+
+
+@dataclass
+class AuthedUser:
+    id: int
+    sub: str
+    email: str
+    name: str
+    groups: List[str]
+
+
+def require_user(
+    x_service_token: str = Header(default=""),
+    x_user_sub: str = Header(default=""),
+    x_user_email: str = Header(default=""),
+    x_user_name: str = Header(default=""),
+    x_user_groups: str = Header(default=""),
+) -> AuthedUser:
+    if not SERVICE_TOKEN or not hmac.compare_digest(x_service_token, SERVICE_TOKEN):
+        raise HTTPException(401, detail={"code": "UNAUTHORIZED", "message": "invalid service token"})
+    if not x_user_sub:
+        raise HTTPException(401, detail={"code": "UNAUTHORIZED", "message": "missing user subject"})
+    groups = [g.strip() for g in x_user_groups.split(",") if g.strip()]
+    existing = db.query_one("SELECT id FROM users WHERE sub = %s", (x_user_sub,))
+    if existing is None and not db.get_config("signups_enabled", True):
+        if not {"infra-admins", "jobtracker-users-internal"}.intersection(groups):
+            raise HTTPException(
+                403,
+                detail={"code": "SIGNUPS_DISABLED", "message": "new signups are currently disabled"},
+            )
+    row = db.query_one(
+        """
+        INSERT INTO users (sub, email, name, groups)
+        VALUES (%s, %s, %s, %s)
+        ON CONFLICT (sub) DO UPDATE SET
+            email = COALESCE(NULLIF(EXCLUDED.email, ''), users.email),
+            name = COALESCE(NULLIF(EXCLUDED.name, ''), users.name),
+            groups = EXCLUDED.groups,
+            last_seen_at = now()
+        RETURNING id, sub, email, name, groups
+        """,
+        (x_user_sub, x_user_email, x_user_name, groups),
+    )
+    assert row is not None
+    return AuthedUser(
+        id=row["id"],
+        sub=row["sub"],
+        email=row["email"] or "",
+        name=row["name"] or "",
+        groups=row["groups"] or [],
+    )

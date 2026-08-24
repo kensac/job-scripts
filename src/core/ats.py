@@ -67,6 +67,10 @@ class AtsResolver(ABC):
     @abstractmethod
     def fetch(self, url: str) -> AtsResult: ...
 
+    def canonical(self, url: str) -> Optional[str]:
+        """Collapse URL variants of one posting onto a single clickable URL."""
+        return None
+
     def get(self, url: str) -> Optional[requests.Response]:
         try:
             return _session.get(url, timeout=TIMEOUT)
@@ -92,6 +96,16 @@ class AtsResolver(ABC):
 class Greenhouse(AtsResolver):
     name = "greenhouse"
     markers = ("greenhouse.io", "gh_jid=")
+
+    def canonical(self, url: str) -> Optional[str]:
+        parsed = urlparse(url)
+        match = re.search(r"greenhouse\.io/([^/?]+)/jobs/(\d+)", url)
+        if match:
+            return f"https://{parsed.netloc.lower()}/{match.group(1)}/jobs/{match.group(2)}"
+        job_id = (parse_qs(parsed.query).get("gh_jid") or [None])[0]
+        if job_id:
+            return f"https://{parsed.netloc.lower()}{parsed.path.rstrip('/')}?gh_jid={job_id}"
+        return None
 
     def fetch(self, url: str) -> AtsResult:
         parsed = urlparse(url)
@@ -128,6 +142,10 @@ class Lever(AtsResolver):
     enabled = False
     deprecated = True
 
+    def canonical(self, url: str) -> Optional[str]:
+        match = re.search(r"(jobs(?:\.eu)?\.lever\.co)/([^/?]+)/([0-9a-f-]{36})", url)
+        return f"https://{match.group(1).lower()}/{match.group(2)}/{match.group(3)}" if match else None
+
     def fetch(self, url: str) -> AtsResult:
         match = re.search(r"lever\.co/([^/]+)/([0-9a-f-]{36})", url)
         if not match:
@@ -157,6 +175,10 @@ class Ashby(AtsResolver):
     enabled = False
     deprecated = True
 
+    def canonical(self, url: str) -> Optional[str]:
+        match = re.search(r"ashbyhq\.com/([^/?]+)/([0-9a-f-]{36})", url)
+        return f"https://jobs.ashbyhq.com/{match.group(1)}/{match.group(2)}" if match else None
+
     def fetch(self, url: str) -> AtsResult:
         match = re.search(r"ashbyhq\.com/([^/]+)/([0-9a-f-]{36})", url)
         if not match:
@@ -181,7 +203,12 @@ class SmartRecruiters(AtsResolver):
     markers = ("smartrecruiters.com",)
     enabled = False
     deprecated = True
+
     _SECTIONS = ("companyDescription", "jobDescription", "qualifications", "additionalInformation")
+
+    def canonical(self, url: str) -> Optional[str]:
+        match = re.search(r"smartrecruiters\.com/([^/?]+)/(\d+)", url)
+        return f"https://jobs.smartrecruiters.com/{match.group(1)}/{match.group(2)}" if match else None
 
     def fetch(self, url: str) -> AtsResult:
         match = re.search(r"smartrecruiters\.com/([^/]+)/(\d+)", url)
@@ -207,6 +234,12 @@ class Workday(AtsResolver):
     enabled = False
     deprecated = True
 
+    def canonical(self, url: str) -> Optional[str]:
+        parsed = urlparse(url)
+        path = re.sub(r"^/[a-z]{2}-[a-z]{2}/", "/", parsed.path, flags=re.IGNORECASE)
+        match = re.match(r"^/([^/]+)/job/(.+?)/?$", path)
+        return f"https://{parsed.netloc.lower()}/{match.group(1)}/job/{match.group(2)}" if match else None
+
     def fetch(self, url: str) -> AtsResult:
         parsed = urlparse(url)
         tenant = parsed.netloc.split(".")[0]
@@ -225,13 +258,44 @@ class Workday(AtsResolver):
         )
 
 
+class ICims(AtsResolver):
+    """No public content API; registered for URL canonicalization only."""
+
+    name = "icims"
+    markers = ("icims.com",)
+    enabled = False
+
+    def canonical(self, url: str) -> Optional[str]:
+        parsed = urlparse(url)
+        match = re.search(r"/jobs/(\d+)(?:/[^/]*)?/job", parsed.path)
+        return f"https://{parsed.netloc.lower()}/jobs/{match.group(1)}/job" if match else None
+
+    def fetch(self, url: str) -> AtsResult:
+        return UNSUPPORTED
+
+
 RESOLVERS: list[AtsResolver] = [
     Greenhouse(),
     Lever(),
     Ashby(),
     SmartRecruiters(),
     Workday(),
+    ICims(),
 ]
+
+
+def canonicalize(url: str) -> Optional[str]:
+    """Canonical clickable URL for a posting, independent of whether the
+    provider's content bypass is enabled."""
+    for resolver in RESOLVERS:
+        if not resolver.matches(url):
+            continue
+        try:
+            return resolver.canonical(url)
+        except Exception as exc:
+            logger.debug(f"[{resolver.name}] canonicalization error {url}: {exc}")
+            return None
+    return None
 
 
 def resolve(url: str) -> AtsResult:

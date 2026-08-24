@@ -1,0 +1,10 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "dependencyDashboard": true,
+  "branchPrefix": "renovate/",
+  "labels": ["dependencies", "renovate"],
+  "timezone": "America/New_York",
+  "schedule": ["* 0-23 * * *"],
+  "pinDigests": true
+}

@@ -231,17 +231,26 @@ def get_latest(url: str, check_type: str) -> Optional[Dict[str, Any]]:
     return dict(row) if row else None
 
 
-def get_custom_result(url: str, prompt_hash: str) -> Optional[Dict[str, Any]]:
-    """Latest decided custom result for a url under a specific filter (by hash)."""
-    sub = _custom_cache.get(url)
-    if sub is not None and prompt_hash in sub:
-        return sub[prompt_hash]
+def get_custom_result(
+    url: str, prompt_hash: str, model: Optional[str] = None
+) -> Optional[Dict[str, Any]]:
+    """Latest decided custom result for a url under a specific filter (by hash).
+
+    With `model`, only verdicts produced by that model count (bypasses the
+    in-memory cache); without it, any model's verdict is reused.
+    """
+    if model is None:
+        sub = _custom_cache.get(url)
+        if sub is not None and prompt_hash in sub:
+            return sub[prompt_hash]
+    clause = " AND model = %s" if model is not None else ""
+    params = (url, prompt_hash, model) if model is not None else (url, prompt_hash)
     with _pool.connection() as conn:
         row = conn.execute(
             "SELECT * FROM ai_queries WHERE url = %s AND check_type = 'custom' "
-            "AND prompt_hash = %s AND status IN ('passed', 'rejected') "
+            f"AND prompt_hash = %s{clause} AND status IN ('passed', 'rejected') "
             "ORDER BY id DESC LIMIT 1",
-            (url, prompt_hash),
+            params,
         ).fetchone()
     return dict(row) if row else None
 
