@@ -83,6 +83,57 @@ async def run_check(
     return parsed, usage
 
 
+def record_ai_verdict(
+    *,
+    url: str,
+    check_type: str,
+    rejected: bool,
+    reason: str,
+    parsed_json: str,
+    usage: Dict[str, int],
+    model: str,
+    provider: str = "openai",
+    key_source: str = "owner",
+    company: str = "",
+    job_title: str = "",
+    instructions: str = "",
+    input_text: str = "",
+    filter_name: Optional[str] = None,
+    prompt_hash: Optional[str] = None,
+    context: str = "worker",
+    batched: bool = False,
+) -> None:
+    """Records a verdict whose AI response was obtained outside ai.parse
+    (e.g. the Batch API) - same complete row, metrics, and cost accounting
+    (batch pricing is half price)."""
+    status = "rejected" if rejected else "passed"
+    add_ai_result(
+        url, status, reason, check_type,
+        model=model,
+        filter_name=filter_name,
+        prompt_hash=prompt_hash,
+        company=company,
+        job_title=job_title,
+        instructions=instructions,
+        input_content=input_text,
+        parsed_json=parsed_json,
+        prompt_tokens=usage.get("prompt_tokens", 0),
+        completion_tokens=usage.get("completion_tokens", 0),
+        total_tokens=usage.get("total_tokens", 0),
+        config_name=context,
+    )
+    metrics.CHECKS.labels(check_type, status).inc()
+    metrics.AI_CALLS.labels(provider, model, "ok").inc()
+    price = ai.PRICES_PER_MTOK.get(model)
+    if price:
+        mult = 0.5 if batched else 1.0
+        cost = (
+            usage.get("prompt_tokens", 0) * price[0]
+            + usage.get("completion_tokens", 0) * price[1]
+        ) * mult / 1_000_000
+        metrics.AI_COST_USD.labels(provider, model, key_source).inc(cost)
+
+
 def record_manual(
     *,
     url: str,

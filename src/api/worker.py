@@ -166,7 +166,10 @@ def _parent_cancelled(parent_id: int) -> bool:
     return not row or row["status"] == "cancelled"
 
 
-CHUNK_KINDS = ["run_filter_chunk", "reverify_chunk"]
+CHUNK_KINDS = ["run_filter_chunk", "reverify_chunk", "run_filter_batch_chunk"]
+# Scheduled runs batch their AI calls through the OpenAI Batch API at half
+# price; jobs in one batch chunk (content already cached, so no scraping).
+BATCH_CHUNK_SIZE = int(os.environ.get("JOBTRACKER_BATCH_CHUNK_SIZE", "500"))
 
 
 def _update_parent_progress(parent_id: int) -> None:
@@ -539,32 +542,54 @@ async def _process_jobs(
         _update_parent_progress(parent_id)
 
 
-async def _run_filters(task_id: int, user_id: int, filters: List[Dict[str, Any]]) -> None:
-    """Splitter: compute the undecided work, then either run it inline (small)
-    or shard it into run_filter_chunk tasks the whole fleet load-balances."""
+def _content_ready_urls(urls: List[str]) -> set:
+    if not urls:
+        return set()
+    rows = db.query(
+        "SELECT DISTINCT url FROM ai_queries WHERE url = ANY(%s) "
+        "AND check_type != 'custom' AND input_content IS NOT NULL AND input_content != ''",
+        (urls,),
+    )
+    return {r["url"] for r in rows}
+
+
+async def _run_filters(
+    task_id: int, user_id: int, filters: List[Dict[str, Any]], batched: bool = False
+) -> None:
+    """Splitter: compute the undecided work, then shard it. Scheduled (batched)
+    runs send content-ready jobs through the half-price Batch API in large
+    centralized chunks; jobs still needing a scrape go through live fleet
+    chunks as usual (sharded parsing, centralized batching)."""
     ent, cfg = _load_config(user_id)
     candidates = _candidates(user_id)
     urls = [j["url"] for j in candidates]
+    use_batch = batched and cfg.key_source == "owner" and cfg.provider == "openai"
     units: List[tuple] = []
     for flt in filters:
         decided = _decided_urls(urls, flt["prompt_hash"], cfg.model)
         todo = [j for j in candidates if j["url"] not in decided]
         metrics.CACHED_VERDICTS.inc(len(candidates) - len(todo))
+        if use_batch and todo:
+            ready = _content_ready_urls([j["url"] for j in todo])
+            batchable = [j for j in todo if j["url"] in ready]
+            todo = [j for j in todo if j["url"] not in ready]
+            for start in range(0, len(batchable), BATCH_CHUNK_SIZE):
+                units.append(("batch", flt, batchable[start : start + BATCH_CHUNK_SIZE]))
         for start in range(0, len(todo), CHUNK_SIZE):
-            units.append((flt, todo[start : start + CHUNK_SIZE]))
+            units.append(("live", flt, todo[start : start + CHUNK_SIZE]))
     if not units:
         _materialize_passing(user_id)
         _set_progress(task_id, 0, 0, "everything already decided")
         return
-    if len(units) == 1:
-        flt, jobs = units[0]
+    if len(units) == 1 and units[0][0] == "live":
+        _, flt, jobs = units[0]
         await _process_jobs(task_id, user_id, ent, cfg, flt, jobs)
         _materialize_passing(user_id)
         return
-    total = sum(len(jobs) for _, jobs in units)
-    for flt, jobs in units:
+    total = sum(len(jobs) for _, _, jobs in units)
+    for mode, flt, jobs in units:
         enqueue(
-            "run_filter_chunk",
+            "run_filter_batch_chunk" if mode == "batch" else "run_filter_chunk",
             {
                 "parent_id": task_id,
                 "user_id": user_id,
@@ -597,6 +622,119 @@ async def handle_run_filter_chunk(task_id: int, payload: Dict[str, Any]) -> None
     )
 
 
+async def handle_run_filter_batch_chunk(task_id: int, payload: Dict[str, Any]) -> None:
+    """Centralized half-price path: one worker submits the whole chunk to the
+    OpenAI Batch API (core/batch.py enforces the enqueued-token budget in
+    waves) and records every verdict when results land."""
+    import json as _json
+
+    from openai.lib._pydantic import to_strict_json_schema
+
+    from core.batch import BatchSpec, run_responses_batch
+
+    user_id = payload["user_id"]
+    flt = payload["filter"]
+    jobs = payload["jobs"]
+    parent_id = payload["parent_id"]
+    ent, cfg = _load_config(user_id)
+    if cfg.key_source != "owner" or cfg.provider != "openai":
+        # Entitlement changed since split (e.g. BYO key added): run live.
+        await _process_jobs(task_id, user_id, ent, cfg, flt, jobs, parent_id=parent_id)
+        return
+    instructions = build_custom_instructions(flt["prompt"], flt["on_ambiguous"])
+    schema = to_strict_json_schema(FilterVerdict)
+    specs, by_url = [], {}
+    for job in jobs:
+        content = get_content(job["url"])
+        if not content:
+            continue
+        input_text = (
+            f"Company: {job['company']}\nJob Title: {job['title']}\n\nJob Content:\n{content}"
+        )
+        specs.append(
+            BatchSpec(job["url"], instructions, input_text, "FilterVerdict", schema)
+        )
+        by_url[job["url"]] = (job, input_text)
+    total = len(jobs)
+    if not specs:
+        _set_progress(task_id, total, total, "no content-ready jobs")
+        if parent_id:
+            _update_parent_progress(parent_id)
+        return
+    _set_progress(task_id, 0, total, f"batch of {len(specs)} submitted (half price)")
+    if parent_id:
+        _update_parent_progress(parent_id)
+
+    async def _heartbeat() -> None:
+        while True:
+            await asyncio.sleep(60)
+            db.execute(
+                "UPDATE tasks SET last_heartbeat = now() WHERE id = %s", (task_id,)
+            )
+            if _cancelled(task_id) or (parent_id and _parent_cancelled(parent_id)):
+                raise asyncio.CancelledError
+
+    hb = asyncio.create_task(_heartbeat())
+    try:
+        results = await run_responses_batch(
+            specs, cfg.model, cfg.params.get("reasoning_effort", "medium"), 6000
+        )
+    finally:
+        hb.cancel()
+    done = 0
+    for url, res in results.items():
+        done += 1
+        job, input_text = by_url[url]
+        usage = {
+            "prompt_tokens": (res.usage or {}).get("input_tokens", 0),
+            "completion_tokens": (res.usage or {}).get("output_tokens", 0),
+            "total_tokens": (res.usage or {}).get("total_tokens", 0),
+        }
+        if res.error or not res.text:
+            add_ai_result(
+                url, "failed", f"batch: {res.error or 'no output'}", "custom",
+                model=cfg.model, filter_name=f"user{user_id}:{flt['name']}",
+                prompt_hash=flt["prompt_hash"], company=job["company"],
+                job_title=job["title"], config_name="filter-batch",
+                error=res.error,
+            )
+            metrics.CHECKS.labels("custom", "failed").inc()
+            metrics.AI_CALLS.labels(cfg.provider, cfg.model, "error").inc()
+            continue
+        try:
+            parsed = FilterVerdict(**_json.loads(res.text))
+        except Exception:
+            add_ai_result(
+                url, "failed", "batch: unparsable output", "custom",
+                model=cfg.model, prompt_hash=flt["prompt_hash"],
+                company=job["company"], job_title=job["title"],
+                config_name="filter-batch",
+            )
+            metrics.CHECKS.labels("custom", "failed").inc()
+            continue
+        verdicts.record_ai_verdict(
+            url=url, check_type="custom", rejected=parsed.should_filter,
+            reason=parsed.reason, parsed_json=res.text, usage=usage,
+            model=cfg.model, provider=cfg.provider, key_source=cfg.key_source,
+            company=job["company"], job_title=job["title"],
+            instructions=instructions, input_text=input_text,
+            filter_name=f"user{user_id}:{flt['name']}", prompt_hash=flt["prompt_hash"],
+            context="filter-batch", batched=True,
+        )
+        if usage["total_tokens"]:
+            budget.record_usage(
+                user_id, cfg.key_source, "filter", cfg.model,
+                usage["prompt_tokens"], usage["completion_tokens"], usage["total_tokens"],
+            )
+        if done % 50 == 0:
+            _set_progress(task_id, done, total, flt["name"])
+            if parent_id:
+                _update_parent_progress(parent_id)
+    _set_progress(task_id, total, total, flt["name"])
+    if parent_id:
+        _update_parent_progress(parent_id)
+
+
 async def handle_run_filter(task_id: int, payload: Dict[str, Any]) -> None:
     flt = db.query_one(
         "SELECT * FROM user_filters WHERE id = %s AND user_id = %s",
@@ -604,7 +742,7 @@ async def handle_run_filter(task_id: int, payload: Dict[str, Any]) -> None:
     )
     if not flt:
         raise LookupError("unknown filter")
-    await _run_filters(task_id, flt["user_id"], [flt])
+    await _run_filters(task_id, flt["user_id"], [flt], batched=payload.get("batched", False))
 
 
 async def handle_run_all_filters(task_id: int, payload: Dict[str, Any]) -> None:
@@ -613,7 +751,9 @@ async def handle_run_all_filters(task_id: int, payload: Dict[str, Any]) -> None:
         (payload["user_id"],),
     )
     if filters:
-        await _run_filters(task_id, payload["user_id"], filters)
+        await _run_filters(
+            task_id, payload["user_id"], filters, batched=payload.get("batched", False)
+        )
 
 
 async def handle_ingest_source(task_id: int, payload: Dict[str, Any]) -> None:
@@ -699,7 +839,7 @@ async def handle_ingest_source(task_id: int, payload: Dict[str, Any]) -> None:
             continue
         enqueue(
             "run_all_filters",
-            {"user_id": u["id"]},
+            {"user_id": u["id"], "batched": True},
             dedupe_key=f"runall:{u['id']}:{cycle}",
         )
 
@@ -869,6 +1009,7 @@ HANDLERS = {
     "run_filter": handle_run_filter,
     "run_all_filters": handle_run_all_filters,
     "run_filter_chunk": handle_run_filter_chunk,
+    "run_filter_batch_chunk": handle_run_filter_batch_chunk,
     "ingest_source": handle_ingest_source,
     "reverify_open": handle_reverify_open,
     "reverify_chunk": handle_reverify_chunk,
