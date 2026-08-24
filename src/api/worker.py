@@ -404,6 +404,14 @@ async def handle_ingest_source(task_id: int, payload: Dict[str, Any]) -> None:
         """
     )
     for u in users:
+        active = db.query_one(
+            "SELECT 1 AS x FROM tasks WHERE kind = 'run_all_filters' "
+            "AND status IN ('pending', 'running') "
+            "AND (payload->>'user_id')::bigint = %s LIMIT 1",
+            (u["id"],),
+        )
+        if active:
+            continue
         enqueue(
             "run_all_filters",
             {"user_id": u["id"]},
