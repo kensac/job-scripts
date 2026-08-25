@@ -46,6 +46,7 @@ def _where(
     config: Optional[str],
     url: Optional[str],
     q: Optional[str],
+    deep: bool = False,
 ) -> tuple[str, dict]:
     clauses = []
     params: dict = {}
@@ -62,10 +63,13 @@ def _where(
         clauses.append("url = %(url)s")
         params["url"] = url
     if q:
-        clauses.append(
-            "(reason LIKE %(q)s OR url LIKE %(q)s OR company LIKE %(q)s "
-            "OR job_title LIKE %(q)s OR input_content LIKE %(q)s)"
-        )
+        # Default search hits only trigram-indexed columns; including
+        # input_content (unindexed page dumps) forces a sequential scan, so
+        # it's opt-in via deep=true.
+        cols = "(reason ILIKE %(q)s OR url ILIKE %(q)s OR company ILIKE %(q)s OR job_title ILIKE %(q)s"
+        if deep:
+            cols += " OR input_content ILIKE %(q)s"
+        clauses.append(cols + ")")
         params["q"] = f"%{q}%"
     return ("WHERE " + " AND ".join(clauses)) if clauses else "", params
 
@@ -249,6 +253,78 @@ def list_users(
     return {"users": rows[:limit], "has_more": len(rows) > limit}
 
 
+@router.get("/users/{user_id}")
+def user_detail(user_id: int, user: AuthedUser = Depends(require_admin)):
+    u = db.query_one(
+        """
+        SELECT u.id, u.sub, u.email, u.name, u.groups, u.created_at, u.last_seen_at,
+               s.ai_provider, s.ai_model, s.ai_params, s.bypass_sponsorship_filter,
+               s.criteria, s.api_key_enc IS NOT NULL AS has_byo_key
+        FROM users u LEFT JOIN user_settings s ON s.user_id = u.id
+        WHERE u.id = %s
+        """,
+        (user_id,),
+    )
+    if not u:
+        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown user"})
+    return {
+        "user": u,
+        "spend_by_day": db.query(
+            """
+            SELECT created_at::date AS day, key_source,
+                   SUM(total_tokens) AS tokens, COUNT(*) AS calls
+            FROM api_usage WHERE user_id = %s AND created_at > now() - interval '30 days'
+            GROUP BY 1, 2 ORDER BY 1
+            """,
+            (user_id,),
+        ),
+        "spend_by_purpose": db.query(
+            """
+            SELECT purpose, model, SUM(total_tokens) AS tokens, COUNT(*) AS calls
+            FROM api_usage WHERE user_id = %s GROUP BY 1, 2 ORDER BY 3 DESC
+            """,
+            (user_id,),
+        ),
+        "board": db.query(
+            """
+            SELECT COALESCE(NULLIF(status, ''), 'not_applied') AS status,
+                   COUNT(*) AS count, COUNT(*) FILTER (WHERE hidden) AS hidden
+            FROM user_jobs WHERE user_id = %s GROUP BY 1 ORDER BY 2 DESC
+            """,
+            (user_id,),
+        ),
+        "filters": db.query(
+            "SELECT id, name, enabled, on_ambiguous, fail_closed, updated_at "
+            "FROM user_filters WHERE user_id = %s ORDER BY id",
+            (user_id,),
+        ),
+        "sources": [
+            r["source"]
+            for r in db.query(
+                "SELECT source FROM user_sources WHERE user_id = %s ORDER BY source",
+                (user_id,),
+            )
+        ],
+        "uploads": db.query_one(
+            "SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE extraction_status = 'failed') AS failed "
+            "FROM jobs WHERE uploaded_by = %s",
+            (user_id,),
+        ),
+        "reports": db.query_one(
+            "SELECT COUNT(*) FILTER (WHERE status = 'open') AS open, COUNT(*) AS total "
+            "FROM reports WHERE user_id = %s",
+            (user_id,),
+        ),
+        "recent_tasks": db.query(
+            """
+            SELECT id, kind, status, worker, created_at, finished_at
+            FROM tasks WHERE payload->>'user_id' = %s ORDER BY id DESC LIMIT 10
+            """,
+            (str(user_id),),
+        ),
+    }
+
+
 @router.get("/tasks")
 def list_tasks(
     status: Optional[str] = None,
@@ -286,10 +362,17 @@ def list_tasks(
 
 
 @router.get("/failures")
-def failure_breakdown(hours: int = 24, user: AuthedUser = Depends(require_admin)):
+def failure_breakdown(
+    hours: int = 24,
+    worker: Optional[str] = None,
+    host: Optional[str] = None,
+    user: AuthedUser = Depends(require_admin),
+):
     """Failed checks pivoted by fleet host and URL host: one worker failing on
-    hosts the others handle fine is the signature of an IP block."""
+    hosts the others handle fine is the signature of an IP block. Pass worker
+    and/or host to drill into the individual failures behind a pivot row."""
     hours = max(1, min(hours, 720))
+    params: dict = {"hours": hours, "worker": worker, "host": host}
     rows = db.query(
         """
         SELECT COALESCE(worker, 'unknown') AS worker,
@@ -299,11 +382,28 @@ def failure_breakdown(hours: int = 24, user: AuthedUser = Depends(require_admin)
         FROM ai_queries
         WHERE status = 'failed'
           AND created_at::timestamptz > now() - make_interval(hours => %(hours)s)
+          AND (%(worker)s::text IS NULL OR COALESCE(worker, 'unknown') = %(worker)s)
+          AND (%(host)s::text IS NULL OR substring(url from '//([^/]+)') = %(host)s)
         GROUP BY 1, 2, 3 ORDER BY failures DESC LIMIT 100
         """,
-        {"hours": hours},
+        params,
     )
-    return {"rows": rows}
+    items = []
+    if worker or host:
+        items = db.query(
+            """
+            SELECT id, created_at, url, check_type, company, job_title,
+                   COALESCE(worker, 'unknown') AS worker, left(error, 300) AS error, reason
+            FROM ai_queries
+            WHERE status = 'failed'
+              AND created_at::timestamptz > now() - make_interval(hours => %(hours)s)
+              AND (%(worker)s::text IS NULL OR COALESCE(worker, 'unknown') = %(worker)s)
+              AND (%(host)s::text IS NULL OR substring(url from '//([^/]+)') = %(host)s)
+            ORDER BY id DESC LIMIT 200
+            """,
+            params,
+        )
+    return {"rows": rows, "items": items}
 
 
 class IngestBody(BaseModel):
@@ -573,13 +673,14 @@ def list_queries(
     config: Optional[str] = None,
     url: Optional[str] = None,
     q: Optional[str] = None,
+    deep: bool = False,
     sort: str = "id",
     dir: str = "desc",
     page: int = 1,
     page_size: int = 50,
     user: AuthedUser = Depends(require_admin),
 ):
-    where, params = _where(check_type, status, config, url, q)
+    where, params = _where(check_type, status, config, url, q, deep)
     page = max(1, page)
     page_size = max(1, min(page_size, 500))
     total_row = db.query_one(f"SELECT COUNT(*) AS c FROM ai_queries {where}", params)
@@ -749,6 +850,9 @@ def stats(user: AuthedUser = Depends(require_admin)):
     by_day = db.query(
         """
         SELECT substr(created_at, 1, 10) AS day,
+               COUNT(*) AS queries,
+               COUNT(*) FILTER (WHERE status = 'failed') AS failed,
+               COUNT(*) FILTER (WHERE status = 'rejected') AS rejected,
                COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
                COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
                COALESCE(SUM(cached_tokens), 0) AS cached_tokens,

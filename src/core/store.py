@@ -148,6 +148,19 @@ def init_db() -> None:
             "CREATE INDEX IF NOT EXISTS idx_ai_queries_prompt_hash ON ai_queries(check_type, prompt_hash)",
         ):
             conn.execute(stmt)
+    # Trigram indexes make the admin search (ILIKE %q%) index-backed instead of
+    # a sequential scan; separate connection so a missing extension (no
+    # superuser) can't poison the main init transaction.
+    try:
+        with _pool.connection() as conn:
+            conn.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
+            for col in ("url", "company", "job_title", "reason"):
+                conn.execute(
+                    f"CREATE INDEX IF NOT EXISTS idx_ai_queries_{col}_trgm "
+                    f"ON ai_queries USING gin ({col} gin_trgm_ops)"
+                )
+    except Exception:
+        pass
 
 
 def add_ai_result(

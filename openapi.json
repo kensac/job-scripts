@@ -3394,6 +3394,93 @@
         }
       }
     },
+    "/v1/admin/users/{user_id}": {
+      "get": {
+        "summary": "User Detail",
+        "operationId": "user_detail_v1_admin_users__user_id__get",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "User Id"
+            }
+          },
+          {
+            "name": "x-service-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-Service-Token"
+            }
+          },
+          {
+            "name": "x-user-sub",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Sub"
+            }
+          },
+          {
+            "name": "x-user-email",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Email"
+            }
+          },
+          {
+            "name": "x-user-name",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Name"
+            }
+          },
+          {
+            "name": "x-user-groups",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Groups"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/admin/tasks": {
       "get": {
         "summary": "List Tasks",
@@ -3533,7 +3620,7 @@
     "/v1/admin/failures": {
       "get": {
         "summary": "Failure Breakdown",
-        "description": "Failed checks pivoted by fleet host and URL host: one worker failing on\nhosts the others handle fine is the signature of an IP block.",
+        "description": "Failed checks pivoted by fleet host and URL host: one worker failing on\nhosts the others handle fine is the signature of an IP block. Pass worker\nand/or host to drill into the individual failures behind a pivot row.",
         "operationId": "failure_breakdown_v1_admin_failures_get",
         "parameters": [
           {
@@ -3544,6 +3631,38 @@
               "type": "integer",
               "default": 24,
               "title": "Hours"
+            }
+          },
+          {
+            "name": "worker",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Worker"
+            }
+          },
+          {
+            "name": "host",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Host"
             }
           },
           {
@@ -4809,6 +4928,16 @@
                 }
               ],
               "title": "Q"
+            }
+          },
+          {
+            "name": "deep",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Deep"
             }
           },
           {
