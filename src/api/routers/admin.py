@@ -361,6 +361,107 @@ def list_tasks(
     return {"rows": rows[:limit], "has_more": len(rows) > limit, "summary": summary}
 
 
+AUTHENTIK_URL = os.environ.get("AUTHENTIK_URL", "").rstrip("/")
+AUTHENTIK_INVITE_TOKEN = os.environ.get("AUTHENTIK_INVITE_TOKEN", "")
+AUTHENTIK_INVITE_FLOW = os.environ.get("AUTHENTIK_INVITE_FLOW", "jobtracker-enrollment")
+AUTHENTIK_INVITE_FLOW_PK = os.environ.get("AUTHENTIK_INVITE_FLOW_PK", "")
+
+
+def _invites_configured() -> bool:
+    return bool(AUTHENTIK_URL and AUTHENTIK_INVITE_TOKEN and AUTHENTIK_INVITE_FLOW_PK)
+
+
+def _authentik_client():
+    import httpx
+
+    return httpx.Client(
+        base_url=f"{AUTHENTIK_URL}/api/v3",
+        headers={"Authorization": f"Bearer {AUTHENTIK_INVITE_TOKEN}"},
+        timeout=15,
+    )
+
+
+class InviteBody(BaseModel):
+    email: str = Field(min_length=3, max_length=320, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+@router.post("/invites")
+def create_invite(body: InviteBody, user: AuthedUser = Depends(require_admin)):
+    """Email-only onboarding: creates a single-use Authentik invitation bound
+    to the jobtracker enrollment flow and emails the link. The invitee picks
+    their own username/name/password during enrollment."""
+    if not _invites_configured():
+        raise HTTPException(
+            503, detail={"code": "INVITES_NOT_CONFIGURED", "message": "authentik invite env missing"}
+        )
+    from api import mail
+
+    import datetime as _dt
+
+    email = body.email.strip().lower()
+    expires = (_dt.datetime.now(_dt.timezone.utc) + _dt.timedelta(days=7)).isoformat()
+    with _authentik_client() as ak:
+        resp = ak.post(
+            "/stages/invitation/invitations/",
+            json={
+                "name": f"jobtracker-{email.replace('@', '-at-').replace('.', '-')}-{int(_dt.datetime.now().timestamp())}",
+                "expires": expires,
+                "fixed_data": {"email": email},
+                "single_use": True,
+                "flow": AUTHENTIK_INVITE_FLOW_PK,
+            },
+        )
+        if resp.status_code >= 300:
+            raise HTTPException(
+                502,
+                detail={"code": "AUTHENTIK_ERROR", "message": f"invitation create failed ({resp.status_code})"},
+            )
+        inv = resp.json()
+    invite_url = f"{AUTHENTIK_URL}/if/flow/{AUTHENTIK_INVITE_FLOW}/?itoken={inv['pk']}"
+    emailed = False
+    if mail.configured():
+        try:
+            mail.send_invite(email, invite_url)
+            emailed = True
+        except Exception:
+            pass
+    return {"ok": True, "invite_url": invite_url, "expires": expires, "emailed": emailed, "pk": inv["pk"]}
+
+
+@router.get("/invites")
+def list_invites(user: AuthedUser = Depends(require_admin)):
+    if not _invites_configured():
+        return {"rows": [], "configured": False}
+    with _authentik_client() as ak:
+        resp = ak.get("/stages/invitation/invitations/", params={"flow__slug": AUTHENTIK_INVITE_FLOW})
+        if resp.status_code >= 300:
+            raise HTTPException(502, detail={"code": "AUTHENTIK_ERROR", "message": "invitation list failed"})
+        data = resp.json()
+    rows = [
+        {
+            "pk": r["pk"],
+            "email": (r.get("fixed_data") or {}).get("email", ""),
+            "expires": r.get("expires"),
+            "single_use": r.get("single_use", True),
+        }
+        for r in data.get("results", [])
+    ]
+    return {"rows": rows, "configured": True}
+
+
+@router.delete("/invites/{pk}")
+def revoke_invite(pk: str, user: AuthedUser = Depends(require_admin)):
+    if not _invites_configured():
+        raise HTTPException(
+            503, detail={"code": "INVITES_NOT_CONFIGURED", "message": "authentik invite env missing"}
+        )
+    with _authentik_client() as ak:
+        resp = ak.delete(f"/stages/invitation/invitations/{pk}/")
+        if resp.status_code >= 300 and resp.status_code != 404:
+            raise HTTPException(502, detail={"code": "AUTHENTIK_ERROR", "message": "invitation revoke failed"})
+    return {"ok": True}
+
+
 class CancelTasksBody(BaseModel):
     ids: List[int] = Field(min_length=1, max_length=200)
 
