@@ -730,10 +730,19 @@ async def handle_run_filter_batch_chunk(task_id: int, payload: Dict[str, Any]) -
                 raise asyncio.CancelledError
 
     hb = asyncio.create_task(_heartbeat())
+    hook = _batch_event_hook(task_id, "filter", cfg.model)
     try:
-        results = await run_responses_batch(
-            specs, cfg.model, cfg.params.get("reasoning_effort", "medium"), 6000
-        )
+        existing = _pending_batch_ids(task_id)
+        if existing:
+            from core.batch import collect_batches
+
+            logger.info(f"Task {task_id}: reattaching to {len(existing)} in-flight batch(es)")
+            results = await collect_batches(existing, hook)
+        else:
+            results = await run_responses_batch(
+                specs, cfg.model, cfg.params.get("reasoning_effort", "medium"), 6000,
+                on_event=hook,
+            )
     finally:
         hb.cancel()
     done = 0
@@ -1074,6 +1083,56 @@ async def handle_reverify_chunk(task_id: int, payload: Dict[str, Any]) -> None:
     await _reverify_jobs(task_id, payload["rows"], parent_id=payload["parent_id"])
 
 
+def _batch_event_hook(task_id: int, purpose: str, model: str):
+    """Registers every provider batch in ai_batches as it progresses, and
+    stores submitted batch ids on the task payload so a requeued attempt
+    reattaches instead of resubmitting (double spend + orphaned results)."""
+
+    def on_event(batch_id: str, status: str, counts: Dict[str, int]) -> None:
+        db.execute(
+            """
+            INSERT INTO ai_batches (provider_batch_id, task_id, purpose, model,
+                                    requests, completed, failed_count, status)
+            VALUES (%(bid)s, %(tid)s, %(purpose)s, %(model)s,
+                    %(requests)s, %(completed)s, %(failed)s, %(status)s)
+            ON CONFLICT (provider_batch_id) DO UPDATE SET
+                requests = GREATEST(ai_batches.requests, EXCLUDED.requests),
+                completed = EXCLUDED.completed,
+                failed_count = EXCLUDED.failed_count,
+                status = EXCLUDED.status,
+                updated_at = now(),
+                completed_at = CASE WHEN EXCLUDED.status IN
+                    ('completed', 'failed', 'expired', 'cancelled')
+                    THEN COALESCE(ai_batches.completed_at, now()) ELSE NULL END
+            """,
+            {
+                "bid": batch_id, "tid": task_id, "purpose": purpose, "model": model,
+                "requests": counts.get("requests", 0),
+                "completed": counts.get("completed", 0),
+                "failed": counts.get("failed", 0),
+                "status": status,
+            },
+        )
+        db.execute(
+            """
+            UPDATE tasks SET payload = jsonb_set(payload, '{batch_ids}',
+                COALESCE(payload->'batch_ids', '[]'::jsonb) ||
+                CASE WHEN payload->'batch_ids' ? %(bid)s THEN '[]'::jsonb
+                     ELSE to_jsonb(%(bid)s::text) END)
+            WHERE id = %(tid)s
+            """,
+            {"bid": batch_id, "tid": task_id},
+        )
+        events.publish_task(task_id)
+
+    return on_event
+
+
+def _pending_batch_ids(task_id: int) -> List[str]:
+    row = db.query_one("SELECT payload->'batch_ids' AS ids FROM tasks WHERE id = %s", (task_id,))
+    return list(row["ids"]) if row and row["ids"] else []
+
+
 async def handle_send_digests(task_id: int, payload: Dict[str, Any]) -> None:
     """Daily batched digest (never per-event: single-IP mail server, see
     homelab constraints). force+user_id sends the last day's rows regardless
@@ -1188,7 +1247,17 @@ async def handle_extract_comp(task_id: int, payload: Dict[str, Any]) -> None:
     ]
     by_url = {r["url"]: r["id"] for r in rows}
     _set_progress(task_id, 0, len(specs), "comp batch submitted (half price)")
-    results = await run_responses_batch(specs, ai.DEFAULT_MODELS["openai"], "low", 1500)
+    hook = _batch_event_hook(task_id, "comp", ai.DEFAULT_MODELS["openai"])
+    existing = _pending_batch_ids(task_id)
+    if existing:
+        from core.batch import collect_batches
+
+        logger.info(f"Task {task_id}: reattaching to {len(existing)} in-flight batch(es)")
+        results = await collect_batches(existing, hook)
+    else:
+        results = await run_responses_batch(
+            specs, ai.DEFAULT_MODELS["openai"], "low", 1500, on_event=hook
+        )
     done = 0
     for url, res in results.items():
         job_id = by_url.get(url)
@@ -1278,12 +1347,29 @@ def _graceful_exit(signum: int, frame: Any) -> None:
     os._exit(0)
 
 
+def _report_worker_status(current_task_id: Optional[int]) -> None:
+    try:
+        db.execute(
+            """
+            INSERT INTO worker_status (name, current_task_id, last_seen)
+            VALUES (%(name)s, %(tid)s, now())
+            ON CONFLICT (name) DO UPDATE SET
+                current_task_id = %(tid)s, last_seen = now()
+            """,
+            {"name": WORKER_NAME, "tid": current_task_id},
+        )
+    except Exception:
+        logger.exception("worker status report failed")
+
+
 async def run_once() -> bool:
     global _current_task_id
     task = _claim_task()
     if not task:
+        _report_worker_status(None)
         return False
     _current_task_id = task["id"]
+    _report_worker_status(task["id"])
     handler = HANDLERS.get(task["kind"])
     events.publish_task(task["id"])
     logger.info(f"Task {task['id']} ({task['kind']}) starting")
@@ -1331,6 +1417,11 @@ def main() -> None:
     signal.signal(signal.SIGTERM, _graceful_exit)
     signal.signal(signal.SIGINT, _graceful_exit)
     db.init_schema()
+    db.execute(
+        "INSERT INTO worker_status (name) VALUES (%s) ON CONFLICT (name) DO UPDATE "
+        "SET started_at = now(), current_task_id = NULL, last_seen = now()",
+        (WORKER_NAME,),
+    )
     metrics.serve()
     ingest_enabled = os.environ.get("JOBTRACKER_INGEST_SCHEDULER", "1") == "1"
     logger.info(

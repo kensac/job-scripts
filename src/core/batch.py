@@ -6,7 +6,10 @@ import json
 import logging
 import os
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
+
+# on_event(batch_id, status, {"requests": n, "completed": x, "failed": y})
+BatchEventHook = Optional[Callable[[str, str, Dict[str, int]], None]]
 
 from openai import AsyncOpenAI
 from openai.types import Batch
@@ -114,7 +117,27 @@ def _extract_output_text(body: dict) -> Optional[str]:
     return None
 
 
-async def _wait_for_batch(client: AsyncOpenAI, batch_id: str) -> Batch:
+def _emit(on_event: BatchEventHook, batch: Batch) -> None:
+    if on_event is None:
+        return
+    counts = getattr(batch, "request_counts", None)
+    try:
+        on_event(
+            batch.id,
+            batch.status,
+            {
+                "requests": getattr(counts, "total", 0) or 0,
+                "completed": getattr(counts, "completed", 0) or 0,
+                "failed": getattr(counts, "failed", 0) or 0,
+            },
+        )
+    except Exception:
+        logger.exception("batch event hook failed")
+
+
+async def _wait_for_batch(
+    client: AsyncOpenAI, batch_id: str, on_event: BatchEventHook = None
+) -> Batch:
     while True:
         batch = await client.batches.retrieve(batch_id)
         counts = getattr(batch, "request_counts", None)
@@ -123,40 +146,22 @@ async def _wait_for_batch(client: AsyncOpenAI, batch_id: str) -> Batch:
             f"({getattr(counts, 'completed', '?')}/{getattr(counts, 'total', '?')} done, "
             f"{getattr(counts, 'failed', '?')} failed)"
         )
+        _emit(on_event, batch)
         if batch.status in _TERMINAL_STATES:
             return batch
         await asyncio.sleep(BATCH_POLL_INTERVAL)
 
 
-async def _run_chunk(
+async def _collect_batch(
     client: AsyncOpenAI,
-    specs: List[BatchSpec],
-    model: str,
-    reasoning_effort: str,
-    max_output_tokens: int,
+    batch: Batch,
+    results: Dict[str, BatchResult],
+    create_missing: bool = False,
 ) -> Dict[str, BatchResult]:
-    results: Dict[str, BatchResult] = {spec.custom_id: BatchResult(spec.custom_id) for spec in specs}
-
-    payload = "\n".join(
-        json.dumps(_build_line(spec, model, reasoning_effort, max_output_tokens))
-        for spec in specs
-    ).encode("utf-8")
-
-    upload = await client.files.create(
-        file=("batch_input.jsonl", io.BytesIO(payload)), purpose="batch"
-    )
-    batch = await client.batches.create(
-        input_file_id=upload.id,
-        endpoint=BATCH_ENDPOINT,
-        completion_window=BATCH_COMPLETION_WINDOW,
-    )
-    logger.info(f"Submitted batch {batch.id} with {len(specs)} requests")
-
-    batch = await _wait_for_batch(client, batch.id)
-
     if batch.status != "completed":
-        for spec in specs:
-            results[spec.custom_id].error = f"batch {batch.status}"
+        for result in results.values():
+            if result.text is None and result.error is None:
+                result.error = f"batch {batch.status}"
         if not batch.output_file_id:
             return results
 
@@ -169,7 +174,9 @@ async def _run_chunk(
             custom_id = obj.get("custom_id")
             result = results.get(custom_id)
             if result is None:
-                continue
+                if not create_missing or not custom_id:
+                    continue
+                result = results.setdefault(custom_id, BatchResult(custom_id))
             err = obj.get("error")
             resp = obj.get("response")
             if err or not resp or resp.get("status_code") != 200:
@@ -191,6 +198,8 @@ async def _run_chunk(
                 obj = json.loads(line)
                 custom_id = obj.get("custom_id")
                 result = results.get(custom_id)
+                if result is None and create_missing and custom_id:
+                    result = results.setdefault(custom_id, BatchResult(custom_id))
                 if result is not None and result.text is None:
                     result.error = str(obj.get("error") or "batch error")
         except Exception as exc:
@@ -199,11 +208,62 @@ async def _run_chunk(
     return results
 
 
+async def _run_chunk(
+    client: AsyncOpenAI,
+    specs: List[BatchSpec],
+    model: str,
+    reasoning_effort: str,
+    max_output_tokens: int,
+    on_event: BatchEventHook = None,
+) -> Dict[str, BatchResult]:
+    results: Dict[str, BatchResult] = {spec.custom_id: BatchResult(spec.custom_id) for spec in specs}
+
+    payload = "\n".join(
+        json.dumps(_build_line(spec, model, reasoning_effort, max_output_tokens))
+        for spec in specs
+    ).encode("utf-8")
+
+    upload = await client.files.create(
+        file=("batch_input.jsonl", io.BytesIO(payload)), purpose="batch"
+    )
+    batch = await client.batches.create(
+        input_file_id=upload.id,
+        endpoint=BATCH_ENDPOINT,
+        completion_window=BATCH_COMPLETION_WINDOW,
+    )
+    logger.info(f"Submitted batch {batch.id} with {len(specs)} requests")
+    _emit(on_event, batch)
+
+    batch = await _wait_for_batch(client, batch.id, on_event)
+    return await _collect_batch(client, batch, results)
+
+
+async def collect_batches(
+    batch_ids: List[str], on_event: BatchEventHook = None
+) -> Dict[str, BatchResult]:
+    """Reattach to already-submitted batches (e.g. after a worker died mid-wait)
+    and wait them out instead of resubmitting; results are keyed by whatever
+    custom_ids the batches carry."""
+    client = _client()
+    if not client:
+        return {}
+    results: Dict[str, BatchResult] = {}
+    for batch_id in batch_ids:
+        try:
+            batch = await _wait_for_batch(client, batch_id, on_event)
+        except Exception as exc:
+            logger.warning(f"Batch {batch_id} reattach failed: {exc}")
+            continue
+        await _collect_batch(client, batch, results, create_missing=True)
+    return results
+
+
 async def run_responses_batch(
     specs: List[BatchSpec],
     model: str,
     reasoning_effort: str,
     max_output_tokens: int,
+    on_event: BatchEventHook = None,
 ) -> Dict[str, BatchResult]:
     client = _client()
     if not client:
@@ -221,6 +281,6 @@ async def run_responses_batch(
     for index, chunk in enumerate(chunks, start=1):
         logger.info(f"Batch wave {index}/{len(chunks)}: {len(chunk)} requests")
         results.update(
-            await _run_chunk(client, chunk, model, reasoning_effort, max_output_tokens)
+            await _run_chunk(client, chunk, model, reasoning_effort, max_output_tokens, on_event)
         )
     return results

@@ -493,6 +493,53 @@ def cancel_tasks(body: CancelTasksBody, user: AuthedUser = Depends(require_admin
     return {"cancelled": cancelled, "skipped": [i for i in body.ids if i not in cancelled]}
 
 
+@router.get("/batches")
+def list_batches(hours: int = 72, user: AuthedUser = Depends(require_admin)):
+    """Provider batch jobs: what's pending at OpenAI right now, and recent
+    history. Pending first, then newest."""
+    hours = max(1, min(hours, 720))
+    rows = db.query(
+        """
+        SELECT b.id, b.provider_batch_id, b.task_id, b.purpose, b.model,
+               b.requests, b.completed, b.failed_count, b.status,
+               b.submitted_at, b.updated_at, b.completed_at,
+               t.kind AS task_kind, t.status AS task_status
+        FROM ai_batches b LEFT JOIN tasks t ON t.id = b.task_id
+        WHERE b.status NOT IN ('completed', 'failed', 'expired', 'cancelled')
+           OR b.submitted_at > now() - make_interval(hours => %(hours)s)
+        ORDER BY (b.status IN ('completed', 'failed', 'expired', 'cancelled')), b.id DESC
+        LIMIT 200
+        """,
+        {"hours": hours},
+    )
+    return {"rows": rows}
+
+
+@router.get("/workers")
+def list_workers(user: AuthedUser = Depends(require_admin)):
+    """Live fleet view: every worker's heartbeat, what it's running right now,
+    and its last-24h throughput."""
+    rows = db.query(
+        """
+        SELECT w.name, w.started_at, w.last_seen, w.current_task_id,
+               now() - w.last_seen < interval '30 seconds' AS alive,
+               t.kind AS task_kind, t.status AS task_status, t.progress AS task_progress,
+               t.started_at AS task_started_at,
+               stats.done_24h, stats.failed_24h
+        FROM worker_status w
+        LEFT JOIN tasks t ON t.id = w.current_task_id AND t.status = 'running'
+        LEFT JOIN LATERAL (
+            SELECT COUNT(*) FILTER (WHERE s.status = 'done') AS done_24h,
+                   COUNT(*) FILTER (WHERE s.status = 'failed') AS failed_24h
+            FROM tasks s WHERE s.worker = w.name
+              AND s.finished_at > now() - interval '24 hours'
+        ) stats ON TRUE
+        ORDER BY w.name
+        """
+    )
+    return {"rows": rows}
+
+
 @router.get("/failures")
 def failure_breakdown(
     hours: int = 24,
