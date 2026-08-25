@@ -229,6 +229,36 @@ class Task(Base):
     finished_at: Mapped[Optional[datetime.datetime]]
 
 
+class AiBatch(Base):
+    __tablename__ = "ai_batches"
+    __table_args__ = (
+        Index("idx_ai_batches_status", "status", "id"),
+        Index("idx_ai_batches_task", "task_id"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
+    provider_batch_id: Mapped[str] = mapped_column(Text, unique=True)
+    task_id: Mapped[Optional[int]] = mapped_column(BigInteger)
+    purpose: Mapped[str] = mapped_column(Text, server_default=text("''"))
+    model: Mapped[Optional[str]] = mapped_column(Text)
+    requests: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
+    completed: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
+    failed_count: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
+    status: Mapped[str] = mapped_column(Text, server_default=text("'submitted'"))
+    submitted_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+    updated_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+    completed_at: Mapped[Optional[datetime.datetime]]
+
+
+class WorkerStatus(Base):
+    __tablename__ = "worker_status"
+
+    name: Mapped[str] = mapped_column(Text, primary_key=True)
+    started_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+    last_seen: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+    current_task_id: Mapped[Optional[int]] = mapped_column(BigInteger)
+
+
 class FilterPreset(Base):
     __tablename__ = "filter_presets"
 

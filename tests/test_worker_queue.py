@@ -331,3 +331,32 @@ async def test_reverify_jobs_skips_urls_with_fresh_closed_verdicts(monkeypatch):
 
     assert sorted(check_calls) == sorted(stale_urls)
     assert sorted(fetch_calls) == sorted(stale_urls)
+
+
+def test_batch_event_hook_registers_and_stores_ids():
+    from api import worker
+    t1 = worker.enqueue("run_filter_batch_chunk", {"parent_id": 1, "user_id": 1})
+    hook = worker._batch_event_hook(t1, "filter", "gpt-5-nano")
+    hook("batch_abc", "validating", {"requests": 10, "completed": 0, "failed": 0})
+    hook("batch_abc", "in_progress", {"requests": 10, "completed": 4, "failed": 0})
+    hook("batch_abc", "completed", {"requests": 10, "completed": 9, "failed": 1})
+    from api import db
+    row = db.query_one("SELECT * FROM ai_batches WHERE provider_batch_id = 'batch_abc'")
+    assert row["status"] == "completed" and row["completed"] == 9
+    assert row["failed_count"] == 1 and row["completed_at"] is not None
+    assert worker._pending_batch_ids(t1) == ["batch_abc"]
+    hook("batch_def", "validating", {"requests": 5, "completed": 0, "failed": 0})
+    assert worker._pending_batch_ids(t1) == ["batch_abc", "batch_def"]
+    hook("batch_abc", "completed", {"requests": 10, "completed": 9, "failed": 1})
+    assert worker._pending_batch_ids(t1) == ["batch_abc", "batch_def"]
+
+
+def test_worker_status_report_upserts():
+    from api import worker
+    worker._report_worker_status(None)
+    from api import db
+    row = db.query_one("SELECT * FROM worker_status WHERE name = %s", (worker.WORKER_NAME,))
+    assert row is not None and row["current_task_id"] is None
+    worker._report_worker_status(42)
+    row = db.query_one("SELECT current_task_id FROM worker_status WHERE name = %s", (worker.WORKER_NAME,))
+    assert row["current_task_id"] == 42
