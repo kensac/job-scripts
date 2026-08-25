@@ -13,8 +13,6 @@ SQL = """
         AND (NOT %(crit_has_excl)s OR NOT EXISTS (
               SELECT 1 FROM unnest(j.locations) loc
               JOIN unnest(%(crit_excl)s::text[]) ex ON lower(loc) ~ ('\\m' || ex || '\\M')))
-        AND (NOT %(crit_has_terms)s OR cardinality(j.terms) = 0
-             OR j.terms && %(crit_terms)s::text[])
 """
 
 
@@ -25,11 +23,8 @@ def params(settings_row: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         for s in crit.get("excluded_locations", [])
         if s.strip()
     ]
-    terms = [s.strip() for s in crit.get("included_terms", []) if s.strip()]
     return {
         "crit_date": crit.get("date_posted_after"),
         "crit_excl": excl,
         "crit_has_excl": bool(excl),
-        "crit_terms": terms,
-        "crit_has_terms": bool(terms),
     }

@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from api import ai, budget, crypto, db
-from api.auth import AuthedUser, require_user
+from api.auth import AuthedUser, require_service, require_user
 from api.models import ApiKeyPut, SettingsPut
 
 router = APIRouter()
@@ -115,7 +115,8 @@ def models(user: AuthedUser = Depends(require_user)):
 def get_settings(user: AuthedUser = Depends(require_user)):
     row = db.query_one(
         "SELECT column_layout, prefs, ai_provider, ai_base_url, ai_model, ai_params, "
-        "bypass_sponsorship_filter, criteria, api_key_enc IS NOT NULL AS has_byo_key "
+        "bypass_sponsorship_filter, criteria, email_digest, "
+        "api_key_enc IS NOT NULL AS has_byo_key "
         "FROM user_settings WHERE user_id = %s",
         (user.id,),
     )
@@ -128,6 +129,7 @@ def get_settings(user: AuthedUser = Depends(require_user)):
         "ai_params": {},
         "bypass_sponsorship_filter": True,
         "criteria": {},
+        "email_digest": False,
         "has_byo_key": False,
     }
 
@@ -167,10 +169,11 @@ def put_settings(body: SettingsPut, user: AuthedUser = Depends(require_user)):
     db.execute(
         """
         INSERT INTO user_settings (user_id, column_layout, prefs, ai_model, ai_params,
-                                   bypass_sponsorship_filter, criteria, updated_at)
+                                   bypass_sponsorship_filter, criteria, email_digest, updated_at)
         VALUES (%(uid)s, %(layout)s, COALESCE(%(prefs)s, '{}'::jsonb),
                 %(model)s, COALESCE(%(params)s, '{}'::jsonb),
-                COALESCE(%(bypass)s, TRUE), COALESCE(%(criteria)s, '{}'::jsonb), now())
+                COALESCE(%(bypass)s, TRUE), COALESCE(%(criteria)s, '{}'::jsonb),
+                COALESCE(%(digest)s, FALSE), now())
         ON CONFLICT (user_id) DO UPDATE SET
             column_layout = COALESCE(EXCLUDED.column_layout, user_settings.column_layout),
             prefs = COALESCE(%(prefs)s, user_settings.prefs),
@@ -178,6 +181,7 @@ def put_settings(body: SettingsPut, user: AuthedUser = Depends(require_user)):
             ai_params = COALESCE(%(params)s, user_settings.ai_params),
             bypass_sponsorship_filter = COALESCE(%(bypass)s, user_settings.bypass_sponsorship_filter),
             criteria = COALESCE(%(criteria)s, user_settings.criteria),
+            email_digest = COALESCE(%(digest)s, user_settings.email_digest),
             updated_at = now()
         """,
         {
@@ -190,8 +194,31 @@ def put_settings(body: SettingsPut, user: AuthedUser = Depends(require_user)):
             "criteria": db.jsonb(body.criteria.model_dump(mode="json"))
             if body.criteria is not None
             else None,
+            "digest": body.email_digest,
         },
     )
+    if body.email_digest:
+        import secrets as _secrets
+
+        db.execute(
+            "UPDATE user_settings SET digest_token = %s "
+            "WHERE user_id = %s AND digest_token IS NULL",
+            (_secrets.token_urlsafe(24), user.id),
+        )
+    return {"ok": True}
+
+
+@router.get("/digest/unsubscribe")
+def digest_unsubscribe(token: str, _: None = Depends(require_service)):
+    """One-click unsubscribe target from digest emails; identified purely by
+    the emailed token, no user session required."""
+    row = db.query_one(
+        "UPDATE user_settings SET email_digest = FALSE, updated_at = now() "
+        "WHERE digest_token = %s RETURNING user_id",
+        (token,),
+    )
+    if not row:
+        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown token"})
     return {"ok": True}
 
 

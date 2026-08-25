@@ -49,7 +49,6 @@ class SourcesPut(BaseModel):
 class Criteria(BaseModel):
     date_posted_after: Optional[datetime.date] = None
     excluded_locations: List[str] = Field(default_factory=list, max_length=100)
-    included_terms: List[str] = Field(default_factory=list, max_length=100)
 
 
 class SettingsPut(BaseModel):
@@ -59,6 +58,7 @@ class SettingsPut(BaseModel):
     ai_params: Optional[Dict[str, Any]] = None
     bypass_sponsorship_filter: Optional[bool] = None
     criteria: Optional[Criteria] = None
+    email_digest: Optional[bool] = None
 
 
 class ApiKeyPut(BaseModel):
