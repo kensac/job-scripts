@@ -984,9 +984,13 @@ async def _reverify_jobs(
             return
         if ats_res.ok and ats_res.text and not _looks_blocked(ats_res.text):
             content = ats_res.text
+            # Cache it: reverify touches every open board job daily, which
+            # makes it the cheapest content-coverage engine we have (comp
+            # extraction and batch filtering both feed on these rows).
+            add_ai_result(r["url"], "passed", "content cached", "content", input_content=content)
         else:
             async with scrape_sem:
-                content = await _fetch_page(r["url"])
+                content = await _scrape(r["url"])
         if not content:
             # Fetch failed or page was a block/interstitial: says nothing about
             # the job, so keep the prior verdict and retry next cycle.
@@ -1236,9 +1240,9 @@ async def handle_extract_comp(task_id: int, payload: Dict[str, Any]) -> None:
         FROM jobs j
         JOIN LATERAL (
             SELECT input_content FROM ai_queries q
-            WHERE q.url = j.url AND q.check_type = 'content'
-              AND q.input_content IS NOT NULL
-            ORDER BY q.id DESC LIMIT 1
+            WHERE q.url = j.url AND q.input_content IS NOT NULL
+              AND length(q.input_content) > 200
+            ORDER BY (q.check_type = 'content') DESC, q.id DESC LIMIT 1
         ) q ON TRUE
         WHERE NOT j.comp_extracted AND j.active
         """
