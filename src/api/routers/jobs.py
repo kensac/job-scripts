@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -172,6 +173,17 @@ def patch_job(job_id: int, body: UserJobPatch, user: AuthedUser = Depends(requir
     fields = body.model_dump(exclude_unset=True)
     if not fields:
         raise HTTPException(400, detail={"code": "EMPTY_PATCH", "message": "no fields to update"})
+    autofilled = {}
+    # Setting any real status implies the user acted on the job; stamp
+    # date_applied once so they never have to fill it by hand.
+    if fields.get("status") and "date_applied" not in fields:
+        existing = db.query_one(
+            "SELECT date_applied FROM user_jobs WHERE user_id = %s AND job_id = %s",
+            (user.id, job_id),
+        )
+        if not existing or existing["date_applied"] is None:
+            fields["date_applied"] = datetime.date.today()
+            autofilled["date_applied"] = fields["date_applied"].isoformat()
     cols = ", ".join(f"{k} = %({k})s" for k in fields)
     insert_cols = ", ".join(fields)
     insert_vals = ", ".join(f"%({k})s" for k in fields)
@@ -183,7 +195,7 @@ def patch_job(job_id: int, body: UserJobPatch, user: AuthedUser = Depends(requir
         """,
         {"uid": user.id, "jid": job_id, **fields},
     )
-    return {"ok": True}
+    return {"ok": True, "autofilled": autofilled}
 
 
 @router.delete("/user/jobs/{job_id}")

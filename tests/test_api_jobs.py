@@ -248,3 +248,50 @@ def test_delete_user_job_removes_only_user_jobs_row(client, user_headers):
     assert resp.status_code == 200
     assert db.query_one("SELECT 1 FROM user_jobs WHERE user_id = %s AND job_id = %s", (uid, jid)) is None
     assert db.query_one("SELECT 1 FROM jobs WHERE id = %s", (jid,)) is not None
+
+
+def test_patch_status_autofills_date_applied(client, user_headers):
+    uid = _uid(user_headers)
+    jid = _insert_job("src-af", "https://x.test/af1")
+    resp = client.patch(f"/v1/user/jobs/{jid}", json={"status": "Applied"}, headers=user_headers)
+    assert resp.status_code == 200
+    today = datetime.date.today()
+    assert resp.json()["autofilled"] == {"date_applied": today.isoformat()}
+    row = db.query_one("SELECT date_applied FROM user_jobs WHERE user_id = %s AND job_id = %s", (uid, jid))
+    assert row["date_applied"] == today
+
+
+def test_patch_explicit_date_applied_wins_over_autofill(client, user_headers):
+    uid = _uid(user_headers)
+    jid = _insert_job("src-af", "https://x.test/af2")
+    resp = client.patch(
+        f"/v1/user/jobs/{jid}",
+        json={"status": "Applied", "date_applied": "2026-08-01"},
+        headers=user_headers,
+    )
+    assert resp.json()["autofilled"] == {}
+    row = db.query_one("SELECT date_applied FROM user_jobs WHERE user_id = %s AND job_id = %s", (uid, jid))
+    assert row["date_applied"] == datetime.date(2026, 8, 1)
+
+
+def test_patch_status_change_does_not_overwrite_existing_date_applied(client, user_headers):
+    uid = _uid(user_headers)
+    jid = _insert_job("src-af", "https://x.test/af3")
+    client.patch(
+        f"/v1/user/jobs/{jid}",
+        json={"status": "Applied", "date_applied": "2026-08-01"},
+        headers=user_headers,
+    )
+    resp = client.patch(f"/v1/user/jobs/{jid}", json={"status": "Interview"}, headers=user_headers)
+    assert resp.json()["autofilled"] == {}
+    row = db.query_one("SELECT date_applied FROM user_jobs WHERE user_id = %s AND job_id = %s", (uid, jid))
+    assert row["date_applied"] == datetime.date(2026, 8, 1)
+
+
+def test_patch_notes_only_does_not_autofill_date_applied(client, user_headers):
+    uid = _uid(user_headers)
+    jid = _insert_job("src-af", "https://x.test/af4")
+    resp = client.patch(f"/v1/user/jobs/{jid}", json={"notes": "check later"}, headers=user_headers)
+    assert resp.json()["autofilled"] == {}
+    row = db.query_one("SELECT date_applied FROM user_jobs WHERE user_id = %s AND job_id = %s", (uid, jid))
+    assert row["date_applied"] is None
