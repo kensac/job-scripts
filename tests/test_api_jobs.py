@@ -295,3 +295,40 @@ def test_patch_notes_only_does_not_autofill_date_applied(client, user_headers):
     assert resp.json()["autofilled"] == {}
     row = db.query_one("SELECT date_applied FROM user_jobs WHERE user_id = %s AND job_id = %s", (uid, jid))
     assert row["date_applied"] is None
+
+
+def test_status_changes_append_history(client, user_headers):
+    uid = _uid(user_headers)
+    jid = _insert_job("src-h", "https://x.test/h1")
+    client.patch(f"/v1/user/jobs/{jid}", json={"status": "Applied"}, headers=user_headers)
+    client.patch(f"/v1/user/jobs/{jid}", json={"status": "Interview"}, headers=user_headers)
+    client.patch(f"/v1/user/jobs/{jid}", json={"notes": "n"}, headers=user_headers)
+    rows = db.query(
+        "SELECT old_status, new_status FROM user_job_history WHERE user_id = %s AND job_id = %s ORDER BY id",
+        (uid, jid),
+    )
+    assert [(r["old_status"], r["new_status"]) for r in rows] == [
+        (None, "Applied"),
+        ("Applied", "Interview"),
+    ]
+
+
+def test_job_detail_returns_content_verdicts_history(client, user_headers):
+    uid = _uid(user_headers)
+    jid = _insert_job("src-d", "https://x.test/d1", company="Acme", title="SWE")
+    add_ai_result("https://x.test/d1", "passed", "content cached", "content", input_content="THE JOB TEXT")
+    add_ai_result("https://x.test/d1", "passed", "job open", "closed")
+    db.execute(
+        "INSERT INTO user_filters (user_id, name, prompt, prompt_hash) VALUES (%s, 'f1', 'p', 'hash1')",
+        (uid,),
+    )
+    add_ai_result("https://x.test/d1", "passed", "matches profile", "custom", prompt_hash="hash1")
+    client.patch(f"/v1/user/jobs/{jid}", json={"status": "Applied"}, headers=user_headers)
+    resp = client.get(f"/v1/user/jobs/{jid}/detail", headers=user_headers)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["content"] == "THE JOB TEXT"
+    assert body["row"]["status"] == "Applied"
+    assert body["history"][0]["new_status"] == "Applied"
+    assert {c["check_type"]: c["status"] for c in body["checks"]} == {"closed": "passed"}
+    assert body["filter_verdicts"][0]["reason"] == "matches profile"

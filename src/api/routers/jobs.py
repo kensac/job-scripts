@@ -16,7 +16,7 @@ router = APIRouter()
 _JOB_ROW = """
     j.id AS job_id, j.company, j.title, j.locations, j.terms, j.source,
     j.url, j.raw_url, j.active, j.date_posted, j.created_at AS added_at,
-    j.extraction_status,
+    j.extraction_status, j.comp_min, j.comp_max, j.comp_text,
     uj.status, uj.date_applied, uj.notes, uj.size, uj.recruiter,
     uj.connection1, uj.connection2, uj.documents,
     COALESCE(uj.hidden, FALSE) AS hidden
@@ -74,6 +74,7 @@ _SORTABLE = {
     "title": "lower(j.title)",
     "source": "j.source",
     "status": "uj.status",
+    "comp": "j.comp_max",
 }
 
 NOT_APPLIED = "not_applied"
@@ -174,16 +175,26 @@ def patch_job(job_id: int, body: UserJobPatch, user: AuthedUser = Depends(requir
     if not fields:
         raise HTTPException(400, detail={"code": "EMPTY_PATCH", "message": "no fields to update"})
     autofilled = {}
+    existing = None
+    if "status" in fields or "date_applied" not in fields:
+        existing = db.query_one(
+            "SELECT status, date_applied FROM user_jobs WHERE user_id = %s AND job_id = %s",
+            (user.id, job_id),
+        )
     # Setting any real status implies the user acted on the job; stamp
     # date_applied once so they never have to fill it by hand.
     if fields.get("status") and "date_applied" not in fields:
-        existing = db.query_one(
-            "SELECT date_applied FROM user_jobs WHERE user_id = %s AND job_id = %s",
-            (user.id, job_id),
-        )
         if not existing or existing["date_applied"] is None:
             fields["date_applied"] = datetime.date.today()
             autofilled["date_applied"] = fields["date_applied"].isoformat()
+    if "status" in fields:
+        old_status = existing["status"] if existing else None
+        if (old_status or "") != (fields["status"] or ""):
+            db.execute(
+                "INSERT INTO user_job_history (user_id, job_id, old_status, new_status) "
+                "VALUES (%s, %s, %s, %s)",
+                (user.id, job_id, old_status, fields["status"]),
+            )
     cols = ", ".join(f"{k} = %({k})s" for k in fields)
     insert_cols = ", ".join(fields)
     insert_vals = ", ".join(f"%({k})s" for k in fields)
@@ -196,6 +207,69 @@ def patch_job(job_id: int, body: UserJobPatch, user: AuthedUser = Depends(requir
         {"uid": user.id, "jid": job_id, **fields},
     )
     return {"ok": True, "autofilled": autofilled}
+
+
+@router.get("/user/jobs/{job_id}/detail")
+def job_detail(job_id: int, user: AuthedUser = Depends(require_user)):
+    """Everything behind one board row: cached posting content, the user's own
+    row + status history, and why the AI let it through (per-filter verdicts
+    plus the closed/clearance checks)."""
+    job = db.query_one(
+        "SELECT id, url, raw_url, company, title, locations, terms, source, active, "
+        "date_posted, comp_min, comp_max, comp_text, created_at FROM jobs WHERE id = %s",
+        (job_id,),
+    )
+    if not job:
+        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown job"})
+    content_row = db.query_one(
+        "SELECT input_content, created_at FROM ai_queries "
+        "WHERE url = %s AND check_type = 'content' AND input_content IS NOT NULL "
+        "ORDER BY id DESC LIMIT 1",
+        (job["url"],),
+    )
+    checks = db.query(
+        """
+        SELECT DISTINCT ON (check_type) check_type, status, reason, model, created_at
+        FROM ai_queries
+        WHERE url = %(url)s AND check_type IN ('closed', 'clearance')
+          AND status IN ('passed', 'rejected')
+        ORDER BY check_type, id DESC
+        """,
+        {"url": job["url"]},
+    )
+    filter_verdicts = db.query(
+        """
+        SELECT f.name, f.enabled, v.status, v.reason, v.model, v.created_at
+        FROM user_filters f
+        LEFT JOIN LATERAL (
+            SELECT status, reason, model, created_at FROM ai_queries q
+            WHERE q.url = %(url)s AND q.check_type = 'custom'
+              AND q.prompt_hash = f.prompt_hash
+              AND q.status IN ('passed', 'rejected')
+            ORDER BY q.id DESC LIMIT 1
+        ) v ON TRUE
+        WHERE f.user_id = %(uid)s ORDER BY f.id
+        """,
+        {"url": job["url"], "uid": user.id},
+    )
+    return {
+        "job": job,
+        "row": db.query_one(
+            "SELECT status, date_applied, notes, size, recruiter, connection1, "
+            "connection2, documents, hidden, created_at, updated_at "
+            "FROM user_jobs WHERE user_id = %s AND job_id = %s",
+            (user.id, job_id),
+        ),
+        "history": db.query(
+            "SELECT old_status, new_status, created_at FROM user_job_history "
+            "WHERE user_id = %s AND job_id = %s ORDER BY id",
+            (user.id, job_id),
+        ),
+        "content": (content_row or {}).get("input_content"),
+        "content_fetched_at": (content_row or {}).get("created_at"),
+        "checks": checks,
+        "filter_verdicts": filter_verdicts,
+    }
 
 
 @router.delete("/user/jobs/{job_id}")

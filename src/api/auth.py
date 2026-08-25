@@ -21,6 +21,13 @@ class AuthedUser:
     groups: List[str]
 
 
+def require_service(x_service_token: str = Header(default="")) -> None:
+    """Proxy-level auth only — for routes that identify their subject by a
+    token in the request (e.g. one-click unsubscribe) rather than headers."""
+    if not SERVICE_TOKEN or not hmac.compare_digest(x_service_token, SERVICE_TOKEN):
+        raise HTTPException(401, detail={"code": "UNAUTHORIZED", "message": "invalid service token"})
+
+
 def require_user(
     x_service_token: str = Header(default=""),
     x_user_sub: str = Header(default=""),

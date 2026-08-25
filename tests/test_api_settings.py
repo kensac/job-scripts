@@ -119,3 +119,23 @@ def test_models_after_byo_key_only_that_provider_catalog(client, user_headers):
     assert len(data["providers"]) == 1
     assert data["providers"][0]["provider"] == "openai"
     assert data["key_source"] == "byo"
+
+
+def test_email_digest_toggle_generates_token_and_unsubscribe_works(client, user_headers):
+    from api import db
+    resp = client.put("/v1/user/settings", json={"email_digest": True}, headers=user_headers)
+    assert resp.status_code == 200
+    row = db.query_one(
+        "SELECT email_digest, digest_token FROM user_settings us JOIN users u ON u.id = us.user_id WHERE u.sub = %s",
+        (user_headers["X-User-Sub"],),
+    )
+    assert row["email_digest"] is True and row["digest_token"]
+    service_only = {"X-Service-Token": user_headers["X-Service-Token"]}
+    resp = client.get(f"/v1/digest/unsubscribe?token={row['digest_token']}", headers=service_only)
+    assert resp.status_code == 200
+    row2 = db.query_one(
+        "SELECT email_digest FROM user_settings us JOIN users u ON u.id = us.user_id WHERE u.sub = %s",
+        (user_headers["X-User-Sub"],),
+    )
+    assert row2["email_digest"] is False
+    assert client.get("/v1/digest/unsubscribe?token=bogus", headers=service_only).status_code == 404

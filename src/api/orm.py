@@ -78,6 +78,10 @@ class Job(Base):
         BigInteger, ForeignKey("users.id")
     )
     extraction_status: Mapped[Optional[str]] = mapped_column(Text)
+    comp_min: Mapped[Optional[int]] = mapped_column(BigInteger)
+    comp_max: Mapped[Optional[int]] = mapped_column(BigInteger)
+    comp_text: Mapped[Optional[str]] = mapped_column(Text)
+    comp_extracted: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
 
 
@@ -101,6 +105,22 @@ class UserJob(Base):
     hidden: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
     updated_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+
+
+class UserJobHistory(Base):
+    __tablename__ = "user_job_history"
+    __table_args__ = (Index("idx_user_job_history_row", "user_id", "job_id", "id"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="CASCADE")
+    )
+    job_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("jobs.id", ondelete="CASCADE")
+    )
+    old_status: Mapped[Optional[str]] = mapped_column(Text)
+    new_status: Mapped[Optional[str]] = mapped_column(Text)
+    created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
 
 
 class Source(Base):
@@ -167,6 +187,9 @@ class UserSettings(Base):
     ai_base_url: Mapped[Optional[str]] = mapped_column(Text)
     ai_model: Mapped[Optional[str]] = mapped_column(Text)
     ai_params: Mapped[dict] = mapped_column(server_default=text("'{}'::jsonb"))
+    email_digest: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    digest_token: Mapped[Optional[str]] = mapped_column(Text, unique=True)
+    last_digest_at: Mapped[Optional[datetime.datetime]]
     updated_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
 
 

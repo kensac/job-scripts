@@ -1074,6 +1074,148 @@ async def handle_reverify_chunk(task_id: int, payload: Dict[str, Any]) -> None:
     await _reverify_jobs(task_id, payload["rows"], parent_id=payload["parent_id"])
 
 
+async def handle_send_digests(task_id: int, payload: Dict[str, Any]) -> None:
+    """Daily batched digest (never per-event: single-IP mail server, see
+    homelab constraints). force+user_id sends the last day's rows regardless
+    of digest state — used for template testing by admins."""
+    from api import mail
+    import secrets as _secrets
+
+    if not mail.configured():
+        _set_progress(task_id, 0, 0, "mail not configured")
+        return
+    force = bool(payload.get("force"))
+    where_user = "AND u.id = %(only)s" if payload.get("user_id") else ""
+    users = db.query(
+        f"""
+        SELECT u.id, u.email, s.digest_token, s.last_digest_at
+        FROM users u JOIN user_settings s ON s.user_id = u.id
+        WHERE (s.email_digest OR %(force)s) AND u.email LIKE '%%@%%' {where_user}
+        """,
+        {"force": force, "only": payload.get("user_id")},
+    )
+    sent = 0
+    for u in users:
+        try:
+            since_clause = (
+                "uj.created_at > now() - interval '1 day'"
+                if force
+                else "uj.created_at > COALESCE(%(since)s, now() - interval '1 day')"
+            )
+            rows = db.query(
+                f"""
+                SELECT j.company, j.title, j.locations, j.comp_text
+                FROM user_jobs uj JOIN jobs j ON j.id = uj.job_id
+                WHERE uj.user_id = %(uid)s AND {since_clause}
+                ORDER BY uj.created_at DESC
+                """,
+                {"uid": u["id"], "since": u["last_digest_at"]},
+            )
+            if not rows:
+                continue
+            token = u["digest_token"]
+            if not token:
+                token = _secrets.token_urlsafe(24)
+                db.execute(
+                    "UPDATE user_settings SET digest_token = %s WHERE user_id = %s",
+                    (token, u["id"]),
+                )
+            await asyncio.to_thread(mail.send_digest, u["email"], rows, token)
+            if not force:
+                db.execute(
+                    "UPDATE user_settings SET last_digest_at = now() WHERE user_id = %s",
+                    (u["id"],),
+                )
+            sent += 1
+        except Exception:
+            logger.exception(f"digest failed for user {u['id']}")
+    _set_progress(task_id, sent, len(users), "digests sent")
+
+
+class CompExtract(BaseModel):
+    has_comp: bool
+    comp_min: Optional[int] = None
+    comp_max: Optional[int] = None
+    currency: str = ""
+    period: str = ""
+    display: str = ""
+
+
+_COMP_INSTRUCTIONS = (
+    "Extract the advertised compensation for THIS job from the page content. "
+    "has_comp=true only when a concrete pay amount or range is stated for this role. "
+    "comp_min/comp_max: the numeric bounds as given (equal when a single amount); "
+    "currency: ISO code like USD; period: one of yearly, monthly, hourly; "
+    "display: a compact human string exactly as advertised, e.g. '$120k-$150k' or '$45/hr'. "
+    "Ignore benefits, equity ranges, and boilerplate salary-law disclaimers without numbers."
+)
+
+
+def _annualize(value: Optional[int], period: str) -> Optional[int]:
+    if value is None:
+        return None
+    if period == "hourly":
+        return value * 2080
+    if period == "monthly":
+        return value * 12
+    return value
+
+
+async def handle_extract_comp(task_id: int, payload: Dict[str, Any]) -> None:
+    from core.batch import BatchSpec, run_responses_batch
+    from openai.lib._pydantic import to_strict_json_schema
+
+    rows = db.query(
+        """
+        SELECT j.id, j.url, q.input_content
+        FROM jobs j
+        JOIN LATERAL (
+            SELECT input_content FROM ai_queries q
+            WHERE q.url = j.url AND q.check_type = 'content'
+              AND q.input_content IS NOT NULL
+            ORDER BY q.id DESC LIMIT 1
+        ) q ON TRUE
+        WHERE NOT j.comp_extracted AND j.active
+        """
+    )
+    if not rows:
+        _set_progress(task_id, 0, 0, "nothing to extract")
+        return
+    schema = to_strict_json_schema(CompExtract)
+    specs = [
+        BatchSpec(r["url"], _COMP_INSTRUCTIONS, r["input_content"][:20000], "CompExtract", schema)
+        for r in rows
+    ]
+    by_url = {r["url"]: r["id"] for r in rows}
+    _set_progress(task_id, 0, len(specs), "comp batch submitted (half price)")
+    results = await run_responses_batch(specs, ai.DEFAULT_MODELS["openai"], "low", 1500)
+    done = 0
+    for url, res in results.items():
+        job_id = by_url.get(url)
+        if job_id is None:
+            continue
+        comp_min = comp_max = None
+        comp_text = None
+        if res.text and not res.error:
+            try:
+                parsed = CompExtract.model_validate_json(res.text)
+                if parsed.has_comp:
+                    comp_min = _annualize(parsed.comp_min, parsed.period)
+                    comp_max = _annualize(parsed.comp_max, parsed.period) or comp_min
+                    comp_text = parsed.display or None
+            except Exception:
+                logger.warning(f"comp parse failed for {url}")
+        db.execute(
+            "UPDATE jobs SET comp_min = %s, comp_max = %s, comp_text = %s, "
+            "comp_extracted = TRUE WHERE id = %s",
+            (comp_min, comp_max, comp_text, job_id),
+        )
+        done += 1
+        if done % 200 == 0:
+            _set_progress(task_id, done, len(specs), "comp extracted")
+    _set_progress(task_id, done, len(specs), "comp extracted")
+
+
 HANDLERS = {
     "extract_upload": lambda task_id, payload: handle_extract_upload(payload),
     "run_filter": handle_run_filter,
@@ -1083,6 +1225,8 @@ HANDLERS = {
     "ingest_source": handle_ingest_source,
     "reverify_open": handle_reverify_open,
     "reverify_chunk": handle_reverify_chunk,
+    "send_digests": handle_send_digests,
+    "extract_comp": handle_extract_comp,
 }
 
 
@@ -1109,6 +1253,8 @@ def schedule_ingest_cycle() -> None:
         )
     day = now.strftime("%Y-%m-%d")
     enqueue("reverify_open", {"cycle": day}, dedupe_key=f"reverify:{day}")
+    enqueue("extract_comp", {"cycle": day}, dedupe_key=f"comp:{day}")
+    enqueue("send_digests", {"cycle": day}, dedupe_key=f"digest:{day}")
 
 
 _current_task_id: Optional[int] = None
