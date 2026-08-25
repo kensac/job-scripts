@@ -138,3 +138,20 @@ def test_admin_group_budgets_roundtrip(client, admin_headers):
     assert row["weekly_token_budget"] == 12345
     assert row["allowed_models"] == ["gpt-5-nano"]
     assert "gpt-5-nano" in data["catalog_models"]
+
+
+def test_cancel_tasks_cancels_only_live_states(client, admin_headers):
+    from api import worker
+    t1 = worker.enqueue("run_filter", {"user_id": 1})
+    t2 = worker.enqueue("run_filter", {"user_id": 2})
+    db.execute("UPDATE tasks SET status = 'done' WHERE id = %s", (t2,))
+    resp = client.post(
+        "/v1/admin/tasks/cancel", json={"ids": [t1, t2, 999999]}, headers=admin_headers
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["cancelled"] == [t1]
+    assert set(body["skipped"]) == {t2, 999999}
+    row = db.query_one("SELECT status, error FROM tasks WHERE id = %s", (t1,))
+    assert row["status"] == "cancelled" and "admin" in row["error"]
+    assert db.query_one("SELECT status FROM tasks WHERE id = %s", (t2,))["status"] == "done"

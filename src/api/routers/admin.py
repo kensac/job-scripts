@@ -361,6 +361,30 @@ def list_tasks(
     return {"rows": rows[:limit], "has_more": len(rows) > limit, "summary": summary}
 
 
+class CancelTasksBody(BaseModel):
+    ids: List[int] = Field(min_length=1, max_length=200)
+
+
+@router.post("/tasks/cancel")
+def cancel_tasks(body: CancelTasksBody, user: AuthedUser = Depends(require_admin)):
+    """Cancel queued or in-flight tasks. Running workers notice via their
+    mid-task cancellation checks; pending chunks of a cancelled parent are
+    swept by the worker's reconciler."""
+    rows = db.query(
+        """
+        UPDATE tasks SET status = 'cancelled', error = 'cancelled by admin',
+                         finished_at = now()
+        WHERE id = ANY(%s) AND status IN ('pending', 'waiting', 'running')
+        RETURNING id
+        """,
+        (body.ids,),
+    )
+    cancelled = [r["id"] for r in rows]
+    for task_id in cancelled:
+        events.publish_task(task_id)
+    return {"cancelled": cancelled, "skipped": [i for i in body.ids if i not in cancelled]}
+
+
 @router.get("/failures")
 def failure_breakdown(
     hours: int = 24,
