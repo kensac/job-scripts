@@ -8,6 +8,11 @@ on:
 
 jobs:
   check:
+    # Skip only the redundant re-run triggered by our own openapi auto-commit
+    # push; never skip via commit-message markers — [skip ci] in the commit
+    # body survives into squash-merge messages and silently kills ALL workflow
+    # runs for the merge push on main.
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -66,7 +71,7 @@ jobs:
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
             git add openapi.json
-            git commit -m "chore: regenerate openapi.json [skip ci]"
+            git commit -m "chore: regenerate openapi.json"
             git push
             echo "::notice::openapi.json was stale - regenerated and committed"
           fi
