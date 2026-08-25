@@ -1193,8 +1193,8 @@ async def handle_send_digests(task_id: int, payload: Dict[str, Any]) -> None:
 
 class CompExtract(BaseModel):
     has_comp: bool
-    comp_min: Optional[int] = None
-    comp_max: Optional[int] = None
+    comp_min: Optional[float] = None
+    comp_max: Optional[float] = None
     currency: str = ""
     period: str = ""
     display: str = ""
@@ -1203,21 +1203,27 @@ class CompExtract(BaseModel):
 _COMP_INSTRUCTIONS = (
     "Extract the advertised compensation for THIS job from the page content. "
     "has_comp=true only when a concrete pay amount or range is stated for this role. "
-    "comp_min/comp_max: the numeric bounds as given (equal when a single amount); "
+    "comp_min/comp_max: the numeric bounds as decimal numbers exactly as advertised "
+    "(26.44 for $26.44/hr, 120000 for $120k/yr; equal when a single amount); "
     "currency: ISO code like USD; period: one of yearly, monthly, hourly; "
     "display: a compact human string exactly as advertised, e.g. '$120k-$150k' or '$45/hr'. "
     "Ignore benefits, equity ranges, and boilerplate salary-law disclaimers without numbers."
 )
 
 
-def _annualize(value: Optional[int], period: str) -> Optional[int]:
+def _annualize(value: Optional[float], period: str) -> Optional[int]:
     if value is None:
         return None
     if period == "hourly":
-        return value * 2080
-    if period == "monthly":
-        return value * 12
-    return value
+        value = value * 2080
+    elif period == "monthly":
+        value = value * 12
+    annual = int(round(value))
+    # Model slips (cents-as-ints, stray digits) produce absurd annuals;
+    # better no number than a wrong sortable one — display text is kept.
+    if annual < 5_000 or annual > 5_000_000:
+        return None
+    return annual
 
 
 async def handle_extract_comp(task_id: int, payload: Dict[str, Any]) -> None:
@@ -1271,6 +1277,8 @@ async def handle_extract_comp(task_id: int, payload: Dict[str, Any]) -> None:
                 if parsed.has_comp:
                     comp_min = _annualize(parsed.comp_min, parsed.period)
                     comp_max = _annualize(parsed.comp_max, parsed.period) or comp_min
+                    if comp_min and comp_max and comp_min > comp_max:
+                        comp_min, comp_max = comp_max, comp_min
                     comp_text = parsed.display or None
             except Exception:
                 logger.warning(f"comp parse failed for {url}")
