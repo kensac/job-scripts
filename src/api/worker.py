@@ -1381,7 +1381,8 @@ async def run_once() -> bool:
     async def _liveness() -> None:
         # Progress-based heartbeats stall when every job in flight is slow;
         # this proves the process is alive so the reaper only requeues tasks
-        # whose worker actually died.
+        # whose worker actually died. Also keeps worker_status fresh so a
+        # host deep in a long chunk never reads as dead.
         while True:
             await asyncio.sleep(60)
             db.execute(
@@ -1389,6 +1390,7 @@ async def run_once() -> bool:
                 "WHERE id = %s AND status = 'running'",
                 (task["id"],),
             )
+            _report_worker_status(task["id"])
 
     hb = asyncio.create_task(_liveness())
     try:

@@ -522,7 +522,7 @@ def list_workers(user: AuthedUser = Depends(require_admin)):
     rows = db.query(
         """
         SELECT w.name, w.started_at, w.last_seen, w.current_task_id,
-               now() - w.last_seen < interval '30 seconds' AS alive,
+               now() - w.last_seen < interval '90 seconds' AS alive,
                t.kind AS task_kind, t.status AS task_status, t.progress AS task_progress,
                t.started_at AS task_started_at,
                stats.done_24h, stats.failed_24h
