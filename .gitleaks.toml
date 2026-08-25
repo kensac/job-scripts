@@ -1,0 +1,8 @@
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Non-secret identifiers that pattern-match as keys"
+# Authentik flow UUID for jobtracker-enrollment: an object identifier, not a
+# credential — the scoped invite token is the secret, and it lives in Infisical.
+regexes = ['''ecb38a8d-47a5-4eb5-afd1-fb2a480d144e''']

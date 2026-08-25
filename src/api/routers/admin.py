@@ -364,7 +364,11 @@ def list_tasks(
 AUTHENTIK_URL = os.environ.get("AUTHENTIK_URL", "").rstrip("/")
 AUTHENTIK_INVITE_TOKEN = os.environ.get("AUTHENTIK_INVITE_TOKEN", "")
 AUTHENTIK_INVITE_FLOW = os.environ.get("AUTHENTIK_INVITE_FLOW", "jobtracker-enrollment")
-AUTHENTIK_INVITE_FLOW_PK = os.environ.get("AUTHENTIK_INVITE_FLOW_PK", "")
+# The invite service account can't read flows (403 by design), so the flow is
+# addressed by its UUID, not resolved by slug.
+AUTHENTIK_INVITE_FLOW_PK = os.environ.get(
+    "AUTHENTIK_INVITE_FLOW_PK", "ecb38a8d-47a5-4eb5-afd1-fb2a480d144e"
+)
 
 
 def _invites_configured() -> bool:
@@ -398,13 +402,16 @@ def create_invite(body: InviteBody, user: AuthedUser = Depends(require_admin)):
 
     import datetime as _dt
 
+    import re as _re
+
     email = body.email.strip().lower()
     expires = (_dt.datetime.now(_dt.timezone.utc) + _dt.timedelta(days=7)).isoformat()
+    slug = _re.sub(r"[^a-z0-9]+", "-", email).strip("-")
     with _authentik_client() as ak:
         resp = ak.post(
             "/stages/invitation/invitations/",
             json={
-                "name": f"jobtracker-{email.replace('@', '-at-').replace('.', '-')}-{int(_dt.datetime.now().timestamp())}",
+                "name": f"jobtracker-{slug}-{int(_dt.datetime.now().timestamp())}",
                 "expires": expires,
                 "fixed_data": {"email": email},
                 "single_use": True,
