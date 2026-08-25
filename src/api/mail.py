@@ -20,6 +20,31 @@ def configured() -> bool:
     return bool(SMTP_HOST and SMTP_USER and SMTP_PASS)
 
 
+def send_invite(to: str, invite_url: str) -> None:
+    msg = EmailMessage()
+    msg["Subject"] = "You're invited to Job Tracker"
+    msg["From"] = f"Job Tracker <{MAIL_FROM}>"
+    msg["To"] = to
+    msg.set_content(
+        "You've been invited to Job Tracker — an AI-filtered job application tracker.\n\n"
+        f"Create your account here (link valid for 7 days):\n{invite_url}\n\n"
+        "You'll pick your own username and password; this email address will be your login identity."
+    )
+    msg.add_alternative(
+        f"""<div style="font-family:Inter,system-ui,sans-serif;color:#0c0a08;max-width:560px">
+<p>You've been invited to <strong>Job Tracker</strong> — an AI-filtered job application tracker.</p>
+<p><a href="{invite_url}" style="color:#533afd">Create your account</a> (link valid for 7 days).</p>
+<p style="color:#64748d;font-size:12px">You'll pick your own username and password; this email address will be your login identity.</p>
+</div>""",
+        subtype="html",
+    )
+    with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=30) as smtp:
+        smtp.starttls()
+        smtp.login(SMTP_USER, SMTP_PASS)
+        smtp.send_message(msg)
+    logger.info("invite sent")
+
+
 def send_digest(to: str, jobs: List[Dict[str, Any]], unsubscribe_token: str) -> None:
     unsubscribe_url = f"{APP_URL}/unsubscribe?token={unsubscribe_token}"
     count = len(jobs)

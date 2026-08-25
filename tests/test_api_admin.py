@@ -155,3 +155,17 @@ def test_cancel_tasks_cancels_only_live_states(client, admin_headers):
     row = db.query_one("SELECT status, error FROM tasks WHERE id = %s", (t1,))
     assert row["status"] == "cancelled" and "admin" in row["error"]
     assert db.query_one("SELECT status FROM tasks WHERE id = %s", (t2,))["status"] == "done"
+
+
+def test_invites_unconfigured_returns_503_and_empty_list(client, admin_headers):
+    resp = client.post("/v1/admin/invites", json={"email": "new@user.com"}, headers=admin_headers)
+    assert resp.status_code == 503
+    assert resp.json()["detail"]["code"] == "INVITES_NOT_CONFIGURED"
+    resp = client.get("/v1/admin/invites", headers=admin_headers)
+    assert resp.status_code == 200
+    assert resp.json() == {"rows": [], "configured": False}
+
+
+def test_invite_rejects_bad_email(client, admin_headers):
+    resp = client.post("/v1/admin/invites", json={"email": "not-an-email"}, headers=admin_headers)
+    assert resp.status_code == 422
