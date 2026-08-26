@@ -10,7 +10,7 @@
   "prHourlyLimit": 0,
   "prConcurrentLimit": 5,
   "minimumReleaseAge": "3 days",
-  "platformAutomerge": false,
+  "platformAutomerge": true,
   "packageRules": [
     {
       "description": "pydantic hard-pins an exact pydantic-core; it can only move with pydantic",
