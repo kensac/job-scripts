@@ -502,6 +502,7 @@ def list_batches(hours: int = 72, user: AuthedUser = Depends(require_admin)):
         """
         SELECT b.id, b.provider_batch_id, b.task_id, b.purpose, b.model,
                b.requests, b.completed, b.failed_count, b.status,
+               b.est_tokens, b.input_tokens, b.output_tokens, b.est_cost_usd,
                b.submitted_at, b.updated_at, b.completed_at,
                t.kind AS task_kind, t.status AS task_status
         FROM ai_batches b LEFT JOIN tasks t ON t.id = b.task_id
