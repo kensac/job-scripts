@@ -79,6 +79,45 @@ _SORTABLE = {
 
 NOT_APPLIED = "not_applied"
 
+# Canonical status vocabulary, backend-owned. The column stays free text (the
+# sheet import brought arbitrary values), so options are served as this canon
+# unioned with whatever statuses actually exist on the user's rows.
+DEFAULT_STATUSES = [
+    "Application Submitted",
+    "Follow-up",
+    "Recruiter Screen",
+    "Online Assessment",
+    "Interview",
+    "Final Round",
+    "Offer",
+    "Accepted",
+    "Rejected",
+    "No Longer Interested",
+]
+
+
+@router.get("/user/jobs/options")
+def job_options(user: AuthedUser = Depends(require_user)):
+    """Everything the board's filter/edit controls need, generated from data
+    instead of hardcoded in the client."""
+    in_use = [
+        r["status"]
+        for r in db.query(
+            "SELECT DISTINCT status FROM user_jobs "
+            "WHERE user_id = %s AND status IS NOT NULL AND status != '' ORDER BY status",
+            (user.id,),
+        )
+    ]
+    statuses = DEFAULT_STATUSES + [s for s in in_use if s not in DEFAULT_STATUSES]
+    sources = [
+        r["source"]
+        for r in db.query(
+            "SELECT source FROM user_sources WHERE user_id = %s ORDER BY source",
+            (user.id,),
+        )
+    ]
+    return {"statuses": statuses, "not_applied_sentinel": NOT_APPLIED, "sources": sources}
+
 
 @router.get("/user/jobs")
 def list_jobs(
