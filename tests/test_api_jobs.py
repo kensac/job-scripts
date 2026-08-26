@@ -332,3 +332,19 @@ def test_job_detail_returns_content_verdicts_history(client, user_headers):
     assert body["history"][0]["new_status"] == "Applied"
     assert {c["check_type"]: c["status"] for c in body["checks"]} == {"closed": "passed"}
     assert body["filter_verdicts"][0]["reason"] == "matches profile"
+
+
+def test_job_options_serves_canon_plus_in_use(client, user_headers):
+    jid = _insert_job("src-opt", "https://x.test/opt1")
+    client.patch(f"/v1/user/jobs/{jid}", json={"status": "Weird Legacy State"}, headers=user_headers)
+    db.execute("INSERT INTO sources (name, listings_url) VALUES ('src-opt', 'https://x') ON CONFLICT DO NOTHING")
+    uid = _uid(user_headers)
+    db.execute("INSERT INTO user_sources (user_id, source) VALUES (%s, 'src-opt') ON CONFLICT DO NOTHING", (uid,))
+    resp = client.get("/v1/user/jobs/options", headers=user_headers)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "Application Submitted" in body["statuses"]
+    assert "Weird Legacy State" in body["statuses"]
+    assert body["statuses"].index("Weird Legacy State") > body["statuses"].index("Rejected")
+    assert body["not_applied_sentinel"] == "not_applied"
+    assert "src-opt" in body["sources"]
