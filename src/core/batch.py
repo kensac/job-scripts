@@ -117,6 +117,28 @@ def _extract_output_text(body: dict) -> Optional[str]:
     return None
 
 
+def _emit_usage(
+    on_event: BatchEventHook,
+    batch_id: str,
+    status: str,
+    results: Dict[str, BatchResult],
+) -> None:
+    if on_event is None:
+        return
+    input_tokens = output_tokens = 0
+    for r in results.values():
+        if r.usage:
+            input_tokens += r.usage.get("input_tokens", 0) or 0
+            output_tokens += r.usage.get("output_tokens", 0) or 0
+    try:
+        on_event(
+            batch_id, status,
+            {"input_tokens": input_tokens, "output_tokens": output_tokens},
+        )
+    except Exception:
+        logger.exception("batch event hook failed")
+
+
 def _emit(on_event: BatchEventHook, batch: Batch) -> None:
     if on_event is None:
         return
@@ -233,9 +255,17 @@ async def _run_chunk(
     )
     logger.info(f"Submitted batch {batch.id} with {len(specs)} requests")
     _emit(on_event, batch)
+    if on_event is not None:
+        est = sum(_estimate_tokens(spec, max_output_tokens) for spec in specs)
+        try:
+            on_event(batch.id, batch.status, {"est_tokens": est, "requests": len(specs)})
+        except Exception:
+            logger.exception("batch event hook failed")
 
     batch = await _wait_for_batch(client, batch.id, on_event)
-    return await _collect_batch(client, batch, results)
+    collected = await _collect_batch(client, batch, results)
+    _emit_usage(on_event, batch.id, batch.status, collected)
+    return collected
 
 
 async def collect_batches(
@@ -254,7 +284,12 @@ async def collect_batches(
         except Exception as exc:
             logger.warning(f"Batch {batch_id} reattach failed: {exc}")
             continue
+        before = set(results)
         await _collect_batch(client, batch, results, create_missing=True)
+        _emit_usage(
+            on_event, batch.id, batch.status,
+            {k: v for k, v in results.items() if k not in before},
+        )
     return results
 
 

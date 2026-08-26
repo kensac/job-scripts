@@ -10,6 +10,7 @@ from sqlalchemy import (
     ForeignKey,
     Identity,
     Index,
+    Numeric,
     Text,
     UniqueConstraint,
     text,
@@ -245,6 +246,10 @@ class AiBatch(Base):
     completed: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
     failed_count: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
     status: Mapped[str] = mapped_column(Text, server_default=text("'submitted'"))
+    est_tokens: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
+    input_tokens: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
+    output_tokens: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
+    est_cost_usd: Mapped[Optional[Any]] = mapped_column(Numeric(12, 6))
     submitted_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
     updated_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
     completed_at: Mapped[Optional[datetime.datetime]]

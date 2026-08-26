@@ -1093,17 +1093,37 @@ def _batch_event_hook(task_id: int, purpose: str, model: str):
     reattaches instead of resubmitting (double spend + orphaned results)."""
 
     def on_event(batch_id: str, status: str, counts: Dict[str, int]) -> None:
+        if "input_tokens" in counts or "output_tokens" in counts:
+            # Terminal usage report: real token totals -> half-price batch cost.
+            inp = counts.get("input_tokens", 0)
+            out = counts.get("output_tokens", 0)
+            prices = ai.PRICES_PER_MTOK.get(model)
+            cost = (
+                round((inp * prices[0] + out * prices[1]) / 2_000_000, 6)
+                if prices
+                else None
+            )
+            db.execute(
+                "UPDATE ai_batches SET input_tokens = input_tokens + %s, "
+                "output_tokens = output_tokens + %s, "
+                "est_cost_usd = COALESCE(est_cost_usd, 0) + COALESCE(%s, 0), "
+                "updated_at = now() WHERE provider_batch_id = %s",
+                (inp, out, cost, batch_id),
+            )
+            events.publish_task(task_id)
+            return
         db.execute(
             """
             INSERT INTO ai_batches (provider_batch_id, task_id, purpose, model,
-                                    requests, completed, failed_count, status)
+                                    requests, completed, failed_count, status, est_tokens)
             VALUES (%(bid)s, %(tid)s, %(purpose)s, %(model)s,
-                    %(requests)s, %(completed)s, %(failed)s, %(status)s)
+                    %(requests)s, %(completed)s, %(failed)s, %(status)s, %(est)s)
             ON CONFLICT (provider_batch_id) DO UPDATE SET
                 requests = GREATEST(ai_batches.requests, EXCLUDED.requests),
                 completed = EXCLUDED.completed,
                 failed_count = EXCLUDED.failed_count,
                 status = EXCLUDED.status,
+                est_tokens = GREATEST(ai_batches.est_tokens, EXCLUDED.est_tokens),
                 updated_at = now(),
                 completed_at = CASE WHEN EXCLUDED.status IN
                     ('completed', 'failed', 'expired', 'cancelled')
@@ -1115,6 +1135,7 @@ def _batch_event_hook(task_id: int, purpose: str, model: str):
                 "completed": counts.get("completed", 0),
                 "failed": counts.get("failed", 0),
                 "status": status,
+                "est": counts.get("est_tokens", 0),
             },
         )
         db.execute(
