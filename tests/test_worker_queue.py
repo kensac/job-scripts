@@ -311,12 +311,20 @@ async def test_reverify_jobs_skips_urls_with_fresh_closed_verdicts(monkeypatch):
         fetch_calls.append(url)
         return "some job content"
 
-    async def fake_run_check(cfg, **kwargs):
-        check_calls.append(kwargs["url"])
-        return None, {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+    async def fake_batch(specs, model, effort, max_out, on_event=None):
+        from core import batch as core_batch
+
+        check_calls.extend(s.custom_id for s in specs)
+        return {
+            s.custom_id: core_batch.BatchResult(
+                s.custom_id, text='{"is_closed": false}',
+                usage={"input_tokens": 10, "output_tokens": 2, "total_tokens": 12},
+            )
+            for s in specs
+        }
 
     monkeypatch.setattr(worker, "_fetch_page", fake_fetch_page)
-    monkeypatch.setattr(verdicts, "run_check", fake_run_check)
+    monkeypatch.setattr("core.batch.run_responses_batch", fake_batch)
 
     fresh_urls = ["https://x.example.com/fresh-1", "https://x.example.com/fresh-2"]
     stale_urls = ["https://x.example.com/stale-1", "https://x.example.com/stale-2"]
@@ -397,3 +405,54 @@ async def test_verify_new_records_both_verdicts(monkeypatch):
     assert [(r["check_type"], r["status"]) for r in rows] == [
         ("clearance", "rejected"), ("closed", "passed"),
     ]
+
+
+@pytest.mark.asyncio
+async def test_reverify_records_batch_verdicts_and_reattaches(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    from core import batch as core_batch
+
+    submits = []
+
+    async def fake_batch(specs, model, effort, max_out, on_event=None):
+        submits.append(len(specs))
+        if on_event:
+            on_event("batch_rv1", "in_progress", {"requests": len(specs), "completed": 0, "failed": 0})
+        return {
+            s.custom_id: core_batch.BatchResult(
+                s.custom_id, text='{"is_closed": true}',
+                usage={"input_tokens": 20, "output_tokens": 3, "total_tokens": 23},
+            )
+            for s in specs
+        }
+
+    async def fake_collect(batch_ids, on_event=None):
+        return {
+            "https://rv.example.com/1": core_batch.BatchResult(
+                "https://rv.example.com/1", text='{"is_closed": true}',
+                usage={"input_tokens": 20, "output_tokens": 3, "total_tokens": 23},
+            )
+        }
+
+    async def fake_fetch_page(url):
+        return "job content here"
+
+    monkeypatch.setattr(worker, "_fetch_page", fake_fetch_page)
+    monkeypatch.setattr("core.batch.run_responses_batch", fake_batch)
+    monkeypatch.setattr("core.batch.collect_batches", fake_collect)
+
+    rows = [{"url": "https://rv.example.com/1", "company": "Acme", "title": "SWE"}]
+    task_id = worker.enqueue("reverify_chunk", {"parent_id": 1})
+    worker._claim_task()
+    await worker._reverify_jobs(task_id, rows)
+
+    row = db.query_one(
+        "SELECT status, config_name FROM ai_queries WHERE url = 'https://rv.example.com/1' "
+        "AND check_type = 'closed' ORDER BY id DESC LIMIT 1"
+    )
+    assert row["status"] == "rejected" and row["config_name"] == "reverify"
+    assert worker._pending_batch_ids(task_id) == ["batch_rv1"]
+
+    # Requeued: the stored batch id makes it reattach, never resubmitting.
+    await worker._reverify_jobs(task_id, rows)
+    assert submits == [1]

@@ -958,21 +958,66 @@ def _demote_closed() -> int:
     return demoted
 
 
+def _record_reverify_results(
+    results: Dict[str, Any], by_url: Dict[str, Dict[str, Any]], model: str
+) -> int:
+    """Turns batch lines into closed verdicts. Only parseable lines record —
+    anything failed or missing simply stays stale and the next daily sweep
+    picks it up, which is what makes the whole task idempotent."""
+    recorded = 0
+    for url, res in results.items():
+        job = by_url.get(url)
+        if job is None or res.error or not res.text:
+            continue
+        try:
+            parsed = JobClosedLean.model_validate_json(res.text)
+        except Exception:
+            continue
+        verdicts.record_ai_verdict(
+            url=url, check_type="closed", rejected=parsed.is_closed, reason="",
+            parsed_json=res.text, model=model,
+            usage={
+                "prompt_tokens": (res.usage or {}).get("input_tokens", 0),
+                "completion_tokens": (res.usage or {}).get("output_tokens", 0),
+                "total_tokens": (res.usage or {}).get("total_tokens", 0),
+            },
+            company=job["company"], job_title=job["title"],
+            context="reverify", batched=True,
+        )
+        recorded += 1
+    return recorded
+
+
 async def _reverify_jobs(
     task_id: int, rows: List[Dict[str, Any]], parent_id: Optional[int] = None
 ) -> None:
+    """Two phases: gather evidence concurrently (ATS gone-detection, then
+    content — the fleet-distributed, network-bound part), then settle every
+    remaining verdict in ONE half-price batch instead of a call per job."""
     from core import ats
+    from core.batch import BatchSpec, collect_batches, run_responses_batch
     from core.pittcsc_simplify import CLOSED_INSTRUCTIONS
+    from openai.lib._pydantic import to_strict_json_schema
 
-    key = ai.server_key("openai")
-    if not key:
+    if not ai.server_key("openai"):
         raise LookupError("no server OpenAI key for reverification")
-    cfg = ai.AIConfig(
-        provider="openai", api_key=key, key_source="owner",
-        model=ai.DEFAULT_MODELS["openai"],
-    )
-    # Resumability: a requeued chunk (worker died mid-run) skips rows already
-    # re-verified in this cycle instead of redoing scrapes and AI calls.
+    model = ai.DEFAULT_MODELS["openai"]
+    by_url = {r["url"]: r for r in rows}
+    hook = _batch_event_hook(task_id, "reverify", model)
+
+    # A chunk requeued after submitting reattaches to its live batch instead
+    # of rescraping and paying again.
+    existing = _pending_batch_ids(task_id)
+    if existing:
+        logger.info(f"Task {task_id}: reattaching to {len(existing)} reverify batch(es)")
+        results = await collect_batches(existing, hook)
+        _record_reverify_results(results, by_url, model)
+        _set_progress(task_id, len(rows), len(rows), "reverified")
+        if parent_id:
+            _update_parent_progress(parent_id)
+        return
+
+    # Resumability: a requeued chunk skips rows already re-verified this cycle.
     import datetime as _dt
 
     cutoff = (_dt.datetime.now() - _dt.timedelta(days=1)).isoformat()
@@ -989,8 +1034,9 @@ async def _reverify_jobs(
     done = len(fresh)
     limiter = AdaptiveLimiter()
     scrape_sem = asyncio.Semaphore(SCRAPE_CONCURRENCY)
+    needs_ai: List[tuple] = []
 
-    async def one(r: Dict[str, Any]) -> None:
+    async def gather(r: Dict[str, Any]) -> None:
         ats_res = await asyncio.to_thread(ats.resolve, r["url"])
         if ats_res.status is ats.Status.GONE:
             verdicts.record_manual(
@@ -1012,25 +1058,14 @@ async def _reverify_jobs(
             # Fetch failed or page was a block/interstitial: says nothing about
             # the job, so keep the prior verdict and retry next cycle.
             return
-        await verdicts.run_check(
-            cfg,
-            url=r["url"],
-            check_type="closed",
-            instructions=CLOSED_INSTRUCTIONS,
-            input_text=content[:60000],
-            response_model=JobClosedLean,
-            verdict_of=lambda p: (p.is_closed, ""),
-            company=r["company"],
-            job_title=r["title"],
-            context="reverify",
-        )
+        needs_ai.append((r["url"], content))
 
     idx = 0
     n_todo = len(rows)
     pending: Dict[asyncio.Task, Dict[str, Any]] = {}
     while idx < n_todo or pending:
         while idx < n_todo and len(pending) < limiter.limit:
-            pending[asyncio.create_task(one(rows[idx]))] = rows[idx]
+            pending[asyncio.create_task(gather(rows[idx]))] = rows[idx]
             idx += 1
         if not pending:
             break
@@ -1044,15 +1079,27 @@ async def _reverify_jobs(
             except Exception as exc:
                 s = str(exc).lower()
                 limiter.record(error=True, rate_limited="429" in s or "rate limit" in s)
-                logger.exception(f"Reverify failed for {r['url']}")
+                logger.exception(f"Reverify gather failed for {r['url']}")
             if done % 5 == 0:
-                _set_progress(task_id, done, total, "reverifying open status")
+                _set_progress(task_id, done, total, "checking open status")
                 if parent_id:
                     _update_parent_progress(parent_id)
         if _cancelled(task_id) or (parent_id and _parent_cancelled(parent_id)):
             for t in pending:
                 t.cancel()
             return
+
+    if needs_ai:
+        _set_progress(task_id, done, total, f"batch of {len(needs_ai)} submitted (half price)")
+        if parent_id:
+            _update_parent_progress(parent_id)
+        schema = to_strict_json_schema(JobClosedLean)
+        specs = [
+            BatchSpec(url, CLOSED_INSTRUCTIONS, content[:20000], "JobClosedLean", schema)
+            for url, content in needs_ai
+        ]
+        results = await run_responses_batch(specs, model, "low", 1000, on_event=hook)
+        _record_reverify_results(results, by_url, model)
     _set_progress(task_id, total, total, "reverified")
     if parent_id:
         _update_parent_progress(parent_id)
