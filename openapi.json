@@ -1186,6 +1186,104 @@
         }
       }
     },
+    "/v1/user/jobs/{job_id}/explain": {
+      "post": {
+        "summary": "Explain Check",
+        "description": "On-demand debugging: re-runs one check with the reason-ful schema and\nfuller reasoning (default verdicts skip reasons to save output tokens).\nRecords a fresh verdict row (context 'explain') and returns the reason.",
+        "operationId": "explain_check_v1_user_jobs__job_id__explain_post",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Job Id"
+            }
+          },
+          {
+            "name": "x-service-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-Service-Token"
+            }
+          },
+          {
+            "name": "x-user-sub",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Sub"
+            }
+          },
+          {
+            "name": "x-user-email",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Email"
+            }
+          },
+          {
+            "name": "x-user-name",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Name"
+            }
+          },
+          {
+            "name": "x-user-groups",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Groups"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExplainBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/uploads": {
       "post": {
         "summary": "Upload Links",
@@ -6649,6 +6747,19 @@
           "ids"
         ],
         "title": "DeleteQueries"
+      },
+      "ExplainBody": {
+        "properties": {
+          "check": {
+            "type": "string",
+            "title": "Check"
+          }
+        },
+        "type": "object",
+        "required": [
+          "check"
+        ],
+        "title": "ExplainBody"
       },
       "FilterCreate": {
         "properties": {
