@@ -199,7 +199,7 @@ async def _parse(
             instructions=instructions,
             input=input_text,
             text_format=response_model,
-            reasoning={"effort": cfg.params.get("reasoning_effort", "medium")},
+            reasoning={"effort": cfg.params.get("reasoning_effort", "low")},
             # Covers reasoning AND output on the Responses API; too small and
             # the JSON gets truncated mid-string after a long reasoning pass.
             max_output_tokens=cfg.params.get("max_output_tokens", 6000),

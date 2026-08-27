@@ -311,6 +311,92 @@ def job_detail(job_id: int, user: AuthedUser = Depends(require_user)):
     }
 
 
+class ExplainBody(BaseModel):
+    check: str
+
+
+@router.post("/user/jobs/{job_id}/explain")
+async def explain_check(
+    job_id: int, body: ExplainBody, user: AuthedUser = Depends(require_user)
+):
+    """On-demand debugging: re-runs one check with the reason-ful schema and
+    fuller reasoning (default verdicts skip reasons to save output tokens).
+    Records a fresh verdict row (context 'explain') and returns the reason."""
+    import dataclasses
+
+    from api import budget
+    from api import verdicts as _verdicts
+    from api.worker import FilterVerdict
+    from core.filters import build_custom_instructions
+    from core.pittcsc_simplify import (
+        CLEARANCE_INSTRUCTIONS,
+        CLOSED_INSTRUCTIONS,
+        ClearanceRequirementResponse,
+        JobClosedResponse,
+    )
+
+    job = db.query_one("SELECT id, url, company, title FROM jobs WHERE id = %s", (job_id,))
+    if not job:
+        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown job"})
+    content_row = db.query_one(
+        "SELECT input_content FROM ai_queries WHERE url = %s AND input_content IS NOT NULL "
+        "AND length(input_content) > 200 ORDER BY (check_type = 'content') DESC, id DESC LIMIT 1",
+        (job["url"],),
+    )
+    if not content_row:
+        raise HTTPException(
+            409, detail={"code": "NO_CONTENT", "message": "no cached content for this job yet"}
+        )
+    ent = budget.get_entitlement(user)
+    cfg = budget.resolve_ai_config(user.id, ent)
+    cfg = dataclasses.replace(cfg, params={**cfg.params, "reasoning_effort": "medium"})
+
+    check = body.check
+    filter_name = prompt_hash = None
+    if check == "closed":
+        instructions, model_cls = CLOSED_INSTRUCTIONS, JobClosedResponse
+        verdict_of = lambda p: (p.is_closed, p.reason or "")
+    elif check == "clearance":
+        instructions, model_cls = CLEARANCE_INSTRUCTIONS, ClearanceRequirementResponse
+        verdict_of = lambda p: (
+            p.requires_clearance_or_restrictions,
+            p.reason or (p.restriction_type or ""),
+        )
+    elif check.startswith("filter:"):
+        flt = db.query_one(
+            "SELECT name, prompt, on_ambiguous, prompt_hash FROM user_filters "
+            "WHERE user_id = %s AND id = %s",
+            (user.id, int(check.split(":", 1)[1])),
+        )
+        if not flt:
+            raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown filter"})
+        instructions = build_custom_instructions(flt["prompt"], flt["on_ambiguous"])
+        model_cls = FilterVerdict
+        verdict_of = lambda p: (p.should_filter, p.reason)
+        filter_name = f"user{user.id}:{flt['name']}"
+        prompt_hash = flt["prompt_hash"]
+        check = "custom"
+    else:
+        raise HTTPException(
+            400,
+            detail={"code": "INVALID_CHECK", "message": "check must be closed, clearance, or filter:<id>"},
+        )
+
+    parsed, usage = await _verdicts.run_check(
+        cfg, url=job["url"], check_type=check, instructions=instructions,
+        input_text=content_row["input_content"][:60000], response_model=model_cls,
+        verdict_of=verdict_of, company=job["company"], job_title=job["title"],
+        filter_name=filter_name, prompt_hash=prompt_hash, context="explain",
+    )
+    budget.record_usage(
+        user.id, cfg.key_source, "explain", cfg.model,
+        usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0),
+        usage.get("total_tokens", 0),
+    )
+    rejected, reason = verdict_of(parsed)
+    return {"check": body.check, "status": "rejected" if rejected else "passed", "reason": reason}
+
+
 @router.delete("/user/jobs/{job_id}")
 def delete_user_job(job_id: int, user: AuthedUser = Depends(require_user)):
     """Drops the user's board row only (the catalog job is untouched); a later
