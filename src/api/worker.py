@@ -98,6 +98,23 @@ class FilterVerdict(BaseModel):
     reason: str
 
 
+class FilterVerdictLean(BaseModel):
+    """Default verdict shape: no reason text — reasons cost output tokens on
+    every call and are only read when a human debugs, so they're generated
+    on demand via the explain endpoint instead."""
+
+    should_filter: bool
+
+
+class JobClosedLean(BaseModel):
+    is_closed: bool
+
+
+class VerifyLean(BaseModel):
+    is_closed: bool
+    requires_clearance_or_restrictions: bool
+
+
 MAX_ATTEMPTS = 3
 HEARTBEAT_TIMEOUT_MINUTES = 15
 
@@ -455,8 +472,8 @@ async def _check_filter(
         check_type="custom",
         instructions=instructions,
         input_text=f"Company: {company}\nJob Title: {title}\n\nJob Content:\n{content}",
-        response_model=FilterVerdict,
-        verdict_of=lambda p: (p.should_filter, p.reason),
+        response_model=FilterVerdictLean,
+        verdict_of=lambda p: (p.should_filter, ""),
         company=company,
         job_title=title,
         filter_name=filter_name,
@@ -697,7 +714,7 @@ async def handle_run_filter_batch_chunk(task_id: int, payload: Dict[str, Any]) -
         await _process_jobs(task_id, user_id, ent, cfg, flt, jobs, parent_id=parent_id)
         return
     instructions = build_custom_instructions(flt["prompt"], flt["on_ambiguous"])
-    schema = to_strict_json_schema(FilterVerdict)
+    schema = to_strict_json_schema(FilterVerdictLean)
     specs, by_url = [], {}
     for job in jobs:
         content = get_content(job["url"])
@@ -766,7 +783,7 @@ async def handle_run_filter_batch_chunk(task_id: int, payload: Dict[str, Any]) -
             metrics.AI_CALLS.labels(cfg.provider, cfg.model, "error").inc()
             continue
         try:
-            parsed = FilterVerdict(**_json.loads(res.text))
+            parsed = FilterVerdictLean(**_json.loads(res.text))
         except Exception:
             add_ai_result(
                 url, "failed", "batch: unparsable output", "custom",
@@ -778,7 +795,7 @@ async def handle_run_filter_batch_chunk(task_id: int, payload: Dict[str, Any]) -
             continue
         verdicts.record_ai_verdict(
             url=url, check_type="custom", rejected=parsed.should_filter,
-            reason=parsed.reason, parsed_json=res.text, usage=usage,
+            reason="", parsed_json=res.text, usage=usage,
             model=cfg.model, provider=cfg.provider, key_source=cfg.key_source,
             company=job["company"], job_title=job["title"],
             instructions=instructions, input_text=input_text,
@@ -945,7 +962,7 @@ async def _reverify_jobs(
     task_id: int, rows: List[Dict[str, Any]], parent_id: Optional[int] = None
 ) -> None:
     from core import ats
-    from core.pittcsc_simplify import CLOSED_INSTRUCTIONS, JobClosedResponse
+    from core.pittcsc_simplify import CLOSED_INSTRUCTIONS
 
     key = ai.server_key("openai")
     if not key:
@@ -1001,8 +1018,8 @@ async def _reverify_jobs(
             check_type="closed",
             instructions=CLOSED_INSTRUCTIONS,
             input_text=content[:60000],
-            response_model=JobClosedResponse,
-            verdict_of=lambda p: (p.is_closed, p.reason or ""),
+            response_model=JobClosedLean,
+            verdict_of=lambda p: (p.is_closed, ""),
             company=r["company"],
             job_title=r["title"],
             context="reverify",
@@ -1296,9 +1313,11 @@ async def handle_extract_comp(task_id: int, payload: Dict[str, Any]) -> None:
             continue
         comp_min = comp_max = None
         comp_text = None
+        parsed_ok = False
         if res.text and not res.error:
             try:
                 parsed = CompExtract.model_validate_json(res.text)
+                parsed_ok = True
                 if parsed.has_comp:
                     comp_min = _annualize(parsed.comp_min, parsed.period)
                     comp_max = _annualize(parsed.comp_max, parsed.period) or comp_min
@@ -1307,15 +1326,110 @@ async def handle_extract_comp(task_id: int, payload: Dict[str, Any]) -> None:
                     comp_text = parsed.display or None
             except Exception:
                 logger.warning(f"comp parse failed for {url}")
-        db.execute(
-            "UPDATE jobs SET comp_min = %s, comp_max = %s, comp_text = %s, "
-            "comp_extracted = TRUE WHERE id = %s",
-            (comp_min, comp_max, comp_text, job_id),
-        )
+        if parsed_ok:
+            db.execute(
+                "UPDATE jobs SET comp_min = %s, comp_max = %s, comp_text = %s, "
+                "comp_extracted = TRUE WHERE id = %s",
+                (comp_min, comp_max, comp_text, job_id),
+            )
+        # Failed/errored lines stay comp_extracted=false so the next daily
+        # sweep retries them — batch operations are idempotent by re-sweep.
         done += 1
         if done % 200 == 0:
             _set_progress(task_id, done, len(specs), "comp extracted")
     _set_progress(task_id, done, len(specs), "comp extracted")
+
+
+_VERIFY_INSTRUCTIONS = (
+    "Evaluate this job posting on two independent axes.\n"
+    "is_closed: true ONLY on posting-specific signals (no longer available/accepting, "
+    "position filled, expired, deadline passed, job not found, 404). Site-wide errors, "
+    "captchas, access blocks, or login walls say nothing about the job: false. "
+    "Ambiguous: false.\n"
+    "requires_clearance_or_restrictions: true ONLY for explicit restrictions — required "
+    "security clearance or citizenship (US citizen required, US Person, Secret/TS-SCI/"
+    "Public Trust), explicit no-sponsorship ('will not sponsor', 'no H1B'), or F1-not-"
+    "eligible. Do NOT flag preferences, sponsorship offered, or application questions. "
+    "When in doubt: false."
+)
+
+
+async def handle_verify_new(task_id: int, payload: Dict[str, Any]) -> None:
+    """Batched replacement for ingest-time closed/clearance checks: one
+    half-price call per job yields both verdicts. Idempotent by re-sweep —
+    only successful lines produce verdict rows; anything missed or failed is
+    picked up by the next cycle's sweep."""
+    from core.batch import BatchSpec, run_responses_batch
+    from core.store import add_ai_result
+    from openai.lib._pydantic import to_strict_json_schema
+
+    rows = db.query(
+        """
+        SELECT j.url, j.company, j.title, q.input_content
+        FROM jobs j
+        JOIN LATERAL (
+            SELECT input_content FROM ai_queries q
+            WHERE q.url = j.url AND q.input_content IS NOT NULL
+              AND length(q.input_content) > 200
+            ORDER BY (q.check_type = 'content') DESC, q.id DESC LIMIT 1
+        ) q ON TRUE
+        WHERE j.active AND NOT EXISTS (
+            SELECT 1 FROM ai_queries c WHERE c.url = j.url
+              AND c.check_type = 'closed' AND c.status IN ('passed', 'rejected')
+        )
+        LIMIT 4000
+        """
+    )
+    if not rows:
+        _set_progress(task_id, 0, 0, "nothing to verify")
+        return
+    schema = to_strict_json_schema(VerifyLean)
+    specs = [
+        BatchSpec(r["url"], _VERIFY_INSTRUCTIONS, r["input_content"][:20000], "VerifyLean", schema)
+        for r in rows
+    ]
+    by_url = {r["url"]: r for r in rows}
+    _set_progress(task_id, 0, len(specs), "verify batch submitted (half price)")
+    model = ai.DEFAULT_MODELS["openai"]
+    hook = _batch_event_hook(task_id, "verify", model)
+    existing = _pending_batch_ids(task_id)
+    if existing:
+        from core.batch import collect_batches
+
+        results = await collect_batches(existing, hook)
+    else:
+        results = await run_responses_batch(specs, model, "low", 1000, on_event=hook)
+    done = 0
+    for url, res in results.items():
+        job = by_url.get(url)
+        if job is None or res.error or not res.text:
+            continue
+        try:
+            parsed = VerifyLean.model_validate_json(res.text)
+        except Exception:
+            continue
+        usage = {
+            "prompt_tokens": (res.usage or {}).get("input_tokens", 0),
+            "completion_tokens": (res.usage or {}).get("output_tokens", 0),
+            "total_tokens": (res.usage or {}).get("total_tokens", 0),
+        }
+        verdicts.record_ai_verdict(
+            url=url, check_type="closed",
+            rejected=parsed.is_closed, reason="", parsed_json=res.text,
+            model=model, company=job["company"], job_title=job["title"],
+            context="verify-batch", usage=usage, batched=True,
+        )
+        verdicts.record_ai_verdict(
+            url=url, check_type="clearance",
+            rejected=parsed.requires_clearance_or_restrictions, reason="",
+            parsed_json=res.text, model=model,
+            company=job["company"], job_title=job["title"],
+            context="verify-batch", usage={}, batched=True,
+        )
+        done += 1
+        if done % 200 == 0:
+            _set_progress(task_id, done, len(specs), "verified")
+    _set_progress(task_id, done, len(specs), "verified")
 
 
 HANDLERS = {
@@ -1329,6 +1443,7 @@ HANDLERS = {
     "reverify_chunk": handle_reverify_chunk,
     "send_digests": handle_send_digests,
     "extract_comp": handle_extract_comp,
+    "verify_new": handle_verify_new,
 }
 
 
@@ -1357,6 +1472,9 @@ def schedule_ingest_cycle() -> None:
     enqueue("reverify_open", {"cycle": day}, dedupe_key=f"reverify:{day}")
     enqueue("extract_comp", {"cycle": day}, dedupe_key=f"comp:{day}")
     enqueue("send_digests", {"cycle": day}, dedupe_key=f"digest:{day}")
+    # Hourly sweep for jobs the ingest pipeline left unverified (inline AI
+    # checks disabled fleet-side): closed+clearance in one batched call each.
+    enqueue("verify_new", {"cycle": cycle}, dedupe_key=f"verify:{cycle}")
 
 
 _current_task_id: Optional[int] = None

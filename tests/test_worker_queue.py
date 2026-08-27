@@ -360,3 +360,40 @@ def test_worker_status_report_upserts():
     worker._report_worker_status(42)
     row = db.query_one("SELECT current_task_id FROM worker_status WHERE name = %s", (worker.WORKER_NAME,))
     assert row["current_task_id"] == 42
+
+
+@pytest.mark.asyncio
+async def test_verify_new_records_both_verdicts(monkeypatch):
+    from api import worker, db
+    from core.store import add_ai_result
+    from core import batch as core_batch
+
+    db.execute(
+        "INSERT INTO jobs (url, source, company, title) VALUES ('https://v.test/1', 's', 'Acme', 'SWE')"
+    )
+    add_ai_result("https://v.test/1", "passed", "content cached", "content", input_content="J" * 500)
+
+    async def fake_batch(specs, model, effort, max_out, on_event=None):
+        assert effort == "low"
+        return {
+            s.custom_id: core_batch.BatchResult(
+                s.custom_id,
+                text='{"is_closed": false, "requires_clearance_or_restrictions": true}',
+                usage={"input_tokens": 100, "output_tokens": 10, "total_tokens": 110},
+            )
+            for s in specs
+        }
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setattr(worker, "run_responses_batch", None, raising=False)
+    import api.worker as w
+    monkeypatch.setattr("core.batch.run_responses_batch", fake_batch)
+    tid = worker.enqueue("verify_new", {"cycle": "t"})
+    await w.handle_verify_new(tid, {"cycle": "t"})
+    rows = db.query(
+        "SELECT check_type, status FROM ai_queries WHERE url = 'https://v.test/1' "
+        "AND check_type IN ('closed','clearance') ORDER BY check_type"
+    )
+    assert [(r["check_type"], r["status"]) for r in rows] == [
+        ("clearance", "rejected"), ("closed", "passed"),
+    ]

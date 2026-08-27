@@ -131,7 +131,7 @@ OPENAI_MODEL: str = "gpt-5-nano"
 OPENAI_TIMEOUT: float = 120.0
 OPENAI_MAX_RETRIES: int = 3
 OPENAI_MAX_COMPLETION_TOKENS: int = 2500
-OPENAI_REASONING_EFFORT: str = "medium"
+OPENAI_REASONING_EFFORT: str = os.environ.get("OPENAI_REASONING_EFFORT", "low")
 NETWORK_CHECK_TIMEOUT: float = 5.0
 NETWORK_RETRY_DELAY: float = 10.0
 
@@ -704,6 +704,13 @@ async def preprocess_job_posting(
     if len(content.strip()) < MIN_CONTENT_LENGTH:
         add_ai_result(job.url, "failed", f"insufficient content (only {len(content)} chars)", "extraction")
         return _on_extraction_failure(job, f"insufficient content ({len(content)} chars)")
+
+    # Fleet workers set this to 0: content is cached above, and the hourly
+    # verify_new task runs closed+clearance as one half-price batched call per
+    # job instead of two sync calls here. Local sheet runs keep inline checks.
+    if os.environ.get("JOBTRACKER_INGEST_SYNC_CHECKS", "1") != "1":
+        add_ai_result(job.url, "passed", "content cached", "content", input_content=content)
+        return job
 
     is_closed = await check_if_job_closed(content, job.url, job.title, job.company)
     if is_closed:
