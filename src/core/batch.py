@@ -56,6 +56,7 @@ class BatchResult:
     text: Optional[str] = None
     usage: Optional[dict] = None
     error: Optional[str] = None
+    batch_id: Optional[str] = None
 
 
 def _estimate_tokens(spec: BatchSpec, max_output_tokens: int) -> int:
@@ -210,6 +211,10 @@ async def _collect_batch(
             result.usage = body.get("usage")
             if text is None:
                 result.error = "no output text"
+
+    for result in results.values():
+        if result.batch_id is None:
+            result.batch_id = batch.id
 
     if batch.error_file_id:
         try:

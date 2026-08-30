@@ -403,7 +403,8 @@ async def _fetch_page(url: str) -> Optional[str]:
 async def _scrape(url: str) -> Optional[str]:
     content = await _fetch_page(url)
     if content:
-        add_ai_result(url, "passed", "content cached", "content", input_content=content)
+        add_ai_result(url, "passed", "content cached", "content",
+                      input_content=content, config_name="content-cache")
     return content
 
 
@@ -982,7 +983,7 @@ def _record_reverify_results(
                 "total_tokens": (res.usage or {}).get("total_tokens", 0),
             },
             company=job["company"], job_title=job["title"],
-            context="reverify", batched=True,
+            context="reverify", batched=True, batch_id=res.batch_id,
         )
         recorded += 1
     return recorded
@@ -1050,7 +1051,8 @@ async def _reverify_jobs(
             # Cache it: reverify touches every open board job daily, which
             # makes it the cheapest content-coverage engine we have (comp
             # extraction and batch filtering both feed on these rows).
-            add_ai_result(r["url"], "passed", "content cached", "content", input_content=content)
+            add_ai_result(r["url"], "passed", "content cached", "content",
+                          input_content=content, config_name="content-cache")
         else:
             async with scrape_sem:
                 content = await _scrape(r["url"])
@@ -1420,9 +1422,18 @@ async def handle_verify_new(task_id: int, payload: Dict[str, Any]) -> None:
               AND length(q.input_content) > 200
             ORDER BY (q.check_type = 'content') DESC, q.id DESC LIMIT 1
         ) q ON TRUE
-        WHERE j.active AND NOT EXISTS (
-            SELECT 1 FROM ai_queries c WHERE c.url = j.url
-              AND c.check_type = 'closed' AND c.status IN ('passed', 'rejected')
+        WHERE j.active AND (
+            NOT EXISTS (
+                SELECT 1 FROM ai_queries c WHERE c.url = j.url
+                  AND c.check_type = 'closed' AND c.status IN ('passed', 'rejected'))
+            -- Short-circuited pipelines (and any upstream verdict that later
+            -- flips to passing) leave downstream checks MISSING, not false;
+            -- a job invisible for want of a clearance verdict never heals
+            -- unless the sweep looks for holes in every check, not just the
+            -- first one.
+            OR NOT EXISTS (
+                SELECT 1 FROM ai_queries c WHERE c.url = j.url
+                  AND c.check_type = 'clearance' AND c.status IN ('passed', 'rejected'))
         )
         LIMIT 4000
         """
@@ -1465,6 +1476,7 @@ async def handle_verify_new(task_id: int, payload: Dict[str, Any]) -> None:
             rejected=parsed.is_closed, reason="", parsed_json=res.text,
             model=model, company=job["company"], job_title=job["title"],
             context="verify-batch", usage=usage, batched=True,
+            batch_id=res.batch_id,
         )
         verdicts.record_ai_verdict(
             url=url, check_type="clearance",
@@ -1472,6 +1484,7 @@ async def handle_verify_new(task_id: int, payload: Dict[str, Any]) -> None:
             parsed_json=res.text, model=model,
             company=job["company"], job_title=job["title"],
             context="verify-batch", usage={}, batched=True,
+            batch_id=res.batch_id,
         )
         done += 1
         if done % 200 == 0:

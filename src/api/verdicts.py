@@ -102,6 +102,7 @@ def record_ai_verdict(
     prompt_hash: Optional[str] = None,
     context: str = "worker",
     batched: bool = False,
+    batch_id: Optional[str] = None,
 ) -> None:
     """Records a verdict whose AI response was obtained outside ai.parse
     (e.g. the Batch API) - same complete row, metrics, and cost accounting
@@ -121,6 +122,7 @@ def record_ai_verdict(
         completion_tokens=usage.get("completion_tokens", 0),
         total_tokens=usage.get("total_tokens", 0),
         config_name=context,
+        batch_id=batch_id,
     )
     metrics.CHECKS.labels(check_type, status).inc()
     metrics.AI_CALLS.labels(provider, model, "ok").inc()
