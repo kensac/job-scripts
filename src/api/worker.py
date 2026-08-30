@@ -403,7 +403,7 @@ async def _fetch_page(url: str) -> Optional[str]:
 async def _scrape(url: str) -> Optional[str]:
     content = await _fetch_page(url)
     if content:
-        add_ai_result(url, "passed", "content cached", "content",
+        add_ai_result(url, "passed", "scraped", "content",
                       input_content=content, config_name="content-cache")
     return content
 
@@ -1051,7 +1051,9 @@ async def _reverify_jobs(
             # Cache it: reverify touches every open board job daily, which
             # makes it the cheapest content-coverage engine we have (comp
             # extraction and batch filtering both feed on these rows).
-            add_ai_result(r["url"], "passed", "content cached", "content",
+            # Reason records HOW we got the text: an ATS share that collapses
+            # is the earliest signal that an upstream resolver has broken.
+            add_ai_result(r["url"], "passed", "ats text", "content",
                           input_content=content, config_name="content-cache")
         else:
             async with scrape_sem:
@@ -1389,6 +1391,31 @@ async def handle_extract_comp(task_id: int, payload: Dict[str, Any]) -> None:
     _set_progress(task_id, done, len(specs), "comp extracted")
 
 
+async def handle_data_health(task_id: int, payload: Dict[str, Any]) -> None:
+    """Watches for upstream changes that would otherwise surface as a pile of
+    quietly misclassified jobs weeks later. Alerts fire once per condition and
+    auto-resolve, so the mail stays worth reading."""
+    from api import health, mail
+
+    found = health.detect()
+    fresh = health.record(found)
+    metrics.HEALTH_ALERTS.set(len(found))
+    if fresh and mail.configured():
+        admins = db.query(
+            "SELECT DISTINCT email FROM users WHERE email LIKE '%%@%%' "
+            "AND 'infra-admins' = ANY(groups)"
+        )
+        for a in admins:
+            try:
+                await asyncio.to_thread(mail.send_health_alert, a["email"], fresh)
+            except Exception:
+                logger.exception("health alert mail failed")
+    _set_progress(
+        task_id, len(found), len(found),
+        f"{len(found)} open, {len(fresh)} new" if found else "all clear",
+    )
+
+
 CONTENT_BACKFILL_PER_CYCLE = int(
     os.environ.get("JOBTRACKER_CONTENT_BACKFILL_PER_CYCLE", "100")
 )
@@ -1426,7 +1453,7 @@ async def handle_fetch_missing_content(task_id: int, payload: Dict[str, Any]) ->
         # ATS text is free and instant where the resolver supports the board.
         ats_res = await asyncio.to_thread(ats.resolve, r["url"])
         if ats_res.ok and ats_res.text and not _looks_blocked(ats_res.text):
-            add_ai_result(r["url"], "passed", "content cached", "content",
+            add_ai_result(r["url"], "passed", "ats text", "content",
                           input_content=ats_res.text, config_name="content-cache")
             return True
         if ats_res.status is ats.Status.GONE:
@@ -1584,6 +1611,7 @@ HANDLERS = {
     "extract_comp": handle_extract_comp,
     "verify_new": handle_verify_new,
     "fetch_missing_content": handle_fetch_missing_content,
+    "data_health": handle_data_health,
 }
 
 
@@ -1612,6 +1640,7 @@ def schedule_ingest_cycle() -> None:
     enqueue("reverify_open", {"cycle": day}, dedupe_key=f"reverify:{day}")
     enqueue("extract_comp", {"cycle": day}, dedupe_key=f"comp:{day}")
     enqueue("send_digests", {"cycle": day}, dedupe_key=f"digest:{day}")
+    enqueue("data_health", {"cycle": cycle}, dedupe_key=f"health:{cycle}")
     # Hourly sweep for jobs the ingest pipeline left unverified (inline AI
     # checks disabled fleet-side): closed+clearance in one batched call each.
     enqueue("verify_new", {"cycle": cycle}, dedupe_key=f"verify:{cycle}")

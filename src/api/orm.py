@@ -264,6 +264,27 @@ class WorkerStatus(Base):
     current_task_id: Mapped[Optional[int]] = mapped_column(BigInteger)
 
 
+class HealthAlert(Base):
+    __tablename__ = "health_alerts"
+    __table_args__ = (
+        Index(
+            "uq_health_alerts_open", "kind", "subject",
+            unique=True, postgresql_where=text("resolved_at IS NULL"),
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
+    kind: Mapped[str] = mapped_column(Text)
+    subject: Mapped[str] = mapped_column(Text)
+    severity: Mapped[str] = mapped_column(Text, server_default=text("'warning'"))
+    message: Mapped[str] = mapped_column(Text, server_default=text("''"))
+    detail: Mapped[Optional[Any]] = mapped_column(JSONB)
+    first_seen: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+    last_seen: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+    notified_at: Mapped[Optional[datetime.datetime]]
+    resolved_at: Mapped[Optional[datetime.datetime]]
+
+
 class FilterPreset(Base):
     __tablename__ = "filter_presets"
 

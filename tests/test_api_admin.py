@@ -215,3 +215,54 @@ def test_batch_jobs_drilldown_reports_per_job_cost(client, admin_headers):
     assert row["url"] == "https://b.test/1" and row["prompt_tokens"] == 1000
     assert row["est_cost_usd"] is not None and row["est_cost_usd"] > 0
     assert client.get("/v1/admin/batches/nope/jobs", headers=admin_headers).status_code == 404
+
+
+def _content_row(url, reason, when_days_ago):
+    from core.store import add_ai_result
+    import datetime
+    add_ai_result(url, "passed", reason, "content", input_content="X" * 400,
+                  config_name="content-cache")
+    stamp = (datetime.datetime.now() - datetime.timedelta(days=when_days_ago)).isoformat()
+    db.execute(
+        "UPDATE ai_queries SET created_at = %s WHERE id = "
+        "(SELECT MAX(id) FROM ai_queries WHERE url = %s)", (stamp, url)
+    )
+
+
+def test_health_detects_ats_collapse_and_resolves_when_it_recovers(client, admin_headers):
+    from api import health
+    db.execute("INSERT INTO jobs (url, source, company, title) SELECT "
+               "'https://h.test/' || g, 'hsrc', 'C', 'T' FROM generate_series(1,60) g")
+    # Baseline week: ATS text served reliably.
+    for i in range(1, 31):
+        _content_row(f"https://h.test/{i}", "ats text", 4)
+    # Last 24h: resolver broke, everything fell back to scraping.
+    for i in range(31, 61):
+        _content_row(f"https://h.test/{i}", "scraped", 0)
+
+    found = health.detect()
+    collapse = [f for f in found if f["kind"] == "ats_text_collapse" and f["subject"] == "hsrc"]
+    assert collapse, f"expected an ats collapse alert, got {[f['kind'] for f in found]}"
+    assert collapse[0]["severity"] == "critical"
+
+    fresh = health.record(found)
+    assert any(f["subject"] == "hsrc" for f in fresh)
+    # Re-detecting the same condition must not re-notify.
+    assert not [f for f in health.record(health.detect()) if f["subject"] == "hsrc"]
+
+    resp = client.get("/v1/admin/health", headers=admin_headers)
+    assert any(a["subject"] == "hsrc" for a in resp.json()["open"])
+
+    # Condition clears -> alert auto-resolves.
+    health.record([f for f in health.detect() if f["subject"] != "hsrc"])
+    row = db.query_one("SELECT resolved_at FROM health_alerts WHERE subject = 'hsrc'")
+    assert row["resolved_at"] is not None
+
+
+def test_health_ignores_low_volume_noise(client, admin_headers):
+    from api import health
+    db.execute("INSERT INTO jobs (url, source, company, title) VALUES "
+               "('https://q.test/1','quiet','C','T'), ('https://q.test/2','quiet','C','T')")
+    _content_row("https://q.test/1", "ats text", 4)
+    _content_row("https://q.test/2", "scraped", 0)
+    assert not [f for f in health.detect() if f["subject"] == "quiet"]
