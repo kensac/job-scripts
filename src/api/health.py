@@ -17,6 +17,20 @@ def _pct(part: int, whole: int) -> float:
     return (part / whole) if whole else 0.0
 
 
+def backfill_distorting() -> bool:
+    """The content backfill scrapes jobs that never had text, which inflates the
+    'scraped' share and reads exactly like an ATS resolver breaking. Only the
+    ATS detector is gated on this — the rejection-rate and fetch-failure
+    detectors aren't distorted the same way, and over-suppression is its own
+    way of going blind. Self-clearing: once the backlog drains the task stops
+    doing work and the detector comes back."""
+    return db.query_one(
+        "SELECT 1 FROM tasks WHERE kind = 'fetch_missing_content' "
+        "AND finished_at > now() - interval '24 hours' "
+        "AND COALESCE((progress->>'total')::int, 0) > 0 LIMIT 1"
+    ) is not None
+
+
 def detect() -> List[Dict[str, Any]]:
     """Compares the last 24h against the preceding week, per source, looking for
     the shapes that mean 'something upstream changed' rather than 'the job
@@ -24,6 +38,7 @@ def detect() -> List[Dict[str, Any]]:
     own baseline — absolute thresholds would fire constantly on sources that
     are legitimately mostly-closed or legitimately short."""
     found: List[Dict[str, Any]] = []
+    ats_gated = backfill_distorting()
 
     # 1. The ATS text path silently breaking. When a resolver stops returning
     #    usable text we fall back to chromium, so the share collapses long
@@ -49,6 +64,8 @@ def detect() -> List[Dict[str, Any]]:
         recent = _pct(r["recent_ats"], r["recent_total"])
         base = _pct(r["base_ats"], r["base_total"])
         # Only meaningful if the source actually relied on ATS text before.
+        if ats_gated:
+            continue
         if base >= 0.30 and recent < base * 0.5:
             found.append({
                 "kind": "ats_text_collapse",

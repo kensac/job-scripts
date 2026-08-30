@@ -266,3 +266,30 @@ def test_health_ignores_low_volume_noise(client, admin_headers):
     _content_row("https://q.test/1", "ats text", 4)
     _content_row("https://q.test/2", "scraped", 0)
     assert not [f for f in health.detect() if f["subject"] == "quiet"]
+
+
+def test_ats_detector_gated_while_backfill_runs_but_others_still_fire(client, admin_headers):
+    from api import health, worker
+    db.execute("INSERT INTO jobs (url, source, company, title) SELECT "
+               "'https://g.test/' || g, 'gsrc', 'C', 'T' FROM generate_series(1,60) g")
+    for i in range(1, 31):
+        _content_row(f"https://g.test/{i}", "ats text", 4)
+    for i in range(31, 61):
+        _content_row(f"https://g.test/{i}", "scraped", 0)
+    assert [f for f in health.detect() if f["kind"] == "ats_text_collapse"]
+
+    tid = worker.enqueue("fetch_missing_content", {})
+    db.execute(
+        "UPDATE tasks SET status='done', finished_at=now(), progress=%s WHERE id=%s",
+        (db.jsonb({"done": 100, "total": 100, "label": "cached"}), tid),
+    )
+    assert health.backfill_distorting() is True
+    assert not [f for f in health.detect() if f["kind"] == "ats_text_collapse"]
+    resp = client.get("/v1/admin/health", headers=admin_headers)
+    assert any("ats_text_collapse" in s for s in resp.json()["suppressed"])
+
+    # A backfill that found nothing must NOT suppress anything.
+    db.execute("UPDATE tasks SET progress = %s WHERE id = %s",
+               (db.jsonb({"done": 0, "total": 0, "label": "no content gaps"}), tid))
+    assert health.backfill_distorting() is False
+    assert [f for f in health.detect() if f["kind"] == "ats_text_collapse"]
