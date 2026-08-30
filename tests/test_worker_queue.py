@@ -456,3 +456,33 @@ async def test_reverify_records_batch_verdicts_and_reattaches(monkeypatch):
     # Requeued: the stored batch id makes it reattach, never resubmitting.
     await worker._reverify_jobs(task_id, rows)
     assert submits == [1]
+
+
+@pytest.mark.asyncio
+async def test_transient_error_requeues_instead_of_failing(monkeypatch):
+    async def oom_handler(task_id, payload):
+        raise RuntimeError("can't start new thread")
+
+    monkeypatch.setitem(worker.HANDLERS, "test_kind", oom_handler)
+    tid = worker.enqueue("test_kind", {})
+    assert await worker.run_once() is True
+    row = db.query_one("SELECT status, attempts, error FROM tasks WHERE id = %s", (tid,))
+    assert row["status"] == "pending" and "transient" in row["error"]
+
+    # Past MAX_ATTEMPTS it gives up rather than looping forever.
+    db.execute("UPDATE tasks SET attempts = %s WHERE id = %s", (worker.MAX_ATTEMPTS, tid))
+    assert await worker.run_once() is True
+    row = db.query_one("SELECT status FROM tasks WHERE id = %s", (tid,))
+    assert row["status"] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_non_transient_error_still_fails_immediately(monkeypatch):
+    async def bad_handler(task_id, payload):
+        raise ValueError("genuinely broken")
+
+    monkeypatch.setitem(worker.HANDLERS, "test_kind", bad_handler)
+    tid = worker.enqueue("test_kind", {})
+    assert await worker.run_once() is True
+    row = db.query_one("SELECT status, error FROM tasks WHERE id = %s", (tid,))
+    assert row["status"] == "failed" and "genuinely broken" in row["error"]

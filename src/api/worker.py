@@ -128,7 +128,7 @@ def _claim_task() -> Optional[Dict[str, Any]]:
                          worker = %(worker)s
         WHERE id = (SELECT id FROM tasks WHERE status = 'pending' {kinds_clause}
                     ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED)
-        RETURNING id, kind, payload
+        RETURNING id, kind, payload, attempts
         """,
         {"kinds": WORKER_KINDS, "worker": WORKER_NAME},
     )
@@ -1545,6 +1545,21 @@ def _graceful_exit(signum: int, frame: Any) -> None:
     os._exit(0)
 
 
+# Host resource exhaustion (small fleet hosts hitting their memory ceiling
+# while chromium is up). The task is fine; the machine momentarily isn't.
+_TRANSIENT_MARKERS = (
+    "can't start new thread",
+    "cannot allocate memory",
+    "resource temporarily unavailable",
+    "out of memory",
+    "no space left on device",
+)
+
+
+def _is_transient(exc: Exception) -> bool:
+    return any(m in str(exc).lower() for m in _TRANSIENT_MARKERS)
+
+
 def _report_worker_status(current_task_id: Optional[int]) -> None:
     try:
         db.execute(
@@ -1597,9 +1612,22 @@ async def run_once() -> bool:
         metrics.TASKS_PROCESSED.labels(task["kind"], "done").inc()
         logger.info(f"Task {task['id']} done")
     except Exception as exc:
-        _finish(task["id"], "failed", str(exc))
-        metrics.TASKS_PROCESSED.labels(task["kind"], "failed").inc()
-        logger.exception(f"Task {task['id']} failed")
+        if _is_transient(exc) and task["attempts"] < MAX_ATTEMPTS:
+            # Host ran out of memory/threads, not a broken task: put it back so
+            # a healthier worker (or this one, later) takes it. Failing
+            # permanently here costs the source a whole ingest cycle.
+            db.execute(
+                "UPDATE tasks SET status = 'pending', started_at = NULL, "
+                "last_heartbeat = NULL, error = %s WHERE id = %s AND status = 'running'",
+                (f"retrying after transient error: {str(exc)[:200]}", task["id"]),
+            )
+            events.publish_task(task["id"])
+            metrics.TASKS_PROCESSED.labels(task["kind"], "requeued").inc()
+            logger.warning(f"Task {task['id']} hit a transient error, requeued: {exc}")
+        else:
+            _finish(task["id"], "failed", str(exc))
+            metrics.TASKS_PROCESSED.labels(task["kind"], "failed").inc()
+            logger.exception(f"Task {task['id']} failed")
     finally:
         hb.cancel()
         _current_task_id = None
