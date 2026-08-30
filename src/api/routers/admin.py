@@ -31,6 +31,7 @@ _LIST_COLS = (
     "id, created_at, config_name, url, check_type, status, reason, model, "
     "company, job_title, prompt_tokens, completion_tokens, total_tokens, "
     "cached_tokens, reasoning_tokens, duration_ms, error, worker, "
+    "filter_name, prompt_hash, "
     # Correlated lookups rather than a join: ai_queries and jobs share several
     # column names, so joining would make every existing filter ambiguous.
     "(SELECT j.id FROM jobs j WHERE j.url = ai_queries.url) AS job_id, "
@@ -638,6 +639,49 @@ async def run_single_check(body: RunCheckBody, user: AuthedUser = Depends(requir
     job = db.query_one("SELECT id, url, company, title FROM jobs WHERE id = %s", (body.job_id,))
     if not job:
         raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown job"})
+    filter_name = prompt_hash = None
+    check = body.check
+    if check == "closed":
+        instructions = CLOSED_INSTRUCTIONS
+        model_cls = JobClosedResponse if body.with_reason else JobClosedLean
+        verdict_of = lambda p: (p.is_closed, getattr(p, "reason", "") or "")
+    elif check == "clearance":
+        instructions, model_cls = CLEARANCE_INSTRUCTIONS, ClearanceRequirementResponse
+        verdict_of = lambda p: (
+            p.requires_clearance_or_restrictions,
+            p.reason or (p.restriction_type or ""),
+        )
+    elif check.startswith("filter:") or check.startswith("hash:"):
+        if check.startswith("hash:"):
+            # Verdicts are cached by prompt_hash, not by filter id — several
+            # users' filters can share one hash. Any of them reproduces the
+            # same check, so re-running by hash is the honest admin-side
+            # addressing for a verdict row.
+            flt = db.query_one(
+                "SELECT user_id, name, prompt, on_ambiguous, prompt_hash FROM user_filters "
+                "WHERE prompt_hash = %s ORDER BY id LIMIT 1",
+                (check.split(":", 1)[1],),
+            )
+        else:
+            flt = db.query_one(
+                "SELECT user_id, name, prompt, on_ambiguous, prompt_hash FROM user_filters WHERE id = %s",
+                (int(check.split(":", 1)[1]),),
+            )
+        if not flt:
+            raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown filter"})
+        instructions = build_custom_instructions(flt["prompt"], flt["on_ambiguous"])
+        model_cls, verdict_of = FilterVerdict, (lambda p: (p.should_filter, p.reason))
+        filter_name = f"user{flt['user_id']}:{flt['name']}"
+        prompt_hash = flt["prompt_hash"]
+        check = "custom"
+    else:
+        raise HTTPException(
+            400,
+            detail={
+                "code": "INVALID_CHECK",
+                "message": "check must be closed, clearance, filter:<id>, or hash:<prompt_hash>",
+            },
+        )
     content = db.query_one(
         "SELECT input_content FROM ai_queries WHERE url = %s AND input_content IS NOT NULL "
         "AND length(input_content) > 200 ORDER BY (check_type = 'content') DESC, id DESC LIMIT 1",
@@ -655,35 +699,6 @@ async def run_single_check(body: RunCheckBody, user: AuthedUser = Depends(requir
         model=ai.DEFAULT_MODELS["openai"],
         params={"reasoning_effort": "medium" if body.with_reason else "low"},
     )
-    filter_name = prompt_hash = None
-    check = body.check
-    if check == "closed":
-        instructions = CLOSED_INSTRUCTIONS
-        model_cls = JobClosedResponse if body.with_reason else JobClosedLean
-        verdict_of = lambda p: (p.is_closed, getattr(p, "reason", "") or "")
-    elif check == "clearance":
-        instructions, model_cls = CLEARANCE_INSTRUCTIONS, ClearanceRequirementResponse
-        verdict_of = lambda p: (
-            p.requires_clearance_or_restrictions,
-            p.reason or (p.restriction_type or ""),
-        )
-    elif check.startswith("filter:"):
-        flt = db.query_one(
-            "SELECT user_id, name, prompt, on_ambiguous, prompt_hash FROM user_filters WHERE id = %s",
-            (int(check.split(":", 1)[1]),),
-        )
-        if not flt:
-            raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown filter"})
-        instructions = build_custom_instructions(flt["prompt"], flt["on_ambiguous"])
-        model_cls, verdict_of = FilterVerdict, (lambda p: (p.should_filter, p.reason))
-        filter_name = f"user{flt['user_id']}:{flt['name']}"
-        prompt_hash = flt["prompt_hash"]
-        check = "custom"
-    else:
-        raise HTTPException(
-            400,
-            detail={"code": "INVALID_CHECK", "message": "check must be closed, clearance, or filter:<id>"},
-        )
     parsed, usage = await _verdicts.run_check(
         cfg, url=job["url"], check_type=check, instructions=instructions,
         input_text=content["input_content"][:60000], response_model=model_cls,

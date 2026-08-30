@@ -293,3 +293,23 @@ def test_ats_detector_gated_while_backfill_runs_but_others_still_fire(client, ad
                (db.jsonb({"done": 0, "total": 0, "label": "no content gaps"}), tid))
     assert health.backfill_distorting() is False
     assert [f for f in health.detect() if f["kind"] == "ats_text_collapse"]
+
+
+def test_manual_check_addresses_filters_by_hash(client, admin_headers):
+    uid = db.query_one("SELECT id FROM users WHERE sub = %s", (admin_headers["X-User-Sub"],))["id"]
+    db.execute(
+        "INSERT INTO user_filters (user_id, name, prompt, prompt_hash) "
+        "VALUES (%s, 'byhash', 'keep backend roles', 'hash-xyz')", (uid,)
+    )
+    db.execute("INSERT INTO jobs (url, source, company, title) VALUES ('https://mh.test/1','s','C','T')")
+    jid = db.query_one("SELECT id FROM jobs WHERE url = 'https://mh.test/1'")["id"]
+    resp = client.post(
+        "/v1/admin/checks/run", json={"job_id": jid, "check": "hash:hash-xyz"}, headers=admin_headers
+    )
+    # No cached content for this job, so it stops at the content guard rather
+    # than the addressing — which is what proves the hash resolved.
+    assert resp.status_code == 409 and resp.json()["detail"]["code"] == "NO_CONTENT"
+    bad = client.post(
+        "/v1/admin/checks/run", json={"job_id": jid, "check": "nonsense"}, headers=admin_headers
+    )
+    assert bad.status_code == 400 and bad.json()["detail"]["code"] == "INVALID_CHECK"
