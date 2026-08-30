@@ -486,3 +486,40 @@ async def test_non_transient_error_still_fails_immediately(monkeypatch):
     assert await worker.run_once() is True
     row = db.query_one("SELECT status, error FROM tasks WHERE id = %s", (tid,))
     assert row["status"] == "failed" and "genuinely broken" in row["error"]
+
+
+@pytest.mark.asyncio
+async def test_content_backfill_caches_pages_and_skips_covered_jobs(monkeypatch):
+    from core import ats as core_ats
+    from core.store import add_ai_result
+
+    db.execute("INSERT INTO sources (name, listings_url) VALUES ('bf', 'https://x') ON CONFLICT DO NOTHING")
+    db.execute("INSERT INTO users (sub, email) VALUES ('bf-user', 'b@f.com') ON CONFLICT DO NOTHING")
+    uid = db.query_one("SELECT id FROM users WHERE sub = 'bf-user'")["id"]
+    db.execute("INSERT INTO user_sources (user_id, source) VALUES (%s, 'bf') ON CONFLICT DO NOTHING", (uid,))
+    db.execute(
+        "INSERT INTO jobs (url, source, company, title) VALUES "
+        "('https://bf.test/needs', 'bf', 'A', 'T'), ('https://bf.test/has', 'bf', 'B', 'T')"
+    )
+    add_ai_result("https://bf.test/has", "passed", "content cached", "content",
+                  input_content="X" * 500, config_name="content-cache")
+
+    scraped = []
+
+    async def fake_scrape(url):
+        scraped.append(url)
+        add_ai_result(url, "passed", "content cached", "content",
+                      input_content="Y" * 500, config_name="content-cache")
+        return "Y" * 500
+
+    monkeypatch.setattr(worker, "_scrape", fake_scrape)
+    monkeypatch.setattr(core_ats, "resolve", lambda url: core_ats.UNSUPPORTED)
+
+    tid = worker.enqueue("fetch_missing_content", {})
+    await worker.handle_fetch_missing_content(tid, {})
+
+    assert scraped == ["https://bf.test/needs"]
+    # Re-running finds nothing: the task is self-limiting once gaps are closed.
+    scraped.clear()
+    await worker.handle_fetch_missing_content(tid, {})
+    assert scraped == []
