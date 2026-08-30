@@ -110,6 +110,11 @@ def _oldest_pending_age() -> float:
     return float(row["age"]) if row else 0.0
 
 
+HEALTH_ALERTS = Gauge(
+    "jobtracker_health_alerts_open", "Open data-health alerts"
+)
+
+
 def serve() -> None:
     """Expose the default registry on an internal-only port (not via traefik)."""
     TASK_QUEUE_DEPTH.set_function(_queue_depth)

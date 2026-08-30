@@ -45,6 +45,36 @@ def send_invite(to: str, invite_url: str) -> None:
     logger.info("invite sent")
 
 
+def send_health_alert(to: str, alerts: List[Dict[str, Any]]) -> None:
+    lines = ["Job tracker data-health alerts:", ""]
+    html = []
+    for a in alerts:
+        lines.append(f"- [{a['severity'].upper()}] {a['message']}")
+        html.append(
+            f"<li><strong>{a['severity'].upper()}</strong> — {a['message']}</li>"
+        )
+    lines += ["", f"Admin: {APP_URL.replace('/job-tracker', '/job-scripts')}/dashboard"]
+    msg = EmailMessage()
+    msg["Subject"] = f"Job tracker: {len(alerts)} data-health alert{'s' if len(alerts) != 1 else ''}"
+    msg["From"] = f"Job Tracker <{MAIL_FROM}>"
+    msg["To"] = to
+    msg.set_content("\n".join(lines))
+    msg.add_alternative(
+        f"""<div style="font-family:Inter,system-ui,sans-serif;color:#0c0a08;max-width:640px">
+<p>Something upstream looks different than it did last week:</p>
+<ul>{"".join(html)}</ul>
+<p style="color:#64748d;font-size:12px">Alerts fire once when a condition starts and
+auto-resolve when it stops.</p>
+</div>""",
+        subtype="html",
+    )
+    with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=30) as smtp:
+        smtp.starttls()
+        smtp.login(SMTP_USER, SMTP_PASS)
+        smtp.send_message(msg)
+    logger.info(f"health alert mail sent ({len(alerts)} alerts)")
+
+
 def send_digest(to: str, jobs: List[Dict[str, Any]], unsubscribe_token: str) -> None:
     unsubscribe_url = f"{APP_URL}/unsubscribe?token={unsubscribe_token}"
     count = len(jobs)

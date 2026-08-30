@@ -30,7 +30,11 @@ _SORTABLE = {
 _LIST_COLS = (
     "id, created_at, config_name, url, check_type, status, reason, model, "
     "company, job_title, prompt_tokens, completion_tokens, total_tokens, "
-    "cached_tokens, reasoning_tokens, duration_ms, error, worker"
+    "cached_tokens, reasoning_tokens, duration_ms, error, worker, "
+    # Correlated lookups rather than a join: ai_queries and jobs share several
+    # column names, so joining would make every existing filter ambiguous.
+    "(SELECT j.id FROM jobs j WHERE j.url = ai_queries.url) AS job_id, "
+    "(SELECT j.source FROM jobs j WHERE j.url = ai_queries.url) AS source"
 )
 
 
@@ -693,6 +697,44 @@ async def run_single_check(body: RunCheckBody, user: AuthedUser = Depends(requir
         "reason": reason,
         "tokens": usage.get("total_tokens", 0),
     }
+
+
+@router.get("/health")
+def data_health(user: AuthedUser = Depends(require_admin)):
+    """Open data-health alerts plus recently resolved ones, so an upstream
+    break is something you're told about rather than something you discover."""
+    return {
+        "open": db.query(
+            "SELECT * FROM health_alerts WHERE resolved_at IS NULL "
+            "ORDER BY severity, last_seen DESC"
+        ),
+        "recently_resolved": db.query(
+            "SELECT * FROM health_alerts WHERE resolved_at > now() - interval '7 days' "
+            "ORDER BY resolved_at DESC LIMIT 20"
+        ),
+        "content_mix": db.query(
+            """
+            SELECT j.source,
+                   COUNT(*) FILTER (WHERE q.reason = 'ats text') AS ats_text,
+                   COUNT(*) FILTER (WHERE q.reason = 'scraped') AS scraped,
+                   COUNT(*) AS total
+            FROM ai_queries q JOIN jobs j ON j.url = q.url
+            WHERE q.check_type = 'content'
+              AND q.created_at::timestamptz > now() - interval '7 days'
+            GROUP BY j.source ORDER BY total DESC
+            """
+        ),
+    }
+
+
+@router.post("/health/check")
+async def run_health_check(user: AuthedUser = Depends(require_admin)):
+    """Run the detectors now instead of waiting for the hourly task."""
+    from api import health
+
+    found = health.detect()
+    fresh = health.record(found)
+    return {"open": len(found), "new": len(fresh), "alerts": found}
 
 
 @router.get("/failures")
