@@ -703,7 +703,16 @@ async def run_single_check(body: RunCheckBody, user: AuthedUser = Depends(requir
 def data_health(user: AuthedUser = Depends(require_admin)):
     """Open data-health alerts plus recently resolved ones, so an upstream
     break is something you're told about rather than something you discover."""
+    from api import health as _health
+
     return {
+        # Suppression is reported, never silent: a detector that is off and
+        # says nothing is indistinguishable from a detector that sees nothing.
+        "suppressed": (
+            ["ats_text_collapse (content backfill running)"]
+            if _health.backfill_distorting()
+            else []
+        ),
         "open": db.query(
             "SELECT * FROM health_alerts WHERE resolved_at IS NULL "
             "ORDER BY severity, last_seen DESC"
