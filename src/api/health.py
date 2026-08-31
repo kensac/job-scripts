@@ -78,10 +78,13 @@ def detect() -> List[Dict[str, Any]]:
                 "detail": dict(r),
             })
 
-    # 2. Verdict-rate shifts. Catches misclassification no matter the cause:
-    #    a broken resolver feeding stub text, a prompt regression, an ATS
-    #    serving interstitials. If a source's closed-rate jumps, something
-    #    decided a lot of live jobs are dead.
+    # 2. Verdict-rate shifts on FIRST-EVER checks only. Re-checks flipping to
+    #    closed is the system working — postings expire, and a sweep that newly
+    #    covers a backlog of old jobs will legitimately reject a lot of them at
+    #    once. Mixing the two makes coverage changes look like breakage (it did:
+    #    the first live alert was a reverify backlog on a board whose postings
+    #    expire in ~2 days). What genuinely indicates something upstream broke
+    #    is FRESHLY-SEEN jobs being classified closed at an unusual rate.
     for r in db.query(
         """
         SELECT j.source, q.check_type,
@@ -96,6 +99,10 @@ def detect() -> List[Dict[str, Any]]:
         WHERE q.check_type IN ('closed', 'clearance')
           AND q.status IN ('passed', 'rejected')
           AND q.created_at::timestamptz > now() - interval '8 days'
+          AND NOT EXISTS (
+            SELECT 1 FROM ai_queries p
+            WHERE p.url = q.url AND p.check_type = q.check_type
+              AND p.id < q.id AND p.status IN ('passed', 'rejected'))
         GROUP BY j.source, q.check_type
         """
     ):
@@ -109,9 +116,10 @@ def detect() -> List[Dict[str, Any]]:
                 "subject": r["source"],
                 "severity": "critical",
                 "message": (
-                    f"{r['check_type']} rejection rate for {r['source']} jumped from "
-                    f"{base:.0%} to {recent:.0%} over {r['recent_total']} checks — "
-                    "suspect bad input text before believing the verdicts."
+                    f"{r['check_type']} rejection rate for newly-seen {r['source']} jobs "
+                    f"jumped from {base:.0%} to {recent:.0%} over {r['recent_total']} "
+                    "first-time checks — jobs are being written off on arrival, so "
+                    "suspect the input text before believing the verdicts."
                 ),
                 "detail": dict(r),
             })

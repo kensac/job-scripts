@@ -380,3 +380,36 @@ def test_recheck_refetches_and_reports_gone_without_asking_the_model(client, adm
         "AND check_type = 'closed' ORDER BY id DESC LIMIT 1"
     )
     assert latest["status"] == "rejected"
+
+
+def test_rate_spike_ignores_expiring_rechecks_but_catches_fresh_misclassification(client, admin_headers):
+    """The first live alert was a reverify backlog on a fast-expiring board:
+    real closures, but coverage changing rather than anything breaking. Only
+    freshly-seen jobs being written off means something upstream is wrong."""
+    import datetime
+    from api import health
+    from core.store import add_ai_result
+
+    def closed_row(url, status, days_ago):
+        add_ai_result(url, status, "", "closed")
+        stamp = (datetime.datetime.now() - datetime.timedelta(days=days_ago)).isoformat()
+        db.execute("UPDATE ai_queries SET created_at = %s WHERE id = "
+                   "(SELECT MAX(id) FROM ai_queries WHERE url = %s)", (stamp, url))
+
+    db.execute("INSERT INTO jobs (url, source, company, title) SELECT "
+               "'https://exp.test/' || g, 'expsrc', 'C', 'T' FROM generate_series(1,80) g")
+    # Baseline week: fresh jobs arrive open.
+    for i in range(1, 41):
+        closed_row(f"https://exp.test/{i}", "passed", 4)
+    # Last 24h: those same jobs are RE-checked and have since expired.
+    for i in range(1, 41):
+        closed_row(f"https://exp.test/{i}", "rejected", 0)
+    assert not [f for f in health.detect() if f["subject"] == "expsrc"], \
+        "expiring re-checks must not read as breakage"
+
+    # Now the real signal: brand-new jobs written off on arrival.
+    for i in range(41, 81):
+        closed_row(f"https://exp.test/{i}", "rejected", 0)
+    spike = [f for f in health.detect() if f["subject"] == "expsrc"]
+    assert spike and spike[0]["kind"] == "closed_rate_spike"
+    assert "newly-seen" in spike[0]["message"]
