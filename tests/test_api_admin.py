@@ -364,7 +364,7 @@ def test_recheck_refetches_and_reports_gone_without_asking_the_model(client, adm
             reason="posting redirects away (board index or careers page)",
             company=company, job_title=job_title, context=context,
         )
-        return None
+        return None, "redirected_away"
 
     monkeypatch.setattr(verdicts, "refresh_content", fake_refresh)
     resp = client.post(
@@ -374,6 +374,7 @@ def test_recheck_refetches_and_reports_gone_without_asking_the_model(client, adm
     body = resp.json()
     assert body["status"] == "rejected" and "redirects away" in body["reason"]
     assert body["tokens"] == 0  # no model call needed to know it's gone
+    assert body["closure_signal"] == "redirected_away"  # explicit, not inferred
     latest = db.query_one(
         "SELECT status FROM ai_queries WHERE url = 'https://gone.test/jobs/1' "
         "AND check_type = 'closed' ORDER BY id DESC LIMIT 1"

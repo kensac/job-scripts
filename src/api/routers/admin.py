@@ -684,7 +684,7 @@ async def run_single_check(body: RunCheckBody, user: AuthedUser = Depends(requir
         )
     # Re-fetch: a recheck against cached text cannot discover that a posting
     # has since closed, which is usually the whole reason for asking.
-    fresh = await _verdicts.refresh_content(
+    fresh, closure_signal = await _verdicts.refresh_content(
         job["url"], company=job["company"], job_title=job["title"], context="manual"
     )
     if fresh is None:
@@ -693,10 +693,11 @@ async def run_single_check(body: RunCheckBody, user: AuthedUser = Depends(requir
             "ORDER BY id DESC LIMIT 1",
             (job["url"],),
         )
-        if gone and gone["status"] == "rejected":
+        if closure_signal:
             return {
                 "check": body.check, "status": "rejected",
-                "reason": gone["reason"], "tokens": 0, "refetched": True,
+                "reason": (gone or {}).get("reason", ""), "tokens": 0,
+                "refetched": True, "closure_signal": closure_signal,
             }
         raise HTTPException(
             409,

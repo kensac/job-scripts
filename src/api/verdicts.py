@@ -138,15 +138,18 @@ def record_ai_verdict(
         metrics.AI_COST_USD.labels(provider, model, key_source).inc(cost)
 
 
-async def refresh_content(url: str, company: str = "", job_title: str = "",
-                          context: str = "manual") -> Optional[str]:
+async def refresh_content(
+    url: str, company: str = "", job_title: str = "", context: str = "manual"
+) -> Tuple[Optional[str], Optional[str]]:
     """Re-fetches a posting and returns fresh text, or None when the posting is
     gone. A 'recheck' that reuses cached text can only ever re-run the model
     over the page as it looked before it closed — it cannot discover a closure,
     which is the one thing a recheck is usually asked to do.
 
-    Returns None after recording a closed verdict when the ATS says the job is
-    gone, or when the URL redirects away to a board index / careers page."""
+    Returns (content, closure_signal). closure_signal names WHY the posting is
+    gone ('ats_gone' | 'redirected_away') and is set only when a closed verdict
+    was recorded; callers should report it explicitly rather than inferring
+    closure from incidental values like a zero token count."""
     from api import worker
     from core import ats
     from core.store import add_ai_result
@@ -158,11 +161,11 @@ async def refresh_content(url: str, company: str = "", job_title: str = "",
             reason="ATS reports posting gone", company=company,
             job_title=job_title, context=context,
         )
-        return None
+        return None, "ats_gone"
     if ats_res.ok and ats_res.text and not worker._looks_blocked(ats_res.text):
         add_ai_result(url, "passed", "ats text", "content",
                       input_content=ats_res.text, config_name="content-cache")
-        return ats_res.text
+        return ats_res.text, None
 
     content, redirected = await worker._fetch_page_ex(url)
     if redirected:
@@ -171,11 +174,11 @@ async def refresh_content(url: str, company: str = "", job_title: str = "",
             reason="posting redirects away (board index or careers page)",
             company=company, job_title=job_title, context=context,
         )
-        return None
+        return None, "redirected_away"
     if content:
         add_ai_result(url, "passed", "scraped", "content",
                       input_content=content, config_name="content-cache")
-    return content
+    return content, None
 
 
 def record_manual(
