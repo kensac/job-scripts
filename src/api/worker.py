@@ -374,30 +374,50 @@ def _looks_blocked(content: Optional[str]) -> bool:
     return False
 
 
-async def _fetch_page(url: str) -> Optional[str]:
-    """Timeout-bounded, block-aware chromium extraction; returns None for
-    failures, timeouts, and interstitial pages alike."""
-    from core.pittcsc_simplify import extract_url_content
+def redirected_away(requested: str, final: Optional[str]) -> bool:
+    """True when a fetch landed somewhere materially different — the signature
+    of an expired posting bouncing to a board index or careers page. Compared
+    on host+path only, so tracking params and trailing slashes don't count."""
+    if not final:
+        return False
+    from urllib.parse import urlparse
+
+    a, b = urlparse(requested), urlparse(final)
+    return (a.netloc, a.path.rstrip("/")) != (b.netloc, b.path.rstrip("/"))
+
+
+async def _fetch_page_ex(url: str) -> tuple[Optional[str], bool]:
+    """Returns (content, redirected_away)."""
+    from core.pittcsc_simplify import extract_url_content_ex
 
     start = time.monotonic()
     try:
         # A wedged chromium must not hold a scrape slot forever; the thread
         # itself can't be killed, but freeing the slot keeps the chunk moving.
-        content = await asyncio.wait_for(
-            asyncio.to_thread(extract_url_content, url), SCRAPE_TIMEOUT_SECONDS
+        content, final_url = await asyncio.wait_for(
+            asyncio.to_thread(extract_url_content_ex, url), SCRAPE_TIMEOUT_SECONDS
         )
+        if redirected_away(url, final_url):
+            metrics.SCRAPE_DURATION.observe(time.monotonic() - start)
+            metrics.SCRAPES.labels("redirected").inc()
+            logger.info(f"fetch redirected away: {url} -> {final_url}")
+            return None, True
     except asyncio.TimeoutError:
         metrics.SCRAPE_DURATION.observe(time.monotonic() - start)
         metrics.SCRAPES.labels("timeout").inc()
         logger.warning(f"scrape timed out after {SCRAPE_TIMEOUT_SECONDS}s: {url}")
-        return None
+        return None, False
     metrics.SCRAPE_DURATION.observe(time.monotonic() - start)
     if _looks_blocked(content):
         metrics.SCRAPES.labels("blocked").inc()
         logger.info(f"scrape returned a block/interstitial page: {url}")
-        return None
+        return None, False
     metrics.SCRAPES.labels("ok" if content else "empty").inc()
-    return content
+    return content, False
+
+
+async def _fetch_page(url: str) -> Optional[str]:
+    return (await _fetch_page_ex(url))[0]
 
 
 async def _scrape(url: str) -> Optional[str]:

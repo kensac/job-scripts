@@ -278,12 +278,20 @@ def get_chrome_options() -> Options:
 
 
 def extract_url_content(url: str) -> Optional[str]:
+    return extract_url_content_ex(url)[0]
+
+
+def extract_url_content_ex(url: str) -> tuple[Optional[str], Optional[str]]:
+    """Returns (content, final_url). The final URL matters: an expired posting
+    very often 302s to a board index or careers page, and the page that lands
+    is perfectly healthy-looking — so without knowing we were redirected, the
+    text reads as a live job to both a human and the model."""
     if not openai_client:
-        return None
+        return None, None
 
     ats_result = ats.resolve(url)
     if ats_result.ok and ats_result.text:
-        return ats_result.text
+        return ats_result.text, url
 
     driver = None
     try:
@@ -305,16 +313,22 @@ def extract_url_content(url: str) -> Optional[str]:
         body_element = driver.find_element(By.TAG_NAME, "body")
         content = ftfy.fix_text(body_element.text).strip()
 
+        final_url = None
+        try:
+            final_url = driver.current_url
+        except Exception:
+            pass
+
         if content:
             logger.info(f"Extracted {len(content)} chars from {url}")
-            return content
+            return content, final_url
         else:
             logger.warning(f"No content found for {url}")
-            return None
+            return None, final_url
 
     except Exception as exc:
         logger.debug(f"Extraction failed for {url}: {exc}")
-        return None
+        return None, None
     finally:
         if driver:
             try:

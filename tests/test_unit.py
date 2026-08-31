@@ -196,3 +196,17 @@ def test_build_custom_instructions_stable_hash():
     second = filters.build_custom_instructions("must offer visa sponsorship", "filter")
     assert first == second
     assert hashlib.sha256(first.encode()).hexdigest() == hashlib.sha256(second.encode()).hexdigest()
+
+
+def test_redirected_away_detects_board_index_bounce():
+    from api.worker import redirected_away
+
+    job = "https://job-boards.greenhouse.io/hpiq/jobs/6173700004"
+    # The real failure: expired posting bounces to the board index.
+    assert redirected_away(job, "https://job-boards.greenhouse.io/hpiq?error=true") is True
+    assert redirected_away(job, "https://example.com/careers") is True
+    # Benign variations must not read as a redirect.
+    assert redirected_away(job, job) is False
+    assert redirected_away(job, job + "/") is False
+    assert redirected_away(job, job + "?utm_source=x") is False
+    assert redirected_away(job, None) is False

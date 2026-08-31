@@ -343,3 +343,39 @@ def test_delete_source_force_overrides_and_group_delete_works(client, admin_head
     db.execute("INSERT INTO source_groups (name, members) VALUES ('empty-grp', ARRAY[]::text[])")
     assert client.delete("/v1/admin/source-groups/empty-grp", headers=admin_headers).status_code == 200
     assert client.delete("/v1/admin/source-groups/empty-grp", headers=admin_headers).status_code == 404
+
+
+def test_recheck_refetches_and_reports_gone_without_asking_the_model(client, admin_headers, monkeypatch):
+    """The reported bug: a recheck over cached text said 'open' for a posting
+    that had since started redirecting to a careers page."""
+    from api import verdicts
+    from core.store import add_ai_result
+
+    db.execute("INSERT INTO jobs (url, source, company, title) VALUES "
+               "('https://gone.test/jobs/1','s','HP IQ','SWE')")
+    jid = db.query_one("SELECT id FROM jobs WHERE url = 'https://gone.test/jobs/1'")["id"]
+    # Stale cache from when the posting was still live.
+    add_ai_result("https://gone.test/jobs/1", "passed", "content cached", "content",
+                  input_content="A full and healthy job description. " * 30)
+
+    async def fake_refresh(url, company="", job_title="", context="manual"):
+        verdicts.record_manual(
+            url=url, check_type="closed", rejected=True,
+            reason="posting redirects away (board index or careers page)",
+            company=company, job_title=job_title, context=context,
+        )
+        return None
+
+    monkeypatch.setattr(verdicts, "refresh_content", fake_refresh)
+    resp = client.post(
+        "/v1/admin/checks/run", json={"job_id": jid, "check": "closed"}, headers=admin_headers
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "rejected" and "redirects away" in body["reason"]
+    assert body["tokens"] == 0  # no model call needed to know it's gone
+    latest = db.query_one(
+        "SELECT status FROM ai_queries WHERE url = 'https://gone.test/jobs/1' "
+        "AND check_type = 'closed' ORDER BY id DESC LIMIT 1"
+    )
+    assert latest["status"] == "rejected"
