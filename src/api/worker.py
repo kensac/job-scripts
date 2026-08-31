@@ -1010,7 +1010,8 @@ def _record_reverify_results(
 
 
 async def _reverify_jobs(
-    task_id: int, rows: List[Dict[str, Any]], parent_id: Optional[int] = None
+    task_id: int, rows: List[Dict[str, Any]], parent_id: Optional[int] = None,
+    force: bool = False,
 ) -> None:
     """Two phases: gather evidence concurrently (ATS gone-detection, then
     content — the fleet-distributed, network-bound part), then settle every
@@ -1039,20 +1040,26 @@ async def _reverify_jobs(
         return
 
     # Resumability: a requeued chunk skips rows already re-verified this cycle.
+    # A forced sweep skips nothing — the point is to overturn existing verdicts.
     import datetime as _dt
 
-    cutoff = (_dt.datetime.now() - _dt.timedelta(days=1)).isoformat()
-    fresh = {
-        r["url"]
-        for r in db.query(
-            "SELECT DISTINCT url FROM ai_queries WHERE url = ANY(%s) "
-            "AND check_type = 'closed' AND created_at > %s",
-            ([r["url"] for r in rows], cutoff),
-        )
-    }
-    rows = [r for r in rows if r["url"] not in fresh]
-    total = len(rows) + len(fresh)
-    done = len(fresh)
+    if force:
+        fresh: set = set()
+        total = len(rows)
+        done = 0
+    else:
+        cutoff = (_dt.datetime.now() - _dt.timedelta(days=1)).isoformat()
+        fresh = {
+            r["url"]
+            for r in db.query(
+                "SELECT DISTINCT url FROM ai_queries WHERE url = ANY(%s) "
+                "AND check_type = 'closed' AND created_at > %s",
+                ([r["url"] for r in rows], cutoff),
+            )
+        }
+        rows = [r for r in rows if r["url"] not in fresh]
+        total = len(rows) + len(fresh)
+        done = len(fresh)
     limiter = AdaptiveLimiter()
     scrape_sem = asyncio.Semaphore(SCRAPE_CONCURRENCY)
     needs_ai: List[tuple] = []
@@ -1131,26 +1138,42 @@ async def _reverify_jobs(
 
 async def handle_reverify_open(task_id: int, payload: Dict[str, Any]) -> None:
     """Splitter: find every stale untouched board row, shard the re-checks
-    across the fleet, demote closed rows when the last chunk lands."""
-    cap_sql = "LIMIT %(cap)s" if REVERIFY_PER_CYCLE else ""
-    rows = db.query(
-        f"""
-        SELECT DISTINCT j.url, j.company, j.title FROM user_jobs uj
-        JOIN jobs j ON j.id = uj.job_id
-        WHERE {_UNTOUCHED}
-          AND COALESCE((SELECT MAX(q.created_at) FROM ai_queries q
-                        WHERE q.url = j.url AND q.check_type = 'closed'),
-                       '1970-01-01')::timestamp < now() - make_interval(days => %(days)s)
-        {cap_sql}
-        """,
-        {"days": REVERIFY_DAYS, "cap": REVERIFY_PER_CYCLE},
-    )
+    across the fleet, demote closed rows when the last chunk lands.
+
+    full=true re-checks EVERY active job currently believed open, ignoring
+    staleness, board membership and the per-cycle cap — for when the evidence
+    behind existing verdicts is itself suspect (e.g. verdicts taken before the
+    fetcher could tell a redirect from a live page)."""
+    if payload.get("full"):
+        rows = db.query(
+            """
+            SELECT j.url, j.company, j.title FROM jobs j
+            WHERE j.active AND EXISTS (
+                SELECT 1 FROM ai_queries q WHERE q.url = j.url
+                  AND q.check_type = 'closed' AND q.status = 'passed')
+            ORDER BY j.id
+            """
+        )
+    else:
+        cap_sql = "LIMIT %(cap)s" if REVERIFY_PER_CYCLE else ""
+        rows = db.query(
+            f"""
+            SELECT DISTINCT j.url, j.company, j.title FROM user_jobs uj
+            JOIN jobs j ON j.id = uj.job_id
+            WHERE {_UNTOUCHED}
+              AND COALESCE((SELECT MAX(q.created_at) FROM ai_queries q
+                            WHERE q.url = j.url AND q.check_type = 'closed'),
+                           '1970-01-01')::timestamp < now() - make_interval(days => %(days)s)
+            {cap_sql}
+            """,
+            {"days": REVERIFY_DAYS, "cap": REVERIFY_PER_CYCLE},
+        )
     if not rows:
         _set_progress(task_id, 0, 0, "nothing stale")
         _demote_closed()
         return
     if len(rows) <= CHUNK_SIZE:
-        await _reverify_jobs(task_id, rows)
+        await _reverify_jobs(task_id, rows, force=bool(payload.get("full")))
         _demote_closed()
         return
     total = len(rows)
@@ -1158,7 +1181,11 @@ async def handle_reverify_open(task_id: int, payload: Dict[str, Any]) -> None:
     for start in range(0, total, CHUNK_SIZE):
         enqueue(
             "reverify_chunk",
-            {"parent_id": task_id, "rows": rows[start : start + CHUNK_SIZE]},
+            {
+                "parent_id": task_id,
+                "rows": rows[start : start + CHUNK_SIZE],
+                "force": bool(payload.get("full")),
+            },
         )
         n_chunks += 1
     db.execute(
@@ -1172,7 +1199,10 @@ async def handle_reverify_open(task_id: int, payload: Dict[str, Any]) -> None:
 
 
 async def handle_reverify_chunk(task_id: int, payload: Dict[str, Any]) -> None:
-    await _reverify_jobs(task_id, payload["rows"], parent_id=payload["parent_id"])
+    await _reverify_jobs(
+        task_id, payload["rows"], parent_id=payload["parent_id"],
+        force=bool(payload.get("force")),
+    )
 
 
 def _batch_event_hook(task_id: int, purpose: str, model: str):

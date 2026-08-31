@@ -523,3 +523,44 @@ async def test_content_backfill_caches_pages_and_skips_covered_jobs(monkeypatch)
     scraped.clear()
     await worker.handle_fetch_missing_content(tid, {})
     assert scraped == []
+
+
+@pytest.mark.asyncio
+async def test_full_sweep_rechecks_even_fresh_verdicts(monkeypatch):
+    """A forced sweep must overturn verdicts made today — skipping them is
+    exactly what would preserve the stale-evidence verdicts it exists to fix."""
+    from core import ats as core_ats
+    from core import batch as core_batch
+    from core.store import add_ai_result
+
+    checked = []
+
+    async def fake_batch(specs, model, effort, max_out, on_event=None):
+        checked.extend(s.custom_id for s in specs)
+        return {
+            s.custom_id: core_batch.BatchResult(
+                s.custom_id, text='{"is_closed": false}',
+                usage={"input_tokens": 5, "output_tokens": 1, "total_tokens": 6},
+            )
+            for s in specs
+        }
+
+    async def fake_fetch(url):
+        return "fresh page text " * 40
+
+    monkeypatch.setattr(worker, "_scrape", fake_fetch)
+    monkeypatch.setattr(core_ats, "resolve", lambda url: core_ats.UNSUPPORTED)
+    monkeypatch.setattr("core.batch.run_responses_batch", fake_batch)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+
+    url = "https://fs.test/1"
+    add_ai_result(url, "passed", "job open", "closed")  # verdict from today
+    rows = [{"url": url, "company": "C", "title": "T"}]
+
+    tid = worker.enqueue("reverify_chunk", {"parent_id": 1})
+    worker._claim_task()
+    await worker._reverify_jobs(tid, rows)
+    assert checked == [], "normal sweep should skip a verdict made today"
+
+    await worker._reverify_jobs(tid, rows, force=True)
+    assert checked == [url], "forced sweep must re-check it anyway"
