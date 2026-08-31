@@ -682,15 +682,27 @@ async def run_single_check(body: RunCheckBody, user: AuthedUser = Depends(requir
                 "message": "check must be closed, clearance, filter:<id>, or hash:<prompt_hash>",
             },
         )
-    content = db.query_one(
-        "SELECT input_content FROM ai_queries WHERE url = %s AND input_content IS NOT NULL "
-        "AND length(input_content) > 200 ORDER BY (check_type = 'content') DESC, id DESC LIMIT 1",
-        (job["url"],),
+    # Re-fetch: a recheck against cached text cannot discover that a posting
+    # has since closed, which is usually the whole reason for asking.
+    fresh = await _verdicts.refresh_content(
+        job["url"], company=job["company"], job_title=job["title"], context="manual"
     )
-    if not content:
-        raise HTTPException(
-            409, detail={"code": "NO_CONTENT", "message": "no cached content for this job"}
+    if fresh is None:
+        gone = db.query_one(
+            "SELECT status, reason FROM ai_queries WHERE url = %s AND check_type = 'closed' "
+            "ORDER BY id DESC LIMIT 1",
+            (job["url"],),
         )
+        if gone and gone["status"] == "rejected":
+            return {
+                "check": body.check, "status": "rejected",
+                "reason": gone["reason"], "tokens": 0, "refetched": True,
+            }
+        raise HTTPException(
+            409,
+            detail={"code": "NO_CONTENT", "message": "could not fetch this posting just now"},
+        )
+    content = {"input_content": fresh}
     key = ai.server_key("openai")
     if not key:
         raise HTTPException(503, detail={"code": "NO_SERVER_KEY", "message": "no server key"})

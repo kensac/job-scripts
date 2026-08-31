@@ -338,15 +338,22 @@ async def explain_check(
     job = db.query_one("SELECT id, url, company, title FROM jobs WHERE id = %s", (job_id,))
     if not job:
         raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown job"})
-    content_row = db.query_one(
-        "SELECT input_content FROM ai_queries WHERE url = %s AND input_content IS NOT NULL "
-        "AND length(input_content) > 200 ORDER BY (check_type = 'content') DESC, id DESC LIMIT 1",
-        (job["url"],),
+    fresh = await _verdicts.refresh_content(
+        job["url"], company=job["company"], job_title=job["title"], context="explain"
     )
-    if not content_row:
-        raise HTTPException(
-            409, detail={"code": "NO_CONTENT", "message": "no cached content for this job yet"}
+    if fresh is None:
+        gone = db.query_one(
+            "SELECT status, reason FROM ai_queries WHERE url = %s AND check_type = 'closed' "
+            "ORDER BY id DESC LIMIT 1",
+            (job["url"],),
         )
+        if gone and gone["status"] == "rejected":
+            return {"check": body.check, "status": "rejected", "reason": gone["reason"]}
+        raise HTTPException(
+            409,
+            detail={"code": "NO_CONTENT", "message": "could not fetch this posting just now"},
+        )
+    content_row = {"input_content": fresh}
     ent = budget.get_entitlement(user)
     cfg = budget.resolve_ai_config(user.id, ent)
     cfg = dataclasses.replace(cfg, params={**cfg.params, "reasoning_effort": "medium"})
