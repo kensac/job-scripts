@@ -867,6 +867,54 @@ def upsert_source_group(name: str, body: SourceGroupBody, user: AuthedUser = Dep
     return row
 
 
+@router.delete("/sources/{name}")
+def delete_source(name: str, force: bool = False, user: AuthedUser = Depends(require_admin)):
+    """Permanently remove a source. Refuses while anything still hangs off it —
+    jobs would be orphaned into a source that no longer exists, and there is no
+    undo — so emptiness is proven rather than assumed. force=true is the
+    deliberate override. Group memberships are always cleaned up, because a
+    group pointing at a deleted source is silent debris."""
+    src = db.query_one("SELECT name FROM sources WHERE name = %s", (name,))
+    if not src:
+        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown source"})
+    attached = db.query_one(
+        """
+        SELECT (SELECT count(*) FROM jobs WHERE source = %(n)s) AS jobs,
+               (SELECT count(*) FROM user_sources WHERE source = %(n)s) AS subscribers,
+               (SELECT count(*) FROM user_jobs uj JOIN jobs j ON j.id = uj.job_id
+                WHERE j.source = %(n)s) AS board_rows
+        """,
+        {"n": name},
+    )
+    if not force and (attached["jobs"] or attached["subscribers"] or attached["board_rows"]):
+        raise HTTPException(
+            409,
+            detail={
+                "code": "SOURCE_IN_USE",
+                "message": (
+                    f"{name} still has {attached['jobs']} jobs, "
+                    f"{attached['subscribers']} subscribers, {attached['board_rows']} board rows"
+                ),
+                "attached": attached,
+            },
+        )
+    db.execute("DELETE FROM user_sources WHERE source = %s", (name,))
+    db.execute(
+        "UPDATE source_groups SET members = array_remove(members, %s) WHERE %s = ANY(members)",
+        (name, name),
+    )
+    db.execute("DELETE FROM sources WHERE name = %s", (name,))
+    return {"ok": True, "deleted": name, "was_attached": attached}
+
+
+@router.delete("/source-groups/{name}")
+def delete_source_group(name: str, user: AuthedUser = Depends(require_admin)):
+    row = db.query_one("DELETE FROM source_groups WHERE name = %s RETURNING name", (name,))
+    if not row:
+        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown group"})
+    return {"ok": True, "deleted": name}
+
+
 @router.patch("/sources/{name}")
 def patch_source(name: str, body: SourceBody, user: AuthedUser = Depends(require_admin)):
     fields = body.model_dump(exclude_unset=True, exclude={"name"})
