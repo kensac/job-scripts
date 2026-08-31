@@ -338,7 +338,7 @@ async def explain_check(
     job = db.query_one("SELECT id, url, company, title FROM jobs WHERE id = %s", (job_id,))
     if not job:
         raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown job"})
-    fresh = await _verdicts.refresh_content(
+    fresh, closure_signal = await _verdicts.refresh_content(
         job["url"], company=job["company"], job_title=job["title"], context="explain"
     )
     if fresh is None:
@@ -347,8 +347,12 @@ async def explain_check(
             "ORDER BY id DESC LIMIT 1",
             (job["url"],),
         )
-        if gone and gone["status"] == "rejected":
-            return {"check": body.check, "status": "rejected", "reason": gone["reason"]}
+        if closure_signal:
+            return {
+                "check": body.check, "status": "rejected",
+                "reason": (gone or {}).get("reason", ""),
+                "refetched": True, "closure_signal": closure_signal,
+            }
         raise HTTPException(
             409,
             detail={"code": "NO_CONTENT", "message": "could not fetch this posting just now"},
