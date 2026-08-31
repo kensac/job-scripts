@@ -313,3 +313,33 @@ def test_manual_check_addresses_filters_by_hash(client, admin_headers):
         "/v1/admin/checks/run", json={"job_id": jid, "check": "nonsense"}, headers=admin_headers
     )
     assert bad.status_code == 400 and bad.json()["detail"]["code"] == "INVALID_CHECK"
+
+
+def test_delete_source_refuses_while_in_use_then_succeeds(client, admin_headers):
+    db.execute("INSERT INTO sources (name, listings_url) VALUES ('doomed', 'https://x')")
+    db.execute("INSERT INTO source_groups (name, members) VALUES ('grp', ARRAY['doomed','other'])")
+    db.execute("INSERT INTO jobs (url, source, company, title) VALUES ('https://d.test/1','doomed','C','T')")
+
+    resp = client.delete("/v1/admin/sources/doomed", headers=admin_headers)
+    assert resp.status_code == 409
+    assert resp.json()["detail"]["code"] == "SOURCE_IN_USE"
+    assert db.query_one("SELECT 1 FROM sources WHERE name = 'doomed'") is not None
+
+    db.execute("DELETE FROM jobs WHERE source = 'doomed'")
+    resp = client.delete("/v1/admin/sources/doomed", headers=admin_headers)
+    assert resp.status_code == 200
+    assert db.query_one("SELECT 1 FROM sources WHERE name = 'doomed'") is None
+    # Group membership is cleaned so nothing points at a ghost.
+    assert db.query_one("SELECT members FROM source_groups WHERE name = 'grp'")["members"] == ["other"]
+    assert client.delete("/v1/admin/sources/doomed", headers=admin_headers).status_code == 404
+
+
+def test_delete_source_force_overrides_and_group_delete_works(client, admin_headers):
+    db.execute("INSERT INTO sources (name, listings_url) VALUES ('forced', 'https://x')")
+    db.execute("INSERT INTO jobs (url, source, company, title) VALUES ('https://f.test/1','forced','C','T')")
+    resp = client.delete("/v1/admin/sources/forced?force=true", headers=admin_headers)
+    assert resp.status_code == 200 and resp.json()["was_attached"]["jobs"] == 1
+
+    db.execute("INSERT INTO source_groups (name, members) VALUES ('empty-grp', ARRAY[]::text[])")
+    assert client.delete("/v1/admin/source-groups/empty-grp", headers=admin_headers).status_code == 200
+    assert client.delete("/v1/admin/source-groups/empty-grp", headers=admin_headers).status_code == 404
