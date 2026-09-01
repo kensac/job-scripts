@@ -76,6 +76,12 @@ WORKER_CONCURRENCY = Gauge(
     "jobtracker_worker_concurrency",
     "Current adaptive in-flight limit of this worker",
 )
+USERS_PROVISIONED = Counter(
+    "jobtracker_users_provisioned_total",
+    "User rows created by an authenticated request. A phantom identity from "
+    "the proxy mints a real user silently, so this must be watchable.",
+)
+
 REAPER_REQUEUES = Counter(
     "jobtracker_reaper_requeues_total",
     "Tasks requeued after their worker died",
