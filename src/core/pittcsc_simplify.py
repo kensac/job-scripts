@@ -1,4 +1,22 @@
+"""Google-Sheets era pipeline. DEPRECATED as a whole; kept for local sheet runs.
+
+The multi-user API in src/api/ replaced everything here except a small set of
+symbols it still imports, which are NOT deprecated and must keep working:
+
+    FALLBACK_CUTOFF_TS, fetch_job_postings   -- ingest (api/worker.py)
+    extract_url_content_ex                   -- page fetching (api/fetching.py)
+    CLOSED_INSTRUCTIONS, CLEARANCE_INSTRUCTIONS,
+    JobClosedResponse, ClearanceRequirementResponse
+                                             -- checks (api/routers/*, worker)
+    JobPosting                               -- catalog (core/catalog.py)
+
+Everything else is sheet-era and carries @deprecated, so any caller gets a
+runtime DeprecationWarning and type checkers flag it. Do not add new callers;
+extract what you need into a leaf module instead.
+"""
 from __future__ import annotations
+
+from warnings import deprecated
 
 import asyncio
 import datetime
@@ -277,6 +295,7 @@ def get_chrome_options() -> Options:
     return chrome_options
 
 
+@deprecated("sheet-era pipeline: superseded by the multi-user API (src/api/). Kept for local Google-Sheets runs only.")
 def extract_url_content(url: str) -> Optional[str]:
     return extract_url_content_ex(url)[0]
 
@@ -367,6 +386,7 @@ ACTIVE_CUSTOM_INSTRUCTIONS = CUSTOM_INSTRUCTIONS
 ACTIVE_FILTER_FAIL_CLOSED = False
 
 
+@deprecated("sheet-era pipeline: superseded by the multi-user API (src/api/). Kept for local Google-Sheets runs only.")
 def set_active_filter(name: str) -> bool:
     global ACTIVE_FILTER_NAME, ACTIVE_CUSTOM_INSTRUCTIONS, ACTIVE_FILTER_FAIL_CLOSED
     spec = get_filter_spec(name)
@@ -385,6 +405,7 @@ def _build_custom_input(content: str, job_title: str, company: str) -> str:
     return f"Company: {company}\nJob Title: {job_title}\n\nJob Content:\n{content}"
 
 
+@deprecated("sheet-era pipeline: superseded by the multi-user API (src/api/). Kept for local Google-Sheets runs only.")
 async def check_if_job_closed(
     content: str, url: str = "", job_title: str = "", company: str = ""
 ) -> bool:
@@ -476,6 +497,7 @@ async def check_if_job_closed(
     return False
 
 
+@deprecated("sheet-era pipeline: superseded by the multi-user API (src/api/). Kept for local Google-Sheets runs only.")
 async def check_security_clearance_requirement(
     content: str, url: str = "", job_title: str = "", company: str = ""
 ) -> bool:
@@ -578,6 +600,7 @@ async def check_security_clearance_requirement(
     return False
 
 
+@deprecated("sheet-era pipeline: superseded by the multi-user API (src/api/). Kept for local Google-Sheets runs only.")
 async def check_custom_filter(
     content: str,
     url: str = "",
@@ -692,6 +715,7 @@ def _on_extraction_failure(job: JobPosting, why: str) -> JobPosting:
     return job
 
 
+@deprecated("sheet-era pipeline: superseded by the multi-user API (src/api/). Kept for local Google-Sheets runs only.")
 async def preprocess_job_posting(
     job: JobPosting
 ) -> JobPosting:
@@ -783,6 +807,7 @@ async def preprocess_job_posting(
     return job
 
 
+@deprecated("sheet-era pipeline: superseded by the multi-user API (src/api/). Kept for local Google-Sheets runs only.")
 async def retry_failed_job(url: str, check_type: str) -> bool:
     if not openai_client:
         logger.warning("No OpenAI API key found - cannot retry failed jobs")
@@ -827,6 +852,7 @@ async def retry_failed_job(url: str, check_type: str) -> bool:
         return False
 
 
+@deprecated("sheet-era pipeline: superseded by the multi-user API (src/api/). Kept for local Google-Sheets runs only.")
 async def reevaluate_custom_filter(url: str, job_title: str = "", company: str = "") -> Optional[bool]:
     if not openai_client or not CUSTOM_FILTER_PROMPT:
         logger.warning("No OpenAI API key or CUSTOM_FILTER_PROMPT found - cannot reevaluate")
@@ -853,6 +879,7 @@ async def reevaluate_custom_filter(url: str, job_title: str = "", company: str =
         return None
 
 
+@deprecated("sheet-era pipeline: superseded by the multi-user API (src/api/). Kept for local Google-Sheets runs only.")
 async def retry_all_failed_jobs() -> Dict[str, int]:
     failed_jobs = get_all_failed_jobs()
 
@@ -884,6 +911,7 @@ async def retry_all_failed_jobs() -> Dict[str, int]:
     return {"total": len(failed_jobs), "success": success_count, "failed": failed_count}
 
 
+@deprecated("sheet-era pipeline: superseded by the multi-user API (src/api/). Kept for local Google-Sheets runs only.")
 async def reevaluate_all_custom_filtered_jobs(sheet_id: str, job_listings_url: str) -> Dict[str, int]:
     custom_jobs = get_all_custom_filter_jobs()
 
@@ -1256,6 +1284,7 @@ def is_terms_included(terms: List[str]) -> bool:
     return any(term in INCLUDED_TERMS for term in terms)
 
 
+@deprecated("sheet-era pipeline: superseded by the multi-user API (src/api/). Kept for local Google-Sheets runs only.")
 def filter_job_postings(
     postings: List[JobPosting], existing_urls: Set[str]
 ) -> List[JobPosting]:
@@ -1285,6 +1314,7 @@ def filter_job_postings(
     return filtered
 
 
+@deprecated("sheet-era pipeline: superseded by the multi-user API (src/api/). Kept for local Google-Sheets runs only.")
 def authenticate_gspread() -> gspread.client.Client:
     scope = [
         "https://spreadsheets.google.com/feeds",
@@ -1299,6 +1329,7 @@ def authenticate_gspread() -> gspread.client.Client:
     return client
 
 
+@deprecated("sheet-era pipeline: superseded by the multi-user API (src/api/). Kept for local Google-Sheets runs only.")
 def get_existing_urls(sheet: Worksheet) -> Set[str]:
     rows: List[List[str]] = sheet.get_all_values()
     urls = {row[5] for row in rows if len(row) > 5 and row[5]}  # type: ignore
@@ -1446,6 +1477,7 @@ async def _process_jobs_batched(jobs: List[JobPosting]) -> List[JobPosting]:
     return [job if active.get(job.url) else replace(job, active=False) for job in jobs]
 
 
+@deprecated("sheet-era pipeline: superseded by the multi-user API (src/api/). Kept for local Google-Sheets runs only.")
 async def filter_jobs_by_clearance(
     jobs: List[JobPosting]
 ) -> ClearanceStats:
@@ -1522,6 +1554,7 @@ async def filter_jobs_by_clearance(
     return clearance_stats
 
 
+@deprecated("sheet-era pipeline: superseded by the multi-user API (src/api/). Kept for local Google-Sheets runs only.")
 def write_to_sheet(sheet: Worksheet, jobs: List[JobPosting]) -> int:
     if not jobs:
         return 0
@@ -1562,6 +1595,7 @@ def write_to_sheet(sheet: Worksheet, jobs: List[JobPosting]) -> int:
         return 0
 
 
+@deprecated("sheet-era pipeline: superseded by the multi-user API (src/api/). Kept for local Google-Sheets runs only.")
 def summarize_filters(
     postings: List[JobPosting],
     existing_urls: Set[str],
@@ -1686,6 +1720,7 @@ def wait_for_network() -> None:
     logger.info("Network connection restored")
 
 
+@deprecated("sheet-era pipeline: superseded by the multi-user API (src/api/). Kept for local Google-Sheets runs only.")
 async def async_main(
     retry_failed: bool = False,
     reevaluate_custom: bool = False,
@@ -1764,6 +1799,7 @@ async def async_main(
         raise
 
 
+@deprecated("sheet-era pipeline: superseded by the multi-user API (src/api/). Kept for local Google-Sheets runs only.")
 def main(
     retry_failed: bool = False,
     reevaluate_custom: bool = False,

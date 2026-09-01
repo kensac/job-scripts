@@ -1,6 +1,21 @@
+"""DEPRECATED: Google-Sheets tracker CLI entry point.
+
+Superseded by the multi-user API in src/api/. Nothing in the running product
+imports this module - it is a manual CLI for the Google-Sheets era, kept so
+local sheet runs still work. Importing it warns.
+"""
+from __future__ import annotations
+
+import warnings
+
+warnings.warn(
+    "trackers.run_tracker is the deprecated Google-Sheets CLI; the API in src/api/ replaced it",
+    DeprecationWarning,
+    stacklevel=2,
+)
+
 #!/usr/bin/env python3
 
-from __future__ import annotations
 
 import logging
 import os

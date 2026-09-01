@@ -1,4 +1,19 @@
+"""DEPRECATED: one-time sheet-era backfill tool.
+
+Superseded by the multi-user API in src/api/. Nothing in the running product
+imports this module - it is a manual CLI for the Google-Sheets era, kept so
+local sheet runs still work. Importing it warns.
+"""
 from __future__ import annotations
+
+import warnings
+
+warnings.warn(
+    "trackers.backfill is the deprecated Google-Sheets CLI; the API in src/api/ replaced it",
+    DeprecationWarning,
+    stacklevel=2,
+)
+
 
 import argparse
 import datetime
