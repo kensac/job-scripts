@@ -70,9 +70,6 @@ class AdaptiveLimiter:
         self._win_start = time.monotonic()
         metrics.WORKER_CONCURRENCY.set(self.limit)
 INGEST_INTERVAL_MINUTES = int(os.environ.get("JOBTRACKER_INGEST_INTERVAL_MINUTES", "60"))
-# 0 = unlimited. Fixed counts don't scale with users/fleet; per-user budgets
-# and fleet throughput are the real controls, these envs are emergency brakes.
-INGEST_MAX_AI_PER_SOURCE = int(os.environ.get("JOBTRACKER_INGEST_MAX_AI_PER_SOURCE", "0"))
 # Which task kinds this worker claims; lets small fleet hosts (e.g. an rpi)
 # opt out of scrape-heavy work. Default: all kinds.
 WORKER_KINDS = [
@@ -860,13 +857,8 @@ async def handle_run_all_filters(task_id: int, payload: Dict[str, Any]) -> None:
 
 async def handle_ingest_source(task_id: int, payload: Dict[str, Any]) -> None:
     from core import catalog
-    from core.pittcsc_simplify import (
-        FALLBACK_CUTOFF_TS,
-        check_if_job_closed,
-        check_security_clearance_requirement,
-        fetch_job_postings,
-    )
-    from core.store import get_latest, prefetch
+    from core.pittcsc_simplify import FALLBACK_CUTOFF_TS, fetch_job_postings
+    from core.store import prefetch
 
     source = db.query_one(
         "SELECT * FROM sources WHERE name = %s AND active", (payload["source"],)
@@ -880,42 +872,41 @@ async def handle_ingest_source(task_id: int, payload: Dict[str, Any]) -> None:
     metrics.INGEST_JOBS.labels(source["name"], "upserted").inc(upserted)
     logger.info(f"Ingest {source['name']}: fetched {len(postings)}, upserted {upserted}")
 
+    # Ingest caches pages but runs NO AI. It reached here through the task
+    # queue, which makes it scheduled work, and the rule for scheduled work is
+    # that it batches: the hourly verify_new task settles closed+clearance as
+    # one half-price call per job. Checking inline here bypassed that — it was
+    # why ~90% of closed/clearance verdicts were still full-price sync calls,
+    # since verify_new only ever saw the jobs ingest had not already reached.
+    #
+    # Caching the page stays here on purpose. verify_new can only batch a job
+    # whose text is already stored, and leaving that to fetch_missing_content
+    # (100/cycle) would throttle verification far below the ingest rate.
+    # refresh_content also tags where the text came from, which is what keeps
+    # the ats_text_collapse detector fed with live-ingest data.
     candidates = [
         p for p in postings
         if p.active and p.url and p.date_posted >= FALLBACK_CUTOFF_TS
     ]
     prefetch([p.url for p in candidates])
-    checked = 0
+    cached = 0
     total = len(candidates)
     for i, p in enumerate(candidates):
         if i % 10 == 0 and _cancelled(task_id):
             logger.info(f"Task {task_id} cancelled mid-ingest")
             return
-        if INGEST_MAX_AI_PER_SOURCE and checked >= INGEST_MAX_AI_PER_SOURCE:
-            logger.info(f"Ingest {source['name']}: AI cap reached ({checked})")
-            break
-        closed = get_latest(p.url, "closed")
-        clearance = get_latest(p.url, "clearance")
-        if closed and clearance:
+        if get_content(p.url):
             continue
-        content = get_content(p.url) or await _scrape(p.url)
-        if not content:
-            continue
-        checked += 1
-        metrics.INGEST_JOBS.labels(source["name"], "checked").inc()
-        if not closed:
-            is_closed = await check_if_job_closed(content, p.url, p.title, p.company)
-            metrics.CHECKS.labels("closed", "rejected" if is_closed else "passed").inc()
-            if is_closed:
-                continue
-        if not clearance:
-            restricted = await check_security_clearance_requirement(
-                content, p.url, p.title, p.company
+        try:
+            await verdicts.refresh_content(
+                p.url, company=p.company, job_title=p.title, context="ingest"
             )
-            metrics.CHECKS.labels(
-                "clearance", "rejected" if restricted else "passed"
-            ).inc()
-        if checked % 5 == 0:
+        except Exception:
+            logger.warning(f"Ingest {source['name']}: content fetch failed for {p.url}")
+            continue
+        cached += 1
+        metrics.INGEST_JOBS.labels(source["name"], "cached").inc()
+        if cached % 5 == 0:
             _set_progress(task_id, i + 1, total, source["name"])
     _set_progress(task_id, total, total, source["name"])
 
