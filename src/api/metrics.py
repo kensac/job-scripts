@@ -127,8 +127,14 @@ def instrument(app: FastAPI) -> None:
     async def _metrics_middleware(request: Request, call_next):
         start = time.monotonic()
         response = await call_next(request)
+        # Only a MATCHED route may become a label value. FastAPI sets
+        # scope["route"] on a match and leaves it unset otherwise, so falling
+        # back to the raw URL let every 404 mint a new time series - one
+        # scanner walking /wp-login.php, /.env, /admin.php ... grows the
+        # registry without bound until the metrics endpoint stops being
+        # scrapeable. Unmatched requests all collapse into one bucket.
         route = request.scope.get("route")
-        path = getattr(route, "path", request.url.path)
+        path = getattr(route, "path", None) or "<unmatched>"
         HTTP_REQUESTS.labels(request.method, path, str(response.status_code)).inc()
         HTTP_DURATION.labels(request.method, path).observe(time.monotonic() - start)
         return response

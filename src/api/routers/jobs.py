@@ -404,6 +404,14 @@ async def explain_check(
         usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0),
         usage.get("total_tokens", 0),
     )
+    if parsed is None:
+        # run_check records the 'failed' row and returns None when the model
+        # produces no parseable output; the tokens are already spent, so this
+        # must read as a real outcome rather than an unhandled AttributeError.
+        raise HTTPException(
+            502,
+            detail={"code": "NO_VERDICT", "message": "the model returned no usable answer; try again"},
+        )
     rejected, reason = verdict_of(parsed)
     return {"check": body.check, "status": "rejected" if rejected else "passed", "reason": reason}
 
