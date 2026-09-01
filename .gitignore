@@ -226,3 +226,12 @@ applied_actalent.txt
 
 # Local agent instructions; never committed.
 CLAUDE.md
+
+# Local-only, deliberately untracked: sheet ids, filter prompts, a launchd
+# shim, and a defunct ECR workflow. configs.toml is read at API start to seed
+# sources, but core/configs.py returns {} when it is absent and prod is
+# already seeded, so its absence from the image is the intended state.
+configs.toml
+filters.toml
+scripts/run_tracker_launch.sh
+.github/workflows/build-push-ecr.yml
