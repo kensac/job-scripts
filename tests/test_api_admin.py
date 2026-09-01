@@ -253,7 +253,16 @@ def test_health_detects_ats_collapse_and_resolves_when_it_recovers(client, admin
     resp = client.get("/v1/admin/health", headers=admin_headers)
     assert any(a["subject"] == "hsrc" for a in resp.json()["open"])
 
-    # Condition clears -> alert auto-resolves.
+    # Condition clears -> alert auto-resolves, but only after RESOLVE_GRACE of
+    # silence: a detector going quiet for one cycle is not proof it is over.
+    health.record([f for f in health.detect() if f["subject"] != "hsrc"])
+    assert db.query_one(
+        "SELECT resolved_at FROM health_alerts WHERE subject = 'hsrc'"
+    )["resolved_at"] is None
+    db.execute(
+        "UPDATE health_alerts SET last_seen = now() - interval '1 day' "
+        "WHERE subject = 'hsrc'"
+    )
     health.record([f for f in health.detect() if f["subject"] != "hsrc"])
     row = db.query_one("SELECT resolved_at FROM health_alerts WHERE subject = 'hsrc'")
     assert row["resolved_at"] is not None
@@ -266,33 +275,6 @@ def test_health_ignores_low_volume_noise(client, admin_headers):
     _content_row("https://q.test/1", "ats text", 4)
     _content_row("https://q.test/2", "scraped", 0)
     assert not [f for f in health.detect() if f["subject"] == "quiet"]
-
-
-def test_ats_detector_gated_while_backfill_runs_but_others_still_fire(client, admin_headers):
-    from api import health, worker
-    db.execute("INSERT INTO jobs (url, source, company, title) SELECT "
-               "'https://g.test/' || g, 'gsrc', 'C', 'T' FROM generate_series(1,60) g")
-    for i in range(1, 31):
-        _content_row(f"https://g.test/{i}", "ats text", 4)
-    for i in range(31, 61):
-        _content_row(f"https://g.test/{i}", "scraped", 0)
-    assert [f for f in health.detect() if f["kind"] == "ats_text_collapse"]
-
-    tid = worker.enqueue("fetch_missing_content", {})
-    db.execute(
-        "UPDATE tasks SET status='done', finished_at=now(), progress=%s WHERE id=%s",
-        (db.jsonb({"done": 100, "total": 100, "label": "cached"}), tid),
-    )
-    assert health.backfill_distorting() is True
-    assert not [f for f in health.detect() if f["kind"] == "ats_text_collapse"]
-    resp = client.get("/v1/admin/health", headers=admin_headers)
-    assert any("ats_text_collapse" in s for s in resp.json()["suppressed"])
-
-    # A backfill that found nothing must NOT suppress anything.
-    db.execute("UPDATE tasks SET progress = %s WHERE id = %s",
-               (db.jsonb({"done": 0, "total": 0, "label": "no content gaps"}), tid))
-    assert health.backfill_distorting() is False
-    assert [f for f in health.detect() if f["kind"] == "ats_text_collapse"]
 
 
 def test_manual_check_addresses_filters_by_hash(client, admin_headers):
@@ -390,26 +372,28 @@ def test_rate_spike_ignores_expiring_rechecks_but_catches_fresh_misclassificatio
     from api import health
     from core.store import add_ai_result
 
-    def closed_row(url, status, days_ago):
-        add_ai_result(url, status, "", "closed")
+    def closed_row(url, status, days_ago, company):
+        add_ai_result(url, status, "", "closed", company=company)
         stamp = (datetime.datetime.now() - datetime.timedelta(days=days_ago)).isoformat()
         db.execute("UPDATE ai_queries SET created_at = %s WHERE id = "
                    "(SELECT MAX(id) FROM ai_queries WHERE url = %s)", (stamp, url))
 
+    # One company per job: a rate built from a single employer's bulk drop is
+    # capped at MAX_PER_COMPANY, which is the point of the cap.
     db.execute("INSERT INTO jobs (url, source, company, title) SELECT "
-               "'https://exp.test/' || g, 'expsrc', 'C', 'T' FROM generate_series(1,80) g")
+               "'https://exp.test/' || g, 'expsrc', 'co' || g, 'T' FROM generate_series(1,120) g")
     # Baseline week: fresh jobs arrive open.
-    for i in range(1, 41):
-        closed_row(f"https://exp.test/{i}", "passed", 4)
+    for i in range(1, 61):
+        closed_row(f"https://exp.test/{i}", "passed", 4, f"co{i}")
     # Last 24h: those same jobs are RE-checked and have since expired.
-    for i in range(1, 41):
-        closed_row(f"https://exp.test/{i}", "rejected", 0)
+    for i in range(1, 61):
+        closed_row(f"https://exp.test/{i}", "rejected", 0, f"co{i}")
     assert not [f for f in health.detect() if f["subject"] == "expsrc"], \
         "expiring re-checks must not read as breakage"
 
     # Now the real signal: brand-new jobs written off on arrival.
-    for i in range(41, 81):
-        closed_row(f"https://exp.test/{i}", "rejected", 0)
+    for i in range(61, 121):
+        closed_row(f"https://exp.test/{i}", "rejected", 0, f"co{i}")
     spike = [f for f in health.detect() if f["subject"] == "expsrc"]
     assert spike and spike[0]["kind"] == "closed_rate_spike"
     assert "newly-seen" in spike[0]["message"]
