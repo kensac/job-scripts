@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from api import ai, db, verdicts, worker
+from api import ai, db, fetching, verdicts, worker
 from core.store import add_ai_result
 
 # ---------------------------------------------------------------------------
@@ -235,7 +235,7 @@ async def test_chunked_run_all_filters_lifecycle(monkeypatch, user_headers):
     async def no_network(url):
         raise AssertionError(f"scrape attempted for {url}, content should have been cached")
 
-    monkeypatch.setattr(worker, "_fetch_page", no_network)
+    monkeypatch.setattr(fetching, "fetch_page", no_network)
 
     async def fake_parse(cfg, instructions, input_text, response_model, timeout=120.0):
         should_filter = "REJECT_ME" in input_text
@@ -309,7 +309,7 @@ async def test_reverify_jobs_skips_urls_with_fresh_closed_verdicts(monkeypatch):
 
     async def fake_fetch_page(url):
         fetch_calls.append(url)
-        return "some job content"
+        return "some job content", False
 
     async def fake_batch(specs, model, effort, max_out, on_event=None):
         from core import batch as core_batch
@@ -323,7 +323,7 @@ async def test_reverify_jobs_skips_urls_with_fresh_closed_verdicts(monkeypatch):
             for s in specs
         }
 
-    monkeypatch.setattr(worker, "_fetch_page", fake_fetch_page)
+    monkeypatch.setattr(fetching, "fetch_page", fake_fetch_page)
     monkeypatch.setattr("core.batch.run_responses_batch", fake_batch)
 
     fresh_urls = ["https://x.example.com/fresh-1", "https://x.example.com/fresh-2"]
@@ -435,9 +435,9 @@ async def test_reverify_records_batch_verdicts_and_reattaches(monkeypatch):
         }
 
     async def fake_fetch_page(url):
-        return "job content here"
+        return "job content here", False
 
-    monkeypatch.setattr(worker, "_fetch_page", fake_fetch_page)
+    monkeypatch.setattr(fetching, "fetch_page", fake_fetch_page)
     monkeypatch.setattr("core.batch.run_responses_batch", fake_batch)
     monkeypatch.setattr("core.batch.collect_batches", fake_collect)
 
@@ -506,13 +506,11 @@ async def test_content_backfill_caches_pages_and_skips_covered_jobs(monkeypatch)
 
     scraped = []
 
-    async def fake_scrape(url):
+    async def fake_fetch_page(url):
         scraped.append(url)
-        add_ai_result(url, "passed", "content cached", "content",
-                      input_content="Y" * 500, config_name="content-cache")
-        return "Y" * 500
+        return "Y" * 500, False
 
-    monkeypatch.setattr(worker, "_scrape", fake_scrape)
+    monkeypatch.setattr(fetching, "fetch_page", fake_fetch_page)
     monkeypatch.setattr(core_ats, "resolve", lambda url: core_ats.UNSUPPORTED)
 
     tid = worker.enqueue("fetch_missing_content", {})
@@ -546,9 +544,9 @@ async def test_full_sweep_rechecks_even_fresh_verdicts(monkeypatch):
         }
 
     async def fake_fetch(url):
-        return "fresh page text " * 40
+        return "fresh page text " * 40, False
 
-    monkeypatch.setattr(worker, "_scrape", fake_fetch)
+    monkeypatch.setattr(fetching, "fetch_page", fake_fetch)
     monkeypatch.setattr(core_ats, "resolve", lambda url: core_ats.UNSUPPORTED)
     monkeypatch.setattr("core.batch.run_responses_batch", fake_batch)
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")

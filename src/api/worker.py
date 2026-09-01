@@ -349,87 +349,6 @@ def _load_config(user_id: int) -> tuple[Entitlement, ai.AIConfig]:
     return ent, budget.resolve_ai_config(user_id, ent)
 
 
-SCRAPE_TIMEOUT_SECONDS = int(os.environ.get("JOBTRACKER_SCRAPE_TIMEOUT_SECONDS", "180"))
-
-# Interstitial/block pages (captcha walls, geo blocks, rate limits, site-wide
-# outages) must never be cached as job content or fed to closed-checks: a
-# blocked fetch says nothing about the job. Markers are checked only on short
-# pages; real postings are long, block pages are not.
-_BLOCK_MARKERS = (
-    "captcha", "access denied", "request blocked", "are you a robot",
-    "unusual traffic", "too many requests", "rate limit", "just a moment",
-    "checking your browser", "attention required", "service unavailable",
-    "temporarily unavailable", "not available in your region",
-    "not available in your country", "error 503", "error 502",
-)
-
-
-def _looks_blocked(content: Optional[str]) -> bool:
-    if not content:
-        return False
-    text = content.strip()
-    if len(text) < 300:
-        return True
-    if len(text) < 6000:
-        lowered = text.lower()
-        return any(m in lowered for m in _BLOCK_MARKERS)
-    return False
-
-
-def redirected_away(requested: str, final: Optional[str]) -> bool:
-    """True when a fetch landed somewhere materially different — the signature
-    of an expired posting bouncing to a board index or careers page. Compared
-    on host+path only, so tracking params and trailing slashes don't count."""
-    if not final:
-        return False
-    from urllib.parse import urlparse
-
-    a, b = urlparse(requested), urlparse(final)
-    return (a.netloc, a.path.rstrip("/")) != (b.netloc, b.path.rstrip("/"))
-
-
-async def _fetch_page_ex(url: str) -> tuple[Optional[str], bool]:
-    """Returns (content, redirected_away)."""
-    from core.pittcsc_simplify import extract_url_content_ex
-
-    start = time.monotonic()
-    try:
-        # A wedged chromium must not hold a scrape slot forever; the thread
-        # itself can't be killed, but freeing the slot keeps the chunk moving.
-        content, final_url = await asyncio.wait_for(
-            asyncio.to_thread(extract_url_content_ex, url), SCRAPE_TIMEOUT_SECONDS
-        )
-        if redirected_away(url, final_url):
-            metrics.SCRAPE_DURATION.observe(time.monotonic() - start)
-            metrics.SCRAPES.labels("redirected").inc()
-            logger.info(f"fetch redirected away: {url} -> {final_url}")
-            return None, True
-    except asyncio.TimeoutError:
-        metrics.SCRAPE_DURATION.observe(time.monotonic() - start)
-        metrics.SCRAPES.labels("timeout").inc()
-        logger.warning(f"scrape timed out after {SCRAPE_TIMEOUT_SECONDS}s: {url}")
-        return None, False
-    metrics.SCRAPE_DURATION.observe(time.monotonic() - start)
-    if _looks_blocked(content):
-        metrics.SCRAPES.labels("blocked").inc()
-        logger.info(f"scrape returned a block/interstitial page: {url}")
-        return None, False
-    metrics.SCRAPES.labels("ok" if content else "empty").inc()
-    return content, False
-
-
-async def _fetch_page(url: str) -> Optional[str]:
-    return (await _fetch_page_ex(url))[0]
-
-
-async def _scrape(url: str) -> Optional[str]:
-    content = await _fetch_page(url)
-    if content:
-        add_ai_result(url, "passed", "scraped", "content",
-                      input_content=content, config_name="content-cache")
-    return content
-
-
 async def handle_extract_upload(payload: Dict[str, Any]) -> None:
     job = db.query_one("SELECT * FROM jobs WHERE id = %s", (payload["job_id"],))
     if not job:
@@ -437,7 +356,11 @@ async def handle_extract_upload(payload: Dict[str, Any]) -> None:
     _, cfg = _load_config(payload["user_id"])
 
     content = None if payload.get("force") else get_content(job["url"])
-    content = content or await _scrape(job["url"])
+    if not content:
+        content, _closure = await verdicts.refresh_content(
+            job["url"], company=job.get("company") or "",
+            job_title=job.get("title") or "", context="upload",
+        )
     if not content:
         db.execute(
             "UPDATE jobs SET extraction_status = 'failed' WHERE id = %s", (job["id"],)
@@ -581,8 +504,11 @@ async def _process_jobs(
     async def one(job: Dict[str, Any]):
         content = get_content(job["url"])
         if not content:
-            async with scrape_sem:
-                content = await _scrape(job["url"])
+            content, _closure = await verdicts.refresh_content(
+                job["url"], company=job.get("company") or "",
+                job_title=job.get("title") or "", context="filter-run",
+                scrape_sem=scrape_sem,
+            )
         if not content:
             return None
         return await _check_filter(
@@ -1015,7 +941,6 @@ async def _reverify_jobs(
     """Two phases: gather evidence concurrently (ATS gone-detection, then
     content — the fleet-distributed, network-bound part), then settle every
     remaining verdict in ONE half-price batch instead of a call per job."""
-    from core import ats
     from core.batch import BatchSpec, collect_batches, run_responses_batch
     from core.pittcsc_simplify import CLOSED_INSTRUCTIONS
     from openai.lib._pydantic import to_strict_json_schema
@@ -1064,29 +989,15 @@ async def _reverify_jobs(
     needs_ai: List[tuple] = []
 
     async def gather(r: Dict[str, Any]) -> None:
-        ats_res = await asyncio.to_thread(ats.resolve, r["url"])
-        if ats_res.status is ats.Status.GONE:
-            verdicts.record_manual(
-                url=r["url"], check_type="closed", rejected=True,
-                reason="ATS reports posting gone (reverify)",
-                company=r["company"], job_title=r["title"], context="reverify",
-            )
-            return
-        if ats_res.ok and ats_res.text and not _looks_blocked(ats_res.text):
-            content = ats_res.text
-            # Cache it: reverify touches every open board job daily, which
-            # makes it the cheapest content-coverage engine we have (comp
-            # extraction and batch filtering both feed on these rows).
-            # Reason records HOW we got the text: an ATS share that collapses
-            # is the earliest signal that an upstream resolver has broken.
-            add_ai_result(r["url"], "passed", "ats text", "content",
-                          input_content=content, config_name="content-cache")
-        else:
-            async with scrape_sem:
-                content = await _scrape(r["url"])
+        content, _closure = await verdicts.refresh_content(
+            r["url"], company=r["company"], job_title=r["title"],
+            context="reverify", scrape_sem=scrape_sem,
+        )
         if not content:
-            # Fetch failed or page was a block/interstitial: says nothing about
-            # the job, so keep the prior verdict and retry next cycle.
+            # Either refresh_content already recorded the closure (ATS gone,
+            # or the link bounced to a board index), or the fetch simply
+            # failed - which says nothing about the job, so the prior verdict
+            # stands and the next cycle retries.
             return
         needs_ai.append((r["url"], content))
 
@@ -1476,7 +1387,6 @@ async def handle_fetch_missing_content(task_id: int, payload: Dict[str, Any]) ->
     and caches their pages; the existing sweeps then pick them up for free.
     Self-limiting: once every job has content it finds nothing and costs
     nothing."""
-    from core import ats
 
     cap = max(1, payload.get("limit") or CONTENT_BACKFILL_PER_CYCLE)
     rows = db.query(
@@ -1499,21 +1409,11 @@ async def handle_fetch_missing_content(task_id: int, payload: Dict[str, Any]) ->
     scrape_sem = asyncio.Semaphore(SCRAPE_CONCURRENCY)
 
     async def one(r: Dict[str, Any]) -> bool:
-        # ATS text is free and instant where the resolver supports the board.
-        ats_res = await asyncio.to_thread(ats.resolve, r["url"])
-        if ats_res.ok and ats_res.text and not _looks_blocked(ats_res.text):
-            add_ai_result(r["url"], "passed", "ats text", "content",
-                          input_content=ats_res.text, config_name="content-cache")
-            return True
-        if ats_res.status is ats.Status.GONE:
-            verdicts.record_manual(
-                url=r["url"], check_type="closed", rejected=True,
-                reason="ATS reports posting gone (backfill)",
-                company=r["company"], job_title=r["title"], context="content-backfill",
-            )
-            return False
-        async with scrape_sem:
-            return bool(await _scrape(r["url"]))
+        content, _closure = await verdicts.refresh_content(
+            r["url"], company=r["company"], job_title=r["title"],
+            context="content-backfill", scrape_sem=scrape_sem,
+        )
+        return bool(content)
 
     limiter = AdaptiveLimiter()
     idx = 0
