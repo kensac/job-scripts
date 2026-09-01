@@ -880,12 +880,13 @@ async def handle_ingest_source(task_id: int, payload: Dict[str, Any]) -> None:
 REVERIFY_DAYS = int(os.environ.get("JOBTRACKER_REVERIFY_DAYS", "7"))
 REVERIFY_PER_CYCLE = int(os.environ.get("JOBTRACKER_REVERIFY_PER_CYCLE", "0"))  # 0 = all stale
 
-# Comp extraction runs hourly, so each pass must be bounded. Unbounded it read
-# every eligible job in one task: 236 rows today, but 10,665 active jobs still
-# need it, which would be ~60MB pulled into one list and ~17 sequential batch
-# waves awaited while holding one of three worker slots.
+# Comp extraction runs hourly and each pass is bounded, so one task cannot pull
+# the whole catalog into memory or occupy a worker indefinitely. The size is
+# chosen to fill the batch-wave concurrency rather than picked arbitrarily: a
+# comp spec is ~6.5k tokens against a 1.8M-token wave budget, so ~276 specs per
+# wave, and waves now run BATCH_WAVE_CONCURRENCY at a time.
 EXTRACT_COMP_PER_CYCLE = int(
-    os.environ.get("JOBTRACKER_EXTRACT_COMP_PER_CYCLE", "500")
+    os.environ.get("JOBTRACKER_EXTRACT_COMP_PER_CYCLE", "1100")
 )
 
 # A board row counts as untouched (machine-managed) when the user never set

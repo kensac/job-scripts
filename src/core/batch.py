@@ -31,6 +31,12 @@ def _client() -> Optional[AsyncOpenAI]:
 BATCH_ENDPOINT = "/v1/responses"
 BATCH_COMPLETION_WINDOW = "24h"
 BATCH_TOKEN_BUDGET = 1_800_000
+
+# How many batch waves may be in flight at once. Each wave is an independent
+# OpenAI batch, and a batch spends nearly all its time queued rather than
+# consuming local resources, so this bounds provider-side enqueued work rather
+# than anything on our side.
+BATCH_WAVE_CONCURRENCY = int(os.environ.get("JOBTRACKER_BATCH_WAVE_CONCURRENCY", "4"))
 BATCH_CHARS_PER_TOKEN = 4
 BATCH_POLL_INTERVAL = 30.0
 
@@ -317,10 +323,34 @@ async def run_responses_batch(
         f"(<= {BATCH_TOKEN_BUDGET:,} tokens each)"
     )
 
+    # Waves used to run one after another. Each is an independent OpenAI batch
+    # that spends most of its life waiting, so serialising them made total time
+    # the SUM of every wave's queue time: a 37-wave backfill at ~42 min a wave
+    # is ~26 hours of mostly idle waiting, holding a worker slot throughout.
+    # Running a bounded number concurrently collapses that to roughly the
+    # slowest few waves.
+    sem = asyncio.Semaphore(max(1, BATCH_WAVE_CONCURRENCY))
+
+    async def run_wave(index: int, chunk: List[BatchSpec]) -> Dict[str, BatchResult]:
+        async with sem:
+            logger.info(f"Batch wave {index}/{len(chunks)}: {len(chunk)} requests")
+            return await _run_chunk(
+                client, chunk, model, reasoning_effort, max_output_tokens, on_event
+            )
+
+    waves = await asyncio.gather(
+        *(run_wave(i, c) for i, c in enumerate(chunks, start=1)),
+        return_exceptions=True,
+    )
+
     results: Dict[str, BatchResult] = {}
-    for index, chunk in enumerate(chunks, start=1):
-        logger.info(f"Batch wave {index}/{len(chunks)}: {len(chunk)} requests")
-        results.update(
-            await _run_chunk(client, chunk, model, reasoning_effort, max_output_tokens, on_event)
-        )
+    for index, wave in enumerate(waves, start=1):
+        if isinstance(wave, BaseException):
+            # One wave failing must not discard the ones that succeeded and
+            # were already paid for. The unanswered specs simply get no
+            # verdict, which the next sweep picks up - the same idempotency
+            # the serial version relied on, just without losing siblings.
+            logger.warning(f"Batch wave {index}/{len(chunks)} failed: {wave}")
+            continue
+        results.update(wave)
     return results
