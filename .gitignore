@@ -227,6 +227,10 @@ applied_actalent.txt
 # Local agent instructions; never committed.
 CLAUDE.md
 
+# Database dumps. Large, and they contain scraped page content and model
+# instructions. The existing *.json / *.csv rules do not cover *.csv.gz.
+backups/
+
 # Local-only, deliberately untracked: sheet ids, filter prompts, a launchd
 # shim, and a defunct ECR workflow. configs.toml is read at API start to seed
 # sources, but core/configs.py returns {} when it is absent and prod is
