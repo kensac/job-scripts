@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import hmac
+import logging
 import os
 from dataclasses import dataclass
 from typing import List
 
 from fastapi import Header, HTTPException
 
-from api import db
+from api import db, metrics
+
+logger = logging.getLogger("jobtracker_api")
 
 SERVICE_TOKEN = os.environ.get("JOBTRACKER_SERVICE_TOKEN", "")
 
@@ -47,6 +50,16 @@ def require_user(
                 403,
                 detail={"code": "SIGNUPS_DISABLED", "message": "new signups are currently disabled"},
             )
+    if existing is None and not (x_user_email or "").strip():
+        # Provisioning a user is a real side effect, and this endpoint trusts
+        # whatever identity the proxy forwards. A malformed or mistyped sub
+        # would otherwise mint a phantom user row silently; every genuine
+        # identity carries an email, so its absence means the request is wrong.
+        raise HTTPException(
+            400,
+            detail={"code": "IDENTITY_INCOMPLETE",
+                    "message": "cannot provision a user without an email"},
+        )
     row = db.query_one(
         """
         INSERT INTO users (sub, email, name, groups)
@@ -56,11 +69,19 @@ def require_user(
             name = COALESCE(NULLIF(EXCLUDED.name, ''), users.name),
             groups = EXCLUDED.groups,
             last_seen_at = now()
-        RETURNING id, sub, email, name, groups
+        RETURNING id, sub, email, name, groups, (xmax = 0) AS is_new
         """,
         (x_user_sub, x_user_email, x_user_name, groups),
     )
     assert row is not None
+    if row["is_new"]:
+        # Loud on purpose: a new user appearing is either a real signup or a
+        # bug in whatever forwarded the identity, and both are worth seeing.
+        metrics.USERS_PROVISIONED.inc()
+        logger.warning(
+            "provisioned new user id=%s email=%s groups=%s",
+            row["id"], row["email"], groups,
+        )
     return AuthedUser(
         id=row["id"],
         sub=row["sub"],
