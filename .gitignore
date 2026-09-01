@@ -223,3 +223,6 @@ applied_actalent.txt
 *.db
 *.db-wal
 *.db-shm
+
+# Local agent instructions; never committed.
+CLAUDE.md
