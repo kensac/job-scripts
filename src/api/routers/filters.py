@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 
 from fastapi import APIRouter, Depends, HTTPException
+from psycopg.errors import UniqueViolation
 from pydantic import BaseModel
 
 from api import ai, budget, db, events
@@ -106,11 +107,18 @@ def patch_filter(filter_id: int, body: FilterPatch, user: AuthedUser = Depends(r
     on_ambiguous = fields.get("on_ambiguous", existing["on_ambiguous"])
     fields["prompt_hash"] = _hash(prompt, on_ambiguous)
     cols = ", ".join(f"{k} = %({k})s" for k in fields)
-    row = db.query_one(
-        f"UPDATE user_filters SET {cols}, updated_at = now() "
-        f"WHERE id = %(fid)s AND user_id = %(uid)s RETURNING {_FILTER_COLS}",
-        {"fid": filter_id, "uid": user.id, **fields},
-    )
+    try:
+        row = db.query_one(
+            f"UPDATE user_filters SET {cols}, updated_at = now() "
+            f"WHERE id = %(fid)s AND user_id = %(uid)s RETURNING {_FILTER_COLS}",
+            {"fid": filter_id, "uid": user.id, **fields},
+        )
+    except UniqueViolation:
+        # create_filter pre-checks the name; renaming has to answer the same
+        # way rather than letting user_filters_user_id_name_key escape as a 500.
+        raise HTTPException(
+            409, detail={"code": "DUPLICATE_NAME", "message": "filter name already exists"}
+        )
     assert row is not None
     task_id, blocked = (None, None)
     hash_changed = row["prompt_hash"] != existing["prompt_hash"]

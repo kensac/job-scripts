@@ -718,6 +718,11 @@ async def run_single_check(body: RunCheckBody, user: AuthedUser = Depends(requir
         verdict_of=verdict_of, company=job["company"], job_title=job["title"],
         filter_name=filter_name, prompt_hash=prompt_hash, context="manual",
     )
+    if parsed is None:
+        raise HTTPException(
+            502,
+            detail={"code": "NO_VERDICT", "message": "the model returned no usable answer; try again"},
+        )
     rejected, reason = verdict_of(parsed)
     return {
         "check": body.check,
