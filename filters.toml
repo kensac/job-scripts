@@ -1,0 +1,208 @@
+# Named custom filters.
+#
+# "default" still comes from CUSTOM_FILTER_PROMPT in .env. The filters below are
+# selectable by name and apply one with:
+#
+#   python -m trackers.run_tracker <config> --apply-filter <name>
+#
+# Apply-filter reuses cached page content + closed/clearance verdicts, so
+# switching filters only pays for custom checks it hasn't run before, and only
+# adds passing jobs that are missing from the sheet.
+#
+# Note: "general" is identical to the .env default, so it shares the same cache.
+
+[general]
+prompt = """
+Candidate: early-career software engineer (Rust, Go, TypeScript, Python, Java, C/C++; backend, infrastructure, full-stack, systems, DevOps, distributed systems). Optimize for company reputation over exact role fit.
+
+KEEP (do not filter):
+- Tech or tech-adjacent companies: software, AI/ML, developer tools/infrastructure, fintech/quant, startups; especially well-known, high-growth, or well-funded ones with strong engineering reputations.
+- Software/backend/frontend/full-stack/platform/infrastructure/systems/SRE/DevOps/cloud engineering roles at any level up to staff.
+- US-based or remote roles.
+
+FILTER OUT only when clearly:
+- Non-engineering roles: product manager, business analyst, sales or sales engineer, recruiter, marketing.
+- Mobile-only (pure iOS/Android, no backend), research-only DS/ML, embedded/firmware, hardware, security researcher, network specialist, or game development.
+- Non-tech employers: marketing agencies, consulting firms, staffing/recruiting agencies, or government contractors (EXCEPT Palantir and Anduril, which are KEEP).
+- Located outside the US and not remote.
+- Requires (not merely prefers) a Master's or PhD, or more than 3 years of experience.
+
+When uncertain, KEEP.
+"""
+
+# Strict: only elite, extremely high-paying or prestigious employers.
+# This is an inclusion filter -- the bar is HIGH, so treat "not clearly top-tier"
+# as a violation and filter it out.
+[top_tier]
+prompt = """
+Keep ONLY software/engineering roles at elite, extremely high-paying or prestigious employers. The bar is intentionally high: if a company is not clearly and recognizably in the tiers below, that is a violation of these criteria -- filter it out.
+
+KEEP only if the company is clearly one of:
+- Big tech: Google, Meta, Apple, Amazon, Microsoft, Netflix, Nvidia.
+- Elite AI labs: OpenAI, Anthropic, Google DeepMind, xAI, Mistral, Scale AI, Cohere, Thinking Machines, SSI.
+- Top quant / HFT / trading firms: Citadel, Citadel Securities, Jane Street, Two Sigma, Hudson River Trading, Jump Trading, Optiver, DRW, IMC, DE Shaw, Five Rings, SIG, Point72, Akuna, Old Mission.
+- Top-tier high-comp startups / unicorns with elite engineering reputations: Stripe, Databricks, Snowflake, Ramp, Plaid, Figma, Notion, Rippling, Coinbase, Anduril, Palantir, Airbnb, Uber, Cloudflare, Datadog, HashiCorp, Confluent, Vercel, Roblox, Pinterest, Dropbox, Robinhood, Brex, Mercury.
+
+Also acceptable: a company not on the list ONLY if the posting makes its top-tier status unmistakable (e.g. clearly states elite/FAANG-level compensation, or is a widely recognized top engineering brand).
+
+FILTER OUT everything else, including solid-but-not-elite mid-size companies, banks/insurers, consultancies, agencies, enterprise/legacy software, government/defense contractors (except Palantir/Anduril), and any company you do not clearly recognize as top-tier. When unsure whether a company is truly elite, FILTER IT OUT.
+Also filter non-engineering roles and roles outside the US that are not remote.
+"""
+
+# Resume / skillset match: keep roles that meaningfully use Kanishk's strengths.
+[resume_match]
+prompt = """
+Match roles to this candidate's actual strengths. Keep a role only if it has a GOOD amount of overlap with the profile below; filter roles where his core skills would largely go unused.
+
+CANDIDATE PROFILE:
+- Core languages: Rust, Go, Python, C/C++, TypeScript/JavaScript, Java.
+- Strong domains: backend engineering, distributed systems, systems programming, infrastructure/platform, real-time and multi-threaded systems, full-stack web, SRE/DevOps, computer vision (OpenCV).
+- Frameworks/tools: Django, Flask, Next.js, NestJS, React, Vue, Node.js, Redis, Celery, Docker, Kubernetes, Terraform, AWS/GCP/Azure, CI/CD, OpenGL.
+
+KEEP if the role clearly involves at least a couple of these, e.g.:
+- Backend / API / microservices in Python, Go, Rust, Java, or Node/TypeScript.
+- Distributed systems, systems/low-level, performance, or real-time/concurrent work.
+- Infrastructure / platform / SRE / DevOps / cloud (AWS/GCP/Azure, Docker, K8s, Terraform).
+- Full-stack or frontend with React/Next.js/Vue/TypeScript.
+- Computer vision / image processing (OpenCV) or rendering/graphics.
+
+FILTER OUT roles with little real overlap, e.g.:
+- Stacks he doesn't work in as the primary focus: C#/.NET-only, Ruby/Rails-only, PHP-only, Scala/Kotlin-only, Salesforce/SAP/ServiceNow/Workday, COBOL/mainframe.
+- Research-only data science / ML research, statistics/quant-research (not SWE), pure analytics.
+- Mobile-only (iOS/Swift or Android/Kotlin) with no backend, embedded/firmware, hardware/FPGA, ASIC, security research, network engineering, QA/test-only, or pure UI/UX design.
+- Non-engineering roles entirely.
+- AI Focused roles
+- Requires (not merely prefers) a Master's or PhD, or more than 3 years of experience.
+
+When the role's primary stack and domain clearly match his strengths, KEEP; when the match is weak or only superficial, FILTER OUT.
+In this case if the job is unclear FILTER OUT.
+"""
+
+[resume_match_new_grad]
+prompt = """
+Match roles to this candidate's actual strengths. Keep a role only if it has a GOOD amount of overlap with the profile below; filter roles where his core skills would largely go unused.
+
+CANDIDATE PROFILE:
+- Core languages: Rust, Go, Python, C/C++, TypeScript/JavaScript, Java.
+- Strong domains: backend engineering, distributed systems, systems programming, infrastructure/platform, real-time and multi-threaded systems, full-stack web, SRE/DevOps, computer vision (OpenCV).
+- Frameworks/tools: Django, Flask, Next.js, NestJS, React, Vue, Node.js, Redis, Celery, Docker, Kubernetes, Terraform, AWS/GCP/Azure, CI/CD, OpenGL.
+
+KEEP a role only if BOTH are true: (1) its primary stack/domain clearly involves at least a couple of these, and (2) it is a new-grad / entry-level / junior / early-career role. Being new-grad/early-career is NOT on its own a reason to keep -- the technical match is always required.
+- Backend / API / microservices in Python, Go, Rust, Java, or Node/TypeScript.
+- Distributed systems, systems/low-level, performance, or real-time/concurrent work.
+- Infrastructure / platform / SRE / DevOps / cloud (AWS/GCP/Azure, Docker, K8s, Terraform).
+- Full-stack or frontend with React/Next.js/Vue/TypeScript.
+- Computer vision / image processing (OpenCV) or rendering/graphics.
+
+FILTER OUT if ANY of these apply (each is sufficient on its own):
+- Little real stack overlap, or the primary stack is one he doesn't work in: C#/.NET-only, Ruby/Rails-only, PHP-only, Scala/Kotlin-only, Salesforce/SAP/ServiceNow/Workday, COBOL/mainframe.
+- A generic "software engineer" role whose actual work does not clearly touch his stack/domains above (new-grad status does NOT rescue it).
+- Research-only data science / ML research, statistics/quant-research (not SWE), pure analytics.
+- Mobile-only (iOS/Swift or Android/Kotlin) with no backend, embedded/firmware, hardware/FPGA, ASIC, security research, network engineering, QA/test-only, or pure UI/UX design.
+- Non-engineering roles entirely.
+- Mid / senior / lead / staff / principal level, or requires (not merely prefers) a Master's or PhD, or more than 1 year of experience.
+
+When the technical match is weak, only superficial, or the role is unclear about its actual stack/domain, FILTER OUT.
+"""
+
+[empty]
+prompt = """
+Accept the job, no filtering
+"""
+
+[pay_tier]
+fail_closed = true
+on_ambiguous = "filter"
+prompt = """
+Top tire pay is defined as a total compensation of at least $200k/year for new grads. This would include positions of base salary of $150k/year or more. Filter out any positions that are not clearly in this pay tier. If the pay is not listed, filter it out.
+
+FILTER OUT if ANY of these apply (each is sufficient on its own):
+- Mid / senior / lead / staff / principal level, or requires (not merely prefers) a Master's or PhD, or more than 1 year of experience.
+"""
+
+
+[pay_tier_150]
+fail_closed = true
+on_ambiguous = "filter"
+prompt = """
+Top tire pay is defined as a total compensation of at least $150k/year for new grads. This would include positions of base salary of $150k/year or more. If the max range is higher than $150k/year, keep the job, Filter out any positions that are not clearly in this pay tier. If the pay is not listed, filter it out.
+
+FILTER OUT if ANY of these apply (each is sufficient on its own):
+- Mid / senior / lead / staff / principal level, or requires (not merely prefers) a Master's or PhD, or more than 1 year of experience.
+"""
+
+[pay_tier_200]
+fail_closed = true
+on_ambiguous = "filter"
+prompt = """
+Target: first-year total compensation (base + annual equity + amortized signing) of at least $200k for a new grad.
+
+Base salary is the proxy for TC: a base of $150k/year or more implies roughly $200k+ TC once equity and bonus are counted, so treat $150k base as clearing the bar.
+
+READING STATED PAY:
+- Judge on the TOP of a stated base range. $129k-$195k -> judge $195k -> KEEP. $95k-$140k -> judge $140k -> FILTER OUT.
+- If total compensation is stated directly rather than base, use $200k as the bar instead of $150k.
+- Annualize hourly, daily or weekly rates at 2080 hrs/year before judging ($40/hr = $83k -> FILTER OUT).
+
+WHEN NO PAY IS STATED:
+Absence of a stated range is NOT ambiguity -- decide from the employer and the role. Judge whether this specific company plausibly pays $200k+ first-year TC to a new grad in this role.
+- KEEP when the employer is known to pay at that level: big tech, elite AI labs, quant/HFT and trading firms, top-tier high-comp startups and unicorns, and well-funded engineering-led companies. Equity-heavy employers frequently post base only, or nothing at all.
+- FILTER OUT when the employer and role clearly do not reach it: utilities, retail, healthcare systems, staffing and consulting agencies, government and defense contractors, non-profits, universities, banks and insurers outside their quant desks, and any hourly, field, technician, operations or support role.
+- If you genuinely cannot place the employer, FILTER OUT.
+
+FILTER OUT if ANY of these apply (each is sufficient on its own):
+- Mid / senior / lead / staff / principal level, or requires (not merely prefers) a Master's or PhD, or more than 1 year of experience.
+"""
+# pay_tier_200 AND a technical match against Kanishk's resume. Both bars must
+# clear; failing either filters the job out. fail_closed: an unreadable posting
+# cannot be confirmed on either axis.
+[pay_tier_200_resume_match]
+fail_closed = true
+on_ambiguous = "filter"
+prompt = """
+Keep a job ONLY if it clears BOTH bars below. Failing either one is sufficient to filter it out.
+
+Failing a bar IS a clear violation of these criteria: if either bar fails, filter the job out even if the other bar passes strongly.
+
+=== BAR A: PAY ===
+Target: first-year total compensation (base + annual equity + amortized signing) of at least $200k. BASE SALARY IS NOT COMPARED TO $200k -- follow the procedure exactly.
+
+1. If a BASE salary or base range is stated: take the TOP of the range and compare it to $150,000.
+   Top base >= $150,000 -> BAR A CLEARS. Top base < $150,000 -> BAR A FAILS.
+   $153k-$196k -> top $196k >= $150k -> CLEARS.  $129k-$195k -> top $195k -> CLEARS.  $95k-$140k -> top $140k -> FAILS.
+   Never compare a base figure to $200,000, and never judge on the bottom of a range. A $150k base already implies $200k+ TC once equity and bonus are counted.
+2. Only if the posting states TOTAL COMPENSATION rather than base, compare that figure to $200,000.
+- Annualize hourly, daily or weekly rates at 2080 hrs/year before judging ($40/hr = $83k -> fails).
+- When NO pay is stated, absence of a range is NOT ambiguity -- decide from the employer and role. Clears if the employer is known to pay at that level (big tech, elite AI labs, quant/HFT and trading firms, top-tier high-comp startups and unicorns, well-funded engineering-led companies; equity-heavy employers often post base only or nothing). Fails for utilities, retail, healthcare systems, staffing and consulting agencies, government and defense contractors, non-profits, universities, banks and insurers outside their quant desks, and any hourly, field, technician, operations or support role. If you genuinely cannot place the employer, it fails.
+
+=== BAR B: TECHNICAL MATCH ===
+CANDIDATE PROFILE:
+- Languages: Rust, Go, Python, C/C++, TypeScript/JavaScript, Java, SQL.
+- Backend and distributed systems: microservices and APIs (Nest.js, Django, Flask, Express, Node.js), workflow orchestration at scale (Temporal), high-throughput data pipelines, multi-threaded and real-time systems, caching and invalidation (Redis), async job processing (Celery), search infrastructure (OpenSearch), relational data modeling (SQL, Prisma, Aurora, MySQL).
+- Domains with direct production experience: billing, invoicing and payments infrastructure (fintech), multi-tenant SaaS platforms, RBAC and permissions, inventory and scheduling systems.
+- Infrastructure and DevOps: AWS, GCP, Azure, Docker, Kubernetes, Terraform, ECS, Cloud Run, GitHub Actions, CI/CD, Nginx, Firebase.
+- Full-stack and frontend: Next.js, React, Vue 3, TypeScript SPAs.
+- Systems and graphics: Rust with OpenGL, parallel processing, spatial data structures, pathfinding; computer vision and image processing with OpenCV.
+- Education: BS Computer Science and BS Mathematics.
+
+CLEARS BAR B when the role's primary work meaningfully uses several of the above, e.g.:
+- Backend / API / platform / microservices in Go, Rust, Python, Java, TypeScript or Node.
+- Distributed systems, systems programming, performance, concurrency, or real-time work.
+- Infrastructure / platform / SRE / DevOps / cloud.
+- Payments, billing, ledger, or fintech infrastructure.
+- Data or search infrastructure, pipelines, streaming.
+- Full-stack or frontend with React / Next.js / Vue / TypeScript.
+- Computer vision, image processing, graphics or rendering.
+
+FAILS BAR B when:
+- The primary stack is one he does not work in: C#/.NET-only, Ruby/Rails-only, PHP-only, Scala/Kotlin-only, Salesforce/SAP/ServiceNow/Workday, COBOL/mainframe.
+- A generic "software engineer" posting that never indicates work touching the stacks or domains above.
+- Research-only data science / ML research, quant research (not SWE), or pure analytics.
+- Mobile-only (iOS/Swift or Android/Kotlin) with no backend, embedded/firmware, hardware/FPGA/ASIC, security research, network engineering, QA/test-only, or pure UI/UX design.
+- Non-engineering roles entirely.
+- The posting is too vague to tell what the actual stack or domain is.
+
+=== ALSO FILTER OUT (each sufficient on its own) ===
+- Senior / lead / staff / principal level, or requires (not merely prefers) a Master's or PhD, or more than 5 years of experience.
+Entry-level, new-grad, junior AND mid-level roles are all acceptable -- do NOT filter a role merely for being mid-level.
+"""

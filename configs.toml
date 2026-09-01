@@ -1,0 +1,83 @@
+# Tracker configurations.
+#
+# Each [configs.<name>] maps a config to the sheet it writes to and the source
+# it pulls from (a listings.json URL or an Airtable shared-view link). Run one
+# with:
+#
+#   python -m trackers.run_tracker <name>
+#
+# [groups] are named lists of configs run sequentially:
+#
+#   python -m trackers.run_tracker <group>
+
+[configs.internships]
+sheet_id = "1kICSTt1U3DajANKj_eQ1tq5y3DKDRc3p8b1NBP_ZQY4"
+job_listings_url = "https://raw.githubusercontent.com/SimplifyJobs/Summer2026-Internships/refs/heads/dev/.github/scripts/listings.json"
+
+[configs.internships_ouckah]
+sheet_id = "1kICSTt1U3DajANKj_eQ1tq5y3DKDRc3p8b1NBP_ZQY4"
+job_listings_url = "https://raw.githubusercontent.com/vanshb03/Summer2026-Internships/refs/heads/dev/.github/scripts/listings.json"
+
+[configs.fulltime]
+sheet_id = "1pVpdvetKl5L8TYWuX-7E_2TBVbZBUgqgWNUT6caHAmk"
+job_listings_url = "https://raw.githubusercontent.com/SimplifyJobs/New-Grad-Positions/refs/heads/dev/.github/scripts/listings.json"
+
+[configs.fulltime_ouckah]
+sheet_id = "1pVpdvetKl5L8TYWuX-7E_2TBVbZBUgqgWNUT6caHAmk"
+job_listings_url = "https://raw.githubusercontent.com/vanshb03/New-Grad-2026/refs/heads/dev/.github/scripts/listings.json"
+
+[configs.fulltime_ouckah_2027]
+sheet_id = "1pVpdvetKl5L8TYWuX-7E_2TBVbZBUgqgWNUT6caHAmk"
+job_listings_url = "https://raw.githubusercontent.com/vanshb03/New-Grad-2027/refs/heads/dev/.github/scripts/listings.json"
+
+[configs.testing]
+sheet_id = "1NUc-aKgartwAA-4PsY0eOEFSFfH9ky0dVgpKf5mZxFo"
+job_listings_url = "https://raw.githubusercontent.com/SimplifyJobs/New-Grad-Positions/refs/heads/dev/.github/scripts/listings.json"
+
+[configs.airtable1]
+sheet_id = "1pVpdvetKl5L8TYWuX-7E_2TBVbZBUgqgWNUT6caHAmk"
+job_listings_url = "https://airtable.com/appjDG7vmPOm1pO7S/shr763VHjlzPBDCgN/tblLP4AtskrLA8Aw1?viewControls=on"
+
+[configs.airtable2]
+sheet_id = "1pVpdvetKl5L8TYWuX-7E_2TBVbZBUgqgWNUT6caHAmk"
+job_listings_url = "https://airtable.com/appqYfRGKpLQ8UsdH/shrFnvW20reJCEkYZ/tblDVfWJzDdU8KsoY?viewControls=on"
+
+[configs.airtable3]
+sheet_id = "1pVpdvetKl5L8TYWuX-7E_2TBVbZBUgqgWNUT6caHAmk"
+job_listings_url = "https://airtable.com/appoxNzAIRReFCzZV/shrmDBF1vNPtzNjzl/tbldeT1mbQGFwtwpa?viewControls=on"
+
+[configs.airtable4]
+sheet_id = "1pVpdvetKl5L8TYWuX-7E_2TBVbZBUgqgWNUT6caHAmk"
+job_listings_url = "https://airtable.com/appZ5SmkwkcW7Xd8C/shr51y9s2uIRlkvI8/tblnD3h2G6iiA0Csr?viewControls=on"
+
+[configs.airtable5]
+sheet_id = "1pVpdvetKl5L8TYWuX-7E_2TBVbZBUgqgWNUT6caHAmk"
+job_listings_url = "https://airtable.com/appTmAS0zZwcwxhoo/shrZzO1d5s5qGPRgr/tblkOVG7BaimFY0C6?viewControls=on"
+
+[configs.fulltime_dixon]
+sheet_id = "13cHzkxW6TUejAZ3M37q5qb6YwH5phGt4_DzPOLkh8m8"
+job_listings_url = "https://raw.githubusercontent.com/SimplifyJobs/New-Grad-Positions/refs/heads/dev/.github/scripts/listings.json"
+
+[configs.fulltime_ouckah_dixon]
+sheet_id = "13cHzkxW6TUejAZ3M37q5qb6YwH5phGt4_DzPOLkh8m8"
+job_listings_url = "https://raw.githubusercontent.com/vanshb03/New-Grad-2026/refs/heads/dev/.github/scripts/listings.json"
+
+[configs.fulltime_ouckah_2027_dixon]
+sheet_id = "13cHzkxW6TUejAZ3M37q5qb6YwH5phGt4_DzPOLkh8m8"
+job_listings_url = "https://raw.githubusercontent.com/vanshb03/New-Grad-2027/refs/heads/dev/.github/scripts/listings.json"
+
+[configs.speedyapply_intern]
+sheet_id = "1kICSTt1U3DajANKj_eQ1tq5y3DKDRc3p8b1NBP_ZQY4"
+job_listings_url = "https://raw.githubusercontent.com/speedyapply/2027-SWE-College-Jobs/main/README.md"
+
+[configs.speedyapply_ng]
+sheet_id = "1pVpdvetKl5L8TYWuX-7E_2TBVbZBUgqgWNUT6caHAmk"
+job_listings_url = "https://raw.githubusercontent.com/speedyapply/2027-SWE-College-Jobs/main/NEW_GRAD_USA.md"
+
+
+
+[groups]
+all = ["internships", "fulltime", "internships_ouckah", "fulltime_ouckah", "speedyapply_intern", "speedyapply_ng"]
+ft = ["fulltime", "fulltime_ouckah", "fulltime_ouckah_2027", "speedyapply_ng"]
+airtable = ["airtable1", "airtable2", "airtable3"]
+dixon = ["fulltime_dixon", "fulltime_ouckah_dixon", "fulltime_ouckah_2027_dixon"]

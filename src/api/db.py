@@ -32,8 +32,27 @@ _GROUP_BUDGET_SEED = [
 _APP_CONFIG_SEED = [("signups_enabled", True)]
 
 
+# One constant key, so every process that does startup DDL queues behind the
+# same lock. Nothing else serialises this: on a lockstep roll the three CD runs
+# execute in parallel and hetzner recreates api+worker together, so up to four
+# processes can enter `alembic upgrade head` within the same minute, from
+# different hosts. It has held only because every migration so far was additive
+# and the losers of the race landed on idempotent guards.
+_SCHEMA_LOCK_KEY = 8_274_113_907_441_002
+
+
 def init_schema() -> None:
-    _migrate()
+    # Blocking, not try-lock: a worker waiting a few seconds for a peer's
+    # migration is correct; skipping it and then running against a
+    # half-converted schema is not. core/store.init_db() is not covered - it
+    # runs at import and is entirely IF NOT EXISTS, so it tolerates the race
+    # on its own.
+    with pool.connection() as conn:
+        conn.execute("SELECT pg_advisory_lock(%s)", (_SCHEMA_LOCK_KEY,))
+        try:
+            _migrate()
+        finally:
+            conn.execute("SELECT pg_advisory_unlock(%s)", (_SCHEMA_LOCK_KEY,))
     _seed_sources()
     for group, tokens in _GROUP_BUDGET_SEED:
         execute(
