@@ -47,3 +47,13 @@ README.md
 Dockerfile
 docker-compose.yml
 .dockerignore
+
+# Secrets and local state must never reach an image layer. The Dockerfile does
+# `COPY . .`, so anything not excluded here is baked into every published tag
+# and survives in the layer history even if a later step deletes it.
+# config/ holds Google service-account private keys; data/ is ~77MB of local
+# scrape artefacts from the retired sheet pipeline.
+config/
+data/
+backups/
+.env.*
