@@ -798,7 +798,7 @@ async def handle_run_filter_batch_chunk(task_id: int, payload: Dict[str, Any]) -
                 model=cfg.model, filter_name=f"user{user_id}:{flt['name']}",
                 prompt_hash=flt["prompt_hash"], company=job["company"],
                 job_title=job["title"], config_name="filter-batch",
-                error=res.error,
+                error=res.error, batch_id=res.batch_id,
             )
             metrics.CHECKS.labels("custom", "failed").inc()
             metrics.AI_CALLS.labels(cfg.provider, cfg.model, "error").inc()
@@ -810,7 +810,7 @@ async def handle_run_filter_batch_chunk(task_id: int, payload: Dict[str, Any]) -
                 url, "failed", "batch: unparsable output", "custom",
                 model=cfg.model, prompt_hash=flt["prompt_hash"],
                 company=job["company"], job_title=job["title"],
-                config_name="filter-batch",
+                config_name="filter-batch", batch_id=res.batch_id,
             )
             metrics.CHECKS.labels("custom", "failed").inc()
             continue
@@ -821,7 +821,7 @@ async def handle_run_filter_batch_chunk(task_id: int, payload: Dict[str, Any]) -
             company=job["company"], job_title=job["title"],
             instructions=instructions, input_text=input_text,
             filter_name=f"user{user_id}:{flt['name']}", prompt_hash=flt["prompt_hash"],
-            context="filter-batch", batched=True,
+            context="filter-batch", batched=True, batch_id=res.batch_id,
         )
         if usage["total_tokens"]:
             budget.record_usage(
