@@ -1314,7 +1314,11 @@ def stats(user: AuthedUser = Depends(require_admin)):
     )
     by_day = db.query(
         """
-        SELECT substr(created_at, 1, 10) AS day,
+        -- created_at is timestamptz since a7c1e9d40b22; substr() has no
+        -- overload for it. ::date also makes the bucket a real calendar day
+        -- in the session timezone rather than the first ten characters of
+        -- whatever string the writer happened to produce.
+        SELECT created_at::date AS day,
                COUNT(*) AS queries,
                COUNT(*) FILTER (WHERE status = 'failed') AS failed,
                COUNT(*) FILTER (WHERE status = 'rejected') AS rejected,
