@@ -156,11 +156,17 @@ def reap_stale_tasks() -> None:
 
 def enqueue(kind: str, payload: Dict[str, Any], dedupe_key: Optional[str] = None) -> Optional[int]:
     """Insert a task; with a dedupe_key, at most one task per key ever exists,
-    so every fleet worker can race to enqueue and exactly one wins."""
+    so every fleet worker can race to enqueue and exactly one wins.
+
+    parent_id is mirrored out of the payload into its own column: it is the
+    only payload field that gets queried, and no index can serve
+    payload->>'parent_id'. It stays in the payload too so a chunk handler
+    reading its own payload is unchanged."""
     row = db.query_one(
-        "INSERT INTO tasks (kind, payload, dedupe_key) VALUES (%s, %s, %s) "
+        "INSERT INTO tasks (kind, payload, dedupe_key, parent_id) "
+        "VALUES (%s, %s, %s, %s) "
         "ON CONFLICT (dedupe_key) DO NOTHING RETURNING id",
-        (kind, db.jsonb(payload), dedupe_key),
+        (kind, db.jsonb(payload), dedupe_key, payload.get("parent_id")),
     )
     if row:
         events.publish_task(row["id"])
@@ -196,7 +202,7 @@ BATCH_CHUNK_SIZE = int(os.environ.get("JOBTRACKER_BATCH_CHUNK_SIZE", "500"))
 def _update_parent_progress(parent_id: int) -> None:
     agg = db.query_one(
         "SELECT COALESCE(SUM((progress->>'done')::int), 0) AS done FROM tasks "
-        "WHERE kind = ANY(%s) AND (payload->>'parent_id')::bigint = %s",
+        "WHERE kind = ANY(%s) AND parent_id = %s",
         (CHUNK_KINDS, parent_id),
     )
     db.execute(
@@ -276,14 +282,14 @@ def _maybe_finalize_parent(parent_id: int) -> None:
     _update_parent_progress(parent_id)
     live = db.query_one(
         "SELECT COUNT(*) AS c FROM tasks WHERE kind = ANY(%s) "
-        "AND (payload->>'parent_id')::bigint = %s AND status IN ('pending', 'running')",
+        "AND parent_id = %s AND status IN ('pending', 'running')",
         (CHUNK_KINDS, parent_id),
     )
     if live and live["c"]:
         return
     failed = db.query_one(
         "SELECT COUNT(*) AS c FROM tasks WHERE kind = ANY(%s) "
-        "AND (payload->>'parent_id')::bigint = %s AND status = 'failed'",
+        "AND parent_id = %s AND status = 'failed'",
         (CHUNK_KINDS, parent_id),
     )
     parent = db.query_one("SELECT kind, payload FROM tasks WHERE id = %s", (parent_id,))
@@ -317,14 +323,14 @@ def _reconcile_chunks() -> None:
     db.execute(
         "UPDATE tasks SET status = 'cancelled', error = 'parent cancelled', finished_at = now() "
         "WHERE kind = ANY(%s) AND status = 'pending' "
-        "AND (payload->>'parent_id')::bigint IN (SELECT id FROM tasks WHERE status = 'cancelled')",
+        "AND parent_id IN (SELECT id FROM tasks WHERE status = 'cancelled')",
         (CHUNK_KINDS,),
     )
     for r in db.query(
         """
         SELECT id FROM tasks t WHERE t.status = 'waiting'
         AND NOT EXISTS (SELECT 1 FROM tasks c WHERE c.kind = ANY(%s)
-            AND (c.payload->>'parent_id')::bigint = t.id
+            AND c.parent_id = t.id
             AND c.status IN ('pending', 'running'))
         """,
         (CHUNK_KINDS,),

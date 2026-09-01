@@ -213,12 +213,19 @@ class ApiUsage(Base):
 
 class Task(Base):
     __tablename__ = "tasks"
-    __table_args__ = (Index("idx_tasks_status", "status", "id"),)
+    __table_args__ = (
+        Index("idx_tasks_status", "status", "id"),
+        Index(
+            "idx_tasks_parent", "parent_id", "status",
+            postgresql_where=text("parent_id IS NOT NULL"),
+        ),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
     kind: Mapped[str] = mapped_column(Text)
     payload: Mapped[dict] = mapped_column(JSONB)
     dedupe_key: Mapped[Optional[str]] = mapped_column(Text, unique=True)
+    parent_id: Mapped[Optional[int]] = mapped_column(BigInteger)
     status: Mapped[str] = mapped_column(Text, server_default=text("'pending'"))
     attempts: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
     worker: Mapped[Optional[str]] = mapped_column(Text)
