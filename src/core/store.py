@@ -300,25 +300,6 @@ def get_content(url: str) -> Optional[str]:
     return row["input_content"] if row else None
 
 
-def get_prelim_passed_urls() -> List[str]:
-    """URLs whose latest closed AND latest clearance checks both passed."""
-    with _pool.connection() as conn:
-        rows = conn.execute(
-            """
-            SELECT url FROM ai_queries a
-              WHERE check_type = 'closed' AND status = 'passed'
-                AND id = (SELECT MAX(id) FROM ai_queries b
-                          WHERE b.url = a.url AND b.check_type = 'closed')
-            INTERSECT
-            SELECT url FROM ai_queries a
-              WHERE check_type = 'clearance' AND status = 'passed'
-                AND id = (SELECT MAX(id) FROM ai_queries b
-                          WHERE b.url = a.url AND b.check_type = 'clearance')
-            """
-        ).fetchall()
-    return [r["url"] for r in rows]
-
-
 def is_prelim_rejected(url: str) -> bool:
     """Rejected by a prompt-independent check (closed or clearance)."""
     closed = get_latest(url, "closed")
