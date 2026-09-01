@@ -139,7 +139,11 @@ def record_ai_verdict(
 
 
 async def refresh_content(
-    url: str, company: str = "", job_title: str = "", context: str = "manual"
+    url: str,
+    company: str = "",
+    job_title: str = "",
+    context: str = "manual",
+    scrape_sem: Optional[asyncio.Semaphore] = None,
 ) -> Tuple[Optional[str], Optional[str]]:
     """Re-fetches a posting and returns fresh text, or None when the posting is
     gone. A 'recheck' that reuses cached text can only ever re-run the model
@@ -149,8 +153,12 @@ async def refresh_content(
     Returns (content, closure_signal). closure_signal names WHY the posting is
     gone ('ats_gone' | 'redirected_away') and is set only when a closed verdict
     was recorded; callers should report it explicitly rather than inferring
-    closure from incidental values like a zero token count."""
-    from api import worker
+    closure from incidental values like a zero token count.
+
+    scrape_sem, when given, is held ONLY around the browser fetch. ATS
+    resolution is cheap and is the common path, so gating it on the scrape
+    budget would throttle the fast case behind the slow one."""
+    from api import fetching
     from core import ats
     from core.store import add_ai_result
 
@@ -162,12 +170,16 @@ async def refresh_content(
             job_title=job_title, context=context,
         )
         return None, "ats_gone"
-    if ats_res.ok and ats_res.text and not worker._looks_blocked(ats_res.text):
+    if ats_res.ok and ats_res.text and not fetching.looks_blocked(ats_res.text):
         add_ai_result(url, "passed", "ats text", "content",
                       input_content=ats_res.text, config_name="content-cache")
         return ats_res.text, None
 
-    content, redirected = await worker._fetch_page_ex(url)
+    if scrape_sem is not None:
+        async with scrape_sem:
+            content, redirected = await fetching.fetch_page(url)
+    else:
+        content, redirected = await fetching.fetch_page(url)
     if redirected:
         record_manual(
             url=url, check_type="closed", rejected=True,

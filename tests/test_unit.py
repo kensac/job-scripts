@@ -6,7 +6,7 @@ import re
 from api import criteria as crit
 from api import ai, ssrf
 from api import db
-from api import worker
+from api import fetching, worker
 from core import filters
 
 # ---------------------------------------------------------------------------
@@ -59,29 +59,29 @@ def test_criteria_word_boundary_matching_canada():
 
 
 # ---------------------------------------------------------------------------
-# api.worker._looks_blocked
+# api.fetching.looks_blocked
 # ---------------------------------------------------------------------------
 
 
 def test_looks_blocked_none_content():
-    assert worker._looks_blocked(None) is False
+    assert fetching.looks_blocked(None) is False
 
 
 def test_looks_blocked_short_page():
-    assert worker._looks_blocked("short") is True
+    assert fetching.looks_blocked("short") is True
 
 
 def test_looks_blocked_short_page_with_markers():
     for marker in ("just a moment", "access denied", "service unavailable"):
         page = f"{marker} " * 30
         assert 300 < len(page) < 6000
-        assert worker._looks_blocked(page) is True
+        assert fetching.looks_blocked(page) is True
 
 
 def test_looks_blocked_long_real_posting_with_cloudflare_word():
     page = "We use cloudflare for our website. " + ("Great engineering culture. " * 300)
     assert len(page) > 6000
-    assert worker._looks_blocked(page) is False
+    assert fetching.looks_blocked(page) is False
 
 
 # ---------------------------------------------------------------------------
@@ -199,7 +199,7 @@ def test_build_custom_instructions_stable_hash():
 
 
 def test_redirected_away_detects_board_index_bounce():
-    from api.worker import redirected_away
+    from api.fetching import redirected_away
 
     job = "https://job-boards.greenhouse.io/hpiq/jobs/6173700004"
     # The real failure: expired posting bounces to the board index.
