@@ -24,7 +24,12 @@ _JOB_ROW = """
 
 _VISIBILITY = """
 WITH enabled_filters AS (
-    SELECT prompt_hash FROM user_filters WHERE user_id = %(uid)s AND enabled
+    -- DISTINCT is load-bearing: two enabled filters can share a prompt_hash
+    -- (same prompt text under different names - adopting a preset and then
+    -- pasting the same prompt does it). filter_pass dedupes per hash, so
+    -- without this the passed_count could never reach COUNT(*) and the board
+    -- would silently go empty.
+    SELECT DISTINCT prompt_hash FROM user_filters WHERE user_id = %(uid)s AND enabled
 ),
 latest_check AS (
     SELECT DISTINCT ON (url, check_type) url, check_type, status

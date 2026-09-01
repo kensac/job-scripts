@@ -229,7 +229,12 @@ def _materialize_passing(user_id: int) -> int:
         result = conn.execute(
             f"""
             WITH enabled AS (
-                SELECT prompt_hash FROM user_filters WHERE user_id = %(uid)s AND enabled
+                -- DISTINCT for the same reason as _VISIBILITY: duplicate
+                -- prompt_hashes cancel out in this query's symmetric counts,
+                -- but the two predicates must stay spelled the same way or
+                -- the read path and the write path drift apart again.
+                SELECT DISTINCT prompt_hash FROM user_filters
+                WHERE user_id = %(uid)s AND enabled
             ),
             latest_check AS (
                 SELECT DISTINCT ON (url, check_type) url, check_type, status
@@ -1561,7 +1566,15 @@ async def handle_verify_new(task_id: int, payload: Dict[str, Any]) -> None:
 
     rows = db.query(
         """
-        SELECT j.url, j.company, j.title, q.input_content
+        SELECT j.url, j.company, j.title, q.input_content,
+               NOT EXISTS (
+                   SELECT 1 FROM ai_queries c WHERE c.url = j.url
+                     AND c.check_type = 'closed'
+                     AND c.status IN ('passed', 'rejected')) AS needs_closed,
+               NOT EXISTS (
+                   SELECT 1 FROM ai_queries c WHERE c.url = j.url
+                     AND c.check_type = 'clearance'
+                     AND c.status IN ('passed', 'rejected')) AS needs_clearance
         FROM jobs j
         JOIN LATERAL (
             SELECT input_content FROM ai_queries q
@@ -1618,21 +1631,30 @@ async def handle_verify_new(task_id: int, payload: Dict[str, Any]) -> None:
             "completion_tokens": (res.usage or {}).get("output_tokens", 0),
             "total_tokens": (res.usage or {}).get("total_tokens", 0),
         }
-        verdicts.record_ai_verdict(
-            url=url, check_type="closed",
-            rejected=parsed.is_closed, reason="", parsed_json=res.text,
-            model=model, company=job["company"], job_title=job["title"],
-            context="verify-batch", usage=usage, batched=True,
-            batch_id=res.batch_id,
-        )
-        verdicts.record_ai_verdict(
-            url=url, check_type="clearance",
-            rejected=parsed.requires_clearance_or_restrictions, reason="",
-            parsed_json=res.text, model=model,
-            company=job["company"], job_title=job["title"],
-            context="verify-batch", usage={}, batched=True,
-            batch_id=res.batch_id,
-        )
+        # Write ONLY the verdicts this job was actually missing. A job is
+        # selected when EITHER check has a hole, but the text we just read is
+        # whatever was last cached — which can predate a closure that another
+        # path already recorded. Writing both would let a stale page overturn
+        # a fresh 'closed' rejection, and latest-row-wins would put the dead
+        # posting back on people's boards.
+        if job["needs_closed"]:
+            verdicts.record_ai_verdict(
+                url=url, check_type="closed",
+                rejected=parsed.is_closed, reason="", parsed_json=res.text,
+                model=model, company=job["company"], job_title=job["title"],
+                context="verify-batch", usage=usage, batched=True,
+                batch_id=res.batch_id,
+            )
+        if job["needs_clearance"]:
+            verdicts.record_ai_verdict(
+                url=url, check_type="clearance",
+                rejected=parsed.requires_clearance_or_restrictions, reason="",
+                parsed_json=res.text, model=model,
+                company=job["company"], job_title=job["title"],
+                context="verify-batch",
+                usage=usage if not job["needs_closed"] else {},
+                batched=True, batch_id=res.batch_id,
+            )
         done += 1
         if done % 200 == 0:
             _set_progress(task_id, done, len(specs), "verified")
