@@ -858,7 +858,6 @@ async def handle_run_all_filters(task_id: int, payload: Dict[str, Any]) -> None:
 async def handle_ingest_source(task_id: int, payload: Dict[str, Any]) -> None:
     from core import catalog
     from core.pittcsc_simplify import FALLBACK_CUTOFF_TS, fetch_job_postings
-    from core.store import prefetch
 
     source = db.query_one(
         "SELECT * FROM sources WHERE name = %s AND active", (payload["source"],)
@@ -888,14 +887,18 @@ async def handle_ingest_source(task_id: int, payload: Dict[str, Any]) -> None:
         p for p in postings
         if p.active and p.url and p.date_posted >= FALLBACK_CUTOFF_TS
     ]
-    prefetch([p.url for p in candidates])
-    cached = 0
+    # One query to learn which postings already have text, instead of a
+    # round trip per posting. The largest source carries ~2,800 active jobs
+    # and almost all of them are already cached, so the per-posting form was
+    # ~2,800 sequential queries pulling ~15MB to compute a boolean, hourly.
     total = len(candidates)
+    have_content = _content_ready_urls([p.url for p in candidates])
+    cached = 0
     for i, p in enumerate(candidates):
         if i % 10 == 0 and _cancelled(task_id):
             logger.info(f"Task {task_id} cancelled mid-ingest")
             return
-        if get_content(p.url):
+        if p.url in have_content:
             continue
         try:
             await verdicts.refresh_content(
