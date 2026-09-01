@@ -56,7 +56,19 @@ async def fetch_page(url: str) -> tuple[Optional[str], bool]:
     must not discard the flag — a helper that did exactly that is why redirect
     detection never reached the daily reverify sweep.
     """
+    from api import ssrf
     from core.pittcsc_simplify import extract_url_content_ex
+
+    # The browser runs with --no-sandbox --disable-web-security and will fetch
+    # whatever it is pointed at, including cloud metadata and services on the
+    # compose network. Validate before connecting; validate the FINAL url too,
+    # because a public host can redirect into the internal one and a static
+    # check cannot see that coming.
+    error = await asyncio.to_thread(ssrf.public_url_error, url)
+    if error:
+        metrics.SCRAPES.labels("blocked_target").inc()
+        logger.warning(f"refusing to fetch {url}: {error}")
+        return None, False
 
     start = time.monotonic()
     try:
@@ -65,6 +77,12 @@ async def fetch_page(url: str) -> tuple[Optional[str], bool]:
         content, final_url = await asyncio.wait_for(
             asyncio.to_thread(extract_url_content_ex, url), SCRAPE_TIMEOUT_SECONDS
         )
+        if final_url and final_url != url:
+            landed = await asyncio.to_thread(ssrf.public_url_error, final_url)
+            if landed:
+                metrics.SCRAPES.labels("blocked_target").inc()
+                logger.warning(f"{url} redirected to a non-public target: {landed}")
+                return None, False
         if redirected_away(url, final_url):
             metrics.SCRAPE_DURATION.observe(time.monotonic() - start)
             metrics.SCRAPES.labels("redirected").inc()

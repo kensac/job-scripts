@@ -434,10 +434,20 @@ def delete_user_job(job_id: int, user: AuthedUser = Depends(require_user)):
 
 @router.post("/uploads")
 def upload_links(body: UploadRequest, user: AuthedUser = Depends(require_user)):
+    from api import ssrf
+
     accepted = []
+    rejected = []
     for raw in body.urls:
         raw = raw.strip()
         if not raw.startswith(("http://", "https://")):
+            continue
+        # Fail here as well as in the fetcher: an upload is the one place a
+        # user chooses the URL, and rejecting it now gives them an answer
+        # instead of a job that silently never extracts.
+        error = ssrf.validate_public_url(raw)
+        if error:
+            rejected.append({"url": raw, "error": error})
             continue
         url = normalize_url(raw)
         row = db.query_one(
@@ -464,7 +474,7 @@ def upload_links(body: UploadRequest, user: AuthedUser = Depends(require_user)):
             if task:
                 events.publish_task(task["id"])
         accepted.append({"job_id": row["id"], "url": url})
-    return {"accepted": accepted}
+    return {"accepted": accepted, "rejected": rejected}
 
 
 REPORT_KINDS = ("stale", "wrong_data", "closed", "other")

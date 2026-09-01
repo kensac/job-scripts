@@ -56,7 +56,7 @@ def resolve_public_ip(host: str) -> str:
     """Resolves host and returns one address; raises ValueError if any resolved
     address is private/loopback/link-local/CGNAT/reserved."""
     try:
-        infos = socket.getaddrinfo(host, 443, proto=socket.IPPROTO_TCP)
+        infos = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
     except socket.gaierror as exc:
         raise ValueError(f"could not resolve {host}: {exc}") from exc
     ips = {info[4][0] for info in infos}
@@ -66,6 +66,45 @@ def resolve_public_ip(host: str) -> str:
         if not _addr_ok(ip):
             raise ValueError(f"{host} resolves to a non-public address")
     return sorted(ips)[0]
+
+
+def validate_public_url(url: str) -> Optional[str]:
+    """Static checks on a URL we are about to FETCH. Returns an error or None.
+
+    Looser than validate_base_url - job postings legitimately live on http as
+    well as https - but it still refuses credentials, bare IPs, and anything
+    whose hostname is not a public DNS name. Pair it with resolve_public_ip to
+    catch a name that points somewhere internal.
+    """
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        return "url must be http or https"
+    host = parsed.hostname
+    if not host:
+        return "url has no hostname"
+    if parsed.username or parsed.password:
+        return "url must not contain credentials"
+    try:
+        addr = ipaddress.ip_address(host)
+        return None if _addr_ok(str(addr)) else "url points at a non-public address"
+    except ValueError:
+        pass
+    if "." not in host or host.endswith("."):
+        return "url hostname must be a public DNS name"
+    return None
+
+
+def public_url_error(url: str) -> Optional[str]:
+    """validate_public_url plus a DNS check. Blocking - call it off-thread."""
+    error = validate_public_url(url)
+    if error:
+        return error
+    host = urlparse(url).hostname or ""
+    try:
+        resolve_public_ip(host)
+    except ValueError as exc:
+        return str(exc)
+    return None
 
 
 class PinnedPublicTransport(httpx.AsyncHTTPTransport):
