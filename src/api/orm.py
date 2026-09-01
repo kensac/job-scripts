@@ -82,6 +82,9 @@ class Job(Base):
     comp_min: Mapped[Optional[int]] = mapped_column(BigInteger)
     comp_max: Mapped[Optional[int]] = mapped_column(BigInteger)
     comp_text: Mapped[Optional[str]] = mapped_column(Text)
+    comp_period: Mapped[Optional[str]] = mapped_column(Text)
+    comp_currency: Mapped[Optional[str]] = mapped_column(Text)
+    comp_basis: Mapped[Optional[str]] = mapped_column(Text)
     comp_extracted: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
 
