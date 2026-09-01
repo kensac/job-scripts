@@ -1329,9 +1329,47 @@ def stats(user: AuthedUser = Depends(require_admin)):
         FROM ai_queries GROUP BY day ORDER BY day ASC
         """
     )
+    # Cost is computed here, not in the browser. The client had one hardcoded
+    # gpt-5-nano price applied to every token, but PRICES_PER_MTOK spans
+    # $0.05-$5.00 per Mtok - a 100x range - so the headline number was wrong
+    # the moment anything ran on a different model, and silently so.
+    # Batched calls bill at half price, which the client could not know either.
+    by_model = db.query(
+        """
+        SELECT model,
+               COUNT(*) AS queries,
+               COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+               COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
+               COALESCE(SUM(prompt_tokens) FILTER (WHERE batch_id IS NOT NULL), 0) AS batched_prompt_tokens,
+               COALESCE(SUM(completion_tokens) FILTER (WHERE batch_id IS NOT NULL), 0) AS batched_completion_tokens
+        FROM ai_queries WHERE model IS NOT NULL GROUP BY model ORDER BY queries DESC
+        """
+    )
+    total_cost = 0.0
+    for row in by_model:
+        price = ai.PRICES_PER_MTOK.get(row["model"])
+        if not price:
+            row["cost_usd"] = None
+            continue
+        p_in, p_out = price
+        # SUM() over bigint comes back as Decimal, which will not multiply with
+        # a float rate - coerce before any arithmetic.
+        pt = int(row["prompt_tokens"] or 0)
+        ct = int(row["completion_tokens"] or 0)
+        bpt = int(row["batched_prompt_tokens"] or 0)
+        bct = int(row["batched_completion_tokens"] or 0)
+        cost = (
+            ((pt - bpt) * p_in + (ct - bct) * p_out)
+            + (bpt * p_in + bct * p_out) / 2
+        ) / 1_000_000
+        row["cost_usd"] = round(cost, 6)
+        total_cost += cost
+    totals["cost_usd"] = round(total_cost, 6)
+
     return {
         "totals": totals,
         "by_check_type": by_check_type,
         "by_status": by_status,
         "by_day": by_day,
+        "by_model": by_model,
     }
