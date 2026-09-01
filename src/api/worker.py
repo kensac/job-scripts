@@ -1047,7 +1047,7 @@ async def _reverify_jobs(
         total = len(rows)
         done = 0
     else:
-        cutoff = (_dt.datetime.now() - _dt.timedelta(days=1)).isoformat()
+        cutoff = _dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(days=1)
         fresh = {
             r["url"]
             for r in db.query(
@@ -1162,7 +1162,7 @@ async def handle_reverify_open(task_id: int, payload: Dict[str, Any]) -> None:
             WHERE {_UNTOUCHED}
               AND COALESCE((SELECT MAX(q.created_at) FROM ai_queries q
                             WHERE q.url = j.url AND q.check_type = 'closed'),
-                           '1970-01-01')::timestamp < now() - make_interval(days => %(days)s)
+                           '-infinity') < now() - make_interval(days => %(days)s)
             {cap_sql}
             """,
             {"days": REVERIFY_DAYS, "cap": REVERIFY_PER_CYCLE},

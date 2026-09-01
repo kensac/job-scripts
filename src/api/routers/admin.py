@@ -572,11 +572,11 @@ def query_options(user: AuthedUser = Depends(require_admin)):
         # config names — only values seen in the last 30 days.
         "contexts": col(
             "SELECT DISTINCT config_name FROM ai_queries WHERE config_name IS NOT NULL "
-            "AND created_at::timestamptz > now() - interval '30 days' ORDER BY config_name",
+            "AND created_at > now() - interval '30 days' ORDER BY config_name",
             "config_name"),
         "workers": col(
             "SELECT DISTINCT worker FROM ai_queries WHERE worker IS NOT NULL "
-            "AND created_at::timestamptz > now() - interval '30 days' ORDER BY worker",
+            "AND created_at > now() - interval '30 days' ORDER BY worker",
             "worker"),
     }
 
@@ -760,7 +760,7 @@ def data_health(user: AuthedUser = Depends(require_admin)):
                    COUNT(*) AS total
             FROM ai_queries q JOIN jobs j ON j.url = q.url
             WHERE q.check_type = 'content'
-              AND q.created_at::timestamptz > now() - interval '7 days'
+              AND q.created_at > now() - interval '7 days'
             GROUP BY j.source ORDER BY total DESC
             """
         ),
@@ -797,7 +797,7 @@ def failure_breakdown(
                MAX(created_at) AS last_failure
         FROM ai_queries
         WHERE status = 'failed'
-          AND created_at::timestamptz > now() - make_interval(hours => %(hours)s)
+          AND created_at > now() - make_interval(hours => %(hours)s)
           AND (%(worker)s::text IS NULL OR COALESCE(worker, 'unknown') = %(worker)s)
           AND (%(host)s::text IS NULL OR substring(url from '//([^/]+)') = %(host)s)
         GROUP BY 1, 2, 3 ORDER BY failures DESC LIMIT 100
@@ -812,7 +812,7 @@ def failure_breakdown(
                    COALESCE(worker, 'unknown') AS worker, left(error, 300) AS error, reason
             FROM ai_queries
             WHERE status = 'failed'
-              AND created_at::timestamptz > now() - make_interval(hours => %(hours)s)
+              AND created_at > now() - make_interval(hours => %(hours)s)
               AND (%(worker)s::text IS NULL OR COALESCE(worker, 'unknown') = %(worker)s)
               AND (%(host)s::text IS NULL OR substring(url from '//([^/]+)') = %(host)s)
             ORDER BY id DESC LIMIT 200

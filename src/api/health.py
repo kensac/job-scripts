@@ -55,12 +55,12 @@ def detect() -> List[Dict[str, Any]]:
     for r in db.query(
         """
         SELECT j.source,
-               COUNT(*) FILTER (WHERE q.created_at::timestamptz > now() - interval '24 hours') AS recent_total,
-               COUNT(*) FILTER (WHERE q.created_at::timestamptz > now() - interval '24 hours'
+               COUNT(*) FILTER (WHERE q.created_at > now() - interval '24 hours') AS recent_total,
+               COUNT(*) FILTER (WHERE q.created_at > now() - interval '24 hours'
                                 AND q.reason = 'ats text') AS recent_ats,
-               COUNT(*) FILTER (WHERE q.created_at::timestamptz BETWEEN now() - interval '8 days'
+               COUNT(*) FILTER (WHERE q.created_at BETWEEN now() - interval '8 days'
                                 AND now() - interval '24 hours') AS base_total,
-               COUNT(*) FILTER (WHERE q.created_at::timestamptz BETWEEN now() - interval '8 days'
+               COUNT(*) FILTER (WHERE q.created_at BETWEEN now() - interval '8 days'
                                 AND now() - interval '24 hours' AND q.reason = 'ats text') AS base_ats
         FROM ai_queries q JOIN jobs j ON j.url = q.url
         WHERE q.check_type = 'content'
@@ -70,14 +70,14 @@ def detect() -> List[Dict[str, Any]]:
           -- share far below the `base >= 0.30` floor — which is why this
           -- detector had never once fired.
           AND q.reason IN ('ats text', 'scraped')
-          AND q.created_at::timestamptz > now() - interval '8 days'
+          AND q.created_at > now() - interval '8 days'
           -- Backlog sweeps and live ingest are different populations with
           -- different ATS-text shares, so comparing a backfill-heavy baseline
           -- against a live-traffic window invents a collapse (it does exactly
           -- that today, in the direction the old gate did NOT anticipate:
           -- backfilled jobs resolve to ATS text MORE often, not less).
           -- Excluding them beats suppressing the detector wholesale.
-          AND q.created_at::timestamptz - j.created_at < %(fresh_window)s::interval
+          AND q.created_at - j.created_at < %(fresh_window)s::interval
         GROUP BY j.source
         """,
         {"fresh_window": FRESH_CHECK_WINDOW},
@@ -116,17 +116,17 @@ def detect() -> List[Dict[str, Any]]:
         """
         WITH firsts AS (
             SELECT j.source, q.check_type, q.status,
-                   q.created_at::timestamptz > now() - interval '24 hours' AS is_recent,
+                   q.created_at > now() - interval '24 hours' AS is_recent,
                    ROW_NUMBER() OVER (
                        PARTITION BY j.source, q.check_type, COALESCE(q.company, ''),
-                                    q.created_at::timestamptz > now() - interval '24 hours'
+                                    q.created_at > now() - interval '24 hours'
                        ORDER BY q.id
                    ) AS company_rank
             FROM ai_queries q JOIN jobs j ON j.url = q.url
             WHERE q.check_type IN ('closed', 'clearance')
               AND q.status IN ('passed', 'rejected')
-              AND q.created_at::timestamptz > now() - interval '8 days'
-              AND q.created_at::timestamptz - j.created_at
+              AND q.created_at > now() - interval '8 days'
+              AND q.created_at - j.created_at
                   < %(fresh_window)s::interval
               AND NOT EXISTS (
                 SELECT 1 FROM ai_queries p
@@ -170,16 +170,16 @@ def detect() -> List[Dict[str, Any]]:
     for r in db.query(
         """
         SELECT substring(url from '//([^/]+)') AS host,
-               COUNT(*) FILTER (WHERE created_at::timestamptz > now() - interval '24 hours') AS recent_total,
-               COUNT(*) FILTER (WHERE created_at::timestamptz > now() - interval '24 hours'
+               COUNT(*) FILTER (WHERE created_at > now() - interval '24 hours') AS recent_total,
+               COUNT(*) FILTER (WHERE created_at > now() - interval '24 hours'
                                 AND status = 'failed') AS recent_failed,
-               COUNT(*) FILTER (WHERE created_at::timestamptz BETWEEN now() - interval '8 days'
+               COUNT(*) FILTER (WHERE created_at BETWEEN now() - interval '8 days'
                                 AND now() - interval '24 hours') AS base_total,
-               COUNT(*) FILTER (WHERE created_at::timestamptz BETWEEN now() - interval '8 days'
+               COUNT(*) FILTER (WHERE created_at BETWEEN now() - interval '8 days'
                                 AND now() - interval '24 hours' AND status = 'failed') AS base_failed
         FROM ai_queries
         WHERE check_type IN ('extraction', 'content')
-          AND created_at::timestamptz > now() - interval '8 days'
+          AND created_at > now() - interval '8 days'
         GROUP BY 1
         """
     ):
