@@ -880,6 +880,14 @@ async def handle_ingest_source(task_id: int, payload: Dict[str, Any]) -> None:
 REVERIFY_DAYS = int(os.environ.get("JOBTRACKER_REVERIFY_DAYS", "7"))
 REVERIFY_PER_CYCLE = int(os.environ.get("JOBTRACKER_REVERIFY_PER_CYCLE", "0"))  # 0 = all stale
 
+# Comp extraction runs hourly, so each pass must be bounded. Unbounded it read
+# every eligible job in one task: 236 rows today, but 10,665 active jobs still
+# need it, which would be ~60MB pulled into one list and ~17 sequential batch
+# waves awaited while holding one of three worker slots.
+EXTRACT_COMP_PER_CYCLE = int(
+    os.environ.get("JOBTRACKER_EXTRACT_COMP_PER_CYCLE", "500")
+)
+
 # A board row counts as untouched (machine-managed) when the user never set
 # anything on it; only these are auto-added by materialization and auto-removed
 # by re-verification.
@@ -1300,7 +1308,10 @@ async def handle_extract_comp(task_id: int, payload: Dict[str, Any]) -> None:
             ORDER BY (q.check_type = 'content') DESC, q.id DESC LIMIT 1
         ) q ON TRUE
         WHERE NOT j.comp_extracted AND j.active
-        """
+        ORDER BY j.id DESC
+        LIMIT %(cap)s
+        """,
+        {"cap": EXTRACT_COMP_PER_CYCLE},
     )
     if not rows:
         _set_progress(task_id, 0, 0, "nothing to extract")
@@ -1610,7 +1621,16 @@ def schedule_ingest_cycle() -> None:
         )
     day = now.strftime("%Y-%m-%d")
     enqueue("reverify_open", {"cycle": day}, dedupe_key=f"reverify:{day}")
-    enqueue("extract_comp", {"cycle": day}, dedupe_key=f"comp:{day}")
+    # Hourly, but only when the previous pass has finished. Each run is capped
+    # at EXTRACT_COMP_PER_CYCLE jobs and then waits on the Batch API, which can
+    # take hours - enqueuing unconditionally every hour would stack passes up
+    # until all three workers were doing nothing else. The dedupe key stops two
+    # tasks per cycle; this stops overlap ACROSS cycles.
+    if not db.query_one(
+        "SELECT 1 FROM tasks WHERE kind = 'extract_comp' "
+        "AND status IN ('pending', 'running', 'waiting') LIMIT 1"
+    ):
+        enqueue("extract_comp", {"cycle": cycle}, dedupe_key=f"comp:{cycle}")
     enqueue("send_digests", {"cycle": day}, dedupe_key=f"digest:{day}")
     enqueue("data_health", {"cycle": cycle}, dedupe_key=f"health:{cycle}")
     # Hourly sweep for jobs the ingest pipeline left unverified (inline AI
