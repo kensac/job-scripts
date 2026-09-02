@@ -485,3 +485,53 @@ async def test_a_deadline_still_lands_in_deadline_at(monkeypatch, f):
     assert row is not None
     assert row["occurred_at"] is None
     assert row["deadline_at"] == datetime.datetime(2024, 5, 31, 0, 0, tzinfo=datetime.UTC)
+
+
+@pytest.mark.asyncio
+async def test_reclassify_by_id_revisits_a_message_that_already_has_an_event(monkeypatch, f):
+    """The default path skips anything already classified, which is what stops
+    the classifier re-paying for the whole mailbox every sweep. Repairing a
+    wrong event needs to reach past that, and does so with an explicit set
+    rather than by loosening the default."""
+    _uid, mid = _store(f, mid="<again@x>")
+    first = (
+        '{"kind":"offer","company":"Acme","role_title":null,'
+        '"deadline":null,"deadline_is_explicit":false,"confidence":"high"}'
+    )
+    await _run(monkeypatch, {}, {str(mid): _Res(first)})
+
+    # The default sweep now has nothing to do for this message.
+    await _run(monkeypatch, {}, {str(mid): _Res(first)})
+    assert len(_events(mid)) == 1
+
+    corrected = (
+        '{"kind":"not_job_related","company":null,"role_title":null,'
+        '"deadline":null,"deadline_is_explicit":false,"confidence":"high"}'
+    )
+    await _run(monkeypatch, {"message_ids": [mid]}, {str(mid): _Res(corrected)})
+
+    events = _events(mid)
+    assert len(events) == 2, "the log is append-only; the old event is kept"
+    # Latest per message wins, which is how the correction takes effect
+    # without deleting or migrating anything.
+    assert events[-1]["kind"] == "not_job_related"
+
+
+@pytest.mark.asyncio
+async def test_reclassify_refuses_a_list_over_the_cap(monkeypatch, f):
+    """Truncating a repair silently leaves the rest wrong with nothing
+    recording which half ran."""
+    with pytest.raises(ValueError, match="over the cap"):
+        await _run(monkeypatch, {"message_ids": list(range(1, 12)), "cap": 10}, {})
+
+
+@pytest.mark.asyncio
+async def test_reclassify_ignores_ids_that_do_not_exist(monkeypatch, f):
+    """A stale id in a caller's list must not fail the whole repair."""
+    _uid, mid = _store(f, mid="<ghost@x>")
+    result = (
+        '{"kind":"rejection","company":"Acme","role_title":null,'
+        '"deadline":null,"deadline_is_explicit":false,"confidence":"high"}'
+    )
+    await _run(monkeypatch, {"message_ids": [mid, mid + 99_999]}, {str(mid): _Res(result)})
+    assert len(_events(mid)) == 1

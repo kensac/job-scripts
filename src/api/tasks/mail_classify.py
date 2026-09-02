@@ -164,6 +164,22 @@ For company and role, copy what the email states. If the email does not state
 it, leave it null. Do NOT infer a company from the sender's domain and do NOT
 guess a role title.
 
+"offer" is an offer of EMPLOYMENT - a job, internship or paid position the
+candidate can accept and be paid for. Nothing else is an offer, however it is
+worded:
+
+- An "offer of admission" to a university, degree or programme is NOT an offer,
+  even when it names money. Tuition credits, enrolment deposits and
+  scholarships are not pay.
+- Acceptance into a course, a hackathon RSVP or team allocation, a club or
+  conference allotment, and "you're in" or "confirm your spot" mail are
+  "not_job_related".
+- Discussing a job already started, or congratulating someone on one, is not
+  an offer.
+
+If the email is about paid work but does not extend an offer, use the kind
+that fits what it does say.
+
 For a deadline, only give a date the email actually states or plainly implies
 ("within 5 days" from a dated email is implied; "soon" is not). Leave it null
 otherwise. Never invent one.
@@ -452,19 +468,51 @@ async def handle_classify_mail(task_id: int, payload: dict[str, Any]) -> None:
     # the failure would arrive as memory pressure on a worker rather than as a
     # rejected parameter.
     cap = min(int(payload.get("cap") or CLASSIFY_PER_CYCLE), MAX_CLASSIFY_PER_CYCLE)
-    rows = db.query(
-        """
-        SELECT m.id, m.from_email, m.subject, m.sent_at, m.body_text
-        FROM email_messages m
-        WHERE NOT EXISTS (SELECT 1 FROM email_events e WHERE e.message_id = m.id)
-        -- Likely job mail first. The prefilter gates nothing, so this only
-        -- changes the ORDER in which the whole mailbox is worked through -
-        -- which matters because the useful results arrive sooner.
-        ORDER BY m.prefilter_hit DESC NULLS LAST, m.id DESC
-        LIMIT %(cap)s
-        """,
-        {"cap": cap},
-    )
+    # Re-classifying an EXPLICIT set of messages, for repairing events that were
+    # written wrong rather than for finding ones that are missing. The set is
+    # computed by the caller and recorded in the payload, so the task row says
+    # exactly what was re-classified and why it was expected to be that many.
+    #
+    # An explicit id list rather than a "reclassify" mode carrying its own WHERE
+    # clause: a predicate the handler evaluates can match the whole mailbox if
+    # someone later widens it, and the cost of that mistake is a re-paid
+    # backfill discovered on the bill. A list cannot grow on its own.
+    #
+    # Events are append-only and the latest per message wins
+    # (mail_pipeline's DISTINCT ON ... ORDER BY id DESC), so a corrected event
+    # supersedes the old one. Nothing is deleted and nothing is migrated.
+    requested = payload.get("message_ids")
+    if requested:
+        ids = sorted({int(i) for i in requested})
+        if len(ids) > cap:
+            # Refused rather than truncated. Silently doing part of a repair
+            # leaves the rest wrong with nothing recording which half ran.
+            raise ValueError(
+                f"message_ids has {len(ids)} entries, over the cap of {cap}; "
+                "split it into several tasks"
+            )
+        rows = db.query(
+            """
+            SELECT m.id, m.from_email, m.subject, m.sent_at, m.body_text
+            FROM email_messages m WHERE m.id = ANY(%(ids)s) ORDER BY m.id
+            """,
+            {"ids": ids},
+        )
+        logger.info(f"Task {task_id}: re-classifying {len(rows)} of {len(ids)} requested messages")
+    else:
+        rows = db.query(
+            """
+            SELECT m.id, m.from_email, m.subject, m.sent_at, m.body_text
+            FROM email_messages m
+            WHERE NOT EXISTS (SELECT 1 FROM email_events e WHERE e.message_id = m.id)
+            -- Likely job mail first. The prefilter gates nothing, so this only
+            -- changes the ORDER in which the whole mailbox is worked through -
+            -- which matters because the useful results arrive sooner.
+            ORDER BY m.prefilter_hit DESC NULLS LAST, m.id DESC
+            LIMIT %(cap)s
+            """,
+            {"cap": cap},
+        )
     if not rows:
         _set_progress(task_id, 0, 0, "nothing to classify")
         return
