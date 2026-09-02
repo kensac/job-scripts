@@ -317,6 +317,58 @@ class Task(Base):
     finished_at: Mapped[datetime.datetime | None]
 
 
+class AiPrompt(Base):
+    """One row per distinct instruction text, whatever sends it.
+
+    Production carries 21 distinct prompts across 68,735 ai_queries rows, so
+    the text is affordable here in a way it is not per-row: 32 KB against the
+    75 MB the same text costs stored beside every request that used it.
+
+    Not a resolution key. Changing a filter's prompt is meant to fork its
+    verdict log; changing an extraction prompt must not invalidate the catalog.
+    """
+
+    __tablename__ = "ai_prompts"
+    __table_args__ = (Index("idx_ai_prompts_purpose", "purpose", "last_seen_at"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
+    prompt_hash: Mapped[str] = mapped_column(Text, unique=True)
+    purpose: Mapped[str] = mapped_column(Text)
+    instructions: Mapped[str] = mapped_column(Text)
+    first_seen_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+    # Moves every sweep, so a retired prompt shows as one with an old
+    # last_seen_at rather than by being absent.
+    last_seen_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+    batches: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
+
+
+class AiPromptSample(Base):
+    """A bounded sample of what a prompt version actually produced.
+
+    Bounded because a sample is what answers "what changed", and the
+    destination tables already hold the current answer - what they do not hold
+    is the previous one, which is the half a prompt-change review needs.
+    """
+
+    __tablename__ = "ai_prompt_samples"
+    __table_args__ = (Index("idx_ai_prompt_samples_prompt", "prompt_id", "id"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
+    prompt_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("ai_prompts.id", ondelete="CASCADE")
+    )
+    # A url, a message id - whatever the caller keyed its specs by. Not a
+    # foreign key: the sample outlives the row it describes, which is most of
+    # its value once a posting is gone.
+    custom_id: Mapped[str] = mapped_column(Text)
+    output: Mapped[str | None] = mapped_column(Text)
+    # Sampled alongside outputs: a prompt edit that starts producing
+    # unparseable JSON is exactly the change worth seeing, and it leaves no
+    # output behind.
+    error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+
+
 class AiBatch(Base):
     __tablename__ = "ai_batches"
     __table_args__ = (
@@ -334,6 +386,7 @@ class AiBatch(Base):
     failed_count: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
     status: Mapped[str] = mapped_column(Text, server_default=text("'submitted'"))
     est_tokens: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
+    prompt_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("ai_prompts.id"))
     input_tokens: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
     output_tokens: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
     est_cost_usd: Mapped[Any | None] = mapped_column(Numeric(12, 6))
