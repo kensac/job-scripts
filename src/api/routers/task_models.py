@@ -151,7 +151,10 @@ def _view(purpose: str) -> dict[str, Any]:
                     if c.est_cycle_cost_usd is not None and current_cycle is not None
                     else None
                 ),
-                "off_peak": c.off_peak,
+                # True when this model is billed by the hour of day, which
+                # makes the figures above the peak ones. A caveat for beside
+                # the price, not a state.
+                "price_varies_by_time": c.price_varies_by_time,
                 # The measured findings about THIS model on THIS task, so the
                 # client renders them on the option they are about rather than
                 # holding its own copy that rots at the next measurement.

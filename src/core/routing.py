@@ -304,7 +304,17 @@ class Candidacy:
     # per_cycle x the per-call cost, or None when the sweep is unbounded and a
     # cycle figure would be invented rather than computed.
     est_cycle_cost_usd: Decimal | None
-    off_peak: bool
+    # True when this model's rate depends on the hour, which makes the figures
+    # above the PEAK ones - the conservative reading, since a caller that
+    # cannot say when the work will run must overstate rather than assume a
+    # discount. It is a caveat belonging beside the price.
+    #
+    # This replaced an `off_peak` flag that could never be true: it was
+    # computed at at=None, which means peak by that same rule, so it asserted
+    # "not currently discounted" when what it knew was "nobody asked what time
+    # it is". A field that cannot express its own uncertainty is worse than an
+    # absent one, because false reads as a finding.
+    price_varies_by_time: bool
 
 
 def candidates_for(shape: TaskShape, at: datetime.datetime | None = None) -> list[Candidacy]:
@@ -348,7 +358,7 @@ def candidates_for(shape: TaskShape, at: datetime.datetime | None = None) -> lis
                 est_cycle_cost_usd=(
                     per_call * shape.per_cycle if per_call is not None and shape.per_cycle else None
                 ),
-                off_peak=is_off_peak(declared.rates, at),
+                price_varies_by_time=bool(declared.rates.peak_windows),
             )
         )
     # None sorts last among the eligible, which cannot happen - _rejection
