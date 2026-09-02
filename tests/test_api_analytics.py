@@ -255,6 +255,33 @@ def test_drill_params_point_at_the_rows_behind_the_aggregate(client, admin_heade
     assert [r["url"] for r in followed.json()["rows"]] == [url]
 
 
+def test_every_drill_link_resolves_to_a_real_route(client, admin_headers, f):
+    """A drill that 404s is worse than no drill. `/v1/jobs?source=` shipped in
+    #182 and does not exist - the board route is /v1/user/jobs, and it would
+    have shown only postings visible to the viewer anyway."""
+    f.make_source("linked")
+    f.make_ready_job(source="linked", closed="passed")
+
+    row = _row(client.get(ENDPOINT, headers=admin_headers).json(), "linked")
+    assert row["drill"], "expected drill links"
+    for name, link in row["drill"].items():
+        resp = client.get(link, headers=admin_headers)
+        assert resp.status_code == 200, f"{name} -> {link} returned {resp.status_code}"
+
+
+def test_checked_jobs_drill_is_scoped_to_the_board(client, admin_headers, f):
+    """It has to actually filter, not just resolve: an endpoint that ignores
+    the parameter returns every board's rows under one board's heading."""
+    f.make_source("mine")
+    f.make_source("theirs")
+    _, mine = f.make_ready_job(source="mine", closed="passed")
+    f.make_ready_job(source="theirs", closed="passed")
+
+    row = _row(client.get(ENDPOINT, headers=admin_headers).json(), "mine")
+    rows = client.get(row["drill"]["checked_jobs"], headers=admin_headers).json()["rows"]
+    assert [r["url"] for r in rows] == [mine]
+
+
 def test_detail_endpoint_names_the_boards_a_source_overlaps(client, admin_headers, f):
     f.make_source("primary")
     f.make_source("mirror")
