@@ -120,6 +120,146 @@ def list_mail(
     }
 
 
+@router.get("/admin/mail/analytics")
+def mail_analytics(
+    days: int = Query(default=0, ge=0, le=3650),
+    user: AuthedUser = Depends(require_admin),
+):
+    """Where the pipeline is wrong, as distributions rather than examples.
+
+    /admin/mail answers "why did THIS message get that answer" and has to show
+    the message to do it. That is the wrong tool for finding a pattern: reading
+    a hundred messages to notice that one model is producing low-confidence
+    answers is work a GROUP BY does in a second.
+
+    days=0 means the whole corpus, which is the right default here. This is a
+    historical import spanning 2018 to now, so a 30-day window would describe
+    the tail of an eight-year backfill rather than the backfill.
+    """
+    window = "AND m.sent_at >= now() - make_interval(days => %(days)s)" if days else ""
+    params: dict[str, Any] = {"days": days} if days else {}
+
+    def q(sql: str) -> list[dict[str, Any]]:
+        return db.query(sql.format(window=window), params)
+
+    classification = q(
+        """
+        WITH ce AS (
+            SELECT DISTINCT ON (message_id) message_id, kind, confidence, model, deadline_inferred,
+                   detail
+            FROM email_events ORDER BY message_id, id DESC
+        )
+        SELECT ce.kind, ce.model, ce.confidence,
+               count(*) AS messages,
+               count(*) FILTER (WHERE ce.detail->>'company' IS NULL) AS no_company,
+               count(*) FILTER (WHERE ce.deadline_inferred) AS inferred_deadlines
+        FROM email_messages m JOIN ce ON ce.message_id = m.id
+        WHERE TRUE {window}
+        GROUP BY 1, 2, 3 ORDER BY 4 DESC
+        """
+    )
+
+    matching = q(
+        """
+        WITH ce AS (
+            SELECT DISTINCT ON (message_id) message_id, kind
+            FROM email_events ORDER BY message_id, id DESC
+        ),
+        cm AS (
+            SELECT DISTINCT ON (message_id) message_id, application_id, method
+            FROM application_matches ORDER BY message_id, id DESC
+        )
+        SELECT ce.kind,
+               coalesce(cm.method, 'never attempted') AS method,
+               count(*) AS messages
+        FROM email_messages m
+        JOIN ce ON ce.message_id = m.id
+        LEFT JOIN cm ON cm.message_id = m.id
+        WHERE ce.kind <> 'not_job_related' {window}
+        GROUP BY 1, 2 ORDER BY 3 DESC
+        """
+    )
+
+    # The prefilter gates nothing on purpose - a filtered-out email is the one
+    # unrecoverable failure, because the posting is closed and the thread is
+    # not coming back. It survives to measure, after the fact, how much a gate
+    # WOULD have missed. That is the only honest basis for ever letting the
+    # ongoing feed use one, and it is a question only this endpoint can answer.
+    prefilter = q(
+        """
+        WITH ce AS (
+            SELECT DISTINCT ON (message_id) message_id, kind
+            FROM email_events ORDER BY message_id, id DESC
+        )
+        SELECT coalesce(m.prefilter_hit, false) AS prefilter_hit,
+               ce.kind <> 'not_job_related' AS job_related,
+               count(*) AS messages
+        FROM email_messages m JOIN ce ON ce.message_id = m.id
+        WHERE TRUE {window}
+        GROUP BY 1, 2
+        """
+    )
+    missed = sum(r["messages"] for r in prefilter if not r["prefilter_hit"] and r["job_related"])
+    job_related_total = sum(r["messages"] for r in prefilter if r["job_related"])
+
+    senders = q(
+        """
+        WITH ce AS (
+            SELECT DISTINCT ON (message_id) message_id, kind
+            FROM email_events ORDER BY message_id, id DESC
+        ),
+        cm AS (
+            SELECT DISTINCT ON (message_id) message_id, application_id
+            FROM application_matches ORDER BY message_id, id DESC
+        )
+        SELECT split_part(lower(m.from_email), '@', 2) AS domain,
+               count(*) AS messages,
+               count(*) FILTER (WHERE cm.application_id IS NOT NULL) AS matched
+        FROM email_messages m
+        JOIN ce ON ce.message_id = m.id
+        LEFT JOIN cm ON cm.message_id = m.id
+        WHERE ce.kind <> 'not_job_related' {window}
+        GROUP BY 1 ORDER BY 2 DESC LIMIT 40
+        """
+    )
+
+    coverage = (
+        db.query_one(
+            """
+        SELECT count(*) AS messages,
+               count(*) FILTER (
+                   WHERE NOT EXISTS (SELECT 1 FROM email_events e WHERE e.message_id = m.id)
+               ) AS unclassified,
+               min(m.sent_at) AS oldest,
+               max(m.sent_at) AS newest
+        FROM email_messages m
+        """
+        )
+        or {}
+    )
+
+    return {
+        "window_days": days or None,
+        "coverage": {
+            **coverage,
+            "by_source": q(
+                "SELECT m.source, count(*) AS messages FROM email_messages m "
+                "WHERE TRUE {window} GROUP BY 1 ORDER BY 2 DESC"
+            ),
+        },
+        "classification": classification,
+        "matching": matching,
+        # A rate the prefilter could never report about itself, and the reason
+        # it was kept as a signal rather than deleted.
+        "prefilter": {
+            "cells": prefilter,
+            "job_related_a_gate_would_have_dropped": missed,
+            "job_related_total": job_related_total,
+        },
+        "sender_domains": senders,
+    }
+
+
 @router.get("/admin/mail/{message_id}")
 def mail_detail(message_id: int, user: AuthedUser = Depends(require_admin)):
     """One message with its FULL history, not just the current verdict.

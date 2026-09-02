@@ -177,3 +177,77 @@ def test_pipeline_hides_closed_by_default(client, user_headers):
             "applications"
         ]
     ]
+
+
+def test_analytics_reports_where_the_matcher_refuses(client, admin_headers, f):
+    """Finding a pattern by reading a hundred messages is work a GROUP BY does
+    in a second. The distribution is the point."""
+    uid = f.make_user()
+    for kind, method in (
+        ("rejection", "ats_company"),
+        ("rejection", "unmatched"),
+        ("recruiter_outreach", "not_an_application"),
+    ):
+        mid = db.query_one(
+            "INSERT INTO email_messages (user_id, provider_message_id, source, from_email, "
+            "subject, sent_at, prefilter_hit) VALUES (%s,%s,'takeout','a@greenhouse.io','s',"
+            "now(),TRUE) RETURNING id",
+            (uid, f"an-{kind}-{method}"),
+        )["id"]
+        db.execute(
+            "INSERT INTO email_events (message_id, kind, confidence, model, detail) "
+            "VALUES (%s,%s,'high','gpt-5.6-luna',%s)",
+            (mid, kind, db.jsonb({"company": "Acme"})),
+        )
+        db.execute(
+            "INSERT INTO application_matches (message_id, application_id, method, confidence) "
+            "VALUES (%s, NULL, %s, 'none')",
+            (mid, method),
+        )
+
+    body = client.get("/v1/admin/mail/analytics", headers=admin_headers).json()
+    methods = {r["method"]: r["messages"] for r in body["matching"]}
+    assert methods["unmatched"] == 1
+    assert methods["not_an_application"] == 1, (
+        "deliberately unattached must not read as a matcher failure"
+    )
+    kinds = {r["kind"] for r in body["classification"]}
+    assert {"rejection", "recruiter_outreach"} <= kinds
+    assert body["classification"][0]["model"] == "gpt-5.6-luna"
+
+
+def test_analytics_measures_what_a_prefilter_gate_would_have_cost(client, admin_headers, f):
+    """The prefilter gates nothing on purpose: a filtered-out email is the one
+    unrecoverable failure, because the posting is closed and the thread is not
+    coming back. It survives to answer this question and only this question."""
+    uid = f.make_user()
+    for hit, kind in ((False, "rejection"), (True, "rejection"), (False, "not_job_related")):
+        mid = db.query_one(
+            "INSERT INTO email_messages (user_id, provider_message_id, source, from_email, "
+            "subject, sent_at, prefilter_hit) VALUES (%s,%s,'takeout','a@b.com','s',now(),%s) "
+            "RETURNING id",
+            (uid, f"pf-{hit}-{kind}", hit),
+        )["id"]
+        db.execute(
+            "INSERT INTO email_events (message_id, kind, confidence) VALUES (%s,%s,'high')",
+            (mid, kind),
+        )
+
+    body = client.get("/v1/admin/mail/analytics", headers=admin_headers).json()
+    assert body["prefilter"]["job_related_a_gate_would_have_dropped"] == 1
+    assert body["prefilter"]["job_related_total"] == 2
+
+
+def test_analytics_needs_admin(client, user_headers):
+    assert client.get("/v1/admin/mail/analytics", headers=user_headers).status_code == 403
+
+
+def test_a_literal_route_is_registered_before_the_one_that_would_swallow_it():
+    """/admin/mail/analytics was silently answered by /admin/mail/{message_id}
+    until it was moved above it. FastAPI matches in registration order and does
+    not fall through on a failed conversion, so the literal path has to come
+    first - and nothing about the code reads wrong when it does not."""
+    from api.routers import mail
+
+    paths = [r.path for r in mail.router.routes]
+    assert paths.index("/admin/mail/analytics") < paths.index("/admin/mail/{message_id}")
