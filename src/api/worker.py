@@ -16,6 +16,8 @@ import socket
 import time
 from typing import Any
 
+import psycopg
+
 from api import db, events, metrics
 from api.tasks import HANDLERS
 from api.tasks.runtime import (
@@ -172,8 +174,27 @@ def _graceful_exit(signum: int, frame: Any) -> None:
     os._exit(0)
 
 
+# Infrastructure went away underneath a healthy task. Matched by TYPE, because
+# these have real exception classes and substring-matching an error message is
+# how the database-restart case was missed: a `pg_ctl restart` severs in-flight
+# connections with "terminating connection due to administrator command", which
+# was booked as task failure. Two maintenance restarts then exhausted the
+# attempt cap and permanently failed work that was merely waiting - stripping
+# batch_ids from tasks whose provider batches went on to complete, leaving paid
+# results with nothing to consume them.
+_TRANSIENT_EXCEPTIONS = (
+    psycopg.errors.AdminShutdown,  # 57P01, the restart case
+    psycopg.errors.CannotConnectNow,  # 57P03, server starting up
+    psycopg.errors.ConnectionException,  # class 08, connection lost mid-statement
+    psycopg.OperationalError,  # the pool failing to reconnect at all
+    psycopg.InterfaceError,  # connection already closed under us
+)
+
 # Host resource exhaustion (small fleet hosts hitting their memory ceiling
 # while chromium is up). The task is fine; the machine momentarily isn't.
+# These surface as OSError/RuntimeError from the OS with no distinguishing
+# type, so they stay string-matched - a narrower use than before, and the only
+# one where no type exists to match on instead.
 _TRANSIENT_MARKERS = (
     "can't start new thread",
     "cannot allocate memory",
@@ -184,6 +205,8 @@ _TRANSIENT_MARKERS = (
 
 
 def _is_transient(exc: Exception) -> bool:
+    if isinstance(exc, _TRANSIENT_EXCEPTIONS):
+        return True
     return any(m in str(exc).lower() for m in _TRANSIENT_MARKERS)
 
 
