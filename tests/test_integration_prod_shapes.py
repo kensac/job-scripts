@@ -133,3 +133,31 @@ def test_visibility_predicate_runs_against_real_volume():
         {"uid": user["id"], "bypass_sponsorship": False, **criteria.params(settings)},
     )
     assert row is not None and row["c"] >= 0
+
+
+def test_no_stored_filter_hash_would_move_under_the_current_template():
+    """The unit suite pins one hash for one prompt; this checks every filter
+    a real user actually has.
+
+    prompt_hash is STORED on user_filters and only recomputed when a filter is
+    patched, so a change to build_custom_instructions does not fork the verdict
+    log when it ships - it arms a fork that fires later, on an edit as
+    innocuous as a rename or an enable toggle, orphaning that filter's history
+    and triggering a paid re-run. Nothing errors and nothing looks wrong until
+    weeks afterwards, which is why the check has to be against real rows.
+
+    A failure here means someone moved model guidance into the instruction
+    text. Put it in the response schema instead: the schema is not part of the
+    hash.
+    """
+    from core.filters import build_custom_instructions, compute_prompt_hash
+
+    rows = db.query("SELECT name, prompt, on_ambiguous, prompt_hash FROM user_filters")
+    assert rows, "no filters in the synced database"
+    moved = [
+        r["name"]
+        for r in rows
+        if compute_prompt_hash(build_custom_instructions(r["prompt"], r["on_ambiguous"]))
+        != r["prompt_hash"]
+    ]
+    assert not moved, f"these filters would fork their verdict history on the next patch: {moved}"
