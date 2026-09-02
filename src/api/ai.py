@@ -9,6 +9,7 @@ from openai import AsyncOpenAI
 from pydantic import BaseModel
 
 from core import providers
+from core.providers.spec import Model, StructuredOutput
 
 PROVIDERS = (*providers.PROVIDERS, "openai_compatible")
 
@@ -212,6 +213,89 @@ async def parse[T: BaseModel](
     return result
 
 
+async def _parse_json_object[T: BaseModel](
+    oa: AsyncOpenAI,
+    cfg: AIConfig,
+    instructions: str,
+    input_text: str,
+    response_model: type[T],
+    declared: Model,
+    timeout: float,
+) -> tuple[T | None, dict[str, int]]:
+    """The path for a provider that returns JSON but will not enforce a schema.
+
+    Reached by DECLARED MODE, never by provider name. A provider is on this
+    path because its datasheet says json_object, so the next one that says so
+    needs no branch here - which is the difference between a router and a pile
+    of if-statements.
+
+    Three things this path has to do that the strict-schema path gets for free:
+
+    The literal word. DeepSeek refuses the request outright without it -
+    "Prompt must contain the word 'json' in some form to use 'response_format'
+    of type 'json_object'" - so the instructions are amended rather than the
+    caller being asked to remember, since forgetting is a 400 at call time.
+
+    The reasoning default. Its declared default is applied when the caller has
+    not chosen, because on DeepSeek an UNSET effort is not neutral: it costs 79
+    extra input tokens per request against 'low'. Leaving it out would pay that
+    scaffold by omission.
+
+    The validation. The provider guarantees only that the bytes parse as JSON,
+    not that they match the model asked for, so the shape is checked here. And
+    a truncated response is refused rather than parsed: the JSON would fail to
+    load with an error pointing at column 4,000 of a string instead of at the
+    token budget that actually caused it.
+    """
+    spec = declared.structured_output
+    if spec.requires_literal_json_in_prompt and "json" not in instructions.lower():
+        instructions = f"{instructions}\n\nReturn a single json object."
+
+    kwargs: dict[str, Any] = {}
+    if "temperature" in cfg.params:
+        kwargs["temperature"] = cfg.params["temperature"]
+    kwargs["max_tokens"] = cfg.params.get(
+        "max_output_tokens", declared.output.default_max_output_tokens
+    )
+    effort_param = declared.reasoning.param
+    if effort_param:
+        effort = cfg.params.get(effort_param, declared.reasoning.default)
+        if effort:
+            kwargs[effort_param] = effort
+
+    completion = await oa.chat.completions.create(
+        model=cfg.model,
+        messages=[
+            {"role": "system", "content": instructions},
+            {"role": "user", "content": input_text},
+        ],
+        response_format={"type": "json_object"},
+        timeout=timeout,
+        **kwargs,
+    )
+    cu = completion.usage
+    usage = _usage_tuple(
+        getattr(cu, "prompt_tokens", 0) or 0,
+        getattr(cu, "completion_tokens", 0) or 0,
+        getattr(cu, "total_tokens", 0) or 0,
+        cached=_detail(cu, "prompt_tokens_details", "cached_tokens"),
+        reasoning=_detail(cu, "completion_tokens_details", "reasoning_tokens"),
+    )
+    choice = completion.choices[0] if completion.choices else None
+    if choice is None:
+        return None, usage
+    truncated = declared.output.truncation_finish_reason
+    if truncated is not None and choice.finish_reason == truncated:
+        raise ValueError(
+            f"{cfg.model} stopped at the output limit "
+            f"({kwargs['max_tokens']} tokens); the response is incomplete"
+        )
+    content = choice.message.content
+    if not content:
+        return None, usage
+    return response_model.model_validate_json(content), usage
+
+
 async def _parse[T: BaseModel](
     cfg: AIConfig,
     instructions: str,
@@ -279,6 +363,20 @@ async def _parse[T: BaseModel](
             reasoning=_detail(u, "output_tokens_details", "reasoning_tokens"),
         )
         return response.output_parsed, usage
+
+    # Among the chat-wire providers, the DECLARED MODE decides whether the
+    # provider can be asked to enforce a schema. Wire chose the protocol above;
+    # this chooses what to ask for within it. Dispatching on the declaration
+    # rather than on the provider name is what stops the next json_object
+    # provider needing a branch of its own.
+    declared_model = providers.model(cfg.model)
+    if (
+        declared_model is not None
+        and declared_model.structured_output.mode is StructuredOutput.JSON_OBJECT
+    ):
+        return await _parse_json_object(
+            oa, cfg, instructions, input_text, response_model, declared_model, timeout
+        )
 
     # Everything that is not OpenAI's Responses API lands here: xAI and any
     # user-configured openai_compatible endpoint. Both accept a strict

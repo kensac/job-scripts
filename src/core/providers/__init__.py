@@ -7,10 +7,11 @@ price table, an effort union and a key-env map in four files that can disagree.
 
 from __future__ import annotations
 
-from core.providers import anthropic, openai, xai
+from core.providers import anthropic, deepseek, openai, xai
 from core.providers.spec import (
     Model,
     Output,
+    PeakWindow,
     Provider,
     Rates,
     Reasoning,
@@ -26,6 +27,7 @@ __all__ = [
     "PROVIDERS",
     "Model",
     "Output",
+    "PeakWindow",
     "Provider",
     "Rates",
     "Reasoning",
@@ -39,7 +41,7 @@ __all__ = [
 ]
 
 # Declaration order is the order the UI offers them in.
-_MODULES = (openai, anthropic, xai)
+_MODULES = (openai, anthropic, xai, deepseek)
 
 PROVIDERS: dict[str, Provider] = {m.PROVIDER.name: m.PROVIDER for m in _MODULES}
 
