@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+from decimal import Decimal
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -9,6 +10,7 @@ from pydantic import BaseModel, Field
 
 from api import ai, db, events
 from api.auth import AuthedUser, require_user
+from core import pricing
 
 logger = logging.getLogger("jobtracker_api")
 
@@ -646,24 +648,22 @@ def batch_jobs(provider_batch_id: str, user: AuthedUser = Depends(require_admin)
     rows = db.query(
         """
         SELECT q.id, q.url, q.check_type, q.status, q.reason, q.company, q.job_title,
-               q.prompt_tokens, q.completion_tokens, q.total_tokens, q.created_at,
-               j.source, j.id AS job_id
+               q.prompt_tokens, q.completion_tokens, q.total_tokens, q.cached_tokens,
+               q.created_at, j.source, j.id AS job_id
         FROM ai_queries q LEFT JOIN jobs j ON j.url = q.url
         WHERE q.batch_id = %s ORDER BY q.id
         """,
         (provider_batch_id,),
     )
-    price = ai.PRICES_PER_MTOK.get(batch["model"])
     for r in rows:
-        r["est_cost_usd"] = (
-            round(
-                (r["prompt_tokens"] or 0) * price[0] / 2_000_000
-                + (r["completion_tokens"] or 0) * price[1] / 2_000_000,
-                6,
-            )
-            if price
-            else None
+        cost = pricing.estimate_cost_usd(
+            batch["model"],
+            r["prompt_tokens"],
+            r["completion_tokens"],
+            cached_tokens=r.get("cached_tokens"),
+            batched=True,
         )
+        r["est_cost_usd"] = round(float(cost), 6) if cost is not None else None
     return {"batch": batch, "rows": rows}
 
 
@@ -1431,31 +1431,39 @@ def stats(user: AuthedUser = Depends(require_admin)):
                COUNT(*) AS queries,
                COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
                COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
+               COALESCE(SUM(cached_tokens), 0) AS cached_tokens,
                COALESCE(SUM(prompt_tokens) FILTER (WHERE batch_id IS NOT NULL), 0) AS batched_prompt_tokens,
-               COALESCE(SUM(completion_tokens) FILTER (WHERE batch_id IS NOT NULL), 0) AS batched_completion_tokens
+               COALESCE(SUM(completion_tokens) FILTER (WHERE batch_id IS NOT NULL), 0) AS batched_completion_tokens,
+               COALESCE(SUM(cached_tokens) FILTER (WHERE batch_id IS NOT NULL), 0) AS batched_cached_tokens
         FROM ai_queries WHERE model IS NOT NULL GROUP BY model ORDER BY queries DESC
         """
     )
-    total_cost = 0.0
+    total_cost = Decimal(0)
     for row in by_model:
-        price = ai.PRICES_PER_MTOK.get(row["model"])
-        if not price:
+        # Batched and synchronous tokens bill at different rates, so they are
+        # priced as two separate calls and summed - one blended rate over the
+        # whole model would be wrong by up to 2x depending on the mix.
+        batched = pricing.estimate_cost_usd(
+            row["model"],
+            row["batched_prompt_tokens"],
+            row["batched_completion_tokens"],
+            cached_tokens=row["batched_cached_tokens"],
+            batched=True,
+        )
+        sync = pricing.estimate_cost_usd(
+            row["model"],
+            int(row["prompt_tokens"]) - int(row["batched_prompt_tokens"]),
+            int(row["completion_tokens"]) - int(row["batched_completion_tokens"]),
+            cached_tokens=int(row["cached_tokens"]) - int(row["batched_cached_tokens"]),
+        )
+        if batched is None or sync is None:
             row["cost_usd"] = None
             continue
-        p_in, p_out = price
-        # SUM() over bigint comes back as Decimal, which will not multiply with
-        # a float rate - coerce before any arithmetic.
-        pt = int(row["prompt_tokens"] or 0)
-        ct = int(row["completion_tokens"] or 0)
-        bpt = int(row["batched_prompt_tokens"] or 0)
-        bct = int(row["batched_completion_tokens"] or 0)
-        cost = (
-            ((pt - bpt) * p_in + (ct - bct) * p_out) + (bpt * p_in + bct * p_out) / 2
-        ) / 1_000_000
-        row["cost_usd"] = round(cost, 6)
+        cost = batched + sync
+        row["cost_usd"] = round(float(cost), 6)
         total_cost += cost
     if totals is not None:
-        totals["cost_usd"] = round(total_cost, 6)
+        totals["cost_usd"] = round(float(total_cost), 6)
 
     return {
         "totals": totals,

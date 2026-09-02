@@ -6,7 +6,7 @@ import re
 from api import ai, db, fetching, ssrf, worker
 from api import criteria as crit
 from api.tasks import runtime as tasks_runtime
-from core import filters
+from core import filters, pricing
 
 # ---------------------------------------------------------------------------
 # api.criteria
@@ -161,7 +161,7 @@ def test_provider_of_model():
 def test_prices_cover_every_catalog_model():
     for models in ai.MODEL_CATALOG.values():
         for entry in models:
-            assert entry["model"] in ai.PRICES_PER_MTOK, entry["model"]
+            assert entry["model"] in pricing.PRICES_PER_MTOK, entry["model"]
 
 
 # ---------------------------------------------------------------------------
