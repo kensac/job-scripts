@@ -79,6 +79,14 @@ WITH base AS (
     FROM jobs WHERE company <> ''
     GROUP BY lower(btrim(company))
 ), apps AS (
+    -- SCOPED TO THE CALLING USER. Every query in this file that touches
+    -- `applications` or `user_jobs` now carries a user_id, and none of them
+    -- did before: the aggregate spanned every user in the database. With one
+    -- real user it produced correct numbers, which is what made it dangerous -
+    -- there is no error and no wrong value to notice, right up until a second
+    -- user signs up and their applications silently join these counts and the
+    -- response rates derived from them.
+    --
     -- `applications`, not `user_jobs`. The board table only knows postings the
     -- user tracked by hand; `applications` also holds the ones only email
     -- knows about, whose posting was never in this catalog and never will be.
@@ -94,6 +102,7 @@ WITH base AS (
     FROM applications a
     WHERE a.company_name IS NOT NULL AND btrim(a.company_name) <> ''
       AND a.dismissed_at IS NULL
+      AND a.user_id = %(user_id)s
     GROUP BY lower(btrim(a.company_name))
 )
 SELECT base.*,
@@ -126,6 +135,7 @@ WITH scoped AS (
     FROM applications a
     WHERE a.company_name IS NOT NULL AND btrim(a.company_name) <> ''
       AND a.dismissed_at IS NULL
+      AND a.user_id = %(user_id)s
       AND lower(btrim(a.company_name)) = ANY(%(keys)s)
       -- Applications whose first contact came from a platform rather than an
       -- employer's own mail. A course provider that replies to everyone is not
@@ -222,6 +232,7 @@ FROM applications a
 JOIN user_jobs uj ON uj.job_id = a.job_id AND uj.user_id = a.user_id
 WHERE a.company_name IS NOT NULL AND btrim(a.company_name) <> ''
   AND a.dismissed_at IS NULL AND NOT uj.hidden
+  AND a.user_id = %(user_id)s
   AND uj.status IS NOT NULL AND uj.status <> ''
   AND lower(btrim(a.company_name)) = ANY(%(keys)s)
 GROUP BY lower(btrim(a.company_name)), uj.status
@@ -464,7 +475,7 @@ def list_companies(
     # ranking of 7,564.
     order = f"{column} {direction} NULLS LAST"
     pattern = f"%{q.strip().lower()}%" if q and q.strip() else None
-    params = {"q": pattern, "limit": limit + 1, "offset": offset}
+    params = {"q": pattern, "limit": limit + 1, "offset": offset, "user_id": user.id}
 
     rows = db.query(_BASE_SQL.format(order=order), params)
     has_more = len(rows) > limit
@@ -472,7 +483,7 @@ def list_companies(
     keys = [r["company_key"] for r in rows]
 
     currency = _bucket(db.query(_CURRENCY_SQL, {"keys": keys})) if keys else {}
-    statuses = _bucket(db.query(_STATUS_SQL, {"keys": keys})) if keys else {}
+    statuses = _bucket(db.query(_STATUS_SQL, {"keys": keys, "user_id": user.id})) if keys else {}
     open_rows = {r["company_key"]: r for r in db.query(_OPEN_SQL, {"keys": keys})} if keys else {}
     reposts = (
         {
@@ -497,6 +508,7 @@ def list_companies(
                 _RESPONSE_SQL,
                 {
                     "keys": keys,
+                    "user_id": user.id,
                     "outcomes": list(_OUTCOME_KINDS),
                     "intermediaries": mail_pipeline.intermediary_domains(),
                 },

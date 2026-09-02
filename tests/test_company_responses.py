@@ -48,10 +48,15 @@ def _reply(uid: int, app_id: int, kind: str, *, domain: str, day: int) -> None:
     )
 
 
-def _block(key: str, min_sample: int, intermediaries: list[str] | None = None):
+def _block(key: str, min_sample: int, intermediaries: list[str] | None = None, uid: int = 0):
     rows = db.query(
         _RESPONSE_SQL,
-        {"keys": [key], "outcomes": OUTCOMES, "intermediaries": intermediaries or []},
+        {
+            "keys": [key],
+            "user_id": uid,
+            "outcomes": OUTCOMES,
+            "intermediaries": intermediaries or [],
+        },
     )
     return _response_block(rows[0] if rows else None, min_sample)
 
@@ -64,7 +69,7 @@ def test_a_rate_below_the_floor_is_null_but_keeps_its_counts(f):
         app = _apply(uid, "Acme", provenance="tracker", applied_day=day)
     _reply(uid, app, "rejection", domain="acme.test", day=10)
 
-    block = _block("acme", rates.DEFAULT_MIN_SAMPLE)
+    block = _block("acme", rates.DEFAULT_MIN_SAMPLE, uid=uid)
     assert block is not None
     assert block["replied"]["value"] is None
     assert block["replied"]["numerator"] == 1
@@ -80,8 +85,8 @@ def test_the_floor_is_a_parameter_not_a_constant(f):
         app = _apply(uid, "Acme", provenance="tracker", applied_day=day)
     _reply(uid, app, "rejection", domain="acme.test", day=10)
 
-    assert _block("acme", 3)["replied"]["value"] == round(1 / 3, 4)
-    assert _block("acme", 4)["replied"]["value"] is None
+    assert _block("acme", 3, uid=uid)["replied"]["value"] == round(1 / 3, 4)
+    assert _block("acme", 4, uid=uid)["replied"]["value"] is None
 
 
 def test_an_acknowledgement_is_a_reply_but_not_an_outcome(f):
@@ -91,7 +96,7 @@ def test_an_acknowledgement_is_a_reply_but_not_an_outcome(f):
     app = _apply(uid, "Acme", provenance="tracker", applied_day=1)
     _reply(uid, app, "acknowledgement", domain="acme.test", day=2)
 
-    block = _block("acme", 1)
+    block = _block("acme", 1, uid=uid)
     assert block["replied"]["numerator"] == 1
     assert block["reached_outcome"]["numerator"] == 0
 
@@ -106,7 +111,7 @@ def test_timing_ignores_mail_derived_applications(f):
     app = _apply(uid, "Acme", provenance="email", applied_day=1)
     _reply(uid, app, "rejection", domain="acme.test", day=20)
 
-    block = _block("acme", 1)
+    block = _block("acme", 1, uid=uid)
     assert block["reached_outcome"]["numerator"] == 1, "it still counts as an outcome"
     assert block["days_to_first_outcome"]["n"] == 0, "but it is not timed"
     assert block["days_to_first_outcome"]["median"] is None
@@ -117,7 +122,7 @@ def test_timing_uses_tracker_dates_and_reports_its_basis(f):
     app = _apply(uid, "Acme", provenance="tracker", applied_day=1)
     _reply(uid, app, "rejection", domain="acme.test", day=11)
 
-    timing = _block("acme", 1)["days_to_first_outcome"]
+    timing = _block("acme", 1, uid=uid)["days_to_first_outcome"]
     assert timing["n"] == 1
     assert timing["median"] == 10.0
     assert timing["basis"] == "tracker_dated_only"
@@ -130,7 +135,7 @@ def test_a_median_needs_a_sample_too(f):
     app = _apply(uid, "Acme", provenance="tracker", applied_day=1)
     _reply(uid, app, "rejection", domain="acme.test", day=28)
 
-    timing = _block("acme", rates.DEFAULT_MIN_SAMPLE)["days_to_first_outcome"]
+    timing = _block("acme", rates.DEFAULT_MIN_SAMPLE, uid=uid)["days_to_first_outcome"]
     assert timing["n"] == 1
     assert timing["median"] is None
     assert timing["below_floor"] is True
@@ -143,7 +148,7 @@ def test_an_outcome_before_the_application_date_is_not_timed(f):
     app = _apply(uid, "Acme", provenance="tracker", applied_day=20)
     _reply(uid, app, "rejection", domain="acme.test", day=2)
 
-    assert _block("acme", 1)["days_to_first_outcome"]["n"] == 0
+    assert _block("acme", 1, uid=uid)["days_to_first_outcome"]["n"] == 0
 
 
 def test_applications_arriving_via_an_intermediary_are_excluded(f):
@@ -154,8 +159,8 @@ def test_applications_arriving_via_an_intermediary_are_excluded(f):
     app = _apply(uid, "Some Programme", provenance="tracker", applied_day=1)
     _reply(uid, app, "offer", domain="university.test", day=2)
 
-    assert _block("some programme", 1) is not None
-    assert _block("some programme", 1, intermediaries=["university.test"]) is None
+    assert _block("some programme", 1, uid=uid) is not None
+    assert _block("some programme", 1, intermediaries=["university.test"], uid=uid) is None
 
 
 def test_an_employer_is_not_excluded_by_the_intermediary_rule(f):
@@ -163,6 +168,35 @@ def test_an_employer_is_not_excluded_by_the_intermediary_rule(f):
     app = _apply(uid, "Acme", provenance="tracker", applied_day=1)
     _reply(uid, app, "rejection", domain="acme.test", day=5)
 
-    block = _block("acme", 1, intermediaries=["university.test"])
+    block = _block("acme", 1, intermediaries=["university.test"], uid=uid)
     assert block is not None
     assert block["replied"]["numerator"] == 1
+
+
+def test_the_aggregate_is_scoped_to_one_user(f, client):
+    """Every query in companies.py that touches applications or user_jobs used
+    to span the whole database. With one real user it produced correct numbers,
+    which is what made it dangerous - no error, no wrong value, right up until
+    a second user's applications silently join the counts."""
+    from tests.conftest import _auth_headers
+
+    mine = _auth_headers("company-scope-admin", "scope@example.com", ["infra-admins"])
+    assert client.post("/v1/users/bootstrap", headers=mine).status_code == 200
+    my_id = db.query_one("SELECT id FROM users WHERE sub = %s", ("company-scope-admin",))["id"]
+    theirs = f.make_user()
+
+    # The company list is built from `jobs`, so the company needs a posting to
+    # appear at all - an application-only company is invisible here.
+    f.make_job(company="Shared Co", source=f.make_source())
+    for uid in (my_id, theirs, theirs, theirs):
+        db.execute(
+            "INSERT INTO applications (user_id, company_name, source_provenance) "
+            "VALUES (%s, 'Shared Co', 'email')",
+            (uid,),
+        )
+
+    resp = client.get("/v1/admin/companies?q=shared", headers=mine)
+    assert resp.status_code == 200, resp.text
+    items = [i for i in resp.json()["items"] if i["company_key"] == "shared co"]
+    assert items, resp.json()
+    assert items[0]["applications"]["n"] == 1, "the other user's three must not be counted"
