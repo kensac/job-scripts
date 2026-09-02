@@ -182,8 +182,13 @@ _MONTHS = {
 }
 _MONTHS.update({m[:3]: i for m, i in _MONTHS.items()})
 
+# The ordinal suffix is optional and must be consumed: "June 15th" is
+# extremely common in this corpus and without it the day fails to terminate,
+# so the whole date was dropped.
 _DATE_RE = re.compile(
-    r"\b(?P<month>[A-Za-z]{3,9})\.?\s+(?P<day>\d{1,2})(?:\s*,)?(?:\s+(?P<year>\d{4}))?\b"
+    r"\b(?P<month>[A-Za-z]{3,9})\.?\s+(?P<day>\d{1,2})(?:st|nd|rd|th)?"
+    r"(?:\s*,)?(?:\s+(?P<year>\d{4}))?\b",
+    re.IGNORECASE,
 )
 
 

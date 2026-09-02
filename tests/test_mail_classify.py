@@ -271,6 +271,13 @@ SENT = datetime.datetime(2026, 9, 1, tzinfo=datetime.UTC)
         ("May 30, 2024, 5:00 PM Pacific Time", datetime.date(2024, 5, 30), False),
         # No year: resolved against the message and MARKED inferred.
         ("Jan. 15", datetime.date(2027, 1, 15), True),
+        # Ordinal suffixes. Common in this corpus and, without consuming them,
+        # the day fails to terminate and the whole date is dropped - found by
+        # sampling 100 real messages after the first fix shipped.
+        ("June 15th", datetime.date(2027, 6, 15), True),
+        ("March 1st, 2023", datetime.date(2023, 3, 1), False),
+        ("Dec 3rd 2024", datetime.date(2024, 12, 3), False),
+        ("April 22nd, 2025", datetime.date(2025, 4, 22), False),
         ("November 1", datetime.date(2026, 11, 1), True),
         # No resolvable date at all.
         ("Tuesday at 2:00 PM", None, False),
