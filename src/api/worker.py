@@ -316,3 +316,14 @@ def main() -> None:
         worked = asyncio.run(run_once())
         if not worked:
             time.sleep(POLL_SECONDS)
+
+
+# The container entrypoint is `python -m api.worker`. Without this the module
+# imports, defines main(), reaches EOF and exits 0 - a clean exit that reads as
+# success to every healthcheck, restart policy and metric, while the fleet does
+# no work at all. #142 dropped it during the tasks/ split and it went unnoticed
+# because the running containers predated that deploy; it surfaced only when CD
+# finally caught up. tests/test_worker_entrypoint.py exists to make that
+# impossible to repeat.
+if __name__ == "__main__":
+    main()
