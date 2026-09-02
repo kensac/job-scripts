@@ -22,10 +22,12 @@ from api.tasks.runtime import (
     HEARTBEAT_TIMEOUT_MINUTES,
     MAX_ATTEMPTS,
     AwaitingBatch,
+    TaskClaim,
     _finish,
     _maybe_finalize_parent,
     _reconcile_chunks,
     enqueue,
+    set_current_claim,
 )
 
 logger = logging.getLogger("jobtracker_worker")
@@ -59,7 +61,7 @@ def _claim_task() -> dict[str, Any] | None:
                          worker = %(worker)s
         WHERE id = (SELECT id FROM tasks WHERE status = 'pending' {kinds_clause}
                     ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED)
-        RETURNING id, kind, payload, attempts
+        RETURNING id, kind, payload, attempts, worker
         """,
         {"kinds": WORKER_KINDS, "worker": WORKER_NAME},
     )
@@ -80,7 +82,8 @@ def reap_stale_tasks() -> None:
     db.execute(
         f"""
         UPDATE tasks SET status = 'failed', finished_at = now(),
-                         error = 'worker lost (heartbeat timeout after ' || attempts || ' attempts)'
+                         error = 'worker lost (heartbeat timeout after ' || attempts || ' attempts)',
+                         payload = COALESCE(payload, '{{}}'::jsonb) - 'batch_ids'
         WHERE status = 'running' AND attempts >= {MAX_ATTEMPTS}
           AND COALESCE(last_heartbeat, started_at) < now() - interval '{HEARTBEAT_TIMEOUT_MINUTES} minutes'
         """
@@ -131,22 +134,31 @@ def schedule_ingest_cycle() -> None:
     enqueue("fetch_missing_content", {"cycle": cycle}, dedupe_key=f"content:{cycle}")
 
 
-_current_task_id: int | None = None
+# The claim held by the task currently running on this worker. The handler
+# path reads it from the runtime contextvar, but a signal handler runs outside
+# that context, so the loop mirrors it here.
+_current_claim: TaskClaim | None = None
 
 
 def _graceful_exit(signum: int, frame: Any) -> None:
     """Deploys must not leave the in-flight task in 'running' limbo until the
     reaper times out: requeue it immediately (chunks resume from cached
-    verdicts) without burning an attempt, then exit."""
-    if _current_task_id is not None:
+    verdicts) without burning an attempt, then exit.
+
+    Guarded by the claim: a deploy is exactly when a worker is most likely to
+    have already lost its task to the reaper, and requeueing then would hand
+    back a run another worker is midway through - while crediting it an attempt
+    it never spent.
+    """
+    if _current_claim is not None:
         try:
             db.execute(
                 "UPDATE tasks SET status = 'pending', attempts = GREATEST(attempts - 1, 0), "
                 "started_at = NULL, last_heartbeat = NULL "
-                "WHERE id = %s AND status = 'running'",
-                (_current_task_id,),
+                "WHERE id = %s AND status = 'running' AND worker = %s AND attempts = %s",
+                (_current_claim.task_id, _current_claim.worker, _current_claim.attempts),
             )
-            logger.info(f"SIGTERM: requeued task {_current_task_id}, exiting")
+            logger.info(f"SIGTERM: requeued task {_current_claim.task_id}, exiting")
         except Exception:  # noqa: S110 - nothing may block exit, not even logging
             pass
     os._exit(0)
@@ -183,12 +195,14 @@ def _report_worker_status(current_task_id: int | None) -> None:
 
 
 async def run_once() -> bool:
-    global _current_task_id
+    global _current_claim
     task = _claim_task()
     if not task:
         _report_worker_status(None)
         return False
-    _current_task_id = task["id"]
+    claim = TaskClaim(task["id"], task["worker"], task["attempts"])
+    _current_claim = claim
+    set_current_claim(claim)
     _report_worker_status(task["id"])
     handler = HANDLERS.get(task["kind"])
     events.publish_task(task["id"])
@@ -205,10 +219,16 @@ async def run_once() -> bool:
         # host deep in a long chunk never reads as dead.
         while True:
             await asyncio.sleep(60)
-            db.execute(
-                "UPDATE tasks SET last_heartbeat = now() WHERE id = %s AND status = 'running'",
-                (task["id"],),
+            beat = db.execute_count(
+                "UPDATE tasks SET last_heartbeat = now() WHERE id = %s AND status = 'running' "
+                "AND worker = %s AND attempts = %s",
+                (claim.task_id, claim.worker, claim.attempts),
             )
+            if not beat:
+                # Reaped and re-claimed while we were still working. Beating on
+                # it now would vouch for the run that replaced ours.
+                logger.warning(f"Task {claim.task_id}: claim lost, stopping heartbeat")
+                return
             _report_worker_status(task["id"])
 
     hb = asyncio.create_task(_liveness())
@@ -229,8 +249,14 @@ async def run_once() -> bool:
             # permanently here costs the source a whole ingest cycle.
             db.execute(
                 "UPDATE tasks SET status = 'pending', started_at = NULL, "
-                "last_heartbeat = NULL, error = %s WHERE id = %s AND status = 'running'",
-                (f"retrying after transient error: {str(exc)[:200]}", task["id"]),
+                "last_heartbeat = NULL, error = %s WHERE id = %s AND status = 'running' "
+                "AND worker = %s AND attempts = %s",
+                (
+                    f"retrying after transient error: {str(exc)[:200]}",
+                    claim.task_id,
+                    claim.worker,
+                    claim.attempts,
+                ),
             )
             events.publish_task(task["id"])
             metrics.TASKS_PROCESSED.labels(task["kind"], "requeued").inc()
@@ -241,7 +267,8 @@ async def run_once() -> bool:
             logger.exception(f"Task {task['id']} failed")
     finally:
         hb.cancel()
-        _current_task_id = None
+        set_current_claim(None)
+        _current_claim = None
     metrics.TASK_DURATION.labels(task["kind"]).observe(time.monotonic() - task_start)
     if task["kind"] in CHUNK_KINDS:
         try:

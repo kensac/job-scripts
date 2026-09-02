@@ -10,7 +10,8 @@ from __future__ import annotations
 import logging
 import os
 import time
-from typing import Any
+from contextvars import ContextVar
+from typing import Any, LiteralString, NamedTuple
 
 from api import ai, budget, db, events, metrics
 from api.budget import Entitlement
@@ -91,6 +92,72 @@ HEARTBEAT_TIMEOUT_MINUTES = 15
 CHUNK_KINDS = ["run_filter_chunk", "reverify_chunk", "run_filter_batch_chunk"]
 
 
+class TaskClaim(NamedTuple):
+    """Proof that this worker still holds the task it claimed.
+
+    `status` alone cannot express ownership: the reaper requeues a stale task
+    to 'pending' and another worker claims it back to 'running', so both states
+    look identical to the worker that lost it. attempts is incremented by the
+    claim itself, which makes (worker, attempts) a generation stamp - any
+    re-claim, by any host including this one, invalidates every claim before
+    it.
+    """
+
+    task_id: int
+    worker: str
+    attempts: int
+
+
+_current_claim: ContextVar[TaskClaim | None] = ContextVar("_current_claim", default=None)
+
+
+def set_current_claim(claim: TaskClaim | None) -> None:
+    """Called by the worker loop around a handler run. Nothing else claims
+    tasks, so nothing else sets this."""
+    _current_claim.set(claim)
+
+
+def _owned(task_id: int) -> tuple[LiteralString, dict[str, Any]]:
+    """The SQL tail and params that restrict a lifecycle write to the worker
+    that still owns `task_id`.
+
+    Outside the worker loop there is no claim to check - direct handler calls
+    and tests - and the write stays as unrestricted as it was before.
+    """
+    claim = _current_claim.get()
+    if claim is None or claim.task_id != task_id:
+        return "", {}
+    return " AND worker = %(_claim_worker)s AND attempts = %(_claim_attempts)s", {
+        "_claim_worker": claim.worker,
+        "_claim_attempts": claim.attempts,
+    }
+
+
+def _record_batch_ids(task_id: int, batch_ids: list[str], conn: Any = None) -> None:
+    """Appends batch ids to the task payload, skipping any already recorded.
+
+    Both the event hook (as each batch is accepted) and the park (as a safety
+    net for a submit that ran without a hook) record the same ids, so this has
+    to be idempotent or a two-wave submit parks with [b1, b2, b1, b2] and
+    collection downloads every output file twice.
+    """
+    sql = """
+        UPDATE tasks SET payload = jsonb_set(
+            COALESCE(payload, '{}'::jsonb), '{batch_ids}',
+            COALESCE(payload->'batch_ids', '[]'::jsonb) || COALESCE((
+                SELECT jsonb_agg(v)
+                FROM jsonb_array_elements(%(ids)s::jsonb) AS v
+                WHERE NOT COALESCE(payload->'batch_ids', '[]'::jsonb) ? (v #>> '{}')
+            ), '[]'::jsonb))
+        WHERE id = %(tid)s
+        """
+    params = {"ids": db.jsonb(batch_ids), "tid": task_id}
+    if conn is not None:
+        conn.execute(sql, params)
+    else:
+        db.execute(sql, params)
+
+
 def enqueue(kind: str, payload: dict[str, Any], dedupe_key: str | None = None) -> int | None:
     """Insert a task; with a dedupe_key, at most one task per key ever exists,
     so every fleet worker can race to enqueue and exactly one wins.
@@ -133,18 +200,21 @@ def _park_awaiting_batch(task_id: int, batch_ids: list[str]) -> bool:
     out from under us). That matters: the batches are already submitted and
     billed, so losing their ids here would orphan paid work with nothing left
     pointing at it. The caller must surface that rather than park silently.
+
+    The ids are recorded before the status flips, and unconditionally - even
+    when this worker has lost the claim - because an id that reaches no row is
+    paid work nothing points at. Only the park itself is refused.
     """
+    owned, owned_params = _owned(task_id)
     with db.pool.connection() as conn:
+        _record_batch_ids(task_id, batch_ids, conn=conn)
         result = conn.execute(
-            """
+            f"""
             UPDATE tasks SET status = 'awaiting_batch', started_at = NULL,
-                last_heartbeat = NULL,
-                payload = jsonb_set(
-                    COALESCE(payload, '{}'::jsonb), '{batch_ids}',
-                    COALESCE(payload->'batch_ids', '[]'::jsonb) || %(ids)s::jsonb)
-            WHERE id = %(tid)s AND status IN ('running', 'pending')
+                last_heartbeat = NULL
+            WHERE id = %(tid)s AND status = 'running'{owned}
             """,
-            {"ids": db.jsonb(batch_ids), "tid": task_id},
+            {"tid": task_id, **owned_params},
         )
         parked = bool(result.rowcount)
     if parked:
@@ -153,11 +223,30 @@ def _park_awaiting_batch(task_id: int, batch_ids: list[str]) -> bool:
 
 
 def _finish(task_id: int, status: str, error: str | None = None) -> None:
-    # Only running tasks can be finished; an admin 'cancelled' status sticks.
+    """Ends the task and closes out its batch lifecycle.
+
+    Only running tasks can be finished; an admin 'cancelled' status sticks, and
+    a worker that lost the claim must not finish the run that took it over.
+
+    batch_ids are dropped here because this is the one point where the batches
+    they name are provably spent. Leaving them behind lets a later re-run of
+    the same row collect those outputs again and write verdicts from scraped
+    text old enough to predate a closure. A retry *within* the run keeps them:
+    that is the reattach path, and it is what stops paid work being resubmitted.
+    """
+    owned, owned_params = _owned(task_id)
     db.execute(
-        "UPDATE tasks SET status = %s, error = %s, finished_at = now() "
-        "WHERE id = %s AND status = 'running'",
-        (status, error[:500] if error else None, task_id),
+        f"""
+        UPDATE tasks SET status = %(status)s, error = %(error)s, finished_at = now(),
+            payload = COALESCE(payload, '{{}}'::jsonb) - 'batch_ids'
+        WHERE id = %(tid)s AND status = 'running'{owned}
+        """,
+        {
+            "status": status,
+            "error": error[:500] if error else None,
+            "tid": task_id,
+            **owned_params,
+        },
     )
     events.publish_task(task_id)
 
@@ -251,9 +340,18 @@ def _reconcile_chunks() -> None:
 
 
 def _set_progress(task_id: int, done: int, total: int, label: str) -> None:
+    # The heartbeat rides along with progress, so this write has to respect the
+    # claim too: a worker that lost the task would otherwise keep proving the
+    # liveness of the run that replaced it, and the reaper would never see it.
+    owned, owned_params = _owned(task_id)
     db.execute(
-        "UPDATE tasks SET progress = %s, last_heartbeat = now() WHERE id = %s",
-        (db.jsonb({"done": done, "total": total, "label": label}), task_id),
+        f"UPDATE tasks SET progress = %(progress)s, last_heartbeat = now() "
+        f"WHERE id = %(tid)s{owned}",
+        {
+            "progress": db.jsonb({"done": done, "total": total, "label": label}),
+            "tid": task_id,
+            **owned_params,
+        },
     )
     events.publish_task(task_id)
 
@@ -308,16 +406,7 @@ def _batch_event_hook(task_id: int, purpose: str, model: str):
                 "est": counts.get("est_tokens", 0),
             },
         )
-        db.execute(
-            """
-            UPDATE tasks SET payload = jsonb_set(payload, '{batch_ids}',
-                COALESCE(payload->'batch_ids', '[]'::jsonb) ||
-                CASE WHEN payload->'batch_ids' ? %(bid)s THEN '[]'::jsonb
-                     ELSE to_jsonb(%(bid)s::text) END)
-            WHERE id = %(tid)s
-            """,
-            {"bid": batch_id, "tid": task_id},
-        )
+        _record_batch_ids(task_id, [batch_id])
         events.publish_task(task_id)
 
     return on_event
