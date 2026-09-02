@@ -86,6 +86,27 @@ class Tier:
 
 
 @dataclass(frozen=True)
+class PeakWindow:
+    """Hours during which a vendor charges its undiscounted rate.
+
+    isodow numbering: 1 is Monday through 7 is Sunday, which is what
+    PostgreSQL's EXTRACT(isodow) returns. Python's date.weekday() is 0-based
+    for Monday, so the conversion happens exactly once - in pricing, at the
+    boundary - rather than in each rendering of the formula. Two renderings
+    with different day origins would misprice one day a week, silently, by the
+    whole discount.
+
+    Half-open on the hour: [start_hour_utc, end_hour_utc). "01:00-04:00" means
+    04:00:00 is already off-peak. Stated because closed-closed and open-open
+    both leave 04:00:30 belonging to no window at all.
+    """
+
+    isodows: tuple[int, ...]
+    start_hour_utc: int
+    end_hour_utc: int
+
+
+@dataclass(frozen=True)
 class Rates:
     """What one model costs, as published.
 
@@ -103,6 +124,25 @@ class Rates:
     # its per-token rates are on its own model page and its 20% batch discount
     # appears only second-hand. None means no batch lane is claimed at all.
     batch_source: Source | None = None
+
+    # Some vendors bill by wall-clock time. DeepSeek charges its published rate
+    # during peak hours and exactly half outside them, which covers 133 of a
+    # week's 168 hours - so for that provider the time a request is made moves
+    # the bill more than any batch lane would.
+    #
+    # The tier rates above are the PEAK rates, and this multiplier is the
+    # discount applied outside `peak_windows`. Peak is the base deliberately:
+    # a caller that cannot say when a request happened then overstates, which
+    # is the same direction rate_cached_in=None takes, rather than inventing a
+    # discount it cannot justify.
+    #
+    # It multiplies ALL THREE rates - input, output and cached - because that
+    # is what the one vendor doing this does. A vendor discounting them
+    # unevenly would need per-rate values, and this name must not be read as
+    # already handling that case.
+    off_peak_multiplier: Decimal | None = None
+    peak_windows: tuple[PeakWindow, ...] = ()
+    off_peak_source: Source | None = None
 
 
 @dataclass(frozen=True)
