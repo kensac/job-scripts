@@ -420,3 +420,97 @@ def test_groups_endpoint_resolves_a_drill_key_to_its_label(client, admin_headers
 def test_groups_endpoint_requires_admin(client, user_headers):
     resp = client.get("/v1/admin/filter-insights/groups", headers=user_headers)
     assert resp.status_code in (401, 403)
+
+
+def _phrasings(client, admin_headers, **params):
+    resp = client.get("/v1/admin/filter-insights/phrasings", params=params, headers=admin_headers)
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
+def test_phrasings_lists_every_distinct_wording_with_its_count(client, admin_headers):
+    """The counts are the answer to "how is this derived": three sentences
+    repeated fifty times and 159 near-unique ones mean different things about
+    whether the grouping is doing real work."""
+    for i in range(3):
+        _reject(f"https://p.test/a{i}", "No pay disclosed.", "hash_aaaa", "f")
+    _reject("https://p.test/b", "Salary not listed anywhere.", "hash_aaaa", "f")
+
+    body = _phrasings(client, admin_headers, prompt_hash="hash_aaaa", group="pay_undisclosed")
+    assert body["total_phrasings"] == 2
+    assert body["total_decisions"] == 4
+    assert body["phrasings"][0] == {
+        "phrasing": "No pay disclosed.",
+        "decisions": 3,
+        "distinct_jobs": 3,
+    }
+    assert body["has_more"] is False
+
+
+def test_phrasings_is_scoped_to_one_prompt_version(client, admin_headers):
+    _reject("https://p.test/1", "No pay disclosed.", "hash_aaaa", "f")
+    _reject("https://p.test/2", "No pay disclosed.", "hash_bbbb", "f")
+    body = _phrasings(client, admin_headers, prompt_hash="hash_aaaa", group="pay_undisclosed")
+    assert body["total_decisions"] == 1, "must not span prompt versions"
+
+
+def test_phrasings_states_what_it_truncated(client, admin_headers):
+    """Silently returning a page as though it were the whole set is the
+    failure this endpoint exists to avoid."""
+    for i in range(5):
+        _reject(f"https://p.test/{i}", f"No pay disclosed, case {i}.", "hash_aaaa", "f")
+    body = _phrasings(
+        client, admin_headers, prompt_hash="hash_aaaa", group="pay_undisclosed", limit=2
+    )
+    assert body["total_phrasings"] == 5
+    assert body["returned"] == 2
+    assert body["has_more"] is True
+
+    rest = _phrasings(
+        client,
+        admin_headers,
+        prompt_hash="hash_aaaa",
+        group="pay_undisclosed",
+        limit=2,
+        offset=4,
+    )
+    assert rest["returned"] == 1 and rest["has_more"] is False
+
+
+def test_phrasings_can_list_the_ungrouped_residual(client, admin_headers):
+    """The residual is a real bucket on the insight page, so it has to be
+    drillable the same way a named group is."""
+    _reject("https://p.test/1", "Zzzz qqqq wwww.", "hash_aaaa", "f")
+    _reject("https://p.test/2", "No pay disclosed.", "hash_aaaa", "f")
+    body = _phrasings(client, admin_headers, prompt_hash="hash_aaaa", group="ungrouped")
+    assert body["total_phrasings"] == 1
+    assert body["phrasings"][0]["phrasing"] == "Zzzz qqqq wwww."
+
+
+def test_phrasings_without_a_group_covers_the_whole_version(client, admin_headers):
+    _reject("https://p.test/1", "Zzzz qqqq wwww.", "hash_aaaa", "f")
+    _reject("https://p.test/2", "No pay disclosed.", "hash_aaaa", "f")
+    body = _phrasings(client, admin_headers, prompt_hash="hash_aaaa")
+    assert body["total_phrasings"] == 2
+
+
+def test_examples_are_a_deterministic_sample_not_a_frequency_ranking(client, admin_headers):
+    """Nearly every phrasing occurs once, so ordering by count alone leaves the
+    choice to row arrival order. Ties break on the text so the same three come
+    back every time."""
+    for i in range(4):
+        _reject(f"https://p.test/{i}", f"No pay disclosed, variant {i}.", "hash_aaaa", "f")
+    first = _get(client, admin_headers)["prompt_versions"][0]["groups"][0]["examples"]
+    second = _get(client, admin_headers)["prompt_versions"][0]["groups"][0]["examples"]
+    assert first == second
+    assert first == sorted(first)
+
+
+def test_examples_selection_is_published_so_it_cannot_be_narrated_wrong(client, admin_headers):
+    """The field name was always right; the sentence wrapped around it on the
+    page was not. Shipping the derivation means a caller renders it instead of
+    recalling it."""
+    _reject("https://p.test/1", "No pay disclosed.", "hash_aaaa", "f")
+    sel = _get(client, admin_headers)["examples_selection"]
+    assert sel["method"] == "sample"
+    assert "not a frequency ranking" in sel["description"]
