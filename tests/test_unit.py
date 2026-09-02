@@ -5,6 +5,7 @@ import re
 
 from api import ai, db, fetching, ssrf, worker
 from api import criteria as crit
+from api.tasks import runtime as tasks_runtime
 from core import filters
 
 # ---------------------------------------------------------------------------
@@ -83,17 +84,17 @@ def test_looks_blocked_long_real_posting_with_cloudflare_word():
 
 
 # ---------------------------------------------------------------------------
-# api.worker.AdaptiveLimiter
+# api.tasks_runtime.AdaptiveLimiter
 # ---------------------------------------------------------------------------
 
 
 def test_adaptive_limiter_starts_at_min_when_max_is_low():
-    limiter = worker.AdaptiveLimiter(min_c=1, max_c=1)
+    limiter = tasks_runtime.AdaptiveLimiter(min_c=1, max_c=1)
     assert limiter.limit == 1
 
 
 def test_adaptive_limiter_grows_on_sustained_throughput():
-    limiter = worker.AdaptiveLimiter(min_c=1, max_c=10, window=4)
+    limiter = tasks_runtime.AdaptiveLimiter(min_c=1, max_c=10, window=4)
     start = limiter.limit
     for _ in range(4):
         limiter.record()
@@ -101,7 +102,7 @@ def test_adaptive_limiter_grows_on_sustained_throughput():
 
 
 def test_adaptive_limiter_grows_across_two_windows(monkeypatch):
-    limiter = worker.AdaptiveLimiter(min_c=1, max_c=10, window=4)
+    limiter = tasks_runtime.AdaptiveLimiter(min_c=1, max_c=10, window=4)
     start = limiter.limit
     clock = iter([0, 8, 8, 15, 15])
     monkeypatch.setattr(worker.time, "monotonic", lambda: next(clock))
@@ -111,14 +112,14 @@ def test_adaptive_limiter_grows_across_two_windows(monkeypatch):
 
 
 def test_adaptive_limiter_halves_on_rate_limit_signal():
-    limiter = worker.AdaptiveLimiter(min_c=1, max_c=10)
+    limiter = tasks_runtime.AdaptiveLimiter(min_c=1, max_c=10)
     limiter.limit = 8
     limiter.record(rate_limited=True)
     assert limiter.limit == 4
 
 
 def test_adaptive_limiter_rate_limit_never_below_min():
-    limiter = worker.AdaptiveLimiter(min_c=2, max_c=10)
+    limiter = tasks_runtime.AdaptiveLimiter(min_c=2, max_c=10)
     limiter.limit = 2
     limiter.record(rate_limited=True)
     assert limiter.limit == 2

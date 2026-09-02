@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 
 from api import db
+from api.tasks import runtime as tasks_runtime
 from api.worker import enqueue
 from core.store import add_ai_result
 
@@ -141,10 +142,9 @@ def test_admin_group_budgets_roundtrip(client, admin_headers):
 
 
 def test_cancel_tasks_cancels_only_live_states(client, admin_headers):
-    from api import worker
 
-    t1 = worker.enqueue("run_filter", {"user_id": 1})
-    t2 = worker.enqueue("run_filter", {"user_id": 2})
+    t1 = tasks_runtime.enqueue("run_filter", {"user_id": 1})
+    t2 = tasks_runtime.enqueue("run_filter", {"user_id": 2})
     db.execute("UPDATE tasks SET status = 'done' WHERE id = %s", (t2,))
     resp = client.post(
         "/v1/admin/tasks/cancel", json={"ids": [t1, t2, 999999]}, headers=admin_headers
