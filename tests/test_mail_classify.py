@@ -13,8 +13,9 @@ import pytest
 
 from api import db, mail_store
 from api.tasks import HANDLERS, mail_classify
-from core import pricing
+from core import pricing, providers
 from core.mail_import import ImportedMessage
+from core.routing import resolve
 
 
 class _Res:
@@ -72,10 +73,21 @@ def test_handler_is_registered():
     assert HANDLERS["classify_mail"] is mail_classify.handle_classify_mail
 
 
-def test_backfill_and_ongoing_use_different_models():
-    """The one-time sweep and the daily trickle are priced differently enough
-    to be different models; inheriting one for both loses that on purpose."""
-    assert mail_classify.BACKFILL_MODEL != mail_classify.ONGOING_MODEL
+def test_both_mail_paths_read_the_mail_the_same_way():
+    """One model for the archive and the trickle, on Kanishk's call, and the
+    reason is consistency rather than the $4.55 difference. 67k messages were
+    classified on luna; an ongoing feed on another model reads the same mail by
+    different standards, so a rejection recognised in the archive might not be
+    recognised next week - and that shows up as a change in the funnel that
+    nothing in the funnel explains.
+
+    The constants stay separate because their env overrides are separate: the
+    per-task model config can move one path without the other."""
+    assert mail_classify.BACKFILL_MODEL == mail_classify.ONGOING_MODEL
+
+    # Still separate purposes, so the two remain separable in the spend ledger
+    # even while they share a model.
+    assert mail_classify.BACKFILL_TASK.purpose != mail_classify.ONGOING_TASK.purpose
 
 
 @pytest.mark.asyncio
@@ -213,11 +225,22 @@ def test_an_unknown_model_gets_a_value_both_generations_accept():
         assert effort in accepts
 
 
-def test_the_two_models_do_not_share_an_effort_by_accident():
-    """If they ever do, it should be because the intersection changed, not
-    because someone collapsed the table back to one constant."""
-    assert mail_classify.effort_for(mail_classify.BACKFILL_MODEL) == "none"
-    assert mail_classify.effort_for(mail_classify.ONGOING_MODEL) == "minimal"
+def test_effort_follows_the_model_rather_than_a_shared_constant():
+    """#179: a single CLASSIFY_EFFORT was shared across both paths, and mini
+    rejects "none" outright - so the ongoing path 400'd on every call while the
+    backfill worked. A batch submits whole and fails whole, so a rejected
+    parameter costs the entire run.
+
+    The models happen to agree today because both paths are luna. The property
+    that matters is that each shape's effort is DERIVED from its own model's
+    declared set, so pointing a path at a different model moves its effort
+    with it rather than sending a value that model refuses."""
+    for shape in (mail_classify.BACKFILL_TASK, mail_classify.ONGOING_TASK):
+        model = resolve(shape).model
+        assert shape.resolved_effort() == mail_classify.effort_for(model)
+        declared = providers.model(model)
+        assert declared is not None
+        assert shape.resolved_effort() not in declared.reasoning.rejects
 
 
 def test_max_tokens_leaves_room_for_the_schema():
