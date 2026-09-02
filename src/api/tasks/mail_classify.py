@@ -561,6 +561,24 @@ async def handle_classify_mail(task_id: int, payload: dict[str, Any]) -> None:
             JOIN users u ON u.id = m.user_id
             WHERE NOT EXISTS (SELECT 1 FROM email_events e WHERE e.message_id = m.id)
               AND NOT {_SELF_SENT}
+              -- Not already paid for. "No events yet" is true of a message the
+              -- moment it is submitted and stays true for the hours it waits in
+              -- the provider's queue, so a later sweep selected the SAME
+              -- messages and submitted them again: three tasks an hour apart
+              -- each carrying an identical 1,156 requests, all in flight at
+              -- once. The cost is not the queue depth, it is paying repeatedly
+              -- for one answer.
+              --
+              -- Reading the in-flight ids from the parked tasks rather than
+              -- from a column, because the payload is where submit_or_collect
+              -- already records them and a second copy would be a second thing
+              -- to keep true.
+              AND NOT EXISTS (
+                  SELECT 1 FROM tasks t
+                  WHERE t.kind = 'classify_mail'
+                    AND t.status IN ('pending', 'running', 'waiting', 'awaiting_batch')
+                    AND t.payload -> 'claimed_message_ids' @> to_jsonb(m.id)
+              )
             -- Likely job mail first. The prefilter gates nothing, so this only
             -- changes the ORDER in which the whole mailbox is worked through -
             -- which matters because the useful results arrive sooner.
@@ -591,6 +609,19 @@ async def handle_classify_mail(task_id: int, payload: dict[str, Any]) -> None:
     if not rows:
         _set_progress(task_id, len(corrected), len(corrected), "nothing to classify")
         return
+
+    # Record what this task claimed BEFORE submitting, so a sweep an hour from
+    # now can see it. "No events yet" stays true for the whole time a message
+    # sits in the provider's queue, so without this the next sweep selects the
+    # same messages and pays for them again - which is exactly what happened:
+    # three tasks an hour apart each carrying an identical 1,156 requests.
+    #
+    # Merged rather than replaced, because submit_or_collect writes batch_ids
+    # into this same payload and a requeued attempt reattaches through it.
+    db.execute(
+        "UPDATE tasks SET payload = COALESCE(payload, '{}'::jsonb) || %s WHERE id = %s",
+        (db.jsonb({"claimed_message_ids": [r["id"] for r in rows]}), task_id),
+    )
 
     by_id = {r["id"]: r["sent_at"] for r in rows}
     schema = to_strict_json_schema(MailClassification)

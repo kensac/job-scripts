@@ -302,7 +302,11 @@ def test_every_batched_call_site_goes_through_the_standard_caller():
     offenders = [
         path.name
         for path in sorted(root.glob("*.py"))
-        if "submit_or_collect" in path.read_text() and path.name not in KNOWN
+        # A CALL, not a mention: the first version matched the bare name and
+        # tripped on a comment explaining what submit_or_collect does to a
+        # payload. A test that fires on prose gets edited to pass rather than
+        # obeyed.
+        if "submit_or_collect(" in path.read_text() and path.name not in KNOWN
     ]
     assert offenders == [], (
         f"{offenders} call submit_or_collect directly; use run_batched so the "
