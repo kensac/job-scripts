@@ -200,6 +200,10 @@ class ApiUsage(Base):
     prompt_tokens: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
     completion_tokens: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
     total_tokens: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
+    cached_tokens: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
+    # NULL means the model had no published price, which must stay distinct
+    # from a call that genuinely cost nothing.
+    cost_usd: Mapped[Any | None] = mapped_column(Numeric(12, 6))
 
 
 class Task(Base):
