@@ -219,7 +219,10 @@ async def _parse[T: BaseModel](
     response_model: type[T],
     timeout: float = 120.0,
 ) -> tuple[T | None, dict[str, int]]:
-    if cfg.provider == "anthropic":
+    if (
+        providers.PROVIDERS.get(cfg.provider, None) is not None
+        and providers.PROVIDERS[cfg.provider].wire is providers.Wire.ANTHROPIC_MESSAGES
+    ):
         client = AsyncAnthropic(api_key=cfg.api_key, timeout=timeout)
         kwargs: dict[str, Any] = {}
         if cfg.params.get("effort"):
@@ -241,14 +244,20 @@ async def _parse[T: BaseModel](
         return response.parsed_output, usage
 
     client_kwargs: dict[str, Any] = {"api_key": cfg.api_key}
-    if cfg.provider == "openai_compatible" and cfg.base_url:
+    declared = providers.PROVIDERS.get(cfg.provider)
+    if declared is not None and declared.base_url:
+        # A declared provider's endpoint is our own constant, so it does not
+        # need the SSRF-pinned transport below - that exists because
+        # openai_compatible takes a base_url from the user.
+        client_kwargs["base_url"] = declared.base_url
+    elif cfg.provider == "openai_compatible" and cfg.base_url:
         from api.ssrf import safe_async_client
 
         client_kwargs["base_url"] = cfg.base_url
         client_kwargs["http_client"] = safe_async_client()
     oa = AsyncOpenAI(**client_kwargs)
 
-    if cfg.provider == "openai":
+    if declared is not None and declared.wire is providers.Wire.OPENAI_RESPONSES:
         response = await oa.responses.parse(
             model=cfg.model,
             instructions=instructions,
