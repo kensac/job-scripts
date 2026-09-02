@@ -708,6 +708,75 @@ def _owned_message(message_id: int, user_id: int) -> dict[str, Any]:
     return row
 
 
+@router.get("/user/mail")
+def user_mail(
+    kind: str | None = Query(default=None),
+    matched: bool | None = Query(default=None),
+    q: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    user: AuthedUser = Depends(require_user),
+):
+    """The user's own mail, and what the pipeline did with each message.
+
+    There was no way to see this without being an admin. `/admin/mail` is the
+    debug view - it exists to answer "why did the classifier decide that", it
+    spans every user, and it is gated behind infra-admin. Reading your own
+    inbox should not require the permission to read everyone's.
+
+    The two surfaces answer different questions and so are not the same query.
+    An admin asks which messages the pipeline handled badly; a person asks what
+    arrived and where it went. This returns the second: the current
+    classification, whether it reached an application, and which one.
+    """
+    where = ["m.user_id = %(user)s"]
+    params: dict[str, Any] = {"user": user.id, "limit": limit, "offset": offset}
+    if kind:
+        where.append("ce.kind = %(kind)s")
+        params["kind"] = kind
+    if q:
+        where.append("(m.subject ILIKE %(q)s OR m.from_email ILIKE %(q)s)")
+        params["q"] = f"%{q}%"
+    if matched is True:
+        where.append("cm.application_id IS NOT NULL")
+    elif matched is False:
+        where.append("cm.application_id IS NULL")
+    predicate = " AND ".join(where)
+
+    base = f"""
+        FROM email_messages m
+        LEFT JOIN (
+            SELECT DISTINCT ON (message_id) message_id, kind, confidence, detail
+            FROM email_events ORDER BY message_id, id DESC
+        ) ce ON ce.message_id = m.id
+        LEFT JOIN (
+            SELECT DISTINCT ON (message_id) message_id, application_id, method
+            FROM application_matches ORDER BY message_id, id DESC
+        ) cm ON cm.message_id = m.id
+        LEFT JOIN applications a ON a.id = cm.application_id
+        WHERE {predicate}
+    """
+    total = db.query_one(f"SELECT count(*) AS n {base}", params)
+    rows = db.query(
+        f"""
+        SELECT m.id, m.subject, m.from_email, m.sent_at, m.source,
+               ce.kind, ce.confidence,
+               ce.detail->>'company' AS extracted_company,
+               cm.application_id, cm.method,
+               a.company_name, a.title
+        {base}
+        ORDER BY m.sent_at DESC NULLS LAST, m.id DESC
+        LIMIT %(limit)s OFFSET %(offset)s
+        """,
+        params,
+    )
+    return {
+        "messages": rows,
+        "total": (total or {}).get("n", 0),
+        "has_more": offset + len(rows) < (total or {}).get("n", 0),
+    }
+
+
 @router.get("/user/messages/{message_id}/candidates")
 def match_candidates(
     message_id: int,
