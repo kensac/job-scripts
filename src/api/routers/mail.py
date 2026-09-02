@@ -495,3 +495,192 @@ def restore_application(
         (application_id,),
     )
     return {"ok": True}
+
+
+MANUAL = "manual"
+
+
+class Assignment(BaseModel):
+    """One of three targets. An application to attach to, a board job to
+    create an application from, or a company and title when neither exists -
+    which is the common case for mail predating the catalog."""
+
+    application_id: int | None = None
+    job_id: int | None = None
+    company_name: str | None = None
+    title: str | None = None
+    note: str | None = None
+
+
+def _owned_message(message_id: int, user_id: int) -> dict[str, Any]:
+    row = db.query_one(
+        "SELECT id, subject, from_email, sent_at, body_text FROM email_messages "
+        "WHERE id = %s AND user_id = %s",
+        (message_id, user_id),
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="message not found")
+    return row
+
+
+@router.get("/user/messages/{message_id}/candidates")
+def match_candidates(
+    message_id: int,
+    q: str | None = Query(default=None),
+    limit: int = Query(default=25, ge=1, le=100),
+    user: AuthedUser = Depends(require_user),
+):
+    """What this message could belong to, best guesses first.
+
+    The default order is not a search ranking, it is the matcher's own
+    reasoning made visible. `_by_company` REFUSES when two applications at one
+    employer are both plausible, and those rejected candidates are exactly
+    what a person should be shown first - the system already knows the answer
+    is one of them and only declined to guess which.
+
+    Board jobs with no application are included because the correction a user
+    most often wants is "this belongs to a job I tracked but never recorded
+    applying to", and there is nothing to attach to until one exists.
+    """
+    message = _owned_message(message_id, user.id)
+    event = db.query_one(
+        "SELECT detail FROM email_events WHERE message_id = %s ORDER BY id DESC LIMIT 1",
+        (message_id,),
+    )
+    detail = (event or {}).get("detail") or {}
+    company = detail.get("company")
+    key = mail_match.norm_company(company)
+
+    apps = db.query(
+        "SELECT id, job_id, company_name, title, applied_at, source_provenance, dismissed_at "
+        "FROM applications WHERE user_id = %s",
+        (user.id,),
+    )
+    events = mail_pipeline.events_by_application(user.id)
+    needle = (q or "").lower().strip()
+    scored = []
+    for app in apps:
+        haystack = f"{app['company_name'] or ''} {app['title'] or ''}".lower()
+        if needle and needle not in haystack:
+            continue
+        same_company = bool(key) and mail_match.norm_company(app["company_name"]) == key
+        own = events.get(app["id"], [])
+        scored.append(
+            {
+                **app,
+                "stage": mail_pipeline.stage_for(own),
+                "event_count": len(own),
+                # Why it is on the list at all. A candidate the matcher
+                # considered and declined to choose between is a different
+                # thing from a search hit, and the UI should be able to say so.
+                "reason": "same company as this mail" if same_company else "search match",
+                "_rank": (0 if same_company else 1, app["company_name"] or ""),
+            }
+        )
+    scored.sort(key=lambda r: r["_rank"])
+    ambiguous = sum(1 for r in scored if r["reason"] == "same company as this mail")
+
+    jobs = db.query(
+        """
+        SELECT j.id, j.company, j.title, j.url, uj.date_applied, uj.status
+        FROM user_jobs uj JOIN jobs j ON j.id = uj.job_id
+        WHERE uj.user_id = %(user)s
+          AND NOT EXISTS (
+              SELECT 1 FROM applications a WHERE a.user_id = uj.user_id AND a.job_id = uj.job_id
+          )
+          AND (%(q)s::text IS NULL OR lower(j.company) LIKE %(like)s OR lower(j.title) LIKE %(like)s)
+        ORDER BY uj.date_applied DESC NULLS LAST
+        LIMIT %(limit)s
+        """,
+        {"user": user.id, "q": q, "like": f"%{needle}%", "limit": limit},
+    )
+    return {
+        "message": {
+            "id": message["id"],
+            "subject": message["subject"],
+            "from_email": message["from_email"],
+            "sent_at": message["sent_at"],
+            "extracted_company": company,
+            "extracted_title": detail.get("role_title"),
+        },
+        "applications": [
+            {k: v for k, v in row.items() if not k.startswith("_")} for row in scored[:limit]
+        ],
+        "total_applications": len(scored),
+        # The count the matcher choked on. Two or more means it refused on
+        # purpose rather than finding nothing.
+        "same_company_candidates": ambiguous,
+        "board_jobs": jobs,
+    }
+
+
+@router.post("/user/messages/{message_id}/assign")
+def assign_message(message_id: int, body: Assignment, user: AuthedUser = Depends(require_user)):
+    """Attach this message to an application, creating one if asked.
+
+    Appends. The previous match stays in the log and stops counting by
+    latest-wins, so a correction never destroys the evidence for the decision
+    it is correcting.
+
+    A job_id creates the application from the tracked posting; a bare company
+    and title creates a job-less one, which is the normal shape for mail
+    predating the catalog. Never the other way round: an email does not get to
+    invent a `jobs` row.
+    """
+    _owned_message(message_id, user.id)
+    application_id = body.application_id
+
+    if application_id is not None:
+        owned = db.query_one(
+            "SELECT id FROM applications WHERE id = %s AND user_id = %s",
+            (application_id, user.id),
+        )
+        if owned is None:
+            raise HTTPException(status_code=404, detail="application not found")
+    elif body.job_id is not None:
+        job = db.query_one(
+            "SELECT j.id, j.company, j.title, uj.date_applied FROM jobs j "
+            "JOIN user_jobs uj ON uj.job_id = j.id AND uj.user_id = %s WHERE j.id = %s",
+            (user.id, body.job_id),
+        )
+        if job is None:
+            raise HTTPException(status_code=404, detail="job not on your board")
+        existing = db.query_one(
+            "SELECT id FROM applications WHERE user_id = %s AND job_id = %s",
+            (user.id, body.job_id),
+        )
+        if existing:
+            application_id = existing["id"]
+        else:
+            created = db.query_one(
+                "INSERT INTO applications (user_id, job_id, company_name, title, "
+                "source_provenance, applied_at) VALUES (%s, %s, %s, %s, 'tracker', %s) "
+                "RETURNING id",
+                (user.id, job["id"], job["company"], job["title"], job["date_applied"]),
+            )
+            if created is None:
+                raise HTTPException(status_code=500, detail="could not create the application")
+            application_id = created["id"]
+    elif body.company_name:
+        created = db.query_one(
+            "INSERT INTO applications (user_id, job_id, company_name, title, "
+            "source_provenance, applied_at) VALUES (%s, NULL, %s, %s, 'manual', "
+            "(SELECT sent_at FROM email_messages WHERE id = %s)) RETURNING id",
+            (user.id, body.company_name, body.title, message_id),
+        )
+        if created is None:
+            raise HTTPException(status_code=500, detail="could not create the application")
+        application_id = created["id"]
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="give an application_id, a job_id, or a company_name to create one",
+        )
+
+    db.execute(
+        "INSERT INTO application_matches (message_id, application_id, method, confidence, "
+        "rationale) VALUES (%s, %s, %s, 'high', %s)",
+        (message_id, application_id, MANUAL, body.note or "assigned by the user"),
+    )
+    mail_pipeline.sync_action_items(application_id)
+    return {"ok": True, "application_id": application_id}
