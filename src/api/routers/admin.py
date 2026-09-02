@@ -284,8 +284,28 @@ def user_detail(user_id: int, user: AuthedUser = Depends(require_admin)):
     )
     if not u:
         raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown user"})
+    from api import budget as _budget
+
+    # The Users page showed a weekly token total one click from a page showing
+    # a 5,000,000 budget, with nothing saying which cap applied to whom - which
+    # invited the reading that the owner was over budget when his group is
+    # uncapped. Resolve it here rather than leaving the UI to infer.
+    groups = u.get("groups") or []
+    owner_key, weekly_cap = _budget._owner_budget(groups)
+    granting = db.query(
+        "SELECT group_name, weekly_token_budget FROM group_budgets "
+        "WHERE group_name = ANY(%s) ORDER BY group_name",
+        (groups,),
+    )
     return {
         "user": u,
+        "budget": {
+            "owner_key": owner_key,
+            # None means uncapped, which is a real answer and not a missing one.
+            "weekly_token_budget": weekly_cap,
+            "spent_this_week": _budget.spent_this_week(user_id) if owner_key else 0,
+            "granted_by": granting,
+        },
         "spend_by_day": db.query(
             """
             SELECT created_at::date AS day, key_source,

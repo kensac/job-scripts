@@ -38,7 +38,31 @@ def bootstrap(user: AuthedUser = Depends(require_user)):
 
 @router.get("/user/usage")
 def usage(user: AuthedUser = Depends(require_user)):
-    return _grants(user)
+    """Grants, plus the spend history the admin view already computed.
+
+    These are the same two aggregates /admin/users/{id} runs, scoped to the
+    caller. They existed for months and only an admin could see them, which is
+    why a user's own Usage page had nothing to show.
+    """
+    return {
+        **_grants(user),
+        "spend_by_day": db.query(
+            """
+            SELECT created_at::date AS day, key_source,
+                   SUM(total_tokens) AS tokens, COUNT(*) AS calls
+            FROM api_usage WHERE user_id = %s AND created_at > now() - interval '30 days'
+            GROUP BY 1, 2 ORDER BY 1
+            """,
+            (user.id,),
+        ),
+        "spend_by_purpose": db.query(
+            """
+            SELECT purpose, model, SUM(total_tokens) AS tokens, COUNT(*) AS calls
+            FROM api_usage WHERE user_id = %s GROUP BY 1, 2 ORDER BY 3 DESC
+            """,
+            (user.id,),
+        ),
+    }
 
 
 _PROVIDER_PARAMS = {
