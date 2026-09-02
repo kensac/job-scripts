@@ -26,9 +26,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
-from api import db, signals
+from api import db, mail_pipeline, rates, signals
 from api.auth import AuthedUser
 from api.routers.admin import require_admin
 
@@ -103,6 +103,85 @@ FROM base LEFT JOIN apps ON apps.company_key = base.company_key
 WHERE (%(q)s::text IS NULL OR base.company_key LIKE %(q)s::text)
 ORDER BY {order}, base.company_key
 LIMIT %(limit)s OFFSET %(offset)s
+"""
+
+
+# A reply is any classified mail attached to the application. An OUTCOME is a
+# reply that decided something - an acknowledgement is a mail server saying it
+# received the form, and counting it as "they replied" would report a 100%
+# response rate for every company running an ATS.
+_OUTCOME_KINDS = (
+    "rejection",
+    "interview_invite",
+    "interview_scheduled",
+    "assessment_invite",
+    "offer",
+    "position_closed",
+)
+
+_RESPONSE_SQL = """
+WITH scoped AS (
+    SELECT a.id, lower(btrim(a.company_name)) AS company_key,
+           a.applied_at, a.source_provenance
+    FROM applications a
+    WHERE a.company_name IS NOT NULL AND btrim(a.company_name) <> ''
+      AND a.dismissed_at IS NULL
+      AND lower(btrim(a.company_name)) = ANY(%(keys)s)
+      -- Applications whose first contact came from a platform rather than an
+      -- employer's own mail. A course provider that replies to everyone is not
+      -- a company that answers every applicant, and including them put a
+      -- perfect response rate on a university.
+      -- (No percent sign in this comment on purpose: psycopg reads a bare one
+      -- as a placeholder and the query fails to prepare.)
+      AND NOT EXISTS (
+          SELECT 1 FROM application_matches am2
+          JOIN email_messages m2 ON m2.id = am2.message_id
+          WHERE am2.application_id = a.id
+            AND lower(COALESCE(NULLIF(split_part(m2.from_email, '@', 2), ''), ''))
+                = ANY(%(intermediaries)s)
+      )
+),
+latest_event AS (
+    SELECT DISTINCT ON (message_id) message_id, kind
+    FROM email_events ORDER BY message_id, id DESC
+),
+per_app AS (
+    SELECT s.id, s.company_key, s.applied_at, s.source_provenance,
+           count(e.kind) AS replies,
+           count(*) FILTER (WHERE e.kind = ANY(%(outcomes)s)) AS outcomes,
+           min(m.sent_at) FILTER (WHERE e.kind = ANY(%(outcomes)s)) AS first_outcome_at
+    FROM scoped s
+    LEFT JOIN application_matches am ON am.application_id = s.id
+    LEFT JOIN email_messages m ON m.id = am.message_id
+    LEFT JOIN latest_event e ON e.message_id = m.id
+    GROUP BY s.id, s.company_key, s.applied_at, s.source_provenance
+)
+SELECT company_key,
+       count(*) AS applications,
+       count(*) FILTER (WHERE replies > 0) AS replied,
+       count(*) FILTER (WHERE outcomes > 0) AS with_outcome,
+       -- Timing is TRACKER-ONLY and the filter is the whole point; see
+       -- _response_block. The >= guard drops three rows whose outcome predates
+       -- the date entered by hand.
+       count(*) FILTER (
+           WHERE source_provenance = 'tracker' AND applied_at IS NOT NULL
+             AND first_outcome_at IS NOT NULL AND first_outcome_at >= applied_at
+       ) AS timed_n,
+       percentile_cont(0.5) WITHIN GROUP (
+           ORDER BY CASE
+               WHEN source_provenance = 'tracker' AND applied_at IS NOT NULL
+                    AND first_outcome_at IS NOT NULL AND first_outcome_at >= applied_at
+               THEN EXTRACT(epoch FROM (first_outcome_at - applied_at)) / 86400
+           END
+       ) AS median_days,
+       percentile_cont(0.9) WITHIN GROUP (
+           ORDER BY CASE
+               WHEN source_provenance = 'tracker' AND applied_at IS NOT NULL
+                    AND first_outcome_at IS NOT NULL AND first_outcome_at >= applied_at
+               THEN EXTRACT(epoch FROM (first_outcome_at - applied_at)) / 86400
+           END
+       ) AS p90_days
+FROM per_app GROUP BY company_key
 """
 
 _COUNT_SQL = """
@@ -206,6 +285,60 @@ def _bucket(rows: list[dict[str, Any]], key: str = "company_key") -> dict[str, l
     return out
 
 
+def _quantile(value: Any, n: int, min_sample: int) -> float | None:
+    if value is None or n < min_sample:
+        return None
+    return round(float(value), 1)
+
+
+def _response_block(row: dict[str, Any] | None, min_sample: int) -> dict[str, Any] | None:
+    """Does this company reply, and how long does it take?
+
+    RATES ARE ALMOST ALWAYS NULL HERE, and that is the honest answer rather than
+    a defect. Of 1,283 companies with an application, 449 have two, 87 have
+    five and TWO have thirty. At any floor that makes a proportion mean
+    something, nearly every company is below it - so the numerator and
+    denominator carry the information and the caller renders "2 of 7". A
+    company with three applications and one reply does not have a 33% response
+    rate; it has one reply.
+
+    TIMING IS TRACKER-ONLY, and this is not a caveat about precision - the
+    mail-derived number is not a measurement at all. For all 1,783 mail-derived
+    applications, `applied_at` IS the first matched message's `sent_at`,
+    exactly, with no exceptions. So "days from applying to the first outcome"
+    computed over them measures the gap between the first mail and the first
+    DECIDING mail, which is zero whenever a rejection arrives with no
+    acknowledgement before it - a median of 0.0 days across 956 applications.
+    Publishing that mixed with real dates is how an average becomes 33 days
+    when the measurable median is 8.
+
+    Median and p90 rather than a mean, because the tail is long: over the 200
+    tracker applications with a clean duration the mean is 30.5 days and the
+    median 7.9. The mean is describing the tail, not the wait.
+    """
+    if row is None:
+        return None
+    applications = int(row["applications"])
+    if not applications:
+        return None
+    timed = int(row["timed_n"])
+    return {
+        "replied": rates.rate(int(row["replied"]), applications, min_sample),
+        "reached_outcome": rates.rate(int(row["with_outcome"]), applications, min_sample),
+        "days_to_first_outcome": {
+            "n": timed,
+            # A median needs a sample as much as a proportion does. One timed
+            # application produced a "median" of 205 days, which is not a
+            # median - it is that one application wearing the word.
+            "median": _quantile(row["median_days"], timed, min_sample),
+            "p90": _quantile(row["p90_days"], timed, min_sample),
+            "below_floor": timed < min_sample,
+            # Named so nobody reads this as covering every application.
+            "basis": "tracker_dated_only",
+        },
+    }
+
+
 def _item(
     base: dict[str, Any],
     *,
@@ -213,6 +346,8 @@ def _item(
     statuses: list[dict[str, Any]],
     open_row: dict[str, Any] | None,
     repost: dict[str, Any] | None,
+    responses: dict[str, Any] | None = None,
+    min_sample: int = rates.DEFAULT_MIN_SAMPLE,
 ) -> dict[str, Any]:
     total = int(base["total_postings_seen"])
     item: dict[str, Any] = {
@@ -247,6 +382,9 @@ def _item(
             "last_applied_at": base["last_applied_at"],
             "statuses": {r["status"]: int(r["n"]) for r in statuses},
         }
+        block = _response_block(responses, min_sample)
+        if block is not None:
+            item["applications"]["responses"] = block
     if open_row and int(open_row["n_checked"]) >= OPEN_MIN_CHECKED:
         item["open"] = {
             "n_open": int(open_row["n_open"]),
@@ -291,6 +429,7 @@ def list_companies(
     dir: str = "desc",
     limit: int = 50,
     cursor: str | None = None,
+    min_sample: int = Query(default=rates.DEFAULT_MIN_SAMPLE, ge=1),
     user: AuthedUser = Depends(require_admin),
 ):
     limit = max(1, min(limit, _MAX_LIMIT))
@@ -328,6 +467,22 @@ def list_companies(
         else {}
     )
 
+    responses = (
+        {
+            r["company_key"]: r
+            for r in db.query(
+                _RESPONSE_SQL,
+                {
+                    "keys": keys,
+                    "outcomes": list(_OUTCOME_KINDS),
+                    "intermediaries": mail_pipeline.intermediary_domains(),
+                },
+            )
+        }
+        if keys
+        else {}
+    )
+
     total_row = db.query_one(_COUNT_SQL, {"q": pattern})
     return {
         "items": [
@@ -337,11 +492,29 @@ def list_companies(
                 statuses=statuses.get(row["company_key"], []),
                 open_row=open_rows.get(row["company_key"]),
                 repost=reposts.get(row["company_key"]),
+                responses=responses.get(row["company_key"]),
+                min_sample=min_sample,
             )
             for row in rows
         ],
         "has_more": has_more,
         "next_cursor": str(offset + limit) if has_more else None,
+        # A company that has not replied may simply not have been READ yet.
+        # Silence is only evidence once the mailbox is classified, so the size
+        # of the backlog travels with the numbers that depend on it rather than
+        # being something a reader has to know to ask about.
+        "coverage": {
+            "messages_awaiting_classification": int(
+                (
+                    db.query_one(
+                        "SELECT count(*) AS c FROM email_messages m WHERE NOT EXISTS "
+                        "(SELECT 1 FROM email_events e WHERE e.message_id = m.id)"
+                    )
+                    or {"c": 0}
+                )["c"]
+            ),
+            "min_sample": min_sample,
+        },
         "total_names": int(total_row["c"]) if total_row else 0,
         "caveats": _CAVEATS,
     }

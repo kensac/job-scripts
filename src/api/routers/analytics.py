@@ -32,36 +32,17 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from api import db, signals
 from api.auth import AuthedUser
+from api.rates import DEFAULT_MIN_SAMPLE
+from api.rates import rate as _rate
 from api.routers.admin import require_admin
 
 router = APIRouter(prefix="/analytics")
 
-# A proportion needs enough trials before it carries information. Thirty is the
-# conventional floor for the normal approximation to the binomial: below it the
-# Wald interval stops covering, and a single extra rejection moves the rate by
-# whole percentage points. It is a policy rather than a constant of nature, so
-# callers can raise or lower it per request.
-DEFAULT_MIN_SAMPLE = 30
 
 # The checks whose latest verdict is a per-job yes/no. 'content' and
 # 'extraction' are excluded deliberately: they record a scrape attempt, not a
 # judgement about the posting, and neither writes a 'rejected' row.
 _VERDICT_CHECKS = ("closed", "clearance")
-
-
-def _rate(numerator: int, denominator: int, min_sample: int) -> dict[str, Any]:
-    """A proportion that refuses to be a bare number.
-
-    Below the floor `value` is None and the caller renders "2 of 7"; the
-    numerator and denominator are always present so it can.
-    """
-    below = denominator < min_sample
-    return {
-        "value": None if below or not denominator else round(numerator / denominator, 4),
-        "numerator": numerator,
-        "denominator": denominator,
-        "below_floor": below,
-    }
 
 
 _INVENTORY_SQL = """
