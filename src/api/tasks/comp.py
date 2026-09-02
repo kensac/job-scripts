@@ -57,6 +57,14 @@ COMP_BASES = ("base", "total", "stipend", "unspecified")
 # instead of assumed. Comp extraction is the shape nano handles well: a
 # stated number copied off the page, not a judgment about silence.
 COMP_TASK = TaskShape(
+    purpose="comp",
+    label="Compensation extraction",
+    per_cycle=EXTRACT_COMP_PER_CYCLE,
+    notes=(
+        "Copying a stated number off the page, which is the shape gpt-5-nano "
+        "handles well - it is not asked to judge silence, only to read a figure "
+        "that is either printed or absent."
+    ),
     structured=StructuredOutput.JSON_SCHEMA,
     batched=True,
     max_output_tokens=1500,
@@ -146,7 +154,7 @@ async def handle_extract_comp(task_id: int, payload: dict[str, Any]) -> None:
     ]
     by_url = {r["url"]: r["id"] for r in rows}
     _set_progress(task_id, 0, len(specs), "comp batch submitted (half price)")
-    results, _ = await run_batched(task_id, COMP_TASK, specs, purpose="comp")
+    results, _ = await run_batched(task_id, COMP_TASK, specs)
     done = 0
     for url, res in results.items():
         job_id = by_url.get(url)

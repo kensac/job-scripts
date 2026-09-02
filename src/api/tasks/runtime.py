@@ -418,6 +418,30 @@ def _batch_event_hook(task_id: int, purpose: str, model: str, prompt_id: int | N
     return on_event
 
 
+def configured_model(purpose: str) -> str | None:
+    """The model a person has configured for this task, if any.
+
+    Read here rather than inside resolve() because core does not import api and
+    an override lives in the database. resolve() takes it as an argument and
+    stays a pure function of the declaration plus one value, which is what lets
+    the configuration screen ask "what would this do" without a write.
+
+    Latest row wins, and the table is append-only, so the history a monthly
+    review needs is the table itself rather than something reconstructed.
+    Returns None on any failure: a configuration lookup that cannot be read
+    must fall back to the call site's own judgment rather than stopping a sweep.
+    """
+    try:
+        row = db.query_one(
+            "SELECT model FROM task_model_overrides WHERE purpose = %s ORDER BY id DESC LIMIT 1",
+            (purpose,),
+        )
+    except Exception:
+        logger.warning(f"could not read the configured model for {purpose}", exc_info=True)
+        return None
+    return (row or {}).get("model") or None
+
+
 def _record_prompt(purpose: str, instructions: str) -> int | None:
     """One row per distinct instruction text, and its id.
 
@@ -490,8 +514,6 @@ async def run_batched(
     task_id: int,
     shape: TaskShape,
     specs: list,
-    *,
-    purpose: str,
 ) -> tuple[dict[str, Any], Choice]:
     """The one way a scheduled handler runs a batch.
 
@@ -505,13 +527,17 @@ async def run_batched(
     chance to disagree with it. The shape is the single declaration of what the
     work needs; unpacking it at four call sites is what let them diverge.
 
-    `purpose` is required and is what every ledger groups by, so a handler
-    cannot run a batch without its cost, tokens and model landing in analytics.
+    The purpose every ledger groups by comes from the SHAPE rather than beside
+    it, so a handler cannot name one purpose while running another's shape -
+    and so the key that configures a task is the same key that reports it.
+    A handler cannot run a batch without its cost, tokens and model landing in
+    analytics.
     Anything recorded here in future - prompt identity, output samples - lands
     for every caller at once rather than being added to four files and missed
     in a fifth.
     """
-    chosen = resolve(shape)
+    purpose = shape.purpose
+    chosen = resolve(shape, override=configured_model(purpose))
     logger.info(f"Task {task_id}: {purpose} on {chosen.model} - {chosen.reason}")
     # Every spec in a sweep carries the same instructions - they are module
     # constants - so the first is the prompt for the batch. Recorded before

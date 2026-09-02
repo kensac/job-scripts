@@ -267,6 +267,13 @@ async def _reverify_jobs(
 # than last cycle would see no cached verdicts and re-run everything at full
 # price. See core/routing.py.
 VERIFY_TASK = TaskShape(
+    purpose="verify",
+    label="Closed and clearance verification",
+    notes=(
+        "A yes/no read of whether a posting is still open and whether it "
+        "demands a clearance. Cheap and high volume - every active job, every "
+        "cycle - so the fleet default is the right place to start."
+    ),
     structured=StructuredOutput.JSON_SCHEMA,
     batched=True,
     max_output_tokens=1000,
