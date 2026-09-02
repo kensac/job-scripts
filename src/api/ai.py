@@ -38,8 +38,6 @@ OWNER_KEY_MODELS = {
     if m.strip()
 }
 
-_SERVER_KEY_ENVS = {name: p.api_key_env for name, p in providers.PROVIDERS.items()}
-
 
 def server_key(provider: str) -> str:
     """Delegates to core.routing, which owns the one reading of a provider's
