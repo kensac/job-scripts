@@ -8,13 +8,15 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from api import ai, db
+from api import db
 from api.tasks.runtime import (
     _batch_event_hook,
     _pending_batch_ids,
     _set_progress,
     submit_or_collect,
 )
+from core.providers.spec import StructuredOutput
+from core.routing import TaskShape, resolve
 from core.store import CONTENT_LATERAL
 
 logger = logging.getLogger("jobtracker_worker")
@@ -49,6 +51,21 @@ COMP_PERIODS = (*tuple(_PERIOD_TO_YEARLY), "one_time")
 
 
 COMP_BASES = ("base", "total", "stipend", "unspecified")
+
+
+# What this work needs, rather than which model happens to serve it. One
+# candidate, so the resolved model is gpt-5-nano exactly as before - what
+# changes is that the capability, the key and the price are now checked
+# instead of assumed. Comp extraction is the shape nano handles well: a
+# stated number copied off the page, not a judgment about silence.
+COMP_TASK = TaskShape(
+    structured=StructuredOutput.JSON_SCHEMA,
+    batched=True,
+    max_output_tokens=1500,
+    est_prompt_tokens=6500,
+    effort="low",
+    candidates=("gpt-5-nano",),
+)
 
 
 class CompExtract(BaseModel):
@@ -131,7 +148,9 @@ async def handle_extract_comp(task_id: int, payload: dict[str, Any]) -> None:
     ]
     by_url = {r["url"]: r["id"] for r in rows}
     _set_progress(task_id, 0, len(specs), "comp batch submitted (half price)")
-    hook = _batch_event_hook(task_id, "comp", ai.DEFAULT_OPENAI_MODEL)
+    chosen = resolve(COMP_TASK)
+    logger.info(f"Task {task_id}: comp extraction on {chosen.model} - {chosen.reason}")
+    hook = _batch_event_hook(task_id, "comp", chosen.model)
     existing = _pending_batch_ids(task_id)
     if existing:
         from core.batch import collect_batches
@@ -140,7 +159,12 @@ async def handle_extract_comp(task_id: int, payload: dict[str, Any]) -> None:
         results = await collect_batches(existing, hook)
     else:
         results = await submit_or_collect(
-            task_id, specs, ai.DEFAULT_OPENAI_MODEL, "low", 1500, hook
+            task_id,
+            specs,
+            chosen.model,
+            COMP_TASK.effort or "low",
+            COMP_TASK.max_output_tokens,
+            hook,
         )
     done = 0
     for url, res in results.items():

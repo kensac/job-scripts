@@ -8,7 +8,7 @@ from anthropic import AsyncAnthropic
 from openai import AsyncOpenAI
 from pydantic import BaseModel
 
-from core import providers
+from core import providers, routing
 from core.providers.spec import Model, StructuredOutput
 
 PROVIDERS = (*providers.PROVIDERS, "openai_compatible")
@@ -42,7 +42,9 @@ _SERVER_KEY_ENVS = {name: p.api_key_env for name, p in providers.PROVIDERS.items
 
 
 def server_key(provider: str) -> str:
-    return os.environ.get(_SERVER_KEY_ENVS.get(provider, ""), "")
+    """Delegates to core.routing, which owns the one reading of a provider's
+    declared key env var. Kept as a name here because most callers are in api."""
+    return routing.server_key(provider)
 
 
 def provider_of_model(model: str) -> str | None:
