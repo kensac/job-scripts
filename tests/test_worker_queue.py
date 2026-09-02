@@ -830,3 +830,85 @@ async def test_full_sweep_rechecks_even_fresh_verdicts(monkeypatch):
 
     await _run_batched(tid, lambda: tasks_verify._reverify_jobs(tid, rows, force=True))
     assert checked == [url], "forced sweep must re-check it anyway"
+
+
+# ---------------------------------------------------------------------------
+# reverify: evidence in a parked batch is older than the batch's own results
+# ---------------------------------------------------------------------------
+
+
+def _submitted_batch(provider_batch_id: str, minutes_ago: int) -> None:
+    db.execute(
+        "INSERT INTO ai_batches (provider_batch_id, purpose, submitted_at) "
+        "VALUES (%s, 'reverify', now() - make_interval(mins => %s))",
+        (provider_batch_id, minutes_ago),
+    )
+
+
+def _reverify_result(url: str, batch_id: str, is_closed: bool):
+    from core.batch import BatchResult
+
+    return BatchResult(
+        url,
+        text=f'{{"is_closed": {str(is_closed).lower()}}}',
+        usage={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+        batch_id=batch_id,
+    )
+
+
+def test_reverify_does_not_overturn_a_closure_settled_while_it_was_parked():
+    """A parked batch carries page text as old as its submission. If something
+    closed the job in the meantime, writing our result last would overturn a
+    fresh closure with a stale page - and latest-row-wins would put the dead
+    posting back on people's boards."""
+    url = "https://stale.test/1"
+    _submitted_batch("batch_parked", minutes_ago=120)
+    # Settled AFTER we submitted, by evidence newer than ours.
+    add_ai_result(url, "rejected", "ATS returns gone", "closed")
+
+    rows = {url: {"url": url, "company": "C", "title": "T"}}
+    recorded = tasks_verify._record_reverify_results(
+        {url: _reverify_result(url, "batch_parked", is_closed=False)}, rows, "m"
+    )
+
+    assert recorded == 0
+    latest = db.query_one(
+        "SELECT status, reason FROM ai_queries WHERE url = %s AND check_type = 'closed' "
+        "ORDER BY id DESC LIMIT 1",
+        (url,),
+    )
+    assert latest["status"] == "rejected", "the fresh closure must still win"
+    assert latest["reason"] == "ATS returns gone"
+
+
+def test_reverify_records_normally_when_nothing_settled_after_submission():
+    url = "https://stale.test/2"
+    add_ai_result(url, "rejected", "stale closure", "closed")
+    # Submitted after that verdict, so our evidence is the newer of the two.
+    _submitted_batch("batch_fresh", minutes_ago=0)
+
+    rows = {url: {"url": url, "company": "C", "title": "T"}}
+    recorded = tasks_verify._record_reverify_results(
+        {url: _reverify_result(url, "batch_fresh", is_closed=False)}, rows, "m"
+    )
+
+    assert recorded == 1
+    latest = db.query_one(
+        "SELECT status FROM ai_queries WHERE url = %s AND check_type = 'closed' "
+        "ORDER BY id DESC LIMIT 1",
+        (url,),
+    )
+    assert latest["status"] == "passed", "a reverify with newer evidence still reopens"
+
+
+def test_reverify_records_when_the_evidence_cannot_be_dated():
+    """No registry row means no submitted_at to compare against. Recording is
+    the pre-existing behaviour and a url is not dropped on a suspicion."""
+    url = "https://stale.test/3"
+    add_ai_result(url, "rejected", "stale closure", "closed")
+
+    rows = {url: {"url": url, "company": "C", "title": "T"}}
+    recorded = tasks_verify._record_reverify_results(
+        {url: _reverify_result(url, "batch_unregistered", is_closed=False)}, rows, "m"
+    )
+    assert recorded == 1
