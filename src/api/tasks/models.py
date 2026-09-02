@@ -31,7 +31,15 @@ class FilterVerdict(BaseModel):
     which matters: prompt_hash is computed over those instructions, and
     altering them would fork every custom verdict ever recorded.
 
-    `basis` is steered by its own description here for exactly that reason.
+    `basis` is anchored to the single deciding factor named in `reason`, not
+    to the posting as a whole. A dry run against live postings showed why:
+    these prompts carry several criteria, so "did the posting supply what the
+    criteria needed" has no answer when it stated the pay and omitted the tech
+    stack. Two near-identical postings came back with different values, one of
+    them contradicting its own reason text. Tying it to the deciding factor
+    makes it a question about one thing that is already named.
+
+    It is steered by its own description here rather than by the prompt.
     Putting the guidance in build_custom_instructions would have been the
     obvious place and would have moved every prompt_hash - not immediately,
     which is the trap: hashes are stored on user_filters and only recomputed
@@ -47,14 +55,16 @@ class FilterVerdict(BaseModel):
     reason: str
     basis: Literal["stated", "undetermined"] = Field(
         description=(
-            "Whether the posting supplied what the criteria needed. "
-            "'stated': the posting contained the information the criteria ask "
-            "about, and the verdict follows from what it said. "
-            "'undetermined': the posting did not disclose that information or "
-            "was ambiguous about it, so the verdict follows from the ambiguity "
-            "policy rather than from anything the posting stated. This "
-            "describes the POSTING, not your confidence - a clearly-worded "
-            "posting that simply omits the salary is 'undetermined'."
+            "Describes the ONE deciding factor you named in `reason` - not the "
+            "posting as a whole, and not your confidence. "
+            "'stated': the posting explicitly contained that deciding factor "
+            "(a salary figure, a named technology, a listed requirement) and "
+            "your verdict follows from what it said. "
+            "'undetermined': the posting never disclosed that deciding factor, "
+            "or was too vague about it to tell, so the verdict follows from "
+            "the ambiguity policy instead. "
+            "A posting that states pay but omits the tech stack is 'stated' "
+            "when pay decided it and 'undetermined' when the stack did."
         )
     )
 
