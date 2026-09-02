@@ -272,10 +272,18 @@ class UserSettings(Base):
 
 class ApiUsage(Base):
     __tablename__ = "api_usage"
-    __table_args__ = (Index("idx_api_usage_user_created", "user_id", "created_at"),)
+    __table_args__ = (
+        Index("idx_api_usage_user_created", "user_id", "created_at"),
+        Index("idx_api_usage_purpose", "purpose", "created_at"),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
-    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"))
+    # NULL for fleet work. Catalog-wide extraction is charged to nobody in
+    # particular, and attributing it to whichever admin is user 1 would make
+    # per-user spend a fiction.
+    user_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="CASCADE")
+    )
     created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
     key_source: Mapped[str] = mapped_column(Text)
     purpose: Mapped[str] = mapped_column(Text)
@@ -283,6 +291,7 @@ class ApiUsage(Base):
     prompt_tokens: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
     completion_tokens: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
     total_tokens: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
+    batched: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     cached_tokens: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
     # NULL means the model had no published price, which must stay distinct
     # from a call that genuinely cost nothing.

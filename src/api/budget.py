@@ -148,6 +148,48 @@ def resolve_ai_config(user_id: int, entitlement: Entitlement):
     raise LookupError("NO_API_KEY")
 
 
+def record_fleet_usage(
+    purpose: str,
+    model: str | None,
+    prompt_tokens: int,
+    completion_tokens: int,
+    *,
+    batched: bool = True,
+) -> None:
+    """Scheduled work, charged to the fleet rather than to a person.
+
+    `api_usage` is the ledger of record for spend, and until now it held only
+    the sync path - so the largest line item in the system was invisible to it.
+    Mail classification alone is $18.49 of batched work that the spend page,
+    which reads ai_queries, could not see at all because message
+    classification is not URL-keyed and writes no verdict row.
+
+    This is called from the ONE place every batched caller already passes
+    through, with the purpose it already declares. That is what makes a new AI
+    caller appear in analytics without anyone remembering to wire it up: the
+    hook cannot be used without naming a purpose, and naming a purpose is all
+    the reporting needs.
+
+    user_id is NULL on purpose. Catalog-wide extraction belongs to nobody in
+    particular, and attributing it to whichever admin happens to be user 1
+    would make per-user spend a fiction.
+    """
+    db.execute(
+        "INSERT INTO api_usage (user_id, key_source, purpose, model, prompt_tokens, "
+        "completion_tokens, total_tokens, cached_tokens, batched, cost_usd) "
+        "VALUES (NULL, 'server', %s, %s, %s, %s, %s, 0, %s, %s)",
+        (
+            purpose,
+            model,
+            prompt_tokens,
+            completion_tokens,
+            prompt_tokens + completion_tokens,
+            batched,
+            pricing.estimate_cost_usd(model, prompt_tokens, completion_tokens, batched=batched),
+        ),
+    )
+
+
 def record_usage(
     user_id: int,
     key_source: str,
