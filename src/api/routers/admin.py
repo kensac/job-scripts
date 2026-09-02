@@ -489,12 +489,15 @@ class CancelTasksBody(BaseModel):
 def cancel_tasks(body: CancelTasksBody, user: AuthedUser = Depends(require_admin)):
     """Cancel queued or in-flight tasks. Running workers notice via their
     mid-task cancellation checks; pending chunks of a cancelled parent are
-    swept by the worker's reconciler."""
+    swept by the worker's reconciler. A task parked on provider batches
+    (awaiting_batch) is cancellable too - it holds no worker, so nothing
+    notices otherwise and it would sit until its batches landed."""
     rows = db.query(
         """
         UPDATE tasks SET status = 'cancelled', error = 'cancelled by admin',
                          finished_at = now()
-        WHERE id = ANY(%s) AND status IN ('pending', 'waiting', 'running')
+        WHERE id = ANY(%s)
+          AND status IN ('pending', 'waiting', 'running', 'awaiting_batch')
         RETURNING id
         """,
         (body.ids,),

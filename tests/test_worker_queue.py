@@ -301,6 +301,43 @@ async def test_chunked_run_all_filters_lifecycle(monkeypatch, user_headers):
 # ---------------------------------------------------------------------------
 
 
+
+async def _submit_ids(specs, model, effort, max_out, on_event=None):
+    """Stands in for the provider accepting a submission."""
+    _submit_ids.last_specs = list(specs)
+    _submit_ids.calls = getattr(_submit_ids, "calls", 0) + 1
+    return ["batch_test_1"]
+
+
+def _collect_from(fake_batch):
+    """Turns a test's existing result-builder into a collector, so the
+    per-test expectations stay exactly as they were written."""
+
+    async def _collect(batch_ids, on_event=None):
+        return await fake_batch(
+            getattr(_submit_ids, "last_specs", []), "m", "low", 0, None
+        )
+
+    return _collect
+
+
+
+async def _run_batched(coro_factory):
+    """Runs a batched handler through submit -> park -> collect.
+
+    The first call submits and raises AwaitingBatch (freeing the worker in
+    production); the second call finds the batch ids in the task payload and
+    collects. Driving both halves is what makes these tests exercise the real
+    lifecycle rather than a submit-and-wait that no longer exists.
+    """
+    from api.worker import AwaitingBatch
+
+    try:
+        await coro_factory()
+    except AwaitingBatch:
+        await coro_factory()
+
+
 @pytest.mark.asyncio
 async def test_reverify_jobs_skips_urls_with_fresh_closed_verdicts(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
@@ -324,7 +361,8 @@ async def test_reverify_jobs_skips_urls_with_fresh_closed_verdicts(monkeypatch):
         }
 
     monkeypatch.setattr(fetching, "fetch_page", fake_fetch_page)
-    monkeypatch.setattr("core.batch.run_responses_batch", fake_batch)
+    monkeypatch.setattr("core.batch.submit_responses_batches", _submit_ids)
+    monkeypatch.setattr("core.batch.collect_batches", _collect_from(fake_batch))
 
     fresh_urls = ["https://x.example.com/fresh-1", "https://x.example.com/fresh-2"]
     stale_urls = ["https://x.example.com/stale-1", "https://x.example.com/stale-2"]
@@ -335,7 +373,7 @@ async def test_reverify_jobs_skips_urls_with_fresh_closed_verdicts(monkeypatch):
 
     task_id = worker.enqueue("reverify_open", {})
     worker._claim_task()
-    await worker._reverify_jobs(task_id, rows)
+    await _run_batched(lambda: worker._reverify_jobs(task_id, rows))
 
     assert sorted(check_calls) == sorted(stale_urls)
     assert sorted(fetch_calls) == sorted(stale_urls)
@@ -393,11 +431,11 @@ async def test_verify_new_records_both_verdicts(monkeypatch):
         }
 
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
-    monkeypatch.setattr(worker, "run_responses_batch", None, raising=False)
     import api.worker as w
-    monkeypatch.setattr("core.batch.run_responses_batch", fake_batch)
+    monkeypatch.setattr("core.batch.submit_responses_batches", _submit_ids)
+    monkeypatch.setattr("core.batch.collect_batches", _collect_from(fake_batch))
     tid = worker.enqueue("verify_new", {"cycle": "t"})
-    await w.handle_verify_new(tid, {"cycle": "t"})
+    await _run_batched(lambda: w.handle_verify_new(tid, {"cycle": "t"}))
     rows = db.query(
         "SELECT check_type, status FROM ai_queries WHERE url = 'https://v.test/1' "
         "AND check_type IN ('closed','clearance') ORDER BY check_type"
@@ -438,24 +476,27 @@ async def test_reverify_records_batch_verdicts_and_reattaches(monkeypatch):
         return "job content here", False
 
     monkeypatch.setattr(fetching, "fetch_page", fake_fetch_page)
-    monkeypatch.setattr("core.batch.run_responses_batch", fake_batch)
+    monkeypatch.setattr("core.batch.submit_responses_batches", _submit_ids)
+    monkeypatch.setattr("core.batch.collect_batches", _collect_from(fake_batch))
     monkeypatch.setattr("core.batch.collect_batches", fake_collect)
 
     rows = [{"url": "https://rv.example.com/1", "company": "Acme", "title": "SWE"}]
     task_id = worker.enqueue("reverify_chunk", {"parent_id": 1})
     worker._claim_task()
-    await worker._reverify_jobs(task_id, rows)
+    await _run_batched(lambda: worker._reverify_jobs(task_id, rows))
 
     row = db.query_one(
         "SELECT status, config_name FROM ai_queries WHERE url = 'https://rv.example.com/1' "
         "AND check_type = 'closed' ORDER BY id DESC LIMIT 1"
     )
     assert row["status"] == "rejected" and row["config_name"] == "reverify"
-    assert worker._pending_batch_ids(task_id) == ["batch_rv1"]
+    # Parked with its batch id recorded, so the work is recoverable.
+    assert worker._pending_batch_ids(task_id) == ["batch_test_1"]
+    submitted_once = _submit_ids.calls
 
     # Requeued: the stored batch id makes it reattach, never resubmitting.
-    await worker._reverify_jobs(task_id, rows)
-    assert submits == [1]
+    await _run_batched(lambda: worker._reverify_jobs(task_id, rows))
+    assert _submit_ids.calls == submitted_once, "resume must not resubmit"
 
 
 @pytest.mark.asyncio
@@ -548,7 +589,8 @@ async def test_full_sweep_rechecks_even_fresh_verdicts(monkeypatch):
 
     monkeypatch.setattr(fetching, "fetch_page", fake_fetch)
     monkeypatch.setattr(core_ats, "resolve", lambda url: core_ats.UNSUPPORTED)
-    monkeypatch.setattr("core.batch.run_responses_batch", fake_batch)
+    monkeypatch.setattr("core.batch.submit_responses_batches", _submit_ids)
+    monkeypatch.setattr("core.batch.collect_batches", _collect_from(fake_batch))
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
 
     url = "https://fs.test/1"
@@ -557,8 +599,8 @@ async def test_full_sweep_rechecks_even_fresh_verdicts(monkeypatch):
 
     tid = worker.enqueue("reverify_chunk", {"parent_id": 1})
     worker._claim_task()
-    await worker._reverify_jobs(tid, rows)
+    await _run_batched(lambda: worker._reverify_jobs(tid, rows))
     assert checked == [], "normal sweep should skip a verdict made today"
 
-    await worker._reverify_jobs(tid, rows, force=True)
+    await _run_batched(lambda: worker._reverify_jobs(tid, rows, force=True))
     assert checked == [url], "forced sweep must re-check it anyway"

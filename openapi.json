@@ -4185,7 +4185,7 @@
     "/v1/admin/tasks/cancel": {
       "post": {
         "summary": "Cancel Tasks",
-        "description": "Cancel queued or in-flight tasks. Running workers notice via their\nmid-task cancellation checks; pending chunks of a cancelled parent are\nswept by the worker's reconciler.",
+        "description": "Cancel queued or in-flight tasks. Running workers notice via their\nmid-task cancellation checks; pending chunks of a cancelled parent are\nswept by the worker's reconciler. A task parked on provider batches\n(awaiting_batch) is cancellable too - it holds no worker, so nothing\nnotices otherwise and it would sit until its batches landed.",
         "operationId": "cancel_tasks_v1_admin_tasks_cancel_post",
         "parameters": [
           {
