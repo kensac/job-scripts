@@ -224,3 +224,30 @@ def test_max_tokens_leaves_room_for_the_schema():
     line rather than an error - so it looks like a model failure, not a
     configuration one."""
     assert mail_classify.CLASSIFY_MAX_TOKENS >= 200
+
+
+def test_a_backfill_may_ask_for_more_than_the_hourly_cap():
+    """34,000 archived messages take ~28 hours of hourly cycles at the ongoing
+    cap. A one-time sweep is a different job from a trickle."""
+    assert mail_classify.MAX_CLASSIFY_PER_CYCLE > mail_classify.CLASSIFY_PER_CYCLE
+
+
+@pytest.mark.asyncio
+async def test_the_cap_is_clamped_not_trusted(monkeypatch, f):
+    """An enqueuer asking for the whole mailbox would build a spec list far
+    larger than a wave can carry, and that failure arrives as memory pressure
+    on a worker rather than as a rejected parameter."""
+    seen: dict = {}
+
+    async def fake(task_id, specs, model, effort, max_tokens, hook):
+        seen["count"] = len(specs)
+        return {}
+
+    for i in range(3):
+        _store(f, mid=f"<cap{i}@x>")
+    monkeypatch.setattr(mail_classify, "submit_or_collect", fake)
+    monkeypatch.setattr(mail_classify, "_set_progress", lambda *a, **k: None)
+    monkeypatch.setattr(mail_classify, "_batch_event_hook", lambda *a, **k: None)
+    monkeypatch.setattr(mail_classify, "MAX_CLASSIFY_PER_CYCLE", 2)
+    await mail_classify.handle_classify_mail(1, {"cap": 999999})
+    assert seen["count"] <= 2
