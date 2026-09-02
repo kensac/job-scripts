@@ -986,3 +986,69 @@ def test_reverify_records_when_the_evidence_cannot_be_dated():
         {url: _reverify_result(url, "batch_unregistered", is_closed=False)}, rows, "m"
     )
     assert recorded == 1
+
+
+@pytest.mark.asyncio
+async def test_polling_records_the_status_it_already_fetched(monkeypatch, f):
+    """The poll asks the provider for every batch's status each minute to
+    decide whether to resume. It used that answer for one boolean and threw it
+    away, so ai_batches.status kept whatever the submitting task last wrote -
+    a batch sat at 'validating' for two hours while the provider had it
+    'in_progress' at 446 of 501 requests. The column lied in both directions:
+    live work read as stuck, and a genuinely stalled batch was indistinguishable
+    from a healthy one."""
+    from api.tasks import batches as tasks_batches
+
+    task_id = f.make_task("classify_mail", {"batch_ids": ["batch_live"]}, status="awaiting_batch")
+    db.execute(
+        "INSERT INTO ai_batches (provider_batch_id, task_id, purpose, model, status) "
+        "VALUES (%s, %s, 'mail', 'gpt-5.6-luna', 'validating')",
+        ("batch_live", task_id),
+    )
+
+    async def fake_states(ids):
+        return {"batch_live": "in_progress"}
+
+    monkeypatch.setattr("core.batch.batch_states", fake_states)
+    poll_id = f.make_task("poll_batches", {})
+    _claim_for_test(poll_id)
+    await tasks_batches.handle_poll_batches(poll_id, {})
+
+    row = db.query_one(
+        "SELECT status, completed_at FROM ai_batches WHERE provider_batch_id = 'batch_live'"
+    )
+    assert row is not None
+    assert row["status"] == "in_progress", "the poll must record what it just read"
+    assert row["completed_at"] is None, "in flight is not finished"
+
+    assert (
+        db.query_one("SELECT status FROM tasks WHERE id = %s", (task_id,))["status"]
+        == "awaiting_batch"
+    ), "a non-terminal batch must not resume the task"
+
+
+@pytest.mark.asyncio
+async def test_polling_stamps_completed_at_once_terminal(monkeypatch, f):
+    from api.tasks import batches as tasks_batches
+
+    task_id = f.make_task("classify_mail", {"batch_ids": ["batch_done"]}, status="awaiting_batch")
+    db.execute(
+        "INSERT INTO ai_batches (provider_batch_id, task_id, purpose, model, status) "
+        "VALUES (%s, %s, 'mail', 'gpt-5.6-luna', 'in_progress')",
+        ("batch_done", task_id),
+    )
+
+    async def fake_states(ids):
+        return {"batch_done": "completed"}
+
+    monkeypatch.setattr("core.batch.batch_states", fake_states)
+    poll_id = f.make_task("poll_batches", {})
+    _claim_for_test(poll_id)
+    await tasks_batches.handle_poll_batches(poll_id, {})
+
+    row = db.query_one(
+        "SELECT status, completed_at FROM ai_batches WHERE provider_batch_id = 'batch_done'"
+    )
+    assert row is not None
+    assert row["status"] == "completed"
+    assert row["completed_at"] is not None
