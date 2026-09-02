@@ -293,6 +293,7 @@ def test_requirements_declares_a_shape_the_model_can_actually_serve():
     against declared capability rather than assumed. Requirements was the last
     one naming a model straight into the batch call."""
     from api.tasks.requirements import REQUIREMENTS_MODEL, REQUIREMENTS_TASK
+    from core import providers
     from core.providers import StructuredOutput
     from core.routing import resolve
 
@@ -301,9 +302,13 @@ def test_requirements_declares_a_shape_the_model_can_actually_serve():
     assert REQUIREMENTS_TASK.batched is True
 
     assert resolve(REQUIREMENTS_TASK).model == REQUIREMENTS_MODEL
-    # "minimal" is the whole point of the pinning: nano rejects it outright and
-    # a batch fails whole, so an unchecked effort costs the entire run.
-    assert REQUIREMENTS_TASK.resolved_effort() == "minimal"
+    # The effort is DERIVED, not pinned. luna rejects "minimal" and mini
+    # rejects "none", so a literal here makes the model unswappable and a
+    # batch fails whole on a 400 - #179. Assert it is legal for whichever
+    # model the shape resolves to, not that it equals a particular string.
+    declared = providers.model(resolve(REQUIREMENTS_TASK).model)
+    assert declared is not None
+    assert REQUIREMENTS_TASK.resolved_effort() in declared.reasoning.accepts
 
 
 def test_alembic_has_exactly_one_head():
@@ -320,3 +325,44 @@ def test_alembic_has_exactly_one_head():
     script = ScriptDirectory.from_config(Config("alembic.ini"))
     heads = script.get_heads()
     assert len(heads) == 1, f"{len(heads)} alembic heads: {heads}; add a merge revision"
+
+
+def test_no_fleet_task_defaults_to_a_model_that_is_dropping_requests():
+    """gpt-5-mini fails 1.6% of its requests - 499 of 31,999 - against zero for
+    both other models across 80,000. Nothing was watching, because a batch that
+    returns fewer lines than it was sent looks like a batch.
+
+    Asserting on the defaults rather than on behaviour: a task pointed at a
+    failing model works fine most of the time, which is exactly why this needs
+    to be a fact about the configuration."""
+    from api.routers.filters import IMPROVE_MODEL
+    from api.tasks.mail_classify import BACKFILL_MODEL, ONGOING_MODEL
+    from api.tasks.requirements import REQUIREMENTS_MODEL
+
+    for name, model in (
+        ("requirements", REQUIREMENTS_MODEL),
+        ("mail backfill", BACKFILL_MODEL),
+        ("mail ongoing", ONGOING_MODEL),
+        ("improve prompt", IMPROVE_MODEL),
+    ):
+        assert model != "gpt-5-mini", f"{name} still defaults to gpt-5-mini"
+
+
+def test_swapping_the_mail_or_requirements_model_carries_its_effort():
+    """luna REJECTS "minimal" and mini rejects "none", so a literal effort makes
+    the model unswappable - point a task at the other one and resolve() refuses,
+    or a batch submits and fails whole on a 400. That is #179, and it broke the
+    ongoing mail path while the backfill kept working."""
+    from api.tasks.mail_classify import BACKFILL_TASK, ONGOING_TASK
+    from api.tasks.requirements import REQUIREMENTS_TASK
+    from core import providers
+    from core.routing import resolve
+
+    for shape in (REQUIREMENTS_TASK, BACKFILL_TASK, ONGOING_TASK):
+        chosen = resolve(shape)
+        declared = providers.model(chosen.model)
+        assert declared is not None
+        effort = shape.resolved_effort()
+        assert effort not in declared.reasoning.rejects, (
+            f"{chosen.model} rejects {effort!r}; a batch would fail whole"
+        )

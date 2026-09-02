@@ -13,7 +13,7 @@ from core.filters import ON_AMBIGUOUS_VALUES, build_custom_instructions, compute
 
 router = APIRouter()
 
-IMPROVE_MODEL = os.environ.get("JOBTRACKER_IMPROVE_MODEL", "gpt-5-mini")
+IMPROVE_MODEL = os.environ.get("JOBTRACKER_IMPROVE_MODEL", "gpt-5.6-luna")
 
 _FILTER_COLS = (
     "id, name, prompt, on_ambiguous, fail_closed, enabled, prompt_hash, created_at, updated_at"

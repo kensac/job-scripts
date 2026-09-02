@@ -12,6 +12,7 @@ import pytest
 
 from api import db
 from api.tasks import SHAPES
+from api.tasks.requirements import REQUIREMENTS_MODEL
 
 
 def _get(client, headers, purpose="requirements"):
@@ -43,7 +44,7 @@ class TestEligibility:
         missing model is a bug."""
         body = _get(client, admin_headers)
         by_model = {c["model"]: c for c in body["candidates"]}
-        assert by_model["gpt-5-mini"]["eligible"] is True
+        assert by_model[REQUIREMENTS_MODEL]["eligible"] is True
         assert by_model["deepseek-v4-flash"]["eligible"] is False
         assert "json_object" in by_model["deepseek-v4-flash"]["rejection"]
         assert by_model["claude-opus-5"]["rejection"] == "provider has no batch endpoint"
@@ -59,7 +60,7 @@ class TestEligibility:
         """So the client never infers 'this is an override' by comparing
         strings - that is how two notions of override drift apart."""
         body = _get(client, admin_headers)
-        assert body["sanctioned"] == ["gpt-5-mini"]
+        assert body["sanctioned"] == [REQUIREMENTS_MODEL]
         assert body["override_is_outside_sanctioned"] is False
 
 
@@ -83,7 +84,7 @@ class TestEvidence:
             for e in c["evidence"]:
                 assert e["finding"]
                 assert e["sample_size"] > 0
-        chosen = next(c for c in body["candidates"] if c["model"] == "gpt-5-mini")
+        chosen = next(c for c in body["candidates"] if c["model"] == REQUIREMENTS_MODEL)
         assert chosen["evidence"][0]["verdict"] == "chosen"
 
     def test_a_task_with_no_measurement_says_so_with_an_empty_list(self, client, admin_headers):
@@ -96,7 +97,7 @@ class TestCost:
     def test_the_cycle_cost_is_served_not_left_to_the_client(self, client, admin_headers):
         """This repo's rule is that cost comes from the server or nowhere."""
         body = _get(client, admin_headers)
-        mini = next(c for c in body["candidates"] if c["model"] == "gpt-5-mini")
+        mini = next(c for c in body["candidates"] if c["model"] == REQUIREMENTS_MODEL)
         assert mini["est_cost_usd"] is not None
         assert mini["est_cycle_cost_usd"] is not None
         assert float(mini["est_cycle_cost_usd"]) > float(mini["est_cost_usd"])
@@ -110,7 +111,7 @@ class TestCost:
 
     def test_the_delta_is_against_what_runs_today(self, client, admin_headers):
         body = _get(client, admin_headers)
-        current = next(c for c in body["candidates"] if c["model"] == "gpt-5-mini")
+        current = next(c for c in body["candidates"] if c["model"] == REQUIREMENTS_MODEL)
         assert current["est_cycle_cost_delta_usd"] is not None
         assert float(current["est_cycle_cost_delta_usd"]) == 0
         cheaper = next(c for c in body["candidates"] if c["model"] == "gpt-5-nano")
@@ -193,7 +194,7 @@ class TestEvidenceCannotBeOrphaned:
 
 class TestOverride:
     def test_a_sanctioned_model_is_not_an_override(self, client, admin_headers):
-        r = _put(client, admin_headers, "requirements", model="gpt-5-mini")
+        r = _put(client, admin_headers, "requirements", model=REQUIREMENTS_MODEL)
         assert r.status_code == 200
         assert r.json()["override_is_outside_sanctioned"] is False
         assert r.json()["resolved"]["overridden"] is False
@@ -227,7 +228,7 @@ class TestOverride:
         r = _put(client, admin_headers, "requirements", model=None)
         assert r.status_code == 200
         assert r.json()["override"] is None
-        assert r.json()["resolved"]["model"] == "gpt-5-mini"
+        assert r.json()["resolved"]["model"] == REQUIREMENTS_MODEL
 
 
 class TestHistory:
