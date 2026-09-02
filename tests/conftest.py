@@ -118,7 +118,21 @@ os.environ["DATABASE_URL"] = (
 
 from api import db  # noqa: E402  (import only after DATABASE_URL is set)
 
-db.init_schema()
+
+def _schema_already_provisioned() -> bool:
+    """True when the target database already has the schema, which is the case
+    for an integration run against a synced copy. The credential there is
+    read-only on purpose, so attempting to migrate or seed would fail - and
+    should, rather than the role being widened to make a test pass."""
+    row = db.query_one("SELECT to_regclass('public.alembic_version') AS t")
+    if not (row and row["t"]):
+        return False
+    version = db.query_one("SELECT count(*) AS c FROM alembic_version")
+    return bool(version and version["c"])
+
+
+if not _schema_already_provisioned():
+    db.init_schema()
 import core.store  # noqa: E402,F401  (import triggers ai_queries creation)
 
 

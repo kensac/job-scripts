@@ -8,6 +8,7 @@ import socket
 from typing import Any, LiteralString, cast
 
 import dotenv
+import psycopg
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
@@ -126,7 +127,34 @@ def prefetch(
                 _custom_cache.setdefault(u, {})[prompt_hash] = found.get(u)
 
 
+def _schema_present() -> bool:
+    """Whether ai_queries already exists.
+
+    The pool uses dict_row, so this must read the column by name - indexing
+    row[0] raises KeyError, and swallowing that turned "schema exists" into
+    "schema missing", which sent a read-only connection into CREATE TABLE.
+    Only connection failures are caught: anything else is a real fault and
+    should surface rather than be reported as an absent schema.
+    """
+    try:
+        with _pool.connection() as conn:
+            row = conn.execute("SELECT to_regclass('public.ai_queries') AS oid").fetchone()
+    except psycopg.OperationalError:
+        return False
+    return bool(row and row["oid"])
+
+
 def init_db() -> None:
+    """Create the ai_queries table and its indexes if absent.
+
+    Runs at import, so it must tolerate a connection that cannot do DDL: a
+    read-only role against an already-provisioned database is a legitimate way
+    to use this code (CI runs the integration suite that way), and crashing on
+    import would make that impossible. Missing privileges are only a problem
+    when the schema is also missing, which the caller finds out immediately.
+    """
+    if _schema_present():
+        return
     with _pool.connection() as conn:
         conn.execute(
             """
