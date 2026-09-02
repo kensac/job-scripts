@@ -77,6 +77,27 @@ _RESOLVING_EVENTS = {
 WITHDRAWN_STATUSES = ("No Longer Interested", "Withdrawn")
 
 
+def settles_on(kind: str) -> list[str]:
+    """The event kinds that can close this ask, which is often none.
+
+    `resolved_at IS NULL` currently means two different things and the
+    difference is the whole product. An assessment invite from last week is
+    outstanding: something can still arrive to settle it. An offer from 2020 is
+    not outstanding - nothing was ever going to settle it, because no email
+    says "you accepted". Measured over the corpus: of 71 applications carrying
+    an offer event, only 11 have ANY later event at all, and no kind follows
+    one reliably.
+
+    So this is a property of the KIND, not of the item's age, and it is the
+    honest thing to expose. A caller that sees an empty list knows the item is
+    unresolved by construction rather than by neglect, and must not render it
+    as a live obligation. `reply_to_recruiter` is deliberately in that
+    category too - an approach you never answered is a decision worth seeing,
+    not a task waiting on a reply that will never be observable.
+    """
+    return list(_RESOLVING_EVENTS.get(kind, ()))
+
+
 def stage_for(events: list[dict[str, Any]], board_status: str | None = None) -> str:
     """Furthest stage reached, with terminal events winning outright.
 
