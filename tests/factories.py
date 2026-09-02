@@ -221,3 +221,20 @@ def make_requirements(
                     "ON CONFLICT DO NOTHING",
                     (url, kind, skill, raw),
                 )
+
+
+def make_embedding(url: str, vector: list[float] | None = None, *, seed: float = 0.0) -> None:
+    """A job_embeddings row. `seed` shifts the vector along one axis, which is
+    enough to order neighbours deterministically without a test having to write
+    1536 numbers out."""
+    from core.embeddings import EMBEDDING_DIMENSIONS, EMBEDDING_MODEL
+
+    if vector is None:
+        vector = [1.0] + [0.0] * (EMBEDDING_DIMENSIONS - 1)
+        vector[1] = seed
+    assert len(vector) == EMBEDDING_DIMENSIONS
+    db.execute(
+        "INSERT INTO job_embeddings (url, embedding, model, content_hash, input_tokens) "
+        "VALUES (%s, %s, %s, %s, %s) ON CONFLICT (url) DO UPDATE SET embedding = EXCLUDED.embedding",
+        (url, str(vector), EMBEDDING_MODEL, "hash", 100),
+    )

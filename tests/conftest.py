@@ -177,6 +177,7 @@ _MUTABLE_TABLES = [
     "jobs",
     "job_requirements",
     "job_skills",
+    "job_embeddings",
     "user_jobs",
     "users",
     "user_filters",

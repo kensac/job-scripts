@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime
 from typing import Any
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     BigInteger,
     Boolean,
@@ -10,6 +11,7 @@ from sqlalchemy import (
     ForeignKey,
     Identity,
     Index,
+    Integer,
     Numeric,
     Text,
     UniqueConstraint,
@@ -17,6 +19,8 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import ARRAY, BYTEA, JSONB, TIMESTAMP
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+from core.embeddings import EMBEDDING_DIMENSIONS
 
 _now = text("now()")
 
@@ -118,6 +122,33 @@ class JobRequirements(Base):
     model: Mapped[str | None] = mapped_column(Text)
     content_hash: Mapped[str | None] = mapped_column(Text)
     extracted_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+
+
+class JobEmbedding(Base):
+    """One vector per posting, for "what else reads like this".
+
+    Separate from JobRequirements rather than a column on it: the two sweeps
+    fail independently, and the requirements slice does SELECT DISTINCT r.*,
+    which would drag a 6 KB vector through a DISTINCT on every request.
+
+    No vector index, deliberately - see the migration for the measurements.
+    The query that gets issued is always scoped to one user's visible slice,
+    where an exact scan is single-digit milliseconds.
+    """
+
+    __tablename__ = "job_embeddings"
+
+    url: Mapped[str] = mapped_column(Text, primary_key=True)
+    embedding: Mapped[Any] = mapped_column(Vector(EMBEDDING_DIMENSIONS))
+    model: Mapped[str] = mapped_column(Text)
+    content_hash: Mapped[str | None] = mapped_column(Text)
+    input_tokens: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    # NULL means the model had no published price, which must stay distinct
+    # from a call that genuinely cost nothing. Ten decimal places rather than
+    # the six elsewhere: one embedding costs $0.0000226, which six places
+    # rounds up by 1.6% every time - see the migration.
+    cost_usd: Mapped[Any | None] = mapped_column(Numeric(14, 10))
+    created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
 
 
 class JobSkill(Base):
