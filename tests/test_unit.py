@@ -287,6 +287,7 @@ def test_verdicts_take_their_timestamp_from_the_database():
 
     assert "created_at" not in _INSERT_COLUMNS
 
+
 def test_verdict_schema_changes_do_not_move_prompt_hash():
     """basis lives in the response schema, not in the instruction text, and
     this is what keeps that true.
