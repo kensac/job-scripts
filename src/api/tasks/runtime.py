@@ -376,6 +376,12 @@ def _batch_event_hook(task_id: int, purpose: str, model: str):
                 "updated_at = now() WHERE provider_batch_id = %s",
                 (inp, out, cost, batch_id),
             )
+            # The same numbers into the spend ledger. Every batched caller
+            # passes through here and already names a purpose, so a new AI
+            # caller shows up in analytics without anyone wiring it - the hook
+            # cannot be used without a purpose, and that is all the grouping
+            # needs.
+            budget.record_fleet_usage(purpose, model, inp, out, batched=True)
             events.publish_task(task_id)
             return
         db.execute(

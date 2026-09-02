@@ -156,9 +156,54 @@ def spend(
         params,
     )
 
+    # Every AI caller, grouped by the purpose it already declares.
+    #
+    # The rest of this endpoint reads ai_queries, which is the VERDICT log -
+    # URL-keyed, and so structurally blind to any work that is not about a
+    # posting. Mail classification is $18.49 of real spend and writes no
+    # verdict row, so it was invisible here while being the largest line item
+    # in the system.
+    #
+    # api_usage is the ledger of record for spend and every path writes it: the
+    # sync path through record_usage, the batched path through the one hook
+    # every task already passes a purpose to. A new caller appears here with no
+    # wiring, because it cannot make a batched call without naming a purpose.
+    by_purpose = db.query(
+        """
+        SELECT purpose,
+               COUNT(*) AS calls,
+               COUNT(*) FILTER (WHERE cost_usd IS NULL) AS unpriced_calls,
+               COALESCE(SUM(cost_usd), 0) AS cost_usd,
+               COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+               COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
+               COUNT(*) FILTER (WHERE batched) AS batched_calls,
+               COUNT(DISTINCT model) AS models,
+               MIN(created_at) AS first_call,
+               MAX(created_at) AS last_call
+        FROM api_usage
+        WHERE created_at >= now() - make_interval(days => %(days)s)
+        GROUP BY purpose ORDER BY 4 DESC
+        """,
+        {"days": days},
+    )
+    ledger_total = sum((r["cost_usd"] or 0) for r in by_purpose)
+
     return {
         "window": {"days": days, "from": totals.get("first_call"), "to": totals.get("last_call")},
         "totals": totals,
+        "by_purpose": by_purpose,
+        # The two ledgers answer different questions and will not agree:
+        # ai_queries prices per URL and cannot see non-posting work; api_usage
+        # prices every call and cannot say which posting it was about. Stating
+        # both, labelled, beats printing one and calling it the total.
+        "ledger": {
+            "spend_total_usd": ledger_total,
+            "verdict_total_usd": totals.get("cost_usd"),
+            "note": (
+                "spend_total_usd covers every AI call by purpose; verdict_total_usd "
+                "covers only work that produced a posting verdict"
+            ),
+        },
         "batching": batching,
         "by_check_type": by_check_type,
         "by_model": by_model,
