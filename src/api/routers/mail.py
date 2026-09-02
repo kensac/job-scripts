@@ -238,6 +238,10 @@ def _rows_for(user_id: int) -> list[dict[str, Any]]:
     )
     events = mail_pipeline.events_by_application(user_id)
     tiers = _tiers_by_application(user_id)
+    # Derived at read time and attached rather than stored, so it moves when
+    # core.ats learns a provider or when a sender turns out to serve more
+    # companies than it did when the match was made.
+    senders = mail_pipeline.sender_signal(user_id)
     out = []
     for app in apps:
         own = events.get(app["id"], [])
@@ -248,6 +252,10 @@ def _rows_for(user_id: int) -> list[dict[str, Any]]:
                 "event_count": len(own),
                 "last_event_at": max((e["sent_at"] for e in own if e["sent_at"]), default=None),
                 **tiers.get(app["id"], {"strongest_tier": None, "tier_confidence": None}),
+                # A possibility, not a verdict: nothing filters on this and no
+                # application is hidden by it. It says "worth confirming", and
+                # carries the evidence so the reader can disagree.
+                "sender": senders.get(app["id"]),
             }
         )
     return out
