@@ -598,6 +598,33 @@ class Application(Base):
     )
 
 
+class SuggestionResponse(Base):
+    """What the user decided about a suggestion, which is the only fact here.
+
+    The suggestions themselves are derived at read time - a comparison of what
+    the mail says against what the board says - so they correct themselves when
+    either side changes. Storing them would freeze a disagreement that should
+    disappear on its own.
+    """
+
+    __tablename__ = "suggestion_responses"
+    __table_args__ = (Index("idx_suggestion_responses_app", "application_id", "event_id"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"))
+    application_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("applications.id", ondelete="CASCADE")
+    )
+    # Keyed on the evidence, so a dismissal silences THIS event rather than the
+    # question. A later rejection from the same company gets asked again.
+    event_id: Mapped[int | None] = mapped_column(BigInteger)
+    suggested_status: Mapped[str] = mapped_column(Text)
+    response: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=_now
+    )
+
+
 class EmailEvent(Base):
     __tablename__ = "email_events"
     __table_args__ = (Index("idx_email_events_latest", "message_id", "kind", text("id DESC")),)

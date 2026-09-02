@@ -275,3 +275,22 @@ def test_blank_company_names_are_not_a_row(client, admin_headers, f):
     f.make_job(source="s", company="", title="a")
 
     assert not any(i["company_key"] == "" for i in _items(client, admin_headers))
+
+
+def test_the_status_breakdown_never_exceeds_the_count_it_breaks_down(client, admin_headers, f):
+    """They were counted from different tables with different keys and
+    different exclusions, so adjacent numbers read as a total and its parts and
+    were neither. A breakdown larger than its whole is the visible symptom."""
+    user_id = f.make_user()
+    job_id = f.make_job(source="s", company="Twinned", title="a")
+    f.make_board_row(user_id, job_id, status="Application Submitted")
+    db.execute(
+        "INSERT INTO applications (user_id, job_id, company_name, title, source_provenance, "
+        "applied_at, dismissed_at) VALUES (%s, %s, 'Twinned', 'a', 'tracker', now(), now())",
+        (user_id, job_id),
+    )
+
+    item = _item(client, admin_headers, "twinned")
+    # The one application is dismissed, so it counts for nothing - and its board
+    # row must not survive in the breakdown as a part of a whole that is zero.
+    assert "applications" not in item

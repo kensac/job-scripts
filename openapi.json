@@ -9985,6 +9985,192 @@
         }
       }
     },
+    "/v1/user/suggestions": {
+      "get": {
+        "summary": "Suggestions",
+        "description": "Where the mail and the board disagree, as things to confirm.\n\nNever an overwrite. `user_jobs.status` is what the user typed, and a system\nthat silently rewrites it stops being trustworthy at exactly the moment it\nis most confident. So this says \"we think you were rejected\" and waits.\n\nDerived at read time rather than stored, so a suggestion disappears on its\nown once he acts on the board directly, or once a reclassification retracts\nthe evidence. Only his ANSWER is a fact worth keeping.\n\nEvery row carries the evidence - the message, the sender, and an excerpt -\nbecause a suggestion he cannot check is one he has to take on faith.",
+        "operationId": "suggestions_v1_user_suggestions_get",
+        "parameters": [
+          {
+            "name": "x-service-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-Service-Token"
+            }
+          },
+          {
+            "name": "x-user-sub",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Sub"
+            }
+          },
+          {
+            "name": "x-user-email",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Email"
+            }
+          },
+          {
+            "name": "x-user-name",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Name"
+            }
+          },
+          {
+            "name": "x-user-groups",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Groups"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/user/suggestions/{application_id}/{event_id}": {
+      "post": {
+        "summary": "Answer Suggestion",
+        "description": "Accept a suggestion and the board moves; dismiss it and it stays put.\n\nBoth are recorded against the EVENT, so a dismissal silences this piece of\nevidence rather than the question. A later rejection from the same company\nis new evidence and gets asked again - which is what makes dismissing safe\nrather than a decision he can never revisit.",
+        "operationId": "answer_suggestion_v1_user_suggestions__application_id___event_id__post",
+        "parameters": [
+          {
+            "name": "application_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Application Id"
+            }
+          },
+          {
+            "name": "event_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Event Id"
+            }
+          },
+          {
+            "name": "x-service-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-Service-Token"
+            }
+          },
+          {
+            "name": "x-user-sub",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Sub"
+            }
+          },
+          {
+            "name": "x-user-email",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Email"
+            }
+          },
+          {
+            "name": "x-user-name",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Name"
+            }
+          },
+          {
+            "name": "x-user-groups",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Groups"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SuggestionAnswer"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/admin/filter-insights/groups": {
       "get": {
         "summary": "Groups",
@@ -11760,6 +11946,30 @@
           "enabled"
         ],
         "title": "SourcesPut"
+      },
+      "SuggestionAnswer": {
+        "properties": {
+          "response": {
+            "type": "string",
+            "title": "Response"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "response"
+        ],
+        "title": "SuggestionAnswer"
       },
       "TaskModelPut": {
         "properties": {

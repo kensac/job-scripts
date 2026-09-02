@@ -1080,3 +1080,133 @@ def message_detail(message_id: int, user: AuthedUser = Depends(require_user)):
             (message_id,),
         ),
     }
+
+
+# What the mail implies the board should say. Only kinds where the evidence is
+# unambiguous about the OUTCOME - an acknowledgement means the application is
+# alive, which the board already says, so it suggests nothing.
+_STATUS_FROM_EVENT = {
+    "rejection": "Rejected",
+    "position_closed": "No Longer Available",
+    "offer": "Offer",
+    "interview_invite": "Interviewing",
+    "interview_scheduled": "Interviewing",
+}
+
+# Board statuses that mean "still waiting". A suggestion is only worth making
+# against one of these: if he has already moved it on, the mail is confirming
+# what he knows rather than telling him something.
+_UNRESOLVED_STATUSES = ("Application Submitted", "Follow-up")
+
+ACCEPTED = "accepted"
+DISMISSED = "dismissed"
+
+
+class SuggestionAnswer(BaseModel):
+    response: str
+    note: str | None = None
+
+
+@router.get("/user/suggestions")
+def suggestions(user: AuthedUser = Depends(require_user)):
+    """Where the mail and the board disagree, as things to confirm.
+
+    Never an overwrite. `user_jobs.status` is what the user typed, and a system
+    that silently rewrites it stops being trustworthy at exactly the moment it
+    is most confident. So this says "we think you were rejected" and waits.
+
+    Derived at read time rather than stored, so a suggestion disappears on its
+    own once he acts on the board directly, or once a reclassification retracts
+    the evidence. Only his ANSWER is a fact worth keeping.
+
+    Every row carries the evidence - the message, the sender, and an excerpt -
+    because a suggestion he cannot check is one he has to take on faith.
+    """
+    rows = db.query(
+        """
+        WITH current_match AS (
+            SELECT DISTINCT ON (message_id) message_id, application_id
+            FROM application_matches ORDER BY message_id, id DESC
+        ),
+        current_event AS (
+            SELECT DISTINCT ON (message_id) message_id, id, kind, detail
+            FROM email_events ORDER BY message_id, id DESC
+        )
+        SELECT DISTINCT ON (a.id, e.kind)
+               a.id AS application_id, a.company_name, a.title, a.job_id,
+               uj.status AS board_status, uj.date_applied,
+               e.id AS event_id, e.kind, m.id AS message_id, m.sent_at
+        FROM applications a
+        JOIN user_jobs uj ON uj.job_id = a.job_id AND uj.user_id = a.user_id
+        JOIN current_match cm ON cm.application_id = a.id
+        JOIN current_event e ON e.message_id = cm.message_id
+        JOIN email_messages m ON m.id = cm.message_id
+        WHERE a.user_id = %(user)s
+          AND a.dismissed_at IS NULL
+          AND uj.status = ANY(%(unresolved)s)
+          AND e.kind = ANY(%(kinds)s)
+          AND NOT EXISTS (
+              SELECT 1 FROM suggestion_responses sr
+              WHERE sr.application_id = a.id AND sr.event_id = e.id
+          )
+        ORDER BY a.id, e.kind, e.id DESC
+        """,
+        {
+            "user": user.id,
+            "unresolved": list(_UNRESOLVED_STATUSES),
+            "kinds": sorted(_STATUS_FROM_EVENT),
+        },
+    )
+    evidence = _evidence_for(sorted({r["message_id"] for r in rows}))
+    return {
+        "suggestions": [
+            {
+                **row,
+                "suggested_status": _STATUS_FROM_EVENT[row["kind"]],
+                "evidence": evidence.get(row["message_id"]),
+            }
+            for row in rows
+        ],
+        "total": len(rows),
+    }
+
+
+@router.post("/user/suggestions/{application_id}/{event_id}")
+def answer_suggestion(
+    application_id: int,
+    event_id: int,
+    body: SuggestionAnswer,
+    user: AuthedUser = Depends(require_user),
+):
+    """Accept a suggestion and the board moves; dismiss it and it stays put.
+
+    Both are recorded against the EVENT, so a dismissal silences this piece of
+    evidence rather than the question. A later rejection from the same company
+    is new evidence and gets asked again - which is what makes dismissing safe
+    rather than a decision he can never revisit.
+    """
+    if body.response not in (ACCEPTED, DISMISSED):
+        raise HTTPException(status_code=400, detail=f"response must be {ACCEPTED} or {DISMISSED}")
+    app = db.query_one(
+        "SELECT id, job_id FROM applications WHERE id = %s AND user_id = %s",
+        (application_id, user.id),
+    )
+    if app is None:
+        raise HTTPException(status_code=404, detail="application not found")
+    event = db.query_one("SELECT id, kind FROM email_events WHERE id = %s", (event_id,))
+    if event is None or event["kind"] not in _STATUS_FROM_EVENT:
+        raise HTTPException(status_code=404, detail="no suggestion for that event")
+
+    status = _STATUS_FROM_EVENT[event["kind"]]
+    db.execute(
+        "INSERT INTO suggestion_responses (user_id, application_id, event_id, "
+        "suggested_status, response) VALUES (%s, %s, %s, %s, %s)",
+        (user.id, application_id, event_id, status, body.response),
+    )
+    if body.response == ACCEPTED and app["job_id"] is not None:
+        db.execute(
+            "UPDATE user_jobs SET status = %s, updated_at = now() "
+            "WHERE user_id = %s AND job_id = %s",
+            (status, user.id, app["job_id"]),
+        )
+    return {"ok": True, "status": status if body.response == ACCEPTED else None}
