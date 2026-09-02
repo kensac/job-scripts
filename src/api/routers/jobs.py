@@ -69,6 +69,43 @@ WHERE (
 """
 
 
+def _visible_job(user: AuthedUser, job_id: int, columns: str) -> dict | None:
+    """One job, but only if this user may address it.
+
+    Every per-job route needs this and none of them had it: they resolved the
+    job with a bare `WHERE id = %s`, so any signed-in user could name any of
+    the 49k job ids. That let them read another user's private upload, pin it
+    to their own board, and - through the explain route, which writes a verdict
+    into an append-only log with no user_id - flip a job's closed status for
+    EVERY user at once, because latest-row-per-(url, check_type) wins globally.
+
+    The gate is _VISIBILITY itself rather than a new predicate. A fourth
+    spelling of "can this user see this job" is how the first three drifted.
+    """
+    settings = db.query_one(
+        "SELECT bypass_sponsorship_filter, criteria FROM user_settings WHERE user_id = %s",
+        (user.id,),
+    )
+    return db.query_one(
+        _VISIBILITY.format(columns=columns, criteria=criteria.SQL, extra="AND j.id = %(jid)s"),
+        {
+            "uid": user.id,
+            "jid": job_id,
+            "bypass_sponsorship": settings["bypass_sponsorship_filter"] if settings else True,
+            **criteria.params(settings),
+        },
+    )
+
+
+def _require_visible_job(user: AuthedUser, job_id: int, columns: str) -> dict:
+    job = _visible_job(user, job_id, columns)
+    if not job:
+        # 404, not 403: whether a job exists is itself information the caller
+        # is not entitled to.
+        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown job"})
+    return job
+
+
 # Whitelisted server-side sort columns (all NULLS LAST so empty cells sink).
 _SORTABLE = {
     "added_at": "j.created_at",
@@ -212,7 +249,14 @@ def list_jobs(
 
 @router.patch("/user/jobs/{job_id}")
 def patch_job(job_id: int, body: UserJobPatch, user: AuthedUser = Depends(require_user)):
-    if not db.query_one("SELECT id FROM jobs WHERE id = %s", (job_id,)):
+    # Pinning an unsubscribed job by patching it is a deliberate feature (the
+    # "watching" case). But a user_jobs row IS a visibility grant - _VISIBILITY
+    # trusts `uj.user_id IS NOT NULL` unconditionally - so an unrestricted pin
+    # launders around every other gate: pin, then read the job's cached page
+    # through /detail. The public catalog is fine to pin; another user's
+    # private upload is not, and that is the only distinction that matters.
+    owner = db.query_one("SELECT uploaded_by FROM jobs WHERE id = %s", (job_id,))
+    if not owner or (owner["uploaded_by"] is not None and owner["uploaded_by"] != user.id):
         raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown job"})
     fields = body.model_dump(exclude_unset=True)
     if not fields:
@@ -260,13 +304,12 @@ def job_detail(job_id: int, user: AuthedUser = Depends(require_user)):
     """Everything behind one board row: cached posting content, the user's own
     row + status history, and why the AI let it through (per-filter verdicts
     plus the closed/clearance checks)."""
-    job = db.query_one(
-        "SELECT id, url, raw_url, company, title, locations, terms, source, active, "
-        "date_posted, comp_min, comp_max, comp_text, created_at FROM jobs WHERE id = %s",
-        (job_id,),
+    job = _require_visible_job(
+        user,
+        job_id,
+        "j.id, j.url, j.raw_url, j.company, j.title, j.locations, j.terms, j.source, "
+        "j.active, j.date_posted, j.comp_min, j.comp_max, j.comp_text, j.created_at",
     )
-    if not job:
-        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown job"})
     content_row = db.query_one(
         "SELECT input_content, created_at FROM ai_queries "
         "WHERE url = %s AND check_type = 'content' AND input_content IS NOT NULL "
@@ -340,9 +383,11 @@ async def explain_check(job_id: int, body: ExplainBody, user: AuthedUser = Depen
         JobClosedResponse,
     )
 
-    job = db.query_one("SELECT id, url, company, title FROM jobs WHERE id = %s", (job_id,))
-    if not job:
-        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown job"})
+    # This route writes a verdict into ai_queries, which has no user_id and is
+    # resolved latest-row-per-(url, check_type) for EVERY user. An ungated
+    # job_id here is therefore not a read leak but a write primitive against
+    # everyone's board.
+    job = _require_visible_job(user, job_id, "j.id, j.url, j.company, j.title")
     fresh, closure_signal = await _verdicts.refresh_content(
         job["url"], company=job["company"], job_title=job["title"], context="explain"
     )
@@ -532,10 +577,15 @@ def report_job(job_id: int, body: ReportBody, user: AuthedUser = Depends(require
 
 @router.get("/tasks/{task_id}")
 def get_task(task_id: int, user: AuthedUser = Depends(require_user)):
+    # Task ids are sequential and `error` is str(exc) written verbatim by the
+    # worker, so an ungated lookup hands any signed-in user every other user's
+    # failures. Ownership lives in the payload: every user-initiated kind
+    # stamps user_id there, and the kinds that do not (ingest_source,
+    # verify_new, data_health...) are fleet work with no user to show it to.
     row = db.query_one(
         "SELECT id, kind, status, progress, error, created_at, started_at, finished_at "
-        "FROM tasks WHERE id = %s",
-        (task_id,),
+        "FROM tasks WHERE id = %s AND (payload->>'user_id')::bigint = %s",
+        (task_id, user.id),
     )
     if not row:
         raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown task"})
