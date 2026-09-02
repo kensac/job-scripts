@@ -62,3 +62,12 @@ ignore = [
 
 [tool.ruff.format]
 quote-style = "double"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "integration: runs against a synced copy of production (needs TEST_DATABASE_URL)",
+]
+# Integration tests are opt-in: `make test` stays fast and hermetic on the
+# scratch database, `make integration` selects them explicitly.
+addopts = "-m 'not integration'"

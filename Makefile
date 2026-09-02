@@ -1,6 +1,6 @@
 export PYTHONPATH := src
 
-.PHONY: api worker check lint fmt types test schema migrate revision db-up db-down
+.PHONY: api worker check lint fmt types test testdb-sync testdb-sync-fast integration schema migrate revision db-up db-down
 
 api:            ## run the API locally
 	uvicorn api.app:app --port 8000 --reload
@@ -45,3 +45,22 @@ db-up:          ## throwaway local postgres on :54999 (data in .pgdev)
 db-down:        ## stop and delete the throwaway postgres
 	pg_ctl -D .pgdev stop -m fast || true
 	rm -rf .pgdev
+
+# --- test database -------------------------------------------------------
+# A copy of production on the same Postgres instance, refreshed on demand so
+# integration tests run against real shapes instead of invented ones. Manual
+# by design: prod data only moves when you ask it to.
+#
+# pg_dump must match the server major version and the local client is older,
+# so the dump runs inside a postgres:18 container rather than pinning a second
+# client install on every machine.
+TESTDB ?= jobtracker_test
+
+testdb-sync:    ## rebuild $(TESTDB) from production (destructive)
+	python scripts/sync_testdb.py --name $(TESTDB)
+
+testdb-sync-fast: ## same, minus the large text columns (~80% of the data)
+	python scripts/sync_testdb.py --name $(TESTDB) --fast
+
+integration:    ## run integration tests (needs TEST_DATABASE_URL on a *_test db)
+	pytest -q -m integration tests

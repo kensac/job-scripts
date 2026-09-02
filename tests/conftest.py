@@ -91,7 +91,30 @@ def _start_scratch_postgres() -> str:
     return f"postgresql://postgres@127.0.0.1:{port}/jobtracker_test"
 
 
-os.environ["DATABASE_URL"] = os.environ.get("TEST_DATABASE_URL") or _start_scratch_postgres()
+def _assert_disposable(url: str) -> str:
+    """Refuse to run against a database whose name does not mark it disposable.
+
+    The autouse fixture below TRUNCATEs every mutable table between tests. A
+    mistyped TEST_DATABASE_URL pointed at production would therefore erase it,
+    with no confirmation step anywhere. The database name is the one thing a
+    caller cannot get wrong by accident, so it is what we gate on.
+    """
+    from urllib.parse import urlparse
+
+    name = (urlparse(url).path or "").lstrip("/")
+    if not (name.endswith(("_test", "_ci")) or name.startswith("test_")):
+        raise RuntimeError(
+            f"refusing to run tests against database {name!r}: the test suite "
+            "truncates every table between tests. Name it *_test or *_ci."
+        )
+    return url
+
+
+os.environ["DATABASE_URL"] = (
+    _assert_disposable(os.environ["TEST_DATABASE_URL"])
+    if os.environ.get("TEST_DATABASE_URL")
+    else _start_scratch_postgres()
+)
 
 from api import db  # noqa: E402  (import only after DATABASE_URL is set)
 
@@ -140,7 +163,17 @@ def _reseed() -> None:
 
 
 @pytest.fixture(autouse=True)
-def _clean_db():
+def _clean_db(request):
+    """Isolate unit tests by truncating between them.
+
+    Integration tests are exempt, and that exemption is load-bearing: they run
+    against a synced copy of production, so truncating first would delete the
+    only thing they are there to inspect. The guard test in the integration
+    suite exists because this fixture silently did exactly that.
+    """
+    if request.node.get_closest_marker("integration"):
+        yield
+        return
     db.execute(f"TRUNCATE TABLE {', '.join(_MUTABLE_TABLES)} RESTART IDENTITY CASCADE")
     _reseed()
     yield
@@ -182,3 +215,12 @@ def admin_headers(client) -> dict:
     resp = client.post("/v1/users/bootstrap", headers=headers)
     assert resp.status_code == 200, resp.text
     return headers
+
+
+@pytest.fixture
+def f():
+    """The row builders, as a fixture so a test reads `f.make_ready_job(...)`
+    and does not need an import line per helper."""
+    from tests import factories
+
+    return factories
