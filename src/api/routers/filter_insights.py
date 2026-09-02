@@ -51,6 +51,14 @@ _DEFAULT_MIN_DECISIONS = int(1 / _MAX_SWING_PER_DECISION)
 _WINDOW = "created_at >= now() - make_interval(days => %(days)s)"
 
 
+def _criterion() -> dict[str, Any]:
+    return {
+        "method": "phrase_match",
+        "description": EVIDENCE_MISSING_DESCRIPTION,
+        "phrases": list(EVIDENCE_MISSING_PHRASES),
+    }
+
+
 def _bucket() -> dict[str, Any]:
     return {
         "decisions": 0,
@@ -71,6 +79,24 @@ def _finish(bucket: dict[str, Any], examples: int) -> dict[str, Any]:
         # Most frequent phrasings rather than arbitrary ones: an example is
         # standing in for a group, so it should be typical of it.
         "examples": [text for text, _ in bucket["phrasings"].most_common(examples)],
+    }
+
+
+@router.get("/groups")
+def groups(user: AuthedUser = Depends(require_admin)) -> dict[str, Any]:
+    """The taxonomy itself: keys, labels, and what evidence_missing means.
+
+    A drill-through link carries only the key, so the page it lands on has to
+    turn that back into words. Resolving it here rather than passing display
+    text through the URL keeps one definition of a label - a link is a durable
+    thing and a label baked into one goes stale the moment the taxonomy is
+    edited, while a humanised key silently loses whatever the label said that
+    the key does not. `seniority` covers new-grad and first-year mismatches,
+    not only over-seniority, and `location` covers work authorisation.
+    """
+    return {
+        "groups": [{"key": g.key, "label": GROUP_LABELS[g.key]} for g in GROUPS],
+        "evidence_missing_criterion": _criterion(),
     }
 
 
@@ -242,11 +268,7 @@ def rejection_reasons(
         "unit": "decisions",
         "min_decisions": min_decisions,
         "overlapping_groups": True,
-        "evidence_missing_criterion": {
-            "method": "phrase_match",
-            "description": EVIDENCE_MISSING_DESCRIPTION,
-            "phrases": list(EVIDENCE_MISSING_PHRASES),
-        },
+        "evidence_missing_criterion": _criterion(),
         "prompt_versions": out,
     }
 
@@ -257,10 +279,6 @@ def _empty(days: int, min_decisions: int) -> dict[str, Any]:
         "unit": "decisions",
         "min_decisions": min_decisions,
         "overlapping_groups": True,
-        "evidence_missing_criterion": {
-            "method": "phrase_match",
-            "description": EVIDENCE_MISSING_DESCRIPTION,
-            "phrases": list(EVIDENCE_MISSING_PHRASES),
-        },
+        "evidence_missing_criterion": _criterion(),
         "prompt_versions": [],
     }

@@ -8262,6 +8262,89 @@
         }
       }
     },
+    "/v1/admin/filter-insights/groups": {
+      "get": {
+        "summary": "Groups",
+        "description": "The taxonomy itself: keys, labels, and what evidence_missing means.\n\nA drill-through link carries only the key, so the page it lands on has to\nturn that back into words. Resolving it here rather than passing display\ntext through the URL keeps one definition of a label - a link is a durable\nthing and a label baked into one goes stale the moment the taxonomy is\nedited, while a humanised key silently loses whatever the label said that\nthe key does not. `seniority` covers new-grad and first-year mismatches,\nnot only over-seniority, and `location` covers work authorisation.",
+        "operationId": "groups_v1_admin_filter_insights_groups_get",
+        "parameters": [
+          {
+            "name": "x-service-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-Service-Token"
+            }
+          },
+          {
+            "name": "x-user-sub",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Sub"
+            }
+          },
+          {
+            "name": "x-user-email",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Email"
+            }
+          },
+          {
+            "name": "x-user-name",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Name"
+            }
+          },
+          {
+            "name": "x-user-groups",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Groups"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Groups V1 Admin Filter Insights Groups Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/admin/filter-insights/rejection-reasons": {
       "get": {
         "summary": "Rejection Reasons",

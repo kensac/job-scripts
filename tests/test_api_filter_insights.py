@@ -398,3 +398,25 @@ def test_enabled_says_whether_this_prompt_can_still_reject_anything(client, admi
     assert rows["hash_retired"]["owner"]["state"] == "resolved"
     # No current filter carries this prompt, so there is nothing to ask.
     assert rows["hash_gone"]["owner"]["enabled"] is None
+
+
+def test_groups_endpoint_resolves_a_drill_key_to_its_label(client, admin_headers):
+    """A drill link carries only the key. Baking the label into the URL instead
+    would go stale the moment the taxonomy is edited."""
+    resp = client.get("/v1/admin/filter-insights/groups", headers=admin_headers)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    labels = {g["key"]: g["label"] for g in body["groups"]}
+
+    assert set(labels) == set(GROUP_KEYS)
+    # The cases a humanised key would lose: these groups are broader than
+    # their key reads.
+    assert labels["seniority"] == "Seniority or experience mismatch"
+    assert labels["location"] == "Location or work authorisation"
+    assert labels["pay_below"] == "Pay below threshold"
+    assert body["evidence_missing_criterion"]["method"] == "phrase_match"
+
+
+def test_groups_endpoint_requires_admin(client, user_headers):
+    resp = client.get("/v1/admin/filter-insights/groups", headers=user_headers)
+    assert resp.status_code in (401, 403)
