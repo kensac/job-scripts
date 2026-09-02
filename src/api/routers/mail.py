@@ -12,6 +12,7 @@ append-only, so a correction is a newer row, not an edit.
 
 from __future__ import annotations
 
+import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -499,6 +500,37 @@ def _rows_for(user_id: int) -> list[dict[str, Any]]:
     return out
 
 
+# A date that stands in for "no date" while sorting. It never leaves this
+# module and never reaches a response - the boolean beside it is what actually
+# orders undated rows, and this only stops the comparison raising on None.
+_EPOCH = datetime.datetime(1970, 1, 1, tzinfo=datetime.UTC)
+
+_STAGE_RANK = {
+    name: index
+    for index, name in enumerate(
+        (
+            "applied",
+            "acknowledged",
+            "assessment",
+            "interviewing",
+            "offer",
+            "rejected",
+            "closed",
+            "withdrawn",
+        )
+    )
+}
+
+_PIPELINE_SORTS: dict[str, Any] = {
+    "applied_at": lambda r: (r["applied_at"] is None, r["applied_at"] or _EPOCH, r["id"]),
+    "last_event_at": lambda r: (r["last_event_at"] is None, r["last_event_at"] or _EPOCH, r["id"]),
+    "company": lambda r: ((r["company_name"] or "").lower(), r["id"]),
+    "title": lambda r: ((r["title"] or "").lower(), r["id"]),
+    "stage": lambda r: (_STAGE_RANK.get(r["stage"], 99), r["id"]),
+    "event_count": lambda r: (r["event_count"], r["id"]),
+}
+
+
 @router.get("/user/pipeline/summary")
 def pipeline_summary(user: AuthedUser = Depends(require_user)):
     """Stage counts, derived by the same code that derives the list.
@@ -534,6 +566,8 @@ def pipeline(
     provenance: str | None = Query(default=None),
     tier: str | None = Query(default=None),
     evidence: bool | None = Query(default=None),
+    sort: str = Query(default="applied_at"),
+    dir: str = Query(default="desc"),
     q: str | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
@@ -547,15 +581,20 @@ def pipeline(
     are.
     """
     rows = _rows_for(user.id)
+    # Comma-separated, because every lens worth having is multi-valued:
+    # "waiting" is applied AND acknowledged, "over" is rejected AND closed AND
+    # withdrawn. A single-valued filter makes a lens either impossible or a
+    # client-side re-derivation of a set the server already knows.
+    stages = {s.strip() for s in stage.split(",") if s.strip()} if stage else set()
     if stage == "dismissed":
         rows = [r for r in rows if r["dismissed_at"] is not None]
-        stage = None
+        stages = set()
     else:
         rows = [r for r in rows if r["dismissed_at"] is None]
-    if not include_closed and not stage:
+    if not include_closed and not stages:
         rows = [r for r in rows if r["stage"] not in mail_pipeline.TERMINAL]
-    if stage:
-        rows = [r for r in rows if r["stage"] == stage]
+    if stages:
+        rows = [r for r in rows if r["stage"] in stages]
     if provenance:
         rows = [r for r in rows if r["source_provenance"] == provenance]
     if tier:
@@ -572,7 +611,15 @@ def pipeline(
             for r in rows
             if needle in (r["company_name"] or "").lower() or needle in (r["title"] or "").lower()
         ]
-    rows.sort(key=lambda r: (r["applied_at"] is None, r["applied_at"], r["id"]), reverse=True)
+    # Sorted on the SET, not the page. A client sorting what it was handed
+    # sorts one page of a filtered whole and reads as though it sorted
+    # everything - which is a quiet lie rather than a missing feature.
+    #
+    # Stage sorts by how far through the process it is rather than
+    # alphabetically, because "applied, acknowledged, interviewing" is the
+    # order the word means and "acknowledged, applied, assessment" is not.
+    key = _PIPELINE_SORTS.get(sort, _PIPELINE_SORTS["applied_at"])
+    rows.sort(key=key, reverse=dir != "asc")
     page = rows[offset : offset + limit]
     return {
         "applications": page,
@@ -812,11 +859,22 @@ def _owned_message(message_id: int, user_id: int) -> dict[str, Any]:
     return row
 
 
+_USER_MAIL_SORTS = {
+    "sent_at": "m.sent_at",
+    "from_email": "lower(m.from_email)",
+    "subject": "lower(m.subject)",
+    "kind": "ce.kind",
+    "company": "lower(coalesce(a.company_name, ce.detail->>'company'))",
+}
+
+
 @router.get("/user/mail")
 def user_mail(
     kind: str | None = Query(default=None),
     matched: bool | None = Query(default=None),
     application_id: int | None = Query(default=None),
+    sort: str = Query(default="sent_at"),
+    dir: str = Query(default="desc"),
     q: str | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
@@ -837,8 +895,12 @@ def user_mail(
     where = ["m.user_id = %(user)s"]
     params: dict[str, Any] = {"user": user.id, "limit": limit, "offset": offset}
     if kind:
-        where.append("ce.kind = %(kind)s")
-        params["kind"] = kind
+        # Comma-separated for the same reason as stage: "replies" is rejection
+        # AND offer AND interview_invite AND assessment_invite, and a lens the
+        # client assembles from four requests is not the same set.
+        kinds = [k.strip() for k in kind.split(",") if k.strip()]
+        where.append("ce.kind = ANY(%(kinds)s)")
+        params["kinds"] = kinds
     if q:
         where.append("(m.subject ILIKE %(q)s OR m.from_email ILIKE %(q)s)")
         params["q"] = f"%{q}%"
@@ -868,6 +930,11 @@ def user_mail(
         WHERE {predicate}
     """
     total = db.query_one(f"SELECT count(*) AS n {base}", params)
+    # A whitelist, not interpolation of whatever arrives: this string is
+    # concatenated into SQL, and an unknown value falls back rather than
+    # reaching the database.
+    order = _USER_MAIL_SORTS.get(sort, _USER_MAIL_SORTS["sent_at"])
+    direction = "ASC" if dir == "asc" else "DESC"
     rows = db.query(
         f"""
         SELECT m.id, m.subject, m.from_email, m.sent_at, m.source,
@@ -876,15 +943,25 @@ def user_mail(
                cm.application_id, cm.method,
                a.company_name, a.title
         {base}
-        ORDER BY m.sent_at DESC NULLS LAST, m.id DESC
+        ORDER BY {order} {direction} NULLS LAST, m.id DESC
         LIMIT %(limit)s OFFSET %(offset)s
         """,
         params,
     )
+    # Per-kind counts over the SAME predicate, so a tab's number and its
+    # contents cannot disagree. One extra aggregate rather than one request per
+    # tab - and without it mail tabs either show no counts or cost a round trip
+    # each to display a number the server already had in hand.
+    by_kind = {
+        r["kind"]: r["n"]
+        for r in db.query(f"SELECT ce.kind, count(*) AS n {base} GROUP BY ce.kind", params)
+        if r["kind"]
+    }
     return {
         "messages": rows,
         "total": (total or {}).get("n", 0),
         "has_more": offset + len(rows) < (total or {}).get("n", 0),
+        "by_kind": by_kind,
     }
 
 
