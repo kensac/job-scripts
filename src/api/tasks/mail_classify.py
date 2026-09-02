@@ -626,7 +626,16 @@ async def handle_classify_mail(task_id: int, payload: dict[str, Any]) -> None:
         occurred_at: datetime.datetime | None = None
         deadline_at: datetime.datetime | None = None
         year_inferred = False
-        if when is not None:
+        # Mail that is not about a job has no job deadline, whatever date it
+        # states. This is the model's own answer applied to its own other
+        # answer, not a second judgement: it already said the message is not
+        # job related, so the date it found is a marketing expiry, a newsletter
+        # RSVP or a tuition date.
+        #
+        # It is the largest source of deadlines in the corpus by a wide margin
+        # - 1,409 of 2,128, two thirds of every deadline recorded - and each
+        # one becomes an action item and feeds "quiet for 60+ days".
+        if when is not None and parsed.kind != "not_job_related":
             year_inferred = when.year_inferred
             if is_appointment(parsed.kind):
                 occurred_at = when.at
@@ -639,6 +648,9 @@ async def handle_classify_mail(task_id: int, payload: dict[str, Any]) -> None:
             # the position this parser was rewritten from, with no record of
             # what it had been unable to read.
             detail["when_raw"] = parsed.deadline
+            detail["when_dropped_as_not_job_related"] = (
+                parsed.kind == "not_job_related" and when is not None
+            )
             detail["when_precision"] = (
                 None if when is None else ("instant" if when.is_instant else "date")
             )
