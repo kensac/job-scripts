@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import time
 from collections.abc import Callable
 from typing import Any, TypeVar
@@ -11,6 +12,8 @@ from pydantic import BaseModel
 from api import ai, metrics
 from api.ai import AIConfig
 from core.store import add_ai_result
+
+logger = logging.getLogger("jobtracker_api")
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -168,10 +171,10 @@ async def refresh_content(
     over the page as it looked before it closed — it cannot discover a closure,
     which is the one thing a recheck is usually asked to do.
 
-    Returns (content, closure_signal). closure_signal names WHY the posting is
-    gone ('ats_gone' | 'redirected_away') and is set only when a closed verdict
-    was recorded; callers should report it explicitly rather than inferring
-    closure from incidental values like a zero token count.
+    Returns (content, closure_signal). closure_signal is 'ats_gone' and only
+    that: it is set when the BOARD ITSELF reports the posting deleted, which is
+    a fact rather than an inference. A redirect is explicitly not a closure -
+    the page comes back and the closed-check judges it.
 
     scrape_sem, when given, is held ONLY around the browser fetch. ATS
     resolution is cheap and is the common path, so gating it on the scrape
@@ -208,18 +211,16 @@ async def refresh_content(
             content, redirected = await fetching.fetch_page(url)
     else:
         content, redirected = await fetching.fetch_page(url)
-    if redirected:
-        record_manual(
-            url=url,
-            check_type="closed",
-            rejected=True,
-            reason="posting redirects away (board index or careers page)",
-            company=company,
-            job_title=job_title,
-            context=context,
-        )
-        return None, "redirected_away"
     if content:
+        # A redirect is no longer a verdict. It used to record a closure here
+        # without the page being read, which marked 74 live jobs dead - boards
+        # rewrite posting URLs constantly and no URL comparison separates a
+        # canonicalisation from a bounce. The browser followed the redirect and
+        # has the page, so the closed-check reads it and decides. That costs an
+        # AI call on redirecting postings and is worth it: the model can tell a
+        # posting from a careers index, and a URL cannot.
+        if redirected:
+            logger.info(f"{url} landed elsewhere; letting the check judge the page")
         add_ai_result(
             url, "passed", "scraped", "content", input_content=content, config_name="content-cache"
         )
