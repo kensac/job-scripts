@@ -144,6 +144,8 @@ def pytest_sessionfinish(session, exitstatus) -> None:
 _MUTABLE_TABLES = [
     "tasks",
     "jobs",
+    "job_requirements",
+    "job_skills",
     "user_jobs",
     "users",
     "user_filters",

@@ -176,3 +176,48 @@ def make_task(kind: str, payload: dict[str, Any] | None = None, *, status: str =
     )
     assert row is not None
     return row["id"]
+
+
+def make_requirements(
+    url: str,
+    *,
+    has_requirements: bool = True,
+    skills_required: list[str] | None = None,
+    skills_preferred: list[str] | None = None,
+    **fields: Any,
+) -> None:
+    """A job_requirements row plus its job_skills rows, written the way the
+    handler writes them - canonical skill beside the raw text - so a test that
+    passes here is testing the same shape production reads."""
+    from core import skills as skills_lib
+
+    columns = {
+        "yoe_min": None,
+        "yoe_max": None,
+        "degree_min": None,
+        "degree_required": False,
+        "degree_fields": [],
+        "enrollment_required": False,
+        "seniority": None,
+        "employment_type": None,
+        "clearance": None,
+        "citizenship_required": False,
+        "sponsorship": None,
+        **fields,
+    }
+    names = ", ".join(columns)
+    placeholders = ", ".join(f"%({k})s" for k in columns)
+    db.execute(
+        f"INSERT INTO job_requirements (url, has_requirements, {names}) "
+        f"VALUES (%(url)s, %(has)s, {placeholders})",
+        {"url": url, "has": has_requirements, **columns},
+    )
+    for kind, raws in (("required", skills_required), ("preferred", skills_preferred)):
+        for raw in raws or []:
+            skill = skills_lib.canonical(raw)
+            if skill:
+                db.execute(
+                    "INSERT INTO job_skills (url, kind, skill, skill_raw) VALUES (%s, %s, %s, %s) "
+                    "ON CONFLICT DO NOTHING",
+                    (url, kind, skill, raw),
+                )

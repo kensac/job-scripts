@@ -342,6 +342,37 @@ def get_custom_result(
     return dict(row) if row else None
 
 
+# A page shorter than this is a login wall, an error stub or a cookie banner,
+# not a posting. It is the threshold every content-consuming sweep already
+# used inline; naming it here keeps the three of them from drifting apart.
+MIN_CONTENT_CHARS = 200
+
+
+# The one spelling of "which stored page text feeds the AI for this url".
+#
+# Prefers a raw 'content' row over the copy attached to a check, then takes the
+# newest. Formatted with the url expression to join against, so a sweep over
+# jobs passes 'j.url' and a sweep over ai_queries itself passes its own alias;
+# every caller gets the same row for the same url either way.
+#
+# Deliberately NOT the same query as get_content(), which takes the newest text
+# whatever check produced it. Preferring a 'content' row can return older text,
+# which is right for extracting stable facts and wrong for deciding whether a
+# posting has since closed.
+CONTENT_LATERAL = (
+    """
+        JOIN LATERAL (
+            SELECT input_content FROM ai_queries q
+            WHERE q.url = {url} AND q.input_content IS NOT NULL
+              AND length(q.input_content) > """
+    + str(MIN_CONTENT_CHARS)
+    + """
+            ORDER BY (q.check_type = 'content') DESC, q.id DESC LIMIT 1
+        ) q ON TRUE
+"""
+)
+
+
 def get_content(url: str) -> str | None:
     """Most recent non-empty raw scraped content stored for a url.
 

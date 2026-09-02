@@ -19,6 +19,7 @@ from api.tasks.filters import (
 )
 from api.tasks.health import handle_data_health
 from api.tasks.ingest import handle_ingest_source
+from api.tasks.requirements import handle_extract_requirements
 from api.tasks.uploads import handle_extract_upload
 from api.tasks.verify import (
     handle_reverify_chunk,
@@ -36,6 +37,7 @@ HANDLERS = {
     "reverify_open": handle_reverify_open,
     "reverify_chunk": handle_reverify_chunk,
     "extract_comp": handle_extract_comp,
+    "extract_requirements": handle_extract_requirements,
     "send_digests": handle_send_digests,
     "data_health": handle_data_health,
     "poll_batches": handle_poll_batches,
