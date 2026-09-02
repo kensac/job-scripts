@@ -316,6 +316,24 @@ _FUTURE_FACING_KINDS = frozenset(
 _APPOINTMENT_KINDS = frozenset({"interview_scheduled"})
 
 
+# Mail the candidate SENT is not an inbound event about the candidate. The
+# instruction asks the model what "the SENDER is communicating", and when the
+# sender is the candidate every kind comes out backwards - his own reply to a
+# professor saying he had started work and was enjoying it was classified as an
+# offer. 942 messages are self-sent and 137 of them carried inbound events,
+# inflating the interviewing and offer counts directly.
+#
+# Direction is knowable from the header, so it is read rather than inferred.
+# Handing it to a model turns a fact into a probability.
+#
+# THE MESSAGES ARE KEPT, only their classification as inbound events is
+# skipped. Sent mail is the best record that exists of WHEN the candidate
+# applied - better than applications.applied_at, which currently infers it from
+# the first inbound reply - and that is a different signal with a different
+# shape, to be built deliberately rather than fall out of a misread event kind.
+_SELF_SENT = "(u.email <> '' AND position(lower(u.email) in lower(COALESCE(m.from_email, ''))) > 0)"
+
+
 @dataclasses.dataclass(frozen=True)
 class ParsedWhen:
     """A moment an email referred to, and how much of it was actually stated.
@@ -492,19 +510,25 @@ async def handle_classify_mail(task_id: int, payload: dict[str, Any]) -> None:
                 "split it into several tasks"
             )
         rows = db.query(
-            """
-            SELECT m.id, m.from_email, m.subject, m.sent_at, m.body_text
-            FROM email_messages m WHERE m.id = ANY(%(ids)s) ORDER BY m.id
+            f"""
+            SELECT m.id, m.from_email, m.subject, m.sent_at, m.body_text,
+                   {_SELF_SENT} AS self_sent
+            FROM email_messages m
+            JOIN users u ON u.id = m.user_id
+            WHERE m.id = ANY(%(ids)s) ORDER BY m.id
             """,
             {"ids": ids},
         )
         logger.info(f"Task {task_id}: re-classifying {len(rows)} of {len(ids)} requested messages")
     else:
         rows = db.query(
-            """
-            SELECT m.id, m.from_email, m.subject, m.sent_at, m.body_text
+            f"""
+            SELECT m.id, m.from_email, m.subject, m.sent_at, m.body_text,
+                   FALSE AS self_sent
             FROM email_messages m
+            JOIN users u ON u.id = m.user_id
             WHERE NOT EXISTS (SELECT 1 FROM email_events e WHERE e.message_id = m.id)
+              AND NOT {_SELF_SENT}
             -- Likely job mail first. The prefilter gates nothing, so this only
             -- changes the ORDER in which the whole mailbox is worked through -
             -- which matters because the useful results arrive sooner.
@@ -513,8 +537,27 @@ async def handle_classify_mail(task_id: int, payload: dict[str, Any]) -> None:
             """,
             {"cap": cap},
         )
+    # Self-sent mail only reaches here through an explicit message_ids repair,
+    # because the sweep excludes it. Correcting one needs no model: the header
+    # already settles direction, so the event is written directly, costs
+    # nothing, and supersedes the wrong one by the same latest-wins rule. Left
+    # to the model these come back as offers and interviews - that is what the
+    # 137 already-written events are.
+    corrected = [r for r in rows if r["self_sent"]]
+    rows = [r for r in rows if not r["self_sent"]]
+    for row in corrected:
+        db.execute(
+            """
+            INSERT INTO email_events (message_id, kind, confidence, detail, model)
+            VALUES (%s, 'not_job_related', 'high', %s, NULL)
+            """,
+            (row["id"], db.jsonb({"reason": "self_sent"})),
+        )
+    if corrected:
+        logger.info(f"Task {task_id}: corrected {len(corrected)} self-sent message(s)")
+
     if not rows:
-        _set_progress(task_id, 0, 0, "nothing to classify")
+        _set_progress(task_id, len(corrected), len(corrected), "nothing to classify")
         return
 
     by_id = {r["id"]: r["sent_at"] for r in rows}
