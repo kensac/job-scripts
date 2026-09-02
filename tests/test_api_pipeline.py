@@ -783,3 +783,52 @@ def test_the_whole_thread_can_be_declined(client, user_headers):
         json={"application_id": app_id, "whole_thread": False},
     ).json()
     assert body["messages_assigned"] == 1
+
+
+def test_assigning_a_reply_takes_the_message_that_started_the_thread(client, user_headers):
+    """provider_thread_id is the first References entry - the Message-ID of the
+    message that STARTED the thread. So replies carry it and the root does not,
+    because a first message has no References. 1,113 messages in production are
+    the origin of a thread that exists without being part of it, so assigning a
+    reply moved its siblings and silently left the original behind."""
+    uid = db.query_one("SELECT id FROM users WHERE email = %s", ("user@example.com",))["id"]
+    app_id = _app(uid, company="Acme", title="Engineer")
+
+    root = db.query_one(
+        "INSERT INTO email_messages (user_id, provider_message_id, provider_thread_id, source, "
+        "subject, from_email, sent_at) VALUES (%s,'<root@acme>',NULL,'takeout','Your application',"
+        "'a@acme.com',now()) RETURNING id",
+        (uid,),
+    )["id"]
+    reply = db.query_one(
+        "INSERT INTO email_messages (user_id, provider_message_id, provider_thread_id, source, "
+        "subject, from_email, sent_at) VALUES (%s,'<r1@acme>','<root@acme>','takeout',"
+        "'Re: Your application','a@acme.com',now()) RETURNING id",
+        (uid,),
+    )["id"]
+
+    body = client.post(
+        f"/v1/user/messages/{reply}/assign",
+        headers=user_headers,
+        json={"application_id": app_id},
+    ).json()
+    assert body["messages_assigned"] == 2, "the message that started it belongs to it"
+
+    detail = client.get(f"/v1/user/pipeline/{app_id}", headers=user_headers).json()
+    assert {m["message_id"] for m in detail["matches"] if m["in_force"]} == {root, reply}
+
+
+def test_a_message_with_no_thread_and_no_replies_stays_alone(client, user_headers):
+    """Coalescing to the message's own id must not become a way to group
+    unrelated mail - that is the failure that made subject grouping unsafe."""
+    uid = db.query_one("SELECT id FROM users WHERE email = %s", ("user@example.com",))["id"]
+    app_id = _app(uid, company="Acme", title="Engineer")
+    alone = _mail(uid, subject="Thanks for applying", kind="acknowledgement")
+    _mail(uid, subject="Thanks for applying", kind="acknowledgement")
+
+    body = client.post(
+        f"/v1/user/messages/{alone}/assign",
+        headers=user_headers,
+        json={"application_id": app_id},
+    ).json()
+    assert body["messages_assigned"] == 1

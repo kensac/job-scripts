@@ -67,6 +67,7 @@ def store_messages(user_id: int, messages: Iterable[ImportedMessage]) -> int:
                     message.body_text,
                     verdict.hit,
                     verdict.reason,
+                    db.jsonb(message.headers) if message.headers else None,
                 )
             )
         with db.pool.connection() as conn, conn.cursor() as cur:
@@ -75,8 +76,8 @@ def store_messages(user_id: int, messages: Iterable[ImportedMessage]) -> int:
                 INSERT INTO email_messages (
                     user_id, provider_message_id, provider_thread_id, source,
                     from_email, from_name, to_emails, subject, sent_at,
-                    body_text, prefilter_hit, prefilter_reason
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    body_text, prefilter_hit, prefilter_reason, headers
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (user_id, provider_message_id) DO UPDATE SET
                     -- Only ever improve. A thinner copy from another archive
                     -- must not blank a field an earlier import already filled.
@@ -87,7 +88,10 @@ def store_messages(user_id: int, messages: Iterable[ImportedMessage]) -> int:
                         email_messages.provider_thread_id, EXCLUDED.provider_thread_id
                     ),
                     prefilter_hit = EXCLUDED.prefilter_hit,
-                    prefilter_reason = EXCLUDED.prefilter_reason
+                    prefilter_reason = EXCLUDED.prefilter_reason,
+                    -- Same only-ever-improve rule: an archive that carried the
+                    -- threading chain must not be blanked by one that did not.
+                    headers = COALESCE(EXCLUDED.headers, email_messages.headers)
                 """,
                 rows,
             )
