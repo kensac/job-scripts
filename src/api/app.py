@@ -6,7 +6,16 @@ from fastapi import Depends, FastAPI
 
 from api import db, metrics
 from api.auth import require_user
-from api.routers import admin, filters, jobs, sources, spend, stats, users
+from api.routers import (
+    admin,
+    filter_insights,
+    filters,
+    jobs,
+    sources,
+    spend,
+    stats,
+    users,
+)
 
 
 @asynccontextmanager
@@ -33,6 +42,7 @@ app.include_router(sources.router, prefix="/v1")
 app.include_router(stats.router, prefix="/v1")
 app.include_router(admin.router, prefix="/v1")
 app.include_router(spend.router, prefix="/v1")
+app.include_router(filter_insights.router, prefix="/v1")
 metrics.instrument(app)
 
 
