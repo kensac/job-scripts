@@ -30,6 +30,16 @@ _SORTABLE = {
 }
 
 
+# The wire name for "no match row at all", which is a third state and not an
+# absence. `unmatched` means the matcher ran and found nothing;
+# `not_an_application` means it correctly refused to look; NEVER_ATTEMPTED
+# means nothing has run yet. The first two look identical in any aggregate and
+# mean opposite things, and the third is the one worth filtering for when
+# hunting failures - so it needs a name rather than being reachable only as a
+# gap in a list.
+NEVER_ATTEMPTED = "never_attempted"
+
+
 def _where(
     *,
     kind: str | None,
@@ -37,6 +47,7 @@ def _where(
     source: str | None,
     prefilter: bool | None,
     q: str | None,
+    method: str | None = None,
 ) -> tuple[str, dict[str, Any]]:
     clauses: list[str] = []
     params: dict[str, Any] = {}
@@ -48,6 +59,11 @@ def _where(
         # found nothing" - so unmatched is a value to filter on, not an
         # absence to skip over.
         clauses.append("mt.application_id IS NOT NULL" if matched else "mt.application_id IS NULL")
+    if method == NEVER_ATTEMPTED:
+        clauses.append("mt.match_id IS NULL")
+    elif method:
+        clauses.append("mt.method = %(method)s")
+        params["method"] = method
     if source:
         clauses.append("m.source = %(source)s")
         params["source"] = source
@@ -81,6 +97,7 @@ def list_mail(
     matched: bool | None = None,
     source: str | None = None,
     prefilter: bool | None = None,
+    method: str | None = None,
     q: str | None = None,
     sort: str = "sent_at",
     dir: str = "desc",
@@ -88,7 +105,9 @@ def list_mail(
     page_size: int = 50,
     user: AuthedUser = Depends(require_admin),
 ):
-    where, params = _where(kind=kind, matched=matched, source=source, prefilter=prefilter, q=q)
+    where, params = _where(
+        kind=kind, matched=matched, source=source, prefilter=prefilter, q=q, method=method
+    )
     page = max(1, page)
     page_size = max(1, min(page_size, 200))
     total = db.query_one(
@@ -1210,3 +1229,65 @@ def answer_suggestion(
             (status, user.id, app["job_id"]),
         )
     return {"ok": True, "status": status if body.response == ACCEPTED else None}
+
+
+class ActionAnswer(BaseModel):
+    note: str | None = None
+
+
+@router.post("/user/actions/{action_id}/resolve")
+def resolve_action(action_id: int, body: ActionAnswer, user: AuthedUser = Depends(require_user)):
+    """Mark an action done, because for some kinds nothing else ever will.
+
+    Auto-resolution carries most of the weight and should: an assessment invite
+    is closed by the acknowledgement that follows it, not by the user
+    remembering. That is what makes this no-touch rather than a second inbox.
+
+    But two kinds have no settling event at all. `respond_to_offer` closes only
+    on a rejection, so accepting an offer, declining it or signing never
+    settles it - 146 open and none has ever closed. `reply_to_recruiter` has an
+    empty settling set by construction. For those, a person is the only
+    producer, exactly as the board is the only producer of `withdrawn`.
+
+    Guarded on the event id in sync_action_items, so a resolved item is not
+    reopened by the next recomputation.
+    """
+    row = db.query_one(
+        "SELECT id, resolved_at FROM action_items WHERE id = %s AND user_id = %s",
+        (action_id, user.id),
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="action not found")
+    if row["resolved_at"] is not None:
+        return {"ok": True, "already": True}
+    db.execute(
+        "UPDATE action_items SET resolved_at = now(), resolution = %s WHERE id = %s",
+        (body.note or "marked done", action_id),
+    )
+    return {"ok": True, "already": False}
+
+
+@router.post("/user/actions/{action_id}/reopen")
+def reopen_action(action_id: int, body: ActionAnswer, user: AuthedUser = Depends(require_user)):
+    """Undo a manual resolution.
+
+    Refused on one that a later event settled: that is a fact about the mail
+    rather than a decision the user made, and reopening it would only have it
+    close again on the next recomputation.
+    """
+    row = db.query_one(
+        "SELECT id, resolved_by_event_id FROM action_items WHERE id = %s AND user_id = %s",
+        (action_id, user.id),
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="action not found")
+    if row["resolved_by_event_id"] is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="a later email settled this; it would close again on the next pass",
+        )
+    db.execute(
+        "UPDATE action_items SET resolved_at = NULL, resolution = NULL WHERE id = %s",
+        (action_id,),
+    )
+    return {"ok": True}

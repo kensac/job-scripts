@@ -625,3 +625,81 @@ def test_another_users_suggestion_cannot_be_answered(client, user_headers, other
         json={"response": "accepted"},
     )
     assert resp.status_code == 404
+
+
+def _action(uid, app_id, kind="respond_to_offer", event_id=None):
+    return db.query_one(
+        "INSERT INTO action_items (user_id, application_id, event_id, kind) "
+        "VALUES (%s,%s,%s,%s) RETURNING id",
+        (uid, app_id, event_id, kind),
+    )["id"]
+
+
+def test_an_action_nothing_can_close_is_closeable_by_the_person(client, user_headers):
+    """respond_to_offer settles only on a rejection, so accepting an offer,
+    declining it or signing never closes it: 146 open in production and not one
+    has ever resolved. For those kinds a person is the only producer, exactly
+    as the board is the only producer of `withdrawn`."""
+    uid = db.query_one("SELECT id FROM users WHERE email = %s", ("user@example.com",))["id"]
+    app_id = _app(uid, company="Acme", title="Engineer")
+    action = _action(uid, app_id)
+
+    resp = client.post(
+        f"/v1/user/actions/{action}/resolve", headers=user_headers, json={"note": "signed"}
+    )
+    assert resp.status_code == 200
+    row = db.query_one("SELECT resolved_at, resolution FROM action_items WHERE id = %s", (action,))
+    assert row["resolved_at"] is not None
+    assert row["resolution"] == "signed"
+
+
+def test_recomputing_does_not_reopen_what_the_person_closed(client, user_headers):
+    """sync_action_items runs on every pass. A manual resolution that the next
+    recomputation undoes is not a resolution."""
+    from api.mail_pipeline import sync_action_items
+
+    uid = db.query_one("SELECT id FROM users WHERE email = %s", ("user@example.com",))["id"]
+    app_id = _app(uid, company="Acme", title="Engineer")
+    mid = _mail(uid, kind="offer", company="Acme")
+    _match(mid, app_id)
+    sync_action_items(app_id)
+
+    action = db.query_one("SELECT id FROM action_items WHERE application_id = %s", (app_id,))["id"]
+    client.post(f"/v1/user/actions/{action}/resolve", headers=user_headers, json={})
+    sync_action_items(app_id)
+
+    assert (
+        db.query_one(
+            "SELECT count(*) AS n FROM action_items WHERE application_id = %s AND resolved_at IS NULL",
+            (app_id,),
+        )["n"]
+        == 0
+    )
+
+
+def test_reopening_is_refused_when_an_email_settled_it(client, user_headers):
+    """That is a fact about the mail rather than a decision the person made,
+    and reopening it would only have it close again on the next pass."""
+    uid = db.query_one("SELECT id FROM users WHERE email = %s", ("user@example.com",))["id"]
+    app_id = _app(uid, company="Acme", title="Engineer")
+    mid = _mail(uid, kind="acknowledgement", company="Acme")
+    settling = db.query_one("SELECT id FROM email_events WHERE message_id = %s", (mid,))["id"]
+    action = _action(uid, app_id, kind="complete_assessment")
+    db.execute(
+        "UPDATE action_items SET resolved_at = now(), resolved_by_event_id = %s WHERE id = %s",
+        (settling, action),
+    )
+    resp = client.post(f"/v1/user/actions/{action}/reopen", headers=user_headers, json={})
+    assert resp.status_code == 409
+
+
+def test_another_users_action_cannot_be_closed(client, user_headers, other_user_headers):
+    uid = db.query_one("SELECT id FROM users WHERE email = %s", ("user@example.com",))["id"]
+    app_id = _app(uid, company="Private", title="Engineer")
+    action = _action(uid, app_id)
+    assert (
+        client.post(
+            f"/v1/user/actions/{action}/resolve", headers=other_user_headers, json={}
+        ).status_code
+        == 404
+    )
