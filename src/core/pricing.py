@@ -14,6 +14,10 @@ PRICES_PER_MTOK: dict[str, tuple[float, float]] = {
     # Sonnet 5's launch intro price ($2/$10) became the standard price.
     "claude-sonnet-5": (2.00, 10.00),
     "claude-haiku-4-5": (1.00, 5.00),
+    # Embedding models have no output side, and 0.00 says that rather than
+    # leaving the pair to be guessed at. estimate_cost_usd multiplies the
+    # completion count by this, and an embedding call reports none.
+    "text-embedding-3-small": (0.02, 0.00),
 }
 
 # The Batch API bills at half the synchronous rate. This is the whole reason

@@ -11,11 +11,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from api import criteria, db
 from api.auth import AuthedUser, require_user
-from api.routers.jobs import _VISIBILITY
+from api.routers.jobs import _VISIBILITY, _require_visible_job
 from core import skills as skills_lib
 from core.requirements import (
     CLEARANCE_LEVELS,
@@ -39,10 +39,16 @@ TOP_SKILLS = 40
 # are already three spellings of "can this user see this job" in the codebase
 # and the whole point of the constant is that a fourth never gets written.
 # job_requirements is url-keyed, so the join is on url, not on job id.
-_SLICE = """
+_VISIBLE = """
 WITH visible AS (
 {visibility}
-),
+)
+"""
+
+# Appended to _VISIBLE by the endpoints that need what a posting REQUIRES.
+# The similarity route wants only the visible set, so it stops at _VISIBLE
+# rather than dragging in a CTE it does not read.
+_SLICE = """,
 slice AS (
     SELECT DISTINCT r.* FROM visible v
     JOIN job_requirements r ON r.url = v.url
@@ -53,13 +59,17 @@ slice AS (
 """
 
 
-def _slice_sql(body: str) -> str:
+def _visible_sql(body: str) -> str:
     return (
-        _SLICE.format(
+        _VISIBLE.format(
             visibility=_VISIBILITY.format(columns="j.url", criteria=criteria.SQL, extra="")
         )
         + body
     )
+
+
+def _slice_sql(body: str) -> str:
+    return _visible_sql(_SLICE + body)
 
 
 def _params(user: AuthedUser, seniority: str | None, employment_type: str | None) -> dict[str, Any]:
@@ -302,4 +312,58 @@ def gap(
         "matching_skills": strengths,
         "unused_skills": unused,
         "blockers": blockers,
+    }
+
+
+# How many neighbours a similarity query returns. Small on purpose: the answer
+# is a panel beside a posting, and the twentieth-most-similar role in a slice
+# of a few thousand is not similar to anything.
+SIMILAR_LIMIT = 10
+
+
+@router.get("/jobs/{job_id}/similar")
+def similar(job_id: int, user: AuthedUser = Depends(require_user)):
+    """Postings that read like this one, among the ones this user can see.
+
+    Gated through _require_visible_job rather than a fresh predicate: this is a
+    per-job route, and per-job routes taking any of 49k ids is a bug this
+    codebase has already shipped once. The neighbours are constrained to the
+    same visible slice, so the route cannot become a way to read a posting the
+    user could not otherwise see.
+
+    No vector index backs this, deliberately. The slice is a fraction of the
+    corpus, which makes an exact scan single-digit milliseconds and exact
+    rather than approximate; the migration carries the measurements.
+    """
+    job = _require_visible_job(user, job_id, "j.id, j.url")
+    anchor = db.query_one("SELECT embedding FROM job_embeddings WHERE url = %s", (job["url"],))
+    if not anchor:
+        # Not an error: the sweep is a backlog walker, so a posting ingested in
+        # the last hour legitimately has no vector yet.
+        raise HTTPException(
+            404, detail={"code": "NOT_EMBEDDED", "message": "no embedding for this posting yet"}
+        )
+    params = _params(user, None, None)
+    return {
+        "job_id": job_id,
+        "neighbours": db.query(
+            _visible_sql(
+                """
+                SELECT j.id, j.company, j.title, j.url,
+                       1 - (e.embedding <=> %(anchor)s::vector) AS similarity
+                FROM visible v
+                JOIN jobs j ON j.url = v.url
+                JOIN job_embeddings e ON e.url = v.url
+                WHERE v.url != %(url)s
+                ORDER BY e.embedding <=> %(anchor)s::vector
+                LIMIT %(limit)s
+                """
+            ),
+            {
+                **params,
+                "anchor": str(anchor["embedding"]),
+                "url": job["url"],
+                "limit": SIMILAR_LIMIT,
+            },
+        ),
     }

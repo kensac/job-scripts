@@ -11,6 +11,7 @@ from api.tasks.batches import handle_poll_batches
 from api.tasks.comp import handle_extract_comp
 from api.tasks.content import handle_fetch_missing_content
 from api.tasks.digests import handle_send_digests
+from api.tasks.embeddings import handle_embed_postings
 from api.tasks.filters import (
     handle_run_all_filters,
     handle_run_filter,
@@ -38,6 +39,7 @@ HANDLERS = {
     "reverify_chunk": handle_reverify_chunk,
     "extract_comp": handle_extract_comp,
     "extract_requirements": handle_extract_requirements,
+    "embed_postings": handle_embed_postings,
     "send_digests": handle_send_digests,
     "data_health": handle_data_health,
     "poll_batches": handle_poll_batches,
