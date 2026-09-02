@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import os
-from typing import Optional
 
 from cryptography.fernet import Fernet
 
-_fernet: Optional[Fernet] = None
+_fernet: Fernet | None = None
 
 
 def _get() -> Fernet:

@@ -53,8 +53,7 @@ def apply_source_group(body: ApplyGroupBody, user: AuthedUser = Depends(require_
             conn.execute("DELETE FROM user_sources WHERE user_id = %s", (user.id,))
         for source in members:
             conn.execute(
-                "INSERT INTO user_sources (user_id, source) VALUES (%s, %s) "
-                "ON CONFLICT DO NOTHING",
+                "INSERT INTO user_sources (user_id, source) VALUES (%s, %s) ON CONFLICT DO NOTHING",
                 (user.id, source),
             )
     return {"ok": True, "enabled": members, "mode": body.mode}
@@ -109,9 +108,7 @@ def list_sources(user: AuthedUser = Depends(require_user)):
 
 @router.put("/user/sources")
 def put_sources(body: SourcesPut, user: AuthedUser = Depends(require_user)):
-    known = {
-        r["name"] for r in db.query("SELECT name FROM sources WHERE active")
-    }
+    known = {r["name"] for r in db.query("SELECT name FROM sources WHERE active")}
     unknown = [s for s in body.enabled if s not in known]
     if unknown:
         raise HTTPException(

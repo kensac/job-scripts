@@ -142,6 +142,7 @@ def test_admin_group_budgets_roundtrip(client, admin_headers):
 
 def test_cancel_tasks_cancels_only_live_states(client, admin_headers):
     from api import worker
+
     t1 = worker.enqueue("run_filter", {"user_id": 1})
     t2 = worker.enqueue("run_filter", {"user_id": 2})
     db.execute("UPDATE tasks SET status = 'done' WHERE id = %s", (t2,))
@@ -173,7 +174,10 @@ def test_invite_rejects_bad_email(client, admin_headers):
 
 def test_query_options_serves_live_vocabularies(client, admin_headers):
     from core.store import add_ai_result
-    db.execute("INSERT INTO sources (name, listings_url) VALUES ('src-a', 'https://x') ON CONFLICT DO NOTHING")
+
+    db.execute(
+        "INSERT INTO sources (name, listings_url) VALUES ('src-a', 'https://x') ON CONFLICT DO NOTHING"
+    )
     add_ai_result("https://o.test/1", "passed", "r", "closed", config_name="verify-batch")
     resp = client.get("/v1/admin/queries/options", headers=admin_headers)
     assert resp.status_code == 200
@@ -185,6 +189,7 @@ def test_query_options_serves_live_vocabularies(client, admin_headers):
 
 def test_queries_filter_by_source(client, admin_headers):
     from core.store import add_ai_result
+
     db.execute(
         "INSERT INTO jobs (url, source, company, title) VALUES "
         "('https://s.test/a', 'src-x', 'A', 'T'), ('https://s.test/b', 'src-y', 'B', 'T')"
@@ -198,14 +203,23 @@ def test_queries_filter_by_source(client, admin_headers):
 
 def test_batch_jobs_drilldown_reports_per_job_cost(client, admin_headers):
     from core.store import add_ai_result
+
     db.execute(
         "INSERT INTO ai_batches (provider_batch_id, purpose, model, requests, status) "
         "VALUES ('batch_x1', 'verify', 'gpt-5-nano', 1, 'completed')"
     )
-    db.execute("INSERT INTO jobs (url, source, company, title) VALUES ('https://b.test/1','s','Acme','SWE')")
+    db.execute(
+        "INSERT INTO jobs (url, source, company, title) VALUES ('https://b.test/1','s','Acme','SWE')"
+    )
     add_ai_result(
-        "https://b.test/1", "passed", "job open", "closed",
-        prompt_tokens=1000, completion_tokens=100, total_tokens=1100, batch_id="batch_x1",
+        "https://b.test/1",
+        "passed",
+        "job open",
+        "closed",
+        prompt_tokens=1000,
+        completion_tokens=100,
+        total_tokens=1100,
+        batch_id="batch_x1",
     )
     resp = client.get("/v1/admin/batches/batch_x1/jobs", headers=admin_headers)
     assert resp.status_code == 200
@@ -218,21 +232,28 @@ def test_batch_jobs_drilldown_reports_per_job_cost(client, admin_headers):
 
 
 def _content_row(url, reason, when_days_ago):
-    from core.store import add_ai_result
     import datetime
-    add_ai_result(url, "passed", reason, "content", input_content="X" * 400,
-                  config_name="content-cache")
+
+    from core.store import add_ai_result
+
+    add_ai_result(
+        url, "passed", reason, "content", input_content="X" * 400, config_name="content-cache"
+    )
     stamp = (datetime.datetime.now() - datetime.timedelta(days=when_days_ago)).isoformat()
     db.execute(
         "UPDATE ai_queries SET created_at = %s WHERE id = "
-        "(SELECT MAX(id) FROM ai_queries WHERE url = %s)", (stamp, url)
+        "(SELECT MAX(id) FROM ai_queries WHERE url = %s)",
+        (stamp, url),
     )
 
 
 def test_health_detects_ats_collapse_and_resolves_when_it_recovers(client, admin_headers):
     from api import health
-    db.execute("INSERT INTO jobs (url, source, company, title) SELECT "
-               "'https://h.test/' || g, 'hsrc', 'C', 'T' FROM generate_series(1,60) g")
+
+    db.execute(
+        "INSERT INTO jobs (url, source, company, title) SELECT "
+        "'https://h.test/' || g, 'hsrc', 'C', 'T' FROM generate_series(1,60) g"
+    )
     # Baseline week: ATS text served reliably.
     for i in range(1, 31):
         _content_row(f"https://h.test/{i}", "ats text", 4)
@@ -256,12 +277,12 @@ def test_health_detects_ats_collapse_and_resolves_when_it_recovers(client, admin
     # Condition clears -> alert auto-resolves, but only after RESOLVE_GRACE of
     # silence: a detector going quiet for one cycle is not proof it is over.
     health.record([f for f in health.detect() if f["subject"] != "hsrc"])
-    assert db.query_one(
-        "SELECT resolved_at FROM health_alerts WHERE subject = 'hsrc'"
-    )["resolved_at"] is None
+    assert (
+        db.query_one("SELECT resolved_at FROM health_alerts WHERE subject = 'hsrc'")["resolved_at"]
+        is None
+    )
     db.execute(
-        "UPDATE health_alerts SET last_seen = now() - interval '1 day' "
-        "WHERE subject = 'hsrc'"
+        "UPDATE health_alerts SET last_seen = now() - interval '1 day' WHERE subject = 'hsrc'"
     )
     health.record([f for f in health.detect() if f["subject"] != "hsrc"])
     row = db.query_one("SELECT resolved_at FROM health_alerts WHERE subject = 'hsrc'")
@@ -270,8 +291,11 @@ def test_health_detects_ats_collapse_and_resolves_when_it_recovers(client, admin
 
 def test_health_ignores_low_volume_noise(client, admin_headers):
     from api import health
-    db.execute("INSERT INTO jobs (url, source, company, title) VALUES "
-               "('https://q.test/1','quiet','C','T'), ('https://q.test/2','quiet','C','T')")
+
+    db.execute(
+        "INSERT INTO jobs (url, source, company, title) VALUES "
+        "('https://q.test/1','quiet','C','T'), ('https://q.test/2','quiet','C','T')"
+    )
     _content_row("https://q.test/1", "ats text", 4)
     _content_row("https://q.test/2", "scraped", 0)
     assert not [f for f in health.detect() if f["subject"] == "quiet"]
@@ -281,12 +305,17 @@ def test_manual_check_addresses_filters_by_hash(client, admin_headers):
     uid = db.query_one("SELECT id FROM users WHERE sub = %s", (admin_headers["X-User-Sub"],))["id"]
     db.execute(
         "INSERT INTO user_filters (user_id, name, prompt, prompt_hash) "
-        "VALUES (%s, 'byhash', 'keep backend roles', 'hash-xyz')", (uid,)
+        "VALUES (%s, 'byhash', 'keep backend roles', 'hash-xyz')",
+        (uid,),
     )
-    db.execute("INSERT INTO jobs (url, source, company, title) VALUES ('https://mh.test/1','s','C','T')")
+    db.execute(
+        "INSERT INTO jobs (url, source, company, title) VALUES ('https://mh.test/1','s','C','T')"
+    )
     jid = db.query_one("SELECT id FROM jobs WHERE url = 'https://mh.test/1'")["id"]
     resp = client.post(
-        "/v1/admin/checks/run", json={"job_id": jid, "check": "hash:hash-xyz"}, headers=admin_headers
+        "/v1/admin/checks/run",
+        json={"job_id": jid, "check": "hash:hash-xyz"},
+        headers=admin_headers,
     )
     # No cached content for this job, so it stops at the content guard rather
     # than the addressing — which is what proves the hash resolved.
@@ -300,7 +329,9 @@ def test_manual_check_addresses_filters_by_hash(client, admin_headers):
 def test_delete_source_refuses_while_in_use_then_succeeds(client, admin_headers):
     db.execute("INSERT INTO sources (name, listings_url) VALUES ('doomed', 'https://x')")
     db.execute("INSERT INTO source_groups (name, members) VALUES ('grp', ARRAY['doomed','other'])")
-    db.execute("INSERT INTO jobs (url, source, company, title) VALUES ('https://d.test/1','doomed','C','T')")
+    db.execute(
+        "INSERT INTO jobs (url, source, company, title) VALUES ('https://d.test/1','doomed','C','T')"
+    )
 
     resp = client.delete("/v1/admin/sources/doomed", headers=admin_headers)
     assert resp.status_code == 409
@@ -312,39 +343,60 @@ def test_delete_source_refuses_while_in_use_then_succeeds(client, admin_headers)
     assert resp.status_code == 200
     assert db.query_one("SELECT 1 FROM sources WHERE name = 'doomed'") is None
     # Group membership is cleaned so nothing points at a ghost.
-    assert db.query_one("SELECT members FROM source_groups WHERE name = 'grp'")["members"] == ["other"]
+    assert db.query_one("SELECT members FROM source_groups WHERE name = 'grp'")["members"] == [
+        "other"
+    ]
     assert client.delete("/v1/admin/sources/doomed", headers=admin_headers).status_code == 404
 
 
 def test_delete_source_force_overrides_and_group_delete_works(client, admin_headers):
     db.execute("INSERT INTO sources (name, listings_url) VALUES ('forced', 'https://x')")
-    db.execute("INSERT INTO jobs (url, source, company, title) VALUES ('https://f.test/1','forced','C','T')")
+    db.execute(
+        "INSERT INTO jobs (url, source, company, title) VALUES ('https://f.test/1','forced','C','T')"
+    )
     resp = client.delete("/v1/admin/sources/forced?force=true", headers=admin_headers)
     assert resp.status_code == 200 and resp.json()["was_attached"]["jobs"] == 1
 
     db.execute("INSERT INTO source_groups (name, members) VALUES ('empty-grp', ARRAY[]::text[])")
-    assert client.delete("/v1/admin/source-groups/empty-grp", headers=admin_headers).status_code == 200
-    assert client.delete("/v1/admin/source-groups/empty-grp", headers=admin_headers).status_code == 404
+    assert (
+        client.delete("/v1/admin/source-groups/empty-grp", headers=admin_headers).status_code == 200
+    )
+    assert (
+        client.delete("/v1/admin/source-groups/empty-grp", headers=admin_headers).status_code == 404
+    )
 
 
-def test_recheck_refetches_and_reports_gone_without_asking_the_model(client, admin_headers, monkeypatch):
+def test_recheck_refetches_and_reports_gone_without_asking_the_model(
+    client, admin_headers, monkeypatch
+):
     """The reported bug: a recheck over cached text said 'open' for a posting
     that had since started redirecting to a careers page."""
     from api import verdicts
     from core.store import add_ai_result
 
-    db.execute("INSERT INTO jobs (url, source, company, title) VALUES "
-               "('https://gone.test/jobs/1','s','HP IQ','SWE')")
+    db.execute(
+        "INSERT INTO jobs (url, source, company, title) VALUES "
+        "('https://gone.test/jobs/1','s','HP IQ','SWE')"
+    )
     jid = db.query_one("SELECT id FROM jobs WHERE url = 'https://gone.test/jobs/1'")["id"]
     # Stale cache from when the posting was still live.
-    add_ai_result("https://gone.test/jobs/1", "passed", "content cached", "content",
-                  input_content="A full and healthy job description. " * 30)
+    add_ai_result(
+        "https://gone.test/jobs/1",
+        "passed",
+        "content cached",
+        "content",
+        input_content="A full and healthy job description. " * 30,
+    )
 
     async def fake_refresh(url, company="", job_title="", context="manual"):
         verdicts.record_manual(
-            url=url, check_type="closed", rejected=True,
+            url=url,
+            check_type="closed",
+            rejected=True,
             reason="posting redirects away (board index or careers page)",
-            company=company, job_title=job_title, context=context,
+            company=company,
+            job_title=job_title,
+            context=context,
         )
         return None, "redirected_away"
 
@@ -364,32 +416,41 @@ def test_recheck_refetches_and_reports_gone_without_asking_the_model(client, adm
     assert latest["status"] == "rejected"
 
 
-def test_rate_spike_ignores_expiring_rechecks_but_catches_fresh_misclassification(client, admin_headers):
+def test_rate_spike_ignores_expiring_rechecks_but_catches_fresh_misclassification(
+    client, admin_headers
+):
     """The first live alert was a reverify backlog on a fast-expiring board:
     real closures, but coverage changing rather than anything breaking. Only
     freshly-seen jobs being written off means something upstream is wrong."""
     import datetime
+
     from api import health
     from core.store import add_ai_result
 
     def closed_row(url, status, days_ago, company):
         add_ai_result(url, status, "", "closed", company=company)
         stamp = (datetime.datetime.now() - datetime.timedelta(days=days_ago)).isoformat()
-        db.execute("UPDATE ai_queries SET created_at = %s WHERE id = "
-                   "(SELECT MAX(id) FROM ai_queries WHERE url = %s)", (stamp, url))
+        db.execute(
+            "UPDATE ai_queries SET created_at = %s WHERE id = "
+            "(SELECT MAX(id) FROM ai_queries WHERE url = %s)",
+            (stamp, url),
+        )
 
     # One company per job: a rate built from a single employer's bulk drop is
     # capped at MAX_PER_COMPANY, which is the point of the cap.
-    db.execute("INSERT INTO jobs (url, source, company, title) SELECT "
-               "'https://exp.test/' || g, 'expsrc', 'co' || g, 'T' FROM generate_series(1,120) g")
+    db.execute(
+        "INSERT INTO jobs (url, source, company, title) SELECT "
+        "'https://exp.test/' || g, 'expsrc', 'co' || g, 'T' FROM generate_series(1,120) g"
+    )
     # Baseline week: fresh jobs arrive open.
     for i in range(1, 61):
         closed_row(f"https://exp.test/{i}", "passed", 4, f"co{i}")
     # Last 24h: those same jobs are RE-checked and have since expired.
     for i in range(1, 61):
         closed_row(f"https://exp.test/{i}", "rejected", 0, f"co{i}")
-    assert not [f for f in health.detect() if f["subject"] == "expsrc"], \
+    assert not [f for f in health.detect() if f["subject"] == "expsrc"], (
         "expiring re-checks must not read as breakage"
+    )
 
     # Now the real signal: brand-new jobs written off on arrival.
     for i in range(61, 121):

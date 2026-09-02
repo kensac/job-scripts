@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import tomllib
-from typing import Dict, List
 
 from core.paths import PROJECT_ROOT
 
@@ -17,8 +16,8 @@ def _load() -> dict:
         return {}
 
 
-def load_configs() -> Dict[str, Dict[str, str]]:
-    configs: Dict[str, Dict[str, str]] = {}
+def load_configs() -> dict[str, dict[str, str]]:
+    configs: dict[str, dict[str, str]] = {}
     for name, body in (_load().get("configs") or {}).items():
         if not isinstance(body, dict):
             continue
@@ -29,8 +28,8 @@ def load_configs() -> Dict[str, Dict[str, str]]:
     return configs
 
 
-def load_groups() -> Dict[str, List[str]]:
-    groups: Dict[str, List[str]] = {}
+def load_groups() -> dict[str, list[str]]:
+    groups: dict[str, list[str]] = {}
     for name, members in (_load().get("groups") or {}).items():
         if isinstance(members, list) and all(isinstance(m, str) for m in members):
             groups[name] = members

@@ -6,7 +6,9 @@ from core.filters import build_custom_instructions, compute_prompt_hash
 
 def test_create_filter_returns_task_id_or_run_blocked_and_stores_prompt_hash(client, user_headers):
     resp = client.post(
-        "/v1/user/filters", json={"name": "visa-sponsor", "prompt": "must sponsor visas"}, headers=user_headers
+        "/v1/user/filters",
+        json={"name": "visa-sponsor", "prompt": "must sponsor visas"},
+        headers=user_headers,
     )
     assert resp.status_code == 200
     body = resp.json()

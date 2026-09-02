@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import os
 import signal
 import socket
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -41,7 +40,7 @@ class AdaptiveLimiter:
         self._count = 0
         self._errors = 0
         self._win_start = time.monotonic()
-        self._prev_rate: Optional[float] = None
+        self._prev_rate: float | None = None
 
     def record(self, error: bool = False, rate_limited: bool = False) -> None:
         if rate_limited:
@@ -69,13 +68,13 @@ class AdaptiveLimiter:
         self._errors = 0
         self._win_start = time.monotonic()
         metrics.WORKER_CONCURRENCY.set(self.limit)
+
+
 INGEST_INTERVAL_MINUTES = int(os.environ.get("JOBTRACKER_INGEST_INTERVAL_MINUTES", "60"))
 # Which task kinds this worker claims; lets small fleet hosts (e.g. an rpi)
 # opt out of scrape-heavy work. Default: all kinds.
 WORKER_KINDS = [
-    k.strip()
-    for k in os.environ.get("JOBTRACKER_WORKER_KINDS", "").split(",")
-    if k.strip()
+    k.strip() for k in os.environ.get("JOBTRACKER_WORKER_KINDS", "").split(",") if k.strip()
 ]
 # Stamped on every claimed task so the admin UI can attribute work (and
 # failures - e.g. one host's IP getting blocked) to a fleet host. Set it in
@@ -86,8 +85,8 @@ WORKER_NAME = os.environ.get("JOBTRACKER_WORKER_NAME") or socket.gethostname()
 class JobExtract(BaseModel):
     company: str
     title: str
-    locations: List[str]
-    terms: List[str]
+    locations: list[str]
+    terms: list[str]
 
 
 class FilterVerdict(BaseModel):
@@ -116,7 +115,7 @@ MAX_ATTEMPTS = 3
 HEARTBEAT_TIMEOUT_MINUTES = 15
 
 
-def _claim_task() -> Optional[Dict[str, Any]]:
+def _claim_task() -> dict[str, Any] | None:
     kinds_clause = "AND kind = ANY(%(kinds)s)" if WORKER_KINDS else ""
     return db.query_one(
         f"""
@@ -154,7 +153,7 @@ def reap_stale_tasks() -> None:
     )
 
 
-def enqueue(kind: str, payload: Dict[str, Any], dedupe_key: Optional[str] = None) -> Optional[int]:
+def enqueue(kind: str, payload: dict[str, Any], dedupe_key: str | None = None) -> int | None:
     """Insert a task; with a dedupe_key, at most one task per key ever exists,
     so every fleet worker can race to enqueue and exactly one wins.
 
@@ -185,7 +184,7 @@ class AwaitingBatch(Exception):
     """
 
 
-def _park_awaiting_batch(task_id: int, batch_ids: List[str]) -> bool:
+def _park_awaiting_batch(task_id: int, batch_ids: list[str]) -> bool:
     """Records the batches a task is waiting on and releases the worker.
 
     The ids go in the payload so a resumed run reattaches to work already paid
@@ -215,7 +214,7 @@ def _park_awaiting_batch(task_id: int, batch_ids: List[str]) -> bool:
     return parked
 
 
-def _finish(task_id: int, status: str, error: Optional[str] = None) -> None:
+def _finish(task_id: int, status: str, error: str | None = None) -> None:
     # Only running tasks can be finished; an admin 'cancelled' status sticks.
     db.execute(
         "UPDATE tasks SET status = %s, error = %s, finished_at = now() "
@@ -400,7 +399,7 @@ def _load_config(user_id: int) -> tuple[Entitlement, ai.AIConfig]:
     return ent, budget.resolve_ai_config(user_id, ent)
 
 
-async def handle_extract_upload(payload: Dict[str, Any]) -> None:
+async def handle_extract_upload(payload: dict[str, Any]) -> None:
     job = db.query_one("SELECT * FROM jobs WHERE id = %s", (payload["job_id"],))
     if not job:
         raise LookupError("unknown job")
@@ -409,13 +408,13 @@ async def handle_extract_upload(payload: Dict[str, Any]) -> None:
     content = None if payload.get("force") else get_content(job["url"])
     if not content:
         content, _closure = await verdicts.refresh_content(
-            job["url"], company=job.get("company") or "",
-            job_title=job.get("title") or "", context="upload",
+            job["url"],
+            company=job.get("company") or "",
+            job_title=job.get("title") or "",
+            context="upload",
         )
     if not content:
-        db.execute(
-            "UPDATE jobs SET extraction_status = 'failed' WHERE id = %s", (job["id"],)
-        )
+        db.execute("UPDATE jobs SET extraction_status = 'failed' WHERE id = %s", (job["id"],))
         raise RuntimeError("could not extract page content")
 
     parsed, usage = await ai.parse(
@@ -430,14 +429,17 @@ async def handle_extract_upload(payload: Dict[str, Any]) -> None:
         JobExtract,
     )
     if not parsed:
-        db.execute(
-            "UPDATE jobs SET extraction_status = 'failed' WHERE id = %s", (job["id"],)
-        )
+        db.execute("UPDATE jobs SET extraction_status = 'failed' WHERE id = %s", (job["id"],))
         raise RuntimeError("extraction returned no parsed output")
 
     budget.record_usage(
-        payload["user_id"], cfg.key_source, "extract", cfg.model,
-        usage["prompt_tokens"], usage["completion_tokens"], usage["total_tokens"],
+        payload["user_id"],
+        cfg.key_source,
+        "extract",
+        cfg.model,
+        usage["prompt_tokens"],
+        usage["completion_tokens"],
+        usage["total_tokens"],
     )
     db.execute(
         """
@@ -458,7 +460,7 @@ async def _check_filter(
     instructions: str,
     prompt_hash: str,
     filter_name: str,
-) -> Optional[Dict[str, int]]:
+) -> dict[str, int] | None:
     """Runs one custom-filter check via the shared verdict primitive; returns
     usage, or None when a cached verdict made the call unnecessary."""
     if get_custom_result(url, prompt_hash, model=cfg.model):
@@ -480,7 +482,7 @@ async def _check_filter(
     return usage
 
 
-def _candidates(user_id: int) -> List[Dict[str, Any]]:
+def _candidates(user_id: int) -> list[dict[str, Any]]:
     from api import criteria
 
     settings = db.query_one(
@@ -523,7 +525,7 @@ def _set_progress(task_id: int, done: int, total: int, label: str) -> None:
     events.publish_task(task_id)
 
 
-def _decided_urls(urls: List[str], prompt_hash: str, model: str) -> set:
+def _decided_urls(urls: list[str], prompt_hash: str, model: str) -> set:
     """URLs that already have a decided verdict for this filter+model - one
     query instead of one per job, so cache-hit reruns cost nothing per row."""
     if not urls:
@@ -542,9 +544,9 @@ async def _process_jobs(
     user_id: int,
     ent,
     cfg,
-    flt: Dict[str, Any],
-    jobs: List[Dict[str, Any]],
-    parent_id: Optional[int] = None,
+    flt: dict[str, Any],
+    jobs: list[dict[str, Any]],
+    parent_id: int | None = None,
 ) -> None:
     instructions = build_custom_instructions(flt["prompt"], flt["on_ambiguous"])
     total = len(jobs)
@@ -552,23 +554,31 @@ async def _process_jobs(
     limiter = AdaptiveLimiter()
     scrape_sem = asyncio.Semaphore(SCRAPE_CONCURRENCY)
 
-    async def one(job: Dict[str, Any]):
+    async def one(job: dict[str, Any]):
         content = get_content(job["url"])
         if not content:
             content, _closure = await verdicts.refresh_content(
-                job["url"], company=job.get("company") or "",
-                job_title=job.get("title") or "", context="filter-run",
+                job["url"],
+                company=job.get("company") or "",
+                job_title=job.get("title") or "",
+                context="filter-run",
                 scrape_sem=scrape_sem,
             )
         if not content:
             return None
         return await _check_filter(
-            cfg, job["url"], job["company"], job["title"], content,
-            instructions, flt["prompt_hash"], f"user{user_id}:{flt['name']}",
+            cfg,
+            job["url"],
+            job["company"],
+            job["title"],
+            content,
+            instructions,
+            flt["prompt_hash"],
+            f"user{user_id}:{flt['name']}",
         )
 
     idx = 0
-    pending: Dict[asyncio.Task, Dict[str, Any]] = {}
+    pending: dict[asyncio.Task, dict[str, Any]] = {}
     while idx < total or pending:
         while idx < total and len(pending) < limiter.limit:
             pending[asyncio.create_task(one(jobs[idx]))] = jobs[idx]
@@ -589,8 +599,13 @@ async def _process_jobs(
             limiter.record()
             if usage and usage["total_tokens"]:
                 budget.record_usage(
-                    user_id, cfg.key_source, "filter", cfg.model,
-                    usage["prompt_tokens"], usage["completion_tokens"], usage["total_tokens"],
+                    user_id,
+                    cfg.key_source,
+                    "filter",
+                    cfg.model,
+                    usage["prompt_tokens"],
+                    usage["completion_tokens"],
+                    usage["total_tokens"],
                 )
             if done % 5 == 0:
                 _set_progress(task_id, done, total, flt["name"])
@@ -614,7 +629,7 @@ async def _process_jobs(
         _update_parent_progress(parent_id)
 
 
-def _content_ready_urls(urls: List[str]) -> set:
+def _content_ready_urls(urls: list[str]) -> set:
     if not urls:
         return set()
     rows = db.query(
@@ -626,7 +641,7 @@ def _content_ready_urls(urls: List[str]) -> set:
 
 
 async def _run_filters(
-    task_id: int, user_id: int, filters: List[Dict[str, Any]], batched: bool = False
+    task_id: int, user_id: int, filters: list[dict[str, Any]], batched: bool = False
 ) -> None:
     """Splitter: compute the undecided work, then shard it. Scheduled (batched)
     runs send content-ready jobs through the half-price Batch API in large
@@ -636,7 +651,7 @@ async def _run_filters(
     candidates = _candidates(user_id)
     urls = [j["url"] for j in candidates]
     use_batch = batched and cfg.key_source == "owner" and cfg.provider == "openai"
-    units: List[tuple] = []
+    units: list[tuple] = []
     for flt in filters:
         decided = _decided_urls(urls, flt["prompt_hash"], cfg.model)
         todo = [j for j in candidates if j["url"] not in decided]
@@ -665,9 +680,7 @@ async def _run_filters(
             {
                 "parent_id": task_id,
                 "user_id": user_id,
-                "filter": {
-                    k: flt[k] for k in ("name", "prompt", "on_ambiguous", "prompt_hash")
-                },
+                "filter": {k: flt[k] for k in ("name", "prompt", "on_ambiguous", "prompt_hash")},
                 "jobs": jobs,
             },
         )
@@ -681,7 +694,7 @@ async def _run_filters(
     events.publish_task(task_id)
 
 
-async def handle_run_filter_chunk(task_id: int, payload: Dict[str, Any]) -> None:
+async def handle_run_filter_chunk(task_id: int, payload: dict[str, Any]) -> None:
     ent, cfg = _load_config(payload["user_id"])
     await _process_jobs(
         task_id,
@@ -694,7 +707,7 @@ async def handle_run_filter_chunk(task_id: int, payload: Dict[str, Any]) -> None
     )
 
 
-async def handle_run_filter_batch_chunk(task_id: int, payload: Dict[str, Any]) -> None:
+async def handle_run_filter_batch_chunk(task_id: int, payload: dict[str, Any]) -> None:
     """Centralized half-price path: one worker submits the whole chunk to the
     OpenAI Batch API (core/batch.py enforces the enqueued-token budget in
     waves) and records every verdict when results land."""
@@ -723,9 +736,7 @@ async def handle_run_filter_batch_chunk(task_id: int, payload: Dict[str, Any]) -
         input_text = (
             f"Company: {job['company']}\nJob Title: {job['title']}\n\nJob Content:\n{content}"
         )
-        specs.append(
-            BatchSpec(job["url"], instructions, input_text, "FilterVerdict", schema)
-        )
+        specs.append(BatchSpec(job["url"], instructions, input_text, "FilterVerdict", schema))
         by_url[job["url"]] = (job, input_text)
     total = len(jobs)
     if not specs:
@@ -740,9 +751,7 @@ async def handle_run_filter_batch_chunk(task_id: int, payload: Dict[str, Any]) -
     async def _heartbeat() -> None:
         while True:
             await asyncio.sleep(60)
-            db.execute(
-                "UPDATE tasks SET last_heartbeat = now() WHERE id = %s", (task_id,)
-            )
+            db.execute("UPDATE tasks SET last_heartbeat = now() WHERE id = %s", (task_id,))
             if _cancelled(task_id) or (parent_id and _parent_cancelled(parent_id)):
                 raise asyncio.CancelledError
 
@@ -757,8 +766,12 @@ async def handle_run_filter_batch_chunk(task_id: int, payload: Dict[str, Any]) -
             results = await collect_batches(existing, hook)
         else:
             results = await submit_or_collect(
-                task_id, specs, cfg.model,
-                cfg.params.get("reasoning_effort", "medium"), 6000, hook,
+                task_id,
+                specs,
+                cfg.model,
+                cfg.params.get("reasoning_effort", "medium"),
+                6000,
+                hook,
             )
     finally:
         hb.cancel()
@@ -773,11 +786,18 @@ async def handle_run_filter_batch_chunk(task_id: int, payload: Dict[str, Any]) -
         }
         if res.error or not res.text:
             add_ai_result(
-                url, "failed", f"batch: {res.error or 'no output'}", "custom",
-                model=cfg.model, filter_name=f"user{user_id}:{flt['name']}",
-                prompt_hash=flt["prompt_hash"], company=job["company"],
-                job_title=job["title"], config_name="filter-batch",
-                error=res.error, batch_id=res.batch_id,
+                url,
+                "failed",
+                f"batch: {res.error or 'no output'}",
+                "custom",
+                model=cfg.model,
+                filter_name=f"user{user_id}:{flt['name']}",
+                prompt_hash=flt["prompt_hash"],
+                company=job["company"],
+                job_title=job["title"],
+                config_name="filter-batch",
+                error=res.error,
+                batch_id=res.batch_id,
             )
             metrics.CHECKS.labels("custom", "failed").inc()
             metrics.AI_CALLS.labels(cfg.provider, cfg.model, "error").inc()
@@ -786,26 +806,48 @@ async def handle_run_filter_batch_chunk(task_id: int, payload: Dict[str, Any]) -
             parsed = FilterVerdictLean(**_json.loads(res.text))
         except Exception:
             add_ai_result(
-                url, "failed", "batch: unparsable output", "custom",
-                model=cfg.model, prompt_hash=flt["prompt_hash"],
-                company=job["company"], job_title=job["title"],
-                config_name="filter-batch", batch_id=res.batch_id,
+                url,
+                "failed",
+                "batch: unparsable output",
+                "custom",
+                model=cfg.model,
+                prompt_hash=flt["prompt_hash"],
+                company=job["company"],
+                job_title=job["title"],
+                config_name="filter-batch",
+                batch_id=res.batch_id,
             )
             metrics.CHECKS.labels("custom", "failed").inc()
             continue
         verdicts.record_ai_verdict(
-            url=url, check_type="custom", rejected=parsed.should_filter,
-            reason="", parsed_json=res.text, usage=usage,
-            model=cfg.model, provider=cfg.provider, key_source=cfg.key_source,
-            company=job["company"], job_title=job["title"],
-            instructions=instructions, input_text=input_text,
-            filter_name=f"user{user_id}:{flt['name']}", prompt_hash=flt["prompt_hash"],
-            context="filter-batch", batched=True, batch_id=res.batch_id,
+            url=url,
+            check_type="custom",
+            rejected=parsed.should_filter,
+            reason="",
+            parsed_json=res.text,
+            usage=usage,
+            model=cfg.model,
+            provider=cfg.provider,
+            key_source=cfg.key_source,
+            company=job["company"],
+            job_title=job["title"],
+            instructions=instructions,
+            input_text=input_text,
+            filter_name=f"user{user_id}:{flt['name']}",
+            prompt_hash=flt["prompt_hash"],
+            context="filter-batch",
+            batched=True,
+            batch_id=res.batch_id,
         )
         if usage["total_tokens"]:
             budget.record_usage(
-                user_id, cfg.key_source, "filter", cfg.model,
-                usage["prompt_tokens"], usage["completion_tokens"], usage["total_tokens"],
+                user_id,
+                cfg.key_source,
+                "filter",
+                cfg.model,
+                usage["prompt_tokens"],
+                usage["completion_tokens"],
+                usage["total_tokens"],
             )
         if done % 50 == 0:
             _set_progress(task_id, done, total, flt["name"])
@@ -816,7 +858,7 @@ async def handle_run_filter_batch_chunk(task_id: int, payload: Dict[str, Any]) -
         _update_parent_progress(parent_id)
 
 
-async def handle_run_filter(task_id: int, payload: Dict[str, Any]) -> None:
+async def handle_run_filter(task_id: int, payload: dict[str, Any]) -> None:
     flt = db.query_one(
         "SELECT * FROM user_filters WHERE id = %s AND user_id = %s",
         (payload["filter_id"], payload["user_id"]),
@@ -826,7 +868,7 @@ async def handle_run_filter(task_id: int, payload: Dict[str, Any]) -> None:
     await _run_filters(task_id, flt["user_id"], [flt], batched=payload.get("batched", False))
 
 
-async def handle_run_all_filters(task_id: int, payload: Dict[str, Any]) -> None:
+async def handle_run_all_filters(task_id: int, payload: dict[str, Any]) -> None:
     filters = db.query(
         "SELECT * FROM user_filters WHERE user_id = %s AND enabled ORDER BY id",
         (payload["user_id"],),
@@ -837,13 +879,11 @@ async def handle_run_all_filters(task_id: int, payload: Dict[str, Any]) -> None:
         )
 
 
-async def handle_ingest_source(task_id: int, payload: Dict[str, Any]) -> None:
+async def handle_ingest_source(task_id: int, payload: dict[str, Any]) -> None:
     from core import catalog
     from core.pittcsc_simplify import FALLBACK_CUTOFF_TS, fetch_job_postings
 
-    source = db.query_one(
-        "SELECT * FROM sources WHERE name = %s AND active", (payload["source"],)
-    )
+    source = db.query_one("SELECT * FROM sources WHERE name = %s AND active", (payload["source"],))
     if not source:
         raise LookupError("unknown or inactive source")
 
@@ -865,10 +905,7 @@ async def handle_ingest_source(task_id: int, payload: Dict[str, Any]) -> None:
     # (100/cycle) would throttle verification far below the ingest rate.
     # refresh_content also tags where the text came from, which is what keeps
     # the ats_text_collapse detector fed with live-ingest data.
-    candidates = [
-        p for p in postings
-        if p.active and p.url and p.date_posted >= FALLBACK_CUTOFF_TS
-    ]
+    candidates = [p for p in postings if p.active and p.url and p.date_posted >= FALLBACK_CUTOFF_TS]
     # One query to learn which postings already have text, instead of a
     # round trip per posting. The largest source carries ~2,800 active jobs
     # and almost all of them are already cached, so the per-posting form was
@@ -930,9 +967,7 @@ REVERIFY_PER_CYCLE = int(os.environ.get("JOBTRACKER_REVERIFY_PER_CYCLE", "0"))  
 # chosen to fill the batch-wave concurrency rather than picked arbitrarily: a
 # comp spec is ~6.5k tokens against a 1.8M-token wave budget, so ~276 specs per
 # wave, and waves now run BATCH_WAVE_CONCURRENCY at a time.
-EXTRACT_COMP_PER_CYCLE = int(
-    os.environ.get("JOBTRACKER_EXTRACT_COMP_PER_CYCLE", "1100")
-)
+EXTRACT_COMP_PER_CYCLE = int(os.environ.get("JOBTRACKER_EXTRACT_COMP_PER_CYCLE", "1100"))
 
 # A board row counts as untouched (machine-managed) when the user never set
 # anything on it; only these are auto-added by materialization and auto-removed
@@ -965,7 +1000,7 @@ def _demote_closed() -> int:
 
 
 def _record_reverify_results(
-    results: Dict[str, Any], by_url: Dict[str, Dict[str, Any]], model: str
+    results: dict[str, Any], by_url: dict[str, dict[str, Any]], model: str
 ) -> int:
     """Turns batch lines into closed verdicts. Only parseable lines record —
     anything failed or missing simply stays stale and the next daily sweep
@@ -978,32 +1013,43 @@ def _record_reverify_results(
         try:
             parsed = JobClosedLean.model_validate_json(res.text)
         except Exception:
+            logger.warning(f"reverify: unparsable batch output for {url}")
             continue
         verdicts.record_ai_verdict(
-            url=url, check_type="closed", rejected=parsed.is_closed, reason="",
-            parsed_json=res.text, model=model,
+            url=url,
+            check_type="closed",
+            rejected=parsed.is_closed,
+            reason="",
+            parsed_json=res.text,
+            model=model,
             usage={
                 "prompt_tokens": (res.usage or {}).get("input_tokens", 0),
                 "completion_tokens": (res.usage or {}).get("output_tokens", 0),
                 "total_tokens": (res.usage or {}).get("total_tokens", 0),
             },
-            company=job["company"], job_title=job["title"],
-            context="reverify", batched=True, batch_id=res.batch_id,
+            company=job["company"],
+            job_title=job["title"],
+            context="reverify",
+            batched=True,
+            batch_id=res.batch_id,
         )
         recorded += 1
     return recorded
 
 
 async def _reverify_jobs(
-    task_id: int, rows: List[Dict[str, Any]], parent_id: Optional[int] = None,
+    task_id: int,
+    rows: list[dict[str, Any]],
+    parent_id: int | None = None,
     force: bool = False,
 ) -> None:
     """Two phases: gather evidence concurrently (ATS gone-detection, then
     content — the fleet-distributed, network-bound part), then settle every
     remaining verdict in ONE half-price batch instead of a call per job."""
+    from openai.lib._pydantic import to_strict_json_schema
+
     from core.batch import BatchSpec, collect_batches
     from core.pittcsc_simplify import CLOSED_INSTRUCTIONS
-    from openai.lib._pydantic import to_strict_json_schema
 
     if not ai.server_key("openai"):
         raise LookupError("no server OpenAI key for reverification")
@@ -1032,7 +1078,7 @@ async def _reverify_jobs(
         total = len(rows)
         done = 0
     else:
-        cutoff = _dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(days=1)
+        cutoff = _dt.datetime.now(_dt.UTC) - _dt.timedelta(days=1)
         fresh = {
             r["url"]
             for r in db.query(
@@ -1046,12 +1092,15 @@ async def _reverify_jobs(
         done = len(fresh)
     limiter = AdaptiveLimiter()
     scrape_sem = asyncio.Semaphore(SCRAPE_CONCURRENCY)
-    needs_ai: List[tuple] = []
+    needs_ai: list[tuple] = []
 
-    async def gather(r: Dict[str, Any]) -> None:
+    async def gather(r: dict[str, Any]) -> None:
         content, _closure = await verdicts.refresh_content(
-            r["url"], company=r["company"], job_title=r["title"],
-            context="reverify", scrape_sem=scrape_sem,
+            r["url"],
+            company=r["company"],
+            job_title=r["title"],
+            context="reverify",
+            scrape_sem=scrape_sem,
         )
         if not content:
             # Either refresh_content already recorded the closure (ATS gone,
@@ -1063,7 +1112,7 @@ async def _reverify_jobs(
 
     idx = 0
     n_todo = len(rows)
-    pending: Dict[asyncio.Task, Dict[str, Any]] = {}
+    pending: dict[asyncio.Task, dict[str, Any]] = {}
     while idx < n_todo or pending:
         while idx < n_todo and len(pending) < limiter.limit:
             pending[asyncio.create_task(gather(rows[idx]))] = rows[idx]
@@ -1106,7 +1155,7 @@ async def _reverify_jobs(
         _update_parent_progress(parent_id)
 
 
-async def handle_reverify_open(task_id: int, payload: Dict[str, Any]) -> None:
+async def handle_reverify_open(task_id: int, payload: dict[str, Any]) -> None:
     """Splitter: find every stale untouched board row, shard the re-checks
     across the fleet, demote closed rows when the last chunk lands.
 
@@ -1168,9 +1217,11 @@ async def handle_reverify_open(task_id: int, payload: Dict[str, Any]) -> None:
     events.publish_task(task_id)
 
 
-async def handle_reverify_chunk(task_id: int, payload: Dict[str, Any]) -> None:
+async def handle_reverify_chunk(task_id: int, payload: dict[str, Any]) -> None:
     await _reverify_jobs(
-        task_id, payload["rows"], parent_id=payload["parent_id"],
+        task_id,
+        payload["rows"],
+        parent_id=payload["parent_id"],
         force=bool(payload.get("force")),
     )
 
@@ -1180,17 +1231,13 @@ def _batch_event_hook(task_id: int, purpose: str, model: str):
     stores submitted batch ids on the task payload so a requeued attempt
     reattaches instead of resubmitting (double spend + orphaned results)."""
 
-    def on_event(batch_id: str, status: str, counts: Dict[str, int]) -> None:
+    def on_event(batch_id: str, status: str, counts: dict[str, int]) -> None:
         if "input_tokens" in counts or "output_tokens" in counts:
             # Terminal usage report: real token totals -> half-price batch cost.
             inp = counts.get("input_tokens", 0)
             out = counts.get("output_tokens", 0)
             prices = ai.PRICES_PER_MTOK.get(model)
-            cost = (
-                round((inp * prices[0] + out * prices[1]) / 2_000_000, 6)
-                if prices
-                else None
-            )
+            cost = round((inp * prices[0] + out * prices[1]) / 2_000_000, 6) if prices else None
             db.execute(
                 "UPDATE ai_batches SET input_tokens = input_tokens + %s, "
                 "output_tokens = output_tokens + %s, "
@@ -1218,7 +1265,10 @@ def _batch_event_hook(task_id: int, purpose: str, model: str):
                     THEN COALESCE(ai_batches.completed_at, now()) ELSE NULL END
             """,
             {
-                "bid": batch_id, "tid": task_id, "purpose": purpose, "model": model,
+                "bid": batch_id,
+                "tid": task_id,
+                "purpose": purpose,
+                "model": model,
                 "requests": counts.get("requests", 0),
                 "completed": counts.get("completed", 0),
                 "failed": counts.get("failed", 0),
@@ -1248,7 +1298,7 @@ async def submit_or_collect(
     reasoning_effort: str,
     max_output_tokens: int,
     hook,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """The one way a scheduled handler runs a batch.
 
     First call submits and raises AwaitingBatch, freeing the worker. When
@@ -1287,17 +1337,18 @@ async def submit_or_collect(
     raise AwaitingBatch()
 
 
-def _pending_batch_ids(task_id: int) -> List[str]:
+def _pending_batch_ids(task_id: int) -> list[str]:
     row = db.query_one("SELECT payload->'batch_ids' AS ids FROM tasks WHERE id = %s", (task_id,))
     return list(row["ids"]) if row and row["ids"] else []
 
 
-async def handle_send_digests(task_id: int, payload: Dict[str, Any]) -> None:
+async def handle_send_digests(task_id: int, payload: dict[str, Any]) -> None:
     """Daily batched digest (never per-event: single-IP mail server, see
     homelab constraints). force+user_id sends the last day's rows regardless
     of digest state — used for template testing by admins."""
-    from api import mail
     import secrets as _secrets
+
+    from api import mail
 
     if not mail.configured():
         _set_progress(task_id, 0, 0, "mail not configured")
@@ -1365,7 +1416,7 @@ _PERIOD_TO_YEARLY = {
     "monthly": 12.0,
     "yearly": 1.0,
 }
-COMP_PERIODS = tuple(_PERIOD_TO_YEARLY) + ("one_time",)
+COMP_PERIODS = (*tuple(_PERIOD_TO_YEARLY), "one_time")
 COMP_BASES = ("base", "total", "stipend", "unspecified")
 
 
@@ -1375,8 +1426,8 @@ class CompExtract(BaseModel):
     in the model, so a bad period can be corrected without re-running the AI."""
 
     has_comp: bool
-    comp_min: Optional[float] = None
-    comp_max: Optional[float] = None
+    comp_min: float | None = None
+    comp_max: float | None = None
     currency: str = ""
     period: str = ""
     basis: str = ""
@@ -1403,7 +1454,7 @@ _COMP_INSTRUCTIONS = (
 )
 
 
-def _annualize(value: Optional[float], period: str) -> Optional[int]:
+def _annualize(value: float | None, period: str) -> int | None:
     """Yearly equivalent of an advertised amount, or None when there isn't one.
 
     None is the right answer more often than a number: an unrecognised period,
@@ -1415,7 +1466,7 @@ def _annualize(value: Optional[float], period: str) -> Optional[int]:
     multiplier = _PERIOD_TO_YEARLY.get((period or "").strip().lower())
     if multiplier is None:
         return None
-    annual = int(round(value * multiplier))
+    annual = round(value * multiplier)
     # Model slips (cents-as-ints, stray digits) produce absurd annuals;
     # better no number than a wrong sortable one — display text is kept.
     if annual < 5_000 or annual > 5_000_000:
@@ -1423,9 +1474,10 @@ def _annualize(value: Optional[float], period: str) -> Optional[int]:
     return annual
 
 
-async def handle_extract_comp(task_id: int, payload: Dict[str, Any]) -> None:
-    from core.batch import BatchSpec
+async def handle_extract_comp(task_id: int, payload: dict[str, Any]) -> None:
     from openai.lib._pydantic import to_strict_json_schema
+
+    from core.batch import BatchSpec
 
     rows = db.query(
         """
@@ -1497,8 +1549,7 @@ async def handle_extract_comp(task_id: int, payload: Dict[str, Any]) -> None:
                 "UPDATE jobs SET comp_min = %s, comp_max = %s, comp_text = %s, "
                 "comp_period = %s, comp_currency = %s, comp_basis = %s, "
                 "comp_extracted = TRUE WHERE id = %s",
-                (comp_min, comp_max, comp_text, comp_period, comp_currency,
-                 comp_basis, job_id),
+                (comp_min, comp_max, comp_text, comp_period, comp_currency, comp_basis, job_id),
             )
         # Failed/errored lines stay comp_extracted=false so the next daily
         # sweep retries them — batch operations are idempotent by re-sweep.
@@ -1508,7 +1559,7 @@ async def handle_extract_comp(task_id: int, payload: Dict[str, Any]) -> None:
     _set_progress(task_id, done, len(specs), "comp extracted")
 
 
-async def handle_poll_batches(task_id: int, payload: Dict[str, Any]) -> None:
+async def handle_poll_batches(task_id: int, payload: dict[str, Any]) -> None:
     """Resumes tasks whose provider batches have finished.
 
     This is the half that makes parking safe: without it a parked task would
@@ -1559,7 +1610,9 @@ async def handle_poll_batches(task_id: int, payload: Dict[str, Any]) -> None:
             _resume_parked(t["id"])
             expired += 1
     _set_progress(
-        task_id, resumed + expired, len(parked),
+        task_id,
+        resumed + expired,
+        len(parked),
         f"{resumed} resumed, {expired} past the completion window",
     )
 
@@ -1573,7 +1626,7 @@ def _resume_parked(task_id: int) -> None:
     events.publish_task(task_id)
 
 
-async def handle_data_health(task_id: int, payload: Dict[str, Any]) -> None:
+async def handle_data_health(task_id: int, payload: dict[str, Any]) -> None:
     """Watches for upstream changes that would otherwise surface as a pile of
     quietly misclassified jobs weeks later. Alerts fire once per condition and
     auto-resolve, so the mail stays worth reading."""
@@ -1593,17 +1646,17 @@ async def handle_data_health(task_id: int, payload: Dict[str, Any]) -> None:
             except Exception:
                 logger.exception("health alert mail failed")
     _set_progress(
-        task_id, len(found), len(found),
+        task_id,
+        len(found),
+        len(found),
         f"{len(found)} open, {len(fresh)} new" if found else "all clear",
     )
 
 
-CONTENT_BACKFILL_PER_CYCLE = int(
-    os.environ.get("JOBTRACKER_CONTENT_BACKFILL_PER_CYCLE", "100")
-)
+CONTENT_BACKFILL_PER_CYCLE = int(os.environ.get("JOBTRACKER_CONTENT_BACKFILL_PER_CYCLE", "100"))
 
 
-async def handle_fetch_missing_content(task_id: int, payload: Dict[str, Any]) -> None:
+async def handle_fetch_missing_content(task_id: int, payload: dict[str, Any]) -> None:
     """Jobs nobody ever scraped are invisible to every AI check — they can't be
     verified, filtered, or comp-extracted. This walks that backlog newest-first
     and caches their pages; the existing sweeps then pick them up for free.
@@ -1630,16 +1683,19 @@ async def handle_fetch_missing_content(task_id: int, payload: Dict[str, Any]) ->
     done = fetched = 0
     scrape_sem = asyncio.Semaphore(SCRAPE_CONCURRENCY)
 
-    async def one(r: Dict[str, Any]) -> bool:
+    async def one(r: dict[str, Any]) -> bool:
         content, _closure = await verdicts.refresh_content(
-            r["url"], company=r["company"], job_title=r["title"],
-            context="content-backfill", scrape_sem=scrape_sem,
+            r["url"],
+            company=r["company"],
+            job_title=r["title"],
+            context="content-backfill",
+            scrape_sem=scrape_sem,
         )
         return bool(content)
 
     limiter = AdaptiveLimiter()
     idx = 0
-    pending: Dict[asyncio.Task, Dict[str, Any]] = {}
+    pending: dict[asyncio.Task, dict[str, Any]] = {}
     while idx < total or pending:
         while idx < total and len(pending) < limiter.limit:
             pending[asyncio.create_task(one(rows[idx]))] = rows[idx]
@@ -1680,14 +1736,14 @@ _VERIFY_INSTRUCTIONS = (
 )
 
 
-async def handle_verify_new(task_id: int, payload: Dict[str, Any]) -> None:
+async def handle_verify_new(task_id: int, payload: dict[str, Any]) -> None:
     """Batched replacement for ingest-time closed/clearance checks: one
     half-price call per job yields both verdicts. Idempotent by re-sweep —
     only successful lines produce verdict rows; anything missed or failed is
     picked up by the next cycle's sweep."""
-    from core.batch import BatchSpec
-    from core.store import add_ai_result
     from openai.lib._pydantic import to_strict_json_schema
+
+    from core.batch import BatchSpec
 
     rows = db.query(
         """
@@ -1750,6 +1806,7 @@ async def handle_verify_new(task_id: int, payload: Dict[str, Any]) -> None:
         try:
             parsed = VerifyLean.model_validate_json(res.text)
         except Exception:
+            logger.warning(f"verify_new: unparsable batch output for {url}")
             continue
         usage = {
             "prompt_tokens": (res.usage or {}).get("input_tokens", 0),
@@ -1764,21 +1821,33 @@ async def handle_verify_new(task_id: int, payload: Dict[str, Any]) -> None:
         # posting back on people's boards.
         if job["needs_closed"]:
             verdicts.record_ai_verdict(
-                url=url, check_type="closed",
-                rejected=parsed.is_closed, reason="", parsed_json=res.text,
-                model=model, company=job["company"], job_title=job["title"],
-                context="verify-batch", usage=usage, batched=True,
+                url=url,
+                check_type="closed",
+                rejected=parsed.is_closed,
+                reason="",
+                parsed_json=res.text,
+                model=model,
+                company=job["company"],
+                job_title=job["title"],
+                context="verify-batch",
+                usage=usage,
+                batched=True,
                 batch_id=res.batch_id,
             )
         if job["needs_clearance"]:
             verdicts.record_ai_verdict(
-                url=url, check_type="clearance",
-                rejected=parsed.requires_clearance_or_restrictions, reason="",
-                parsed_json=res.text, model=model,
-                company=job["company"], job_title=job["title"],
+                url=url,
+                check_type="clearance",
+                rejected=parsed.requires_clearance_or_restrictions,
+                reason="",
+                parsed_json=res.text,
+                model=model,
+                company=job["company"],
+                job_title=job["title"],
                 context="verify-batch",
                 usage=usage if not job["needs_closed"] else {},
-                batched=True, batch_id=res.batch_id,
+                batched=True,
+                batch_id=res.batch_id,
             )
         done += 1
         if done % 200 == 0:
@@ -1810,7 +1879,7 @@ def schedule_ingest_cycle() -> None:
     across the whole fleet."""
     import datetime
 
-    now = datetime.datetime.now(datetime.timezone.utc)
+    now = datetime.datetime.now(datetime.UTC)
     bucket = now.replace(
         minute=(now.minute // INGEST_INTERVAL_MINUTES) * INGEST_INTERVAL_MINUTES
         if INGEST_INTERVAL_MINUTES < 60
@@ -1845,12 +1914,10 @@ def schedule_ingest_cycle() -> None:
     enqueue("verify_new", {"cycle": cycle}, dedupe_key=f"verify:{cycle}")
     # Backlog walker: jobs ingested before content-caching existed (or whose
     # scrape failed) can never be checked until their page is cached.
-    enqueue(
-        "fetch_missing_content", {"cycle": cycle}, dedupe_key=f"content:{cycle}"
-    )
+    enqueue("fetch_missing_content", {"cycle": cycle}, dedupe_key=f"content:{cycle}")
 
 
-_current_task_id: Optional[int] = None
+_current_task_id: int | None = None
 
 
 def _graceful_exit(signum: int, frame: Any) -> None:
@@ -1866,7 +1933,7 @@ def _graceful_exit(signum: int, frame: Any) -> None:
                 (_current_task_id,),
             )
             logger.info(f"SIGTERM: requeued task {_current_task_id}, exiting")
-        except Exception:
+        except Exception:  # noqa: S110 - nothing may block exit, not even logging
             pass
     os._exit(0)
 
@@ -1886,7 +1953,7 @@ def _is_transient(exc: Exception) -> bool:
     return any(m in str(exc).lower() for m in _TRANSIENT_MARKERS)
 
 
-def _report_worker_status(current_task_id: Optional[int]) -> None:
+def _report_worker_status(current_task_id: int | None) -> None:
     try:
         db.execute(
             """
@@ -1925,8 +1992,7 @@ async def run_once() -> bool:
         while True:
             await asyncio.sleep(60)
             db.execute(
-                "UPDATE tasks SET last_heartbeat = now() "
-                "WHERE id = %s AND status = 'running'",
+                "UPDATE tasks SET last_heartbeat = now() WHERE id = %s AND status = 'running'",
                 (task["id"],),
             )
             _report_worker_status(task["id"])

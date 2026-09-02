@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from api import ai, db, fetching, verdicts, worker
+from api import ai, db, fetching, worker
 from core.store import add_ai_result
 
 # ---------------------------------------------------------------------------
@@ -301,7 +301,6 @@ async def test_chunked_run_all_filters_lifecycle(monkeypatch, user_headers):
 # ---------------------------------------------------------------------------
 
 
-
 async def _submit_ids(specs, model, effort, max_out, on_event=None):
     """Stands in for the provider accepting a submission."""
     _submit_ids.last_specs = list(specs)
@@ -314,12 +313,9 @@ def _collect_from(fake_batch):
     per-test expectations stay exactly as they were written."""
 
     async def _collect(batch_ids, on_event=None):
-        return await fake_batch(
-            getattr(_submit_ids, "last_specs", []), "m", "low", 0, None
-        )
+        return await fake_batch(getattr(_submit_ids, "last_specs", []), "m", "low", 0, None)
 
     return _collect
-
 
 
 async def _run_batched(coro_factory):
@@ -354,7 +350,8 @@ async def test_reverify_jobs_skips_urls_with_fresh_closed_verdicts(monkeypatch):
         check_calls.extend(s.custom_id for s in specs)
         return {
             s.custom_id: core_batch.BatchResult(
-                s.custom_id, text='{"is_closed": false}',
+                s.custom_id,
+                text='{"is_closed": false}',
                 usage={"input_tokens": 10, "output_tokens": 2, "total_tokens": 12},
             )
             for s in specs
@@ -381,12 +378,14 @@ async def test_reverify_jobs_skips_urls_with_fresh_closed_verdicts(monkeypatch):
 
 def test_batch_event_hook_registers_and_stores_ids():
     from api import worker
+
     t1 = worker.enqueue("run_filter_batch_chunk", {"parent_id": 1, "user_id": 1})
     hook = worker._batch_event_hook(t1, "filter", "gpt-5-nano")
     hook("batch_abc", "validating", {"requests": 10, "completed": 0, "failed": 0})
     hook("batch_abc", "in_progress", {"requests": 10, "completed": 4, "failed": 0})
     hook("batch_abc", "completed", {"requests": 10, "completed": 9, "failed": 1})
     from api import db
+
     row = db.query_one("SELECT * FROM ai_batches WHERE provider_batch_id = 'batch_abc'")
     assert row["status"] == "completed" and row["completed"] == 9
     assert row["failed_count"] == 1 and row["completed_at"] is not None
@@ -399,25 +398,31 @@ def test_batch_event_hook_registers_and_stores_ids():
 
 def test_worker_status_report_upserts():
     from api import worker
+
     worker._report_worker_status(None)
     from api import db
+
     row = db.query_one("SELECT * FROM worker_status WHERE name = %s", (worker.WORKER_NAME,))
     assert row is not None and row["current_task_id"] is None
     worker._report_worker_status(42)
-    row = db.query_one("SELECT current_task_id FROM worker_status WHERE name = %s", (worker.WORKER_NAME,))
+    row = db.query_one(
+        "SELECT current_task_id FROM worker_status WHERE name = %s", (worker.WORKER_NAME,)
+    )
     assert row["current_task_id"] == 42
 
 
 @pytest.mark.asyncio
 async def test_verify_new_records_both_verdicts(monkeypatch):
-    from api import worker, db
-    from core.store import add_ai_result
+    from api import db, worker
     from core import batch as core_batch
+    from core.store import add_ai_result
 
     db.execute(
         "INSERT INTO jobs (url, source, company, title) VALUES ('https://v.test/1', 's', 'Acme', 'SWE')"
     )
-    add_ai_result("https://v.test/1", "passed", "content cached", "content", input_content="J" * 500)
+    add_ai_result(
+        "https://v.test/1", "passed", "content cached", "content", input_content="J" * 500
+    )
 
     async def fake_batch(specs, model, effort, max_out, on_event=None):
         assert effort == "low"
@@ -432,6 +437,7 @@ async def test_verify_new_records_both_verdicts(monkeypatch):
 
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     import api.worker as w
+
     monkeypatch.setattr("core.batch.submit_responses_batches", _submit_ids)
     monkeypatch.setattr("core.batch.collect_batches", _collect_from(fake_batch))
     tid = worker.enqueue("verify_new", {"cycle": "t"})
@@ -441,7 +447,8 @@ async def test_verify_new_records_both_verdicts(monkeypatch):
         "AND check_type IN ('closed','clearance') ORDER BY check_type"
     )
     assert [(r["check_type"], r["status"]) for r in rows] == [
-        ("clearance", "rejected"), ("closed", "passed"),
+        ("clearance", "rejected"),
+        ("closed", "passed"),
     ]
 
 
@@ -455,10 +462,13 @@ async def test_reverify_records_batch_verdicts_and_reattaches(monkeypatch):
     async def fake_batch(specs, model, effort, max_out, on_event=None):
         submits.append(len(specs))
         if on_event:
-            on_event("batch_rv1", "in_progress", {"requests": len(specs), "completed": 0, "failed": 0})
+            on_event(
+                "batch_rv1", "in_progress", {"requests": len(specs), "completed": 0, "failed": 0}
+            )
         return {
             s.custom_id: core_batch.BatchResult(
-                s.custom_id, text='{"is_closed": true}',
+                s.custom_id,
+                text='{"is_closed": true}',
                 usage={"input_tokens": 20, "output_tokens": 3, "total_tokens": 23},
             )
             for s in specs
@@ -467,7 +477,8 @@ async def test_reverify_records_batch_verdicts_and_reattaches(monkeypatch):
     async def fake_collect(batch_ids, on_event=None):
         return {
             "https://rv.example.com/1": core_batch.BatchResult(
-                "https://rv.example.com/1", text='{"is_closed": true}',
+                "https://rv.example.com/1",
+                text='{"is_closed": true}',
                 usage={"input_tokens": 20, "output_tokens": 3, "total_tokens": 23},
             )
         }
@@ -534,16 +545,29 @@ async def test_content_backfill_caches_pages_and_skips_covered_jobs(monkeypatch)
     from core import ats as core_ats
     from core.store import add_ai_result
 
-    db.execute("INSERT INTO sources (name, listings_url) VALUES ('bf', 'https://x') ON CONFLICT DO NOTHING")
-    db.execute("INSERT INTO users (sub, email) VALUES ('bf-user', 'b@f.com') ON CONFLICT DO NOTHING")
+    db.execute(
+        "INSERT INTO sources (name, listings_url) VALUES ('bf', 'https://x') ON CONFLICT DO NOTHING"
+    )
+    db.execute(
+        "INSERT INTO users (sub, email) VALUES ('bf-user', 'b@f.com') ON CONFLICT DO NOTHING"
+    )
     uid = db.query_one("SELECT id FROM users WHERE sub = 'bf-user'")["id"]
-    db.execute("INSERT INTO user_sources (user_id, source) VALUES (%s, 'bf') ON CONFLICT DO NOTHING", (uid,))
+    db.execute(
+        "INSERT INTO user_sources (user_id, source) VALUES (%s, 'bf') ON CONFLICT DO NOTHING",
+        (uid,),
+    )
     db.execute(
         "INSERT INTO jobs (url, source, company, title) VALUES "
         "('https://bf.test/needs', 'bf', 'A', 'T'), ('https://bf.test/has', 'bf', 'B', 'T')"
     )
-    add_ai_result("https://bf.test/has", "passed", "content cached", "content",
-                  input_content="X" * 500, config_name="content-cache")
+    add_ai_result(
+        "https://bf.test/has",
+        "passed",
+        "content cached",
+        "content",
+        input_content="X" * 500,
+        config_name="content-cache",
+    )
 
     scraped = []
 
@@ -578,7 +602,8 @@ async def test_full_sweep_rechecks_even_fresh_verdicts(monkeypatch):
         checked.extend(s.custom_id for s in specs)
         return {
             s.custom_id: core_batch.BatchResult(
-                s.custom_id, text='{"is_closed": false}',
+                s.custom_id,
+                text='{"is_closed": false}',
                 usage={"input_tokens": 5, "output_tokens": 1, "total_tokens": 6},
             )
             for s in specs

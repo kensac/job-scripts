@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import asyncio
-
 import json
 import time
-from typing import Any, Callable, Dict, Optional, Tuple, Type, TypeVar
+from collections.abc import Callable
+from typing import Any, TypeVar
 
 from pydantic import BaseModel
 
@@ -21,27 +21,27 @@ T = TypeVar("T", bound=BaseModel)
 # from new code paths - route them through here.
 
 
-async def run_check(
+async def run_check[T: BaseModel](
     cfg: AIConfig,
     *,
     url: str,
     check_type: str,
     instructions: str,
     input_text: str,
-    response_model: Type[T],
-    verdict_of: Callable[[T], Tuple[bool, str]],
+    response_model: type[T],
+    verdict_of: Callable[[T], tuple[bool, str]],
     company: str = "",
     job_title: str = "",
-    filter_name: Optional[str] = None,
-    prompt_hash: Optional[str] = None,
+    filter_name: str | None = None,
+    prompt_hash: str | None = None,
     context: str = "worker",
-) -> Tuple[Optional[T], Dict[str, int]]:
+) -> tuple[T | None, dict[str, int]]:
     """Runs one structured check, records a complete verdict row + metrics.
 
     verdict_of maps the parsed response to (rejected, reason). Failures are
     recorded (status 'failed') and re-raised for the caller's retry policy.
     """
-    common: Dict[str, Any] = dict(
+    common: dict[str, Any] = dict(
         model=cfg.model,
         reasoning_effort=cfg.params.get("reasoning_effort") or cfg.params.get("effort"),
         filter_name=filter_name,
@@ -57,23 +57,34 @@ async def run_check(
         parsed, usage = await ai.parse(cfg, instructions, input_text, response_model)
     except Exception as exc:
         add_ai_result(
-            url, "failed", f"{check_type} check failed: {str(exc)[:100]}",
-            check_type, error=str(exc), **common,
+            url,
+            "failed",
+            f"{check_type} check failed: {str(exc)[:100]}",
+            check_type,
+            error=str(exc),
+            **common,
         )
         metrics.CHECKS.labels(check_type, "failed").inc()
         raise
     duration_ms = int((time.monotonic() - start) * 1000)
     if parsed is None:
         add_ai_result(
-            url, "failed", "AI returned no parsed response", check_type,
-            duration_ms=duration_ms, **common,
+            url,
+            "failed",
+            "AI returned no parsed response",
+            check_type,
+            duration_ms=duration_ms,
+            **common,
         )
         metrics.CHECKS.labels(check_type, "failed").inc()
         return None, usage
     rejected, reason = verdict_of(parsed)
     status = "rejected" if rejected else "passed"
     add_ai_result(
-        url, status, reason, check_type,
+        url,
+        status,
+        reason,
+        check_type,
         parsed_json=json.dumps(parsed.model_dump()),
         duration_ms=duration_ms,
         prompt_tokens=usage["prompt_tokens"],
@@ -92,7 +103,7 @@ def record_ai_verdict(
     rejected: bool,
     reason: str,
     parsed_json: str,
-    usage: Dict[str, int],
+    usage: dict[str, int],
     model: str,
     provider: str = "openai",
     key_source: str = "owner",
@@ -100,18 +111,21 @@ def record_ai_verdict(
     job_title: str = "",
     instructions: str = "",
     input_text: str = "",
-    filter_name: Optional[str] = None,
-    prompt_hash: Optional[str] = None,
+    filter_name: str | None = None,
+    prompt_hash: str | None = None,
     context: str = "worker",
     batched: bool = False,
-    batch_id: Optional[str] = None,
+    batch_id: str | None = None,
 ) -> None:
     """Records a verdict whose AI response was obtained outside ai.parse
     (e.g. the Batch API) - same complete row, metrics, and cost accounting
     (batch pricing is half price)."""
     status = "rejected" if rejected else "passed"
     add_ai_result(
-        url, status, reason, check_type,
+        url,
+        status,
+        reason,
+        check_type,
         model=model,
         filter_name=filter_name,
         prompt_hash=prompt_hash,
@@ -132,9 +146,13 @@ def record_ai_verdict(
     if price:
         mult = 0.5 if batched else 1.0
         cost = (
-            usage.get("prompt_tokens", 0) * price[0]
-            + usage.get("completion_tokens", 0) * price[1]
-        ) * mult / 1_000_000
+            (
+                usage.get("prompt_tokens", 0) * price[0]
+                + usage.get("completion_tokens", 0) * price[1]
+            )
+            * mult
+            / 1_000_000
+        )
         metrics.AI_COST_USD.labels(provider, model, key_source).inc(cost)
 
 
@@ -143,8 +161,8 @@ async def refresh_content(
     company: str = "",
     job_title: str = "",
     context: str = "manual",
-    scrape_sem: Optional[asyncio.Semaphore] = None,
-) -> Tuple[Optional[str], Optional[str]]:
+    scrape_sem: asyncio.Semaphore | None = None,
+) -> tuple[str | None, str | None]:
     """Re-fetches a posting and returns fresh text, or None when the posting is
     gone. A 'recheck' that reuses cached text can only ever re-run the model
     over the page as it looked before it closed — it cannot discover a closure,
@@ -165,14 +183,24 @@ async def refresh_content(
     ats_res = await asyncio.to_thread(ats.resolve, url)
     if ats_res.status is ats.Status.GONE:
         record_manual(
-            url=url, check_type="closed", rejected=True,
-            reason="ATS reports posting gone", company=company,
-            job_title=job_title, context=context,
+            url=url,
+            check_type="closed",
+            rejected=True,
+            reason="ATS reports posting gone",
+            company=company,
+            job_title=job_title,
+            context=context,
         )
         return None, "ats_gone"
     if ats_res.ok and ats_res.text and not fetching.looks_blocked(ats_res.text):
-        add_ai_result(url, "passed", "ats text", "content",
-                      input_content=ats_res.text, config_name="content-cache")
+        add_ai_result(
+            url,
+            "passed",
+            "ats text",
+            "content",
+            input_content=ats_res.text,
+            config_name="content-cache",
+        )
         return ats_res.text, None
 
     if scrape_sem is not None:
@@ -182,14 +210,19 @@ async def refresh_content(
         content, redirected = await fetching.fetch_page(url)
     if redirected:
         record_manual(
-            url=url, check_type="closed", rejected=True,
+            url=url,
+            check_type="closed",
+            rejected=True,
             reason="posting redirects away (board index or careers page)",
-            company=company, job_title=job_title, context=context,
+            company=company,
+            job_title=job_title,
+            context=context,
         )
         return None, "redirected_away"
     if content:
-        add_ai_result(url, "passed", "scraped", "content",
-                      input_content=content, config_name="content-cache")
+        add_ai_result(
+            url, "passed", "scraped", "content", input_content=content, config_name="content-cache"
+        )
     return content, None
 
 
@@ -207,7 +240,12 @@ def record_manual(
     gone) - same complete row shape, same metrics."""
     status = "rejected" if rejected else "passed"
     add_ai_result(
-        url, status, reason, check_type,
-        company=company, job_title=job_title, config_name=context,
+        url,
+        status,
+        reason,
+        check_type,
+        company=company,
+        job_title=job_title,
+        config_name=context,
     )
     metrics.CHECKS.labels(check_type, status).inc()

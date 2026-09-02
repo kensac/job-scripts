@@ -5,7 +5,6 @@ import logging
 import os
 import tomllib
 from dataclasses import dataclass
-from typing import Dict, List, Optional
 
 from core.paths import PROJECT_ROOT
 
@@ -56,8 +55,8 @@ def compute_prompt_hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
 
 
-def load_filter_specs() -> Dict[str, FilterSpec]:
-    specs: Dict[str, FilterSpec] = {}
+def load_filter_specs() -> dict[str, FilterSpec]:
+    specs: dict[str, FilterSpec] = {}
     default = os.environ.get("CUSTOM_FILTER_PROMPT", "").strip()
     if default:
         specs["default"] = FilterSpec("default", default)
@@ -84,18 +83,18 @@ def load_filter_specs() -> Dict[str, FilterSpec]:
     return specs
 
 
-def load_filters() -> Dict[str, str]:
+def load_filters() -> dict[str, str]:
     return {name: spec.prompt for name, spec in load_filter_specs().items()}
 
 
-def get_filter_spec(name: str) -> Optional[FilterSpec]:
+def get_filter_spec(name: str) -> FilterSpec | None:
     return load_filter_specs().get(name)
 
 
-def get_filter_prompt(name: str) -> Optional[str]:
+def get_filter_prompt(name: str) -> str | None:
     spec = get_filter_spec(name)
     return spec.prompt if spec else None
 
 
-def list_filter_names() -> List[str]:
+def list_filter_names() -> list[str]:
     return sorted(load_filter_specs().keys())

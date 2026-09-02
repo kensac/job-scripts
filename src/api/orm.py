@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import datetime
-from typing import Any, List, Optional
+from typing import Any
 
 from sqlalchemy import (
     BigInteger,
@@ -22,9 +22,9 @@ _now = text("now()")
 
 
 class Base(DeclarativeBase):
-    type_annotation_map = {
+    type_annotation_map = {  # noqa: RUF012 - SQLAlchemy's declarative API
         datetime.datetime: TIMESTAMP(timezone=True),
-        List[str]: ARRAY(Text),
+        list[str]: ARRAY(Text),
         dict: JSONB,
     }
 
@@ -34,9 +34,9 @@ class User(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
     sub: Mapped[str] = mapped_column(Text, unique=True)
-    email: Mapped[Optional[str]] = mapped_column(Text)
-    name: Mapped[Optional[str]] = mapped_column(Text)
-    groups: Mapped[List[str]] = mapped_column(server_default=text("'{}'"))
+    email: Mapped[str | None] = mapped_column(Text)
+    name: Mapped[str | None] = mapped_column(Text)
+    groups: Mapped[list[str]] = mapped_column(server_default=text("'{}'"))
     created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
     last_seen_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
 
@@ -52,10 +52,10 @@ class GroupBudget(Base):
     __tablename__ = "group_budgets"
 
     group_name: Mapped[str] = mapped_column(Text, primary_key=True)
-    weekly_token_budget: Mapped[Optional[int]] = mapped_column(BigInteger)
+    weekly_token_budget: Mapped[int | None] = mapped_column(BigInteger)
     # NULL = default policy (unlimited tiers: every server-keyed model;
     # budgeted tiers: the env allowlist). A list = exactly these models.
-    allowed_models: Mapped[Optional[List[str]]] = mapped_column(ARRAY(Text))
+    allowed_models: Mapped[list[str] | None] = mapped_column(ARRAY(Text))
 
 
 class Job(Base):
@@ -70,21 +70,19 @@ class Job(Base):
     raw_url: Mapped[str] = mapped_column(Text, server_default=text("''"))
     company: Mapped[str] = mapped_column(Text, server_default=text("''"))
     title: Mapped[str] = mapped_column(Text, server_default=text("''"))
-    locations: Mapped[List[str]] = mapped_column(server_default=text("'{}'"))
-    terms: Mapped[List[str]] = mapped_column(server_default=text("'{}'"))
+    locations: Mapped[list[str]] = mapped_column(server_default=text("'{}'"))
+    terms: Mapped[list[str]] = mapped_column(server_default=text("'{}'"))
     source: Mapped[str] = mapped_column(Text)
     active: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
-    date_posted: Mapped[Optional[datetime.datetime]]
-    uploaded_by: Mapped[Optional[int]] = mapped_column(
-        BigInteger, ForeignKey("users.id")
-    )
-    extraction_status: Mapped[Optional[str]] = mapped_column(Text)
-    comp_min: Mapped[Optional[int]] = mapped_column(BigInteger)
-    comp_max: Mapped[Optional[int]] = mapped_column(BigInteger)
-    comp_text: Mapped[Optional[str]] = mapped_column(Text)
-    comp_period: Mapped[Optional[str]] = mapped_column(Text)
-    comp_currency: Mapped[Optional[str]] = mapped_column(Text)
-    comp_basis: Mapped[Optional[str]] = mapped_column(Text)
+    date_posted: Mapped[datetime.datetime | None]
+    uploaded_by: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id"))
+    extraction_status: Mapped[str | None] = mapped_column(Text)
+    comp_min: Mapped[int | None] = mapped_column(BigInteger)
+    comp_max: Mapped[int | None] = mapped_column(BigInteger)
+    comp_text: Mapped[str | None] = mapped_column(Text)
+    comp_period: Mapped[str | None] = mapped_column(Text)
+    comp_currency: Mapped[str | None] = mapped_column(Text)
+    comp_basis: Mapped[str | None] = mapped_column(Text)
     comp_extracted: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
 
@@ -98,14 +96,14 @@ class UserJob(Base):
     job_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("jobs.id", ondelete="CASCADE"), primary_key=True
     )
-    status: Mapped[Optional[str]] = mapped_column(Text)
-    date_applied: Mapped[Optional[datetime.date]] = mapped_column(Date)
-    notes: Mapped[Optional[str]] = mapped_column(Text)
-    size: Mapped[Optional[str]] = mapped_column(Text)
-    recruiter: Mapped[Optional[str]] = mapped_column(Text)
-    connection1: Mapped[Optional[str]] = mapped_column(Text)
-    connection2: Mapped[Optional[str]] = mapped_column(Text)
-    documents: Mapped[Optional[str]] = mapped_column(Text)
+    status: Mapped[str | None] = mapped_column(Text)
+    date_applied: Mapped[datetime.date | None] = mapped_column(Date)
+    notes: Mapped[str | None] = mapped_column(Text)
+    size: Mapped[str | None] = mapped_column(Text)
+    recruiter: Mapped[str | None] = mapped_column(Text)
+    connection1: Mapped[str | None] = mapped_column(Text)
+    connection2: Mapped[str | None] = mapped_column(Text)
+    documents: Mapped[str | None] = mapped_column(Text)
     hidden: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
     updated_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
@@ -116,14 +114,10 @@ class UserJobHistory(Base):
     __table_args__ = (Index("idx_user_job_history_row", "user_id", "job_id", "id"),)
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
-    user_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("users.id", ondelete="CASCADE")
-    )
-    job_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("jobs.id", ondelete="CASCADE")
-    )
-    old_status: Mapped[Optional[str]] = mapped_column(Text)
-    new_status: Mapped[Optional[str]] = mapped_column(Text)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"))
+    job_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("jobs.id", ondelete="CASCADE"))
+    old_status: Mapped[str | None] = mapped_column(Text)
+    new_status: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
 
 
@@ -141,7 +135,7 @@ class SourceGroup(Base):
     __tablename__ = "source_groups"
 
     name: Mapped[str] = mapped_column(Text, primary_key=True)
-    members: Mapped[List[str]] = mapped_column(server_default=text("'{}'"))
+    members: Mapped[list[str]] = mapped_column(server_default=text("'{}'"))
     description: Mapped[str] = mapped_column(Text, server_default=text("''"))
     active: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
     created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
@@ -161,9 +155,7 @@ class UserFilter(Base):
     __table_args__ = (UniqueConstraint("user_id", "name"),)
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
-    user_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("users.id", ondelete="CASCADE")
-    )
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"))
     name: Mapped[str] = mapped_column(Text)
     prompt: Mapped[str] = mapped_column(Text)
     on_ambiguous: Mapped[str] = mapped_column(Text, server_default=text("'keep'"))
@@ -180,20 +172,18 @@ class UserSettings(Base):
     user_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
     )
-    column_layout: Mapped[Optional[Any]] = mapped_column(JSONB)
+    column_layout: Mapped[Any | None] = mapped_column(JSONB)
     prefs: Mapped[dict] = mapped_column(server_default=text("'{}'::jsonb"))
-    api_key_enc: Mapped[Optional[bytes]] = mapped_column(BYTEA)
-    bypass_sponsorship_filter: Mapped[bool] = mapped_column(
-        Boolean, server_default=text("true")
-    )
+    api_key_enc: Mapped[bytes | None] = mapped_column(BYTEA)
+    bypass_sponsorship_filter: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
     criteria: Mapped[dict] = mapped_column(server_default=text("'{}'::jsonb"))
     ai_provider: Mapped[str] = mapped_column(Text, server_default=text("'openai'"))
-    ai_base_url: Mapped[Optional[str]] = mapped_column(Text)
-    ai_model: Mapped[Optional[str]] = mapped_column(Text)
+    ai_base_url: Mapped[str | None] = mapped_column(Text)
+    ai_model: Mapped[str | None] = mapped_column(Text)
     ai_params: Mapped[dict] = mapped_column(server_default=text("'{}'::jsonb"))
     email_digest: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
-    digest_token: Mapped[Optional[str]] = mapped_column(Text, unique=True)
-    last_digest_at: Mapped[Optional[datetime.datetime]]
+    digest_token: Mapped[str | None] = mapped_column(Text, unique=True)
+    last_digest_at: Mapped[datetime.datetime | None]
     updated_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
 
 
@@ -202,13 +192,11 @@ class ApiUsage(Base):
     __table_args__ = (Index("idx_api_usage_user_created", "user_id", "created_at"),)
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
-    user_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("users.id", ondelete="CASCADE")
-    )
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"))
     created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
     key_source: Mapped[str] = mapped_column(Text)
     purpose: Mapped[str] = mapped_column(Text)
-    model: Mapped[Optional[str]] = mapped_column(Text)
+    model: Mapped[str | None] = mapped_column(Text)
     prompt_tokens: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
     completion_tokens: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
     total_tokens: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
@@ -219,7 +207,9 @@ class Task(Base):
     __table_args__ = (
         Index("idx_tasks_status", "status", "id"),
         Index(
-            "idx_tasks_parent", "parent_id", "status",
+            "idx_tasks_parent",
+            "parent_id",
+            "status",
             postgresql_where=text("parent_id IS NOT NULL"),
         ),
     )
@@ -227,17 +217,17 @@ class Task(Base):
     id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
     kind: Mapped[str] = mapped_column(Text)
     payload: Mapped[dict] = mapped_column(JSONB)
-    dedupe_key: Mapped[Optional[str]] = mapped_column(Text, unique=True)
-    parent_id: Mapped[Optional[int]] = mapped_column(BigInteger)
+    dedupe_key: Mapped[str | None] = mapped_column(Text, unique=True)
+    parent_id: Mapped[int | None] = mapped_column(BigInteger)
     status: Mapped[str] = mapped_column(Text, server_default=text("'pending'"))
     attempts: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
-    worker: Mapped[Optional[str]] = mapped_column(Text)
-    last_heartbeat: Mapped[Optional[datetime.datetime]]
-    progress: Mapped[Optional[Any]] = mapped_column(JSONB)
-    error: Mapped[Optional[str]] = mapped_column(Text)
+    worker: Mapped[str | None] = mapped_column(Text)
+    last_heartbeat: Mapped[datetime.datetime | None]
+    progress: Mapped[Any | None] = mapped_column(JSONB)
+    error: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
-    started_at: Mapped[Optional[datetime.datetime]]
-    finished_at: Mapped[Optional[datetime.datetime]]
+    started_at: Mapped[datetime.datetime | None]
+    finished_at: Mapped[datetime.datetime | None]
 
 
 class AiBatch(Base):
@@ -249,9 +239,9 @@ class AiBatch(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
     provider_batch_id: Mapped[str] = mapped_column(Text, unique=True)
-    task_id: Mapped[Optional[int]] = mapped_column(BigInteger)
+    task_id: Mapped[int | None] = mapped_column(BigInteger)
     purpose: Mapped[str] = mapped_column(Text, server_default=text("''"))
-    model: Mapped[Optional[str]] = mapped_column(Text)
+    model: Mapped[str | None] = mapped_column(Text)
     requests: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
     completed: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
     failed_count: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
@@ -259,10 +249,10 @@ class AiBatch(Base):
     est_tokens: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
     input_tokens: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
     output_tokens: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
-    est_cost_usd: Mapped[Optional[Any]] = mapped_column(Numeric(12, 6))
+    est_cost_usd: Mapped[Any | None] = mapped_column(Numeric(12, 6))
     submitted_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
     updated_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
-    completed_at: Mapped[Optional[datetime.datetime]]
+    completed_at: Mapped[datetime.datetime | None]
 
 
 class WorkerStatus(Base):
@@ -271,15 +261,18 @@ class WorkerStatus(Base):
     name: Mapped[str] = mapped_column(Text, primary_key=True)
     started_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
     last_seen: Mapped[datetime.datetime] = mapped_column(server_default=_now)
-    current_task_id: Mapped[Optional[int]] = mapped_column(BigInteger)
+    current_task_id: Mapped[int | None] = mapped_column(BigInteger)
 
 
 class HealthAlert(Base):
     __tablename__ = "health_alerts"
     __table_args__ = (
         Index(
-            "uq_health_alerts_open", "kind", "subject",
-            unique=True, postgresql_where=text("resolved_at IS NULL"),
+            "uq_health_alerts_open",
+            "kind",
+            "subject",
+            unique=True,
+            postgresql_where=text("resolved_at IS NULL"),
         ),
     )
 
@@ -288,11 +281,11 @@ class HealthAlert(Base):
     subject: Mapped[str] = mapped_column(Text)
     severity: Mapped[str] = mapped_column(Text, server_default=text("'warning'"))
     message: Mapped[str] = mapped_column(Text, server_default=text("''"))
-    detail: Mapped[Optional[Any]] = mapped_column(JSONB)
+    detail: Mapped[Any | None] = mapped_column(JSONB)
     first_seen: Mapped[datetime.datetime] = mapped_column(server_default=_now)
     last_seen: Mapped[datetime.datetime] = mapped_column(server_default=_now)
-    notified_at: Mapped[Optional[datetime.datetime]]
-    resolved_at: Mapped[Optional[datetime.datetime]]
+    notified_at: Mapped[datetime.datetime | None]
+    resolved_at: Mapped[datetime.datetime | None]
 
 
 class FilterPreset(Base):
@@ -314,15 +307,13 @@ class SourceRequest(Base):
     __table_args__ = (Index("idx_source_requests_status", "status", "id"),)
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
-    user_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("users.id", ondelete="CASCADE")
-    )
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"))
     url: Mapped[str] = mapped_column(Text)
     note: Mapped[str] = mapped_column(Text, server_default=text("''"))
     status: Mapped[str] = mapped_column(Text, server_default=text("'open'"))
-    resolution_note: Mapped[Optional[str]] = mapped_column(Text)
+    resolution_note: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
-    resolved_at: Mapped[Optional[datetime.datetime]]
+    resolved_at: Mapped[datetime.datetime | None]
 
 
 class Report(Base):
@@ -330,16 +321,12 @@ class Report(Base):
     __table_args__ = (Index("idx_reports_status", "status", "id"),)
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
-    user_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("users.id", ondelete="CASCADE")
-    )
-    job_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("jobs.id", ondelete="CASCADE")
-    )
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"))
+    job_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("jobs.id", ondelete="CASCADE"))
     kind: Mapped[str] = mapped_column(Text)
     message: Mapped[str] = mapped_column(Text, server_default=text("''"))
-    corrections: Mapped[Optional[Any]] = mapped_column(JSONB)
+    corrections: Mapped[Any | None] = mapped_column(JSONB)
     status: Mapped[str] = mapped_column(Text, server_default=text("'open'"))
-    resolution_note: Mapped[Optional[str]] = mapped_column(Text)
+    resolution_note: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
-    resolved_at: Mapped[Optional[datetime.datetime]]
+    resolved_at: Mapped[datetime.datetime | None]

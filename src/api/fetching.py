@@ -4,7 +4,6 @@ import asyncio
 import logging
 import os
 import time
-from typing import Optional
 from urllib.parse import urlparse
 
 from api import metrics
@@ -18,15 +17,26 @@ SCRAPE_TIMEOUT_SECONDS = int(os.environ.get("JOBTRACKER_SCRAPE_TIMEOUT_SECONDS",
 # blocked fetch says nothing about the job. Markers are checked only on short
 # pages; real postings are long, block pages are not.
 _BLOCK_MARKERS = (
-    "captcha", "access denied", "request blocked", "are you a robot",
-    "unusual traffic", "too many requests", "rate limit", "just a moment",
-    "checking your browser", "attention required", "service unavailable",
-    "temporarily unavailable", "not available in your region",
-    "not available in your country", "error 503", "error 502",
+    "captcha",
+    "access denied",
+    "request blocked",
+    "are you a robot",
+    "unusual traffic",
+    "too many requests",
+    "rate limit",
+    "just a moment",
+    "checking your browser",
+    "attention required",
+    "service unavailable",
+    "temporarily unavailable",
+    "not available in your region",
+    "not available in your country",
+    "error 503",
+    "error 502",
 )
 
 
-def looks_blocked(content: Optional[str]) -> bool:
+def looks_blocked(content: str | None) -> bool:
     if not content:
         return False
     text = content.strip()
@@ -38,7 +48,7 @@ def looks_blocked(content: Optional[str]) -> bool:
     return False
 
 
-def redirected_away(requested: str, final: Optional[str]) -> bool:
+def redirected_away(requested: str, final: str | None) -> bool:
     """True when a fetch landed somewhere materially different — the signature
     of an expired posting bouncing to a board index or careers page. Compared
     on host+path only, so tracking params and trailing slashes don't count."""
@@ -48,7 +58,7 @@ def redirected_away(requested: str, final: Optional[str]) -> bool:
     return (a.netloc, a.path.rstrip("/")) != (b.netloc, b.path.rstrip("/"))
 
 
-async def fetch_page(url: str) -> tuple[Optional[str], bool]:
+async def fetch_page(url: str) -> tuple[str | None, bool]:
     """Returns (content, redirected_away).
 
     Both halves matter: a redirect means the posting is gone, which is a
@@ -88,7 +98,7 @@ async def fetch_page(url: str) -> tuple[Optional[str], bool]:
             metrics.SCRAPES.labels("redirected").inc()
             logger.info(f"fetch redirected away: {url} -> {final_url}")
             return None, True
-    except asyncio.TimeoutError:
+    except TimeoutError:
         metrics.SCRAPE_DURATION.observe(time.monotonic() - start)
         metrics.SCRAPES.labels("timeout").inc()
         logger.warning(f"scrape timed out after {SCRAPE_TIMEOUT_SECONDS}s: {url}")

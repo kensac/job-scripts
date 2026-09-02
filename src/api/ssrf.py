@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import socket
-from typing import Optional
 from urllib.parse import urlparse
 
 import httpx
@@ -27,12 +26,10 @@ def _addr_ok(ip_str: str) -> bool:
         or addr.is_unspecified
     ):
         return False
-    if addr.version == 4 and addr in _CGNAT:
-        return False
-    return True
+    return not (addr.version == 4 and addr in _CGNAT)
 
 
-def validate_base_url(url: str) -> Optional[str]:
+def validate_base_url(url: str) -> str | None:
     """Static checks on a user-supplied base URL. Returns an error or None."""
     parsed = urlparse(url)
     if parsed.scheme != "https":
@@ -68,7 +65,7 @@ def resolve_public_ip(host: str) -> str:
     return sorted(ips)[0]
 
 
-def validate_public_url(url: str) -> Optional[str]:
+def validate_public_url(url: str) -> str | None:
     """Static checks on a URL we are about to FETCH. Returns an error or None.
 
     Looser than validate_base_url - job postings legitimately live on http as
@@ -94,7 +91,7 @@ def validate_public_url(url: str) -> Optional[str]:
     return None
 
 
-def public_url_error(url: str) -> Optional[str]:
+def public_url_error(url: str) -> str | None:
     """validate_public_url plus a DNS check. Blocking - call it off-thread."""
     error = validate_public_url(url)
     if error:

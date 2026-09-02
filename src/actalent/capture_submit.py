@@ -30,11 +30,13 @@ def grab_network(driver) -> list:
         elif method == "Network.responseReceived":
             resp = params.get("response", {})
             info = reqs.get(params.get("requestId"), {})
-            events.append({
-                "method": info.get("method"),
-                "url": resp.get("url"),
-                "status": resp.get("status"),
-            })
+            events.append(
+                {
+                    "method": info.get("method"),
+                    "url": resp.get("url"),
+                    "status": resp.get("status"),
+                }
+            )
     return events
 
 
@@ -73,9 +75,17 @@ def main() -> int:
     posts = [e for e in network if e.get("method") == "POST"]
 
     keywords = [
-        "thank you", "thanks for applying", "application submitted", "submitted",
-        "successfully", "received", "we have received", "confirmation", "all set",
-        "complete", "next steps",
+        "thank you",
+        "thanks for applying",
+        "application submitted",
+        "submitted",
+        "successfully",
+        "received",
+        "we have received",
+        "confirmation",
+        "all set",
+        "complete",
+        "next steps",
     ]
     low = body_text.lower()
     hits = [k for k in keywords if k in low]

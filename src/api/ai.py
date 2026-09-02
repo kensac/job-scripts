@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional, Tuple, Type, TypeVar
+from typing import Any, TypeVar
 
 from anthropic import AsyncAnthropic
 from openai import AsyncOpenAI
@@ -47,7 +47,7 @@ def server_key(provider: str) -> str:
     return os.environ.get(_SERVER_KEY_ENVS.get(provider, ""), "")
 
 
-def provider_of_model(model: str) -> Optional[str]:
+def provider_of_model(model: str) -> str | None:
     for provider, models in MODEL_CATALOG.items():
         if any(m["model"] == model for m in models):
             return provider
@@ -65,6 +65,7 @@ def owner_models(unlimited: bool) -> list:
             if unlimited or m["model"] in OWNER_KEY_MODELS:
                 out.append(m["model"])
     return sorted(out)
+
 
 # USD per 1M tokens (input, output); models absent here emit no cost metric.
 PRICES_PER_MTOK = {
@@ -92,11 +93,11 @@ class AIConfig:
     api_key: str
     key_source: str
     model: str
-    base_url: Optional[str] = None
-    params: Dict[str, Any] = field(default_factory=dict)
+    base_url: str | None = None
+    params: dict[str, Any] = field(default_factory=dict)
 
 
-def validate_params(provider: str, params: Dict[str, Any]) -> Optional[str]:
+def validate_params(provider: str, params: dict[str, Any]) -> str | None:
     """Returns an error message, or None when valid."""
     allowed = {"reasoning_effort", "effort", "max_output_tokens", "temperature"}
     unknown = set(params) - allowed
@@ -119,7 +120,7 @@ def validate_params(provider: str, params: Dict[str, Any]) -> Optional[str]:
     return None
 
 
-def _usage_tuple(prompt: int, completion: int, total: int) -> Dict[str, int]:
+def _usage_tuple(prompt: int, completion: int, total: int) -> dict[str, int]:
     return {
         "prompt_tokens": prompt or 0,
         "completion_tokens": completion or 0,
@@ -127,13 +128,13 @@ def _usage_tuple(prompt: int, completion: int, total: int) -> Dict[str, int]:
     }
 
 
-async def parse(
+async def parse[T: BaseModel](
     cfg: AIConfig,
     instructions: str,
     input_text: str,
-    response_model: Type[T],
+    response_model: type[T],
     timeout: float = 120.0,
-) -> Tuple[Optional[T], Dict[str, int]]:
+) -> tuple[T | None, dict[str, int]]:
     import time as _time
 
     from api import metrics
@@ -158,16 +159,16 @@ async def parse(
     return result
 
 
-async def _parse(
+async def _parse[T: BaseModel](
     cfg: AIConfig,
     instructions: str,
     input_text: str,
-    response_model: Type[T],
+    response_model: type[T],
     timeout: float = 120.0,
-) -> Tuple[Optional[T], Dict[str, int]]:
+) -> tuple[T | None, dict[str, int]]:
     if cfg.provider == "anthropic":
         client = AsyncAnthropic(api_key=cfg.api_key, timeout=timeout)
-        kwargs: Dict[str, Any] = {}
+        kwargs: dict[str, Any] = {}
         if cfg.params.get("effort"):
             kwargs["output_config"] = {"effort": cfg.params["effort"]}
         response = await client.messages.parse(
@@ -185,7 +186,7 @@ async def _parse(
         )
         return response.parsed_output, usage
 
-    client_kwargs: Dict[str, Any] = {"api_key": cfg.api_key}
+    client_kwargs: dict[str, Any] = {"api_key": cfg.api_key}
     if cfg.provider == "openai_compatible" and cfg.base_url:
         from api.ssrf import safe_async_client
 
@@ -214,7 +215,7 @@ async def _parse(
         )
         return response.output_parsed, usage
 
-    completion_kwargs: Dict[str, Any] = {}
+    completion_kwargs: dict[str, Any] = {}
     if "temperature" in cfg.params:
         completion_kwargs["temperature"] = cfg.params["temperature"]
     if "max_output_tokens" in cfg.params:

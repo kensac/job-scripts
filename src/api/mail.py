@@ -4,7 +4,7 @@ import logging
 import os
 import smtplib
 from email.message import EmailMessage
-from typing import Any, Dict, List
+from typing import Any
 
 logger = logging.getLogger("jobtracker_mail")
 
@@ -45,17 +45,17 @@ def send_invite(to: str, invite_url: str) -> None:
     logger.info("invite sent")
 
 
-def send_health_alert(to: str, alerts: List[Dict[str, Any]]) -> None:
+def send_health_alert(to: str, alerts: list[dict[str, Any]]) -> None:
     lines = ["Job tracker data-health alerts:", ""]
     html = []
     for a in alerts:
         lines.append(f"- [{a['severity'].upper()}] {a['message']}")
-        html.append(
-            f"<li><strong>{a['severity'].upper()}</strong> — {a['message']}</li>"
-        )
+        html.append(f"<li><strong>{a['severity'].upper()}</strong> — {a['message']}</li>")
     lines += ["", f"Admin: {APP_URL.replace('/job-tracker', '/job-scripts')}/dashboard"]
     msg = EmailMessage()
-    msg["Subject"] = f"Job tracker: {len(alerts)} data-health alert{'s' if len(alerts) != 1 else ''}"
+    msg["Subject"] = (
+        f"Job tracker: {len(alerts)} data-health alert{'s' if len(alerts) != 1 else ''}"
+    )
     msg["From"] = f"Job Tracker <{MAIL_FROM}>"
     msg["To"] = to
     msg.set_content("\n".join(lines))
@@ -75,7 +75,7 @@ auto-resolve when it stops.</p>
     logger.info(f"health alert mail sent ({len(alerts)} alerts)")
 
 
-def send_digest(to: str, jobs: List[Dict[str, Any]], unsubscribe_token: str) -> None:
+def send_digest(to: str, jobs: list[dict[str, Any]], unsubscribe_token: str) -> None:
     unsubscribe_url = f"{APP_URL}/unsubscribe?token={unsubscribe_token}"
     count = len(jobs)
     lines = [

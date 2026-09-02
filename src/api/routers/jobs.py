@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import datetime
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -128,13 +127,13 @@ def job_options(user: AuthedUser = Depends(require_user)):
 def list_jobs(
     limit: int = 200,
     offset: int = 0,
-    cursor: Optional[int] = None,
+    cursor: int | None = None,
     sort: str = "added_at",
     dir: str = "desc",
-    search: Optional[str] = None,
-    status: Optional[str] = None,
-    statuses: Optional[str] = None,
-    source: Optional[str] = None,
+    search: str | None = None,
+    status: str | None = None,
+    statuses: str | None = None,
+    source: str | None = None,
     include_hidden: bool = False,
     with_total: bool = False,
     user: AuthedUser = Depends(require_user),
@@ -229,7 +228,10 @@ def patch_job(job_id: int, body: UserJobPatch, user: AuthedUser = Depends(requir
     # date_applied once so they never have to fill it by hand.
     if fields.get("status") and "date_applied" not in fields:
         if not existing or existing["date_applied"] is None:
-            fields["date_applied"] = datetime.date.today()
+            # UTC, not the container's local date. The containers run
+            # TZ=America/New_York, so date.today() silently decided
+            # "today" in Eastern for every user regardless of theirs.
+            fields["date_applied"] = datetime.datetime.now(datetime.UTC).date()
             autofilled["date_applied"] = fields["date_applied"].isoformat()
     if "status" in fields:
         old_status = existing["status"] if existing else None
@@ -321,9 +323,7 @@ class ExplainBody(BaseModel):
 
 
 @router.post("/user/jobs/{job_id}/explain")
-async def explain_check(
-    job_id: int, body: ExplainBody, user: AuthedUser = Depends(require_user)
-):
+async def explain_check(job_id: int, body: ExplainBody, user: AuthedUser = Depends(require_user)):
     """On-demand debugging: re-runs one check with the reason-ful schema and
     fuller reasoning (default verdicts skip reasons to save output tokens).
     Records a fresh verdict row (context 'explain') and returns the reason."""
@@ -354,9 +354,11 @@ async def explain_check(
         )
         if closure_signal:
             return {
-                "check": body.check, "status": "rejected",
+                "check": body.check,
+                "status": "rejected",
                 "reason": (gone or {}).get("reason", ""),
-                "refetched": True, "closure_signal": closure_signal,
+                "refetched": True,
+                "closure_signal": closure_signal,
             }
         raise HTTPException(
             409,
@@ -395,18 +397,33 @@ async def explain_check(
     else:
         raise HTTPException(
             400,
-            detail={"code": "INVALID_CHECK", "message": "check must be closed, clearance, or filter:<id>"},
+            detail={
+                "code": "INVALID_CHECK",
+                "message": "check must be closed, clearance, or filter:<id>",
+            },
         )
 
     parsed, usage = await _verdicts.run_check(
-        cfg, url=job["url"], check_type=check, instructions=instructions,
-        input_text=content_row["input_content"][:60000], response_model=model_cls,
-        verdict_of=verdict_of, company=job["company"], job_title=job["title"],
-        filter_name=filter_name, prompt_hash=prompt_hash, context="explain",
+        cfg,
+        url=job["url"],
+        check_type=check,
+        instructions=instructions,
+        input_text=content_row["input_content"][:60000],
+        response_model=model_cls,
+        verdict_of=verdict_of,
+        company=job["company"],
+        job_title=job["title"],
+        filter_name=filter_name,
+        prompt_hash=prompt_hash,
+        context="explain",
     )
     budget.record_usage(
-        user.id, cfg.key_source, "explain", cfg.model,
-        usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0),
+        user.id,
+        cfg.key_source,
+        "explain",
+        cfg.model,
+        usage.get("prompt_tokens", 0),
+        usage.get("completion_tokens", 0),
         usage.get("total_tokens", 0),
     )
     if parsed is None:
@@ -415,7 +432,10 @@ async def explain_check(
         # must read as a real outcome rather than an unhandled AttributeError.
         raise HTTPException(
             502,
-            detail={"code": "NO_VERDICT", "message": "the model returned no usable answer; try again"},
+            detail={
+                "code": "NO_VERDICT",
+                "message": "the model returned no usable answer; try again",
+            },
         )
     rejected, reason = verdict_of(parsed)
     return {"check": body.check, "status": "rejected" if rejected else "passed", "reason": reason}
@@ -426,9 +446,7 @@ def delete_user_job(job_id: int, user: AuthedUser = Depends(require_user)):
     """Drops the user's board row only (the catalog job is untouched); a later
     run re-materializes it if it still passes their filters. Hide is the
     permanent alternative."""
-    db.execute(
-        "DELETE FROM user_jobs WHERE user_id = %s AND job_id = %s", (user.id, job_id)
-    )
+    db.execute("DELETE FROM user_jobs WHERE user_id = %s AND job_id = %s", (user.id, job_id))
     return {"ok": True}
 
 
@@ -438,8 +456,8 @@ def upload_links(body: UploadRequest, user: AuthedUser = Depends(require_user)):
 
     accepted = []
     rejected = []
-    for raw in body.urls:
-        raw = raw.strip()
+    for submitted in body.urls:
+        raw = submitted.strip()
         if not raw.startswith(("http://", "https://")):
             continue
         # Fail here as well as in the fetcher: an upload is the one place a
@@ -483,7 +501,7 @@ REPORT_KINDS = ("stale", "wrong_data", "closed", "other")
 class ReportBody(BaseModel):
     kind: str
     message: str = ""
-    corrections: Optional[dict] = None
+    corrections: dict | None = None
 
 
 @router.post("/user/jobs/{job_id}/report")

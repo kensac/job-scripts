@@ -1,25 +1,25 @@
 from __future__ import annotations
 
 import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
 
 
 class UserJobPatch(BaseModel):
-    status: Optional[str] = None
-    date_applied: Optional[datetime.date] = None
-    notes: Optional[str] = None
-    size: Optional[str] = None
-    recruiter: Optional[str] = None
-    connection1: Optional[str] = None
-    connection2: Optional[str] = None
-    documents: Optional[str] = None
-    hidden: Optional[bool] = None
+    status: str | None = None
+    date_applied: datetime.date | None = None
+    notes: str | None = None
+    size: str | None = None
+    recruiter: str | None = None
+    connection1: str | None = None
+    connection2: str | None = None
+    documents: str | None = None
+    hidden: bool | None = None
 
 
 class UploadRequest(BaseModel):
-    urls: List[str] = Field(min_length=1, max_length=50)
+    urls: list[str] = Field(min_length=1, max_length=50)
 
 
 class FilterCreate(BaseModel):
@@ -31,11 +31,11 @@ class FilterCreate(BaseModel):
 
 
 class FilterPatch(BaseModel):
-    name: Optional[str] = Field(default=None, min_length=1, max_length=80)
-    prompt: Optional[str] = Field(default=None, min_length=1, max_length=8000)
-    on_ambiguous: Optional[str] = None
-    fail_closed: Optional[bool] = None
-    enabled: Optional[bool] = None
+    name: str | None = Field(default=None, min_length=1, max_length=80)
+    prompt: str | None = Field(default=None, min_length=1, max_length=8000)
+    on_ambiguous: str | None = None
+    fail_closed: bool | None = None
+    enabled: bool | None = None
 
 
 class ImprovePromptRequest(BaseModel):
@@ -43,25 +43,25 @@ class ImprovePromptRequest(BaseModel):
 
 
 class SourcesPut(BaseModel):
-    enabled: List[str]
+    enabled: list[str]
 
 
 class Criteria(BaseModel):
-    date_posted_after: Optional[datetime.date] = None
-    excluded_locations: List[str] = Field(default_factory=list, max_length=100)
+    date_posted_after: datetime.date | None = None
+    excluded_locations: list[str] = Field(default_factory=list, max_length=100)
 
 
 class SettingsPut(BaseModel):
-    column_layout: Optional[Any] = None
-    prefs: Optional[Dict[str, Any]] = None
-    ai_model: Optional[str] = Field(default=None, max_length=200)
-    ai_params: Optional[Dict[str, Any]] = None
-    bypass_sponsorship_filter: Optional[bool] = None
-    criteria: Optional[Criteria] = None
-    email_digest: Optional[bool] = None
+    column_layout: Any | None = None
+    prefs: dict[str, Any] | None = None
+    ai_model: str | None = Field(default=None, max_length=200)
+    ai_params: dict[str, Any] | None = None
+    bypass_sponsorship_filter: bool | None = None
+    criteria: Criteria | None = None
+    email_digest: bool | None = None
 
 
 class ApiKeyPut(BaseModel):
     api_key: str = Field(min_length=8, max_length=400)
     provider: str = "openai"
-    base_url: Optional[str] = Field(default=None, max_length=400)
+    base_url: str | None = Field(default=None, max_length=400)

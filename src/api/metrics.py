@@ -116,9 +116,7 @@ def _oldest_pending_age() -> float:
     return float(row["age"]) if row else 0.0
 
 
-HEALTH_ALERTS = Gauge(
-    "jobtracker_health_alerts_open", "Open data-health alerts"
-)
+HEALTH_ALERTS = Gauge("jobtracker_health_alerts_open", "Open data-health alerts")
 
 
 def serve() -> None:
