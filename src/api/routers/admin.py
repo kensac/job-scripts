@@ -60,6 +60,7 @@ def _where(
     sources: str | None = None,
     reason_group: str | None = None,
     evidence_missing: bool = False,
+    prompt_hash: str | None = None,
 ) -> tuple[str, dict]:
     clauses = []
     params: dict = {}
@@ -78,6 +79,14 @@ def _where(
     if config:
         clauses.append("config_name = %(config)s")
         params["config"] = config
+    # A filter-insights count is scoped to ONE prompt version, because a
+    # prompt_hash IS the filter as it was actually run - the same name has been
+    # two different prompts. A drill-through that carried only the reason group
+    # would open that group across every version, so the count and the rows it
+    # opened could not match, and not by a little.
+    if prompt_hash:
+        clauses.append("prompt_hash = %(prompt_hash)s")
+        params["prompt_hash"] = prompt_hash
     if url:
         clauses.append("url = %(url)s")
         params["url"] = url
@@ -98,10 +107,15 @@ def _where(
     # which is worse than not linking at all - so both spellings are generated
     # from core.reason_taxonomy and pinned equal by a test.
     #
-    # `~*` is a sequential scan. The trigram index on `reason` cannot serve a
-    # general regex (GIN trigram covers LIKE and similarity only), so do not
-    # read that index's existence as meaning this is indexed. Tens of
-    # milliseconds at 78k rows.
+    # `~*` is never itself indexed: the trigram index on `reason` cannot serve
+    # a general regex (GIN trigram covers LIKE and similarity only), so do not
+    # read that index's existence as meaning this is.
+    #
+    # What it scans depends on what it is composed with. A drill-through link
+    # carries check_type and prompt_hash, and idx_ai_queries_prompt_hash is on
+    # (check_type, prompt_hash) - so those two select the rows first and the
+    # regex only runs over that one prompt version. Used alone, it scans all
+    # 78k, which is still only tens of milliseconds.
     if reason_group:
         clauses.append("reason ~* %(reason_group)s")
         params["reason_group"] = reason_taxonomy.sql_pattern(reason_group)
@@ -1245,6 +1259,7 @@ def list_queries(
     sources: str | None = None,
     reason_group: str | None = None,
     evidence_missing: bool = False,
+    prompt_hash: str | None = None,
     sort: str = "id",
     dir: str = "desc",
     page: int = 1,
@@ -1253,7 +1268,16 @@ def list_queries(
 ):
     try:
         where, params = _where(
-            check_type, status, config, url, q, deep, sources, reason_group, evidence_missing
+            check_type,
+            status,
+            config,
+            url,
+            q,
+            deep,
+            sources,
+            reason_group,
+            evidence_missing,
+            prompt_hash,
         )
     except KeyError:
         # An unknown group key is a bad request, not a server fault. The keys

@@ -294,3 +294,56 @@ def test_criterion_is_published_so_the_number_can_be_described(client, admin_hea
 def test_requires_admin(client, user_headers):
     resp = client.get("/v1/admin/filter-insights/rejection-reasons", headers=user_headers)
     assert resp.status_code in (401, 403)
+
+
+def test_a_drill_link_opens_exactly_the_rows_its_count_counted(client, admin_headers):
+    """The property the whole drill-through exists to have. A count on the
+    insight page is scoped to ONE prompt version; the link has to carry that
+    scope or it opens the same reason group across every version, and the
+    number the user clicked is not the number they land on.
+
+    Without the prompt_hash filter this fails by exactly the rows belonging to
+    the other version.
+    """
+    for i in range(3):
+        _reject(f"https://drill.test/a{i}", "No pay disclosed.", "hash_aaaa", "pay_tier")
+    for i in range(5):
+        _reject(f"https://drill.test/b{i}", "Salary not listed.", "hash_bbbb", "pay_tier")
+
+    insight = _get(client, admin_headers)
+    version_a = next(r for r in insight["prompt_versions"] if r["prompt_hash"] == "hash_aaaa")
+    group = next(g for g in version_a["groups"] if g["key"] == "pay_undisclosed")
+    assert group["decisions"] == 3
+
+    # Exactly the link the UI builds, including check_type so the
+    # (check_type, prompt_hash) index serves the scope.
+    drilled = client.get(
+        "/v1/admin/queries",
+        params={
+            "check_type": "custom",
+            "status": "rejected",
+            "prompt_hash": "hash_aaaa",
+            "reason_group": "pay_undisclosed",
+            "page_size": 100,
+        },
+        headers=admin_headers,
+    )
+    assert drilled.status_code == 200, drilled.text
+    body = drilled.json()
+    assert body["total"] == group["decisions"], (
+        "the drill link must open exactly the rows the count counted"
+    )
+    assert {r["url"] for r in body["rows"]} == {f"https://drill.test/a{i}" for i in range(3)}
+
+
+def test_prompt_hash_filter_composes_with_the_reason_group(client, admin_headers):
+    _reject("https://drill.test/1", "No pay disclosed.", "hash_aaaa", "f")
+    _reject("https://drill.test/2", "Requires 5 years experience.", "hash_aaaa", "f")
+    _reject("https://drill.test/3", "No pay disclosed.", "hash_bbbb", "f")
+
+    resp = client.get(
+        "/v1/admin/queries",
+        params={"prompt_hash": "hash_aaaa", "reason_group": "pay_undisclosed"},
+        headers=admin_headers,
+    )
+    assert resp.json()["total"] == 1, "both predicates must apply, not either"
