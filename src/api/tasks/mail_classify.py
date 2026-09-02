@@ -12,6 +12,7 @@ previous pass concluded.
 
 from __future__ import annotations
 
+import datetime
 import logging
 import os
 from typing import Any, Literal
@@ -153,6 +154,29 @@ def effort_for(model: str) -> str:
     return _EFFORT_BY_MODEL.get(model, FALLBACK_EFFORT)
 
 
+def parse_deadline(value: str | None) -> datetime.datetime | None:
+    """An ISO date, or nothing.
+
+    The model is asked for a date it can actually read off the email, and it
+    mostly complies - but it also returns things like "2022-09-??" when the
+    year and month are stated and the day is not. Postgres rejects that
+    outright, and passing it through failed an entire 1,200-message task on
+    one row.
+
+    A partial date is not a deadline. Dropping it is the same rule the rest of
+    this pipeline follows: unstated stays unstated rather than becoming a
+    guess, and inventing the 1st or the 30th to make it parse would be exactly
+    the fabrication the schema exists to prevent.
+    """
+    if not value:
+        return None
+    try:
+        parsed = datetime.date.fromisoformat(value.strip()[:10])
+    except (ValueError, TypeError):
+        return None
+    return datetime.datetime.combine(parsed, datetime.time.min, tzinfo=datetime.UTC)
+
+
 def _spec_text(row: dict[str, Any]) -> str:
     return (
         f"From: {row.get('from_email') or ''}\n"
@@ -203,6 +227,7 @@ async def handle_classify_mail(task_id: int, payload: dict[str, Any]) -> None:
     )
 
     done = 0
+    skipped = 0
     for key, res in results.items():
         if res.error or not res.text:
             continue
@@ -214,24 +239,35 @@ async def handle_classify_mail(task_id: int, payload: dict[str, Any]) -> None:
         # Everything that can raise happens BEFORE anything is written, so a
         # half-parsed result cannot produce a half-written row that later looks
         # like a completed classification.
-        deadline = parsed.deadline if parsed.deadline else None
-        db.execute(
-            """
-            INSERT INTO email_events (
-                message_id, kind, confidence, deadline_at, deadline_inferred, detail, model
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s)
-            """,
-            (
-                int(key),
-                parsed.kind,
-                parsed.confidence,
-                deadline,
-                not parsed.deadline_is_explicit and deadline is not None,
-                db.jsonb({"company": parsed.company, "role_title": parsed.role_title}),
-                model,
-            ),
-        )
+        deadline = parse_deadline(parsed.deadline)
+        try:
+            db.execute(
+                """
+                INSERT INTO email_events (
+                    message_id, kind, confidence, deadline_at, deadline_inferred, detail, model
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    int(key),
+                    parsed.kind,
+                    parsed.confidence,
+                    deadline,
+                    not parsed.deadline_is_explicit and deadline is not None,
+                    db.jsonb({"company": parsed.company, "role_title": parsed.role_title}),
+                    model,
+                ),
+            )
+        except Exception:
+            # One malformed field must not discard the whole batch's results.
+            # The batch is already paid for; losing 4,999 good classifications
+            # to one bad row is the expensive way to be strict, and the row is
+            # picked up again next sweep because it has no event.
+            logger.warning(f"mail classify: could not record message {key}", exc_info=True)
+            skipped += 1
+            continue
         done += 1
         if done % 200 == 0:
             _set_progress(task_id, done, len(specs), "mail classified")
     _set_progress(task_id, done, len(specs), "mail classified")
+    if skipped:
+        logger.warning(f"mail classify: {skipped} row(s) skipped on write")
