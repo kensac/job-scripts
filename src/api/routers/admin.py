@@ -1240,11 +1240,28 @@ def delete_queries(body: DeleteQueries, user: AuthedUser = Depends(require_admin
     return {"deleted": deleted}
 
 
+# Sortable columns for the job aggregate. Values are looked up here, never
+# interpolated from the request, which is what keeps the ORDER BY safe.
+_JOBS_SORTABLE = {
+    "last_seen": "last_seen",
+    "company": "lower(MAX(company))",
+    "job_title": "lower(MAX(job_title))",
+    "checks": "checks",
+    "passed": "passed",
+    "rejected": "rejected",
+    "failed": "failed",
+    "total_tokens": "total_tokens",
+    "url": "url",
+}
+
+
 @router.get("/jobs")
 def list_jobs(
     q: str | None = None,
     config: str | None = None,
     verdict: str | None = None,
+    sort: str = "last_seen",
+    dir: str = "desc",
     page: int = 1,
     page_size: int = 50,
     user: AuthedUser = Depends(require_admin),
@@ -1286,8 +1303,10 @@ def list_jobs(
         {having}
     """
     total_row = db.query_one(f"SELECT COUNT(*) AS c FROM ({base}) sub", params)
+    sort_col = _JOBS_SORTABLE.get(sort, "last_seen")
+    direction = "ASC" if dir == "asc" else "DESC"
     rows = db.query(
-        f"{base} ORDER BY last_seen DESC LIMIT %(limit)s OFFSET %(offset)s",
+        f"{base} ORDER BY {sort_col} {direction} NULLS LAST, url LIMIT %(limit)s OFFSET %(offset)s",
         {**params, "limit": page_size, "offset": (page - 1) * page_size},
     )
     for r in rows:
@@ -1299,6 +1318,11 @@ def list_jobs(
         "page": page,
         "page_size": page_size,
         "has_more": page * page_size < total,
+        # Echoed so the UI can render the active sort without duplicating the
+        # default, and sortable so it never has to guess the accepted keys.
+        "sort": sort if sort in _JOBS_SORTABLE else "last_seen",
+        "dir": direction.lower(),
+        "sortable": sorted(_JOBS_SORTABLE),
     }
 
 
