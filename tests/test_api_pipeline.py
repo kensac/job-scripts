@@ -233,3 +233,127 @@ def test_a_dismissed_application_is_counted_not_hidden(client, user_headers):
 
     client.post(f"/v1/user/pipeline/{drop}/restore", headers=user_headers, json={})
     assert client.get("/v1/user/pipeline/summary", headers=user_headers).json()["dismissed"] == 0
+
+
+def _job_on_board(uid, company, title, status="Application Submitted"):
+    job = db.query_one(
+        "INSERT INTO jobs (url, raw_url, source, company, title, active) "
+        "VALUES (%s,%s,'fulltime',%s,%s,TRUE) RETURNING id",
+        (f"https://x/{next(_seq)}", f"https://x/{next(_seq)}", company, title),
+    )["id"]
+    db.execute(
+        "INSERT INTO user_jobs (user_id, job_id, status) VALUES (%s,%s,%s)", (uid, job, status)
+    )
+    return job
+
+
+def test_candidates_lead_with_what_the_matcher_refused_to_choose(client, user_headers):
+    """_by_company refuses when two applications at one employer are both
+    plausible. Those rejected candidates are exactly what a person should see
+    first - the system already knows the answer is one of them."""
+    uid = db.query_one("SELECT id FROM users WHERE email = %s", ("user@example.com",))["id"]
+    _app(uid, company="Tesla", title="Frontend Engineer")
+    _app(uid, company="Tesla", title="Autopilot Engineer")
+    _app(uid, company="Unrelated Co", title="Engineer")
+    mid = _msg(uid)
+    db.execute(
+        "INSERT INTO email_events (message_id, kind, confidence, detail) "
+        "VALUES (%s,'rejection','high',%s)",
+        (mid, db.jsonb({"company": "Tesla, Inc.", "role_title": "Engineer"})),
+    )
+
+    body = client.get(f"/v1/user/messages/{mid}/candidates", headers=user_headers).json()
+    assert body["same_company_candidates"] == 2, "the count the matcher choked on"
+    assert [a["reason"] for a in body["applications"][:2]] == [
+        "same company as this mail",
+        "same company as this mail",
+    ]
+    assert body["message"]["extracted_company"] == "Tesla, Inc."
+
+
+def test_candidates_include_board_jobs_with_no_application_yet(client, user_headers):
+    """'This belongs to a job I tracked but never recorded applying to' has
+    nothing to attach to until an application exists."""
+    uid = db.query_one("SELECT id FROM users WHERE email = %s", ("user@example.com",))["id"]
+    _job_on_board(uid, "Stripe", "Backend Engineer")
+    mid = _msg(uid)
+    body = client.get(f"/v1/user/messages/{mid}/candidates?q=stripe", headers=user_headers).json()
+    assert [j["company"] for j in body["board_jobs"]] == ["Stripe"]
+
+
+def test_assigning_to_a_board_job_creates_the_application(client, user_headers):
+    uid = db.query_one("SELECT id FROM users WHERE email = %s", ("user@example.com",))["id"]
+    job = _job_on_board(uid, "Stripe", "Backend Engineer")
+    mid = _msg(uid)
+    _event(mid, "offer")
+
+    resp = client.post(
+        f"/v1/user/messages/{mid}/assign", headers=user_headers, json={"job_id": job}
+    )
+    assert resp.status_code == 200
+    app_id = resp.json()["application_id"]
+    detail = client.get(f"/v1/user/pipeline/{app_id}", headers=user_headers).json()
+    assert detail["company_name"] == "Stripe"
+    assert detail["job_id"] == job
+    assert detail["stage"] == "offer"
+
+
+def test_assigning_to_a_new_company_never_invents_a_job(client, user_headers):
+    """Mail predating the catalog has no posting and never will. An email does
+    not get to create a jobs row."""
+    uid = db.query_one("SELECT id FROM users WHERE email = %s", ("user@example.com",))["id"]
+    before = db.query_one("SELECT count(*) AS n FROM jobs")["n"]
+    mid = _msg(uid)
+    _event(mid, "rejection")
+
+    resp = client.post(
+        f"/v1/user/messages/{mid}/assign",
+        headers=user_headers,
+        json={"company_name": "Initech", "title": "Backend Intern"},
+    )
+    app_id = resp.json()["application_id"]
+    detail = client.get(f"/v1/user/pipeline/{app_id}", headers=user_headers).json()
+    assert detail["job_id"] is None
+    assert detail["source_provenance"] == "manual"
+    assert db.query_one("SELECT count(*) AS n FROM jobs")["n"] == before
+
+
+def test_reassigning_moves_the_message_and_keeps_the_old_row(client, user_headers):
+    uid = db.query_one("SELECT id FROM users WHERE email = %s", ("user@example.com",))["id"]
+    wrong = _app(uid, company="Wrong", title="Engineer")
+    right = _app(uid, company="Right", title="Engineer")
+    mid = _msg(uid)
+    _event(mid, "offer")
+    _match(mid, wrong)
+
+    client.post(
+        f"/v1/user/messages/{mid}/assign", headers=user_headers, json={"application_id": right}
+    )
+    assert (
+        client.get(f"/v1/user/pipeline/{wrong}", headers=user_headers).json()["stage"] == "applied"
+    )
+    assert client.get(f"/v1/user/pipeline/{right}", headers=user_headers).json()["stage"] == "offer"
+    assert (
+        db.query_one("SELECT count(*) AS n FROM application_matches WHERE message_id = %s", (mid,))[
+            "n"
+        ]
+        == 2
+    )
+
+
+def test_assigning_needs_a_target(client, user_headers):
+    uid = db.query_one("SELECT id FROM users WHERE email = %s", ("user@example.com",))["id"]
+    mid = _msg(uid)
+    assert (
+        client.post(f"/v1/user/messages/{mid}/assign", headers=user_headers, json={}).status_code
+        == 400
+    )
+
+
+def test_another_users_message_cannot_be_assigned(client, user_headers, other_user_headers):
+    uid = db.query_one("SELECT id FROM users WHERE email = %s", ("user@example.com",))["id"]
+    mid = _msg(uid)
+    assert (
+        client.get(f"/v1/user/messages/{mid}/candidates", headers=other_user_headers).status_code
+        == 404
+    )
