@@ -425,7 +425,14 @@ async def test_chunked_run_all_filters_lifecycle(monkeypatch, user_headers):
     async def fake_parse(cfg, instructions, input_text, response_model, timeout=120.0):
         should_filter = "REJECT_ME" in input_text
         usage = {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
-        return response_model(should_filter=should_filter, reason="test"), usage
+        return (
+            response_model(
+                should_filter=should_filter,
+                reason="test",
+                basis="stated" if should_filter else "undetermined",
+            ),
+            usage,
+        )
 
     monkeypatch.setattr(ai, "parse", fake_parse)
 
@@ -490,6 +497,18 @@ async def test_chunked_run_all_filters_lifecycle(monkeypatch, user_headers):
         )
     }
     assert custom_reasons == {"test"}
+
+    # basis rides in parsed_json rather than a column of its own: the model
+    # already returns the whole response there, so an audit can count it
+    # without a migration on ai_queries.
+    bases = {
+        r["basis"]
+        for r in db.query(
+            "SELECT parsed_json::jsonb ->> 'basis' AS basis FROM ai_queries "
+            "WHERE check_type = 'custom' AND status = 'rejected'"
+        )
+    }
+    assert bases == {"stated"}
 
 
 # ---------------------------------------------------------------------------

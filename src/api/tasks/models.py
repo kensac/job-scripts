@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel
+from typing import Literal
+
+from pydantic import BaseModel, Field
 
 
 class JobExtract(BaseModel):
@@ -28,10 +30,33 @@ class FilterVerdict(BaseModel):
     schema was silently discarding. Restoring it changes no instruction text,
     which matters: prompt_hash is computed over those instructions, and
     altering them would fork every custom verdict ever recorded.
+
+    `basis` is steered by its own description here for exactly that reason.
+    Putting the guidance in build_custom_instructions would have been the
+    obvious place and would have moved every prompt_hash - not immediately,
+    which is the trap: hashes are stored on user_filters and only recomputed
+    when a filter is patched, so the fork would fire later, on an unrelated
+    edit like a rename or an enable toggle, orphaning that filter's history
+    and triggering a paid re-run. Priced at the current rate that is $1.32 for
+    the one enabled filter and $6.19 if all ten were touched, against $0.009 a
+    month for the field itself. The schema is not part of the hash, so this
+    costs the tokens and nothing else.
     """
 
     should_filter: bool
     reason: str
+    basis: Literal["stated", "undetermined"] = Field(
+        description=(
+            "Whether the posting supplied what the criteria needed. "
+            "'stated': the posting contained the information the criteria ask "
+            "about, and the verdict follows from what it said. "
+            "'undetermined': the posting did not disclose that information or "
+            "was ambiguous about it, so the verdict follows from the ambiguity "
+            "policy rather than from anything the posting stated. This "
+            "describes the POSTING, not your confidence - a clearly-worded "
+            "posting that simply omits the salary is 'undetermined'."
+        )
+    )
 
 
 class JobClosedVerdict(BaseModel):

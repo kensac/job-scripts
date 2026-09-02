@@ -286,3 +286,35 @@ def test_verdicts_take_their_timestamp_from_the_database():
     from core.store import _INSERT_COLUMNS
 
     assert "created_at" not in _INSERT_COLUMNS
+
+def test_verdict_schema_changes_do_not_move_prompt_hash():
+    """basis lives in the response schema, not in the instruction text, and
+    this is what keeps that true.
+
+    prompt_hash is computed over build_custom_instructions() alone and is
+    STORED on user_filters, recomputed only when a filter is patched. So
+    putting model guidance in the instructions would not fork the verdict log
+    immediately - it would arm a fork that fires later, on an unrelated edit
+    like a rename or an enable toggle, orphaning that filter's history and
+    triggering a paid re-run ($1.32 for the one enabled filter at current
+    rates, $6.19 for all ten). A pinned hash is the cheapest way to notice.
+    """
+    from core.filters import build_custom_instructions, compute_prompt_hash
+
+    instructions = build_custom_instructions("no crypto companies", "keep")
+    # Verified identical on origin/main before basis was added.
+    assert compute_prompt_hash(instructions) == "886dfbe4efcccbf5"
+
+
+def test_basis_is_carried_in_the_response_schema():
+    """It must reach the model, and it must reach it via the schema - if it
+    ever migrates into the instruction text the test above starts failing."""
+    from openai.lib._pydantic import to_strict_json_schema
+
+    from api.tasks.models import FilterVerdict
+
+    schema = to_strict_json_schema(FilterVerdict)
+    basis = schema["properties"]["basis"]
+    assert basis["enum"] == ["stated", "undetermined"]
+    assert "did not disclose" in basis["description"]
+    assert set(schema["required"]) == {"should_filter", "reason", "basis"}
