@@ -6375,6 +6375,32 @@
             }
           },
           {
+            "name": "reason_group",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Reason Group"
+            }
+          },
+          {
+            "name": "evidence_missing",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Evidence Missing"
+            }
+          },
+          {
             "name": "sort",
             "in": "query",
             "required": false,

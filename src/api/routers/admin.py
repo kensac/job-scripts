@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 
 from api import ai, db, events
 from api.auth import AuthedUser, require_user
-from core import pricing
+from core import pricing, reason_taxonomy
 
 logger = logging.getLogger("jobtracker_api")
 
@@ -58,6 +58,8 @@ def _where(
     q: str | None,
     deep: bool = False,
     sources: str | None = None,
+    reason_group: str | None = None,
+    evidence_missing: bool = False,
 ) -> tuple[str, dict]:
     clauses = []
     params: dict = {}
@@ -90,6 +92,22 @@ def _where(
             cols += " OR input_content ILIKE %(q)s"
         clauses.append(cols + ")")
         params["q"] = f"%{q}%"
+    # The filter-insights aggregate classifies reasons in Python; this
+    # drill-through has to reproduce that selection in SQL. If the two ever
+    # disagreed, a count would link to a different set of rows than it counted,
+    # which is worse than not linking at all - so both spellings are generated
+    # from core.reason_taxonomy and pinned equal by a test.
+    #
+    # `~*` is a sequential scan. The trigram index on `reason` cannot serve a
+    # general regex (GIN trigram covers LIKE and similarity only), so do not
+    # read that index's existence as meaning this is indexed. Tens of
+    # milliseconds at 78k rows.
+    if reason_group:
+        clauses.append("reason ~* %(reason_group)s")
+        params["reason_group"] = reason_taxonomy.sql_pattern(reason_group)
+    if evidence_missing:
+        clauses.append("reason ~* %(evidence_missing)s")
+        params["evidence_missing"] = reason_taxonomy.EVIDENCE_MISSING_SQL
     return ("WHERE " + " AND ".join(clauses)) if clauses else "", params
 
 
@@ -1213,13 +1231,30 @@ def list_queries(
     q: str | None = None,
     deep: bool = False,
     sources: str | None = None,
+    reason_group: str | None = None,
+    evidence_missing: bool = False,
     sort: str = "id",
     dir: str = "desc",
     page: int = 1,
     page_size: int = 50,
     user: AuthedUser = Depends(require_admin),
 ):
-    where, params = _where(check_type, status, config, url, q, deep, sources)
+    try:
+        where, params = _where(
+            check_type, status, config, url, q, deep, sources, reason_group, evidence_missing
+        )
+    except KeyError:
+        # An unknown group key is a bad request, not a server fault. The keys
+        # are a closed server-side vocabulary, so a caller sending one that
+        # does not exist has a stale link, and should be told which.
+        raise HTTPException(
+            400,
+            detail={
+                "code": "UNKNOWN_REASON_GROUP",
+                "message": f"unknown reason_group: {reason_group}",
+                "valid": [g.key for g in reason_taxonomy.GROUPS],
+            },
+        ) from None
     page = max(1, page)
     page_size = max(1, min(page_size, 500))
     total_row = db.query_one(f"SELECT COUNT(*) AS c FROM ai_queries {where}", params)
