@@ -223,7 +223,15 @@ def mail_analytics(
         """
     )
 
-    coverage = (
+    # Deliberately NOT windowed, and named `corpus` so it cannot be read as
+    # though it were. "How much mail exists, when does it start, how much is
+    # still unclassified" are properties of the import, not of a slice: the
+    # backlog question is about the whole eight-year backfill. by_source is
+    # unwindowed for the same reason - it used to interpolate {window} while
+    # the totals above it did not, so at days=30 the breakdown summed to less
+    # than the total it was nested under and `oldest` reported 2018 on a
+    # screen labelled "last 30 days".
+    corpus = (
         db.query_one(
             """
         SELECT count(*) AS messages,
@@ -237,15 +245,47 @@ def mail_analytics(
         )
         or {}
     )
+    domain_total = db.query_one(
+        "SELECT count(DISTINCT split_part(lower(m.from_email), '@', 2)) AS domains "
+        "FROM email_messages m JOIN ("
+        "  SELECT DISTINCT ON (message_id) message_id, kind FROM email_events"
+        "  ORDER BY message_id, id DESC) ce ON ce.message_id = m.id "
+        f"WHERE ce.kind <> 'not_job_related' {window}",
+        params,
+    )
 
     return {
         "window_days": days or None,
-        "coverage": {
-            **coverage,
-            "by_source": q(
+        "corpus": {
+            **corpus,
+            "by_source": db.query(
                 "SELECT m.source, count(*) AS messages FROM email_messages m "
-                "WHERE TRUE {window} GROUP BY 1 ORDER BY 2 DESC"
+                "GROUP BY 1 ORDER BY 2 DESC"
             ),
+        },
+        # Each section below counts a DIFFERENT population, and nothing in the
+        # rows says so. Presented side by side they invite a subtraction that
+        # means nothing, so the denominators ship here rather than being
+        # hardcoded by whoever renders them.
+        "populations": {
+            "classification": {
+                "messages": sum(r["messages"] for r in classification),
+                "excludes": [],
+            },
+            "matching": {
+                "messages": sum(r["messages"] for r in matching),
+                "excludes": ["not_job_related"],
+            },
+            "prefilter": {
+                "messages": sum(r["messages"] for r in prefilter),
+                "excludes": [],
+            },
+            "sender_domains": {
+                "messages": sum(r["messages"] for r in senders),
+                "excludes": ["not_job_related"],
+                "domains_shown": len(senders),
+                "domains_total": (domain_total or {}).get("domains", 0),
+            },
         },
         "classification": classification,
         "matching": matching,

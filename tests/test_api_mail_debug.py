@@ -238,6 +238,67 @@ def test_analytics_measures_what_a_prefilter_gate_would_have_cost(client, admin_
     assert body["prefilter"]["job_related_total"] == 2
 
 
+def test_corpus_block_describes_one_population_under_any_window(client, admin_headers, f):
+    """The whole block is corpus-wide, including by_source.
+
+    by_source used to interpolate the window while the totals above it did
+    not, so at days=30 the breakdown summed to LESS than the total it was
+    nested under, and `oldest` reported the 2018 start of an eight-year import
+    on a screen labelled "last 30 days". Not a wrong number - a number
+    counting a different population than its label claims.
+    """
+    uid = f.make_user()
+    for i, (source, days_ago) in enumerate((("takeout", 900), ("gmail", 900), ("gmail", 1))):
+        db.execute(
+            "INSERT INTO email_messages (user_id, provider_message_id, source, from_email, "
+            "subject, sent_at, prefilter_hit) VALUES (%s,%s,%s,'a@b.com','s',"
+            "now() - make_interval(days => %s), TRUE)",
+            (uid, f"cov-{i}", source, days_ago),
+        )
+
+    windowed = client.get("/v1/admin/mail/analytics?days=30", headers=admin_headers).json()
+    corpus = windowed["corpus"]
+    assert corpus["messages"] == 3, "corpus totals must ignore the window"
+    assert sum(r["messages"] for r in corpus["by_source"]) == corpus["messages"], (
+        "by_source must sum to the total it is nested under"
+    )
+    assert corpus["unclassified"] == 3
+
+    whole = client.get("/v1/admin/mail/analytics", headers=admin_headers).json()
+    assert whole["corpus"] == corpus, "the corpus block cannot depend on the window at all"
+    assert whole["window_days"] is None and windowed["window_days"] == 30
+
+
+def test_each_section_ships_the_population_it_counts(client, admin_headers, f):
+    """classification counts every classified message; matching and
+    sender_domains exclude not_job_related. Side by side those invite a
+    subtraction that means nothing, so the denominators travel with the rows
+    instead of being hardcoded by whoever renders them."""
+    uid = f.make_user()
+    for i, kind in enumerate(("rejection", "rejection", "not_job_related")):
+        mid = db.query_one(
+            "INSERT INTO email_messages (user_id, provider_message_id, source, from_email, "
+            "subject, sent_at, prefilter_hit) VALUES (%s,%s,'takeout',%s,'s',now(),TRUE) "
+            "RETURNING id",
+            (uid, f"pop-{i}", f"a@d{i}.com"),
+        )["id"]
+        db.execute(
+            "INSERT INTO email_events (message_id, kind, confidence) VALUES (%s,%s,'high')",
+            (mid, kind),
+        )
+
+    pops = client.get("/v1/admin/mail/analytics", headers=admin_headers).json()["populations"]
+    assert pops["classification"]["messages"] == 3
+    assert pops["classification"]["excludes"] == []
+    assert pops["matching"]["messages"] == 2
+    assert pops["matching"]["excludes"] == ["not_job_related"]
+    assert pops["sender_domains"]["messages"] == 2
+    # LIMIT 40 means the rows can be a truncation; say so in numbers rather
+    # than letting a caller assume it is the whole set.
+    assert pops["sender_domains"]["domains_shown"] == 2
+    assert pops["sender_domains"]["domains_total"] == 2
+
+
 def test_analytics_needs_admin(client, user_headers):
     assert client.get("/v1/admin/mail/analytics", headers=user_headers).status_code == 403
 
