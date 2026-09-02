@@ -497,6 +497,11 @@ class Application(Base):
     title: Mapped[str | None] = mapped_column(Text)
     source_provenance: Mapped[str] = mapped_column(Text, server_default="email")
     applied_at: Mapped[datetime.datetime | None] = mapped_column(TIMESTAMP(timezone=True))
+    # A dismissal is a correction, not a delete: the application stays, stops
+    # counting, and can be restored. Only mail-derived applications can be
+    # dismissed - a tracker application exists because the user entered it.
+    dismissed_at: Mapped[datetime.datetime | None] = mapped_column(TIMESTAMP(timezone=True))
+    dismissed_reason: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime.datetime] = mapped_column(
         TIMESTAMP(timezone=True), server_default=_now
     )
