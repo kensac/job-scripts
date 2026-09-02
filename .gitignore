@@ -201,7 +201,16 @@ cython_debug/
 
 # GCP Credentials
 service_account_credentials.json
+# Blanket-ignore JSON because credentials arrive as .json. Config that MUST be
+# committed is negated below - a new one has to be added here deliberately.
+# pyrightconfig.json was silently uncommitted by this rule, so CI type-checked
+# with no config at all and failed on files the config excludes.
 *.json
+!openapi.json
+!renovate.json
+!pyrightconfig.json
+!package.json
+!tsconfig.json
 
 # .python-version
 .python-version

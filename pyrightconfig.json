@@ -1,0 +1,14 @@
+{
+  "extraPaths": ["src"],
+  "include": ["src/api", "src/core"],
+  "exclude": [
+    "src/core/pittcsc_simplify.py",
+    "src/trackers",
+    "src/actalent",
+    "src/peak",
+    "**/__pycache__"
+  ],
+  "typeCheckingMode": "standard",
+  "reportMissingImports": "error",
+  "pythonVersion": "3.13"
+}
