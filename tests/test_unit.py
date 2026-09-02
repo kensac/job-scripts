@@ -286,3 +286,21 @@ def test_verdicts_take_their_timestamp_from_the_database():
     from core.store import _INSERT_COLUMNS
 
     assert "created_at" not in _INSERT_COLUMNS
+
+
+def test_requirements_declares_a_shape_the_model_can_actually_serve():
+    """Every batched extraction goes through the router so its model is checked
+    against declared capability rather than assumed. Requirements was the last
+    one naming a model straight into the batch call."""
+    from api.tasks.requirements import REQUIREMENTS_MODEL, REQUIREMENTS_TASK
+    from core.providers import StructuredOutput
+    from core.routing import resolve
+
+    assert REQUIREMENTS_TASK.candidates == (REQUIREMENTS_MODEL,)
+    assert REQUIREMENTS_TASK.structured is StructuredOutput.JSON_SCHEMA
+    assert REQUIREMENTS_TASK.batched is True
+
+    assert resolve(REQUIREMENTS_TASK).model == REQUIREMENTS_MODEL
+    # "minimal" is the whole point of the pinning: nano rejects it outright and
+    # a batch fails whole, so an unchecked effort costs the entire run.
+    assert REQUIREMENTS_TASK.resolved_effort() == "minimal"

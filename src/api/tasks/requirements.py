@@ -17,6 +17,7 @@ from api.tasks.runtime import (
     submit_or_collect,
 )
 from core import skills as skills_lib
+from core.providers import StructuredOutput
 from core.requirements import (
     CLEARANCE_LEVELS,
     DEGREE_LEVELS,
@@ -26,6 +27,7 @@ from core.requirements import (
     SPONSORSHIPS,
     in_vocabulary,
 )
+from core.routing import TaskShape, resolve
 from core.store import CONTENT_LATERAL
 
 logger = logging.getLogger("jobtracker_worker")
@@ -63,6 +65,21 @@ REQUIREMENTS_REASONING_EFFORT = "minimal"
 # forever, so the headroom is worth more than the tokens - a cap is a ceiling,
 # not a charge.
 REQUIREMENTS_MAX_OUTPUT_TOKENS = 1000
+
+
+# The same declaration every other batched extraction makes. The model is the
+# caller's judgment - the note above is why mini and not nano - and the router
+# checks it can do what this task needs rather than choosing it for cost.
+# est_prompt_tokens is the fitted figure from the pilot below, not the
+# conservative chunking estimate: it ranks candidates and never becomes a bill.
+REQUIREMENTS_TASK = TaskShape(
+    structured=StructuredOutput.JSON_SCHEMA,
+    batched=True,
+    max_output_tokens=REQUIREMENTS_MAX_OUTPUT_TOKENS,
+    est_prompt_tokens=2270,
+    effort=REQUIREMENTS_REASONING_EFFORT,
+    candidates=(REQUIREMENTS_MODEL,),
+)
 
 
 # Bounded per cycle for the same reason comp extraction is: one task must not
@@ -320,7 +337,9 @@ async def handle_extract_requirements(task_id: int, payload: dict[str, Any]) -> 
         for r in rows
     }
     _set_progress(task_id, 0, len(specs), "requirements batch submitted (half price)")
-    hook = _batch_event_hook(task_id, "requirements", REQUIREMENTS_MODEL)
+    chosen = resolve(REQUIREMENTS_TASK)
+    logger.info(f"Task {task_id}: requirements extraction on {chosen.model} - {chosen.reason}")
+    hook = _batch_event_hook(task_id, "requirements", chosen.model)
     existing = _pending_batch_ids(task_id)
     if existing:
         from core.batch import collect_batches
@@ -331,8 +350,8 @@ async def handle_extract_requirements(task_id: int, payload: dict[str, Any]) -> 
         results = await submit_or_collect(
             task_id,
             specs,
-            REQUIREMENTS_MODEL,
-            REQUIREMENTS_REASONING_EFFORT,
+            chosen.model,
+            REQUIREMENTS_TASK.resolved_effort() or REQUIREMENTS_REASONING_EFFORT,
             REQUIREMENTS_MAX_OUTPUT_TOKENS,
             hook,
         )
