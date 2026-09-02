@@ -8,6 +8,7 @@ runtime, and the runtime without reading twelve handlers.
 from __future__ import annotations
 
 import asyncio
+import datetime
 import logging
 import os
 import signal
@@ -94,8 +95,6 @@ def schedule_ingest_cycle() -> None:
     """Leaderless hourly scheduler: every worker calls this each poll; the
     dedupe key (source + time bucket) guarantees one task per source per cycle
     across the whole fleet."""
-    import datetime
-
     now = datetime.datetime.now(datetime.UTC)
     bucket = now.replace(
         minute=(now.minute // INGEST_INTERVAL_MINUTES) * INGEST_INTERVAL_MINUTES
@@ -188,16 +187,25 @@ def _is_transient(exc: Exception) -> bool:
     return any(m in str(exc).lower() for m in _TRANSIENT_MARKERS)
 
 
+# Captured at import, so the upsert below reports when this PROCESS came up.
+# started_at was previously absent from the ON CONFLICT update list, which left
+# it pinned to whenever the row was first inserted - it survived every restart
+# and every deploy, so a column named for a start time answered a different
+# question entirely, and a roll could look like it had not happened.
+_PROCESS_STARTED_AT = datetime.datetime.now(datetime.UTC)
+
+
 def _report_worker_status(current_task_id: int | None) -> None:
     try:
         db.execute(
             """
-            INSERT INTO worker_status (name, current_task_id, last_seen)
-            VALUES (%(name)s, %(tid)s, now())
+            INSERT INTO worker_status (name, started_at, current_task_id, last_seen)
+            VALUES (%(name)s, %(started)s, %(tid)s, now())
             ON CONFLICT (name) DO UPDATE SET
+                started_at = EXCLUDED.started_at,
                 current_task_id = %(tid)s, last_seen = now()
             """,
-            {"name": WORKER_NAME, "tid": current_task_id},
+            {"name": WORKER_NAME, "started": _PROCESS_STARTED_AT, "tid": current_task_id},
         )
     except Exception:
         logger.exception("worker status report failed")
