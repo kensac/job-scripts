@@ -11,6 +11,39 @@ from api.tasks.runtime import _resume_parked, _set_progress
 logger = logging.getLogger("jobtracker_worker")
 
 
+def _record_states(states: dict[str, str]) -> None:
+    """Write back what the provider just told us.
+
+    The poll already knows every batch's live status - it fetches it each
+    minute to decide whether to resume - and until now it used the answer for
+    one boolean and discarded it. So `ai_batches.status` kept whatever the
+    submitting task last wrote and stayed there for the whole life of the
+    batch: a batch reported `validating` for two hours while the provider had
+    it `in_progress` at 446 of 501 requests.
+
+    That makes the column lie in both directions. Work in flight reads as
+    stuck, and a batch that genuinely stalls looks exactly like one that is
+    fine, so the admin view cannot tell them apart. Nothing here costs a
+    request - the status call already happened.
+
+    `completed_at` mirrors the submit-time hook rather than inventing a second
+    rule for when a batch finished.
+    """
+    for batch_id, status in states.items():
+        if not status:
+            continue
+        db.execute(
+            """
+            UPDATE ai_batches SET status = %s, updated_at = now(),
+                completed_at = CASE WHEN %s IN
+                    ('completed', 'failed', 'expired', 'cancelled')
+                    THEN COALESCE(completed_at, now()) ELSE NULL END
+            WHERE provider_batch_id = %s
+            """,
+            (status, status, batch_id),
+        )
+
+
 async def handle_poll_batches(task_id: int, payload: dict[str, Any]) -> None:
     """Resumes tasks whose provider batches have finished.
 
@@ -41,6 +74,7 @@ async def handle_poll_batches(task_id: int, payload: dict[str, Any]) -> None:
             resumed += 1
             continue
         states = await batch_states(ids)
+        _record_states(states)
         # A batch we cannot read a status for is treated as unfinished, so a
         # transient provider error delays a resume instead of dropping results.
         if all(is_terminal(states.get(b, "")) for b in ids):
