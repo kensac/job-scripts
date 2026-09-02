@@ -27,7 +27,9 @@ def require_service(x_service_token: str = Header(default="")) -> None:
     """Proxy-level auth only — for routes that identify their subject by a
     token in the request (e.g. one-click unsubscribe) rather than headers."""
     if not SERVICE_TOKEN or not hmac.compare_digest(x_service_token, SERVICE_TOKEN):
-        raise HTTPException(401, detail={"code": "UNAUTHORIZED", "message": "invalid service token"})
+        raise HTTPException(
+            401, detail={"code": "UNAUTHORIZED", "message": "invalid service token"}
+        )
 
 
 def require_user(
@@ -38,7 +40,9 @@ def require_user(
     x_user_groups: str = Header(default=""),
 ) -> AuthedUser:
     if not SERVICE_TOKEN or not hmac.compare_digest(x_service_token, SERVICE_TOKEN):
-        raise HTTPException(401, detail={"code": "UNAUTHORIZED", "message": "invalid service token"})
+        raise HTTPException(
+            401, detail={"code": "UNAUTHORIZED", "message": "invalid service token"}
+        )
     if not x_user_sub:
         raise HTTPException(401, detail={"code": "UNAUTHORIZED", "message": "missing user subject"})
     groups = [g.strip() for g in x_user_groups.split(",") if g.strip()]
@@ -47,7 +51,10 @@ def require_user(
         if not {"infra-admins", "jobtracker-users-internal"}.intersection(groups):
             raise HTTPException(
                 403,
-                detail={"code": "SIGNUPS_DISABLED", "message": "new signups are currently disabled"},
+                detail={
+                    "code": "SIGNUPS_DISABLED",
+                    "message": "new signups are currently disabled",
+                },
             )
     if existing is None and not (x_user_email or "").strip():
         # Provisioning a user is a real side effect, and this endpoint trusts
@@ -56,8 +63,10 @@ def require_user(
         # identity carries an email, so its absence means the request is wrong.
         raise HTTPException(
             400,
-            detail={"code": "IDENTITY_INCOMPLETE",
-                    "message": "cannot provision a user without an email"},
+            detail={
+                "code": "IDENTITY_INCOMPLETE",
+                "message": "cannot provision a user without an email",
+            },
         )
     row = db.query_one(
         """
@@ -79,7 +88,9 @@ def require_user(
         metrics.USERS_PROVISIONED.inc()
         logger.warning(
             "provisioned new user id=%s email=%s groups=%s",
-            row["id"], row["email"], groups,
+            row["id"],
+            row["email"],
+            groups,
         )
     return AuthedUser(
         id=row["id"],

@@ -4,6 +4,7 @@ Superseded by the multi-user API in src/api/. Nothing in the running product
 imports this module - it is a manual CLI for the Google-Sheets era, kept so
 local sheet runs still work. Importing it warns.
 """
+
 from __future__ import annotations
 
 import warnings
@@ -49,7 +50,12 @@ logger = logging.getLogger(__name__)
 CONFIGS: Dict[str, Dict[str, str]] = load_configs()
 
 
-def run_tracker(config_name: str, retry_failed: bool = False, reevaluate_custom: bool = False, apply_filter: str | None = None) -> tuple[int, RunSummary | None]:
+def run_tracker(
+    config_name: str,
+    retry_failed: bool = False,
+    reevaluate_custom: bool = False,
+    apply_filter: str | None = None,
+) -> tuple[int, RunSummary | None]:
     if config_name not in CONFIGS:
         logger.error(f"Unknown configuration: {config_name}")
         logger.info(f"Available configurations: {', '.join(CONFIGS.keys())}")
@@ -129,7 +135,12 @@ def print_aggregate_summary(summaries: List[RunSummary]) -> None:
     logger.info("=" * 60)
 
 
-def run_configs(config_names: List[str], retry_failed: bool = False, reevaluate_custom: bool = False, apply_filter: str | None = None) -> int:
+def run_configs(
+    config_names: List[str],
+    retry_failed: bool = False,
+    reevaluate_custom: bool = False,
+    apply_filter: str | None = None,
+) -> int:
     failed_configs: List[str] = []
     summaries: List[RunSummary] = []
 
@@ -161,13 +172,36 @@ def run_configs(config_names: List[str], retry_failed: bool = False, reevaluate_
 
 def main() -> int:
     import argparse
+
     parser = argparse.ArgumentParser(description="Run job tracker for various configurations")
-    parser.add_argument("config_name", help=f"Configuration to run: {', '.join(CONFIGS.keys())}; groups: {', '.join(load_groups().keys())}")
-    parser.add_argument("--retry", action="store_true", help="Retry all failed jobs from ai_results.db")
-    parser.add_argument("--reevaluate-custom", action="store_true", help="Reevaluate all custom filter jobs and update sheet")
-    parser.add_argument("--batch", action="store_true", help="Use the OpenAI Batch API (50%% cheaper, async) for AI checks")
-    parser.add_argument("--limit", type=int, default=None, help="Only AI-check the first N unseen jobs (for testing)")
-    parser.add_argument("--apply-filter", default=None, help="Apply a named filter from filters.toml to cached jobs and add passing ones to the sheet")
+    parser.add_argument(
+        "config_name",
+        help=f"Configuration to run: {', '.join(CONFIGS.keys())}; groups: {', '.join(load_groups().keys())}",
+    )
+    parser.add_argument(
+        "--retry", action="store_true", help="Retry all failed jobs from ai_results.db"
+    )
+    parser.add_argument(
+        "--reevaluate-custom",
+        action="store_true",
+        help="Reevaluate all custom filter jobs and update sheet",
+    )
+    parser.add_argument(
+        "--batch",
+        action="store_true",
+        help="Use the OpenAI Batch API (50%% cheaper, async) for AI checks",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Only AI-check the first N unseen jobs (for testing)",
+    )
+    parser.add_argument(
+        "--apply-filter",
+        default=None,
+        help="Apply a named filter from filters.toml to cached jobs and add passing ones to the sheet",
+    )
     args = parser.parse_args()
 
     if args.batch:

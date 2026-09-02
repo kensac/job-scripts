@@ -56,6 +56,7 @@ def completion_window_seconds() -> int:
         return int(float(window[:-1]) * 60)
     raise ValueError(f"unrecognised completion window: {BATCH_COMPLETION_WINDOW!r}")
 
+
 _TERMINAL_STATES = {"completed", "failed", "expired", "cancelled"}
 
 
@@ -86,9 +87,7 @@ def _estimate_tokens(spec: BatchSpec, max_output_tokens: int) -> int:
     return chars // BATCH_CHARS_PER_TOKEN + max_output_tokens
 
 
-def _chunk_specs(
-    specs: list[BatchSpec], max_output_tokens: int
-) -> list[list[BatchSpec]]:
+def _chunk_specs(specs: list[BatchSpec], max_output_tokens: int) -> list[list[BatchSpec]]:
     chunks: list[list[BatchSpec]] = []
     current: list[BatchSpec] = []
     running = 0
@@ -105,9 +104,7 @@ def _chunk_specs(
     return chunks
 
 
-def _build_line(
-    spec: BatchSpec, model: str, reasoning_effort: str, max_output_tokens: int
-) -> dict:
+def _build_line(spec: BatchSpec, model: str, reasoning_effort: str, max_output_tokens: int) -> dict:
     return {
         "custom_id": spec.custom_id,
         "method": "POST",
@@ -155,7 +152,8 @@ def _emit_usage(
             output_tokens += r.usage.get("output_tokens", 0) or 0
     try:
         on_event(
-            batch_id, status,
+            batch_id,
+            status,
             {"input_tokens": input_tokens, "output_tokens": output_tokens},
         )
     except Exception:
@@ -267,8 +265,7 @@ async def _submit_chunk(
 ) -> str:
     """Uploads one wave and returns its provider batch id."""
     payload = "\n".join(
-        json.dumps(_build_line(spec, model, reasoning_effort, max_output_tokens))
-        for spec in specs
+        json.dumps(_build_line(spec, model, reasoning_effort, max_output_tokens)) for spec in specs
     ).encode("utf-8")
 
     upload = await client.files.create(
@@ -301,7 +298,9 @@ async def _run_chunk(
     """Submit-and-wait, retained for callers that genuinely need a result in
     hand. The scheduled paths use submit_responses_batches + collect_batches
     instead so they do not hold a worker while the provider queues."""
-    results: dict[str, BatchResult] = {spec.custom_id: BatchResult(spec.custom_id) for spec in specs}
+    results: dict[str, BatchResult] = {
+        spec.custom_id: BatchResult(spec.custom_id) for spec in specs
+    }
     batch_id = await _submit_chunk(
         client, specs, model, reasoning_effort, max_output_tokens, on_event
     )
@@ -330,7 +329,9 @@ async def collect_batches(
         before = set(results)
         await _collect_batch(client, batch, results, create_missing=True)
         _emit_usage(
-            on_event, batch.id, batch.status,
+            on_event,
+            batch.id,
+            batch.status,
             {k: v for k, v in results.items() if k not in before},
         )
     return results

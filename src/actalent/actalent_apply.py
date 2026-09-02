@@ -97,7 +97,9 @@ def collect_controls(driver) -> List[Dict]:
     return driver.execute_script(COLLECT_JS)
 
 
-def match(controls: List[Dict], needles: List[str], types: set, use_ctx: bool = False) -> Optional[Dict]:
+def match(
+    controls: List[Dict], needles: List[str], types: set, use_ctx: bool = False
+) -> Optional[Dict]:
     for c in controls:
         if c["type"] not in types:
             continue
@@ -126,7 +128,8 @@ def type_into(driver, el, value: str) -> bool:
                 el.dispatchEvent(new Event('input', {bubbles: true}));
                 el.dispatchEvent(new Event('change', {bubbles: true}));
                 """,
-                el, value,
+                el,
+                value,
             )
             return True
         except Exception:
@@ -263,19 +266,58 @@ def apply_to_job(driver, url: str, profile: Dict) -> None:
     filled: List[str] = []
     failed: List[str] = []
 
-    fill_text(driver, controls, ["first name"], profile.get("first_name"), filled, failed, "first_name")
-    fill_text(driver, controls, ["last name"], profile.get("last_name"), filled, failed, "last_name")
-    fill_text(driver, controls, ["phone number", "phone"], profile.get("phone"), filled, failed, "phone")
+    fill_text(
+        driver, controls, ["first name"], profile.get("first_name"), filled, failed, "first_name"
+    )
+    fill_text(
+        driver, controls, ["last name"], profile.get("last_name"), filled, failed, "last_name"
+    )
+    fill_text(
+        driver, controls, ["phone number", "phone"], profile.get("phone"), filled, failed, "phone"
+    )
     fill_text(driver, controls, ["email"], profile.get("email"), filled, failed, "email")
-    fill_text(driver, controls, ["main st", "street"], profile.get("street"), filled, failed, "street")
-    fill_text(driver, controls, ["beverly hills", "city"], profile.get("city"), filled, failed, "city")
-    fill_text(driver, controls, ["90210", "zip", "postal"], profile.get("zip"), filled, failed, "zip")
-    fill_text(driver, controls, ["current or most recent"], profile.get("current_title"), filled, failed, "current_title", use_ctx=True)
+    fill_text(
+        driver, controls, ["main st", "street"], profile.get("street"), filled, failed, "street"
+    )
+    fill_text(
+        driver, controls, ["beverly hills", "city"], profile.get("city"), filled, failed, "city"
+    )
+    fill_text(
+        driver, controls, ["90210", "zip", "postal"], profile.get("zip"), filled, failed, "zip"
+    )
+    fill_text(
+        driver,
+        controls,
+        ["current or most recent"],
+        profile.get("current_title"),
+        filled,
+        failed,
+        "current_title",
+        use_ctx=True,
+    )
 
-    click_radio(driver, controls, "sponsor", "yes" if profile.get("requires_sponsorship") else "no", filled, failed, "sponsorship")
+    click_radio(
+        driver,
+        controls,
+        "sponsor",
+        "yes" if profile.get("requires_sponsorship") else "no",
+        filled,
+        failed,
+        "sponsorship",
+    )
     if profile.get("education"):
-        click_radio(driver, controls, None, profile["education"].lower(), filled, failed, "education")
-    click_radio(driver, controls, "text message", "agree to receive" if profile.get("sms_consent") else "do not want", filled, failed, "sms_consent")
+        click_radio(
+            driver, controls, None, profile["education"].lower(), filled, failed, "education"
+        )
+    click_radio(
+        driver,
+        controls,
+        "text message",
+        "agree to receive" if profile.get("sms_consent") else "do not want",
+        filled,
+        failed,
+        "sms_consent",
+    )
 
     select_dropdown(driver, "select a country", profile.get("country"), filled, failed, "country")
     select_dropdown(driver, "select a state", profile.get("state"), filled, failed, "state")
@@ -329,7 +371,9 @@ def detect_submitted(driver) -> bool:
 
 
 def wait_for_outcome(driver, label: str) -> str:
-    print("  Auto-advances on submit. Use the in-page buttons, or type: Enter=done+next, s=skip, q=quit.")
+    print(
+        "  Auto-advances on submit. Use the in-page buttons, or type: Enter=done+next, s=skip, q=quit."
+    )
     while True:
         inject_controls(driver, label)
 

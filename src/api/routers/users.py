@@ -20,9 +20,7 @@ def _grants(user: AuthedUser) -> dict:
         "spent_this_week": ent.spent_this_week,
         "has_byo_key": ent.has_byo_key,
         "key_source": ent.key_source,
-        "owner_key_models": budget.owner_allowed_models(user.groups)
-        if ent.owner_key
-        else [],
+        "owner_key_models": budget.owner_allowed_models(user.groups) if ent.owner_key else [],
     }
 
 
@@ -97,9 +95,7 @@ def models(user: AuthedUser = Depends(require_user)):
     elif ent.owner_key:
         owner_allowed = budget.owner_allowed_models(user.groups)
         for provider in ("openai", "anthropic"):
-            models_list = [
-                m for m in ai.MODEL_CATALOG[provider] if m["model"] in owner_allowed
-            ]
+            models_list = [m for m in ai.MODEL_CATALOG[provider] if m["model"] in owner_allowed]
             if models_list:
                 providers.append(_provider_entry(provider, models_list))
     return {
@@ -154,9 +150,7 @@ def put_settings(body: SettingsPut, user: AuthedUser = Depends(require_user)):
             valid = provider == "openai_compatible" or body.ai_model in catalog
         else:
             ent = budget.get_entitlement(user)
-            valid = ent.owner_key and body.ai_model in budget.owner_allowed_models(
-                user.groups
-            )
+            valid = ent.owner_key and body.ai_model in budget.owner_allowed_models(user.groups)
         if not valid:
             raise HTTPException(
                 400,
@@ -226,13 +220,19 @@ def put_api_key(body: ApiKeyPut, user: AuthedUser = Depends(require_user)):
     if body.provider not in ai.PROVIDERS:
         raise HTTPException(
             400,
-            detail={"code": "INVALID_PROVIDER", "message": f"provider must be one of {ai.PROVIDERS}"},
+            detail={
+                "code": "INVALID_PROVIDER",
+                "message": f"provider must be one of {ai.PROVIDERS}",
+            },
         )
     if body.provider == "openai_compatible":
         if not body.base_url:
             raise HTTPException(
                 400,
-                detail={"code": "BASE_URL_REQUIRED", "message": "openai_compatible needs a base_url"},
+                detail={
+                    "code": "BASE_URL_REQUIRED",
+                    "message": "openai_compatible needs a base_url",
+                },
             )
         from api import ssrf
 
@@ -243,9 +243,7 @@ def put_api_key(body: ApiKeyPut, user: AuthedUser = Depends(require_user)):
             except ValueError as exc:
                 error = str(exc)
         if error:
-            raise HTTPException(
-                400, detail={"code": "INVALID_BASE_URL", "message": error}
-            )
+            raise HTTPException(400, detail={"code": "INVALID_BASE_URL", "message": error})
     db.execute(
         """
         INSERT INTO user_settings (user_id, api_key_enc, ai_provider, ai_base_url, updated_at)

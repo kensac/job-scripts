@@ -50,12 +50,12 @@ def send_health_alert(to: str, alerts: list[dict[str, Any]]) -> None:
     html = []
     for a in alerts:
         lines.append(f"- [{a['severity'].upper()}] {a['message']}")
-        html.append(
-            f"<li><strong>{a['severity'].upper()}</strong> — {a['message']}</li>"
-        )
+        html.append(f"<li><strong>{a['severity'].upper()}</strong> — {a['message']}</li>")
     lines += ["", f"Admin: {APP_URL.replace('/job-tracker', '/job-scripts')}/dashboard"]
     msg = EmailMessage()
-    msg["Subject"] = f"Job tracker: {len(alerts)} data-health alert{'s' if len(alerts) != 1 else ''}"
+    msg["Subject"] = (
+        f"Job tracker: {len(alerts)} data-health alert{'s' if len(alerts) != 1 else ''}"
+    )
     msg["From"] = f"Job Tracker <{MAIL_FROM}>"
     msg["To"] = to
     msg.set_content("\n".join(lines))

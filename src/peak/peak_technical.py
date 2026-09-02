@@ -49,7 +49,9 @@ SEARCH_URL = "https://ws.jobdiva.com/candPortal/rest/job/searchjobsportal"
 DETAIL_URL = "https://ws.jobdiva.com/candPortal/rest/job/getdetailbyjobid"
 PORTAL_ID = "2320"
 PORTAL_TOKEN = os.environ.get("PEAK_TOKEN", "01dFgdTBBNcXFYIAwhaAVASX1RGAV9VWwNXBAMrdHc=")
-PORTAL_A = os.environ.get("PEAK_A", "gnjdnw4p7dcsh8maybnicg1a02iav20910i4tq2giw4936vpiu8xi6grvip5n9mz")
+PORTAL_A = os.environ.get(
+    "PEAK_A", "gnjdnw4p7dcsh8maybnicg1a02iav20910i4tq2giw4936vpiu8xi6grvip5n9mz"
+)
 
 PAGE_SIZE = 100
 REQUEST_TIMEOUT = 15.0
@@ -108,7 +110,9 @@ class PeakJob:
 
 
 class JobClassification(BaseModel):
-    is_software: bool = Field(description="Whether the role is software/technology or closely adjacent")
+    is_software: bool = Field(
+        description="Whether the role is software/technology or closely adjacent"
+    )
     experience_level: ExperienceLevel = Field(description="Required experience bucket")
 
 
@@ -175,7 +179,10 @@ def fetch_all_jobs() -> List[PeakJob]:
 def fetch_job_description(job_id: int) -> str:
     try:
         response = requests.get(
-            f"{DETAIL_URL}/{job_id}", headers=HEADERS, params={"compid": ""}, timeout=REQUEST_TIMEOUT
+            f"{DETAIL_URL}/{job_id}",
+            headers=HEADERS,
+            params={"compid": ""},
+            timeout=REQUEST_TIMEOUT,
         )
         response.raise_for_status()
         return _clean_html(response.json().get("job", {}).get("jobDescription", ""))
@@ -216,7 +223,10 @@ async def classify_job(job: PeakJob, content: str) -> Optional[str]:
             usage = response.usage
             status = "passed" if parsed.is_software else "rejected"
             add_ai_result(
-                job.url, status, parsed.experience_level, "classify",
+                job.url,
+                status,
+                parsed.experience_level,
+                "classify",
                 prompt_tokens=usage.prompt_tokens if usage else None,
                 completion_tokens=usage.completion_tokens if usage else None,
                 total_tokens=usage.total_tokens if usage else None,
@@ -230,7 +240,9 @@ async def classify_job(job: PeakJob, content: str) -> Optional[str]:
                 await asyncio.to_thread(wait_for_network)
                 continue
             if attempt < OPENAI_MAX_RETRIES - 1:
-                logger.warning(f"Classify failed (attempt {attempt + 1}/{OPENAI_MAX_RETRIES}): {exc}")
+                logger.warning(
+                    f"Classify failed (attempt {attempt + 1}/{OPENAI_MAX_RETRIES}): {exc}"
+                )
                 await asyncio.to_thread(backoff.wait)
             else:
                 logger.warning(f"Classify failed after {OPENAI_MAX_RETRIES} attempts: {exc}")
@@ -241,7 +253,11 @@ async def classify_job(job: PeakJob, content: str) -> Optional[str]:
 
 async def process_job(job: PeakJob) -> Optional[Tuple[PeakJob, str]]:
     cached = get_ai_result(job.url)
-    if cached and cached.get("check_type") == "classify" and cached.get("status") in {"passed", "rejected"}:
+    if (
+        cached
+        and cached.get("check_type") == "classify"
+        and cached.get("status") in {"passed", "rejected"}
+    ):
         if cached["status"] == "rejected":
             logger.info(f"NON-SOFTWARE (cached): {job.company or 'N/A'} - {job.title}")
             return None
@@ -266,7 +282,9 @@ def write_csv(results: List[Tuple[PeakJob, str]]) -> None:
         writer = csv.writer(f)
         writer.writerow(["experience_level", "title", "company", "location", "pay_rate", "url"])
         for job, experience in results:
-            writer.writerow([experience, job.title, job.company, job.location, job.pay_rate, job.url])
+            writer.writerow(
+                [experience, job.title, job.company, job.location, job.pay_rate, job.url]
+            )
     logger.info(f"Wrote {len(results)} software jobs to {OUTPUT_CSV}")
 
 
@@ -289,7 +307,9 @@ async def async_main() -> int:
             return await process_job(job)
 
     logger.info(f"Classifying {len(jobs)} jobs (max {MAX_CONCURRENT_JOBS} concurrent)")
-    results = [r for r in await asyncio.gather(*[with_semaphore(job) for job in jobs]) if r is not None]
+    results = [
+        r for r in await asyncio.gather(*[with_semaphore(job) for job in jobs]) if r is not None
+    ]
 
     write_csv(results)
 

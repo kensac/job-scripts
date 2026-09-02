@@ -4,6 +4,7 @@ Superseded by the multi-user API in src/api/. Nothing in the running product
 imports this module - it is a manual CLI for the Google-Sheets era, kept so
 local sheet runs still work. Importing it warns.
 """
+
 from __future__ import annotations
 
 import warnings
@@ -197,9 +198,20 @@ When uncertain, KEEP.""",
 
 
 COL = {
-    "company": 1, "size": 2, "location": 3, "found": 4, "url": 5, "title": 6,
-    "terms": 7, "recruiter": 8, "connection1": 9, "connection2": 10,
-    "documents": 11, "date_applied": 12, "status": 13, "notes": 14,
+    "company": 1,
+    "size": 2,
+    "location": 3,
+    "found": 4,
+    "url": 5,
+    "title": 6,
+    "terms": 7,
+    "recruiter": 8,
+    "connection1": 9,
+    "connection2": 10,
+    "documents": 11,
+    "date_applied": 12,
+    "status": 13,
+    "notes": 14,
 }
 
 DATE_FORMATS = ("%m/%d/%Y", "%m/%d/%y", "%Y-%m-%d", "%d/%m/%Y")
@@ -236,9 +248,7 @@ def find_or_create_user(sub: Optional[str], email: Optional[str], dry_run: bool)
         )
     if dry_run:
         return {"id": -1, "sub": sub, "email": email}
-    row = db.query_one(
-        "INSERT INTO users (sub, email) VALUES (%s, %s) RETURNING *", (sub, email)
-    )
+    row = db.query_one("INSERT INTO users (sub, email) VALUES (%s, %s) RETURNING *", (sub, email))
     assert row is not None
     return row
 
@@ -253,8 +263,7 @@ def backfill_sources(user_id: int, dry_run: bool) -> int:
                 (name, cfg["JOB_LISTINGS_URL"]),
             )
             db.execute(
-                "INSERT INTO user_sources (user_id, source) VALUES (%s, %s) "
-                "ON CONFLICT DO NOTHING",
+                "INSERT INTO user_sources (user_id, source) VALUES (%s, %s) ON CONFLICT DO NOTHING",
                 (user_id, name),
             )
     return len(configs)
@@ -266,9 +275,7 @@ def backfill_filters(user_id: int, dry_run: bool) -> int:
         count += 1
         if dry_run:
             continue
-        phash = compute_prompt_hash(
-            build_custom_instructions(spec.prompt, spec.on_ambiguous)
-        )
+        phash = compute_prompt_hash(build_custom_instructions(spec.prompt, spec.on_ambiguous))
         db.execute(
             """
             INSERT INTO user_filters
@@ -382,15 +389,16 @@ def main() -> None:
     )
     parser.add_argument("--sub", help="Authentik subject id (creates the user if missing)")
     parser.add_argument("--email", help="Find the user by email (after first login)")
+    parser.add_argument("--sheets", action="store_true", help="Also import sheet rows via gspread")
     parser.add_argument(
-        "--sheets", action="store_true", help="Also import sheet rows via gspread"
-    )
-    parser.add_argument(
-        "--sheet-id", action="append", default=[],
+        "--sheet-id",
+        action="append",
+        default=[],
         help="Sheet to import (repeatable; default: every sheet in configs.toml)",
     )
     parser.add_argument(
-        "--presets", action="store_true",
+        "--presets",
+        action="store_true",
         help="Seed the standard filter presets (user-independent; existing names untouched)",
     )
     parser.add_argument("--dry-run", action="store_true")
@@ -413,9 +421,7 @@ def main() -> None:
     print(f"filters: {n_filters} imported (existing names left untouched)")
 
     if args.sheets:
-        sheet_ids = args.sheet_id or sorted(
-            {cfg["SHEET_ID"] for cfg in load_configs().values()}
-        )
+        sheet_ids = args.sheet_id or sorted({cfg["SHEET_ID"] for cfg in load_configs().values()})
         for sheet_id in sheet_ids:
             stats = backfill_sheet(user["id"], sheet_id, args.dry_run)
             print(f"sheet {sheet_id}: {stats}")

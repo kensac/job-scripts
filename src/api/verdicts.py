@@ -57,23 +57,34 @@ async def run_check[T: BaseModel](
         parsed, usage = await ai.parse(cfg, instructions, input_text, response_model)
     except Exception as exc:
         add_ai_result(
-            url, "failed", f"{check_type} check failed: {str(exc)[:100]}",
-            check_type, error=str(exc), **common,
+            url,
+            "failed",
+            f"{check_type} check failed: {str(exc)[:100]}",
+            check_type,
+            error=str(exc),
+            **common,
         )
         metrics.CHECKS.labels(check_type, "failed").inc()
         raise
     duration_ms = int((time.monotonic() - start) * 1000)
     if parsed is None:
         add_ai_result(
-            url, "failed", "AI returned no parsed response", check_type,
-            duration_ms=duration_ms, **common,
+            url,
+            "failed",
+            "AI returned no parsed response",
+            check_type,
+            duration_ms=duration_ms,
+            **common,
         )
         metrics.CHECKS.labels(check_type, "failed").inc()
         return None, usage
     rejected, reason = verdict_of(parsed)
     status = "rejected" if rejected else "passed"
     add_ai_result(
-        url, status, reason, check_type,
+        url,
+        status,
+        reason,
+        check_type,
         parsed_json=json.dumps(parsed.model_dump()),
         duration_ms=duration_ms,
         prompt_tokens=usage["prompt_tokens"],
@@ -111,7 +122,10 @@ def record_ai_verdict(
     (batch pricing is half price)."""
     status = "rejected" if rejected else "passed"
     add_ai_result(
-        url, status, reason, check_type,
+        url,
+        status,
+        reason,
+        check_type,
         model=model,
         filter_name=filter_name,
         prompt_hash=prompt_hash,
@@ -132,9 +146,13 @@ def record_ai_verdict(
     if price:
         mult = 0.5 if batched else 1.0
         cost = (
-            usage.get("prompt_tokens", 0) * price[0]
-            + usage.get("completion_tokens", 0) * price[1]
-        ) * mult / 1_000_000
+            (
+                usage.get("prompt_tokens", 0) * price[0]
+                + usage.get("completion_tokens", 0) * price[1]
+            )
+            * mult
+            / 1_000_000
+        )
         metrics.AI_COST_USD.labels(provider, model, key_source).inc(cost)
 
 
@@ -165,14 +183,24 @@ async def refresh_content(
     ats_res = await asyncio.to_thread(ats.resolve, url)
     if ats_res.status is ats.Status.GONE:
         record_manual(
-            url=url, check_type="closed", rejected=True,
-            reason="ATS reports posting gone", company=company,
-            job_title=job_title, context=context,
+            url=url,
+            check_type="closed",
+            rejected=True,
+            reason="ATS reports posting gone",
+            company=company,
+            job_title=job_title,
+            context=context,
         )
         return None, "ats_gone"
     if ats_res.ok and ats_res.text and not fetching.looks_blocked(ats_res.text):
-        add_ai_result(url, "passed", "ats text", "content",
-                      input_content=ats_res.text, config_name="content-cache")
+        add_ai_result(
+            url,
+            "passed",
+            "ats text",
+            "content",
+            input_content=ats_res.text,
+            config_name="content-cache",
+        )
         return ats_res.text, None
 
     if scrape_sem is not None:
@@ -182,14 +210,19 @@ async def refresh_content(
         content, redirected = await fetching.fetch_page(url)
     if redirected:
         record_manual(
-            url=url, check_type="closed", rejected=True,
+            url=url,
+            check_type="closed",
+            rejected=True,
             reason="posting redirects away (board index or careers page)",
-            company=company, job_title=job_title, context=context,
+            company=company,
+            job_title=job_title,
+            context=context,
         )
         return None, "redirected_away"
     if content:
-        add_ai_result(url, "passed", "scraped", "content",
-                      input_content=content, config_name="content-cache")
+        add_ai_result(
+            url, "passed", "scraped", "content", input_content=content, config_name="content-cache"
+        )
     return content, None
 
 
@@ -207,7 +240,12 @@ def record_manual(
     gone) - same complete row shape, same metrics."""
     status = "rejected" if rejected else "passed"
     add_ai_result(
-        url, status, reason, check_type,
-        company=company, job_title=job_title, config_name=context,
+        url,
+        status,
+        reason,
+        check_type,
+        company=company,
+        job_title=job_title,
+        config_name=context,
     )
     metrics.CHECKS.labels(check_type, status).inc()

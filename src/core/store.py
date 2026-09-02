@@ -144,9 +144,7 @@ def init_db() -> None:
         )
         conn.execute("ALTER TABLE ai_queries ADD COLUMN IF NOT EXISTS worker TEXT")
         conn.execute("ALTER TABLE ai_queries ADD COLUMN IF NOT EXISTS batch_id TEXT")
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_ai_queries_batch ON ai_queries(batch_id)"
-        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_ai_queries_batch ON ai_queries(batch_id)")
         for stmt in (
             "CREATE INDEX IF NOT EXISTS idx_ai_queries_url ON ai_queries(url)",
             "CREATE INDEX IF NOT EXISTS idx_ai_queries_url_check ON ai_queries(url, check_type)",
@@ -228,9 +226,7 @@ def add_ai_result(
     columns = ", ".join(_INSERT_COLUMNS)
     placeholders = ", ".join(f"%({c})s" for c in _INSERT_COLUMNS)
     with _pool.connection() as conn:
-        conn.execute(
-            f"INSERT INTO ai_queries ({columns}) VALUES ({placeholders})", row
-        )
+        conn.execute(f"INSERT INTO ai_queries ({columns}) VALUES ({placeholders})", row)
     sub = _latest_cache.get(url)
     if sub is not None:
         sub.pop(check_type, None)

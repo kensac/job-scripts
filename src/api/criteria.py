@@ -18,11 +18,7 @@ SQL = """
 
 def params(settings_row: dict[str, Any] | None) -> dict[str, Any]:
     crit = (settings_row or {}).get("criteria") or {}
-    excl = [
-        re.escape(s.strip().lower())
-        for s in crit.get("excluded_locations", [])
-        if s.strip()
-    ]
+    excl = [re.escape(s.strip().lower()) for s in crit.get("excluded_locations", []) if s.strip()]
     return {
         "crit_date": crit.get("date_posted_after"),
         "crit_excl": excl,

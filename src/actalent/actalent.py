@@ -148,7 +148,9 @@ def fetch_job_description(seq: str) -> str:
         "siteType": "external",
     }
     try:
-        response = requests.post(WIDGETS_URL, headers=HEADERS, json=payload, timeout=REQUEST_TIMEOUT)
+        response = requests.post(
+            WIDGETS_URL, headers=HEADERS, json=payload, timeout=REQUEST_TIMEOUT
+        )
         response.raise_for_status()
         html = response.json()["jobDetail"]["data"]["job"].get("description", "") or ""
     except (requests.RequestException, KeyError, ValueError) as exc:
@@ -171,7 +173,11 @@ def build_content(job: ActalentJob, description: str) -> str:
 
 async def process_job(job: ActalentJob) -> Optional[Tuple[ActalentJob, str]]:
     cached = get_ai_result(job.url)
-    if cached and cached.get("check_type") == "classify" and cached.get("status") in {"passed", "rejected"}:
+    if (
+        cached
+        and cached.get("check_type") == "classify"
+        and cached.get("status") in {"passed", "rejected"}
+    ):
         if cached["status"] == "rejected":
             logger.info(f"NON-SOFTWARE (cached): {job.title}")
             return None
@@ -192,7 +198,15 @@ CSV_HEADER = ["experience_level", "title", "category", "type", "location", "url"
 
 
 def csv_row(job: ActalentJob, experience: str) -> List[str]:
-    return [experience, job.title, job.sub_category or job.category, job.type, job.location, job.url, job.apply_url]
+    return [
+        experience,
+        job.title,
+        job.sub_category or job.category,
+        job.type,
+        job.location,
+        job.url,
+        job.apply_url,
+    ]
 
 
 async def async_main() -> int:

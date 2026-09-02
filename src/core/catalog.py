@@ -84,8 +84,8 @@ def _upsert_batch(batch: list[tuple], retries: int = 3) -> None:
                     extraction_status = CASE WHEN jobs.source = 'upload'
                                              THEN 'done' ELSE jobs.extraction_status END
                         """,
-                        batch,
-                    )
+                    batch,
+                )
             return
         except errors.DeadlockDetected:
             if attempt == retries - 1:

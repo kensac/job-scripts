@@ -75,9 +75,7 @@ class Job(Base):
     source: Mapped[str] = mapped_column(Text)
     active: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
     date_posted: Mapped[datetime.datetime | None]
-    uploaded_by: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("users.id")
-    )
+    uploaded_by: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id"))
     extraction_status: Mapped[str | None] = mapped_column(Text)
     comp_min: Mapped[int | None] = mapped_column(BigInteger)
     comp_max: Mapped[int | None] = mapped_column(BigInteger)
@@ -116,12 +114,8 @@ class UserJobHistory(Base):
     __table_args__ = (Index("idx_user_job_history_row", "user_id", "job_id", "id"),)
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
-    user_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("users.id", ondelete="CASCADE")
-    )
-    job_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("jobs.id", ondelete="CASCADE")
-    )
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"))
+    job_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("jobs.id", ondelete="CASCADE"))
     old_status: Mapped[str | None] = mapped_column(Text)
     new_status: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
@@ -161,9 +155,7 @@ class UserFilter(Base):
     __table_args__ = (UniqueConstraint("user_id", "name"),)
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
-    user_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("users.id", ondelete="CASCADE")
-    )
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"))
     name: Mapped[str] = mapped_column(Text)
     prompt: Mapped[str] = mapped_column(Text)
     on_ambiguous: Mapped[str] = mapped_column(Text, server_default=text("'keep'"))
@@ -183,9 +175,7 @@ class UserSettings(Base):
     column_layout: Mapped[Any | None] = mapped_column(JSONB)
     prefs: Mapped[dict] = mapped_column(server_default=text("'{}'::jsonb"))
     api_key_enc: Mapped[bytes | None] = mapped_column(BYTEA)
-    bypass_sponsorship_filter: Mapped[bool] = mapped_column(
-        Boolean, server_default=text("true")
-    )
+    bypass_sponsorship_filter: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
     criteria: Mapped[dict] = mapped_column(server_default=text("'{}'::jsonb"))
     ai_provider: Mapped[str] = mapped_column(Text, server_default=text("'openai'"))
     ai_base_url: Mapped[str | None] = mapped_column(Text)
@@ -202,9 +192,7 @@ class ApiUsage(Base):
     __table_args__ = (Index("idx_api_usage_user_created", "user_id", "created_at"),)
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
-    user_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("users.id", ondelete="CASCADE")
-    )
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"))
     created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
     key_source: Mapped[str] = mapped_column(Text)
     purpose: Mapped[str] = mapped_column(Text)
@@ -219,7 +207,9 @@ class Task(Base):
     __table_args__ = (
         Index("idx_tasks_status", "status", "id"),
         Index(
-            "idx_tasks_parent", "parent_id", "status",
+            "idx_tasks_parent",
+            "parent_id",
+            "status",
             postgresql_where=text("parent_id IS NOT NULL"),
         ),
     )
@@ -278,8 +268,11 @@ class HealthAlert(Base):
     __tablename__ = "health_alerts"
     __table_args__ = (
         Index(
-            "uq_health_alerts_open", "kind", "subject",
-            unique=True, postgresql_where=text("resolved_at IS NULL"),
+            "uq_health_alerts_open",
+            "kind",
+            "subject",
+            unique=True,
+            postgresql_where=text("resolved_at IS NULL"),
         ),
     )
 
@@ -314,9 +307,7 @@ class SourceRequest(Base):
     __table_args__ = (Index("idx_source_requests_status", "status", "id"),)
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
-    user_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("users.id", ondelete="CASCADE")
-    )
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"))
     url: Mapped[str] = mapped_column(Text)
     note: Mapped[str] = mapped_column(Text, server_default=text("''"))
     status: Mapped[str] = mapped_column(Text, server_default=text("'open'"))
@@ -330,12 +321,8 @@ class Report(Base):
     __table_args__ = (Index("idx_reports_status", "status", "id"),)
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
-    user_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("users.id", ondelete="CASCADE")
-    )
-    job_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("jobs.id", ondelete="CASCADE")
-    )
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"))
+    job_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("jobs.id", ondelete="CASCADE"))
     kind: Mapped[str] = mapped_column(Text)
     message: Mapped[str] = mapped_column(Text, server_default=text("''"))
     corrections: Mapped[Any | None] = mapped_column(JSONB)

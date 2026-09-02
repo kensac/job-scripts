@@ -17,11 +17,22 @@ SCRAPE_TIMEOUT_SECONDS = int(os.environ.get("JOBTRACKER_SCRAPE_TIMEOUT_SECONDS",
 # blocked fetch says nothing about the job. Markers are checked only on short
 # pages; real postings are long, block pages are not.
 _BLOCK_MARKERS = (
-    "captcha", "access denied", "request blocked", "are you a robot",
-    "unusual traffic", "too many requests", "rate limit", "just a moment",
-    "checking your browser", "attention required", "service unavailable",
-    "temporarily unavailable", "not available in your region",
-    "not available in your country", "error 503", "error 502",
+    "captcha",
+    "access denied",
+    "request blocked",
+    "are you a robot",
+    "unusual traffic",
+    "too many requests",
+    "rate limit",
+    "just a moment",
+    "checking your browser",
+    "attention required",
+    "service unavailable",
+    "temporarily unavailable",
+    "not available in your region",
+    "not available in your country",
+    "error 503",
+    "error 502",
 )
 
 

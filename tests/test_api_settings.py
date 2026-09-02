@@ -7,7 +7,9 @@ from __future__ import annotations
 
 def test_invalid_model_not_in_owner_allowlist_is_400(client, admin_headers, monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-owner-test")
-    resp = client.put("/v1/user/settings", json={"ai_model": "not-a-real-model"}, headers=admin_headers)
+    resp = client.put(
+        "/v1/user/settings", json={"ai_model": "not-a-real-model"}, headers=admin_headers
+    )
     assert resp.status_code == 400
     assert resp.json()["detail"]["code"] == "INVALID_MODEL"
 
@@ -20,7 +22,9 @@ def test_valid_model_from_owner_models_unlimited_group(client, admin_headers, mo
     assert resp.status_code == 200
 
 
-def test_budgeted_group_restricted_to_owner_key_models_default_policy(client, user_headers, monkeypatch):
+def test_budgeted_group_restricted_to_owner_key_models_default_policy(
+    client, user_headers, monkeypatch
+):
     # jobtracker-users-internal has a finite weekly budget -> default policy is
     # JOBTRACKER_OWNER_KEY_MODELS (gpt-5-nano, gpt-5-mini by default), not the
     # full catalog.
@@ -50,7 +54,11 @@ def test_invalid_ai_params_for_provider_is_400(client, user_headers):
 def test_api_key_openai_compatible_http_base_url_rejected(client, user_headers):
     resp = client.put(
         "/v1/user/settings/api-key",
-        json={"api_key": "dummy-key-1", "provider": "openai_compatible", "base_url": "http://example.com"},
+        json={
+            "api_key": "dummy-key-1",
+            "provider": "openai_compatible",
+            "base_url": "http://example.com",
+        },
         headers=user_headers,
     )
     assert resp.status_code == 400
@@ -60,7 +68,11 @@ def test_api_key_openai_compatible_http_base_url_rejected(client, user_headers):
 def test_api_key_openai_compatible_ip_literal_rejected(client, user_headers):
     resp = client.put(
         "/v1/user/settings/api-key",
-        json={"api_key": "dummy-key-1", "provider": "openai_compatible", "base_url": "https://8.8.8.8/v1"},
+        json={
+            "api_key": "dummy-key-1",
+            "provider": "openai_compatible",
+            "base_url": "https://8.8.8.8/v1",
+        },
         headers=user_headers,
     )
     assert resp.status_code == 400
@@ -122,6 +134,7 @@ def test_models_after_byo_key_only_that_provider_catalog(client, user_headers):
 
 def test_email_digest_toggle_generates_token_and_unsubscribe_works(client, user_headers):
     from api import db
+
     resp = client.put("/v1/user/settings", json={"email_digest": True}, headers=user_headers)
     assert resp.status_code == 200
     row = db.query_one(

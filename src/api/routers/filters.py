@@ -15,7 +15,9 @@ router = APIRouter()
 
 IMPROVE_MODEL = os.environ.get("JOBTRACKER_IMPROVE_MODEL", "gpt-5-mini")
 
-_FILTER_COLS = "id, name, prompt, on_ambiguous, fail_closed, enabled, prompt_hash, created_at, updated_at"
+_FILTER_COLS = (
+    "id, name, prompt, on_ambiguous, fail_closed, enabled, prompt_hash, created_at, updated_at"
+)
 
 
 def _hash(prompt: str, on_ambiguous: str) -> str:
@@ -65,7 +67,9 @@ def create_filter(body: FilterCreate, user: AuthedUser = Depends(require_user)):
         "SELECT id FROM user_filters WHERE user_id = %s AND name = %s",
         (user.id, body.name),
     ):
-        raise HTTPException(409, detail={"code": "DUPLICATE_NAME", "message": "filter name already exists"})
+        raise HTTPException(
+            409, detail={"code": "DUPLICATE_NAME", "message": "filter name already exists"}
+        )
     row = db.query_one(
         f"""
         INSERT INTO user_filters (user_id, name, prompt, on_ambiguous, fail_closed, enabled, prompt_hash)
@@ -131,9 +135,7 @@ def patch_filter(filter_id: int, body: FilterPatch, user: AuthedUser = Depends(r
 
 @router.delete("/user/filters/{filter_id}")
 def delete_filter(filter_id: int, user: AuthedUser = Depends(require_user)):
-    db.execute(
-        "DELETE FROM user_filters WHERE id = %s AND user_id = %s", (filter_id, user.id)
-    )
+    db.execute("DELETE FROM user_filters WHERE id = %s AND user_id = %s", (filter_id, user.id))
     return {"ok": True}
 
 
@@ -145,7 +147,13 @@ def run_filter(filter_id: int, user: AuthedUser = Depends(require_user)):
         raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown filter"})
     task_id, blocked = _enqueue(user, "run_filter", {"user_id": user.id, "filter_id": filter_id})
     if blocked:
-        raise HTTPException(402, detail={"code": blocked, "message": "add your own API key or wait for the weekly budget to reset"})
+        raise HTTPException(
+            402,
+            detail={
+                "code": blocked,
+                "message": "add your own API key or wait for the weekly budget to reset",
+            },
+        )
     return {"task_id": task_id}
 
 
@@ -153,7 +161,13 @@ def run_filter(filter_id: int, user: AuthedUser = Depends(require_user)):
 def run_all_filters(user: AuthedUser = Depends(require_user)):
     task_id, blocked = _enqueue(user, "run_all_filters", {"user_id": user.id})
     if blocked:
-        raise HTTPException(402, detail={"code": blocked, "message": "add your own API key or wait for the weekly budget to reset"})
+        raise HTTPException(
+            402,
+            detail={
+                "code": blocked,
+                "message": "add your own API key or wait for the weekly budget to reset",
+            },
+        )
     return {"task_id": task_id}
 
 
@@ -169,9 +183,7 @@ def list_presets(user: AuthedUser = Depends(require_user)):
 
 @router.post("/filter-presets/{preset_id}/adopt")
 def adopt_preset(preset_id: int, user: AuthedUser = Depends(require_user)):
-    preset = db.query_one(
-        "SELECT * FROM filter_presets WHERE id = %s AND active", (preset_id,)
-    )
+    preset = db.query_one("SELECT * FROM filter_presets WHERE id = %s AND active", (preset_id,))
     if not preset:
         raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown preset"})
     name = preset["name"]
@@ -179,7 +191,8 @@ def adopt_preset(preset_id: int, user: AuthedUser = Depends(require_user)):
         "SELECT id FROM user_filters WHERE user_id = %s AND name = %s", (user.id, name)
     ):
         raise HTTPException(
-            409, detail={"code": "ALREADY_ADOPTED", "message": "this preset is already in your filters"}
+            409,
+            detail={"code": "ALREADY_ADOPTED", "message": "this preset is already in your filters"},
         )
     row = db.query_one(
         f"""
@@ -197,9 +210,7 @@ def adopt_preset(preset_id: int, user: AuthedUser = Depends(require_user)):
         ),
     )
     assert row is not None
-    task_id, blocked = _enqueue(
-        user, "run_filter", {"user_id": user.id, "filter_id": row["id"]}
-    )
+    task_id, blocked = _enqueue(user, "run_filter", {"user_id": user.id, "filter_id": row["id"]})
     return {**row, "task_id": task_id, "run_blocked": blocked}
 
 

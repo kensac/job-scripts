@@ -123,7 +123,9 @@ class Greenhouse(AtsResolver):
 
         last: AtsResult = AtsResult(Status.ERROR, source=self.name)
         for cand in candidates:
-            resp = self.get(f"https://boards-api.greenhouse.io/v1/boards/{cand}/jobs/{job_id}?content=true")
+            resp = self.get(
+                f"https://boards-api.greenhouse.io/v1/boards/{cand}/jobs/{job_id}?content=true"
+            )
             early = self.from_response(resp)
             if early is not None:
                 # A 404 only proves the posting is gone when the board token
@@ -138,7 +140,11 @@ class Greenhouse(AtsResolver):
             assert resp is not None
             data = resp.json()
             return self.result(
-                join(data.get("title"), (data.get("location") or {}).get("name"), clean_html(data.get("content", "")))
+                join(
+                    data.get("title"),
+                    (data.get("location") or {}).get("name"),
+                    clean_html(data.get("content", "")),
+                )
             )
         return last
 
@@ -151,7 +157,9 @@ class Lever(AtsResolver):
 
     def canonical(self, url: str) -> str | None:
         match = re.search(r"(jobs(?:\.eu)?\.lever\.co)/([^/?]+)/([0-9a-f-]{36})", url)
-        return f"https://{match.group(1).lower()}/{match.group(2)}/{match.group(3)}" if match else None
+        return (
+            f"https://{match.group(1).lower()}/{match.group(2)}/{match.group(3)}" if match else None
+        )
 
     def fetch(self, url: str) -> AtsResult:
         match = re.search(r"lever\.co/([^/]+)/([0-9a-f-]{36})", url)
@@ -164,7 +172,9 @@ class Lever(AtsResolver):
             return early
         assert resp is not None
         data = resp.json()
-        lists = [join(s.get("text"), clean_html(s.get("content", ""))) for s in data.get("lists", [])]
+        lists = [
+            join(s.get("text"), clean_html(s.get("content", ""))) for s in data.get("lists", [])
+        ]
         return self.result(
             join(
                 data.get("text"),
@@ -191,7 +201,9 @@ class Ashby(AtsResolver):
         if not match:
             return UNSUPPORTED
         org, job_id = unquote(match.group(1)), match.group(2)
-        resp = self.get(f"https://api.ashbyhq.com/posting-api/job-board/{org}?includeCompensation=true")
+        resp = self.get(
+            f"https://api.ashbyhq.com/posting-api/job-board/{org}?includeCompensation=true"
+        )
         early = self.from_response(resp)
         if early is not None:
             return early
@@ -200,7 +212,12 @@ class Ashby(AtsResolver):
             if job.get("id") == job_id or job_id in str(job.get("jobUrl", "")):
                 comp = (job.get("compensation") or {}).get("compensationTierSummary")
                 return self.result(
-                    join(job.get("title"), job.get("location"), comp, clean_html(job.get("descriptionHtml", "")))
+                    join(
+                        job.get("title"),
+                        job.get("location"),
+                        comp,
+                        clean_html(job.get("descriptionHtml", "")),
+                    )
                 )
         return AtsResult(Status.GONE, source=self.name)
 
@@ -215,13 +232,17 @@ class SmartRecruiters(AtsResolver):
 
     def canonical(self, url: str) -> str | None:
         match = re.search(r"smartrecruiters\.com/([^/?]+)/(\d+)", url)
-        return f"https://jobs.smartrecruiters.com/{match.group(1)}/{match.group(2)}" if match else None
+        return (
+            f"https://jobs.smartrecruiters.com/{match.group(1)}/{match.group(2)}" if match else None
+        )
 
     def fetch(self, url: str) -> AtsResult:
         match = re.search(r"smartrecruiters\.com/([^/]+)/(\d+)", url)
         if not match:
             return UNSUPPORTED
-        resp = self.get(f"https://api.smartrecruiters.com/v1/companies/{match.group(1)}/postings/{match.group(2)}")
+        resp = self.get(
+            f"https://api.smartrecruiters.com/v1/companies/{match.group(1)}/postings/{match.group(2)}"
+        )
         early = self.from_response(resp)
         if early is not None:
             return early
@@ -231,7 +252,11 @@ class SmartRecruiters(AtsResolver):
         sections = (data.get("jobAd") or {}).get("sections") or {}
         body = [clean_html((sections.get(k) or {}).get("text", "")) for k in self._SECTIONS]
         return self.result(
-            join(data.get("name"), " ".join(str(loc.get(k, "")) for k in ("city", "region", "country")), *body)
+            join(
+                data.get("name"),
+                " ".join(str(loc.get(k, "")) for k in ("city", "region", "country")),
+                *body,
+            )
         )
 
 
@@ -245,7 +270,11 @@ class Workday(AtsResolver):
         parsed = urlparse(url)
         path = re.sub(r"^/[a-z]{2}-[a-z]{2}/", "/", parsed.path, flags=re.IGNORECASE)
         match = re.match(r"^/([^/]+)/job/(.+?)/?$", path)
-        return f"https://{parsed.netloc.lower()}/{match.group(1)}/job/{match.group(2)}" if match else None
+        return (
+            f"https://{parsed.netloc.lower()}/{match.group(1)}/job/{match.group(2)}"
+            if match
+            else None
+        )
 
     def fetch(self, url: str) -> AtsResult:
         parsed = urlparse(url)
@@ -254,14 +283,21 @@ class Workday(AtsResolver):
         match = re.match(r"^/([^/]+)/job/(.+)$", path)
         if not match:
             return UNSUPPORTED
-        resp = self.get(f"https://{parsed.netloc}/wday/cxs/{tenant}/{match.group(1)}/job/{match.group(2)}")
+        resp = self.get(
+            f"https://{parsed.netloc}/wday/cxs/{tenant}/{match.group(1)}/job/{match.group(2)}"
+        )
         early = self.from_response(resp)
         if early is not None:
             return early
         assert resp is not None
         info = resp.json().get("jobPostingInfo") or {}
         return self.result(
-            join(info.get("title"), info.get("location"), info.get("startDate"), clean_html(info.get("jobDescription", "")))
+            join(
+                info.get("title"),
+                info.get("location"),
+                info.get("startDate"),
+                clean_html(info.get("jobDescription", "")),
+            )
         )
 
 

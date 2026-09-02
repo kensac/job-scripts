@@ -62,8 +62,7 @@ def init_schema() -> None:
         )
     for key, value in _APP_CONFIG_SEED:
         execute(
-            "INSERT INTO app_config (key, value) VALUES (%s, %s) "
-            "ON CONFLICT (key) DO NOTHING",
+            "INSERT INTO app_config (key, value) VALUES (%s, %s) ON CONFLICT (key) DO NOTHING",
             (key, jsonb(value)),
         )
 

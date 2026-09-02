@@ -66,6 +66,7 @@ def owner_models(unlimited: bool) -> list:
                 out.append(m["model"])
     return sorted(out)
 
+
 # USD per 1M tokens (input, output); models absent here emit no cost metric.
 PRICES_PER_MTOK = {
     "gpt-5-nano": (0.05, 0.40),

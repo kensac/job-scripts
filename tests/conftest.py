@@ -57,16 +57,34 @@ def _start_scratch_postgres() -> str:
     # waits for the pipes to close) hangs forever since postgres never exits.
     _run(
         [
-            f"{bindir}/pg_ctl", "-D", str(data_dir), "-w", "-l", str(scratch_dir / "postgres.log"),
-            "-o", f"-p {port} -c unix_socket_directories=''", "start",
+            f"{bindir}/pg_ctl",
+            "-D",
+            str(data_dir),
+            "-w",
+            "-l",
+            str(scratch_dir / "postgres.log"),
+            "-o",
+            f"-p {port} -c unix_socket_directories=''",
+            "start",
         ]
     )
     _run(
-        [f"{bindir}/createdb", "-h", "127.0.0.1", "-p", str(port), "-U", "postgres", "jobtracker_test"]
+        [
+            f"{bindir}/createdb",
+            "-h",
+            "127.0.0.1",
+            "-p",
+            str(port),
+            "-U",
+            "postgres",
+            "jobtracker_test",
+        ]
     )
 
     def _stop() -> None:
-        subprocess.run([f"{bindir}/pg_ctl", "-D", str(data_dir), "-m", "fast", "stop"], capture_output=True)
+        subprocess.run(
+            [f"{bindir}/pg_ctl", "-D", str(data_dir), "-m", "fast", "stop"], capture_output=True
+        )
         shutil.rmtree(scratch_dir, ignore_errors=True)
 
     _stop_scratch_pg = _stop
@@ -87,9 +105,22 @@ def pytest_sessionfinish(session, exitstatus) -> None:
 
 
 _MUTABLE_TABLES = [
-    "tasks", "jobs", "user_jobs", "users", "user_filters", "user_settings",
-    "user_sources", "ai_queries", "api_usage", "reports", "source_requests",
-    "sources", "source_groups", "group_budgets", "filter_presets", "app_config",
+    "tasks",
+    "jobs",
+    "user_jobs",
+    "users",
+    "user_filters",
+    "user_settings",
+    "user_sources",
+    "ai_queries",
+    "api_usage",
+    "reports",
+    "source_requests",
+    "sources",
+    "source_groups",
+    "group_budgets",
+    "filter_presets",
+    "app_config",
 ]
 
 
@@ -103,8 +134,7 @@ def _reseed() -> None:
         )
     for key, value in db._APP_CONFIG_SEED:
         db.execute(
-            "INSERT INTO app_config (key, value) VALUES (%s, %s) "
-            "ON CONFLICT (key) DO NOTHING",
+            "INSERT INTO app_config (key, value) VALUES (%s, %s) ON CONFLICT (key) DO NOTHING",
             (key, db.jsonb(value)),
         )
 

@@ -88,16 +88,18 @@ def detect() -> list[dict[str, Any]]:
         base = _pct(r["base_ats"], r["base_total"])
         # Only meaningful if the source actually relied on ATS text before.
         if base >= 0.30 and recent < base * 0.5:
-            found.append({
-                "kind": "ats_text_collapse",
-                "subject": r["source"],
-                "severity": "critical",
-                "message": (
-                    f"ATS text share for {r['source']} fell from {base:.0%} to {recent:.0%} "
-                    "— the resolver is probably broken and we're paying to scrape instead."
-                ),
-                "detail": dict(r),
-            })
+            found.append(
+                {
+                    "kind": "ats_text_collapse",
+                    "subject": r["source"],
+                    "severity": "critical",
+                    "message": (
+                        f"ATS text share for {r['source']} fell from {base:.0%} to {recent:.0%} "
+                        "— the resolver is probably broken and we're paying to scrape instead."
+                    ),
+                    "detail": dict(r),
+                }
+            )
 
     # 2. Verdict-rate shifts on FIRST-EVER checks only. Re-checks flipping to
     #    closed is the system working — postings expire, and a sweep that newly
@@ -148,19 +150,21 @@ def detect() -> list[dict[str, Any]]:
         recent = _pct(r["recent_rejected"], r["recent_total"])
         base = _pct(r["base_rejected"], r["base_total"])
         if recent - base >= 0.25 and recent >= 0.35:
-            found.append({
-                "kind": f"{r['check_type']}_rate_spike",
-                "subject": r["source"],
-                "severity": "critical",
-                "message": (
-                    f"{r['check_type']} rejection rate for newly-seen {r['source']} jobs "
-                    f"jumped from {base:.0%} to {recent:.0%} over {r['recent_total']} "
-                    f"first-time checks (max {MAX_PER_COMPANY} per company) — jobs are "
-                    "being written off on arrival, so suspect the input text before "
-                    "believing the verdicts."
-                ),
-                "detail": dict(r),
-            })
+            found.append(
+                {
+                    "kind": f"{r['check_type']}_rate_spike",
+                    "subject": r["source"],
+                    "severity": "critical",
+                    "message": (
+                        f"{r['check_type']} rejection rate for newly-seen {r['source']} jobs "
+                        f"jumped from {base:.0%} to {recent:.0%} over {r['recent_total']} "
+                        f"first-time checks (max {MAX_PER_COMPANY} per company) — jobs are "
+                        "being written off on arrival, so suspect the input text before "
+                        "believing the verdicts."
+                    ),
+                    "detail": dict(r),
+                }
+            )
 
     # 3. Extraction failures concentrated on one host: the bot-wall signature.
     #    Relative to the host's own prior week, not an absolute rate — a site
@@ -188,17 +192,19 @@ def detect() -> list[dict[str, Any]]:
         recent = _pct(r["recent_failed"], r["recent_total"])
         base = _pct(r["base_failed"], r["base_total"])
         if recent - base >= 0.25 and recent >= 0.5:
-            found.append({
-                "kind": "extraction_failing",
-                "subject": r["host"],
-                "severity": "warning",
-                "message": (
-                    f"{r['recent_failed']} of {r['recent_total']} fetches from {r['host']} "
-                    f"failed in 24h ({recent:.0%}, up from {base:.0%} over the prior week) "
-                    "— blocked, or the page shape changed."
-                ),
-                "detail": dict(r),
-            })
+            found.append(
+                {
+                    "kind": "extraction_failing",
+                    "subject": r["host"],
+                    "severity": "warning",
+                    "message": (
+                        f"{r['recent_failed']} of {r['recent_total']} fetches from {r['host']} "
+                        f"failed in 24h ({recent:.0%}, up from {base:.0%} over the prior week) "
+                        "— blocked, or the page shape changed."
+                    ),
+                    "detail": dict(r),
+                }
+            )
 
     return found
 
@@ -220,8 +226,11 @@ def record(found: list[dict[str, Any]]) -> list[dict[str, Any]]:
             RETURNING id, (xmax = 0) AS is_new
             """,
             {
-                "kind": f["kind"], "subject": f["subject"], "severity": f["severity"],
-                "message": f["message"], "detail": db.jsonb(f["detail"]),
+                "kind": f["kind"],
+                "subject": f["subject"],
+                "severity": f["severity"],
+                "message": f["message"],
+                "detail": db.jsonb(f["detail"]),
             },
         )
         if row and row["is_new"]:
@@ -239,7 +248,5 @@ def record(found: list[dict[str, Any]]) -> list[dict[str, Any]]:
     )
     stale = [r["id"] for r in open_rows if (r["kind"], r["subject"]) not in seen]
     if stale:
-        db.execute(
-            "UPDATE health_alerts SET resolved_at = now() WHERE id = ANY(%s)", (stale,)
-        )
+        db.execute("UPDATE health_alerts SET resolved_at = now() WHERE id = ANY(%s)", (stale,))
     return fresh

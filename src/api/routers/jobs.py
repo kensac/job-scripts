@@ -323,9 +323,7 @@ class ExplainBody(BaseModel):
 
 
 @router.post("/user/jobs/{job_id}/explain")
-async def explain_check(
-    job_id: int, body: ExplainBody, user: AuthedUser = Depends(require_user)
-):
+async def explain_check(job_id: int, body: ExplainBody, user: AuthedUser = Depends(require_user)):
     """On-demand debugging: re-runs one check with the reason-ful schema and
     fuller reasoning (default verdicts skip reasons to save output tokens).
     Records a fresh verdict row (context 'explain') and returns the reason."""
@@ -356,9 +354,11 @@ async def explain_check(
         )
         if closure_signal:
             return {
-                "check": body.check, "status": "rejected",
+                "check": body.check,
+                "status": "rejected",
                 "reason": (gone or {}).get("reason", ""),
-                "refetched": True, "closure_signal": closure_signal,
+                "refetched": True,
+                "closure_signal": closure_signal,
             }
         raise HTTPException(
             409,
@@ -397,18 +397,33 @@ async def explain_check(
     else:
         raise HTTPException(
             400,
-            detail={"code": "INVALID_CHECK", "message": "check must be closed, clearance, or filter:<id>"},
+            detail={
+                "code": "INVALID_CHECK",
+                "message": "check must be closed, clearance, or filter:<id>",
+            },
         )
 
     parsed, usage = await _verdicts.run_check(
-        cfg, url=job["url"], check_type=check, instructions=instructions,
-        input_text=content_row["input_content"][:60000], response_model=model_cls,
-        verdict_of=verdict_of, company=job["company"], job_title=job["title"],
-        filter_name=filter_name, prompt_hash=prompt_hash, context="explain",
+        cfg,
+        url=job["url"],
+        check_type=check,
+        instructions=instructions,
+        input_text=content_row["input_content"][:60000],
+        response_model=model_cls,
+        verdict_of=verdict_of,
+        company=job["company"],
+        job_title=job["title"],
+        filter_name=filter_name,
+        prompt_hash=prompt_hash,
+        context="explain",
     )
     budget.record_usage(
-        user.id, cfg.key_source, "explain", cfg.model,
-        usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0),
+        user.id,
+        cfg.key_source,
+        "explain",
+        cfg.model,
+        usage.get("prompt_tokens", 0),
+        usage.get("completion_tokens", 0),
         usage.get("total_tokens", 0),
     )
     if parsed is None:
@@ -417,7 +432,10 @@ async def explain_check(
         # must read as a real outcome rather than an unhandled AttributeError.
         raise HTTPException(
             502,
-            detail={"code": "NO_VERDICT", "message": "the model returned no usable answer; try again"},
+            detail={
+                "code": "NO_VERDICT",
+                "message": "the model returned no usable answer; try again",
+            },
         )
     rejected, reason = verdict_of(parsed)
     return {"check": body.check, "status": "rejected" if rejected else "passed", "reason": reason}
@@ -428,9 +446,7 @@ def delete_user_job(job_id: int, user: AuthedUser = Depends(require_user)):
     """Drops the user's board row only (the catalog job is untouched); a later
     run re-materializes it if it still passes their filters. Hide is the
     permanent alternative."""
-    db.execute(
-        "DELETE FROM user_jobs WHERE user_id = %s AND job_id = %s", (user.id, job_id)
-    )
+    db.execute("DELETE FROM user_jobs WHERE user_id = %s AND job_id = %s", (user.id, job_id))
     return {"ok": True}
 
 

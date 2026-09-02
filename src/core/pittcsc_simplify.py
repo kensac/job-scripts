@@ -14,6 +14,7 @@ Everything else is sheet-era and carries @deprecated, so any caller gets a
 runtime DeprecationWarning and type checkers flag it. Do not add new callers;
 extract what you need into a leaf module instead.
 """
+
 from __future__ import annotations
 
 from warnings import deprecated
@@ -106,8 +107,7 @@ FOUND_SOURCE_DEFAULT: str = "Direct Application"
 
 # Job Filtering Configuration
 EXCLUDED_LOCATIONS: Set[str] = {
-    loc.lower()
-    for loc in ["canada", "toronto", "montreal", "ontario", "london", "--------"]
+    loc.lower() for loc in ["canada", "toronto", "montreal", "ontario", "london", "--------"]
 }
 
 INCLUDED_TERMS: Set[str] = {
@@ -135,10 +135,8 @@ INCLUDED_TERMS: Set[str] = {
 
 # Date Configuration
 # FALLBACK_CUTOFF_DATE: str = "2025-03-01"
-FALLBACK_CUTOFF_DATE = '2026-05-01'
-FALLBACK_CUTOFF_TS: int = int(
-    datetime.datetime.fromisoformat(FALLBACK_CUTOFF_DATE).timestamp()
-)
+FALLBACK_CUTOFF_DATE = "2026-05-01"
+FALLBACK_CUTOFF_TS: int = int(datetime.datetime.fromisoformat(FALLBACK_CUTOFF_DATE).timestamp())
 
 # Content Extraction Configuration
 BROWSER_PAGE_LOAD_TIMEOUT: float = 15.0
@@ -158,7 +156,6 @@ MAX_CONCURRENT_JOBS: int = 5
 
 # Sheet Configuration
 SHEET_COLUMNS: int = 15
-
 
 
 @dataclass(frozen=True)
@@ -219,16 +216,12 @@ class ExponentialBackoff:
         jitter = delay * 0.25 * (2 * random.random() - 1)
         final_delay = max(0, delay + jitter)
 
-        logger.debug(
-            f"Exponential backoff: waiting {final_delay:.2f}s (attempt {self.attempt})"
-        )
+        logger.debug(f"Exponential backoff: waiting {final_delay:.2f}s (attempt {self.attempt})")
         time.sleep(final_delay)
         self.attempt += 1
 
     def reset(self) -> None:
         self.attempt = 0
-
-
 
 
 def _usage_to_kwargs(response) -> Dict[str, Any]:
@@ -269,15 +262,19 @@ class ClearanceRequirementResponse(BaseModel):
     requires_clearance_or_restrictions: bool = Field(
         description="Whether job requires security clearance, citizenship, or has visa/sponsorship restrictions"
     )
-    restriction_type: Optional[Literal["security_clearance", "citizenship", "visa_sponsorship", "f1_restriction"]] = Field(
-        None, description="Type of restriction if any"
-    )
+    restriction_type: Optional[
+        Literal["security_clearance", "citizenship", "visa_sponsorship", "f1_restriction"]
+    ] = Field(None, description="Type of restriction if any")
     reason: Optional[str] = Field(None, description="Brief explanation of the restriction")
 
 
 class CustomFilterResponse(BaseModel):
-    should_filter: bool = Field(description="Whether the job should be filtered out based on custom criteria")
-    reason: Optional[str] = Field(None, description="Brief explanation why job was filtered or kept")
+    should_filter: bool = Field(
+        description="Whether the job should be filtered out based on custom criteria"
+    )
+    reason: Optional[str] = Field(
+        None, description="Brief explanation why job was filtered or kept"
+    )
 
 
 def get_chrome_options() -> Options:
@@ -295,7 +292,9 @@ def get_chrome_options() -> Options:
     return chrome_options
 
 
-@deprecated("sheet-era pipeline: superseded by the multi-user API (src/api/). Kept for local Google-Sheets runs only.")
+@deprecated(
+    "sheet-era pipeline: superseded by the multi-user API (src/api/). Kept for local Google-Sheets runs only."
+)
 def extract_url_content(url: str) -> Optional[str]:
     return extract_url_content_ex(url)[0]
 
@@ -322,13 +321,13 @@ def extract_url_content_ex(url: str) -> tuple[Optional[str], Optional[str]]:
         driver.get(url)
 
         WebDriverWait(driver, BROWSER_ELEMENT_WAIT_TIMEOUT).until(
-            lambda d: d.execute_script('return document.readyState') == 'complete' # type: ignore
+            lambda d: d.execute_script("return document.readyState") == "complete"  # type: ignore
         )
 
         time.sleep(BROWSER_CONTENT_WAIT)
 
-        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);") # type: ignore
-        
+        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")  # type: ignore
+
         body_element = driver.find_element(By.TAG_NAME, "body")
         content = ftfy.fix_text(body_element.text).strip()
 
@@ -376,7 +375,6 @@ Do NOT flag: preferences ("clearance preferred"), sponsorship offered, applicati
 reason: <=20 words, quote the phrase."""
 
 
-
 CUSTOM_INSTRUCTIONS = build_custom_instructions(CUSTOM_FILTER_PROMPT)
 
 # The custom filter the current run applies. Defaults to the .env prompt;
@@ -386,7 +384,9 @@ ACTIVE_CUSTOM_INSTRUCTIONS = CUSTOM_INSTRUCTIONS
 ACTIVE_FILTER_FAIL_CLOSED = False
 
 
-@deprecated("sheet-era pipeline: superseded by the multi-user API (src/api/). Kept for local Google-Sheets runs only.")
+@deprecated(
+    "sheet-era pipeline: superseded by the multi-user API (src/api/). Kept for local Google-Sheets runs only."
+)
 def set_active_filter(name: str) -> bool:
     global ACTIVE_FILTER_NAME, ACTIVE_CUSTOM_INSTRUCTIONS, ACTIVE_FILTER_FAIL_CLOSED
     spec = get_filter_spec(name)
@@ -405,7 +405,9 @@ def _build_custom_input(content: str, job_title: str, company: str) -> str:
     return f"Company: {company}\nJob Title: {job_title}\n\nJob Content:\n{content}"
 
 
-@deprecated("sheet-era pipeline: superseded by the multi-user API (src/api/). Kept for local Google-Sheets runs only.")
+@deprecated(
+    "sheet-era pipeline: superseded by the multi-user API (src/api/). Kept for local Google-Sheets runs only."
+)
 async def check_if_job_closed(
     content: str, url: str = "", job_title: str = "", company: str = ""
 ) -> bool:
@@ -457,7 +459,9 @@ async def check_if_job_closed(
                     **_usage_to_kwargs(response),
                 )
                 if parsed.is_closed:
-                    add_ai_result(url, "rejected", parsed.reason or "job closed", "closed", **record)
+                    add_ai_result(
+                        url, "rejected", parsed.reason or "job closed", "closed", **record
+                    )
                 else:
                     add_ai_result(url, "passed", parsed.reason or "job open", "closed", **record)
 
@@ -475,29 +479,42 @@ async def check_if_job_closed(
                 )
                 await asyncio.to_thread(backoff.wait)
             else:
-                logger.warning(
-                    f"AI closed check failed after {OPENAI_MAX_RETRIES} attempts: {exc}"
-                )
+                logger.warning(f"AI closed check failed after {OPENAI_MAX_RETRIES} attempts: {exc}")
                 if url:
                     add_ai_result(
-                        url, "failed", f"AI check failed: {str(exc)[:100]}", "closed",
-                        model=OPENAI_MODEL, reasoning_effort=OPENAI_REASONING_EFFORT,
-                        company=company, job_title=job_title,
-                        instructions=instructions, input_content=content, error=str(exc),
+                        url,
+                        "failed",
+                        f"AI check failed: {str(exc)[:100]}",
+                        "closed",
+                        model=OPENAI_MODEL,
+                        reasoning_effort=OPENAI_REASONING_EFFORT,
+                        company=company,
+                        job_title=job_title,
+                        instructions=instructions,
+                        input_content=content,
+                        error=str(exc),
                     )
                 return False
 
     if url:
         add_ai_result(
-            url, "failed", "AI check failed: unknown error", "closed",
-            model=OPENAI_MODEL, reasoning_effort=OPENAI_REASONING_EFFORT,
-            company=company, job_title=job_title,
-            instructions=instructions, input_content=content,
+            url,
+            "failed",
+            "AI check failed: unknown error",
+            "closed",
+            model=OPENAI_MODEL,
+            reasoning_effort=OPENAI_REASONING_EFFORT,
+            company=company,
+            job_title=job_title,
+            instructions=instructions,
+            input_content=content,
         )
     return False
 
 
-@deprecated("sheet-era pipeline: superseded by the multi-user API (src/api/). Kept for local Google-Sheets runs only.")
+@deprecated(
+    "sheet-era pipeline: superseded by the multi-user API (src/api/). Kept for local Google-Sheets runs only."
+)
 async def check_security_clearance_requirement(
     content: str, url: str = "", job_title: str = "", company: str = ""
 ) -> bool:
@@ -553,14 +570,18 @@ async def check_security_clearance_requirement(
                 )
                 if parsed.requires_clearance_or_restrictions:
                     add_ai_result(
-                        url, "rejected",
+                        url,
+                        "rejected",
                         parsed.reason or f"{parsed.restriction_type} restriction",
                         "clearance",
                         **record,
                     )
                 else:
                     add_ai_result(
-                        url, "passed", parsed.reason or "no restrictions", "clearance",
+                        url,
+                        "passed",
+                        parsed.reason or "no restrictions",
+                        "clearance",
                         **record,
                     )
 
@@ -583,24 +604,39 @@ async def check_security_clearance_requirement(
                 )
                 if url:
                     add_ai_result(
-                        url, "failed", f"AI check failed: {str(exc)[:100]}", "clearance",
-                        model=OPENAI_MODEL, reasoning_effort=OPENAI_REASONING_EFFORT,
-                        company=company, job_title=job_title,
-                        instructions=instructions, input_content=content, error=str(exc),
+                        url,
+                        "failed",
+                        f"AI check failed: {str(exc)[:100]}",
+                        "clearance",
+                        model=OPENAI_MODEL,
+                        reasoning_effort=OPENAI_REASONING_EFFORT,
+                        company=company,
+                        job_title=job_title,
+                        instructions=instructions,
+                        input_content=content,
+                        error=str(exc),
                     )
                 return False
 
     if url:
         add_ai_result(
-            url, "failed", "AI check failed: unknown error", "clearance",
-            model=OPENAI_MODEL, reasoning_effort=OPENAI_REASONING_EFFORT,
-            company=company, job_title=job_title,
-            instructions=instructions, input_content=content,
+            url,
+            "failed",
+            "AI check failed: unknown error",
+            "clearance",
+            model=OPENAI_MODEL,
+            reasoning_effort=OPENAI_REASONING_EFFORT,
+            company=company,
+            job_title=job_title,
+            instructions=instructions,
+            input_content=content,
         )
     return False
 
 
-@deprecated("sheet-era pipeline: superseded by the multi-user API (src/api/). Kept for local Google-Sheets runs only.")
+@deprecated(
+    "sheet-era pipeline: superseded by the multi-user API (src/api/). Kept for local Google-Sheets runs only."
+)
 async def check_custom_filter(
     content: str,
     url: str = "",
@@ -665,9 +701,21 @@ async def check_custom_filter(
                     **_usage_to_kwargs(response),
                 )
                 if parsed.should_filter:
-                    add_ai_result(url, "rejected", parsed.reason or "custom filter criteria not met", "custom", **record)
+                    add_ai_result(
+                        url,
+                        "rejected",
+                        parsed.reason or "custom filter criteria not met",
+                        "custom",
+                        **record,
+                    )
                 else:
-                    add_ai_result(url, "passed", parsed.reason or "custom filter criteria met", "custom", **record)
+                    add_ai_result(
+                        url,
+                        "passed",
+                        parsed.reason or "custom filter criteria met",
+                        "custom",
+                        **record,
+                    )
 
             return parsed.should_filter
 
@@ -688,21 +736,36 @@ async def check_custom_filter(
                 )
                 if url:
                     add_ai_result(
-                        url, "failed", f"AI custom filter failed: {str(exc)[:100]}", "custom",
-                        model=OPENAI_MODEL, reasoning_effort=OPENAI_REASONING_EFFORT,
-                        filter_name=filter_name, prompt_hash=phash,
-                        company=company, job_title=job_title,
-                        instructions=instructions, input_content=input_text, error=str(exc),
+                        url,
+                        "failed",
+                        f"AI custom filter failed: {str(exc)[:100]}",
+                        "custom",
+                        model=OPENAI_MODEL,
+                        reasoning_effort=OPENAI_REASONING_EFFORT,
+                        filter_name=filter_name,
+                        prompt_hash=phash,
+                        company=company,
+                        job_title=job_title,
+                        instructions=instructions,
+                        input_content=input_text,
+                        error=str(exc),
                     )
                 return False
 
     if url:
         add_ai_result(
-            url, "failed", "AI custom filter failed: unknown error", "custom",
-            model=OPENAI_MODEL, reasoning_effort=OPENAI_REASONING_EFFORT,
-            filter_name=filter_name, prompt_hash=phash,
-            company=company, job_title=job_title,
-            instructions=instructions, input_content=input_text,
+            url,
+            "failed",
+            "AI custom filter failed: unknown error",
+            "custom",
+            model=OPENAI_MODEL,
+            reasoning_effort=OPENAI_REASONING_EFFORT,
+            filter_name=filter_name,
+            prompt_hash=phash,
+            company=company,
+            job_title=job_title,
+            instructions=instructions,
+            input_content=input_text,
         )
     return False
 
@@ -715,10 +778,10 @@ def _on_extraction_failure(job: JobPosting, why: str) -> JobPosting:
     return job
 
 
-@deprecated("sheet-era pipeline: superseded by the multi-user API (src/api/). Kept for local Google-Sheets runs only.")
-async def preprocess_job_posting(
-    job: JobPosting
-) -> JobPosting:
+@deprecated(
+    "sheet-era pipeline: superseded by the multi-user API (src/api/). Kept for local Google-Sheets runs only."
+)
+async def preprocess_job_posting(job: JobPosting) -> JobPosting:
     if not job.url or not job.active:
         return job
 
@@ -740,7 +803,9 @@ async def preprocess_job_posting(
         return _on_extraction_failure(job, "failed to extract content")
 
     if len(content.strip()) < MIN_CONTENT_LENGTH:
-        add_ai_result(job.url, "failed", f"insufficient content (only {len(content)} chars)", "extraction")
+        add_ai_result(
+            job.url, "failed", f"insufficient content (only {len(content)} chars)", "extraction"
+        )
         return _on_extraction_failure(job, f"insufficient content ({len(content)} chars)")
 
     # Fleet workers set this to 0: content is cached above, and the hourly
@@ -752,9 +817,7 @@ async def preprocess_job_posting(
 
     is_closed = await check_if_job_closed(content, job.url, job.title, job.company)
     if is_closed:
-        logger.info(
-            f"FILTERED: Job is closed for {job.company} - {job.title} ({job.url})"
-        )
+        logger.info(f"FILTERED: Job is closed for {job.company} - {job.title} ({job.url})")
         return JobPosting(
             company=job.company,
             locations=job.locations,
@@ -807,7 +870,9 @@ async def preprocess_job_posting(
     return job
 
 
-@deprecated("sheet-era pipeline: superseded by the multi-user API (src/api/). Kept for local Google-Sheets runs only.")
+@deprecated(
+    "sheet-era pipeline: superseded by the multi-user API (src/api/). Kept for local Google-Sheets runs only."
+)
 async def retry_failed_job(url: str, check_type: str) -> bool:
     if not openai_client:
         logger.warning("No OpenAI API key found - cannot retry failed jobs")
@@ -836,7 +901,9 @@ async def retry_failed_job(url: str, check_type: str) -> bool:
 
         elif check_type == "custom":
             if not CUSTOM_FILTER_PROMPT:
-                logger.warning(f"Cannot retry custom filter for {url}: CUSTOM_FILTER_PROMPT not set")
+                logger.warning(
+                    f"Cannot retry custom filter for {url}: CUSTOM_FILTER_PROMPT not set"
+                )
                 return False
             should_filter = await check_custom_filter(content, url, "", "")
             logger.info(f"Retry result for {url}: should_filter={should_filter}")
@@ -852,8 +919,12 @@ async def retry_failed_job(url: str, check_type: str) -> bool:
         return False
 
 
-@deprecated("sheet-era pipeline: superseded by the multi-user API (src/api/). Kept for local Google-Sheets runs only.")
-async def reevaluate_custom_filter(url: str, job_title: str = "", company: str = "") -> Optional[bool]:
+@deprecated(
+    "sheet-era pipeline: superseded by the multi-user API (src/api/). Kept for local Google-Sheets runs only."
+)
+async def reevaluate_custom_filter(
+    url: str, job_title: str = "", company: str = ""
+) -> Optional[bool]:
     if not openai_client or not CUSTOM_FILTER_PROMPT:
         logger.warning("No OpenAI API key or CUSTOM_FILTER_PROMPT found - cannot reevaluate")
         return None
@@ -879,7 +950,9 @@ async def reevaluate_custom_filter(url: str, job_title: str = "", company: str =
         return None
 
 
-@deprecated("sheet-era pipeline: superseded by the multi-user API (src/api/). Kept for local Google-Sheets runs only.")
+@deprecated(
+    "sheet-era pipeline: superseded by the multi-user API (src/api/). Kept for local Google-Sheets runs only."
+)
 async def retry_all_failed_jobs() -> Dict[str, int]:
     failed_jobs = get_all_failed_jobs()
 
@@ -904,15 +977,21 @@ async def retry_all_failed_jobs() -> Dict[str, int]:
                 failed_count += 1
             return success
 
-    logger.info(f"Processing {len(failed_jobs)} failed jobs concurrently (max {MAX_CONCURRENT_JOBS} at a time)")
+    logger.info(
+        f"Processing {len(failed_jobs)} failed jobs concurrently (max {MAX_CONCURRENT_JOBS} at a time)"
+    )
     await asyncio.gather(*[retry_with_semaphore(job) for job in failed_jobs])
 
     logger.info(f"Retry complete: {success_count} succeeded, {failed_count} failed")
     return {"total": len(failed_jobs), "success": success_count, "failed": failed_count}
 
 
-@deprecated("sheet-era pipeline: superseded by the multi-user API (src/api/). Kept for local Google-Sheets runs only.")
-async def reevaluate_all_custom_filtered_jobs(sheet_id: str, job_listings_url: str) -> Dict[str, int]:
+@deprecated(
+    "sheet-era pipeline: superseded by the multi-user API (src/api/). Kept for local Google-Sheets runs only."
+)
+async def reevaluate_all_custom_filtered_jobs(
+    sheet_id: str, job_listings_url: str
+) -> Dict[str, int]:
     custom_jobs = get_all_custom_filter_jobs()
 
     if not custom_jobs:
@@ -957,7 +1036,9 @@ async def reevaluate_all_custom_filtered_jobs(sheet_id: str, job_listings_url: s
                     return job
             return None
 
-    logger.info(f"Reevaluating {len(jobs_to_reevaluate)} jobs concurrently (max {MAX_CONCURRENT_JOBS} at a time)")
+    logger.info(
+        f"Reevaluating {len(jobs_to_reevaluate)} jobs concurrently (max {MAX_CONCURRENT_JOBS} at a time)"
+    )
     results = await asyncio.gather(*[reevaluate_with_semaphore(job) for job in jobs_to_reevaluate])
 
     jobs_to_add = [job for job in results if job is not None]
@@ -969,12 +1050,14 @@ async def reevaluate_all_custom_filtered_jobs(sheet_id: str, job_listings_url: s
     else:
         added_count = 0
 
-    logger.info(f"Reevaluation complete: {reevaluated_count} jobs reevaluated, {now_passed_count} now pass, {added_count} added to sheet")
+    logger.info(
+        f"Reevaluation complete: {reevaluated_count} jobs reevaluated, {now_passed_count} now pass, {added_count} added to sheet"
+    )
     return {
         "total": len(custom_jobs),
         "reevaluated": reevaluated_count,
         "now_passed": now_passed_count,
-        "added_to_sheet": added_count
+        "added_to_sheet": added_count,
     }
 
 
@@ -1044,8 +1127,7 @@ def fetch_airtable_postings(
     postings: List[JobPosting] = []
     for row in table.get("rows", []):
         values = {
-            name_by_id.get(cid, ""): val
-            for cid, val in row.get("cellValuesByColumnId", {}).items()
+            name_by_id.get(cid, ""): val for cid, val in row.get("cellValuesByColumnId", {}).items()
         }
 
         apply_cell = values.get("Apply")
@@ -1082,7 +1164,9 @@ def _parse_age_to_timestamp(age: str) -> int:
     if not match:
         return 0
     amount, unit = int(match.group(1)), match.group(2)
-    days = {"h": amount / 24, "d": amount, "w": amount * 7, "mo": amount * 30, "y": amount * 365}[unit]
+    days = {"h": amount / 24, "d": amount, "w": amount * 7, "mo": amount * 30, "y": amount * 365}[
+        unit
+    ]
     return int((datetime.datetime.now() - datetime.timedelta(days=days)).timestamp())
 
 
@@ -1192,9 +1276,7 @@ def fetch_jobright_postings(url: str, max_retries: int = 3) -> List[JobPosting]:
     return []
 
 
-def fetch_job_postings(
-    url: str, timeout: float = 10.0, max_retries: int = 3
-) -> List[JobPosting]:
+def fetch_job_postings(url: str, timeout: float = 10.0, max_retries: int = 3) -> List[JobPosting]:
     if "airtable.com" in urlparse(url).netloc:
         return fetch_airtable_postings(url, max_retries=max_retries)
 
@@ -1215,9 +1297,7 @@ def fetch_job_postings(
                 retry_after = response.headers.get("Retry-After")
                 if retry_after and retry_after.isdigit():
                     wait_time = int(retry_after)
-                    logger.warning(
-                        f"Rate limited, waiting {wait_time}s as per Retry-After header"
-                    )
+                    logger.warning(f"Rate limited, waiting {wait_time}s as per Retry-After header")
                     time.sleep(wait_time)
                 else:
                     logger.warning(
@@ -1232,14 +1312,10 @@ def fetch_job_postings(
 
         except requests.RequestException as exc:
             if attempt == max_retries:
-                logger.error(
-                    f"Failed to fetch postings after {max_retries + 1} attempts: {exc}"
-                )
+                logger.error(f"Failed to fetch postings after {max_retries + 1} attempts: {exc}")
                 return []
 
-            logger.warning(
-                f"Attempt {attempt + 1} failed: {exc}, retrying with backoff..."
-            )
+            logger.warning(f"Attempt {attempt + 1} failed: {exc}, retrying with backoff...")
             backoff.wait()
     else:
         logger.error("Max retries reached for fetching job postings")
@@ -1259,9 +1335,7 @@ def fetch_job_postings(
         job = JobPosting(
             company=entry.get("company_name", ""),
             locations=(
-                entry.get("locations", [])
-                if isinstance(entry.get("locations"), list)
-                else []
+                entry.get("locations", []) if isinstance(entry.get("locations"), list) else []
             ),
             title=entry.get("title", ""),
             url=normalized_url,
@@ -1284,10 +1358,10 @@ def is_terms_included(terms: List[str]) -> bool:
     return any(term in INCLUDED_TERMS for term in terms)
 
 
-@deprecated("sheet-era pipeline: superseded by the multi-user API (src/api/). Kept for local Google-Sheets runs only.")
-def filter_job_postings(
-    postings: List[JobPosting], existing_urls: Set[str]
-) -> List[JobPosting]:
+@deprecated(
+    "sheet-era pipeline: superseded by the multi-user API (src/api/). Kept for local Google-Sheets runs only."
+)
+def filter_job_postings(postings: List[JobPosting], existing_urls: Set[str]) -> List[JobPosting]:
     filtered: List[JobPosting] = []
     for job in postings:
         if not job.active:
@@ -1314,7 +1388,9 @@ def filter_job_postings(
     return filtered
 
 
-@deprecated("sheet-era pipeline: superseded by the multi-user API (src/api/). Kept for local Google-Sheets runs only.")
+@deprecated(
+    "sheet-era pipeline: superseded by the multi-user API (src/api/). Kept for local Google-Sheets runs only."
+)
 def authenticate_gspread() -> gspread.client.Client:
     scope = [
         "https://spreadsheets.google.com/feeds",
@@ -1329,7 +1405,9 @@ def authenticate_gspread() -> gspread.client.Client:
     return client
 
 
-@deprecated("sheet-era pipeline: superseded by the multi-user API (src/api/). Kept for local Google-Sheets runs only.")
+@deprecated(
+    "sheet-era pipeline: superseded by the multi-user API (src/api/). Kept for local Google-Sheets runs only."
+)
 def get_existing_urls(sheet: Worksheet) -> Set[str]:
     rows: List[List[str]] = sheet.get_all_values()
     urls = {row[5] for row in rows if len(row) > 5 and row[5]}  # type: ignore
@@ -1383,7 +1461,13 @@ async def _run_batch_stage(
             continue
         input_text = input_for(job, content)
         specs.append(
-            BatchSpec(job.url, instructions, input_text, model_cls.__name__, to_strict_json_schema(model_cls))
+            BatchSpec(
+                job.url,
+                instructions,
+                input_text,
+                model_cls.__name__,
+                to_strict_json_schema(model_cls),
+            )
         )
         ctx[job.url] = (job, instructions, input_text)
 
@@ -1404,9 +1488,15 @@ async def _run_batch_stage(
             err = res.error if res else "no result"
             logger.warning(f"Batch {check_type} failed for {url}: {err}")
             add_ai_result(
-                url, "failed", f"batch {check_type} failed: {str(err)[:100]}", check_type,
-                model=OPENAI_MODEL, reasoning_effort=OPENAI_REASONING_EFFORT,
-                instructions=instructions, input_content=input_text, error=str(err),
+                url,
+                "failed",
+                f"batch {check_type} failed: {str(err)[:100]}",
+                check_type,
+                model=OPENAI_MODEL,
+                reasoning_effort=OPENAI_REASONING_EFFORT,
+                instructions=instructions,
+                input_content=input_text,
+                error=str(err),
             )
             continue
         try:
@@ -1414,9 +1504,15 @@ async def _run_batch_stage(
         except Exception as exc:
             logger.warning(f"Batch {check_type} parse failed for {url}: {exc}")
             add_ai_result(
-                url, "failed", f"batch {check_type} parse failed: {str(exc)[:100]}", check_type,
-                model=OPENAI_MODEL, reasoning_effort=OPENAI_REASONING_EFFORT,
-                instructions=instructions, input_content=input_text, error=str(exc),
+                url,
+                "failed",
+                f"batch {check_type} parse failed: {str(exc)[:100]}",
+                check_type,
+                model=OPENAI_MODEL,
+                reasoning_effort=OPENAI_REASONING_EFFORT,
+                instructions=instructions,
+                input_content=input_text,
+                error=str(exc),
             )
             continue
         rejected = reject_of(parsed)
@@ -1426,11 +1522,19 @@ async def _run_batch_stage(
             else {}
         )
         add_ai_result(
-            url, "rejected" if rejected else "passed", reason_of(parsed), check_type,
-            model=OPENAI_MODEL, reasoning_effort=OPENAI_REASONING_EFFORT,
-            company=job.company, job_title=job.title,
-            instructions=instructions, input_content=input_text,
-            parsed_json=parsed.model_dump_json(), **extra, **_usage_dict_to_kwargs(res.usage),
+            url,
+            "rejected" if rejected else "passed",
+            reason_of(parsed),
+            check_type,
+            model=OPENAI_MODEL,
+            reasoning_effort=OPENAI_REASONING_EFFORT,
+            company=job.company,
+            job_title=job.title,
+            instructions=instructions,
+            input_content=input_text,
+            parsed_json=parsed.model_dump_json(),
+            **extra,
+            **_usage_dict_to_kwargs(res.usage),
         )
         if rejected:
             logger.info(f"FILTERED (batch/{check_type}): {job.company} - {job.title} ({url})")
@@ -1450,37 +1554,61 @@ async def _process_jobs_batched(jobs: List[JobPosting]) -> List[JobPosting]:
         active[job.url] = extracted or not ACTIVE_FILTER_FAIL_CLOSED
 
     await _run_batch_stage(
-        jobs, active, contents, "closed", JobClosedResponse,
+        jobs,
+        active,
+        contents,
+        "closed",
+        JobClosedResponse,
         lambda job: CLOSED_INSTRUCTIONS,
         lambda job, content: content,
         lambda p: p.is_closed,
         lambda p: p.reason or ("job closed" if p.is_closed else "job open"),
     )
     await _run_batch_stage(
-        jobs, active, contents, "clearance", ClearanceRequirementResponse,
+        jobs,
+        active,
+        contents,
+        "clearance",
+        ClearanceRequirementResponse,
         lambda job: CLEARANCE_INSTRUCTIONS,
         lambda job, content: content,
         lambda p: p.requires_clearance_or_restrictions,
-        lambda p: p.reason
-        or (f"{p.restriction_type} restriction" if p.requires_clearance_or_restrictions else "no restrictions"),
+        lambda p: (
+            p.reason
+            or (
+                f"{p.restriction_type} restriction"
+                if p.requires_clearance_or_restrictions
+                else "no restrictions"
+            )
+        ),
     )
     if ACTIVE_CUSTOM_INSTRUCTIONS:
         await _run_batch_stage(
-            jobs, active, contents, "custom", CustomFilterResponse,
+            jobs,
+            active,
+            contents,
+            "custom",
+            CustomFilterResponse,
             lambda job: ACTIVE_CUSTOM_INSTRUCTIONS,
             lambda job, content: _build_custom_input(content, job.title, job.company),
             lambda p: p.should_filter,
-            lambda p: p.reason
-            or ("custom filter criteria not met" if p.should_filter else "custom filter criteria met"),
+            lambda p: (
+                p.reason
+                or (
+                    "custom filter criteria not met"
+                    if p.should_filter
+                    else "custom filter criteria met"
+                )
+            ),
         )
 
     return [job if active.get(job.url) else replace(job, active=False) for job in jobs]
 
 
-@deprecated("sheet-era pipeline: superseded by the multi-user API (src/api/). Kept for local Google-Sheets runs only.")
-async def filter_jobs_by_clearance(
-    jobs: List[JobPosting]
-) -> ClearanceStats:
+@deprecated(
+    "sheet-era pipeline: superseded by the multi-user API (src/api/). Kept for local Google-Sheets runs only."
+)
+async def filter_jobs_by_clearance(jobs: List[JobPosting]) -> ClearanceStats:
     clearance_stats: ClearanceStats = {
         "jobs_checked_for_clearance": 0,
         "jobs_filtered_by_clearance": 0,
@@ -1502,19 +1630,17 @@ async def filter_jobs_by_clearance(
     jobs_to_check: List[JobPosting] = []
 
     prompt_hashes = (
-        (compute_prompt_hash(ACTIVE_CUSTOM_INSTRUCTIONS),)
-        if ACTIVE_CUSTOM_INSTRUCTIONS
-        else ()
+        (compute_prompt_hash(ACTIVE_CUSTOM_INSTRUCTIONS),) if ACTIVE_CUSTOM_INSTRUCTIONS else ()
     )
-    await asyncio.to_thread(
-        prefetch, [job.url for job in jobs], prompt_hashes=prompt_hashes
-    )
+    await asyncio.to_thread(prefetch, [job.url for job in jobs], prompt_hashes=prompt_hashes)
 
     for job in jobs:
         if not job.url or not job.active:
             jobs_passed.append(job)
         elif is_prelim_rejected(job.url):
-            logger.info(f"FILTERED: Job already rejected by closed/clearance (cached) for {job.company} - {job.title}")
+            logger.info(
+                f"FILTERED: Job already rejected by closed/clearance (cached) for {job.company} - {job.title}"
+            )
             clearance_stats["jobs_filtered_by_clearance"] += 1
             clearance_stats["clearance_filtered_jobs"].append(job)
         else:
@@ -1522,7 +1648,9 @@ async def filter_jobs_by_clearance(
 
     limit = int(os.environ.get("PROCESS_LIMIT", "0") or "0")
     if limit > 0 and len(jobs_to_check) > limit:
-        logger.info(f"PROCESS_LIMIT={limit}: capping {len(jobs_to_check)} unseen jobs to {limit} for this run")
+        logger.info(
+            f"PROCESS_LIMIT={limit}: capping {len(jobs_to_check)} unseen jobs to {limit} for this run"
+        )
         jobs_to_check = jobs_to_check[:limit]
 
     if jobs_to_check:
@@ -1538,7 +1666,9 @@ async def filter_jobs_by_clearance(
                     await asyncio.to_thread(wait_for_network)
                     return await preprocess_job_posting(job)
 
-            logger.info(f"Processing {len(jobs_to_check)} jobs concurrently (max {MAX_CONCURRENT_JOBS} at a time)")
+            logger.info(
+                f"Processing {len(jobs_to_check)} jobs concurrently (max {MAX_CONCURRENT_JOBS} at a time)"
+            )
             processed_jobs = await asyncio.gather(
                 *[process_job_with_semaphore(job) for job in jobs_to_check]
             )
@@ -1554,7 +1684,9 @@ async def filter_jobs_by_clearance(
     return clearance_stats
 
 
-@deprecated("sheet-era pipeline: superseded by the multi-user API (src/api/). Kept for local Google-Sheets runs only.")
+@deprecated(
+    "sheet-era pipeline: superseded by the multi-user API (src/api/). Kept for local Google-Sheets runs only."
+)
 def write_to_sheet(sheet: Worksheet, jobs: List[JobPosting]) -> int:
     if not jobs:
         return 0
@@ -1586,16 +1718,16 @@ def write_to_sheet(sheet: Worksheet, jobs: List[JobPosting]) -> int:
     end_row: int = start_row + len(rows_to_add) - 1
     cell_range: str = f"A{start_row}:O{end_row}"
     try:
-        sheet.update(
-            rows_to_add, cell_range, value_input_option=ValueInputOption.user_entered
-        )
+        sheet.update(rows_to_add, cell_range, value_input_option=ValueInputOption.user_entered)
         return len(rows_to_add)
     except Exception as exc:
         logger.error(f"Failed to update sheet: {exc}")
         return 0
 
 
-@deprecated("sheet-era pipeline: superseded by the multi-user API (src/api/). Kept for local Google-Sheets runs only.")
+@deprecated(
+    "sheet-era pipeline: superseded by the multi-user API (src/api/). Kept for local Google-Sheets runs only."
+)
 def summarize_filters(
     postings: List[JobPosting],
     existing_urls: Set[str],
@@ -1670,9 +1802,7 @@ def summarize_filters(
     logger.info(
         f"  ├─ Jobs Checked for Security Clearance: {clearance_stats['jobs_checked_for_clearance']}"
     )
-    logger.info(
-        f"  └─ Jobs Added to Sheet: {clearance_stats.get('jobs_added_to_sheet', 0)}"
-    )
+    logger.info(f"  └─ Jobs Added to Sheet: {clearance_stats.get('jobs_added_to_sheet', 0)}")
     logger.info("")
     logger.info(f"Excluded Locations: {sorted(excluded_locations)}")
     logger.info(f"Excluded Terms: {sorted(excluded_terms)}")
@@ -1720,7 +1850,9 @@ def wait_for_network() -> None:
     logger.info("Network connection restored")
 
 
-@deprecated("sheet-era pipeline: superseded by the multi-user API (src/api/). Kept for local Google-Sheets runs only.")
+@deprecated(
+    "sheet-era pipeline: superseded by the multi-user API (src/api/). Kept for local Google-Sheets runs only."
+)
 async def async_main(
     retry_failed: bool = False,
     reevaluate_custom: bool = False,
@@ -1758,9 +1890,7 @@ async def async_main(
 
     if apply_filter:
         if not set_active_filter(apply_filter):
-            logger.error(
-                f"Filter '{apply_filter}' not found. Available: {list_filter_names()}"
-            )
+            logger.error(f"Filter '{apply_filter}' not found. Available: {list_filter_names()}")
             raise ValueError(f"Unknown filter: {apply_filter}")
         logger.info(
             f"APPLY FILTER MODE: running full pipeline with filter '{apply_filter}' "
@@ -1788,7 +1918,9 @@ async def async_main(
         clearance_stats: ClearanceStats = await filter_jobs_by_clearance(new_jobs)
 
         await asyncio.to_thread(wait_for_network)
-        jobs_added: int = await asyncio.to_thread(write_to_sheet, sheet, clearance_stats["jobs_passed"])
+        jobs_added: int = await asyncio.to_thread(
+            write_to_sheet, sheet, clearance_stats["jobs_passed"]
+        )
         clearance_stats["jobs_added_to_sheet"] = jobs_added
 
         summary = summarize_filters(postings, existing_urls, clearance_stats)
@@ -1799,7 +1931,9 @@ async def async_main(
         raise
 
 
-@deprecated("sheet-era pipeline: superseded by the multi-user API (src/api/). Kept for local Google-Sheets runs only.")
+@deprecated(
+    "sheet-era pipeline: superseded by the multi-user API (src/api/). Kept for local Google-Sheets runs only."
+)
 def main(
     retry_failed: bool = False,
     reevaluate_custom: bool = False,
@@ -1817,12 +1951,32 @@ def main(
 
 if __name__ == "__main__":
     import argparse
+
     parser = argparse.ArgumentParser(description="Job posting tracker and AI filter")
-    parser.add_argument("--retry", action="store_true", help="Retry all failed jobs from ai_results.db")
-    parser.add_argument("--reevaluate-custom", action="store_true", help="Reevaluate all custom filter jobs and update sheet")
-    parser.add_argument("--batch", action="store_true", help="Use the OpenAI Batch API (50%% cheaper, async) for AI checks")
-    parser.add_argument("--limit", type=int, default=None, help="Only AI-check the first N unseen jobs (for testing)")
-    parser.add_argument("--apply-filter", default=None, help="Apply a named filter from filters.toml to cached jobs and add passing ones to the sheet")
+    parser.add_argument(
+        "--retry", action="store_true", help="Retry all failed jobs from ai_results.db"
+    )
+    parser.add_argument(
+        "--reevaluate-custom",
+        action="store_true",
+        help="Reevaluate all custom filter jobs and update sheet",
+    )
+    parser.add_argument(
+        "--batch",
+        action="store_true",
+        help="Use the OpenAI Batch API (50%% cheaper, async) for AI checks",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Only AI-check the first N unseen jobs (for testing)",
+    )
+    parser.add_argument(
+        "--apply-filter",
+        default=None,
+        help="Apply a named filter from filters.toml to cached jobs and add passing ones to the sheet",
+    )
     args = parser.parse_args()
 
     if args.batch:

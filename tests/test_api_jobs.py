@@ -30,7 +30,18 @@ def _insert_job(
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING id
         """,
-        (url, url, company, title, locations or [], terms or [], source, active, date_posted, uploaded_by),
+        (
+            url,
+            url,
+            company,
+            title,
+            locations or [],
+            terms or [],
+            source,
+            active,
+            date_posted,
+            uploaded_by,
+        ),
     )
     return row["id"]
 
@@ -114,7 +125,9 @@ def test_enabled_filter_gates_visibility_disabled_bypasses(client, user_headers)
     assert jid in _job_ids(resp.json())
 
     created = client.post(
-        "/v1/user/filters", json={"name": "must-be-remote", "prompt": "must be remote"}, headers=user_headers
+        "/v1/user/filters",
+        json={"name": "must-be-remote", "prompt": "must be remote"},
+        headers=user_headers,
     )
     assert created.status_code == 200
     filt = created.json()
@@ -134,7 +147,9 @@ def test_enabled_filter_gates_visibility_disabled_bypasses(client, user_headers)
     assert jid in _job_ids(resp.json())
 
     # disabling the filter makes the job visible regardless of verdict
-    patch = client.patch(f"/v1/user/filters/{filter_id}", json={"enabled": False}, headers=user_headers)
+    patch = client.patch(
+        f"/v1/user/filters/{filter_id}", json={"enabled": False}, headers=user_headers
+    )
     assert patch.status_code == 200
     add_ai_result("https://x.test/c1", "rejected", check_type="custom", prompt_hash=prompt_hash)
     resp = client.get("/v1/user/jobs", headers=user_headers)
@@ -169,7 +184,9 @@ def test_criteria_date_posted_after_hides_older(client, user_headers):
     _pass_closed("https://x.test/e2")
 
     put = client.put(
-        "/v1/user/settings", json={"criteria": {"date_posted_after": "2024-06-01"}}, headers=user_headers
+        "/v1/user/settings",
+        json={"criteria": {"date_posted_after": "2024-06-01"}},
+        headers=user_headers,
     )
     assert put.status_code == 200
 
@@ -197,7 +214,9 @@ def test_statuses_csv_filter_including_not_applied_sentinel(client, user_headers
         _pass_closed(url)
 
     client.patch(f"/v1/user/jobs/{j_applied}", json={"status": "applied"}, headers=user_headers)
-    client.patch(f"/v1/user/jobs/{j_interviewing}", json={"status": "interviewing"}, headers=user_headers)
+    client.patch(
+        f"/v1/user/jobs/{j_interviewing}", json={"status": "interviewing"}, headers=user_headers
+    )
 
     resp = client.get(
         "/v1/user/jobs", params={"statuses": "applied,not_applied"}, headers=user_headers
@@ -222,7 +241,9 @@ def test_offset_limit_with_total(client, user_headers):
     _subscribe(uid, "src-h")
 
     resp = client.get(
-        "/v1/user/jobs", params={"limit": 2, "offset": 0, "with_total": "true"}, headers=user_headers
+        "/v1/user/jobs",
+        params={"limit": 2, "offset": 0, "with_total": "true"},
+        headers=user_headers,
     )
     data = resp.json()
     assert data["total"] == 5
@@ -230,7 +251,9 @@ def test_offset_limit_with_total(client, user_headers):
     assert data["has_more"] is True
 
     resp2 = client.get(
-        "/v1/user/jobs", params={"limit": 2, "offset": 4, "with_total": "true"}, headers=user_headers
+        "/v1/user/jobs",
+        params={"limit": 2, "offset": 4, "with_total": "true"},
+        headers=user_headers,
     )
     data2 = resp2.json()
     assert data2["total"] == 5
@@ -246,7 +269,10 @@ def test_delete_user_job_removes_only_user_jobs_row(client, user_headers):
 
     resp = client.delete(f"/v1/user/jobs/{jid}", headers=user_headers)
     assert resp.status_code == 200
-    assert db.query_one("SELECT 1 FROM user_jobs WHERE user_id = %s AND job_id = %s", (uid, jid)) is None
+    assert (
+        db.query_one("SELECT 1 FROM user_jobs WHERE user_id = %s AND job_id = %s", (uid, jid))
+        is None
+    )
     assert db.query_one("SELECT 1 FROM jobs WHERE id = %s", (jid,)) is not None
 
 
@@ -259,7 +285,9 @@ def test_patch_status_autofills_date_applied(client, user_headers):
     # timezone to decide a user's "today" in.
     today = datetime.datetime.now(datetime.UTC).date()
     assert resp.json()["autofilled"] == {"date_applied": today.isoformat()}
-    row = db.query_one("SELECT date_applied FROM user_jobs WHERE user_id = %s AND job_id = %s", (uid, jid))
+    row = db.query_one(
+        "SELECT date_applied FROM user_jobs WHERE user_id = %s AND job_id = %s", (uid, jid)
+    )
     assert row["date_applied"] == today
 
 
@@ -272,7 +300,9 @@ def test_patch_explicit_date_applied_wins_over_autofill(client, user_headers):
         headers=user_headers,
     )
     assert resp.json()["autofilled"] == {}
-    row = db.query_one("SELECT date_applied FROM user_jobs WHERE user_id = %s AND job_id = %s", (uid, jid))
+    row = db.query_one(
+        "SELECT date_applied FROM user_jobs WHERE user_id = %s AND job_id = %s", (uid, jid)
+    )
     assert row["date_applied"] == datetime.date(2026, 8, 1)
 
 
@@ -286,7 +316,9 @@ def test_patch_status_change_does_not_overwrite_existing_date_applied(client, us
     )
     resp = client.patch(f"/v1/user/jobs/{jid}", json={"status": "Interview"}, headers=user_headers)
     assert resp.json()["autofilled"] == {}
-    row = db.query_one("SELECT date_applied FROM user_jobs WHERE user_id = %s AND job_id = %s", (uid, jid))
+    row = db.query_one(
+        "SELECT date_applied FROM user_jobs WHERE user_id = %s AND job_id = %s", (uid, jid)
+    )
     assert row["date_applied"] == datetime.date(2026, 8, 1)
 
 
@@ -295,7 +327,9 @@ def test_patch_notes_only_does_not_autofill_date_applied(client, user_headers):
     jid = _insert_job("src-af", "https://x.test/af4")
     resp = client.patch(f"/v1/user/jobs/{jid}", json={"notes": "check later"}, headers=user_headers)
     assert resp.json()["autofilled"] == {}
-    row = db.query_one("SELECT date_applied FROM user_jobs WHERE user_id = %s AND job_id = %s", (uid, jid))
+    row = db.query_one(
+        "SELECT date_applied FROM user_jobs WHERE user_id = %s AND job_id = %s", (uid, jid)
+    )
     assert row["date_applied"] is None
 
 
@@ -318,7 +352,9 @@ def test_status_changes_append_history(client, user_headers):
 def test_job_detail_returns_content_verdicts_history(client, user_headers):
     uid = _uid(user_headers)
     jid = _insert_job("src-d", "https://x.test/d1", company="Acme", title="SWE")
-    add_ai_result("https://x.test/d1", "passed", "content cached", "content", input_content="THE JOB TEXT")
+    add_ai_result(
+        "https://x.test/d1", "passed", "content cached", "content", input_content="THE JOB TEXT"
+    )
     add_ai_result("https://x.test/d1", "passed", "job open", "closed")
     db.execute(
         "INSERT INTO user_filters (user_id, name, prompt, prompt_hash) VALUES (%s, 'f1', 'p', 'hash1')",
@@ -338,10 +374,17 @@ def test_job_detail_returns_content_verdicts_history(client, user_headers):
 
 def test_job_options_serves_canon_plus_in_use(client, user_headers):
     jid = _insert_job("src-opt", "https://x.test/opt1")
-    client.patch(f"/v1/user/jobs/{jid}", json={"status": "Weird Legacy State"}, headers=user_headers)
-    db.execute("INSERT INTO sources (name, listings_url) VALUES ('src-opt', 'https://x') ON CONFLICT DO NOTHING")
+    client.patch(
+        f"/v1/user/jobs/{jid}", json={"status": "Weird Legacy State"}, headers=user_headers
+    )
+    db.execute(
+        "INSERT INTO sources (name, listings_url) VALUES ('src-opt', 'https://x') ON CONFLICT DO NOTHING"
+    )
     uid = _uid(user_headers)
-    db.execute("INSERT INTO user_sources (user_id, source) VALUES (%s, 'src-opt') ON CONFLICT DO NOTHING", (uid,))
+    db.execute(
+        "INSERT INTO user_sources (user_id, source) VALUES (%s, 'src-opt') ON CONFLICT DO NOTHING",
+        (uid,),
+    )
     resp = client.get("/v1/user/jobs/options", headers=user_headers)
     assert resp.status_code == 200
     body = resp.json()

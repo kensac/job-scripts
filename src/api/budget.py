@@ -19,8 +19,7 @@ class Entitlement:
         if self.has_byo_key:
             return "byo"
         if self.owner_key and (
-            self.weekly_token_budget is None
-            or self.spent_this_week < self.weekly_token_budget
+            self.weekly_token_budget is None or self.spent_this_week < self.weekly_token_budget
         ):
             return "owner"
         return None
@@ -76,8 +75,7 @@ def owner_allowed_models(groups: list[str]) -> list[str]:
     if not groups:
         return []
     rows = db.query(
-        "SELECT weekly_token_budget, allowed_models FROM group_budgets "
-        "WHERE group_name = ANY(%s)",
+        "SELECT weekly_token_budget, allowed_models FROM group_budgets WHERE group_name = ANY(%s)",
         (groups,),
     )
     allowed: set = set()
@@ -100,11 +98,14 @@ def resolve_ai_config(user_id: int, entitlement: Entitlement):
 
     from api import ai
 
-    settings = db.query_one(
-        "SELECT api_key_enc, ai_provider, ai_base_url, ai_model, ai_params "
-        "FROM user_settings WHERE user_id = %s",
-        (user_id,),
-    ) or {}
+    settings = (
+        db.query_one(
+            "SELECT api_key_enc, ai_provider, ai_base_url, ai_model, ai_params "
+            "FROM user_settings WHERE user_id = %s",
+            (user_id,),
+        )
+        or {}
+    )
     params = settings.get("ai_params") or {}
 
     if entitlement.has_byo_key and settings.get("api_key_enc"):
