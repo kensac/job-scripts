@@ -140,6 +140,17 @@ def schedule_ingest_cycle() -> None:
 _current_claim: TaskClaim | None = None
 
 
+# Kept as a named constant so the test that pins this statement asserts against
+# the statement itself: _graceful_exit calls os._exit(), so a test can never
+# reach it, and a second copy in the test file would go green while this one
+# drifted.
+_REQUEUE_ON_EXIT_SQL = (
+    "UPDATE tasks SET status = 'pending', attempts = GREATEST(attempts - 1, 0), "
+    "started_at = NULL, last_heartbeat = NULL "
+    "WHERE id = %s AND status = 'running' AND worker = %s AND attempts = %s"
+)
+
+
 def _graceful_exit(signum: int, frame: Any) -> None:
     """Deploys must not leave the in-flight task in 'running' limbo until the
     reaper times out: requeue it immediately (chunks resume from cached
@@ -153,9 +164,7 @@ def _graceful_exit(signum: int, frame: Any) -> None:
     if _current_claim is not None:
         try:
             db.execute(
-                "UPDATE tasks SET status = 'pending', attempts = GREATEST(attempts - 1, 0), "
-                "started_at = NULL, last_heartbeat = NULL "
-                "WHERE id = %s AND status = 'running' AND worker = %s AND attempts = %s",
+                _REQUEUE_ON_EXIT_SQL,
                 (_current_claim.task_id, _current_claim.worker, _current_claim.attempts),
             )
             logger.info(f"SIGTERM: requeued task {_current_claim.task_id}, exiting")
