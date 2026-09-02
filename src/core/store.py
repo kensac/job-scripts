@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import atexit
-import datetime
 import logging
 import os
 import socket
@@ -31,7 +30,6 @@ dotenv.load_dotenv()
 DATABASE_URL = os.environ["DATABASE_URL"]
 
 _INSERT_COLUMNS = [
-    "created_at",
     "config_name",
     "url",
     "check_type",
@@ -245,7 +243,19 @@ def add_ai_result(
     batch_id: str | None = None,
 ) -> None:
     row = {
-        "created_at": datetime.datetime.now(datetime.UTC),
+        # created_at is DELIBERATELY ABSENT: the column defaults to Postgres
+        # now(), and letting the database supply it is what keeps every
+        # timestamp in this system on ONE clock.
+        #
+        # It used to be written from Python here, which made
+        # `ai_queries.created_at > ai_batches.submitted_at` a comparison
+        # between the app host's clock and the database's. That inequality is
+        # the whole of #162's rule - a parked reverify may not overturn a
+        # closure newer than its evidence - and three worker hosts mean three
+        # clocks against one database. A host running slightly fast makes its
+        # verdicts look newer than batches submitted after them, and a
+        # reverify that should record is discarded as stale. Silently:
+        # recorded == 0 is a normal-looking outcome.
         "config_name": config_name or os.environ.get("CONFIG_NAME"),
         "url": url,
         "check_type": check_type,

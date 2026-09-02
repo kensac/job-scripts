@@ -267,3 +267,22 @@ def test_sort_keys_the_frontend_depends_on_still_exist():
     assert {"company", "failed", "total_tokens", "last_seen"} <= set(_JOBS_SORTABLE)
     # /admin/queries - the responses table's columns.
     assert {"created_at", "total_tokens", "duration_ms"} <= _SORTABLE
+
+
+def test_verdicts_take_their_timestamp_from_the_database():
+    """`ai_queries.created_at` must come from Postgres, not from Python.
+
+    verify.py compares it against `ai_batches.submitted_at`, which Postgres
+    writes with now(). That inequality is the whole of the rule that a parked
+    reverify may not overturn a closure newer than its evidence - and three
+    worker hosts mean three clocks against one database. A host running
+    slightly fast makes its verdicts look newer than batches submitted after
+    them, and a reverify that should record is discarded as stale, silently.
+
+    Asserting on the insert column list rather than on behaviour because the
+    two clocks agree closely enough in a test that a behavioural check would
+    pass either way - which is exactly why this shipped.
+    """
+    from core.store import _INSERT_COLUMNS
+
+    assert "created_at" not in _INSERT_COLUMNS
