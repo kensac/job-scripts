@@ -327,16 +327,51 @@ RESOLVERS: list[AtsResolver] = [
 ]
 
 
-# The domains these providers send MAIL from, which are not the domains they
-# host POSTINGS on. Greenhouse posts on greenhouse.io and mails from
-# greenhouse-mail.io; Workday posts on myworkdayjobs.com and mails from
-# myworkday.com. `markers` covers the posting side, so the mail side cannot be
-# derived from it and the difference is listed rather than assumed away.
+# Domains an applicant-tracking system sends MAIL from. This is NOT the same
+# question as which postings we can resolve, and the two lists cannot be
+# derived from each other in either direction.
 #
-# successfactors.com has no resolver because we cannot read its postings, and
-# is still an applicant-tracking system when it sends mail. The two questions
-# are different and this list answers only the second.
-_MAIL_ONLY_DOMAINS = ("greenhouse-mail.io", "myworkday.com", "successfactors.com")
+# Postings differ from mail: Greenhouse posts on greenhouse.io and mails from
+# greenhouse-mail.io; Workday posts on myworkdayjobs.com and mails from
+# myworkday.com. Those two are the largest sources of applications in the
+# corpus, so a rule that assumed the pair would silently miss most of it.
+#
+# And most entries below have NO resolver at all - we cannot read their
+# postings and they are still applicant-tracking systems when they send mail.
+#
+# MEMBERSHIP IS EARNED, not assumed from a brand being well known. Each domain
+# here has at least 8 messages in the corpus of which at least 75% are
+# application LIFECYCLE mail - acknowledgement, rejection, info_request,
+# assessment, interview, offer, closure - rather than outreach or marketing.
+# The measured share is recorded beside each one so the next reader can
+# re-check it rather than trust it.
+#
+# Four job boards were proposed for this list and are deliberately absent,
+# because their mail is mostly marketing rather than news about an application
+# you sent: untapped.io (20% lifecycle over 217 messages), ripplematch.com
+# (21% over 186), hi.wellfound.com (62% over 85) and codesignal.com (71% over
+# 56). Adding them would mark their marketing as near-proof of a real
+# application, which is exactly the failure #211 removed for RippleMatch.
+# app.bamboohr.com is 100% lifecycle but over only 4 messages, so it waits for
+# evidence rather than joining on reputation.
+_MAIL_ONLY_DOMAINS = (
+    # Mail domain differs from the posting domain of a provider we do resolve.
+    "greenhouse-mail.io",
+    "myworkday.com",
+    # Applicant-tracking systems with no resolver: we cannot read their
+    # postings, and their mail is still about an application you sent.
+    "successfactors.com",
+    "jobvite.com",  # 100% lifecycle, n=35
+    "candidates.workablemail.com",  # 100%, n=17
+    "ats.rippling.com",  # 100%, n=31
+    "appreview.gem.com",  # 100%, n=8
+    "applytojob.com",  # 100%, n=10
+    "workflow.mail.us2.cloud.oracle.com",  # 100%, n=38
+    "welcometothejungle.com",  # 93%, n=14
+    # An assessment platform, included on the same evidence: an invitation to
+    # a coding assessment is sent because an application exists.
+    "hackerrankforwork.com",  # 92%, n=78
+)
 
 
 def is_ats_email_domain(domain: str | None) -> bool:
