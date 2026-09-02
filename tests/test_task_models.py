@@ -290,3 +290,81 @@ def test_every_registered_task_renders(client, admin_headers, purpose):
     assert body["label"]
     assert body["candidates"]
     assert body["on_model_change"] in ("mixes", "reruns")
+
+
+class TestModelHealth:
+    """The screen priced models and said nothing about whether they are doing
+    the job, which makes it a price list rather than a decision."""
+
+    def _batch(self, model, *, requests=100, failed=0, completed=True, hours_ago=1):
+        db.execute(
+            "INSERT INTO ai_batches (provider_batch_id, purpose, model, requests, "
+            "completed, failed_count, status, submitted_at, completed_at) "
+            "VALUES (%s, 'comp', %s, %s, %s, %s, %s, now() - make_interval(hours => %s), %s)",
+            (
+                f"b-{model}-{requests}-{failed}-{hours_ago}-{completed}",
+                model,
+                requests,
+                requests - failed,
+                failed,
+                "completed" if completed else "in_progress",
+                hours_ago,
+                None,
+            ),
+        )
+        if completed:
+            db.execute(
+                "UPDATE ai_batches SET completed_at = now() - make_interval(hours => %s) "
+                "WHERE provider_batch_id = %s",
+                (hours_ago, f"b-{model}-{requests}-{failed}-{hours_ago}-{completed}"),
+            )
+
+    def _health(self, client, headers, model, purpose="comp"):
+        body = _get(client, headers, purpose)
+        return next(c for c in body["candidates"] if c["model"] == model)["health"]
+
+    def test_a_model_that_has_run_nothing_has_no_health_not_a_clean_one(
+        self, client, admin_headers
+    ):
+        """A model nobody has used is not a model with a perfect record, and a
+        screen that cannot tell those apart will recommend the untried one."""
+        assert self._health(client, admin_headers, "gpt-5-nano") is None
+
+    def test_completions_and_in_flight_are_both_reported(self, client, admin_headers):
+        self._batch("gpt-5-nano", hours_ago=2)
+        self._batch("gpt-5-nano", completed=False, hours_ago=9)
+        h = self._health(client, admin_headers, "gpt-5-nano")
+        assert h["in_flight"] == 1
+        assert h["last_completed_at"] is not None
+        assert h["oldest_in_flight_at"] is not None
+
+    def test_a_stall_is_visible_as_work_outstanding_with_no_completion(self, client, admin_headers):
+        """The shape of the live incident: batches submitted, nothing coming
+        back. 'in_progress' does not say that; outstanding work with no recent
+        completion does."""
+        self._batch("gpt-5-mini", completed=False, hours_ago=12)
+        h = self._health(client, admin_headers, "gpt-5-mini")
+        assert h["in_flight"] == 1
+        assert h["last_completed_at"] is None
+
+    def test_failures_are_a_numerator_and_a_denominator(self, client, admin_headers):
+        """1 of 3 and 3,000 of 9,000 are different claims; a percentage renders
+        them identically."""
+        self._batch("gpt-5-mini", requests=1000, failed=16)
+        h = self._health(client, admin_headers, "gpt-5-mini")
+        assert h["failed_requests"] == 16
+        assert h["requests"] == 1000
+        assert "rate" not in h and "percent" not in h
+
+    def test_a_model_completing_batches_can_still_be_failing_lines(self, client, admin_headers):
+        """The case worth catching: every batch completes and the schema keeps
+        breaking inside them."""
+        self._batch("gpt-5-mini", requests=500, failed=40, completed=True)
+        h = self._health(client, admin_headers, "gpt-5-mini")
+        assert h["in_flight"] == 0
+        assert h["last_completed_at"] is not None
+        assert h["failed_requests"] == 40
+
+    def test_the_window_travels_with_the_numbers(self, client, admin_headers):
+        self._batch("gpt-5-nano")
+        assert self._health(client, admin_headers, "gpt-5-nano")["window_days"] == 7

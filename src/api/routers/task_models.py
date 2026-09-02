@@ -98,6 +98,65 @@ def _current(purpose: str) -> dict[str, Any] | None:
     return rows[0] if rows else None
 
 
+# How far back per-model health looks. Derived from the provider's own
+# completion window rather than picked: core.batch asks for 24 hours, so a
+# window of seven of those covers a week of full cycles and is long enough that
+# a single slow batch does not read as a stall.
+HEALTH_WINDOW_DAYS = 7
+
+
+def _model_health() -> dict[str, dict[str, Any]]:
+    """Per model: is it finishing work, and is the work coming back good.
+
+    The configuration screen priced models and said nothing about whether they
+    are doing the job, which makes it a price list rather than a decision. Both
+    halves are already in ai_batches and nothing read them.
+
+    `failed_requests` over `requests` is the rate that matters - a model can
+    complete every batch while failing lines inside them, which is what a
+    schema the model keeps breaking looks like. Reported as a numerator and a
+    denominator, never as a percentage: 1 of 3 and 3,000 of 9,000 are not the
+    same claim.
+    """
+    rows = db.query(
+        f"""
+        SELECT model,
+               COUNT(*) FILTER (WHERE completed_at IS NULL) AS in_flight,
+               MAX(completed_at) AS last_completed_at,
+               MIN(submitted_at) FILTER (WHERE completed_at IS NULL)
+                   AS oldest_in_flight_at,
+               COALESCE(SUM(requests), 0) AS requests,
+               COALESCE(SUM(failed_count), 0) AS failed_requests
+        FROM ai_batches
+        WHERE model IS NOT NULL
+          AND submitted_at > now() - interval '{HEALTH_WINDOW_DAYS} days'
+        GROUP BY model
+        """
+    )
+    return {r.pop("model"): r for r in rows}
+
+
+def _health_view(row: dict[str, Any] | None) -> dict[str, Any] | None:
+    """One model's health, or absent when it has run nothing to judge.
+
+    Absent rather than zeroed: a model nobody has used is not a model with a
+    perfect record, and a screen that cannot tell those apart will recommend
+    the untried one.
+    """
+    if not row:
+        return None
+    return {
+        "in_flight": row["in_flight"],
+        "last_completed_at": row["last_completed_at"],
+        "oldest_in_flight_at": row["oldest_in_flight_at"],
+        # Numerator and denominator, not a rate. 1 of 3 and 3,000 of 9,000 are
+        # different claims and a percentage renders them identically.
+        "failed_requests": row["failed_requests"],
+        "requests": row["requests"],
+        "window_days": HEALTH_WINDOW_DAYS,
+    }
+
+
 def _money(value: Any) -> str | None:
     """A dollar figure as a plain decimal string, or absent.
 
@@ -118,6 +177,7 @@ def _view(purpose: str) -> dict[str, Any]:
     latest = _current(purpose)
     override = (latest or {}).get("model")
     candidacies = candidates_for(shape)
+    health = _model_health()
     current_model = override or (shape.candidates[0] if shape.candidates else None)
     current_cycle = next(
         (c.est_cycle_cost_usd for c in candidacies if c.model == current_model), None
@@ -175,6 +235,11 @@ def _view(purpose: str) -> dict[str, Any]:
                 # makes the figures above the peak ones. A caveat for beside
                 # the price, not a state.
                 "price_varies_by_time": c.price_varies_by_time,
+                # Whether this model is finishing work and whether the work
+                # comes back good. Absent when it has run nothing in the
+                # window - which is not the same as healthy, and must not
+                # render as zeroes.
+                "health": _health_view(health.get(c.model)),
                 # The measured findings about THIS model on THIS task, so the
                 # client renders them on the option they are about rather than
                 # holding its own copy that rots at the next measurement.
