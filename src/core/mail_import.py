@@ -20,6 +20,7 @@ import logging
 import re
 import zipfile
 from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from email import policy
@@ -193,6 +194,32 @@ def _from_message(msg: Message, *, source: str, fallback_id: str) -> ImportedMes
     )
 
 
+@contextmanager
+def _mbox_lines(path: Path | str) -> Iterator[Iterator[str]]:
+    """Text lines from an mbox, or from the one inside a Takeout zip.
+
+    Reading the zip member directly rather than extracting it first: the mbox
+    is 4.24GB and the machine holding these archives was at 98% disk, so a
+    temporary copy is a real risk for no benefit. Both paths stream, so neither
+    holds the mailbox in memory.
+    """
+    if str(path).lower().endswith(".zip"):
+        with zipfile.ZipFile(path) as archive:
+            members = [n for n in archive.namelist() if n.lower().endswith(".mbox")]
+            if not members:
+                raise ValueError(f"no .mbox inside {path}")
+            if len(members) > 1:
+                # Refused rather than guessed. Picking one silently is how a
+                # partial archive gets imported as though it were the whole
+                # mailbox.
+                raise ValueError(f"{len(members)} .mbox files inside {path}: {sorted(members)}")
+            with archive.open(members[0]) as raw:
+                yield (line.decode("utf-8", errors="replace") for line in raw)
+        return
+    with open(path, encoding="utf-8", errors="replace") as fh:
+        yield fh
+
+
 def read_mbox(path: Path | str, *, source: str = "takeout") -> Iterator[ImportedMessage]:
     """Stream an mbox without indexing it.
 
@@ -200,7 +227,7 @@ def read_mbox(path: Path | str, *, source: str = "takeout") -> Iterator[Imported
     marker can also legitimately appear inside a body, which is why a real
     mbox escapes it as ">From " - so an unescaped one is a boundary.
     """
-    with open(path, encoding="utf-8", errors="replace") as fh:
+    with _mbox_lines(path) as fh:
         buf: list[str] = []
         seq = 0
         for line in fh:

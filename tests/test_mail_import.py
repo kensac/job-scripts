@@ -254,3 +254,50 @@ def test_only_threading_headers_are_kept():
     [msg] = list(read_mbox(path))
 
     assert set(msg.headers) == {"message-id"}
+
+
+def _mbox_bytes() -> bytes:
+    return (
+        b"From a@b.com\r\n"
+        b"Message-ID: <z1@acme.com>\r\n"
+        b"References: <z0@acme.com>\r\n"
+        b"From: Acme <a@acme.com>\r\n"
+        b"Subject: Re: Your application\r\n"
+        b"\r\nbody one\r\n"
+        b"From b@c.com\r\n"
+        b"Message-ID: <z2@acme.com>\r\n"
+        b"From: Acme <a@acme.com>\r\n"
+        b"Subject: Another\r\n"
+        b"\r\nbody two\r\n"
+    )
+
+
+def test_an_mbox_is_read_from_inside_a_takeout_zip():
+    """The mbox is 4.24GB and the machine holding these archives was at 98%
+    disk. Extracting first is a real risk for no benefit, and both paths
+    stream, so neither holds the mailbox in memory."""
+    path = Path(tempfile.mkdtemp()) / "takeout.zip"
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("Takeout/Mail/All mail Including Spam and Trash.mbox", _mbox_bytes())
+
+    msgs = list(read_mbox(path))
+    assert [m.provider_message_id for m in msgs] == ["<z1@acme.com>", "<z2@acme.com>"]
+    assert msgs[0].headers["references"] == "<z0@acme.com>"
+
+
+def test_a_zip_holding_two_mailboxes_is_refused(tmp_path):
+    """Picking one silently is how a partial archive gets imported as though it
+    were the whole mailbox."""
+    path = tmp_path / "ambiguous.zip"
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("a.mbox", _mbox_bytes())
+        archive.writestr("b.mbox", _mbox_bytes())
+
+    with pytest.raises(ValueError, match=r"2 \.mbox files"):
+        list(read_mbox(path))
+
+
+def test_a_plain_mbox_still_reads(tmp_path):
+    path = tmp_path / "plain.mbox"
+    path.write_bytes(_mbox_bytes())
+    assert len(list(read_mbox(path))) == 2
