@@ -1,18 +1,23 @@
-"""Decide cheaply whether a message could possibly be about a job application.
+"""Whether a message looks like it could be about a job application.
 
-38,685 messages in the Takeout export, and the .olm archives are several times
-larger again. Classifying all of them with a model is affordable but wasteful,
-so a deterministic pass runs first.
+THIS IS A SIGNAL, NOT A GATE. Nothing is skipped because of it.
 
-The bias is RECALL, deliberately and lopsidedly. A missed email is an outcome
-lost forever - the posting is gone, the thread is not coming back, and nothing
-downstream can recover it. A false positive costs one cheap classification that
-the model then rejects. So this says yes on weak evidence, and every rule here
-should be read as "could this conceivably be about a job", never "is it".
+It began as a cost filter: 38,685 messages in the Takeout export, 21.7% of
+them matching, so classifying only the matches would cost ~$3 batched instead
+of ~$15. Kanishk's call was that $12 is not worth it for a one-time backfill,
+and he is right - a filtered-out email is an outcome lost for good, because
+the posting is closed and the thread is not coming back. Every other failure
+in this pipeline is recoverable by re-running something. That one is not.
 
-The verdict is stored on the row rather than applied and discarded, because
-this WILL be widened once real misses are found, and a stored verdict lets a
-widening re-sweep only what it previously dropped.
+So the whole mailbox goes to the classifier and this stays for the three
+things it is actually good at: ordering the sweep so likely job mail is
+classified first, explaining in the admin view why a message was or was not
+expected to matter, and measuring after the fact how much a cheap filter would
+have missed - which is the only honest way to decide whether the ongoing feed
+can ever use one as a gate.
+
+The bias is still RECALL, because those measurements are only useful if the
+rules err the same way a gate would have to.
 """
 
 from __future__ import annotations

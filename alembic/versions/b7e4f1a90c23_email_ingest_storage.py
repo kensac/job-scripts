@@ -53,10 +53,15 @@ def upgrade() -> None:
         sa.Column('sent_at', sa.TIMESTAMP(timezone=True), nullable=True),
         sa.Column('body_text', sa.Text(), nullable=True),
         sa.Column('headers', JSONB(), nullable=True),
-        # The cheap deterministic verdict, recorded rather than applied and
-        # forgotten: the pre-filter is recall-first and will be widened, and a
-        # stored verdict is what lets a widening re-sweep only what it
-        # previously dropped instead of reclassifying 38,685 messages again.
+        # A SIGNAL, NOT A GATE. Nothing is skipped on the strength of this.
+        # Classifying the whole mailbox costs ~$15 batched against ~$3
+        # filtered, and that $12 buys away the only unrecoverable failure in
+        # the pipeline: a missed email is an outcome gone for good, because
+        # the posting is closed and the thread is not coming back. For a
+        # one-time backfill that is not a trade worth making.
+        # Kept because it is genuinely useful as ordering (classify likely
+        # job mail first), as a debugging aid in the admin view, and as a
+        # measurement of how good a cheap filter would have been.
         sa.Column('prefilter_hit', sa.Boolean(), nullable=True),
         sa.Column('prefilter_reason', sa.Text(), nullable=True),
         sa.Column('imported_at', sa.TIMESTAMP(timezone=True),
@@ -66,9 +71,10 @@ def upgrade() -> None:
     op.create_index('idx_email_messages_thread', 'email_messages',
                     ['user_id', 'provider_thread_id'])
     op.create_index('idx_email_messages_sent', 'email_messages', ['user_id', 'sent_at'])
-    # Partial: the sweeps only ever ask for messages the pre-filter kept.
-    op.create_index('idx_email_messages_candidates', 'email_messages', ['user_id', 'id'],
-                    postgresql_where=sa.text('prefilter_hit'))
+    # The sweep asks for messages with no classification yet, across the whole
+    # mailbox - not for the ones a filter liked. An index on prefilter_hit
+    # would encode a gate that deliberately does not exist.
+    op.create_index('idx_email_messages_unclassified', 'email_messages', ['user_id', 'id'])
 
     op.create_table(
         'applications',

@@ -426,12 +426,7 @@ class EmailMessage(Base):
         UniqueConstraint("user_id", "provider_message_id", name="uq_email_messages_provider_id"),
         Index("idx_email_messages_thread", "user_id", "provider_thread_id"),
         Index("idx_email_messages_sent", "user_id", "sent_at"),
-        Index(
-            "idx_email_messages_candidates",
-            "user_id",
-            "id",
-            postgresql_where=text("prefilter_hit"),
-        ),
+        Index("idx_email_messages_unclassified", "user_id", "id"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)

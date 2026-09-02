@@ -1,10 +1,12 @@
-"""The pre-filter decides what 38,685 messages cost, and what is lost forever.
+"""The prefilter is a SIGNAL, not a gate - nothing is skipped because of it.
 
-It is deliberately lopsided. A missed email is an outcome that cannot be
-recovered - the posting is gone and the thread is not coming back. A false
-positive costs one cheap classification the model then rejects. So these tests
-are mostly about RECALL, and the precision cases exist only to stop it
-degenerating into "everything".
+The whole mailbox goes to the classifier (~$15 batched against ~$3 filtered;
+$12 is not worth an unrecoverable miss on a one-time backfill). This stays for
+ordering the sweep, explaining the admin view, and measuring after the fact how
+much a cheap filter WOULD have missed.
+
+That last use is why the recall tests still matter: the measurement is only
+meaningful if these rules err the same way a real gate would have to.
 """
 
 from __future__ import annotations
@@ -55,8 +57,9 @@ def test_recall_on_application_mail(from_email, subject, body):
     ],
 )
 def test_ordinary_mail_is_not_swept_in(from_email, subject, body):
-    """Not correctness so much as cost control: this is what keeps the
-    classification bill proportional to the job mail rather than the mailbox."""
+    """Precision matters only for the signal's usefulness - a rule that fires
+    on everything orders nothing and measures nothing. It does not gate the
+    classifier, so a false positive here costs no money."""
     assert _hit(from_email=from_email, subject=subject, body=body) is False
 
 
