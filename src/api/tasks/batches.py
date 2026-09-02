@@ -11,7 +11,7 @@ from api.tasks.runtime import _resume_parked, _set_progress
 logger = logging.getLogger("jobtracker_worker")
 
 
-def _record_states(states: dict[str, str]) -> None:
+def _record_progress(progress: dict[str, Any]) -> None:
     """Write back what the provider just told us.
 
     The poll already knows every batch's live status - it fetches it each
@@ -29,18 +29,30 @@ def _record_states(states: dict[str, str]) -> None:
     `completed_at` mirrors the submit-time hook rather than inventing a second
     rule for when a batch finished.
     """
-    for batch_id, status in states.items():
-        if not status:
+    for batch_id, state in progress.items():
+        if not state.status:
             continue
         db.execute(
             """
-            UPDATE ai_batches SET status = %s, updated_at = now(),
-                completed_at = CASE WHEN %s IN
+            UPDATE ai_batches SET status = %(status)s, updated_at = now(),
+                requests = GREATEST(requests, %(total)s),
+                completed = GREATEST(completed, %(completed)s),
+                failed_count = GREATEST(failed_count, %(failed)s),
+                completed_at = CASE WHEN %(status)s IN
                     ('completed', 'failed', 'expired', 'cancelled')
                     THEN COALESCE(completed_at, now()) ELSE NULL END
-            WHERE provider_batch_id = %s
+            WHERE provider_batch_id = %(bid)s
             """,
-            (status, status, batch_id),
+            {
+                "status": state.status,
+                # GREATEST because a provider that briefly reports fewer
+                # completed than we already recorded should not walk the
+                # number backwards - progress here is monotonic by nature.
+                "total": state.total,
+                "completed": state.completed,
+                "failed": state.failed,
+                "bid": batch_id,
+            },
         )
 
 
@@ -52,7 +64,7 @@ async def handle_poll_batches(task_id: int, payload: dict[str, Any]) -> None:
     output - so checking every in-flight batch costs about as much as checking
     one, and the handler that resumes does the actual collection.
     """
-    from core.batch import batch_states, completion_window_seconds, is_terminal
+    from core.batch import batch_progress, completion_window_seconds, is_terminal
 
     parked = db.query(
         "SELECT id, kind, payload FROM tasks WHERE status = 'awaiting_batch' ORDER BY id"
@@ -73,8 +85,9 @@ async def handle_poll_batches(task_id: int, payload: dict[str, Any]) -> None:
             _resume_parked(t["id"])
             resumed += 1
             continue
-        states = await batch_states(ids)
-        _record_states(states)
+        progress = await batch_progress(ids)
+        _record_progress(progress)
+        states = {k: v.status for k, v in progress.items()}
         # A batch we cannot read a status for is treated as unfinished, so a
         # transient provider error delays a resume instead of dropping results.
         if all(is_terminal(states.get(b, "")) for b in ids):

@@ -372,20 +372,47 @@ async def submit_responses_batches(
     return ids
 
 
-async def batch_states(batch_ids: list[str]) -> dict[str, str]:
-    """Provider status per batch id. A status call only - it never downloads
-    output - so polling many batches costs about as much as polling one."""
+@dataclass
+class BatchProgress:
+    """What the provider says about a batch right now.
+
+    The counts ride along with the status because the retrieve call already
+    returns them. Fetching a status and discarding the progress is what left
+    ai_batches.completed at 0 for the whole life of every batch, so the only
+    way to answer "is this moving or stuck" was to curl the provider by hand.
+    """
+
+    status: str
+    total: int = 0
+    completed: int = 0
+    failed: int = 0
+
+
+async def batch_progress(batch_ids: list[str]) -> dict[str, BatchProgress]:
+    """Provider status and counts per batch id. A status call only - it never
+    downloads output - so polling many batches costs about as much as one."""
     client = _client()
     if not client:
         return {}
-    states: dict[str, str] = {}
+    out: dict[str, BatchProgress] = {}
     for batch_id in batch_ids:
         try:
             batch = await client.batches.retrieve(batch_id)
-            states[batch_id] = batch.status
+            counts = getattr(batch, "request_counts", None)
+            out[batch_id] = BatchProgress(
+                status=batch.status,
+                total=getattr(counts, "total", 0) or 0,
+                completed=getattr(counts, "completed", 0) or 0,
+                failed=getattr(counts, "failed", 0) or 0,
+            )
         except Exception as exc:
             logger.warning(f"Batch {batch_id} status check failed: {exc}")
-    return states
+    return out
+
+
+async def batch_states(batch_ids: list[str]) -> dict[str, str]:
+    """Status only, for callers that do not need the counts."""
+    return {k: v.status for k, v in (await batch_progress(batch_ids)).items()}
 
 
 def is_terminal(state: str) -> bool:

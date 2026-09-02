@@ -210,3 +210,42 @@ def test_detaching_a_message_closes_the_action_it_asked_for(f):
     )
     assert row["resolved_at"] is not None
     assert "no longer part of this application" in row["resolution"]
+
+
+def test_withdrawn_is_the_one_stage_only_the_person_can_assert(f):
+    """It was declared vocabulary with no producer: TERMINAL named it, the API
+    served it, the frontend rendered a column for it, and nothing could ever
+    reach it - because no employer sends mail saying you pulled out."""
+    from api.mail_pipeline import WITHDRAWN_STATUSES, stage_for
+
+    events = [{"id": 1, "kind": "acknowledgement", "sent_at": None}]
+    assert stage_for(events) == "acknowledged"
+    for status in WITHDRAWN_STATUSES:
+        assert stage_for(events, status) == "withdrawn"
+
+
+def test_withdrawing_beats_a_later_acknowledgement(f):
+    """ATS systems send acknowledgements on a schedule that has nothing to do
+    with the decision. Withdrawal is asserted by the person rather than
+    inferred from what an employer sent, so it outranks all of it."""
+    from api.mail_pipeline import stage_for
+
+    events = [
+        {"id": 1, "kind": "rejection", "sent_at": None},
+        {"id": 2, "kind": "acknowledgement", "sent_at": None},
+    ]
+    assert stage_for(events) == "rejected"
+    assert stage_for(events, "No Longer Interested") == "withdrawn"
+
+
+def test_every_declared_stage_has_something_that_produces_it():
+    """A stage the API names and nothing can reach is a column the frontend
+    renders forever at zero, and a total its parts never sum to."""
+    from api import mail_pipeline
+
+    declared = set(mail_pipeline.STAGE_ORDER) | set(mail_pipeline.TERMINAL)
+    from_events = set(mail_pipeline._EVENT_TO_STAGE.values())
+    # "applied" is the floor stage_for falls back to; "withdrawn" comes from the
+    # board rather than from mail. Everything else must have an event.
+    producible = from_events | {"applied", "withdrawn"}
+    assert declared <= producible, f"no producer for {sorted(declared - producible)}"

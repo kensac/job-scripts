@@ -412,8 +412,14 @@ def _rows_for(user_id: int) -> list[dict[str, Any]]:
     """Every application with its derived stage. One query for applications,
     one for all their events - not two per application."""
     apps = db.query(
-        "SELECT id, job_id, company_name, title, applied_at, source_provenance, "
-        "dismissed_at, dismissed_reason FROM applications WHERE user_id = %s",
+        """
+        SELECT a.id, a.job_id, a.company_name, a.title, a.applied_at,
+               a.source_provenance, a.dismissed_at, a.dismissed_reason,
+               uj.status AS board_status
+        FROM applications a
+        LEFT JOIN user_jobs uj ON uj.job_id = a.job_id AND uj.user_id = a.user_id
+        WHERE a.user_id = %s
+        """,
         (user_id,),
     )
     events = mail_pipeline.events_by_application(user_id)
@@ -428,7 +434,7 @@ def _rows_for(user_id: int) -> list[dict[str, Any]]:
         out.append(
             {
                 **app,
-                "stage": mail_pipeline.stage_for(own),
+                "stage": mail_pipeline.stage_for(own, app["board_status"]),
                 "event_count": len(own),
                 "last_event_at": max((e["sent_at"] for e in own if e["sent_at"]), default=None),
                 **tiers.get(app["id"], {"strongest_tier": None, "tier_confidence": None}),
@@ -535,8 +541,14 @@ def pipeline_detail(application_id: int, user: AuthedUser = Depends(require_user
     the last one in the list.
     """
     app = db.query_one(
-        "SELECT id, job_id, company_name, title, applied_at, source_provenance, "
-        "dismissed_at, dismissed_reason FROM applications WHERE id = %s AND user_id = %s",
+        """
+        SELECT a.id, a.job_id, a.company_name, a.title, a.applied_at,
+               a.source_provenance, a.dismissed_at, a.dismissed_reason,
+               uj.status AS board_status
+        FROM applications a
+        LEFT JOIN user_jobs uj ON uj.job_id = a.job_id AND uj.user_id = a.user_id
+        WHERE a.id = %s AND a.user_id = %s
+        """,
         (application_id, user.id),
     )
     if app is None:
@@ -568,7 +580,7 @@ def pipeline_detail(application_id: int, user: AuthedUser = Depends(require_user
     evidence = _evidence_for(sorted({m["message_id"] for m in matches}))
     return {
         **app,
-        "stage": mail_pipeline.stage_for(events),
+        "stage": mail_pipeline.stage_for(events, app["board_status"]),
         "events": events,
         "matches": [{**m, "evidence": evidence.get(m["message_id"])} for m in matches],
         "actions": db.query(
@@ -814,8 +826,13 @@ def match_candidates(
     key = mail_match.norm_company(company)
 
     apps = db.query(
-        "SELECT id, job_id, company_name, title, applied_at, source_provenance, dismissed_at "
-        "FROM applications WHERE user_id = %s",
+        """
+        SELECT a.id, a.job_id, a.company_name, a.title, a.applied_at,
+               a.source_provenance, a.dismissed_at, uj.status AS board_status
+        FROM applications a
+        LEFT JOIN user_jobs uj ON uj.job_id = a.job_id AND uj.user_id = a.user_id
+        WHERE a.user_id = %s
+        """,
         (user.id,),
     )
     events = mail_pipeline.events_by_application(user.id)
@@ -830,7 +847,7 @@ def match_candidates(
         scored.append(
             {
                 **app,
-                "stage": mail_pipeline.stage_for(own),
+                "stage": mail_pipeline.stage_for(own, app["board_status"]),
                 "event_count": len(own),
                 # Why it is on the list at all. A candidate the matcher
                 # considered and declined to choose between is a different

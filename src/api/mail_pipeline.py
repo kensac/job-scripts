@@ -69,13 +69,26 @@ _RESOLVING_EVENTS = {
 }
 
 
-def stage_for(events: list[dict[str, Any]]) -> str:
+# Board statuses that mean the user withdrew. `withdrawn` is terminal and has
+# no event that produces it, because no employer sends mail saying you pulled
+# out - it is the one stage only the person can assert. Without this it was
+# declared vocabulary with no producer: a state the API named, the frontend
+# rendered a column for, and nothing could ever reach.
+WITHDRAWN_STATUSES = ("No Longer Interested", "Withdrawn")
+
+
+def stage_for(events: list[dict[str, Any]], board_status: str | None = None) -> str:
     """Furthest stage reached, with terminal events winning outright.
 
     Terminal beats progress regardless of order because a rejection is not
     undone by a later automated acknowledgement, and those do arrive - ATS
     systems send them on a schedule that has nothing to do with the decision.
     """
+    # Withdrawal beats everything, including a later automated acknowledgement,
+    # because it is the only stage the person asserts directly rather than
+    # something inferred from what an employer sent.
+    if board_status in WITHDRAWN_STATUSES:
+        return "withdrawn"
     terminal = [e for e in events if _EVENT_TO_STAGE.get(e["kind"]) in TERMINAL]
     if terminal:
         newest = max(terminal, key=lambda e: e["id"])
@@ -162,9 +175,15 @@ def events_by_application(user_id: int) -> dict[int, list[dict[str, Any]]]:
 
 def state_of(application_id: int) -> dict[str, Any]:
     events = events_for(application_id)
+    row = db.query_one(
+        "SELECT uj.status FROM applications a "
+        "LEFT JOIN user_jobs uj ON uj.job_id = a.job_id AND uj.user_id = a.user_id "
+        "WHERE a.id = %s",
+        (application_id,),
+    )
     return {
         "application_id": application_id,
-        "stage": stage_for(events),
+        "stage": stage_for(events, (row or {}).get("status")),
         "event_count": len(events),
         "last_event_at": max((e["sent_at"] for e in events if e["sent_at"]), default=None),
     }

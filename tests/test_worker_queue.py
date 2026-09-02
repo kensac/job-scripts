@@ -1006,20 +1006,27 @@ async def test_polling_records_the_status_it_already_fetched(monkeypatch, f):
         ("batch_live", task_id),
     )
 
-    async def fake_states(ids):
-        return {"batch_live": "in_progress"}
+    async def fake_progress(ids):
+        from core.batch import BatchProgress
 
-    monkeypatch.setattr("core.batch.batch_states", fake_states)
+        return {"batch_live": BatchProgress("in_progress", total=501, completed=446)}
+
+    monkeypatch.setattr("core.batch.batch_progress", fake_progress)
     poll_id = f.make_task("poll_batches", {})
     _claim_for_test(poll_id)
     await tasks_batches.handle_poll_batches(poll_id, {})
 
     row = db.query_one(
-        "SELECT status, completed_at FROM ai_batches WHERE provider_batch_id = 'batch_live'"
+        "SELECT status, completed_at, completed, requests FROM ai_batches "
+        "WHERE provider_batch_id = 'batch_live'"
     )
     assert row is not None
     assert row["status"] == "in_progress", "the poll must record what it just read"
     assert row["completed_at"] is None, "in flight is not finished"
+    assert (row["completed"], row["requests"]) == (446, 501), (
+        "the counts come back on the same call; discarding them is why 'is it "
+        "moving or stuck' could only be answered by curling the provider"
+    )
 
     assert (
         db.query_one("SELECT status FROM tasks WHERE id = %s", (task_id,))["status"]
@@ -1038,10 +1045,12 @@ async def test_polling_stamps_completed_at_once_terminal(monkeypatch, f):
         ("batch_done", task_id),
     )
 
-    async def fake_states(ids):
-        return {"batch_done": "completed"}
+    async def fake_progress(ids):
+        from core.batch import BatchProgress
 
-    monkeypatch.setattr("core.batch.batch_states", fake_states)
+        return {"batch_done": BatchProgress("completed", total=10, completed=10)}
+
+    monkeypatch.setattr("core.batch.batch_progress", fake_progress)
     poll_id = f.make_task("poll_batches", {})
     _claim_for_test(poll_id)
     await tasks_batches.handle_poll_batches(poll_id, {})
