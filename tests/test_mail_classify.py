@@ -622,3 +622,49 @@ async def test_repairing_a_self_sent_message_corrects_it_without_a_model(monkeyp
     assert events[-1]["model"] is None, "no model was paid for a header fact"
     assert events[-1]["detail"]["reason"] == "self_sent"
     assert called is False, "no AI call is made for a message the header already settles"
+
+
+@pytest.mark.asyncio
+async def test_mail_that_is_not_job_related_records_no_deadline(monkeypatch, f):
+    """Two thirds of every deadline in the corpus - 1,409 of 2,128 - sat on
+    mail the classifier itself had called not job related. Each one became an
+    action item and fed the "quiet for 60+ days" signal from a newsletter.
+
+    This applies the model's own answer to its own other answer rather than
+    making a second judgement: it already said the message is not about a job,
+    so whatever date it found is a marketing expiry, not a deadline."""
+    _uid, mid = _store(f, mid="<mktg@x>")
+    result = (
+        '{"kind":"not_job_related","company":null,"role_title":null,'
+        '"deadline":"March 1, 2026","deadline_is_explicit":true,"confidence":"high"}'
+    )
+    await _run(monkeypatch, {}, {str(mid): _Res(result)})
+
+    row = db.query_one(
+        "SELECT kind, deadline_at, occurred_at, detail FROM email_events WHERE message_id = %s",
+        (mid,),
+    )
+    assert row is not None
+    assert row["kind"] == "not_job_related"
+    assert row["deadline_at"] is None
+    assert row["occurred_at"] is None
+    # The date is still recorded as raw text, so a wrongly-dropped one stays
+    # auditable rather than vanishing.
+    assert row["detail"]["when_raw"] == "March 1, 2026"
+    assert row["detail"]["when_dropped_as_not_job_related"] is True
+
+
+@pytest.mark.asyncio
+async def test_a_job_related_deadline_is_still_recorded(monkeypatch, f):
+    """The drop must be scoped to the one kind, not to deadlines generally."""
+    _uid, mid = _store(f, mid="<real@x>")
+    result = (
+        '{"kind":"assessment_invite","company":"Acme","role_title":null,'
+        '"deadline":"March 1, 2026","deadline_is_explicit":true,"confidence":"high"}'
+    )
+    await _run(monkeypatch, {}, {str(mid): _Res(result)})
+
+    row = db.query_one("SELECT deadline_at, detail FROM email_events WHERE message_id = %s", (mid,))
+    assert row is not None
+    assert row["deadline_at"] == datetime.datetime(2026, 3, 1, tzinfo=datetime.UTC)
+    assert row["detail"]["when_dropped_as_not_job_related"] is False
