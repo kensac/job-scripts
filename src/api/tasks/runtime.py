@@ -17,6 +17,7 @@ from api import ai, budget, db, events, metrics
 from api.budget import Entitlement
 from api.tasks.board import _demote_closed, _materialize_passing
 from core import pricing
+from core.prompts import PROMPT_SAMPLE_SIZE, prompt_hash
 from core.routing import Choice, TaskShape, resolve
 
 logger = logging.getLogger("jobtracker_worker")
@@ -358,7 +359,7 @@ def _set_progress(task_id: int, done: int, total: int, label: str) -> None:
     events.publish_task(task_id)
 
 
-def _batch_event_hook(task_id: int, purpose: str, model: str):
+def _batch_event_hook(task_id: int, purpose: str, model: str, prompt_id: int | None = None):
     """Registers every provider batch in ai_batches as it progresses, and
     stores submitted batch ids on the task payload so a requeued attempt
     reattaches instead of resubmitting (double spend + orphaned results)."""
@@ -388,9 +389,11 @@ def _batch_event_hook(task_id: int, purpose: str, model: str):
         db.execute(
             """
             INSERT INTO ai_batches (provider_batch_id, task_id, purpose, model,
-                                    requests, completed, failed_count, status, est_tokens)
+                                    requests, completed, failed_count, status, est_tokens,
+                                    prompt_id)
             VALUES (%(bid)s, %(tid)s, %(purpose)s, %(model)s,
-                    %(requests)s, %(completed)s, %(failed)s, %(status)s, %(est)s)
+                    %(requests)s, %(completed)s, %(failed)s, %(status)s, %(est)s,
+                    %(prompt_id)s)
             ON CONFLICT (provider_batch_id) DO UPDATE SET
                 requests = GREATEST(ai_batches.requests, EXCLUDED.requests),
                 completed = EXCLUDED.completed,
@@ -412,12 +415,81 @@ def _batch_event_hook(task_id: int, purpose: str, model: str):
                 "failed": counts.get("failed", 0),
                 "status": status,
                 "est": counts.get("est_tokens", 0),
+                "prompt_id": prompt_id,
             },
         )
         _record_batch_ids(task_id, [batch_id])
         events.publish_task(task_id)
 
     return on_event
+
+
+def _record_prompt(purpose: str, instructions: str) -> int | None:
+    """One row per distinct instruction text, and its id.
+
+    Upsert rather than insert: the same prompt runs every cycle, and the row
+    that matters is the first sighting plus the fact that it is still in use.
+    Returns None rather than raising if the write fails - provenance is
+    reporting, and losing it must never take down a sweep that is otherwise
+    ready to spend money correctly.
+    """
+    try:
+        row = db.query_one(
+            """
+            INSERT INTO ai_prompts (prompt_hash, purpose, instructions, batches)
+            VALUES (%(hash)s, %(purpose)s, %(instructions)s, 1)
+            ON CONFLICT (prompt_hash) DO UPDATE
+                SET last_seen_at = now(), batches = ai_prompts.batches + 1
+            RETURNING id
+            """,
+            {
+                "hash": prompt_hash(instructions),
+                "purpose": purpose,
+                "instructions": instructions,
+            },
+        )
+        return row["id"] if row else None
+    except Exception:
+        logger.warning(f"could not record prompt for {purpose}", exc_info=True)
+        return None
+
+
+def _record_prompt_samples(prompt_id: int | None, results: dict[str, Any]) -> None:
+    """Up to PROMPT_SAMPLE_SIZE outputs per prompt version, never more.
+
+    The cap is per prompt rather than per sweep, so a prompt running hourly for
+    a year holds 100 rows and not 8,760. Counting first and inserting the
+    remainder is a race between two workers finishing batches at once, and the
+    race is harmless: the loser overshoots the cap by a few rows, which costs
+    bytes rather than correctness. A unique constraint would turn that into a
+    failed sweep.
+
+    Errored lines are sampled too, with their error instead of an output. A
+    prompt change that starts producing unparseable JSON is exactly the change
+    worth seeing, and it leaves no output to record.
+    """
+    if prompt_id is None or not results:
+        return
+    try:
+        held = db.query_one(
+            "SELECT COUNT(*) AS n FROM ai_prompt_samples WHERE prompt_id = %s", (prompt_id,)
+        )
+        room = PROMPT_SAMPLE_SIZE - ((held or {}).get("n") or 0)
+        if room <= 0:
+            return
+        rows = [
+            (prompt_id, custom_id, res.text, res.error)
+            for custom_id, res in list(results.items())[:room]
+        ]
+        if rows:
+            with db.pool.connection() as conn:
+                conn.cursor().executemany(
+                    "INSERT INTO ai_prompt_samples (prompt_id, custom_id, output, error) "
+                    "VALUES (%s, %s, %s, %s)",
+                    rows,
+                )
+    except Exception:
+        logger.warning("could not record prompt samples", exc_info=True)
 
 
 async def run_batched(
@@ -447,24 +519,33 @@ async def run_batched(
     """
     chosen = resolve(shape)
     logger.info(f"Task {task_id}: {purpose} on {chosen.model} - {chosen.reason}")
-    hook = _batch_event_hook(task_id, purpose, chosen.model)
+    # Every spec in a sweep carries the same instructions - they are module
+    # constants - so the first is the prompt for the batch. Recorded before
+    # submitting, so a sweep that dies mid-flight still says what it asked.
+    prompt_id = _record_prompt(purpose, specs[0].instructions) if specs else None
+    hook = _batch_event_hook(task_id, purpose, chosen.model, prompt_id=prompt_id)
     existing = _pending_batch_ids(task_id)
     if existing:
         from core.batch import collect_batches
 
         logger.info(f"Task {task_id}: reattaching to {len(existing)} in-flight batch(es)")
-        return await collect_batches(existing, hook), chosen
-    results = await submit_or_collect(
-        task_id,
-        specs,
-        chosen.model,
-        # The shape's own answer, not the call site's. A model that rejects the
-        # value is not eligible, so resolve() has already refused rather than
-        # letting a batch fail whole on a bad parameter.
-        shape.resolved_effort() or "",
-        shape.max_output_tokens,
-        hook,
-    )
+        results = await collect_batches(existing, hook)
+    else:
+        results = await submit_or_collect(
+            task_id,
+            specs,
+            chosen.model,
+            # The shape's own answer, not the call site's. A model that rejects
+            # the value is not eligible, so resolve() has already refused
+            # rather than letting a batch fail whole on a bad parameter.
+            shape.resolved_effort() or "",
+            shape.max_output_tokens,
+            hook,
+        )
+    # One exit, so the reattach path cannot quietly skip what the submit path
+    # records. A requeued sweep is the case that would lose its provenance,
+    # and it is the harder one to notice missing.
+    _record_prompt_samples(prompt_id, results)
     return results, chosen
 
 
