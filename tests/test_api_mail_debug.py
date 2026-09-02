@@ -370,3 +370,22 @@ def test_never_attempted_has_a_name_rather_than_being_an_absence(client, admin_h
     body = client.get(f"/v1/admin/mail?method={NEVER_ATTEMPTED}", headers=admin_headers).json()
     assert body["total"] == 1
     assert body["rows"][0]["method"] is None
+
+
+def test_matched_false_is_failures_not_refusals(client, admin_headers, f):
+    """A recruiter approach belongs to no application by design, so counting it
+    as a matching failure turns correct behaviour into a defect on screen - and
+    it is 1,374 rows, which would swamp the real failures in the pile a person
+    goes to when hunting them. Predicted by personal-portfolio-58 from the
+    frontend before it was confirmed here."""
+    uid = f.make_user()
+    _msg_with(f, uid, "rejection", "unmatched", "mf-a")
+    _msg_with(f, uid, "recruiter_outreach", "not_an_application", "mf-b")
+
+    body = client.get("/v1/admin/mail?matched=false", headers=admin_headers).json()
+    assert body["total"] == 1
+    assert body["rows"][0]["kind"] == "rejection"
+
+    # Still reachable on purpose, by name.
+    refused = client.get("/v1/admin/mail?method=not_an_application", headers=admin_headers).json()
+    assert refused["total"] == 1

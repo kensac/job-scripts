@@ -58,7 +58,17 @@ def _where(
         # NULL application_id is a real recorded outcome - "we looked and
         # found nothing" - so unmatched is a value to filter on, not an
         # absence to skip over.
-        clauses.append("mt.application_id IS NOT NULL" if matched else "mt.application_id IS NULL")
+        #
+        # But matched=false must NOT sweep in the deliberate refusals. A
+        # recruiter approach belongs to no application by design, so counting
+        # it as a matching failure turns correct behaviour into a defect on
+        # screen - and it is 1,374 rows, which would swamp the real failures
+        # in the pile a person goes to when hunting them.
+        if matched:
+            clauses.append("mt.application_id IS NOT NULL")
+        else:
+            clauses.append("mt.application_id IS NULL AND COALESCE(mt.method, '') <> %(refused)s")
+            params["refused"] = mail_match.NOT_AN_APPLICATION
     if method == NEVER_ATTEMPTED:
         clauses.append("mt.match_id IS NULL")
     elif method:
