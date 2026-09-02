@@ -21,6 +21,7 @@ from api.tasks.filters import (
 from api.tasks.health import handle_data_health
 from api.tasks.ingest import handle_ingest_source
 from api.tasks.mail_classify import handle_classify_mail
+from api.tasks.mail_match import handle_match_mail
 from api.tasks.mail_sync import (
     handle_import_archive,
     handle_probe_credentials,
@@ -37,6 +38,7 @@ from api.tasks.verify import (
 HANDLERS = {
     "extract_upload": lambda task_id, payload: handle_extract_upload(payload),
     "classify_mail": handle_classify_mail,
+    "match_mail": handle_match_mail,
     "sync_gmail": handle_sync_gmail,
     "import_archive": handle_import_archive,
     "probe_credentials": handle_probe_credentials,
