@@ -60,7 +60,12 @@ def test_comp_separates_found_from_ran_and_found_nothing(client, admin_headers, 
     _set_comp(ran_empty, extracted=True)
 
     row = _item(client, admin_headers, "payco")
-    assert row["extraction"] == {"found_pay": 1, "ran_found_nothing": 1, "not_attempted": 1}
+    counts = {k: row["extraction"][k] for k in ("found_pay", "ran_found_nothing", "not_attempted")}
+    assert counts == {"found_pay": 1, "ran_found_nothing": 1, "not_attempted": 1}
+    # The qualification travels with the datum rather than in a caveats list
+    # a refactor could drop.
+    assert "extractor" in row["extraction"]["measures"]
+    assert "disclose" in row["comp"]["not"]
     assert (
         row["extraction"]["found_pay"]
         + row["extraction"]["ran_found_nothing"]

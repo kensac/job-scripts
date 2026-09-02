@@ -458,3 +458,29 @@ def test_rate_spike_ignores_expiring_rechecks_but_catches_fresh_misclassificatio
     spike = [f for f in health.detect() if f["subject"] == "expsrc"]
     assert spike and spike[0]["kind"] == "closed_rate_spike"
     assert "newly-seen" in spike[0]["message"]
+
+
+def test_sources_report_when_they_last_produced_a_new_posting(client, admin_headers, f):
+    """last_ingest_at says the fetch worked. last_new_posting_at says it found
+    anything we had not already seen. They diverge, and the gap is the only
+    signal that retires a source: fulltime_ouckah has 215 successful ingests
+    and has produced nothing since the reseed, reporting green every hour.
+    """
+    from api import db
+
+    f.make_source("productive")
+    f.make_source("green-but-dead")
+    f.make_job(source="productive")
+    for name in ("productive", "green-but-dead"):
+        task_id = f.make_task("ingest_source", {"source": name}, status="done")
+        db.execute("UPDATE tasks SET finished_at = now() WHERE id = %s", (task_id,))
+
+    rows = {
+        r["name"]: r
+        for r in client.get("/v1/admin/sources", headers=admin_headers).json()["sources"]
+    }
+    assert rows["productive"]["last_ingest_at"] is not None
+    assert rows["productive"]["last_new_posting_at"] is not None
+    # Ingested successfully, produced nothing. Previously indistinguishable.
+    assert rows["green-but-dead"]["last_ingest_at"] is not None
+    assert rows["green-but-dead"]["last_new_posting_at"] is None

@@ -24,7 +24,7 @@ router = APIRouter()
 _JOB_ROW = """
     j.id AS job_id, j.company, j.title, j.locations, j.terms, j.source,
     j.url, j.raw_url, j.active, j.date_posted, j.created_at AS added_at,
-    j.extraction_status, j.comp_min, j.comp_max, j.comp_text,
+    j.extraction_status, j.comp_min, j.comp_max, j.comp_text, j.comp_currency,
     (SELECT CASE lc.status WHEN 'passed' THEN 'open' WHEN 'rejected' THEN 'closed' END
      FROM latest_check lc
      WHERE lc.url = j.url AND lc.check_type = 'closed') AS closed_verdict,
@@ -320,7 +320,8 @@ def job_detail(job_id: int, user: AuthedUser = Depends(require_user)):
         user,
         job_id,
         "j.id, j.url, j.raw_url, j.company, j.title, j.locations, j.terms, j.source, "
-        "j.active, j.date_posted, j.comp_min, j.comp_max, j.comp_text, j.created_at, "
+        "j.active, j.date_posted, j.comp_min, j.comp_max, j.comp_text, j.comp_currency, "
+        "j.created_at, "
         "(SELECT CASE lc.status WHEN 'passed' THEN 'open' WHEN 'rejected' THEN 'closed' END "
         " FROM latest_check lc "
         " WHERE lc.url = j.url AND lc.check_type = 'closed') AS closed_verdict",

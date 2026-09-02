@@ -393,3 +393,39 @@ def test_job_options_serves_canon_plus_in_use(client, user_headers):
     assert body["statuses"].index("Weird Legacy State") > body["statuses"].index("Rejected")
     assert body["not_applied_sentinel"] == "not_applied"
     assert "src-opt" in body["sources"]
+
+
+def test_comp_amounts_are_served_with_their_currency(client, user_headers, f):
+    """comp_min/comp_max are annualised numbers and 96% of extracted rows
+    carry no currency. Serving the amount without the unit invites a renderer
+    to supply one, which is how a CAD range becomes a dollar figure. NULL
+    means we never captured a unit — it does not mean USD."""
+    user_id = db.query_one("SELECT id FROM users WHERE sub = 'test-user'")
+    assert user_id is not None
+    job_id, _ = f.make_ready_job(source="comped", comp_min=90000, comp_max=120000)
+    f.make_board_row(user_id["id"], job_id)
+    db.execute("UPDATE jobs SET comp_currency = 'CAD' WHERE id = %s", (job_id,))
+
+    row = next(
+        r
+        for r in client.get("/v1/user/jobs?limit=100", headers=user_headers).json()["rows"]
+        if r["job_id"] == job_id
+    )
+    assert row["comp_currency"] == "CAD"
+    detail = client.get(f"/v1/user/jobs/{job_id}/detail", headers=user_headers).json()
+    assert detail["job"]["comp_currency"] == "CAD"
+
+
+def test_an_amount_with_no_captured_currency_says_so(client, user_headers, f):
+    user_id = db.query_one("SELECT id FROM users WHERE sub = 'test-user'")
+    assert user_id is not None
+    job_id, _ = f.make_ready_job(source="uncurrenced", comp_min=90000, comp_max=120000)
+    f.make_board_row(user_id["id"], job_id)
+
+    row = next(
+        r
+        for r in client.get("/v1/user/jobs?limit=100", headers=user_headers).json()["rows"]
+        if r["job_id"] == job_id
+    )
+    assert row["comp_min"] == 90000
+    assert row["comp_currency"] is None, "absent currency must be visible, not implied"
