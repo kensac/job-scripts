@@ -198,3 +198,60 @@ def test_an_internal_model_is_priced_but_never_offered():
     assert pricing.rates_for("text-embedding-3-small") is not None
     offered = {m["model"] for models in ai.MODEL_CATALOG.values() for m in models}
     assert "text-embedding-3-small" not in offered
+
+
+# --- xAI, the provider that proves wire format is not contract -----------
+
+
+def test_xai_tiering_rebills_the_whole_request_including_output():
+    """xAI's high tier applies to output as well as input once the PROMPT
+    crosses the threshold, so a long prompt with a short answer still pays the
+    higher output rate. A tier that only moved the input rate would understate
+    every one of these."""
+    small = pricing.estimate_cost_usd("grok-4.6", 200_000, 1_000)
+    large = pricing.estimate_cost_usd("grok-4.6", 200_001, 1_000)
+    assert small is not None and large is not None
+    # One extra prompt token roughly doubles the bill, output included.
+    assert large > small * Decimal("1.9")
+
+
+def test_two_models_of_one_provider_disagree_about_reasoning():
+    """The sharpest case for declaring per model rather than per provider:
+    grok-4.3 accepts "none" and grok-4.6 rejects it, same provider, same
+    generation family. A provider-level union would accept it for both and
+    400 on one."""
+    assert ai.validate_params("xai", {"reasoning_effort": "none"}, "grok-4.3") is None
+    assert ai.validate_params("xai", {"reasoning_effort": "none"}, "grok-4.6") is not None
+    # And a value OpenAI's 5.6 family takes that no Grok does.
+    assert ai.validate_params("xai", {"reasoning_effort": "max"}, "grok-4.3") is not None
+
+
+def test_temperature_follows_the_declared_capability_not_a_provider_name():
+    """xAI accepts temperature and OpenAI's Responses API does not. Confirmed
+    live for xAI; the gate reads the descriptor rather than naming providers."""
+    assert providers.PROVIDERS["xai"].supports_temperature is True
+    assert providers.PROVIDERS["openai"].supports_temperature is False
+    assert ai.validate_params("xai", {"temperature": 0.5}) is None
+    assert ai.validate_params("openai", {"temperature": 0.5}) is not None
+
+
+def test_xai_has_a_batch_lane_but_no_declared_discount():
+    """The lane exists - GET /v1/batches returns 200 - but no vendor page
+    states a discount, so none is claimed. A batched call therefore bills at
+    the synchronous rate: overstating if the reported 20% is real, which is the
+    safe direction and the opposite of what a global 0.5 would have done."""
+    assert providers.PROVIDERS["xai"].batch_endpoint == "/v1/batches"
+    for model in ("grok-4.3", "grok-4.5", "grok-4.6"):
+        rates = pricing.rates_for(model)
+        assert rates is not None and rates.batch_rate is None
+        batched = pricing.estimate_cost_usd(model, 10_000, 10_000, batched=True)
+        assert batched == pricing.estimate_cost_usd(model, 10_000, 10_000)
+
+
+def test_xai_cached_rate_is_not_the_openai_tenth():
+    """grok-4.6 bills cached input at 25% of input, not 10%. The global
+    multiplier this package replaced would have understated it 2.5x."""
+    tier = pricing.rates_for("grok-4.6").tiers[0]
+    assert tier.rate_cached_in / tier.rate_in == Decimal("0.25")
+    openai_tier = pricing.rates_for("gpt-5-nano").tiers[0]
+    assert openai_tier.rate_cached_in / openai_tier.rate_in == Decimal("0.1")
