@@ -164,6 +164,22 @@ For company and role, copy what the email states. If the email does not state
 it, leave it null. Do NOT infer a company from the sender's domain and do NOT
 guess a role title.
 
+"offer" is an offer of EMPLOYMENT - a job, internship or paid position the
+candidate can accept and be paid for. Nothing else is an offer, however it is
+worded:
+
+- An "offer of admission" to a university, degree or programme is NOT an offer,
+  even when it names money. Tuition credits, enrolment deposits and
+  scholarships are not pay.
+- Acceptance into a course, a hackathon RSVP or team allocation, a club or
+  conference allotment, and "you're in" or "confirm your spot" mail are
+  "not_job_related".
+- Discussing a job already started, or congratulating someone on one, is not
+  an offer.
+
+If the email is about paid work but does not extend an offer, use the kind
+that fits what it does say.
+
 For a deadline, only give a date the email actually states or plainly implies
 ("within 5 days" from a dated email is implied; "soon" is not). Leave it null
 otherwise. Never invent one.
@@ -298,6 +314,24 @@ _FUTURE_FACING_KINDS = frozenset(
 # find a time" is what distinguishes an appointment from "submit by March 1,
 # 5:00 PM Pacific", which is a deadline that happens to carry a clock time.
 _APPOINTMENT_KINDS = frozenset({"interview_scheduled"})
+
+
+# Mail the candidate SENT is not an inbound event about the candidate. The
+# instruction asks the model what "the SENDER is communicating", and when the
+# sender is the candidate every kind comes out backwards - his own reply to a
+# professor saying he had started work and was enjoying it was classified as an
+# offer. 942 messages are self-sent and 137 of them carried inbound events,
+# inflating the interviewing and offer counts directly.
+#
+# Direction is knowable from the header, so it is read rather than inferred.
+# Handing it to a model turns a fact into a probability.
+#
+# THE MESSAGES ARE KEPT, only their classification as inbound events is
+# skipped. Sent mail is the best record that exists of WHEN the candidate
+# applied - better than applications.applied_at, which currently infers it from
+# the first inbound reply - and that is a different signal with a different
+# shape, to be built deliberately rather than fall out of a misread event kind.
+_SELF_SENT = "(u.email <> '' AND position(lower(u.email) in lower(COALESCE(m.from_email, ''))) > 0)"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -452,21 +486,78 @@ async def handle_classify_mail(task_id: int, payload: dict[str, Any]) -> None:
     # the failure would arrive as memory pressure on a worker rather than as a
     # rejected parameter.
     cap = min(int(payload.get("cap") or CLASSIFY_PER_CYCLE), MAX_CLASSIFY_PER_CYCLE)
-    rows = db.query(
-        """
-        SELECT m.id, m.from_email, m.subject, m.sent_at, m.body_text
-        FROM email_messages m
-        WHERE NOT EXISTS (SELECT 1 FROM email_events e WHERE e.message_id = m.id)
-        -- Likely job mail first. The prefilter gates nothing, so this only
-        -- changes the ORDER in which the whole mailbox is worked through -
-        -- which matters because the useful results arrive sooner.
-        ORDER BY m.prefilter_hit DESC NULLS LAST, m.id DESC
-        LIMIT %(cap)s
-        """,
-        {"cap": cap},
-    )
+    # Re-classifying an EXPLICIT set of messages, for repairing events that were
+    # written wrong rather than for finding ones that are missing. The set is
+    # computed by the caller and recorded in the payload, so the task row says
+    # exactly what was re-classified and why it was expected to be that many.
+    #
+    # An explicit id list rather than a "reclassify" mode carrying its own WHERE
+    # clause: a predicate the handler evaluates can match the whole mailbox if
+    # someone later widens it, and the cost of that mistake is a re-paid
+    # backfill discovered on the bill. A list cannot grow on its own.
+    #
+    # Events are append-only and the latest per message wins
+    # (mail_pipeline's DISTINCT ON ... ORDER BY id DESC), so a corrected event
+    # supersedes the old one. Nothing is deleted and nothing is migrated.
+    requested = payload.get("message_ids")
+    if requested:
+        ids = sorted({int(i) for i in requested})
+        if len(ids) > cap:
+            # Refused rather than truncated. Silently doing part of a repair
+            # leaves the rest wrong with nothing recording which half ran.
+            raise ValueError(
+                f"message_ids has {len(ids)} entries, over the cap of {cap}; "
+                "split it into several tasks"
+            )
+        rows = db.query(
+            f"""
+            SELECT m.id, m.from_email, m.subject, m.sent_at, m.body_text,
+                   {_SELF_SENT} AS self_sent
+            FROM email_messages m
+            JOIN users u ON u.id = m.user_id
+            WHERE m.id = ANY(%(ids)s) ORDER BY m.id
+            """,
+            {"ids": ids},
+        )
+        logger.info(f"Task {task_id}: re-classifying {len(rows)} of {len(ids)} requested messages")
+    else:
+        rows = db.query(
+            f"""
+            SELECT m.id, m.from_email, m.subject, m.sent_at, m.body_text,
+                   FALSE AS self_sent
+            FROM email_messages m
+            JOIN users u ON u.id = m.user_id
+            WHERE NOT EXISTS (SELECT 1 FROM email_events e WHERE e.message_id = m.id)
+              AND NOT {_SELF_SENT}
+            -- Likely job mail first. The prefilter gates nothing, so this only
+            -- changes the ORDER in which the whole mailbox is worked through -
+            -- which matters because the useful results arrive sooner.
+            ORDER BY m.prefilter_hit DESC NULLS LAST, m.id DESC
+            LIMIT %(cap)s
+            """,
+            {"cap": cap},
+        )
+    # Self-sent mail only reaches here through an explicit message_ids repair,
+    # because the sweep excludes it. Correcting one needs no model: the header
+    # already settles direction, so the event is written directly, costs
+    # nothing, and supersedes the wrong one by the same latest-wins rule. Left
+    # to the model these come back as offers and interviews - that is what the
+    # 137 already-written events are.
+    corrected = [r for r in rows if r["self_sent"]]
+    rows = [r for r in rows if not r["self_sent"]]
+    for row in corrected:
+        db.execute(
+            """
+            INSERT INTO email_events (message_id, kind, confidence, detail, model)
+            VALUES (%s, 'not_job_related', 'high', %s, NULL)
+            """,
+            (row["id"], db.jsonb({"reason": "self_sent"})),
+        )
+    if corrected:
+        logger.info(f"Task {task_id}: corrected {len(corrected)} self-sent message(s)")
+
     if not rows:
-        _set_progress(task_id, 0, 0, "nothing to classify")
+        _set_progress(task_id, len(corrected), len(corrected), "nothing to classify")
         return
 
     by_id = {r["id"]: r["sent_at"] for r in rows}
