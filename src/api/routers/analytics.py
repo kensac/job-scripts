@@ -234,9 +234,16 @@ def _drill(source: str) -> dict[str, str]:
     Built here rather than in the client so the filter that produced an
     aggregate and the filter that fetches its members cannot drift apart.
     """
-    queries = f"/v1/admin/queries?{urlencode({'sources': source})}"
+    sources = urlencode({"sources": source})
+    queries = f"/v1/admin/queries?{sources}"
     return {
-        "jobs": f"/v1/jobs?{urlencode({'source': source})}",
+        # Deliberately NOT a link to the postings count. This drills the rows
+        # behind the FUNNEL denominators - urls this board has had checked -
+        # because /v1/admin/jobs aggregates ai_queries and only knows postings
+        # that have a verdict. Nothing serves "every posting from this source"
+        # to an admin, and pointing inventory.total at an endpoint counting a
+        # subset is the drift these links exist to prevent.
+        "checked_jobs": f"/v1/admin/jobs?{sources}",
         "queries": queries,
         "closed_rejected": f"{queries}&check_type=closed&status=rejected",
         "clearance_rejected": f"{queries}&check_type=clearance&status=rejected",

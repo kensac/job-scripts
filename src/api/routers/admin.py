@@ -1351,6 +1351,7 @@ def list_jobs(
     q: str | None = None,
     config: str | None = None,
     verdict: str | None = None,
+    sources: str | None = None,
     sort: str = "last_seen",
     dir: str = "desc",
     page: int = 1,
@@ -1361,6 +1362,13 @@ def list_jobs(
     page_size = max(1, min(page_size, 500))
     sub = ["url IS NOT NULL"]
     params: dict = {}
+    wanted_sources = [s.strip() for s in (sources or "").split(",") if s.strip()]
+    if wanted_sources:
+        # Same shape as _where(): ai_queries is keyed by url and source lives on
+        # the job, so a subquery keeps this composable with the count and page
+        # queries below rather than making every other filter ambiguous.
+        sub.append("url IN (SELECT url FROM jobs WHERE source = ANY(%(sources)s))")
+        params["sources"] = wanted_sources
     if q:
         sub.append(
             "(url LIKE %(q)s OR company LIKE %(q)s OR job_title LIKE %(q)s OR reason LIKE %(q)s)"

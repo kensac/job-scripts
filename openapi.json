@@ -7068,6 +7068,22 @@
             }
           },
           {
+            "name": "sources",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sources"
+            }
+          },
+          {
             "name": "sort",
             "in": "query",
             "required": false,
