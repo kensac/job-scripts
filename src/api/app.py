@@ -9,6 +9,7 @@ from api.auth import require_user
 from api.routers import (
     admin,
     analytics,
+    companies,
     filter_insights,
     filters,
     gmail,
@@ -47,6 +48,7 @@ app.include_router(stats.router, prefix="/v1")
 app.include_router(requirements.router, prefix="/v1")
 app.include_router(admin.router, prefix="/v1")
 app.include_router(analytics.router, prefix="/v1")
+app.include_router(companies.router, prefix="/v1")
 app.include_router(spend.router, prefix="/v1")
 app.include_router(mail.router, prefix="/v1")
 app.include_router(filter_insights.router, prefix="/v1")

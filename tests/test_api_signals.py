@@ -176,6 +176,38 @@ def test_repost_reports_a_role_relisted_on_the_same_board_over_time(client, user
     assert signal["title"] == "Engineer"
 
 
+def test_repost_excludes_one_role_listed_across_many_locations(client, user_headers, f):
+    """A chain listing one role across its estate is bulk hiring, not
+    re-listing. Without location in the key, Sainsbury's "Trading Assistant"
+    grouped to 1,056 urls over 120 locations and rendered as a repost."""
+    _clear_board_cache()
+    user_id = db.query_one("SELECT id FROM users WHERE sub = 'test-user'")
+    assert user_id is not None
+    job_id, _ = _own(f, user_id["id"], source="chain", company="Grocer", title="Assistant")
+    other_store = f.make_job(source="chain", company="Grocer", title="Assistant")
+    db.execute("UPDATE jobs SET locations = %s WHERE id = %s", (["Leeds, UK"], job_id))
+    db.execute("UPDATE jobs SET locations = %s WHERE id = %s", (["Bath, UK"], other_store))
+    _set_posted(job_id, 90)
+    _set_posted(other_store, 10)
+
+    assert "repost" not in _detail(client, user_headers, job_id)["signals"]
+
+
+def test_repost_counts_the_same_role_relisted_at_one_location(client, user_headers, f):
+    _clear_board_cache()
+    user_id = db.query_one("SELECT id FROM users WHERE sub = 'test-user'")
+    assert user_id is not None
+    job_id, _ = _own(f, user_id["id"], source="chain2", company="Grocer", title="Assistant")
+    again = f.make_job(source="chain2", company="Grocer", title="Assistant")
+    db.execute(
+        "UPDATE jobs SET locations = %s WHERE id IN (%s, %s)", (["Leeds, UK"], job_id, again)
+    )
+    _set_posted(job_id, 90)
+    _set_posted(again, 10)
+
+    assert _detail(client, user_headers, job_id)["signals"]["repost"]["url_count"] == 2
+
+
 def test_repost_matches_on_casefolded_company_and_title(client, user_headers, f):
     """The match is text, not identity - which is exactly why a caller may say
     the name recurred and not that the employer reposts."""
