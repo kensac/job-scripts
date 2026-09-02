@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import datetime
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -128,13 +127,13 @@ def job_options(user: AuthedUser = Depends(require_user)):
 def list_jobs(
     limit: int = 200,
     offset: int = 0,
-    cursor: Optional[int] = None,
+    cursor: int | None = None,
     sort: str = "added_at",
     dir: str = "desc",
-    search: Optional[str] = None,
-    status: Optional[str] = None,
-    statuses: Optional[str] = None,
-    source: Optional[str] = None,
+    search: str | None = None,
+    status: str | None = None,
+    statuses: str | None = None,
+    source: str | None = None,
     include_hidden: bool = False,
     with_total: bool = False,
     user: AuthedUser = Depends(require_user),
@@ -229,7 +228,10 @@ def patch_job(job_id: int, body: UserJobPatch, user: AuthedUser = Depends(requir
     # date_applied once so they never have to fill it by hand.
     if fields.get("status") and "date_applied" not in fields:
         if not existing or existing["date_applied"] is None:
-            fields["date_applied"] = datetime.date.today()
+            # UTC, not the container's local date. The containers run
+            # TZ=America/New_York, so date.today() silently decided
+            # "today" in Eastern for every user regardless of theirs.
+            fields["date_applied"] = datetime.datetime.now(datetime.UTC).date()
             autofilled["date_applied"] = fields["date_applied"].isoformat()
     if "status" in fields:
         old_status = existing["status"] if existing else None
@@ -438,8 +440,8 @@ def upload_links(body: UploadRequest, user: AuthedUser = Depends(require_user)):
 
     accepted = []
     rejected = []
-    for raw in body.urls:
-        raw = raw.strip()
+    for submitted in body.urls:
+        raw = submitted.strip()
         if not raw.startswith(("http://", "https://")):
             continue
         # Fail here as well as in the fetcher: an upload is the one place a
@@ -483,7 +485,7 @@ REPORT_KINDS = ("stale", "wrong_data", "closed", "other")
 class ReportBody(BaseModel):
     kind: str
     message: str = ""
-    corrections: Optional[dict] = None
+    corrections: dict | None = None
 
 
 @router.post("/user/jobs/{job_id}/report")

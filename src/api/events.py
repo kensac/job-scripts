@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any, Dict, Optional
+from typing import Any
 
 import requests
 
@@ -16,7 +16,7 @@ CENTRIFUGO_API_KEY = os.environ.get("CENTRIFUGO_API_KEY", "")
 TASKS_CHANNEL = "jobtracker:tasks"
 
 
-def _publish(channel: str, data: Dict[str, Any]) -> None:
+def _publish(channel: str, data: dict[str, Any]) -> None:
     """Fire-and-forget realtime publish; the app must never depend on it."""
     if not CENTRIFUGO_API_URL or not CENTRIFUGO_API_KEY:
         return
@@ -61,6 +61,6 @@ def publish_task(task_id: int) -> None:
         },
     }
     _publish(TASKS_CHANNEL, event)
-    user_id: Optional[int] = payload.get("user_id")
+    user_id: int | None = payload.get("user_id")
     if user_id is not None:
         _publish(f"jobtracker:user.{user_id}", event)

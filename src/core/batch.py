@@ -5,21 +5,21 @@ import io
 import json
 import logging
 import os
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, Dict, List, Optional
-
-# on_event(batch_id, status, {"requests": n, "completed": x, "failed": y})
-BatchEventHook = Optional[Callable[[str, str, Dict[str, int]], None]]
 
 from openai import AsyncOpenAI
 from openai.types import Batch
 
+# on_event(batch_id, status, {"requests": n, "completed": x, "failed": y})
+BatchEventHook = Callable[[str, str, dict[str, int]], None] | None
+
 logger = logging.getLogger("job_tracker")
 
-_batch_client: Optional[AsyncOpenAI] = None
+_batch_client: AsyncOpenAI | None = None
 
 
-def _client() -> Optional[AsyncOpenAI]:
+def _client() -> AsyncOpenAI | None:
     global _batch_client
     if _batch_client is None:
         key = os.environ.get("OPENAI_API_KEY")
@@ -75,10 +75,10 @@ class BatchSpec:
 @dataclass
 class BatchResult:
     custom_id: str
-    text: Optional[str] = None
-    usage: Optional[dict] = None
-    error: Optional[str] = None
-    batch_id: Optional[str] = None
+    text: str | None = None
+    usage: dict | None = None
+    error: str | None = None
+    batch_id: str | None = None
 
 
 def _estimate_tokens(spec: BatchSpec, max_output_tokens: int) -> int:
@@ -87,10 +87,10 @@ def _estimate_tokens(spec: BatchSpec, max_output_tokens: int) -> int:
 
 
 def _chunk_specs(
-    specs: List[BatchSpec], max_output_tokens: int
-) -> List[List[BatchSpec]]:
-    chunks: List[List[BatchSpec]] = []
-    current: List[BatchSpec] = []
+    specs: list[BatchSpec], max_output_tokens: int
+) -> list[list[BatchSpec]]:
+    chunks: list[list[BatchSpec]] = []
+    current: list[BatchSpec] = []
     running = 0
     for spec in specs:
         cost = _estimate_tokens(spec, max_output_tokens)
@@ -131,7 +131,7 @@ def _build_line(
     }
 
 
-def _extract_output_text(body: dict) -> Optional[str]:
+def _extract_output_text(body: dict) -> str | None:
     for item in body.get("output", []):
         if item.get("type") == "message":
             for content in item.get("content", []):
@@ -144,7 +144,7 @@ def _emit_usage(
     on_event: BatchEventHook,
     batch_id: str,
     status: str,
-    results: Dict[str, BatchResult],
+    results: dict[str, BatchResult],
 ) -> None:
     if on_event is None:
         return
@@ -200,9 +200,9 @@ async def _wait_for_batch(
 async def _collect_batch(
     client: AsyncOpenAI,
     batch: Batch,
-    results: Dict[str, BatchResult],
+    results: dict[str, BatchResult],
     create_missing: bool = False,
-) -> Dict[str, BatchResult]:
+) -> dict[str, BatchResult]:
     if batch.status != "completed":
         for result in results.values():
             if result.text is None and result.error is None:
@@ -259,7 +259,7 @@ async def _collect_batch(
 
 async def _submit_chunk(
     client: AsyncOpenAI,
-    specs: List[BatchSpec],
+    specs: list[BatchSpec],
     model: str,
     reasoning_effort: str,
     max_output_tokens: int,
@@ -292,16 +292,16 @@ async def _submit_chunk(
 
 async def _run_chunk(
     client: AsyncOpenAI,
-    specs: List[BatchSpec],
+    specs: list[BatchSpec],
     model: str,
     reasoning_effort: str,
     max_output_tokens: int,
     on_event: BatchEventHook = None,
-) -> Dict[str, BatchResult]:
+) -> dict[str, BatchResult]:
     """Submit-and-wait, retained for callers that genuinely need a result in
     hand. The scheduled paths use submit_responses_batches + collect_batches
     instead so they do not hold a worker while the provider queues."""
-    results: Dict[str, BatchResult] = {spec.custom_id: BatchResult(spec.custom_id) for spec in specs}
+    results: dict[str, BatchResult] = {spec.custom_id: BatchResult(spec.custom_id) for spec in specs}
     batch_id = await _submit_chunk(
         client, specs, model, reasoning_effort, max_output_tokens, on_event
     )
@@ -312,15 +312,15 @@ async def _run_chunk(
 
 
 async def collect_batches(
-    batch_ids: List[str], on_event: BatchEventHook = None
-) -> Dict[str, BatchResult]:
+    batch_ids: list[str], on_event: BatchEventHook = None
+) -> dict[str, BatchResult]:
     """Reattach to already-submitted batches (e.g. after a worker died mid-wait)
     and wait them out instead of resubmitting; results are keyed by whatever
     custom_ids the batches carry."""
     client = _client()
     if not client:
         return {}
-    results: Dict[str, BatchResult] = {}
+    results: dict[str, BatchResult] = {}
     for batch_id in batch_ids:
         try:
             batch = await _wait_for_batch(client, batch_id, on_event)
@@ -337,12 +337,12 @@ async def collect_batches(
 
 
 async def submit_responses_batches(
-    specs: List[BatchSpec],
+    specs: list[BatchSpec],
     model: str,
     reasoning_effort: str,
     max_output_tokens: int,
     on_event: BatchEventHook = None,
-) -> List[str]:
+) -> list[str]:
     """Creates every wave and returns their provider ids WITHOUT waiting.
 
     Splitting submission from collection is what lets a caller release its
@@ -356,7 +356,7 @@ async def submit_responses_batches(
         return []
     chunks = _chunk_specs(specs, max_output_tokens)
     logger.info(f"Submitting {len(specs)} requests as {len(chunks)} batch(es)")
-    ids: List[str] = []
+    ids: list[str] = []
     for index, chunk in enumerate(chunks, start=1):
         try:
             batch = await _submit_chunk(
@@ -371,13 +371,13 @@ async def submit_responses_batches(
     return ids
 
 
-async def batch_states(batch_ids: List[str]) -> Dict[str, str]:
+async def batch_states(batch_ids: list[str]) -> dict[str, str]:
     """Provider status per batch id. A status call only - it never downloads
     output - so polling many batches costs about as much as polling one."""
     client = _client()
     if not client:
         return {}
-    states: Dict[str, str] = {}
+    states: dict[str, str] = {}
     for batch_id in batch_ids:
         try:
             batch = await client.batches.retrieve(batch_id)
@@ -392,12 +392,12 @@ def is_terminal(state: str) -> bool:
 
 
 async def run_responses_batch(
-    specs: List[BatchSpec],
+    specs: list[BatchSpec],
     model: str,
     reasoning_effort: str,
     max_output_tokens: int,
     on_event: BatchEventHook = None,
-) -> Dict[str, BatchResult]:
+) -> dict[str, BatchResult]:
     client = _client()
     if not client:
         return {spec.custom_id: BatchResult(spec.custom_id, error="no api key") for spec in specs}
@@ -418,7 +418,7 @@ async def run_responses_batch(
     # slowest few waves.
     sem = asyncio.Semaphore(max(1, BATCH_WAVE_CONCURRENCY))
 
-    async def run_wave(index: int, chunk: List[BatchSpec]) -> Dict[str, BatchResult]:
+    async def run_wave(index: int, chunk: list[BatchSpec]) -> dict[str, BatchResult]:
         async with sem:
             logger.info(f"Batch wave {index}/{len(chunks)}: {len(chunk)} requests")
             return await _run_chunk(
@@ -430,7 +430,7 @@ async def run_responses_batch(
         return_exceptions=True,
     )
 
-    results: Dict[str, BatchResult] = {}
+    results: dict[str, BatchResult] = {}
     for index, wave in enumerate(waves, start=1):
         if isinstance(wave, BaseException):
             # One wave failing must not discard the ones that succeeded and

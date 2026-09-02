@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import logging
 import os
-from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from api import ai, db, events
 from api.auth import AuthedUser, require_user
+
+logger = logging.getLogger("jobtracker_api")
 
 router = APIRouter(prefix="/admin")
 
@@ -46,13 +48,13 @@ def require_admin(user: AuthedUser = Depends(require_user)) -> AuthedUser:
 
 
 def _where(
-    check_type: Optional[str],
-    status: Optional[str],
-    config: Optional[str],
-    url: Optional[str],
-    q: Optional[str],
+    check_type: str | None,
+    status: str | None,
+    config: str | None,
+    url: str | None,
+    q: str | None,
     deep: bool = False,
-    sources: Optional[str] = None,
+    sources: str | None = None,
 ) -> tuple[str, dict]:
     clauses = []
     params: dict = {}
@@ -87,12 +89,12 @@ def _where(
 
 
 class PresetBody(BaseModel):
-    name: Optional[str] = Field(default=None, min_length=1, max_length=80)
-    description: Optional[str] = Field(default=None, max_length=500)
-    prompt: Optional[str] = Field(default=None, min_length=1, max_length=8000)
-    on_ambiguous: Optional[str] = None
-    fail_closed: Optional[bool] = None
-    active: Optional[bool] = None
+    name: str | None = Field(default=None, min_length=1, max_length=80)
+    description: str | None = Field(default=None, max_length=500)
+    prompt: str | None = Field(default=None, min_length=1, max_length=8000)
+    on_ambiguous: str | None = None
+    fail_closed: bool | None = None
+    active: bool | None = None
 
 
 @router.get("/filter-presets")
@@ -212,10 +214,10 @@ def admin_list_sources(user: AuthedUser = Depends(require_admin)):
 
 
 class SourceBody(BaseModel):
-    name: Optional[str] = Field(default=None, min_length=1, max_length=80)
-    listings_url: Optional[str] = Field(default=None, max_length=1000)
-    description: Optional[str] = Field(default=None, max_length=500)
-    active: Optional[bool] = None
+    name: str | None = Field(default=None, min_length=1, max_length=80)
+    listings_url: str | None = Field(default=None, max_length=1000)
+    description: str | None = Field(default=None, max_length=500)
+    active: bool | None = None
 
 
 @router.post("/sources")
@@ -339,10 +341,10 @@ def user_detail(user_id: int, user: AuthedUser = Depends(require_admin)):
 
 @router.get("/tasks")
 def list_tasks(
-    status: Optional[str] = None,
-    kind: Optional[str] = None,
+    status: str | None = None,
+    kind: str | None = None,
     limit: int = 100,
-    before_id: Optional[int] = None,
+    before_id: int | None = None,
     user: AuthedUser = Depends(require_admin),
 ):
     # id-cursor pagination: stable under new tasks arriving while the admin
@@ -410,20 +412,19 @@ def create_invite(body: InviteBody, user: AuthedUser = Depends(require_admin)):
         raise HTTPException(
             503, detail={"code": "INVITES_NOT_CONFIGURED", "message": "authentik invite env missing"}
         )
-    from api import mail
-
     import datetime as _dt
-
     import re as _re
 
+    from api import mail
+
     email = body.email.strip().lower()
-    expires = (_dt.datetime.now(_dt.timezone.utc) + _dt.timedelta(days=7)).isoformat()
+    expires = (_dt.datetime.now(_dt.UTC) + _dt.timedelta(days=7)).isoformat()
     slug = _re.sub(r"[^a-z0-9]+", "-", email).strip("-")
     with _authentik_client() as ak:
         resp = ak.post(
             "/stages/invitation/invitations/",
             json={
-                "name": f"jobtracker-{slug}-{int(_dt.datetime.now().timestamp())}",
+                "name": f"jobtracker-{slug}-{int(_dt.datetime.now(_dt.UTC).timestamp())}",
                 "expires": expires,
                 "fixed_data": {"email": email},
                 "single_use": True,
@@ -443,7 +444,9 @@ def create_invite(body: InviteBody, user: AuthedUser = Depends(require_admin)):
             mail.send_invite(email, invite_url)
             emailed = True
         except Exception:
-            pass
+            # The invite itself succeeded; only delivery failed. Report it
+            # rather than leaving emailed=False unexplained.
+            logger.exception(f"invite created but email to {email} failed")
     return {"ok": True, "invite_url": invite_url, "expires": expires, "emailed": emailed, "pk": inv["pk"]}
 
 
@@ -482,7 +485,7 @@ def revoke_invite(pk: str, user: AuthedUser = Depends(require_admin)):
 
 
 class CancelTasksBody(BaseModel):
-    ids: List[int] = Field(min_length=1, max_length=200)
+    ids: list[int] = Field(min_length=1, max_length=200)
 
 
 @router.post("/tasks/cancel")
@@ -560,7 +563,7 @@ def list_workers(user: AuthedUser = Depends(require_admin)):
 def query_options(user: AuthedUser = Depends(require_admin)):
     """Filter vocabularies generated from live data, so the admin dropdowns
     can never drift from what actually exists."""
-    def col(sql: str, key: str) -> List[str]:
+    def col(sql: str, key: str) -> list[str]:
         return [r[key] for r in db.query(sql) if r[key]]
 
     return {
@@ -630,6 +633,7 @@ async def run_single_check(body: RunCheckBody, user: AuthedUser = Depends(requir
     re-derives from it immediately — no downstream re-run needed, since
     visibility is a read-time predicate rather than stored derived state."""
     from api import verdicts as _verdicts
+    from api.worker import FilterVerdict, JobClosedLean
     from core.filters import build_custom_instructions
     from core.pittcsc_simplify import (
         CLEARANCE_INSTRUCTIONS,
@@ -637,7 +641,6 @@ async def run_single_check(body: RunCheckBody, user: AuthedUser = Depends(requir
         ClearanceRequirementResponse,
         JobClosedResponse,
     )
-    from api.worker import FilterVerdict, JobClosedLean
 
     job = db.query_one("SELECT id, url, company, title FROM jobs WHERE id = %s", (body.job_id,))
     if not job:
@@ -654,7 +657,7 @@ async def run_single_check(body: RunCheckBody, user: AuthedUser = Depends(requir
             p.requires_clearance_or_restrictions,
             p.reason or (p.restriction_type or ""),
         )
-    elif check.startswith("filter:") or check.startswith("hash:"):
+    elif check.startswith(("filter:", "hash:")):
         if check.startswith("hash:"):
             # Verdicts are cached by prompt_hash, not by filter id — several
             # users' filters can share one hash. Any of them reproduces the
@@ -783,8 +786,8 @@ async def run_health_check(user: AuthedUser = Depends(require_admin)):
 @router.get("/failures")
 def failure_breakdown(
     hours: int = 24,
-    worker: Optional[str] = None,
-    host: Optional[str] = None,
+    worker: str | None = None,
+    host: str | None = None,
     user: AuthedUser = Depends(require_admin),
 ):
     """Failed checks pivoted by fleet host and URL host: one worker failing on
@@ -826,7 +829,7 @@ def failure_breakdown(
 
 
 class IngestBody(BaseModel):
-    sources: Optional[List[str]] = None
+    sources: list[str] | None = None
 
 
 @router.post("/ingest")
@@ -856,9 +859,9 @@ def trigger_ingest(body: IngestBody, user: AuthedUser = Depends(require_admin)):
 
 
 class SourceGroupBody(BaseModel):
-    members: Optional[List[str]] = None
-    description: Optional[str] = Field(default=None, max_length=500)
-    active: Optional[bool] = None
+    members: list[str] | None = None
+    description: str | None = Field(default=None, max_length=500)
+    active: bool | None = None
 
 
 @router.post("/source-groups/{name}")
@@ -1036,11 +1039,11 @@ def resolve_report(
 
 
 class JobCorrection(BaseModel):
-    company: Optional[str] = None
-    title: Optional[str] = None
-    locations: Optional[List[str]] = None
-    terms: Optional[List[str]] = None
-    active: Optional[bool] = None
+    company: str | None = None
+    title: str | None = None
+    locations: list[str] | None = None
+    terms: list[str] | None = None
+    active: bool | None = None
 
 
 @router.patch("/jobs/{job_id}")
@@ -1077,8 +1080,8 @@ def reparse_job(job_id: int, user: AuthedUser = Depends(require_admin)):
 
 
 class GroupBudgetPut(BaseModel):
-    weekly_token_budget: Optional[int] = Field(default=None, ge=0)
-    allowed_models: Optional[List[str]] = Field(default=None, max_length=50)
+    weekly_token_budget: int | None = Field(default=None, ge=0)
+    allowed_models: list[str] | None = Field(default=None, max_length=50)
 
 
 @router.get("/group-budgets")
@@ -1135,13 +1138,13 @@ def delete_group_budget(group_name: str, user: AuthedUser = Depends(require_admi
 
 @router.get("/queries")
 def list_queries(
-    check_type: Optional[str] = None,
-    status: Optional[str] = None,
-    config: Optional[str] = None,
-    url: Optional[str] = None,
-    q: Optional[str] = None,
+    check_type: str | None = None,
+    status: str | None = None,
+    config: str | None = None,
+    url: str | None = None,
+    q: str | None = None,
     deep: bool = False,
-    sources: Optional[str] = None,
+    sources: str | None = None,
     sort: str = "id",
     dir: str = "desc",
     page: int = 1,
@@ -1178,7 +1181,7 @@ def get_query(query_id: int, user: AuthedUser = Depends(require_admin)):
 
 
 class DeleteQueries(BaseModel):
-    ids: List[int] = Field(min_length=1, max_length=10000)
+    ids: list[int] = Field(min_length=1, max_length=10000)
 
 
 @router.post("/queries/delete")
@@ -1191,9 +1194,9 @@ def delete_queries(body: DeleteQueries, user: AuthedUser = Depends(require_admin
 
 @router.get("/jobs")
 def list_jobs(
-    q: Optional[str] = None,
-    config: Optional[str] = None,
-    verdict: Optional[str] = None,
+    q: str | None = None,
+    config: str | None = None,
+    verdict: str | None = None,
     page: int = 1,
     page_size: int = 50,
     user: AuthedUser = Depends(require_admin),
@@ -1276,7 +1279,7 @@ def job_timeline(url: str, user: AuthedUser = Depends(require_admin)):
 
 @router.get("/options")
 def options(user: AuthedUser = Depends(require_admin)):
-    def distinct(col: str) -> List[str]:
+    def distinct(col: str) -> list[str]:
         return [
             r["v"]
             for r in db.query(

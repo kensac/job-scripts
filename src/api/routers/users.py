@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from typing import List, Optional
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -58,16 +57,16 @@ class ModelEntry(BaseModel):
 
 class ProviderEntry(BaseModel):
     provider: str
-    default_model: Optional[str]
-    models: List[ModelEntry]
-    params: List[str]
+    default_model: str | None
+    models: list[ModelEntry]
+    params: list[str]
 
 
 class ModelsResponse(BaseModel):
-    providers: List[ProviderEntry]
-    owner_key_models: List[str]
-    key_source: Optional[str]
-    addable_providers: List[str]
+    providers: list[ProviderEntry]
+    owner_key_models: list[str]
+    key_source: str | None
+    addable_providers: list[str]
 
 
 def _provider_entry(provider: str, models: list) -> dict:

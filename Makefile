@@ -1,6 +1,6 @@
 export PYTHONPATH := src
 
-.PHONY: api worker check test schema migrate revision db-up db-down
+.PHONY: api worker check lint fmt test schema migrate revision db-up db-down
 
 api:            ## run the API locally
 	uvicorn api.app:app --port 8000 --reload
@@ -8,8 +8,17 @@ api:            ## run the API locally
 worker:         ## run a worker locally
 	python -m api.worker
 
-check:          ## compile-check every source file
-	python -m compileall -q src && echo OK
+check:          ## everything CI gates on: lint, format, compile, tests
+	ruff check src tests
+	ruff format --check src tests
+	python -m compileall -q src
+	pytest -q tests
+
+lint:           ## report lint findings (add ARGS=--fix to apply)
+	ruff check src tests $(ARGS)
+
+fmt:            ## format the codebase
+	ruff format src tests
 
 test:           ## run the test suite
 	pytest -q tests

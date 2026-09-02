@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import atexit
 import datetime
+import logging
 import os
 import socket
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import dotenv
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
+
+logger = logging.getLogger("jobtracker_store")
 
 dotenv.load_dotenv()
 
@@ -55,8 +58,8 @@ atexit.register(_pool.close)
 # Read-through caches populated by prefetch() to avoid a network round-trip per
 # url. Each maps url -> latest decided row (or None for a confirmed miss). Only
 # `status` is read off these rows, so the heavy text columns are left out.
-_latest_cache: Dict[str, Dict[str, Optional[Dict[str, Any]]]] = {}
-_custom_cache: Dict[str, Dict[str, Optional[Dict[str, Any]]]] = {}
+_latest_cache: dict[str, dict[str, dict[str, Any] | None]] = {}
+_custom_cache: dict[str, dict[str, dict[str, Any] | None]] = {}
 
 # Heavy text columns no caller reads off a verdict row; omitted to save bandwidth
 # and filled back as None so a cached row keeps the same shape as a full row.
@@ -64,7 +67,7 @@ _PREFETCH_OMIT = ("input_content", "instructions", "parsed_json")
 _PREFETCH_COLS = ["id"] + [c for c in _INSERT_COLUMNS if c not in _PREFETCH_OMIT]
 
 
-def _prefetch_row(r: Dict[str, Any]) -> Dict[str, Any]:
+def _prefetch_row(r: dict[str, Any]) -> dict[str, Any]:
     d = dict(r)
     for c in _PREFETCH_OMIT:
         d[c] = None
@@ -72,7 +75,7 @@ def _prefetch_row(r: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def prefetch(
-    urls: List[str],
+    urls: list[str],
     check_types: tuple = ("closed", "clearance"),
     prompt_hashes: tuple = (),
 ) -> None:
@@ -165,7 +168,11 @@ def init_db() -> None:
                     f"ON ai_queries USING gin ({col} gin_trgm_ops)"
                 )
     except Exception:
-        pass
+        # Trigram indexes need the pg_trgm extension, which needs superuser.
+        # Their absence only makes admin search slower, so a database that
+        # cannot create them must still start - but say so rather than
+        # swallowing it, or a missing index looks like a mystery slowdown.
+        logger.warning("could not create trigram indexes (pg_trgm unavailable?)")
 
 
 def add_ai_result(
@@ -173,27 +180,27 @@ def add_ai_result(
     status: str,
     reason: str = "",
     check_type: str = "",
-    prompt_tokens: Optional[int] = None,
-    completion_tokens: Optional[int] = None,
-    total_tokens: Optional[int] = None,
-    cached_tokens: Optional[int] = None,
-    reasoning_tokens: Optional[int] = None,
-    model: Optional[str] = None,
-    reasoning_effort: Optional[str] = None,
-    filter_name: Optional[str] = None,
-    prompt_hash: Optional[str] = None,
-    company: Optional[str] = None,
-    job_title: Optional[str] = None,
-    instructions: Optional[str] = None,
-    input_content: Optional[str] = None,
-    parsed_json: Optional[str] = None,
-    duration_ms: Optional[int] = None,
-    error: Optional[str] = None,
-    config_name: Optional[str] = None,
-    batch_id: Optional[str] = None,
+    prompt_tokens: int | None = None,
+    completion_tokens: int | None = None,
+    total_tokens: int | None = None,
+    cached_tokens: int | None = None,
+    reasoning_tokens: int | None = None,
+    model: str | None = None,
+    reasoning_effort: str | None = None,
+    filter_name: str | None = None,
+    prompt_hash: str | None = None,
+    company: str | None = None,
+    job_title: str | None = None,
+    instructions: str | None = None,
+    input_content: str | None = None,
+    parsed_json: str | None = None,
+    duration_ms: int | None = None,
+    error: str | None = None,
+    config_name: str | None = None,
+    batch_id: str | None = None,
 ) -> None:
     row = {
-        "created_at": datetime.datetime.now(datetime.timezone.utc),
+        "created_at": datetime.datetime.now(datetime.UTC),
         "config_name": config_name or os.environ.get("CONFIG_NAME"),
         "url": url,
         "check_type": check_type,
@@ -233,7 +240,7 @@ def add_ai_result(
             csub.pop(prompt_hash, None)
 
 
-def get_ai_result(url: str) -> Optional[Dict[str, Any]]:
+def get_ai_result(url: str) -> dict[str, Any] | None:
     with _pool.connection() as conn:
         row = conn.execute(
             "SELECT * FROM ai_queries WHERE url = %s ORDER BY id DESC LIMIT 1", (url,)
@@ -241,7 +248,7 @@ def get_ai_result(url: str) -> Optional[Dict[str, Any]]:
     return dict(row) if row else None
 
 
-def get_latest(url: str, check_type: str) -> Optional[Dict[str, Any]]:
+def get_latest(url: str, check_type: str) -> dict[str, Any] | None:
     """Latest *decided* (passed/rejected) result for a url+check_type.
 
     Ignores 'failed' rows so failed checks are retried rather than cached.
@@ -259,8 +266,8 @@ def get_latest(url: str, check_type: str) -> Optional[Dict[str, Any]]:
 
 
 def get_custom_result(
-    url: str, prompt_hash: str, model: Optional[str] = None
-) -> Optional[Dict[str, Any]]:
+    url: str, prompt_hash: str, model: str | None = None
+) -> dict[str, Any] | None:
     """Latest decided custom result for a url under a specific filter (by hash).
 
     With `model`, only verdicts produced by that model count (bypasses the
@@ -282,7 +289,7 @@ def get_custom_result(
     return dict(row) if row else None
 
 
-def get_content(url: str) -> Optional[str]:
+def get_content(url: str) -> str | None:
     """Most recent non-empty raw scraped content stored for a url.
 
     Excludes 'custom' rows: those store the wrapped _build_custom_input() text
@@ -324,7 +331,7 @@ def is_url_failed(url: str) -> bool:
     return result is not None and result.get("status") == "failed"
 
 
-def _latest_per_url_where(condition: str, params: tuple) -> List[Dict[str, Any]]:
+def _latest_per_url_where(condition: str, params: tuple) -> list[dict[str, Any]]:
     with _pool.connection() as conn:
         rows = conn.execute(
             "SELECT * FROM ai_queries q WHERE id = "
@@ -335,11 +342,11 @@ def _latest_per_url_where(condition: str, params: tuple) -> List[Dict[str, Any]]
     return [dict(row) for row in rows]
 
 
-def get_all_failed_jobs() -> List[Dict[str, Any]]:
+def get_all_failed_jobs() -> list[dict[str, Any]]:
     return _latest_per_url_where("status = %s", ("failed",))
 
 
-def get_all_custom_filter_jobs() -> List[Dict[str, Any]]:
+def get_all_custom_filter_jobs() -> list[dict[str, Any]]:
     return _latest_per_url_where("check_type = %s", ("custom",))
 
 

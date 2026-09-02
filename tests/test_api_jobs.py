@@ -90,7 +90,7 @@ def test_subscribed_closed_passed_no_filters_is_visible(client, user_headers):
 
 
 def test_unsubscribed_source_invisible_then_user_jobs_row_overrides(client, user_headers):
-    uid = _uid(user_headers)
+    _uid(user_headers)
     jid = _insert_job("src-b", "https://x.test/b1")
     _pass_closed("https://x.test/b1")
 
@@ -255,7 +255,9 @@ def test_patch_status_autofills_date_applied(client, user_headers):
     jid = _insert_job("src-af", "https://x.test/af1")
     resp = client.patch(f"/v1/user/jobs/{jid}", json={"status": "Applied"}, headers=user_headers)
     assert resp.status_code == 200
-    today = datetime.date.today()
+    # UTC, matching the server: the container's local date is an arbitrary
+    # timezone to decide a user's "today" in.
+    today = datetime.datetime.now(datetime.UTC).date()
     assert resp.json()["autofilled"] == {"date_applied": today.isoformat()}
     row = db.query_one("SELECT date_applied FROM user_jobs WHERE user_id = %s AND job_id = %s", (uid, jid))
     assert row["date_applied"] == today

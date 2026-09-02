@@ -4,7 +4,7 @@ import datetime
 import logging
 import random
 import time
-from typing import TYPE_CHECKING, List
+from typing import TYPE_CHECKING
 
 from psycopg import errors
 
@@ -29,7 +29,7 @@ def _ensure_table() -> None:
         logger.info("jobs catalog table missing; skipping catalog upserts")
 
 
-def upsert_postings(postings: List["JobPosting"], source: str) -> int:
+def upsert_postings(postings: list[JobPosting], source: str) -> int:
     _ensure_table()
     if not _TABLE_READY or not postings:
         return 0
@@ -43,7 +43,7 @@ def upsert_postings(postings: List["JobPosting"], source: str) -> int:
             p.terms,
             source,
             p.active,
-            datetime.datetime.fromtimestamp(p.date_posted, tz=datetime.timezone.utc)
+            datetime.datetime.fromtimestamp(p.date_posted, tz=datetime.UTC)
             if p.date_posted
             else None,
         )
@@ -62,13 +62,12 @@ def upsert_postings(postings: List["JobPosting"], source: str) -> int:
 _BATCH = 500
 
 
-def _upsert_batch(batch: List[tuple], retries: int = 3) -> None:
+def _upsert_batch(batch: list[tuple], retries: int = 3) -> None:
     for attempt in range(retries):
         try:
-            with pool.connection() as conn:
-                with conn.cursor() as cur:
-                    cur.executemany(
-                        """
+            with pool.connection() as conn, conn.cursor() as cur:
+                cur.executemany(
+                    """
                 INSERT INTO jobs (url, raw_url, company, title, locations, terms, source, active, date_posted)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (url) DO UPDATE SET
@@ -91,6 +90,6 @@ def _upsert_batch(batch: List[tuple], retries: int = 3) -> None:
         except errors.DeadlockDetected:
             if attempt == retries - 1:
                 raise
-            delay = random.uniform(0.2, 1.0) * (attempt + 1)
+            delay = random.uniform(0.2, 1.0) * (attempt + 1)  # noqa: S311 - retry jitter
             logger.warning(f"Catalog upsert deadlock, retrying in {delay:.1f}s")
             time.sleep(delay)

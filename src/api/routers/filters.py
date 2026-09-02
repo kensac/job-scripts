@@ -113,12 +113,12 @@ def patch_filter(filter_id: int, body: FilterPatch, user: AuthedUser = Depends(r
             f"WHERE id = %(fid)s AND user_id = %(uid)s RETURNING {_FILTER_COLS}",
             {"fid": filter_id, "uid": user.id, **fields},
         )
-    except UniqueViolation:
+    except UniqueViolation as exc:
         # create_filter pre-checks the name; renaming has to answer the same
         # way rather than letting user_filters_user_id_name_key escape as a 500.
         raise HTTPException(
             409, detail={"code": "DUPLICATE_NAME", "message": "filter name already exists"}
-        )
+        ) from exc
     assert row is not None
     task_id, blocked = (None, None)
     hash_changed = row["prompt_hash"] != existing["prompt_hash"]
@@ -213,10 +213,14 @@ async def improve_prompt(body: ImprovePromptRequest, user: AuthedUser = Depends(
     ent = budget.get_entitlement(user)
     try:
         cfg = budget.resolve_ai_config(user.id, ent)
-    except PermissionError:
-        raise HTTPException(402, detail={"code": "BUDGET_EXCEEDED", "message": "weekly budget exhausted"})
-    except LookupError:
-        raise HTTPException(402, detail={"code": "NO_API_KEY", "message": "add an API key to use AI features"})
+    except PermissionError as exc:
+        raise HTTPException(
+            402, detail={"code": "BUDGET_EXCEEDED", "message": "weekly budget exhausted"}
+        ) from exc
+    except LookupError as exc:
+        raise HTTPException(
+            402, detail={"code": "NO_API_KEY", "message": "add an API key to use AI features"}
+        ) from exc
 
     if cfg.key_source == "owner":
         cfg.model = IMPROVE_MODEL if IMPROVE_MODEL in ai.OWNER_KEY_MODELS else cfg.model

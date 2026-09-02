@@ -4,7 +4,6 @@ import hmac
 import logging
 import os
 from dataclasses import dataclass
-from typing import List
 
 from fastapi import Header, HTTPException
 
@@ -21,7 +20,7 @@ class AuthedUser:
     sub: str
     email: str
     name: str
-    groups: List[str]
+    groups: list[str]
 
 
 def require_service(x_service_token: str = Header(default="")) -> None:

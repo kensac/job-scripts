@@ -218,8 +218,9 @@ def test_batch_jobs_drilldown_reports_per_job_cost(client, admin_headers):
 
 
 def _content_row(url, reason, when_days_ago):
-    from core.store import add_ai_result
     import datetime
+
+    from core.store import add_ai_result
     add_ai_result(url, "passed", reason, "content", input_content="X" * 400,
                   config_name="content-cache")
     stamp = (datetime.datetime.now() - datetime.timedelta(days=when_days_ago)).isoformat()
@@ -369,6 +370,7 @@ def test_rate_spike_ignores_expiring_rechecks_but_catches_fresh_misclassificatio
     real closures, but coverage changing rather than anything breaking. Only
     freshly-seen jobs being written off means something upstream is wrong."""
     import datetime
+
     from api import health
     from core.store import add_ai_result
 

@@ -3,10 +3,8 @@ from __future__ import annotations
 import hashlib
 import re
 
+from api import ai, db, fetching, ssrf, worker
 from api import criteria as crit
-from api import ai, ssrf
-from api import db
-from api import fetching, worker
 from core import filters
 
 # ---------------------------------------------------------------------------

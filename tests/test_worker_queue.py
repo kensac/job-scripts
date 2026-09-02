@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from api import ai, db, fetching, verdicts, worker
+from api import ai, db, fetching, worker
 from core.store import add_ai_result
 
 # ---------------------------------------------------------------------------
@@ -410,9 +410,9 @@ def test_worker_status_report_upserts():
 
 @pytest.mark.asyncio
 async def test_verify_new_records_both_verdicts(monkeypatch):
-    from api import worker, db
-    from core.store import add_ai_result
+    from api import db, worker
     from core import batch as core_batch
+    from core.store import add_ai_result
 
     db.execute(
         "INSERT INTO jobs (url, source, company, title) VALUES ('https://v.test/1', 's', 'Acme', 'SWE')"

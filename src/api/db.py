@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import atexit
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import dotenv
 from psycopg.rows import dict_row
@@ -104,12 +104,12 @@ def _seed_sources() -> None:
         )
 
 
-def query(sql: str, params: Any = None) -> List[Dict[str, Any]]:
+def query(sql: str, params: Any = None) -> list[dict[str, Any]]:
     with pool.connection() as conn:
         return [dict(r) for r in conn.execute(sql, params).fetchall()]
 
 
-def query_one(sql: str, params: Any = None) -> Optional[Dict[str, Any]]:
+def query_one(sql: str, params: Any = None) -> dict[str, Any] | None:
     with pool.connection() as conn:
         row = conn.execute(sql, params).fetchone()
     return dict(row) if row else None

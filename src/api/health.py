@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List
+from typing import Any
 
 from api import db
 
@@ -41,13 +41,13 @@ def _pct(part: int, whole: int) -> float:
     return (part / whole) if whole else 0.0
 
 
-def detect() -> List[Dict[str, Any]]:
+def detect() -> list[dict[str, Any]]:
     """Compares the last 24h against the preceding week, per source, looking for
     the shapes that mean 'something upstream changed' rather than 'the job
     market moved'. Everything here is deliberately relative to each source's
     own baseline — absolute thresholds would fire constantly on sources that
     are legitimately mostly-closed or legitimately short."""
-    found: List[Dict[str, Any]] = []
+    found: list[dict[str, Any]] = []
 
     # 1. The ATS text path silently breaking. When a resolver stops returning
     #    usable text we fall back to chromium, so the share collapses long
@@ -203,12 +203,12 @@ def detect() -> List[Dict[str, Any]]:
     return found
 
 
-def record(found: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def record(found: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Upserts open alerts and auto-resolves ones that stopped firing. Returns
     only the newly-opened alerts, so notification never repeats for a condition
     that is merely still true."""
     seen = {(f["kind"], f["subject"]) for f in found}
-    fresh: List[Dict[str, Any]] = []
+    fresh: list[dict[str, Any]] = []
     for f in found:
         row = db.query_one(
             """

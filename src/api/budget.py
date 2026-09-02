@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Optional
 
 from api import crypto, db
 from api.auth import AuthedUser
@@ -10,13 +9,13 @@ from api.auth import AuthedUser
 @dataclass
 class Entitlement:
     owner_key: bool
-    weekly_token_budget: Optional[int]
+    weekly_token_budget: int | None
     spent_this_week: int
     has_byo_key: bool
-    groups: List[str] = None  # type: ignore[assignment]
+    groups: list[str] = None  # type: ignore[assignment]
 
     @property
-    def key_source(self) -> Optional[str]:
+    def key_source(self) -> str | None:
         if self.has_byo_key:
             return "byo"
         if self.owner_key and (
@@ -27,7 +26,7 @@ class Entitlement:
         return None
 
 
-def _owner_budget(groups: List[str]) -> tuple[bool, Optional[int]]:
+def _owner_budget(groups: list[str]) -> tuple[bool, int | None]:
     if not groups:
         return False, None
     rows = db.query(
@@ -67,7 +66,7 @@ def get_entitlement(user: AuthedUser) -> Entitlement:
     )
 
 
-def owner_allowed_models(groups: List[str]) -> List[str]:
+def owner_allowed_models(groups: list[str]) -> list[str]:
     """Models this user may run on the owner key: union across their tiers.
     A tier with an explicit allowed_models list grants exactly those; a NULL
     tier grants the default policy for its budget class. Everything is
@@ -98,7 +97,6 @@ def owner_allowed_models(groups: List[str]) -> List[str]:
 
 def resolve_ai_config(user_id: int, entitlement: Entitlement):
     """Returns an ai.AIConfig or raises LookupError / PermissionError."""
-    import os
 
     from api import ai
 
@@ -152,7 +150,7 @@ def record_usage(
     user_id: int,
     key_source: str,
     purpose: str,
-    model: Optional[str],
+    model: str | None,
     prompt_tokens: int,
     completion_tokens: int,
     total_tokens: int,

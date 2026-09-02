@@ -1,0 +1,64 @@
+[tool.ruff]
+src = ["src"]
+line-length = 100
+target-version = "py313"
+extend-exclude = ["alembic/versions", "backups"]
+
+[tool.ruff.lint]
+# Chosen for defect-finding, not style. Every rule here has either caught a
+# real bug in this codebase or guards a class of bug we have actually shipped:
+#   DTZ  - naive datetime.now() wrote ai_queries.created_at in local time and
+#          shifted every window query by the container's UTC offset.
+#   ASYNC- synchronous work inside async def stalls the worker's event loop.
+#   F    - the missing UniqueViolation import that `compileall` waved through.
+#   B    - mutable defaults, unused loop vars, except-without-raise.
+#   S    - subprocess/SSRF/secret shapes; we shipped a real SSRF.
+#   SIM/PIE/RUF - small correctness-adjacent simplifications.
+select = ["E4", "E7", "E9", "F", "I", "B", "S", "ASYNC", "DTZ", "SIM", "PIE", "RUF", "PLW", "UP"]
+
+# UP* (pep585/604 modernisation) is on. It is cosmetic, but a codebase that
+# mixes typing.Dict with dict makes the inconsistency itself a thing to think
+# about at every edit. Applied as one mechanical commit so it is reviewable
+# separately from behaviour.
+ignore = [
+    # FastAPI's whole idiom is `x = Depends(...)` / `Query(...)` in defaults.
+    "B008",
+    # Broad excepts are load-bearing here: a scrape or an AI call failing must
+    # not kill a sweep. Reviewed individually rather than banned.
+    "BLE001",
+    # asserts are used as invariant checks after db.query_one, not as
+    # validation of untrusted input.
+    "S101",
+    # f-string SQL. Audited: every interpolated fragment is a whitelist
+    # (_SORTABLE, column-name constants) or a re.escape'd literal - there is
+    # no user-controlled path into a query. Flagging 31 verified-safe sites
+    # would train us to skip the finding when a real one appears.
+    "S608",
+    # Assigning a lambda is how the check dispatch tables read most clearly
+    # (verdict_of = lambda p: ...); a def per branch is worse here.
+    "E731",
+    # Module-level mutable state in the worker is deliberate (_current_task_id
+    # for the signal handler); the alternative is a global object wrapper.
+    "PLW0603",
+    # `timeout` is our own parameter name on AI wrappers, not asyncio.timeout
+    # misuse; renaming it would change a public-ish signature for a lint.
+    "ASYNC109",
+    # Nested ifs here read as "guard, then condition" and flattening them makes
+    # the two separate concerns harder to see.
+    "SIM102",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# The retired Google-Sheets pipeline is deprecated and frozen; linting it
+# produces churn in code we are not changing.
+"src/core/pittcsc_simplify.py" = ["ALL"]
+"src/trackers/*" = ["ALL"]
+"src/actalent/*" = ["ALL"]
+"src/peak/*" = ["ALL"]
+# Tests legitimately use hardcoded credentials-shaped strings and sleeps.
+# conftest deliberately shells out to initdb/pg_ctl to build a scratch
+# database; the arguments are literals, not untrusted input.
+"tests/*" = ["S105", "S106", "S311", "ASYNC251", "S603", "S607", "PLW1510", "DTZ005", "DTZ011"]
+
+[tool.ruff.format]
+quote-style = "double"
