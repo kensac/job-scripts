@@ -56,9 +56,37 @@ class ImportedMessage:
     body_text: str | None = None
 
 
+def _strip_nul(text: str) -> str:
+    """Remove NUL bytes.
+
+    Postgres text columns cannot contain 0x00 and reject the whole INSERT if
+    one appears - "PostgreSQL text fields cannot contain NUL (0x00) bytes",
+    with no indication of which message or which field. Real mailboxes do
+    contain them: mis-declared encodings, binary fragments in malformed
+    multipart bodies, and truncated attachments all produce them.
+
+    One NUL anywhere would therefore have failed the entire 38,685-message
+    import, in a 1000-row batch, hours in. Found by running the real archive
+    against a scratch database before touching production.
+    """
+    return text.replace("\x00", "")
+
+
 def _clean(text: str) -> str:
-    text = _WS.sub(" ", text.replace("\r\n", "\n").replace("\r", "\n"))
+    text = _WS.sub(" ", _strip_nul(text).replace("\r\n", "\n").replace("\r", "\n"))
     return _BLANKS.sub("\n\n", text).strip()
+
+
+def _clean_header(value: str | None) -> str | None:
+    """Headers reach the database too, and carry the same hazard.
+
+    Subject lines in particular: a mis-declared charset in an encoded-word
+    decodes to bytes that can include NUL.
+    """
+    if value is None:
+        return None
+    cleaned = _strip_nul(value).strip()
+    return cleaned or None
 
 
 def _html_to_text(html: str) -> str:
@@ -127,13 +155,15 @@ def _from_message(msg: Message, *, source: str, fallback_id: str) -> ImportedMes
         # Message-ID is the only cross-archive stable identity available. The
         # four .olm exports overlap heavily with each other and with Takeout,
         # so without it the same message imports many times.
-        provider_message_id=(str(msg.get("Message-ID", "") or "").strip() or fallback_id),
+        provider_message_id=(_clean_header(str(msg.get("Message-ID", "") or "")) or fallback_id),
         source=source,
-        provider_thread_id=(str(msg.get("References", "") or "").split() or [None])[0],
-        from_email=(from_email or None),
-        from_name=(from_name or None),
-        to_emails=recipients,
-        subject=(str(msg.get("Subject", "") or "").strip() or None),
+        provider_thread_id=_clean_header(
+            (str(msg.get("References", "") or "").split() or [None])[0]
+        ),
+        from_email=_clean_header(from_email),
+        from_name=_clean_header(from_name),
+        to_emails=[r for r in (_clean_header(a) for a in recipients) if r],
+        subject=_clean_header(str(msg.get("Subject", "") or "")),
         sent_at=_sent_at(str(msg.get("Date", "") or "") or None),
         body_text=_body(msg),
     )
@@ -245,14 +275,15 @@ def _olm_entries(raw: bytes, *, source: str, origin: str) -> Iterator[ImportedMe
         sender = _olm_sender(node)
         yield ImportedMessage(
             provider_message_id=(
-                _olm_text(node, "OPFMessageCopyMessageID") or f"{source}-{origin}-{idx}"
+                _clean_header(_olm_text(node, "OPFMessageCopyMessageID"))
+                or f"{source}-{origin}-{idx}"
             ),
             source=source,
-            provider_thread_id=_olm_text(node, "OPFMessageCopyThreadTopic"),
-            from_email=sender,
-            from_name=_olm_text(node, "OPFMessageCopyFromAddresses"),
-            to_emails=[a for a in addresses if a != sender],
-            subject=_olm_text(node, "OPFMessageCopySubject"),
+            provider_thread_id=_clean_header(_olm_text(node, "OPFMessageCopyThreadTopic")),
+            from_email=_clean_header(sender),
+            from_name=_clean_header(_olm_text(node, "OPFMessageCopyFromAddresses")),
+            to_emails=[r for r in (_clean_header(a) for a in addresses) if r and r != sender],
+            subject=_clean_header(_olm_text(node, "OPFMessageCopySubject")),
             sent_at=_olm_sent_at(node),
             body_text=(_clean(text)[:MAX_BODY_CHARS] if text else None),
         )
