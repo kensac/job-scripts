@@ -312,3 +312,61 @@ def test_a_literal_route_is_registered_before_the_one_that_would_swallow_it():
 
     paths = [r.path for r in mail.router.routes]
     assert paths.index("/admin/mail/analytics") < paths.index("/admin/mail/{message_id}")
+
+
+def _msg_with(f, uid, kind, method, mid_suffix):
+    mid = db.query_one(
+        "INSERT INTO email_messages (user_id, provider_message_id, source, from_email, subject, "
+        "sent_at) VALUES (%s,%s,'takeout','a@b.com','s',now()) RETURNING id",
+        (uid, f"filt-{mid_suffix}"),
+    )["id"]
+    db.execute(
+        "INSERT INTO email_events (message_id, kind, confidence) VALUES (%s,%s,'high')", (mid, kind)
+    )
+    if method is not None:
+        db.execute(
+            "INSERT INTO application_matches (message_id, application_id, method, confidence) "
+            "VALUES (%s, NULL, %s, 'none')",
+            (mid, method),
+        )
+    return mid
+
+
+def test_the_list_filters_on_how_a_message_matched(client, admin_headers, f):
+    """The distributions point at a tier; without this a person can only see
+    which tier fired by opening every message one at a time."""
+    uid = f.make_user()
+    _msg_with(f, uid, "rejection", "company_title", "a")
+    _msg_with(f, uid, "rejection", "unmatched", "b")
+
+    body = client.get("/v1/admin/mail?method=company_title", headers=admin_headers).json()
+    assert body["total"] == 1
+    assert body["rows"][0]["method"] == "company_title"
+
+
+def test_refusing_to_match_is_filterable_apart_from_failing_to(client, admin_headers, f):
+    """unmatched and not_an_application look identical in any aggregate and
+    mean opposite things: the matcher failing to find a home, and the matcher
+    correctly refusing to give one."""
+    uid = f.make_user()
+    _msg_with(f, uid, "rejection", "unmatched", "c")
+    _msg_with(f, uid, "recruiter_outreach", "not_an_application", "d")
+
+    assert client.get("/v1/admin/mail?method=unmatched", headers=admin_headers).json()["total"] == 1
+    refused = client.get("/v1/admin/mail?method=not_an_application", headers=admin_headers).json()
+    assert refused["total"] == 1
+    assert refused["rows"][0]["kind"] == "recruiter_outreach"
+
+
+def test_never_attempted_has_a_name_rather_than_being_an_absence(client, admin_headers, f):
+    """A third state, and the one worth filtering for when hunting failures.
+    Reachable only as a gap in a list is not reachable."""
+    from api.routers.mail import NEVER_ATTEMPTED
+
+    uid = f.make_user()
+    _msg_with(f, uid, "rejection", None, "e")
+    _msg_with(f, uid, "rejection", "unmatched", "g")
+
+    body = client.get(f"/v1/admin/mail?method={NEVER_ATTEMPTED}", headers=admin_headers).json()
+    assert body["total"] == 1
+    assert body["rows"][0]["method"] is None
