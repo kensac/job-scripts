@@ -357,3 +357,100 @@ def test_another_users_message_cannot_be_assigned(client, user_headers, other_us
         client.get(f"/v1/user/messages/{mid}/candidates", headers=other_user_headers).status_code
         == 404
     )
+
+
+def test_a_match_carries_what_it_was_decided_from(client, user_headers):
+    """The rationale says what the matcher concluded. Evidence says what it
+    concluded it FROM - and the extracted company is the thing tiers 2 and 3
+    actually compared, so a wrong extraction is a wrong match and staring at
+    the conclusion never reveals it."""
+    uid = db.query_one("SELECT id FROM users WHERE email = %s", ("user@example.com",))["id"]
+    app_id = _app(uid, company="Tesla", title="Frontend Engineer")
+    mid = db.query_one(
+        "INSERT INTO email_messages (user_id, provider_message_id, source, subject, from_email, "
+        "sent_at, body_text) VALUES (%s,%s,'takeout',%s,%s,%s,%s) RETURNING id",
+        (
+            uid,
+            f"ev-{next(_seq)}",
+            "Update on your application",
+            "careers@tesla.com",
+            datetime.datetime(2025, 6, 1, tzinfo=datetime.UTC),
+            "Dear Kanishk,\n\n" + ("filler " * 60) + "We have decided not to move forward "
+            "with your application to Tesla for the Frontend role. " + ("more " * 60),
+        ),
+    )["id"]
+    db.execute(
+        "INSERT INTO email_events (message_id, kind, confidence, detail, model) "
+        "VALUES (%s,'rejection','high',%s,'gpt-5.6-luna')",
+        (mid, db.jsonb({"company": "Tesla", "role_title": "Frontend Engineer"})),
+    )
+    _match(mid, app_id)
+
+    detail = client.get(f"/v1/user/pipeline/{app_id}", headers=user_headers).json()
+    ev = detail["matches"][0]["evidence"]
+    assert ev["extracted_company"] == "Tesla"
+    assert ev["classified_as"] == "rejection"
+    assert ev["classifier_model"] == "gpt-5.6-luna"
+    assert ev["from_domain"] == "tesla.com", "the one fact no model produced"
+    # Centred on the company mention, not the greeting: an email opens with a
+    # salutation and a logo, and the sentence that decided this is in the middle.
+    assert ev["snippet"]["centred_on"] == "Tesla"
+    assert "not to move forward" in ev["snippet"]["text"]
+    assert "Dear Kanishk" not in ev["snippet"]["text"]
+
+
+def test_the_whole_message_is_readable_without_leaving(client, user_headers):
+    """Withholding the body would mean checking a decision this system made
+    requires opening a mail client, which is the same as not being able to."""
+    uid = db.query_one("SELECT id FROM users WHERE email = %s", ("user@example.com",))["id"]
+    mid = db.query_one(
+        "INSERT INTO email_messages (user_id, provider_message_id, source, subject, from_email, "
+        "sent_at, body_text) VALUES (%s,%s,'gmail','Offer','hr@initech.com',%s,%s) RETURNING id",
+        (
+            uid,
+            f"ev-{next(_seq)}",
+            datetime.datetime(2025, 6, 1, tzinfo=datetime.UTC),
+            "Full body here",
+        ),
+    )["id"]
+    _event(mid, "offer")
+
+    body = client.get(f"/v1/user/messages/{mid}", headers=user_headers).json()
+    assert body["body_text"] == "Full body here"
+    assert body["from_email"] == "hr@initech.com"
+    assert [e["kind"] for e in body["events"]] == ["offer"]
+
+
+def test_another_users_message_body_is_not_readable(client, user_headers, other_user_headers):
+    uid = db.query_one("SELECT id FROM users WHERE email = %s", ("user@example.com",))["id"]
+    mid = _msg(uid)
+    assert client.get(f"/v1/user/messages/{mid}", headers=other_user_headers).status_code == 404
+
+
+def test_a_snippet_falls_back_when_the_company_is_not_in_the_body(client, user_headers):
+    """The extracted company often does not appear verbatim - the classifier
+    reads it from a signature or a logo. The excerpt still has to render."""
+    uid = db.query_one("SELECT id FROM users WHERE email = %s", ("user@example.com",))["id"]
+    app_id = _app(uid, company="Acme", title="Engineer")
+    mid = db.query_one(
+        "INSERT INTO email_messages (user_id, provider_message_id, source, subject, from_email, "
+        "sent_at, body_text) VALUES (%s,%s,'takeout','Update','no-reply@x.com',%s,%s) RETURNING id",
+        (
+            uid,
+            f"ev-{next(_seq)}",
+            datetime.datetime(2025, 6, 1, tzinfo=datetime.UTC),
+            "Thanks for applying.",
+        ),
+    )["id"]
+    db.execute(
+        "INSERT INTO email_events (message_id, kind, confidence, detail) "
+        "VALUES (%s,'acknowledgement','high',%s)",
+        (mid, db.jsonb({"company": "Acme Corporation"})),
+    )
+    _match(mid, app_id)
+
+    ev = client.get(f"/v1/user/pipeline/{app_id}", headers=user_headers).json()["matches"][0][
+        "evidence"
+    ]
+    assert ev["snippet"]["text"] == "Thanks for applying."
+    assert ev["snippet"]["centred_on"] is None, "say so rather than implying it was found"
