@@ -156,9 +156,17 @@ def _demote_closed() -> int:
             f"""
             DELETE FROM user_jobs uj USING jobs j
             WHERE uj.job_id = j.id AND {_UNTOUCHED}
-              AND (SELECT q.status FROM ai_queries q WHERE q.url = j.url
-                   AND q.check_type = 'closed' AND q.status IN ('passed', 'rejected')
-                   ORDER BY q.id DESC LIMIT 1) = 'rejected'
+              AND (
+                -- A posting that vanished from its source feed is gone even
+                -- if no closed-check ever ran on it. Keying only on the
+                -- verdict left dead postings sitting in the intake view
+                -- forever, because ingest marks them inactive and the sweep
+                -- never looks at them again.
+                NOT j.active
+                OR (SELECT q.status FROM ai_queries q WHERE q.url = j.url
+                    AND q.check_type = 'closed' AND q.status IN ('passed', 'rejected')
+                    ORDER BY q.id DESC LIMIT 1) = 'rejected'
+              )
             """
         )
         demoted = result.rowcount

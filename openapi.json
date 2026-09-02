@@ -86,6 +86,7 @@
     "/v1/user/usage": {
       "get": {
         "summary": "Usage",
+        "description": "Grants, plus the spend history the admin view already computed.\n\nThese are the same two aggregates /admin/users/{id} runs, scoped to the\ncaller. They existed for months and only an admin could see them, which is\nwhy a user's own Usage page had nothing to show.",
         "operationId": "usage_v1_user_usage_get",
         "parameters": [
           {
