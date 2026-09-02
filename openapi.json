@@ -11153,6 +11153,11 @@
               }
             ],
             "title": "Note"
+          },
+          "whole_thread": {
+            "type": "boolean",
+            "title": "Whole Thread",
+            "default": true
           }
         },
         "type": "object",

@@ -703,3 +703,83 @@ def test_another_users_action_cannot_be_closed(client, user_headers, other_user_
         ).status_code
         == 404
     )
+
+
+def _threaded(uid, thread, n, kind="rejection", company="Acme"):
+    ids = []
+    for i in range(n):
+        mid = db.query_one(
+            "INSERT INTO email_messages (user_id, provider_message_id, provider_thread_id, "
+            "source, subject, from_email, sent_at) "
+            "VALUES (%s,%s,%s,'gmail',%s,'a@acme.com',now()) RETURNING id",
+            (uid, f"th-{next(_seq)}", thread, f"msg {i}"),
+        )["id"]
+        db.execute(
+            "INSERT INTO email_events (message_id, kind, confidence, detail) "
+            "VALUES (%s,%s,'high',%s)",
+            (mid, kind, db.jsonb({"company": company})),
+        )
+        ids.append(mid)
+    return ids
+
+
+def test_assigning_one_message_carries_its_conversation(client, user_headers):
+    """A person correcting one message of a thread means the thread. Making
+    them do it five times is the chore this system exists to remove."""
+    uid = db.query_one("SELECT id FROM users WHERE email = %s", ("user@example.com",))["id"]
+    app_id = _app(uid, company="Acme", title="Engineer")
+    ids = _threaded(uid, "thread-x", 4)
+
+    body = client.post(
+        f"/v1/user/messages/{ids[0]}/assign",
+        headers=user_headers,
+        json={"application_id": app_id},
+    ).json()
+    assert body["messages_assigned"] == 4
+
+    detail = client.get(f"/v1/user/pipeline/{app_id}", headers=user_headers).json()
+    assert {m["message_id"] for m in detail["matches"] if m["in_force"]} == set(ids)
+
+
+def test_a_thread_of_one_assigns_one(client, user_headers):
+    uid = db.query_one("SELECT id FROM users WHERE email = %s", ("user@example.com",))["id"]
+    app_id = _app(uid, company="Acme", title="Engineer")
+    ids = _threaded(uid, "thread-solo", 1)
+    body = client.post(
+        f"/v1/user/messages/{ids[0]}/assign",
+        headers=user_headers,
+        json={"application_id": app_id},
+    ).json()
+    assert body["messages_assigned"] == 1
+
+
+def test_threadless_mail_never_drags_a_lookalike_along(client, user_headers):
+    """The measured danger: grouping threadless mail by normalised subject and
+    sender would treat 49 'thank you for applying!' messages from myworkday.com
+    as one conversation, when they are 49 different employers. Only the
+    provider's own thread id counts."""
+    uid = db.query_one("SELECT id FROM users WHERE email = %s", ("user@example.com",))["id"]
+    app_id = _app(uid, company="Acme", title="Engineer")
+    first = _mail(
+        uid, subject="Thank you for applying!", sender="x@myworkday.com", kind="acknowledgement"
+    )
+    _mail(uid, subject="Thank you for applying!", sender="x@myworkday.com", kind="acknowledgement")
+
+    body = client.post(
+        f"/v1/user/messages/{first}/assign",
+        headers=user_headers,
+        json={"application_id": app_id},
+    ).json()
+    assert body["messages_assigned"] == 1, "identical subject and sender is not a conversation"
+
+
+def test_the_whole_thread_can_be_declined(client, user_headers):
+    uid = db.query_one("SELECT id FROM users WHERE email = %s", ("user@example.com",))["id"]
+    app_id = _app(uid, company="Acme", title="Engineer")
+    ids = _threaded(uid, "thread-y", 3)
+    body = client.post(
+        f"/v1/user/messages/{ids[0]}/assign",
+        headers=user_headers,
+        json={"application_id": app_id, "whole_thread": False},
+    ).json()
+    assert body["messages_assigned"] == 1

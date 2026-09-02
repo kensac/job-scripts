@@ -724,6 +724,13 @@ def restore_application(
 MANUAL = "manual"
 
 
+# How many messages one assignment may carry. A conversation is a handful of
+# messages; a number far above that means the grouping is wrong rather than the
+# thread being long, and silently reassigning hundreds of messages on one click
+# is the failure worth refusing.
+MAX_THREAD_FANOUT = 40
+
+
 class Assignment(BaseModel):
     """One of three targets. An application to attach to, a board job to
     create an application from, or a company and title when neither exists -
@@ -734,6 +741,10 @@ class Assignment(BaseModel):
     company_name: str | None = None
     title: str | None = None
     note: str | None = None
+    # Whether to carry the whole conversation. Default on, because a person
+    # correcting one message of a thread means the thread, and making them do
+    # it five times is the kind of chore this system exists to remove.
+    whole_thread: bool = True
 
 
 def _owned_message(message_id: int, user_id: int) -> dict[str, Any]:
@@ -975,13 +986,51 @@ def assign_message(message_id: int, body: Assignment, user: AuthedUser = Depends
             detail="give an application_id, a job_id, or a company_name to create one",
         )
 
-    db.execute(
-        "INSERT INTO application_matches (message_id, application_id, method, confidence, "
-        "rationale) VALUES (%s, %s, %s, 'high', %s)",
-        (message_id, application_id, MANUAL, body.note or "assigned by the user"),
-    )
+    # The provider's own thread id, never a derived one. Grouping threadless
+    # mail by normalised subject and sender was measured and is unsafe: "thank
+    # you for applying!" from myworkday.com is 49 messages from 49 DIFFERENT
+    # employers, and merging those would attach 49 unrelated applications to
+    # one. The correct signal is the References/In-Reply-To chain, which this
+    # importer discards - `headers` is empty on all 67k rows - so until that is
+    # fixed, threadless mail is assigned one message at a time.
+    targets = [message_id]
+    if body.whole_thread:
+        siblings = db.query(
+            """
+            SELECT m.id FROM email_messages m
+            WHERE m.user_id = %(user)s
+              AND m.provider_thread_id IS NOT NULL
+              AND m.provider_thread_id = (
+                  SELECT provider_thread_id FROM email_messages WHERE id = %(msg)s
+              )
+              AND m.id <> %(msg)s
+            ORDER BY m.id
+            LIMIT %(cap)s
+            """,
+            {"user": user.id, "msg": message_id, "cap": MAX_THREAD_FANOUT},
+        )
+        targets.extend(r["id"] for r in siblings)
+
+    rationale = body.note or "assigned by the user"
+    for index, target in enumerate(targets):
+        db.execute(
+            "INSERT INTO application_matches (message_id, application_id, method, confidence, "
+            "rationale) VALUES (%s, %s, %s, 'high', %s)",
+            (
+                target,
+                application_id,
+                MANUAL,
+                rationale if index == 0 else f"{rationale} (same conversation)",
+            ),
+        )
     mail_pipeline.sync_action_items(application_id)
-    return {"ok": True, "application_id": application_id}
+    return {
+        "ok": True,
+        "application_id": application_id,
+        # Say how many moved. One click that quietly reassigns a dozen messages
+        # should report it rather than have the count discovered later.
+        "messages_assigned": len(targets),
+    }
 
 
 # Enough to judge a match without opening the mail client, and short enough to
