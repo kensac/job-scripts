@@ -20,7 +20,10 @@ def upgrade() -> None:
     # nobody in particular. NULL says so, rather than attributing the whole
     # fleet's spend to whichever admin happens to be user 1.
     op.alter_column("api_usage", "user_id", existing_type=sa.BigInteger(), nullable=True)
-    op.add_column("api_usage", sa.Column("batched", sa.Boolean(), server_default=sa.false()))
+    op.add_column(
+        "api_usage",
+        sa.Column("batched", sa.Boolean(), server_default=sa.false(), nullable=False),
+    )
     op.create_index("idx_api_usage_purpose", "api_usage", ["purpose", "created_at"])
 
     # Everything already spent on batched work. Without this the cost centre is
