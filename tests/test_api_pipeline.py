@@ -832,3 +832,184 @@ def test_a_message_with_no_thread_and_no_replies_stays_alone(client, user_header
         json={"application_id": app_id},
     ).json()
     assert body["messages_assigned"] == 1
+
+
+def test_a_person_can_say_what_a_message_actually_is(client, user_headers):
+    """Every other correction fixes the MATCH. Stage is derived from KINDS, so
+    a rejection read as an acknowledgement silently moves an application - and
+    the only affordance on offer was detaching a match that was correct."""
+    uid = db.query_one("SELECT id FROM users WHERE email = %s", ("user@example.com",))["id"]
+    app_id = _app(uid, company="Acme", title="Engineer")
+    mid = _mail(uid, subject="An update from Acme", kind="acknowledgement", company="Acme")
+    _match(mid, app_id)
+    assert client.get(f"/v1/user/pipeline/{app_id}", headers=user_headers).json()["stage"] == (
+        "acknowledged"
+    )
+
+    resp = client.post(
+        f"/v1/user/messages/{mid}/classify",
+        headers=user_headers,
+        json={"kind": "rejection", "note": "this was a rejection"},
+    )
+    assert resp.status_code == 200
+    assert client.get(f"/v1/user/pipeline/{app_id}", headers=user_headers).json()["stage"] == (
+        "rejected"
+    ), "the stage recomputes with nobody restating it"
+
+
+def test_a_correction_supersedes_rather_than_erases(client, user_headers):
+    """Events are append-only and the latest wins, so the model's wrong answer
+    stays visible in the history. A correction that erases its own cause cannot
+    be reviewed."""
+    uid = db.query_one("SELECT id FROM users WHERE email = %s", ("user@example.com",))["id"]
+    mid = _mail(uid, kind="acknowledgement", company="Acme")
+    client.post(
+        f"/v1/user/messages/{mid}/classify", headers=user_headers, json={"kind": "rejection"}
+    )
+    rows = db.query(
+        "SELECT kind, model, detail FROM email_events WHERE message_id = %s ORDER BY id", (mid,)
+    )
+    assert [r["kind"] for r in rows] == ["acknowledgement", "rejection"]
+    assert rows[-1]["model"] is None, "no model is how a human correction is told from a model's"
+    assert rows[-1]["detail"]["corrected_by_user"] is True
+
+
+def test_a_correction_carries_the_extraction_forward(client, user_headers):
+    """Fixing the kind is not also asserting the company was wrong, and
+    blanking it would break the matching that already worked."""
+    uid = db.query_one("SELECT id FROM users WHERE email = %s", ("user@example.com",))["id"]
+    mid = _mail(uid, kind="acknowledgement", company="Acme")
+    client.post(
+        f"/v1/user/messages/{mid}/classify", headers=user_headers, json={"kind": "rejection"}
+    )
+    latest = db.query_one(
+        "SELECT detail FROM email_events WHERE message_id = %s ORDER BY id DESC LIMIT 1", (mid,)
+    )
+    assert latest["detail"]["company"] == "Acme"
+
+
+def test_an_unknown_kind_is_refused(client, user_headers):
+    uid = db.query_one("SELECT id FROM users WHERE email = %s", ("user@example.com",))["id"]
+    mid = _mail(uid, kind="acknowledgement")
+    assert (
+        client.post(
+            f"/v1/user/messages/{mid}/classify",
+            headers=user_headers,
+            json={"kind": "sounds_promising"},
+        ).status_code
+        == 400
+    )
+
+
+def test_another_users_message_cannot_be_reclassified(client, user_headers, other_user_headers):
+    uid = db.query_one("SELECT id FROM users WHERE email = %s", ("user@example.com",))["id"]
+    mid = _mail(uid, kind="acknowledgement")
+    assert (
+        client.post(
+            f"/v1/user/messages/{mid}/classify",
+            headers=other_user_headers,
+            json={"kind": "rejection"},
+        ).status_code
+        == 404
+    )
+
+
+def test_a_correction_reports_which_applications_moved(client, user_headers):
+    """The point of the correction is that the STAGE moves, and it can move an
+    application the person is not looking at - so the ids come back rather than
+    an ok."""
+    uid = db.query_one("SELECT id FROM users WHERE email = %s", ("user@example.com",))["id"]
+    app_id = _app(uid, company="Acme", title="Engineer")
+    mid = _mail(uid, kind="acknowledgement", company="Acme")
+    _match(mid, app_id)
+
+    body = client.post(
+        f"/v1/user/messages/{mid}/classify", headers=user_headers, json={"kind": "rejection"}
+    ).json()
+    assert body["affected_application_ids"] == [app_id]
+
+
+def test_a_correction_can_be_reverted_to_what_the_model_said(client, user_headers):
+    """Another append, not a delete: a mis-correction has to be recoverable and
+    the log still has to show that both happened."""
+    uid = db.query_one("SELECT id FROM users WHERE email = %s", ("user@example.com",))["id"]
+    app_id = _app(uid, company="Acme", title="Engineer")
+    mid = _mail(uid, company="Acme")
+    # A MODEL-authored event, which is what a revert restores. The helper
+    # writes model=NULL, and NULL is exactly how a human correction is told
+    # apart from a model's answer.
+    db.execute(
+        "INSERT INTO email_events (message_id, kind, confidence, detail, model) "
+        "VALUES (%s,'acknowledgement','high',%s,'gpt-5.6-luna')",
+        (mid, db.jsonb({"company": "Acme"})),
+    )
+    _match(mid, app_id)
+
+    client.post(f"/v1/user/messages/{mid}/classify", headers=user_headers, json={"kind": "offer"})
+    assert (
+        client.get(f"/v1/user/pipeline/{app_id}", headers=user_headers).json()["stage"] == "offer"
+    )
+
+    resp = client.post(f"/v1/user/messages/{mid}/classify/revert", headers=user_headers)
+    assert resp.status_code == 200
+    assert client.get(f"/v1/user/pipeline/{app_id}", headers=user_headers).json()["stage"] == (
+        "acknowledged"
+    )
+    kinds = [
+        r["kind"]
+        for r in db.query("SELECT kind FROM email_events WHERE message_id = %s ORDER BY id", (mid,))
+    ]
+    assert kinds == ["acknowledgement", "offer", "acknowledgement"], "all three are visible"
+
+
+def test_reverting_with_nothing_to_restore_is_refused(client, user_headers):
+    uid = db.query_one("SELECT id FROM users WHERE email = %s", ("user@example.com",))["id"]
+    mid = db.query_one(
+        "INSERT INTO email_messages (user_id, provider_message_id, source, subject, sent_at) "
+        "VALUES (%s,%s,'gmail','s',now()) RETURNING id",
+        (uid, f"norev-{next(_seq)}"),
+    )["id"]
+    db.execute(
+        "INSERT INTO email_events (message_id, kind, confidence, model) "
+        "VALUES (%s,'rejection','high',NULL)",
+        (mid,),
+    )
+    assert (
+        client.post(f"/v1/user/messages/{mid}/classify/revert", headers=user_headers).status_code
+        == 409
+    )
+
+
+def test_the_kind_vocabulary_is_served_not_copied(client, user_headers):
+    """The client kept this list in two places, and it drifts the moment a kind
+    is added - the same failure as the stage vocabulary, which had a terminal
+    state the frontend did not know about."""
+    kinds = client.get("/v1/user/message-kinds", headers=user_headers).json()["kinds"]
+    assert "rejection" in kinds and "not_job_related" in kinds
+
+
+def test_mail_can_be_asked_for_one_applications_messages(client, user_headers):
+    """Without it an application can only link to a company text search, which
+    returns a DIFFERENT set and would quietly lie about being the messages
+    behind this application."""
+    uid = db.query_one("SELECT id FROM users WHERE email = %s", ("user@example.com",))["id"]
+    mine = _app(uid, company="Acme", title="Engineer")
+    other = _app(uid, company="Acme", title="Other")
+    a = _mail(uid, kind="rejection", company="Acme")
+    b = _mail(uid, kind="rejection", company="Acme")
+    _match(a, mine)
+    _match(b, other)
+
+    body = client.get(f"/v1/user/mail?application_id={mine}", headers=user_headers).json()
+    assert [m["id"] for m in body["messages"]] == [a]
+
+
+def test_the_pipeline_filters_on_whether_there_is_evidence(client, user_headers):
+    uid = db.query_one("SELECT id FROM users WHERE email = %s", ("user@example.com",))["id"]
+    heard = _app(uid, company="Heard", title="Engineer")
+    _app(uid, company="Silent", title="Engineer")
+    mid = _mail(uid, kind="acknowledgement", company="Heard")
+    _match(mid, heard)
+
+    assert client.get("/v1/user/pipeline?evidence=true", headers=user_headers).json()["total"] == 1
+    assert client.get("/v1/user/pipeline?evidence=false", headers=user_headers).json()["total"] == 1

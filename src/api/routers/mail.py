@@ -20,6 +20,7 @@ from pydantic import BaseModel
 from api import db, mail_match, mail_pipeline
 from api.auth import AuthedUser, require_user
 from api.routers.admin import require_admin
+from api.tasks.mail_classify import EVENT_KINDS
 
 router = APIRouter()
 
@@ -48,6 +49,7 @@ def _where(
     prefilter: bool | None,
     q: str | None,
     method: str | None = None,
+    job_related: bool | None = None,
 ) -> tuple[str, dict[str, Any]]:
     clauses: list[str] = []
     params: dict[str, Any] = {}
@@ -69,6 +71,20 @@ def _where(
         else:
             clauses.append("mt.application_id IS NULL AND COALESCE(mt.method, '') <> %(refused)s")
             params["refused"] = mail_match.NOT_AN_APPLICATION
+    if job_related is not None:
+        # `kind` is an equality filter, so "job-related" - the whole point of
+        # the prefilter matrix - was not expressible: a person could open
+        # "prefilter did not match" and not "job-related AND prefilter did not
+        # match", which IS the 2,244 messages a gate would have dropped. That
+        # is the number the gate decision rests on.
+        #
+        # NULL kind is not job-related here: nothing has classified it, so it
+        # cannot be evidence either way.
+        clauses.append(
+            "ev.kind IS NOT NULL AND ev.kind <> 'not_job_related'"
+            if job_related
+            else "(ev.kind IS NULL OR ev.kind = 'not_job_related')"
+        )
     if method == NEVER_ATTEMPTED:
         clauses.append("mt.match_id IS NULL")
     elif method:
@@ -108,6 +124,7 @@ def list_mail(
     source: str | None = None,
     prefilter: bool | None = None,
     method: str | None = None,
+    job_related: bool | None = None,
     q: str | None = None,
     sort: str = "sent_at",
     dir: str = "desc",
@@ -116,7 +133,13 @@ def list_mail(
     user: AuthedUser = Depends(require_admin),
 ):
     where, params = _where(
-        kind=kind, matched=matched, source=source, prefilter=prefilter, q=q, method=method
+        kind=kind,
+        matched=matched,
+        source=source,
+        prefilter=prefilter,
+        q=q,
+        method=method,
+        job_related=job_related,
     )
     page = max(1, page)
     page_size = max(1, min(page_size, 200))
@@ -510,6 +533,7 @@ def pipeline(
     stage: str | None = Query(default=None),
     provenance: str | None = Query(default=None),
     tier: str | None = Query(default=None),
+    evidence: bool | None = Query(default=None),
     q: str | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
@@ -536,6 +560,11 @@ def pipeline(
         rows = [r for r in rows if r["source_provenance"] == provenance]
     if tier:
         rows = [r for r in rows if r["strongest_tier"] == tier]
+    if evidence is not None:
+        # The summary reports with_evidence and without_evidence; without this
+        # the numbers are not clickable and the population behind them is
+        # unreachable.
+        rows = [r for r in rows if bool(r["event_count"]) is evidence]
     if q:
         needle = q.lower()
         rows = [
@@ -787,6 +816,7 @@ def _owned_message(message_id: int, user_id: int) -> dict[str, Any]:
 def user_mail(
     kind: str | None = Query(default=None),
     matched: bool | None = Query(default=None),
+    application_id: int | None = Query(default=None),
     q: str | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
@@ -812,6 +842,12 @@ def user_mail(
     if q:
         where.append("(m.subject ILIKE %(q)s OR m.from_email ILIKE %(q)s)")
         params["q"] = f"%{q}%"
+    if application_id is not None:
+        # The reverse trip. Without it an application can only link to a
+        # company text search, which returns a DIFFERENT set and would quietly
+        # lie about being "the messages behind this application".
+        where.append("cm.application_id = %(app)s")
+        params["app"] = application_id
     if matched is True:
         where.append("cm.application_id IS NOT NULL")
     elif matched is False:
@@ -1364,3 +1400,128 @@ def reopen_action(action_id: int, body: ActionAnswer, user: AuthedUser = Depends
         (action_id,),
     )
     return {"ok": True}
+
+
+class Reclassification(BaseModel):
+    kind: str
+    company: str | None = None
+    role_title: str | None = None
+    note: str | None = None
+
+
+@router.post("/user/messages/{message_id}/classify")
+def correct_classification(
+    message_id: int, body: Reclassification, user: AuthedUser = Depends(require_user)
+):
+    """Say what a message actually is, when the classifier got it wrong.
+
+    Every other correction here fixes the MATCH. Nothing fixed the kind - and
+    stage is derived from kinds, so a rejection read as an acknowledgement
+    silently moves an application and the only affordance on offer was
+    detaching a match that was correct.
+
+    Appends an event rather than editing one. Events are append-only and the
+    latest per message wins, so this supersedes the model's answer by the same
+    rule a re-classification does, and the wrong answer stays visible in the
+    history. model is NULL, which is how a human correction is told apart from
+    a model's: nothing else writes an event without one.
+
+    The stage recomputes on read, so the correction propagates with nobody
+    restating it - the same property that makes detaching work.
+    """
+    message = _owned_message(message_id, user.id)
+    if body.kind not in EVENT_KINDS:
+        raise HTTPException(status_code=400, detail=f"kind must be one of {sorted(EVENT_KINDS)}")
+    current = db.query_one(
+        "SELECT detail FROM email_events WHERE message_id = %s ORDER BY id DESC LIMIT 1",
+        (message_id,),
+    )
+    # Carry the extraction forward unless the correction replaces it. A person
+    # fixing "acknowledgement" to "rejection" is not also asserting the company
+    # was wrong, and blanking it would break the matching that already worked.
+    detail = dict((current or {}).get("detail") or {})
+    if body.company is not None:
+        detail["company"] = body.company
+    if body.role_title is not None:
+        detail["role_title"] = body.role_title
+    if body.note:
+        detail["corrected_note"] = body.note
+    detail["corrected_by_user"] = True
+
+    db.execute(
+        "INSERT INTO email_events (message_id, kind, confidence, detail, model) "
+        "VALUES (%s, %s, 'high', %s, NULL)",
+        (message_id, body.kind, db.jsonb(detail)),
+    )
+    # A corrected kind can change what the application is waiting for - and it
+    # can change an application the person is not currently looking at, which
+    # is why the ids come back rather than an ok.
+    affected = [
+        r["application_id"]
+        for r in db.query(
+            """
+            SELECT DISTINCT application_id FROM application_matches
+            WHERE message_id = %s AND application_id IS NOT NULL
+            """,
+            (message_id,),
+        )
+    ]
+    for application_id in affected:
+        mail_pipeline.sync_action_items(application_id)
+    return {
+        "ok": True,
+        "message_id": message["id"],
+        "kind": body.kind,
+        "affected_application_ids": affected,
+    }
+
+
+@router.get("/user/message-kinds")
+def message_kinds(user: AuthedUser = Depends(require_user)):
+    """The vocabulary, served rather than copied.
+
+    The client kept this list in two places and it drifts the moment a kind is
+    added - the same failure as the stage vocabulary, which had a terminal
+    state the frontend did not know about.
+    """
+    return {"kinds": sorted(EVENT_KINDS)}
+
+
+@router.post("/user/messages/{message_id}/classify/revert")
+def revert_classification(message_id: int, user: AuthedUser = Depends(require_user)):
+    """Undo a correction by restoring what the model last said.
+
+    Another append, not a delete: a mis-correction has to be recoverable and
+    the log still has to show that both happened. Refused when the model has
+    never classified this message, because there is nothing to restore.
+    """
+    _owned_message(message_id, user.id)
+    model_answer = db.query_one(
+        "SELECT kind, confidence, detail, model FROM email_events "
+        "WHERE message_id = %s AND model IS NOT NULL ORDER BY id DESC LIMIT 1",
+        (message_id,),
+    )
+    if model_answer is None:
+        raise HTTPException(status_code=409, detail="no model classification to restore")
+    current = db.query_one(
+        "SELECT model FROM email_events WHERE message_id = %s ORDER BY id DESC LIMIT 1",
+        (message_id,),
+    )
+    if current and current["model"] is not None:
+        return {"ok": True, "already": True, "kind": model_answer["kind"]}
+
+    detail = dict(model_answer["detail"] or {})
+    detail.pop("corrected_by_user", None)
+    detail.pop("corrected_note", None)
+    db.execute(
+        "INSERT INTO email_events (message_id, kind, confidence, detail, model) "
+        "VALUES (%s, %s, %s, %s, %s)",
+        (
+            message_id,
+            model_answer["kind"],
+            model_answer["confidence"],
+            db.jsonb(detail),
+            model_answer["model"],
+        ),
+    )
+    return {"ok": True, "already": False, "kind": model_answer["kind"]}
