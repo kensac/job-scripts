@@ -12292,6 +12292,11 @@
               }
             ],
             "title": "Reason"
+          },
+          "acknowledge_cost": {
+            "type": "boolean",
+            "title": "Acknowledge Cost",
+            "default": false
           }
         },
         "type": "object",

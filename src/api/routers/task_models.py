@@ -49,6 +49,22 @@ router = APIRouter(prefix="/admin")
 RECENT_CHANGES = 10
 
 
+# How much dearer a model may be than the one running before the change has to
+# be acknowledged rather than merely made.
+#
+# Derived from the largest deliberate step anyone has taken in this codebase:
+# gpt-5-nano to gpt-5-mini, which requirements extraction and ongoing mail
+# classification both chose on measured evidence, is exactly 5x on input and
+# output. Two such steps is 10x, which admits every quality upgrade anyone has
+# argued for and stops the ones nobody would argue for - comp on gpt-5.6-sol is
+# 60x its current cost, hourly.
+#
+# Not a refusal. Kanishk owns this system and may overrule it; what he may not
+# do is spend 60x by accident. The acknowledgement is a second deliberate act
+# and it is recorded on the row.
+COST_ACKNOWLEDGEMENT_MULTIPLE = 10
+
+
 class TaskModelPut(BaseModel):
     # None clears the override and returns the task to what its call site
     # sanctioned. It is not "unset" - a row is still written, because losing
@@ -56,12 +72,16 @@ class TaskModelPut(BaseModel):
     # overwriting it.
     model: str | None = None
     reason: str | None = Field(default=None, max_length=2000)
+    # Required when the new model costs more than COST_ACKNOWLEDGEMENT_MULTIPLE
+    # times the current one. The API says what the number is when it refuses,
+    # so this is never a guess.
+    acknowledge_cost: bool = False
 
 
 def _history(purpose: str, limit: int) -> list[dict[str, Any]]:
     return db.query(
         """
-        SELECT o.id, o.model, o.overrode_sanctioned, o.reason, o.created_at,
+        SELECT o.id, o.model, o.overrode_sanctioned, o.acknowledged_cost, o.reason, o.created_at,
                u.email AS changed_by_email
         FROM task_model_overrides o
         LEFT JOIN users u ON u.id = o.changed_by
@@ -184,6 +204,49 @@ def _view(purpose: str) -> dict[str, Any]:
     }
 
 
+def _require_cost_acknowledgement(purpose: str, shape, body: TaskModelPut) -> None:
+    """Refuse a large increase unless it was acknowledged, and say how large.
+
+    At the moment of the decision, where the number is exactly known - not
+    afterwards, when a sweep declines to run and the person has to work out
+    why. A control that fires somewhere other than where the choice was made
+    is a control nobody connects to their own action.
+
+    Only increases. Moving to a cheaper model never needs acknowledging.
+    """
+    if body.acknowledge_cost:
+        return
+    candidacies = {c.model: c for c in candidates_for(shape)}
+    new = candidacies.get(body.model or "")
+    current_model = _current(purpose) or {}
+    current_name = current_model.get("model") or (shape.candidates[0] if shape.candidates else None)
+    current = candidacies.get(current_name or "")
+    if new is None or current is None:
+        return
+    if new.est_cycle_cost_usd is None or not current.est_cycle_cost_usd:
+        return
+    multiple = new.est_cycle_cost_usd / current.est_cycle_cost_usd
+    if multiple <= COST_ACKNOWLEDGEMENT_MULTIPLE:
+        return
+    raise HTTPException(
+        400,
+        detail={
+            "code": "COST_ACKNOWLEDGEMENT_REQUIRED",
+            "message": (
+                f"{body.model} costs {multiple:.1f}x what {current_name} costs for this "
+                f"task - {_money(new.est_cycle_cost_usd)} against "
+                f"{_money(current.est_cycle_cost_usd)} per cycle. Re-send with "
+                f"acknowledge_cost to proceed."
+            ),
+            "multiple": f"{multiple:.1f}",
+            "current_model": current_name,
+            "current_cycle_cost_usd": _money(current.est_cycle_cost_usd),
+            "new_cycle_cost_usd": _money(new.est_cycle_cost_usd),
+            "threshold": COST_ACKNOWLEDGEMENT_MULTIPLE,
+        },
+    )
+
+
 @router.get("/task-models")
 def list_task_models(_: AuthedUser = Depends(require_admin)):
     """Every configurable task, with its eligible models and what each costs.
@@ -229,14 +292,16 @@ def put_task_model(purpose: str, body: TaskModelPut, user: AuthedUser = Depends(
             raise HTTPException(
                 400, detail={"code": "INELIGIBLE_MODEL", "message": str(exc)}
             ) from exc
+        _require_cost_acknowledgement(purpose, shape, body)
     db.execute(
         "INSERT INTO task_model_overrides (purpose, model, overrode_sanctioned, reason, "
-        "changed_by) VALUES (%s, %s, %s, %s, %s)",
+        "acknowledged_cost, changed_by) VALUES (%s, %s, %s, %s, %s, %s)",
         (
             purpose,
             body.model,
             bool(body.model) and body.model not in shape.candidates,
             body.reason,
+            body.acknowledge_cost,
             user.id,
         ),
     )

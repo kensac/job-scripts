@@ -356,6 +356,10 @@ class TaskModelOverride(Base):
     # whether it was an override when it was made.
     overrode_sanctioned: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     reason: Mapped[str | None] = mapped_column(Text)
+    # True when the change was large enough to need acknowledging and was
+    # acknowledged. "He was told and went ahead" is a different fact from "he
+    # changed it", and the review is where that distinction is wanted.
+    acknowledged_cost: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     changed_by: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("users.id", ondelete="SET NULL")
     )
