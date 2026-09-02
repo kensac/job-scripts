@@ -253,27 +253,57 @@ async def test_the_cap_is_clamped_not_trusted(monkeypatch, f):
     assert seen["count"] <= 2
 
 
+SENT = datetime.datetime(2026, 9, 1, tzinfo=datetime.UTC)
+
+
 @pytest.mark.parametrize(
-    ("raw", "expected_date"),
+    ("raw", "expected_date", "expected_inferred"),
     [
-        ("2026-09-08", datetime.date(2026, 9, 8)),
-        ("2026-09-08T17:00:00Z", datetime.date(2026, 9, 8)),
-        (None, None),
-        ("", None),
-        # The one that failed a 1,200-message task in production: the model
-        # states the year and month and does not know the day.
-        ("2022-09-??", None),
-        ("soon", None),
-        ("2026-13-45", None),
+        # ISO, which the instruction asks for.
+        ("2026-09-08", datetime.date(2026, 9, 8), False),
+        ("2026-09-08T17:00:00Z", datetime.date(2026, 9, 8), False),
+        # Prose with a year. Measured over 200 real messages, the model
+        # returns these far more often than ISO, and accepting only ISO threw
+        # away 7.5% of the deadlines it found.
+        ("March 1, 2023", datetime.date(2023, 3, 1), False),
+        ("Thursday, February 1, 2024", datetime.date(2024, 2, 1), False),
+        ("Tue Dec 10, 2024 at 4:00PM (EST)", datetime.date(2024, 12, 10), False),
+        ("May 30, 2024, 5:00 PM Pacific Time", datetime.date(2024, 5, 30), False),
+        # No year: resolved against the message and MARKED inferred.
+        ("Jan. 15", datetime.date(2027, 1, 15), True),
+        ("November 1", datetime.date(2026, 11, 1), True),
+        # No resolvable date at all.
+        ("Tuesday at 2:00 PM", None, False),
+        (None, None, False),
+        ("", None, False),
+        # The value that failed a 1,200-message task in production.
+        ("2022-09-??", None, False),
+        ("soon", None, False),
+        ("2026-13-45", None, False),
+        ("February 30, 2024", None, False),
     ],
 )
-def test_partial_dates_become_nothing(raw, expected_date):
-    """A partial date is not a deadline. Inventing the 1st or the 30th to make
-    it parse would be exactly the fabrication the schema exists to prevent."""
-    got = mail_classify.parse_deadline(raw)
+def test_deadline_parsing(raw, expected_date, expected_inferred):
+    got, inferred = mail_classify.parse_deadline(raw, sent_at=SENT)
     assert (got.date() if got else None) == expected_date
+    assert inferred is expected_inferred
     if got is not None:
         assert got.tzinfo is not None
+
+
+def test_a_yearless_date_without_a_message_date_is_dropped():
+    """Resolving it against TODAY would attach a deadline to an archived 2022
+    email based on when the classifier happened to run."""
+    assert mail_classify.parse_deadline("Jan. 15") == (None, False)
+
+
+def test_a_yearless_date_rolls_forward_rather_than_backward():
+    """ "Jan. 15" in a December email means the following January. Resolving to
+    the message's own year would put the deadline before the email."""
+    december = datetime.datetime(2026, 12, 20, tzinfo=datetime.UTC)
+    got, inferred = mail_classify.parse_deadline("Jan. 15", sent_at=december)
+    assert got is not None and got.date() == datetime.date(2027, 1, 15)
+    assert inferred is True
 
 
 @pytest.mark.asyncio

@@ -15,6 +15,7 @@ from __future__ import annotations
 import datetime
 import logging
 import os
+import re
 from typing import Any, Literal
 
 from pydantic import BaseModel
@@ -154,27 +155,95 @@ def effort_for(model: str) -> str:
     return _EFFORT_BY_MODEL.get(model, FALLBACK_EFFORT)
 
 
-def parse_deadline(value: str | None) -> datetime.datetime | None:
-    """An ISO date, or nothing.
+# Dates the model actually returns, measured over 200 real messages rather
+# than guessed: "March 1, 2023", "Thursday, February 1, 2024",
+# "Tue Dec 10, 2024 at 4:00PM (EST)". The instruction asks for ISO and the
+# model frequently answers in prose, so accepting only ISO discarded 7.5% of
+# the deadlines it found - real dates, thrown away.
+_MONTHS = {
+    m.lower(): i
+    for i, m in enumerate(
+        [
+            "January",
+            "February",
+            "March",
+            "April",
+            "May",
+            "June",
+            "July",
+            "August",
+            "September",
+            "October",
+            "November",
+            "December",
+        ],
+        start=1,
+    )
+}
+_MONTHS.update({m[:3]: i for m, i in _MONTHS.items()})
 
-    The model is asked for a date it can actually read off the email, and it
-    mostly complies - but it also returns things like "2022-09-??" when the
-    year and month are stated and the day is not. Postgres rejects that
-    outright, and passing it through failed an entire 1,200-message task on
-    one row.
+_DATE_RE = re.compile(
+    r"\b(?P<month>[A-Za-z]{3,9})\.?\s+(?P<day>\d{1,2})(?:\s*,)?(?:\s+(?P<year>\d{4}))?\b"
+)
 
-    A partial date is not a deadline. Dropping it is the same rule the rest of
-    this pipeline follows: unstated stays unstated rather than becoming a
-    guess, and inventing the 1st or the 30th to make it parse would be exactly
-    the fabrication the schema exists to prevent.
+
+def parse_deadline(value: str | None, *, sent_at: datetime.datetime | None = None):
+    """An exact instant, or nothing - plus whether the year had to be inferred.
+
+    Returns (deadline, inferred). Three outcomes, deliberately distinct:
+
+    ISO or a full prose date resolves exactly.
+
+    A date with no year ("Jan. 15") resolves against the message it came from
+    and is marked INFERRED, because that is a real inference and the schema
+    already carries a flag for exactly this. Without a message date it is
+    dropped rather than guessed against today.
+
+    Anything with no resolvable date at all ("Tuesday at 2:00 PM", "soon",
+    "2022-09-??") becomes nothing. A partial date is not a deadline, and
+    inventing a day to make it parse is the fabrication this pipeline exists
+    to avoid.
     """
     if not value:
-        return None
+        return None, False
+    text = value.strip()
+
     try:
-        parsed = datetime.date.fromisoformat(value.strip()[:10])
+        parsed = datetime.date.fromisoformat(text[:10])
+        return datetime.datetime.combine(parsed, datetime.time.min, tzinfo=datetime.UTC), False
     except (ValueError, TypeError):
-        return None
-    return datetime.datetime.combine(parsed, datetime.time.min, tzinfo=datetime.UTC)
+        pass
+
+    match = _DATE_RE.search(text)
+    if not match:
+        return None, False
+    month = _MONTHS.get(match.group("month").lower())
+    if month is None:
+        return None, False
+    day = int(match.group("day"))
+    year_text = match.group("year")
+    inferred = year_text is None
+    if year_text is not None:
+        year = int(year_text)
+    elif sent_at is not None:
+        # The year the message was sent. A deadline stated as "Jan. 15" in a
+        # December email means the following January, so roll forward when the
+        # date would otherwise land in the past.
+        year = sent_at.year
+        try:
+            candidate = datetime.date(year, month, day)
+        except ValueError:
+            return None, False
+        if candidate < sent_at.date():
+            year += 1
+    else:
+        return None, False
+
+    try:
+        resolved = datetime.date(year, month, day)
+    except ValueError:
+        return None, False
+    return datetime.datetime.combine(resolved, datetime.time.min, tzinfo=datetime.UTC), inferred
 
 
 def _spec_text(row: dict[str, Any]) -> str:
@@ -215,6 +284,7 @@ async def handle_classify_mail(task_id: int, payload: dict[str, Any]) -> None:
         _set_progress(task_id, 0, 0, "nothing to classify")
         return
 
+    by_id = {r["id"]: r["sent_at"] for r in rows}
     schema = to_strict_json_schema(MailClassification)
     specs = [
         BatchSpec(str(r["id"]), _INSTRUCTIONS, _spec_text(r), "MailClassification", schema)
@@ -239,7 +309,9 @@ async def handle_classify_mail(task_id: int, payload: dict[str, Any]) -> None:
         # Everything that can raise happens BEFORE anything is written, so a
         # half-parsed result cannot produce a half-written row that later looks
         # like a completed classification.
-        deadline = parse_deadline(parsed.deadline)
+        deadline, year_inferred = parse_deadline(
+            parsed.deadline, sent_at=by_id.get(int(key)) if key.isdigit() else None
+        )
         try:
             db.execute(
                 """
@@ -252,7 +324,10 @@ async def handle_classify_mail(task_id: int, payload: dict[str, Any]) -> None:
                     parsed.kind,
                     parsed.confidence,
                     deadline,
-                    not parsed.deadline_is_explicit and deadline is not None,
+                    # Inferred if the model said so, OR if we resolved a
+                    # missing year ourselves. Either way it is not a date the
+                    # email stated outright.
+                    deadline is not None and (year_inferred or not parsed.deadline_is_explicit),
                     db.jsonb({"company": parsed.company, "role_title": parsed.role_title}),
                     model,
                 ),
