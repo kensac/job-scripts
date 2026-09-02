@@ -7,6 +7,7 @@ and keeps handlers from importing the loop.
 
 from __future__ import annotations
 
+from api.tasks import comp, mail_classify, requirements, verify
 from api.tasks.batches import handle_poll_batches
 from api.tasks.comp import handle_extract_comp
 from api.tasks.content import handle_fetch_missing_content
@@ -35,6 +36,22 @@ from api.tasks.verify import (
     handle_verify_new,
 )
 
+# Every configurable task, keyed by the purpose its own shape declares. This
+# is the list the configuration screen offers and the list resolve() is asked
+# about - one registry, so a task cannot be configurable but unreported, or
+# reported under a name nothing configures.
+SHAPES = {
+    shape.purpose: shape
+    for shape in (
+        comp.COMP_TASK,
+        requirements.REQUIREMENTS_TASK,
+        verify.VERIFY_TASK,
+        mail_classify.BACKFILL_TASK,
+        mail_classify.ONGOING_TASK,
+    )
+}
+
+
 HANDLERS = {
     "extract_upload": lambda task_id, payload: handle_extract_upload(payload),
     "classify_mail": handle_classify_mail,
@@ -59,4 +76,4 @@ HANDLERS = {
     "fetch_missing_content": handle_fetch_missing_content,
 }
 
-__all__ = ["HANDLERS"]
+__all__ = ["HANDLERS", "SHAPES"]
