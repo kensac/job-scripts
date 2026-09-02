@@ -209,6 +209,20 @@ def sync_action_items(application_id: int) -> dict[str, int]:
         "WHERE ai.application_id = %s AND ai.resolved_at IS NULL",
         (application_id,),
     )
+    # An item whose event no longer reaches this application is stranded: the
+    # message was detached or rematched, so nothing will ever resolve it and it
+    # stays open forever asking for something about an application it is not
+    # part of. Matches are append-only, so the event did not disappear - it
+    # moved, and the item has to follow.
+    live_events = {e["id"] for e in events}
+    for item in open_items:
+        if item["event_id"] is not None and item["event_id"] not in live_events:
+            db.execute(
+                "UPDATE action_items SET resolved_at = now(), resolution = %s WHERE id = %s",
+                ("the message this asked about is no longer part of this application", item["id"]),
+            )
+            resolved += 1
+    open_items = [i for i in open_items if i["event_id"] in live_events or i["event_id"] is None]
     for item in open_items:
         settling = _RESOLVING_EVENTS.get(item["kind"], ())
         later = [e for e in events if e["kind"] in settling and e["id"] > (item["event_id"] or 0)]

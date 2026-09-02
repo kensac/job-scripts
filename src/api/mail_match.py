@@ -34,6 +34,18 @@ ATS_COMPANY = "ats_company"
 COMPANY_TITLE = "company_title"
 ADJUDICATED = "adjudicated"
 UNMATCHED = "unmatched"
+# Deliberately attached to nothing, which is not the same as "we looked and
+# found nothing". A recruiter approach is an event about the PERSON, not about
+# an application - it routinely arrives from companies they have no
+# relationship with, and attaching it to one because the names agree turns a
+# cold approach into evidence about a real application.
+NOT_AN_APPLICATION = "not_an_application"
+
+# Kinds that describe the user rather than an application, and so must never
+# be attached to one. Already excluded from creating applications
+# (tasks/mail_match.APPLIED_KINDS); this is the same rule on the matching side,
+# which had drifted.
+UNATTACHABLE_KINDS = frozenset({"recruiter_outreach"})
 
 _URL_RE = re.compile(r"https?://[^\s<>\"')\]]+", re.IGNORECASE)
 
