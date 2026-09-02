@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
+from decimal import Decimal
 
 from api import crypto, db
 from api.auth import AuthedUser
@@ -146,6 +148,94 @@ def resolve_ai_config(user_id: int, entitlement: Entitlement):
                 params={k: v for k, v in params.items() if k != "temperature"},
             )
     raise LookupError("NO_API_KEY")
+
+
+# A week's fleet ceiling, expressed as "this many full sweeps of every task at
+# its sanctioned model" rather than as a dollar figure.
+#
+# Dollars would need re-picking every time a task is added or a model changes.
+# This moves with the design: the fleet's sanctioned cost for one cycle of
+# everything is computable from the shapes themselves, and the ceiling is a
+# multiple of it.
+#
+# 24 is derived from observation. One full sweep of every task at its
+# sanctioned models is $11.71; the fleet actually spent $29.19 in its busiest
+# week, which is about 2.5 sweeps' worth, because sweeps mostly find nothing to
+# do. 24 leaves roughly ten times the observed headroom - high enough that
+# growth and a backfill do not trip it, low enough that the runaway this exists
+# to catch does. A single task switched to the dearest model it can reach costs
+# $30 an hour, which breaches this inside a day.
+FLEET_WEEKLY_CYCLES = int(os.environ.get("JOBTRACKER_FLEET_WEEKLY_CYCLES", "24"))
+
+
+def fleet_cycle_cost_usd() -> Decimal:
+    """What one sweep of every configurable task costs at its CURRENT model.
+
+    Current, not sanctioned: an override is part of what the fleet now costs,
+    and a ceiling that ignored overrides would be measuring a fleet that is not
+    running.
+    """
+    from api.tasks import SHAPES
+    from api.tasks.runtime import configured_model
+    from core.routing import NoEligibleModel, resolve
+
+    total = Decimal(0)
+    for purpose, shape in SHAPES.items():
+        try:
+            chosen = resolve(shape, override=configured_model(purpose))
+        except NoEligibleModel:
+            # A task that cannot run costs nothing, and refusing to compute a
+            # ceiling because one task is misconfigured would take down the
+            # control for every other task.
+            continue
+        if chosen.est_cost_usd is not None:
+            total += chosen.est_cost_usd * shape.per_cycle
+    return total
+
+
+def fleet_spend_this_week() -> Decimal:
+    """Fleet spend since the start of the current week, in UTC.
+
+    user_id IS NULL is what makes a row fleet work rather than a person's -
+    the same predicate record_fleet_usage writes.
+    """
+    row = db.query_one(
+        "SELECT COALESCE(SUM(cost_usd), 0) AS spent FROM api_usage "
+        "WHERE user_id IS NULL AND created_at >= date_trunc('week', now() AT TIME ZONE 'UTC')"
+    )
+    return Decimal(str((row or {}).get("spent") or 0))
+
+
+class FleetBudgetExceeded(RuntimeError):
+    """The fleet has spent past its weekly ceiling.
+
+    Raised rather than logged. A warning would be seen by nobody at 3am, and
+    the whole point is that the runaway case is one nobody is watching.
+    """
+
+
+def check_fleet_budget() -> None:
+    """Refuse to start more paid work once the week's ceiling is passed.
+
+    Checked before a batch is submitted rather than after, because a submitted
+    batch is already billable - the provider has it, and cancelling is not
+    something this system can rely on.
+
+    A ceiling of zero disables the check, which is how a deliberate backfill
+    gets run without editing code.
+    """
+    if FLEET_WEEKLY_CYCLES <= 0:
+        return
+    ceiling = fleet_cycle_cost_usd() * FLEET_WEEKLY_CYCLES
+    if ceiling <= 0:
+        return
+    spent = fleet_spend_this_week()
+    if spent >= ceiling:
+        raise FleetBudgetExceeded(
+            f"fleet spend this week is ${spent:.2f} against a ceiling of ${ceiling:.2f} "
+            f"({FLEET_WEEKLY_CYCLES} full sweeps at current models); "
+            f"raise JOBTRACKER_FLEET_WEEKLY_CYCLES or wait for the week to roll over"
+        )
 
 
 def record_fleet_usage(

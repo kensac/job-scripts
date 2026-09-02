@@ -49,6 +49,22 @@ router = APIRouter(prefix="/admin")
 RECENT_CHANGES = 10
 
 
+# How much dearer a model may be than the one running before the change has to
+# be acknowledged rather than merely made.
+#
+# Derived from the largest deliberate step anyone has taken in this codebase:
+# gpt-5-nano to gpt-5-mini, which requirements extraction and ongoing mail
+# classification both chose on measured evidence, is exactly 5x on input and
+# output. Two such steps is 10x, which admits every quality upgrade anyone has
+# argued for and stops the ones nobody would argue for - comp on gpt-5.6-sol is
+# 60x its current cost, hourly.
+#
+# Not a refusal. Kanishk owns this system and may overrule it; what he may not
+# do is spend 60x by accident. The acknowledgement is a second deliberate act
+# and it is recorded on the row.
+COST_ACKNOWLEDGEMENT_MULTIPLE = 10
+
+
 class TaskModelPut(BaseModel):
     # None clears the override and returns the task to what its call site
     # sanctioned. It is not "unset" - a row is still written, because losing
@@ -56,12 +72,16 @@ class TaskModelPut(BaseModel):
     # overwriting it.
     model: str | None = None
     reason: str | None = Field(default=None, max_length=2000)
+    # Required when the new model costs more than COST_ACKNOWLEDGEMENT_MULTIPLE
+    # times the current one. The API says what the number is when it refuses,
+    # so this is never a guess.
+    acknowledge_cost: bool = False
 
 
 def _history(purpose: str, limit: int) -> list[dict[str, Any]]:
     return db.query(
         """
-        SELECT o.id, o.model, o.overrode_sanctioned, o.reason, o.created_at,
+        SELECT o.id, o.model, o.overrode_sanctioned, o.acknowledged_cost, o.reason, o.created_at,
                u.email AS changed_by_email
         FROM task_model_overrides o
         LEFT JOIN users u ON u.id = o.changed_by
@@ -76,6 +96,65 @@ def _history(purpose: str, limit: int) -> list[dict[str, Any]]:
 def _current(purpose: str) -> dict[str, Any] | None:
     rows = _history(purpose, 1)
     return rows[0] if rows else None
+
+
+# How far back per-model health looks. Derived from the provider's own
+# completion window rather than picked: core.batch asks for 24 hours, so a
+# window of seven of those covers a week of full cycles and is long enough that
+# a single slow batch does not read as a stall.
+HEALTH_WINDOW_DAYS = 7
+
+
+def _model_health() -> dict[str, dict[str, Any]]:
+    """Per model: is it finishing work, and is the work coming back good.
+
+    The configuration screen priced models and said nothing about whether they
+    are doing the job, which makes it a price list rather than a decision. Both
+    halves are already in ai_batches and nothing read them.
+
+    `failed_requests` over `requests` is the rate that matters - a model can
+    complete every batch while failing lines inside them, which is what a
+    schema the model keeps breaking looks like. Reported as a numerator and a
+    denominator, never as a percentage: 1 of 3 and 3,000 of 9,000 are not the
+    same claim.
+    """
+    rows = db.query(
+        f"""
+        SELECT model,
+               COUNT(*) FILTER (WHERE completed_at IS NULL) AS in_flight,
+               MAX(completed_at) AS last_completed_at,
+               MIN(submitted_at) FILTER (WHERE completed_at IS NULL)
+                   AS oldest_in_flight_at,
+               COALESCE(SUM(requests), 0) AS requests,
+               COALESCE(SUM(failed_count), 0) AS failed_requests
+        FROM ai_batches
+        WHERE model IS NOT NULL
+          AND submitted_at > now() - interval '{HEALTH_WINDOW_DAYS} days'
+        GROUP BY model
+        """
+    )
+    return {r.pop("model"): r for r in rows}
+
+
+def _health_view(row: dict[str, Any] | None) -> dict[str, Any] | None:
+    """One model's health, or absent when it has run nothing to judge.
+
+    Absent rather than zeroed: a model nobody has used is not a model with a
+    perfect record, and a screen that cannot tell those apart will recommend
+    the untried one.
+    """
+    if not row:
+        return None
+    return {
+        "in_flight": row["in_flight"],
+        "last_completed_at": row["last_completed_at"],
+        "oldest_in_flight_at": row["oldest_in_flight_at"],
+        # Numerator and denominator, not a rate. 1 of 3 and 3,000 of 9,000 are
+        # different claims and a percentage renders them identically.
+        "failed_requests": row["failed_requests"],
+        "requests": row["requests"],
+        "window_days": HEALTH_WINDOW_DAYS,
+    }
 
 
 def _money(value: Any) -> str | None:
@@ -98,6 +177,7 @@ def _view(purpose: str) -> dict[str, Any]:
     latest = _current(purpose)
     override = (latest or {}).get("model")
     candidacies = candidates_for(shape)
+    health = _model_health()
     current_model = override or (shape.candidates[0] if shape.candidates else None)
     current_cycle = next(
         (c.est_cycle_cost_usd for c in candidacies if c.model == current_model), None
@@ -155,6 +235,11 @@ def _view(purpose: str) -> dict[str, Any]:
                 # makes the figures above the peak ones. A caveat for beside
                 # the price, not a state.
                 "price_varies_by_time": c.price_varies_by_time,
+                # Whether this model is finishing work and whether the work
+                # comes back good. Absent when it has run nothing in the
+                # window - which is not the same as healthy, and must not
+                # render as zeroes.
+                "health": _health_view(health.get(c.model)),
                 # The measured findings about THIS model on THIS task, so the
                 # client renders them on the option they are about rather than
                 # holding its own copy that rots at the next measurement.
@@ -182,6 +267,49 @@ def _view(purpose: str) -> dict[str, Any]:
         },
         "recent_changes": _history(purpose, RECENT_CHANGES),
     }
+
+
+def _require_cost_acknowledgement(purpose: str, shape, body: TaskModelPut) -> None:
+    """Refuse a large increase unless it was acknowledged, and say how large.
+
+    At the moment of the decision, where the number is exactly known - not
+    afterwards, when a sweep declines to run and the person has to work out
+    why. A control that fires somewhere other than where the choice was made
+    is a control nobody connects to their own action.
+
+    Only increases. Moving to a cheaper model never needs acknowledging.
+    """
+    if body.acknowledge_cost:
+        return
+    candidacies = {c.model: c for c in candidates_for(shape)}
+    new = candidacies.get(body.model or "")
+    current_model = _current(purpose) or {}
+    current_name = current_model.get("model") or (shape.candidates[0] if shape.candidates else None)
+    current = candidacies.get(current_name or "")
+    if new is None or current is None:
+        return
+    if new.est_cycle_cost_usd is None or not current.est_cycle_cost_usd:
+        return
+    multiple = new.est_cycle_cost_usd / current.est_cycle_cost_usd
+    if multiple <= COST_ACKNOWLEDGEMENT_MULTIPLE:
+        return
+    raise HTTPException(
+        400,
+        detail={
+            "code": "COST_ACKNOWLEDGEMENT_REQUIRED",
+            "message": (
+                f"{body.model} costs {multiple:.1f}x what {current_name} costs for this "
+                f"task - {_money(new.est_cycle_cost_usd)} against "
+                f"{_money(current.est_cycle_cost_usd)} per cycle. Re-send with "
+                f"acknowledge_cost to proceed."
+            ),
+            "multiple": f"{multiple:.1f}",
+            "current_model": current_name,
+            "current_cycle_cost_usd": _money(current.est_cycle_cost_usd),
+            "new_cycle_cost_usd": _money(new.est_cycle_cost_usd),
+            "threshold": COST_ACKNOWLEDGEMENT_MULTIPLE,
+        },
+    )
 
 
 @router.get("/task-models")
@@ -229,14 +357,16 @@ def put_task_model(purpose: str, body: TaskModelPut, user: AuthedUser = Depends(
             raise HTTPException(
                 400, detail={"code": "INELIGIBLE_MODEL", "message": str(exc)}
             ) from exc
+        _require_cost_acknowledgement(purpose, shape, body)
     db.execute(
         "INSERT INTO task_model_overrides (purpose, model, overrode_sanctioned, reason, "
-        "changed_by) VALUES (%s, %s, %s, %s, %s)",
+        "acknowledged_cost, changed_by) VALUES (%s, %s, %s, %s, %s, %s)",
         (
             purpose,
             body.model,
             bool(body.model) and body.model not in shape.candidates,
             body.reason,
+            body.acknowledge_cost,
             user.id,
         ),
     )

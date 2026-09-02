@@ -68,6 +68,7 @@ class TestStore:
                     "embedding": str(_vec()),
                     "model": EMBEDDING_MODEL,
                     "hash": "abc",
+                    "row_id": 1,
                     "tokens": 1132,
                     "cost": cost,
                 }
@@ -93,6 +94,7 @@ class TestStore:
                         "embedding": str(_vec()),
                         "model": EMBEDDING_MODEL,
                         "hash": h,
+                        "row_id": 1,
                         "tokens": 1,
                         "cost": None,
                     }
@@ -111,6 +113,7 @@ class TestStore:
                         "embedding": str([1.0, 2.0]),
                         "model": EMBEDDING_MODEL,
                         "hash": "h",
+                        "row_id": 1,
                         "tokens": 1,
                         "cost": None,
                     }

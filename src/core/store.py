@@ -365,6 +365,12 @@ MIN_CONTENT_CHARS = 200
 # jobs passes 'j.url' and a sweep over ai_queries itself passes its own alias;
 # every caller gets the same row for the same url either way.
 #
+# `columns` is what to take from that row. Usually input_content, but a sweep
+# deciding WHETHER to re-read a page wants only the row's id: input_content is
+# TOASTed and id is not, so asking "has the page changed" costs an index read
+# instead of detoasting the whole corpus. Both spellings pick the same row,
+# which is the point of having one lateral rather than two.
+#
 # Deliberately NOT the same query as get_content(), which takes the newest text
 # whatever check produced it. Preferring a 'content' row can return older text,
 # which is right for extracting stable facts and wrong for deciding whether a
@@ -372,7 +378,7 @@ MIN_CONTENT_CHARS = 200
 CONTENT_LATERAL = (
     """
         JOIN LATERAL (
-            SELECT input_content FROM ai_queries q
+            SELECT {columns} FROM ai_queries q
             WHERE q.url = {url} AND q.input_content IS NOT NULL
               AND length(q.input_content) > """
     + str(MIN_CONTENT_CHARS)

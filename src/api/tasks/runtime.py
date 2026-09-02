@@ -543,6 +543,9 @@ async def run_batched(
     in a fifth.
     """
     purpose = shape.purpose
+    # Before anything is submitted: a batch the provider has accepted is
+    # billable whether or not this system still wants it.
+    budget.check_fleet_budget()
     chosen = resolve(shape, override=configured_model(purpose))
     logger.info(f"Task {task_id}: {purpose} on {chosen.model} - {chosen.reason}")
     # Every spec in a sweep carries the same instructions - they are module

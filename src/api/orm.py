@@ -137,6 +137,11 @@ class JobRequirements(Base):
     sponsorship: Mapped[str | None] = mapped_column(Text)
     model: Mapped[str | None] = mapped_column(Text)
     content_hash: Mapped[str | None] = mapped_column(Text)
+    # The ai_queries row the answer was read from. Ids are not TOASTed, so
+    # "is there a newer page for this url" is an index read rather than a
+    # detoast of the corpus; the hash above then decides whether the text
+    # actually changed and the work needs paying for again.
+    content_row_id: Mapped[int | None] = mapped_column(BigInteger)
     extracted_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
 
 
@@ -158,6 +163,11 @@ class JobEmbedding(Base):
     embedding: Mapped[Any] = mapped_column(Vector(EMBEDDING_DIMENSIONS))
     model: Mapped[str] = mapped_column(Text)
     content_hash: Mapped[str | None] = mapped_column(Text)
+    # The ai_queries row the answer was read from. Ids are not TOASTed, so
+    # "is there a newer page for this url" is an index read rather than a
+    # detoast of the corpus; the hash above then decides whether the text
+    # actually changed and the work needs paying for again.
+    content_row_id: Mapped[int | None] = mapped_column(BigInteger)
     input_tokens: Mapped[int] = mapped_column(Integer, server_default=text("0"))
     # NULL means the model had no published price, which must stay distinct
     # from a call that genuinely cost nothing. Ten decimal places rather than
@@ -362,6 +372,10 @@ class TaskModelOverride(Base):
     # whether it was an override when it was made.
     overrode_sanctioned: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     reason: Mapped[str | None] = mapped_column(Text)
+    # True when the change was large enough to need acknowledging and was
+    # acknowledged. "He was told and went ahead" is a different fact from "he
+    # changed it", and the review is where that distinction is wanted.
+    acknowledged_cost: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     changed_by: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("users.id", ondelete="SET NULL")
     )

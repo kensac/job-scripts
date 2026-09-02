@@ -137,7 +137,7 @@ async def handle_extract_comp(task_id: int, payload: dict[str, Any]) -> None:
         f"""
         SELECT j.id, j.url, q.input_content
         FROM jobs j
-        {CONTENT_LATERAL.format(url="j.url")}
+        {CONTENT_LATERAL.format(url="j.url", columns="input_content")}
         WHERE NOT j.comp_extracted AND j.active
         ORDER BY j.id DESC
         LIMIT %(cap)s

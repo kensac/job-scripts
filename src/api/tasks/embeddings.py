@@ -38,18 +38,36 @@ logger = logging.getLogger("jobtracker_worker")
 EMBED_POSTINGS_PER_CYCLE = int(os.environ.get("JOBTRACKER_EMBED_POSTINGS_PER_CYCLE", "2000"))
 
 
-# Same shape as the requirements sweep's candidate query, and identical in the
-# part that matters: already-embedded urls are filtered out BEFORE the lateral
-# runs, because input_content is TOASTed and joining first would detoast page
-# text for rows about to be discarded.
+# Postings never embedded, plus postings whose page has been scraped again
+# since they were. Same shape as the requirements sweep, for the same reason.
+#
+# The change check runs over the whole corpus every cycle, so it must not
+# detoast it: the first stage takes only the id of each url's current content
+# row, which is an index read, and compares it to the id the stored answer came
+# from. Only the survivors of that - and only up to the cap - have their text
+# fetched. Getting this the other way round would read 110 MB an hour to learn
+# that nothing changed.
+#
+# `stored_hash` rides along so the handler can tell a re-scrape that changed the
+# page from one that did not. An identical re-scrape refreshes the id and pays
+# for nothing.
 _CANDIDATES = f"""
-    SELECT c.url, q.input_content
-    FROM (
-        SELECT DISTINCT a.url FROM ai_queries a
-        WHERE NOT EXISTS (SELECT 1 FROM job_embeddings e WHERE e.url = a.url)
-    ) c
-    {CONTENT_LATERAL.format(url="c.url")}
-    LIMIT %(cap)s
+    WITH current_row AS (
+        SELECT c.url, q.content_row_id
+        FROM (SELECT DISTINCT a.url FROM ai_queries a) c
+        {CONTENT_LATERAL.format(url="c.url", columns="id AS content_row_id")}
+    ),
+    todo AS (
+        SELECT cr.url, cr.content_row_id, e.content_hash AS stored_hash
+        FROM current_row cr
+        LEFT JOIN job_embeddings e ON e.url = cr.url
+        WHERE e.url IS NULL
+           OR e.content_row_id IS DISTINCT FROM cr.content_row_id
+        LIMIT %(cap)s
+    )
+    SELECT t.url, t.content_row_id, t.stored_hash, q.input_content
+    FROM todo t
+    {CONTENT_LATERAL.format(url="t.url", columns="input_content")}
 """
 
 
@@ -65,16 +83,45 @@ def _store(rows: list[dict[str, Any]]) -> None:
         conn.cursor().executemany(
             """
             INSERT INTO job_embeddings (url, embedding, model, content_hash,
-                                        input_tokens, cost_usd)
-            VALUES (%(url)s, %(embedding)s, %(model)s, %(hash)s, %(tokens)s, %(cost)s)
+                                        content_row_id, input_tokens, cost_usd)
+            VALUES (%(url)s, %(embedding)s, %(model)s, %(hash)s, %(row_id)s,
+                    %(tokens)s, %(cost)s)
             ON CONFLICT (url) DO UPDATE SET
                 embedding = EXCLUDED.embedding, model = EXCLUDED.model,
                 content_hash = EXCLUDED.content_hash,
+                content_row_id = EXCLUDED.content_row_id,
                 input_tokens = EXCLUDED.input_tokens, cost_usd = EXCLUDED.cost_usd,
                 created_at = now()
             """,
             rows,
         )
+
+
+def _drop_unchanged_rescrapes(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Re-stamp the pages scraped again that did not change.
+
+    Same reasoning as the requirements sweep: a url reaches this list when its
+    current content row is not the one its vector came from, which a re-scrape
+    makes true whether or not the text moved. Comparing the stored hash
+    separates them, and an unchanged page has its row id refreshed rather than
+    being re-embedded - it would produce the same vector at the same cost.
+    """
+    changed = []
+    unchanged: list[tuple[int | None, str]] = []
+    for row in rows:
+        text = row["input_content"][:EMBEDDING_INPUT_CHARS]
+        row["content_hash"] = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        if row["stored_hash"] and row["stored_hash"] == row["content_hash"]:
+            unchanged.append((row["content_row_id"], row["url"]))
+        else:
+            changed.append(row)
+    if unchanged:
+        with db.pool.connection() as conn:
+            conn.cursor().executemany(
+                "UPDATE job_embeddings SET content_row_id = %s WHERE url = %s", unchanged
+            )
+        logger.info(f"{len(unchanged)} page(s) re-scraped without changing; not re-embedded")
+    return changed
 
 
 async def handle_embed_postings(task_id: int, payload: dict[str, Any]) -> None:
@@ -87,7 +134,7 @@ async def handle_embed_postings(task_id: int, payload: dict[str, Any]) -> None:
         _set_progress(task_id, 0, 0, "no api key")
         return
 
-    candidates = db.query(_CANDIDATES, {"cap": EMBED_POSTINGS_PER_CYCLE})
+    candidates = _drop_unchanged_rescrapes(db.query(_CANDIDATES, {"cap": EMBED_POSTINGS_PER_CYCLE}))
     if not candidates:
         _set_progress(task_id, 0, 0, "nothing to embed")
         return
@@ -129,13 +176,13 @@ async def handle_embed_postings(task_id: int, payload: dict[str, Any]) -> None:
                     f"expected {EMBEDDING_DIMENSIONS}; skipping"
                 )
                 continue
-            text = row["input_content"][:EMBEDDING_INPUT_CHARS]
             rows.append(
                 {
                     "url": row["url"],
                     "embedding": str(item.embedding),
                     "model": EMBEDDING_MODEL,
-                    "hash": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+                    "hash": row["content_hash"],
+                    "row_id": row["content_row_id"],
                     "tokens": per_posting,
                     "cost": cost,
                 }

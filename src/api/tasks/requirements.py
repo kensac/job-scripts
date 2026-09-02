@@ -227,23 +227,36 @@ _REQUIREMENTS_INSTRUCTIONS = (
 )
 
 
-# Only postings whose stored page text has not already been extracted. Keyed on
-# the url rather than on a job id: 5,511 of the 20,680 urls with usable content
-# have no jobs row at all, and those postings are closed and unscrapable, which
-# makes them the part of the corpus that can never be rebuilt.
+# Postings never extracted, plus postings whose page has been scraped again
+# since they were.
 #
-# The already-extracted urls are filtered out BEFORE the lateral runs, not
-# after. input_content is TOASTed, so a plan that joins first and filters
-# second detoasts megabytes of page text for urls it is about to discard;
-# measured against prod, this shape touches only the rows it returns.
+# The change check runs over the whole corpus every cycle, so it must not
+# detoast it: the first stage takes only the id of each url's current content
+# row, which is an index read, and compares it to the id the stored answer came
+# from. Only the survivors of that - and only up to the cap - have their text
+# fetched. Getting this the other way round would read 110 MB an hour to learn
+# that nothing changed.
+#
+# `stored_hash` rides along so the handler can tell a re-scrape that changed the
+# page from one that did not. An identical re-scrape refreshes the id and pays
+# for nothing.
 _CANDIDATES = f"""
-    SELECT c.url, q.input_content
-    FROM (
-        SELECT DISTINCT a.url FROM ai_queries a
-        WHERE NOT EXISTS (SELECT 1 FROM job_requirements r WHERE r.url = a.url)
-    ) c
-    {CONTENT_LATERAL.format(url="c.url")}
-    LIMIT %(cap)s
+    WITH current_row AS (
+        SELECT c.url, q.content_row_id
+        FROM (SELECT DISTINCT a.url FROM ai_queries a) c
+        {CONTENT_LATERAL.format(url="c.url", columns="id AS content_row_id")}
+    ),
+    todo AS (
+        SELECT cr.url, cr.content_row_id, r.content_hash AS stored_hash
+        FROM current_row cr
+        LEFT JOIN job_requirements r ON r.url = cr.url
+        WHERE r.url IS NULL
+           OR r.content_row_id IS DISTINCT FROM cr.content_row_id
+        LIMIT %(cap)s
+    )
+    SELECT t.url, t.content_row_id, t.stored_hash, q.input_content
+    FROM todo t
+    {CONTENT_LATERAL.format(url="t.url", columns="input_content")}
 """
 
 
@@ -272,7 +285,9 @@ def _years(parsed: RequirementsExtract) -> tuple[int | None, int | None]:
     return low, high
 
 
-def _store(url: str, parsed: RequirementsExtract, content_hash: str) -> None:
+def _store(
+    url: str, parsed: RequirementsExtract, content_hash: str, content_row_id: int | None
+) -> None:
     yoe_min, yoe_max = _years(parsed)
     stated = parsed.has_requirements
     with db.pool.connection() as conn:
@@ -281,10 +296,11 @@ def _store(url: str, parsed: RequirementsExtract, content_hash: str) -> None:
             INSERT INTO job_requirements (
                 url, has_requirements, yoe_min, yoe_max, degree_min, degree_required,
                 degree_fields, enrollment_required, seniority, employment_type,
-                clearance, citizenship_required, sponsorship, model, content_hash)
+                clearance, citizenship_required, sponsorship, model, content_hash,
+                content_row_id)
             VALUES (%(url)s, %(has)s, %(ymin)s, %(ymax)s, %(deg)s, %(degreq)s,
                     %(fields)s, %(enrol)s, %(sen)s, %(emp)s, %(clr)s, %(cit)s,
-                    %(spon)s, %(model)s, %(hash)s)
+                    %(spon)s, %(model)s, %(hash)s, %(row_id)s)
             ON CONFLICT (url) DO UPDATE SET
                 has_requirements = EXCLUDED.has_requirements,
                 yoe_min = EXCLUDED.yoe_min, yoe_max = EXCLUDED.yoe_max,
@@ -298,6 +314,7 @@ def _store(url: str, parsed: RequirementsExtract, content_hash: str) -> None:
                 citizenship_required = EXCLUDED.citizenship_required,
                 sponsorship = EXCLUDED.sponsorship,
                 model = EXCLUDED.model, content_hash = EXCLUDED.content_hash,
+                content_row_id = EXCLUDED.content_row_id,
                 extracted_at = now()
             """,
             {
@@ -316,6 +333,7 @@ def _store(url: str, parsed: RequirementsExtract, content_hash: str) -> None:
                 "spon": in_vocabulary(parsed.sponsorship, SPONSORSHIPS) if stated else None,
                 "model": REQUIREMENTS_MODEL,
                 "hash": content_hash,
+                "row_id": content_row_id,
             },
         )
         # Replaced wholesale rather than merged: a re-extraction that drops a
@@ -343,12 +361,41 @@ def _store(url: str, parsed: RequirementsExtract, content_hash: str) -> None:
             )
 
 
+def _drop_unchanged_rescrapes(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Re-stamp the pages that were scraped again but did not change.
+
+    A url reaches the candidate list when its current content row is not the
+    one its answer came from, which a re-scrape makes true whether or not the
+    page actually changed - and a re-scrape that changed nothing is the common
+    case. Comparing the stored hash to the new text separates the two, and the
+    unchanged ones have their row id refreshed here so they do not come back
+    every cycle. Nothing is paid for; the row keeps the answer it had.
+    """
+    changed = []
+    unchanged: list[tuple[int | None, str]] = []
+    for row in rows:
+        text = row["input_content"][:REQUIREMENTS_INPUT_CHARS]
+        row["content_hash"] = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        if row["stored_hash"] and row["stored_hash"] == row["content_hash"]:
+            unchanged.append((row["content_row_id"], row["url"]))
+        else:
+            changed.append(row)
+    if unchanged:
+        with db.pool.connection() as conn:
+            conn.cursor().executemany(
+                "UPDATE job_requirements SET content_row_id = %s WHERE url = %s", unchanged
+            )
+        logger.info(f"{len(unchanged)} page(s) re-scraped without changing; not re-extracted")
+    return changed
+
+
 async def handle_extract_requirements(task_id: int, payload: dict[str, Any]) -> None:
     from openai.lib._pydantic import to_strict_json_schema
 
     from core.batch import BatchSpec
 
     rows = db.query(_CANDIDATES, {"cap": EXTRACT_REQUIREMENTS_PER_CYCLE})
+    rows = _drop_unchanged_rescrapes(rows)
     if not rows:
         _set_progress(task_id, 0, 0, "nothing to extract")
         return
@@ -366,22 +413,22 @@ async def handle_extract_requirements(task_id: int, payload: dict[str, Any]) -> 
     # The hash is of exactly the text that was sent, so a later pass can tell a
     # row extracted from today's page from one extracted from a page that has
     # since been re-scraped.
-    hashes = {
-        r["url"]: hashlib.sha256(
-            r["input_content"][:REQUIREMENTS_INPUT_CHARS].encode("utf-8")
-        ).hexdigest()
-        for r in rows
-    }
+    by_url = {r["url"]: r for r in rows}
     _set_progress(task_id, 0, len(specs), "requirements batch submitted (half price)")
     results, _ = await run_batched(task_id, REQUIREMENTS_TASK, specs)
     done = 0
     for url, res in results.items():
-        content_hash = hashes.get(url)
-        if content_hash is None:
+        row = by_url.get(url)
+        if row is None:
             continue
         if res.text and not res.error:
             try:
-                _store(url, RequirementsExtract.model_validate_json(res.text), content_hash)
+                _store(
+                    url,
+                    RequirementsExtract.model_validate_json(res.text),
+                    row["content_hash"],
+                    row["content_row_id"],
+                )
             except Exception:
                 # No row is written, so the next sweep picks the url up again -
                 # the same idempotent-by-re-sweep contract every batched pass has.
