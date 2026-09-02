@@ -224,6 +224,17 @@ def user_headers(client) -> dict:
 
 
 @pytest.fixture
+def other_user_headers(client) -> dict:
+    """A second, unrelated signed-in user. Every object-level authorization
+    test needs one, and the suite had none - which is why four cross-user
+    holes sat open behind fully-correct route-level gating."""
+    headers = _auth_headers("test-user-2", "user2@example.com", ["jobtracker-users-internal"])
+    resp = client.post("/v1/users/bootstrap", headers=headers)
+    assert resp.status_code == 200, resp.text
+    return headers
+
+
+@pytest.fixture
 def admin_headers(client) -> dict:
     headers = _auth_headers("test-admin", "admin@example.com", ["infra-admins"])
     resp = client.post("/v1/users/bootstrap", headers=headers)
