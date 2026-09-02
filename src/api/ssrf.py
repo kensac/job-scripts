@@ -56,7 +56,7 @@ def resolve_public_ip(host: str) -> str:
         infos = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
     except socket.gaierror as exc:
         raise ValueError(f"could not resolve {host}: {exc}") from exc
-    ips = {info[4][0] for info in infos}
+    ips = {str(info[4][0]) for info in infos}
     if not ips:
         raise ValueError(f"no addresses for {host}")
     for ip in ips:

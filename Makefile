@@ -1,6 +1,6 @@
 export PYTHONPATH := src
 
-.PHONY: api worker check lint fmt test schema migrate revision db-up db-down
+.PHONY: api worker check lint fmt types test schema migrate revision db-up db-down
 
 api:            ## run the API locally
 	uvicorn api.app:app --port 8000 --reload
@@ -8,9 +8,10 @@ api:            ## run the API locally
 worker:         ## run a worker locally
 	python -m api.worker
 
-check:          ## everything CI gates on: lint, format, compile, tests
+check:          ## everything CI gates on: lint, format, types, compile, tests
 	ruff check src tests
 	ruff format --check src tests
+	pyright
 	python -m compileall -q src
 	pytest -q tests
 
@@ -19,6 +20,9 @@ lint:           ## report lint findings (add ARGS=--fix to apply)
 
 fmt:            ## format the codebase
 	ruff format src tests
+
+types:          ## type-check the live code (src/api, src/core)
+	pyright
 
 test:           ## run the test suite
 	pytest -q tests

@@ -68,16 +68,15 @@ def _claim_task() -> dict[str, Any] | None:
 def reap_stale_tasks() -> None:
     """Recover tasks whose worker died mid-run (deploy, crash, OOM): heartbeat
     goes stale -> requeue up to MAX_ATTEMPTS, then fail permanently."""
-    with db.pool.connection() as conn:
-        result = conn.execute(
-            f"""
-            UPDATE tasks SET status = 'pending', started_at = NULL, last_heartbeat = NULL
-            WHERE status = 'running' AND attempts < {MAX_ATTEMPTS}
-              AND COALESCE(last_heartbeat, started_at) < now() - interval '{HEARTBEAT_TIMEOUT_MINUTES} minutes'
-            """
-        )
-        if result.rowcount:
-            metrics.REAPER_REQUEUES.inc(result.rowcount)
+    requeued = db.execute_count(
+        f"""
+        UPDATE tasks SET status = 'pending', started_at = NULL, last_heartbeat = NULL
+        WHERE status = 'running' AND attempts < {MAX_ATTEMPTS}
+          AND COALESCE(last_heartbeat, started_at) < now() - interval '{HEARTBEAT_TIMEOUT_MINUTES} minutes'
+        """
+    )
+    if requeued:
+        metrics.REAPER_REQUEUES.inc(requeued)
     db.execute(
         f"""
         UPDATE tasks SET status = 'failed', finished_at = now(),

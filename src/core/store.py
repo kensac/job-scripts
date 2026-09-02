@@ -5,13 +5,23 @@ import datetime
 import logging
 import os
 import socket
-from typing import Any
+from typing import Any, LiteralString, cast
 
 import dotenv
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
 logger = logging.getLogger("jobtracker_store")
+
+
+def _as_query(sql: str) -> LiteralString:
+    """Same invariant as api.db._as_query: the interpolated fragments here are
+    whitelisted column lists (_PREFETCH_COLS, _INSERT_COLUMNS) or fixed
+    conditions, never a caller-supplied value. Stated once so the claim is
+    auditable in one place instead of per call site.
+    """
+    return cast("LiteralString", sql)
+
 
 dotenv.load_dotenv()
 
@@ -90,10 +100,13 @@ def prefetch(
     cols = ", ".join(_PREFETCH_COLS)
     with _pool.connection() as conn:
         for check_type in check_types:
-            rows = conn.execute(
+            sql = _as_query(
                 f"SELECT DISTINCT ON (url) {cols} FROM ai_queries "
                 "WHERE url = ANY(%s) AND check_type = %s "
-                "AND status IN ('passed', 'rejected') ORDER BY url, id DESC",
+                "AND status IN ('passed', 'rejected') ORDER BY url, id DESC"
+            )
+            rows = conn.execute(
+                sql,
                 (unique, check_type),
             ).fetchall()
             found = {r["url"]: _prefetch_row(r) for r in rows}
@@ -101,9 +114,11 @@ def prefetch(
                 _latest_cache.setdefault(u, {})[check_type] = found.get(u)
         for prompt_hash in prompt_hashes:
             rows = conn.execute(
-                f"SELECT DISTINCT ON (url) {cols} FROM ai_queries "
-                "WHERE url = ANY(%s) AND check_type = 'custom' AND prompt_hash = %s "
-                "AND status IN ('passed', 'rejected') ORDER BY url, id DESC",
+                _as_query(
+                    f"SELECT DISTINCT ON (url) {cols} FROM ai_queries "
+                    "WHERE url = ANY(%s) AND check_type = 'custom' AND prompt_hash = %s "
+                    "AND status IN ('passed', 'rejected') ORDER BY url, id DESC"
+                ),
                 (unique, prompt_hash),
             ).fetchall()
             found = {r["url"]: _prefetch_row(r) for r in rows}
@@ -226,7 +241,7 @@ def add_ai_result(
     columns = ", ".join(_INSERT_COLUMNS)
     placeholders = ", ".join(f"%({c})s" for c in _INSERT_COLUMNS)
     with _pool.connection() as conn:
-        conn.execute(f"INSERT INTO ai_queries ({columns}) VALUES ({placeholders})", row)
+        conn.execute(_as_query(f"INSERT INTO ai_queries ({columns}) VALUES ({placeholders})"), row)
     sub = _latest_cache.get(url)
     if sub is not None:
         sub.pop(check_type, None)
@@ -329,10 +344,13 @@ def is_url_failed(url: str) -> bool:
 
 def _latest_per_url_where(condition: str, params: tuple) -> list[dict[str, Any]]:
     with _pool.connection() as conn:
-        rows = conn.execute(
+        sql = _as_query(
             "SELECT * FROM ai_queries q WHERE id = "
             "(SELECT MAX(id) FROM ai_queries WHERE url = q.url) "
-            f"AND {condition}",
+            f"AND {condition}"
+        )
+        rows = conn.execute(
+            sql,
             params,
         ).fetchall()
     return [dict(row) for row in rows]
