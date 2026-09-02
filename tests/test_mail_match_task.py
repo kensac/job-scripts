@@ -313,3 +313,27 @@ def test_employer_mail_relayed_by_a_platform_still_matches(f):
 
     counts = task.match_pending(uid)
     assert counts == {"ats_company": 1}
+
+
+def test_a_second_worker_cannot_duplicate_a_derived_application(f):
+    """Two workers can hold this task at once. A slow worker kept running this
+    handler after the reaper had requeued its task and another worker had
+    finished it - and nothing stopped the loser writing a second copy of every
+    application the winner had just created.
+
+    A duplicate here does not merely add a row: _by_company refuses to choose
+    between two applications at one employer, so it would make every future
+    message at that company permanently unmatchable, silently."""
+    uid = f.make_user()
+    msg = _message(uid)
+    _event(msg, "rejection", company="Initech", title="Backend Intern")
+
+    task.match_pending(uid)
+    first_created, first_matched = task.seed_from_mail(uid)
+    assert (first_created, first_matched) == (1, 1)
+
+    # The losing worker: its own view of the world still says this message is
+    # unmatched, because it read the rows before the winner wrote.
+    second_created, _ = task.seed_from_mail(uid)
+    assert second_created == 0
+    assert db.query_one("SELECT count(*) AS n FROM applications")["n"] == 1
