@@ -26,6 +26,7 @@ from datetime import UTC, datetime
 from email import policy
 from email.message import Message
 from email.utils import getaddresses, parsedate_to_datetime
+from html import unescape
 from pathlib import Path
 from xml.etree import ElementTree
 
@@ -98,6 +99,10 @@ def _strip_nul(text: str) -> str:
 
 def _clean(text: str) -> str:
     text = _WS.sub(" ", _strip_nul(text).replace("\r\n", "\n").replace("\r", "\n"))
+    # A non-breaking space is a space. Left alone it survives every whitespace
+    # rule here and reaches the reader as an invisible character that breaks
+    # nothing and joins nothing.
+    text = text.replace("\u00a0", " ").replace("\u200b", "")
     return _BLANKS.sub("\n\n", text).strip()
 
 
@@ -117,7 +122,15 @@ def _html_to_text(html: str) -> str:
     html = re.sub(r"(?is)<(script|style).*?</\1>", " ", html)
     html = re.sub(r"(?i)<br\s*/?>", "\n", html)
     html = re.sub(r"(?i)</p>", "\n\n", html)
-    return _clean(_TAG.sub(" ", html))
+    # A block element ends a line. Without this, a table-laid-out mail - which
+    # is most ATS mail - collapses into one run-on paragraph, and the sender's
+    # own structure is lost rather than translated.
+    html = re.sub(r"(?i)</(div|tr|td|li|h[1-6]|table)>", "\n", html)
+    # Entities LAST, after tags are gone: unescaping first would turn a
+    # literal "&lt;b&gt;" in the sender's text into a tag the stripper then
+    # eats. Without it "&nbsp;" and "&amp;" reach the reader verbatim, which
+    # is what a 67k-message corpus is currently full of.
+    return _clean(unescape(_TAG.sub(" ", html)))
 
 
 def _body(msg: Message) -> str | None:

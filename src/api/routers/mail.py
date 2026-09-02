@@ -1187,6 +1187,16 @@ def _snippet(body: str | None, needle: str | None) -> dict[str, Any] | None:
     text = (body or "").strip()
     if not text:
         return None
+    # An excerpt exists to avoid sending 20,000 characters. When the whole
+    # message is not much longer than the excerpt would be, excerpting saves
+    # nothing and costs everything: the reader gets two thirds of a short mail
+    # and a link to read the third they are missing.
+    #
+    # The bound comes from the excerpt's own size rather than a chosen number:
+    # at most twice what we would have sent anyway, in exchange for never
+    # truncating something the reader could simply have read.
+    if len(text) <= SNIPPET_RADIUS * 4:
+        return {"text": text, "centred_on": None, "truncated": False, "is_whole_message": True}
     found = -1
     if needle:
         found = text.lower().find(needle.strip().lower())
@@ -1202,6 +1212,7 @@ def _snippet(body: str | None, needle: str | None) -> dict[str, Any] | None:
         "text": text[start:end],
         "centred_on": needle,
         "truncated": start > 0 or end < len(text),
+        "is_whole_message": False,
     }
 
 
