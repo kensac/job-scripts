@@ -712,7 +712,7 @@ async def run_single_check(body: RunCheckBody, user: AuthedUser = Depends(requir
     re-derives from it immediately — no downstream re-run needed, since
     visibility is a read-time predicate rather than stored derived state."""
     from api import verdicts as _verdicts
-    from api.tasks.models import FilterVerdict, JobClosedLean
+    from api.tasks.models import FilterVerdict, JobClosedVerdict
     from core.filters import build_custom_instructions
     from core.pittcsc_simplify import (
         CLEARANCE_INSTRUCTIONS,
@@ -728,7 +728,7 @@ async def run_single_check(body: RunCheckBody, user: AuthedUser = Depends(requir
     check = body.check
     if check == "closed":
         instructions = CLOSED_INSTRUCTIONS
-        model_cls = JobClosedResponse if body.with_reason else JobClosedLean
+        model_cls = JobClosedResponse if body.with_reason else JobClosedVerdict
         verdict_of = lambda p: (p.is_closed, getattr(p, "reason", "") or "")
     elif check == "clearance":
         instructions, model_cls = CLEARANCE_INSTRUCTIONS, ClearanceRequirementResponse

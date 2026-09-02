@@ -480,6 +480,17 @@ async def test_chunked_run_all_filters_lifecycle(monkeypatch, user_headers):
     }
     assert board_urls == set(urls) - rejected_urls
 
+    # The live custom path must persist the model's reason too, not just the
+    # batched one - verdict_of previously discarded it, so a filter could
+    # empty a board with no record anywhere of what it objected to.
+    custom_reasons = {
+        r["reason"]
+        for r in db.query(
+            "SELECT reason FROM ai_queries WHERE check_type = 'custom' AND status = 'rejected'"
+        )
+    }
+    assert custom_reasons == {"test"}
+
 
 # ---------------------------------------------------------------------------
 # _reverify_jobs resumability: fresh verdicts are skipped
@@ -555,7 +566,7 @@ async def test_reverify_jobs_skips_urls_with_fresh_closed_verdicts(monkeypatch):
         return {
             s.custom_id: core_batch.BatchResult(
                 s.custom_id,
-                text='{"is_closed": false}',
+                text='{"is_closed": false, "reason": "still accepting"}',
                 usage={"input_tokens": 10, "output_tokens": 2, "total_tokens": 12},
             )
             for s in specs
@@ -632,7 +643,11 @@ async def test_verify_new_records_both_verdicts(monkeypatch):
         return {
             s.custom_id: core_batch.BatchResult(
                 s.custom_id,
-                text='{"is_closed": false, "requires_clearance_or_restrictions": true}',
+                text=(
+                    '{"is_closed": false, "closed_reason": "still accepting", '
+                    '"requires_clearance_or_restrictions": true, '
+                    '"clearance_reason": "US citizenship required"}'
+                ),
                 usage={"input_tokens": 100, "output_tokens": 10, "total_tokens": 110},
             )
             for s in specs
@@ -655,6 +670,55 @@ async def test_verify_new_records_both_verdicts(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_batched_verdicts_record_their_reason(monkeypatch):
+    """The batch path recorded reason="" for a while, which cost nothing
+    measurable in tokens and cost every answer to "why is my board empty":
+    100% of new verdicts across all three check types carried no reason at
+    all. Each axis must persist its OWN reason - one shared sentence could not
+    say which of the two it explained."""
+    from api import db
+    from core import batch as core_batch
+    from core.store import add_ai_result
+
+    db.execute(
+        "INSERT INTO jobs (url, source, company, title) VALUES ('https://r.test/1', 's', 'Acme', 'SWE')"
+    )
+    add_ai_result(
+        "https://r.test/1", "passed", "content cached", "content", input_content="J" * 500
+    )
+
+    async def fake_batch(specs, model, effort, max_out, on_event=None):
+        return {
+            s.custom_id: core_batch.BatchResult(
+                s.custom_id,
+                text=(
+                    '{"is_closed": true, "closed_reason": "position filled", '
+                    '"requires_clearance_or_restrictions": true, '
+                    '"clearance_reason": "TS/SCI required"}'
+                ),
+                usage={"input_tokens": 100, "output_tokens": 10, "total_tokens": 110},
+            )
+            for s in specs
+        }
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setattr("core.batch.submit_responses_batches", _submit_ids)
+    monkeypatch.setattr("core.batch.collect_batches", _collect_from(fake_batch))
+    tid = tasks_runtime.enqueue("verify_new", {"cycle": "t"})
+    await _run_batched(tid, lambda: tasks_verify.handle_verify_new(tid, {"cycle": "t"}))
+
+    reasons = {
+        r["check_type"]: r["reason"]
+        for r in db.query(
+            "SELECT check_type, reason FROM ai_queries WHERE url = 'https://r.test/1' "
+            "AND check_type IN ('closed','clearance')"
+        )
+    }
+    assert reasons["closed"] == "position filled"
+    assert reasons["clearance"] == "TS/SCI required"
+
+
+@pytest.mark.asyncio
 async def test_reverify_records_batch_verdicts_and_reattaches(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     from core import batch as core_batch
@@ -670,7 +734,7 @@ async def test_reverify_records_batch_verdicts_and_reattaches(monkeypatch):
         return {
             s.custom_id: core_batch.BatchResult(
                 s.custom_id,
-                text='{"is_closed": true}',
+                text='{"is_closed": true, "reason": "position filled"}',
                 usage={"input_tokens": 20, "output_tokens": 3, "total_tokens": 23},
             )
             for s in specs
@@ -680,7 +744,7 @@ async def test_reverify_records_batch_verdicts_and_reattaches(monkeypatch):
         return {
             "https://rv.example.com/1": core_batch.BatchResult(
                 "https://rv.example.com/1",
-                text='{"is_closed": true}',
+                text='{"is_closed": true, "reason": "position filled"}',
                 usage={"input_tokens": 20, "output_tokens": 3, "total_tokens": 23},
             )
         }
@@ -805,7 +869,7 @@ async def test_full_sweep_rechecks_even_fresh_verdicts(monkeypatch):
         return {
             s.custom_id: core_batch.BatchResult(
                 s.custom_id,
-                text='{"is_closed": false}',
+                text='{"is_closed": false, "reason": "still accepting"}',
                 usage={"input_tokens": 5, "output_tokens": 1, "total_tokens": 6},
             )
             for s in specs
@@ -850,7 +914,7 @@ def _reverify_result(url: str, batch_id: str, is_closed: bool):
 
     return BatchResult(
         url,
-        text=f'{{"is_closed": {str(is_closed).lower()}}}',
+        text=f'{{"is_closed": {str(is_closed).lower()}, "reason": "batch fixture"}}',
         usage={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
         batch_id=batch_id,
     )

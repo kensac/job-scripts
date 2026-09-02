@@ -9,7 +9,7 @@ from typing import Any
 
 from api import ai, db, events, verdicts
 from api.tasks.board import _UNTOUCHED, _demote_closed
-from api.tasks.models import _VERIFY_INSTRUCTIONS, JobClosedLean, VerifyLean
+from api.tasks.models import _VERIFY_INSTRUCTIONS, JobClosedVerdict, VerifyVerdict
 from api.tasks.runtime import (
     CHUNK_SIZE,
     SCRAPE_CONCURRENCY,
@@ -104,7 +104,7 @@ def _record_reverify_results(
         if job is None or res.error or not res.text or url in superseded:
             continue
         try:
-            parsed = JobClosedLean.model_validate_json(res.text)
+            parsed = JobClosedVerdict.model_validate_json(res.text)
         except Exception:
             logger.warning(f"reverify: unparsable batch output for {url}")
             continue
@@ -112,7 +112,7 @@ def _record_reverify_results(
             url=url,
             check_type="closed",
             rejected=parsed.is_closed,
-            reason="",
+            reason=parsed.reason,
             parsed_json=res.text,
             model=model,
             usage={
@@ -236,9 +236,9 @@ async def _reverify_jobs(
         _set_progress(task_id, done, total, f"batch of {len(needs_ai)} submitted (half price)")
         if parent_id:
             _update_parent_progress(parent_id)
-        schema = to_strict_json_schema(JobClosedLean)
+        schema = to_strict_json_schema(JobClosedVerdict)
         specs = [
-            BatchSpec(url, CLOSED_INSTRUCTIONS, content[:20000], "JobClosedLean", schema)
+            BatchSpec(url, CLOSED_INSTRUCTIONS, content[:20000], "JobClosedVerdict", schema)
             for url, content in needs_ai
         ]
         results = await submit_or_collect(task_id, specs, model, "low", 1000, hook)
@@ -360,9 +360,11 @@ async def handle_verify_new(task_id: int, payload: dict[str, Any]) -> None:
     if not rows:
         _set_progress(task_id, 0, 0, "nothing to verify")
         return
-    schema = to_strict_json_schema(VerifyLean)
+    schema = to_strict_json_schema(VerifyVerdict)
     specs = [
-        BatchSpec(r["url"], _VERIFY_INSTRUCTIONS, r["input_content"][:20000], "VerifyLean", schema)
+        BatchSpec(
+            r["url"], _VERIFY_INSTRUCTIONS, r["input_content"][:20000], "VerifyVerdict", schema
+        )
         for r in rows
     ]
     by_url = {r["url"]: r for r in rows}
@@ -382,7 +384,7 @@ async def handle_verify_new(task_id: int, payload: dict[str, Any]) -> None:
         if job is None or res.error or not res.text:
             continue
         try:
-            parsed = VerifyLean.model_validate_json(res.text)
+            parsed = VerifyVerdict.model_validate_json(res.text)
         except Exception:
             logger.warning(f"verify_new: unparsable batch output for {url}")
             continue
@@ -402,7 +404,7 @@ async def handle_verify_new(task_id: int, payload: dict[str, Any]) -> None:
                 url=url,
                 check_type="closed",
                 rejected=parsed.is_closed,
-                reason="",
+                reason=parsed.closed_reason,
                 parsed_json=res.text,
                 model=model,
                 company=job["company"],
@@ -417,7 +419,7 @@ async def handle_verify_new(task_id: int, payload: dict[str, Any]) -> None:
                 url=url,
                 check_type="clearance",
                 rejected=parsed.requires_clearance_or_restrictions,
-                reason="",
+                reason=parsed.clearance_reason,
                 parsed_json=res.text,
                 model=model,
                 company=job["company"],
