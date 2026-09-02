@@ -1,6 +1,6 @@
 export PYTHONPATH := src
 
-.PHONY: api worker check lint fmt types test testdb-up testdb-down testdb-sync testdb-sync-fast integration schema migrate revision db-up db-down
+.PHONY: api worker check lint fmt types test testdb-up testdb-down testdb-url testdb-sync testdb-sync-fast integration schema migrate revision db-up db-down
 
 api:            ## run the API locally
 	uvicorn api.app:app --port 8000 --reload
@@ -36,15 +36,45 @@ migrate:        ## apply migrations to $$DATABASE_URL
 revision:       ## autogenerate a migration: make revision m="add foo"
 	python -m alembic revision --autogenerate -m "$(m)"
 
-testdb-up:      ## docker postgres WITH pgvector on :55432, for the test suite
-	docker run -d --rm --name jobtracker-testdb -p 55432:5432 \
+# One test container PER CHECKOUT. A single shared name and port is not a
+# nuisance, it is a correctness problem: `docker run --rm --name X` from a
+# second worktree replaces the first one's database while its suite is still
+# running, and the tests fail as "server closed the connection unexpectedly"
+# or as a TRUNCATE against tables that no longer exist. That reads as a flaky
+# test rather than as a environment being pulled out from underneath it, and
+# four parallel checkouts each diagnosed it separately before anyone noticed
+# the common cause - one of them watching a 717-row table become a database
+# that did not exist.
+#
+# Derived from the checkout path rather than a hand-set suffix, so it is stable
+# across runs in one worktree, distinct between worktrees, and needs nobody to
+# remember to set anything. The port is derived the same way; a collision binds
+# loudly instead of silently sharing.
+# The NAME carries the checkout's directory so `docker ps` says whose it is -
+# four sessions each debugged this separately partly because the containers
+# were indistinguishable. Two worktrees with the same basename would collide,
+# and that fails loudly on the docker run rather than silently sharing.
+TESTPG_NAME := jobtracker-testdb-$(notdir $(CURDIR))
+# The PORT is hashed from the full path, because the name alone does not fix
+# anything: a second container with a unique name still cannot bind a port the
+# first one holds, which is what pushed sessions into hand-picking numbers and
+# left one with no published port at all. A 1000-wide range keeps collisions
+# unlikely, and a collision binds loudly instead of sharing quietly.
+TESTPG_PORT := $(shell echo $$((55000 + 0x$(shell pwd | shasum | cut -c1-6) % 1000)))
+TESTPG_URL := postgresql://postgres:test@127.0.0.1:$(TESTPG_PORT)/jobtracker_test
+
+testdb-up:      ## docker postgres WITH pgvector for THIS checkout's test suite
+	docker run -d --rm --name $(TESTPG_NAME) -p $(TESTPG_PORT):5432 \
 	  -e POSTGRES_PASSWORD=test -e POSTGRES_DB=jobtracker_test \
 	  pgvector/pgvector:pg18-trixie >/dev/null
-	@until docker exec jobtracker-testdb pg_isready -U postgres >/dev/null 2>&1; do sleep 1; done
-	@echo 'export TEST_DATABASE_URL=postgresql://postgres:test@127.0.0.1:55432/jobtracker_test'
+	@until docker exec $(TESTPG_NAME) pg_isready -U postgres >/dev/null 2>&1; do sleep 1; done
+	@echo 'export TEST_DATABASE_URL=$(TESTPG_URL)'
 
-testdb-down:    ## stop it
-	docker stop jobtracker-testdb >/dev/null 2>&1 || true
+testdb-down:    ## stop this checkout's test database
+	docker stop $(TESTPG_NAME) >/dev/null 2>&1 || true
+
+testdb-url:     ## print this checkout's TEST_DATABASE_URL
+	@echo 'export TEST_DATABASE_URL=$(TESTPG_URL)' 
 
 db-up:          ## throwaway local postgres on :54999 (data in .pgdev)
 	initdb -D .pgdev -U dev --auth=trust -E UTF8 >/dev/null 2>&1 || true
