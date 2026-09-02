@@ -43,6 +43,18 @@ ONGOING_MODEL = os.environ.get("JOBTRACKER_MAIL_ONGOING_MODEL", "gpt-5-mini")
 # ~300 specs per wave, times BATCH_WAVE_CONCURRENCY waves in flight.
 CLASSIFY_PER_CYCLE = int(os.environ.get("JOBTRACKER_MAIL_CLASSIFY_PER_CYCLE", "1200"))
 
+# A backfill may ask for more, because it is a ONE-TIME sweep over a mailbox
+# rather than an hourly trickle: at the ongoing cap, 34,000 archived messages
+# take about 28 hours of cycles to work through.
+#
+# The ceiling is derived from what a wave can actually carry rather than
+# picked: core.batch budgets BATCH_TOKEN_BUDGET tokens per wave and runs
+# BATCH_WAVE_CONCURRENCY waves at once, and a classification spec is ~1,500
+# tokens (measured on real mail, not estimated). That is ~1,200 specs per wave
+# and ~4,800 in flight, so asking for much beyond that only queues work the
+# provider will not start any sooner.
+MAX_CLASSIFY_PER_CYCLE = int(os.environ.get("JOBTRACKER_MAIL_CLASSIFY_MAX", "5000"))
+
 # Reasoning effort is PER MODEL, because these two do not accept the same
 # values. Probed against the live APIs:
 #
@@ -157,6 +169,11 @@ async def handle_classify_mail(task_id: int, payload: dict[str, Any]) -> None:
 
     backfill = bool(payload.get("backfill"))
     model = BACKFILL_MODEL if backfill else ONGOING_MODEL
+    # Clamped rather than trusted: an enqueuer asking for the whole mailbox in
+    # one task would build a spec list far larger than a wave can carry, and
+    # the failure would arrive as memory pressure on a worker rather than as a
+    # rejected parameter.
+    cap = min(int(payload.get("cap") or CLASSIFY_PER_CYCLE), MAX_CLASSIFY_PER_CYCLE)
     rows = db.query(
         """
         SELECT m.id, m.from_email, m.subject, m.sent_at, m.body_text
@@ -168,7 +185,7 @@ async def handle_classify_mail(task_id: int, payload: dict[str, Any]) -> None:
         ORDER BY m.prefilter_hit DESC NULLS LAST, m.id DESC
         LIMIT %(cap)s
         """,
-        {"cap": CLASSIFY_PER_CYCLE},
+        {"cap": cap},
     )
     if not rows:
         _set_progress(task_id, 0, 0, "nothing to classify")

@@ -187,28 +187,24 @@ def pytest_sessionfinish(session, exitstatus) -> None:
         _stop_scratch_pg()
 
 
-_MUTABLE_TABLES = [
-    "tasks",
-    "jobs",
-    "job_requirements",
-    "job_skills",
-    "job_embeddings",
-    "user_jobs",
-    "users",
-    "user_filters",
-    "user_settings",
-    "user_sources",
-    "user_oauth_tokens",
-    "ai_queries",
-    "api_usage",
-    "reports",
-    "source_requests",
-    "sources",
-    "source_groups",
-    "group_budgets",
-    "filter_presets",
-    "app_config",
-]
+# Tables that must SURVIVE a truncate. Everything else is derived, because a
+# hand-maintained enumeration silently rots: ai_batches was missing from the
+# old list and leaked rows between tests until a unique constraint failed, and
+# all five email tables were missing too - their tests only passed because
+# they happened to use unique ids.
+#
+# Listing the exceptions instead of the members means adding a table never
+# requires remembering to add it here, and forgetting fails loudly (a table
+# that should have persisted gets emptied) rather than silently (state leaks
+# between tests until something collides).
+_PERSISTENT_TABLES = frozenset({"alembic_version"})
+
+
+def _mutable_tables() -> list[str]:
+    rows = db.query(
+        "SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename"
+    )
+    return [r["tablename"] for r in rows if r["tablename"] not in _PERSISTENT_TABLES]
 
 
 def _reseed() -> None:
@@ -238,7 +234,7 @@ def _clean_db(request):
     if request.node.get_closest_marker("integration"):
         yield
         return
-    db.execute(f"TRUNCATE TABLE {', '.join(_MUTABLE_TABLES)} RESTART IDENTITY CASCADE")
+    db.execute(f"TRUNCATE TABLE {', '.join(_mutable_tables())} RESTART IDENTITY CASCADE")
     _reseed()
     yield
 
