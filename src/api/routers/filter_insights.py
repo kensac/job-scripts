@@ -121,15 +121,26 @@ def rejection_reasons(
     )
 
     hashes = [r["prompt_hash"] for r in totals]
-    owners: dict[str, list[dict[str, str]]] = collections.defaultdict(list)
+    # One person can hold SEVERAL filters carrying the same prompt text - one
+    # user in this database has two - so a row per user_filters row is not a
+    # row per owner. Counting rows reported that prompt as shared between two
+    # people when it belongs to one, which is a claim about who to go and talk
+    # to. Users are collapsed by sub; the filter rows are reported separately.
+    owners: dict[str, dict[str, dict[str, str]]] = collections.defaultdict(dict)
+    filters_for: dict[str, list[dict[str, Any]]] = collections.defaultdict(list)
     for row in db.query(
         """
-        SELECT f.prompt_hash, u.sub, u.email FROM user_filters f
+        SELECT f.prompt_hash, f.name, f.enabled, u.sub, u.email FROM user_filters f
         JOIN users u ON u.id = f.user_id WHERE f.prompt_hash = ANY(%s)
+        ORDER BY f.name
         """,
         (hashes,),
     ):
-        owners[row["prompt_hash"]].append({"sub": row["sub"], "email": row["email"] or ""})
+        owners[row["prompt_hash"]][row["sub"]] = {
+            "sub": row["sub"],
+            "email": row["email"] or "",
+        }
+        filters_for[row["prompt_hash"]].append({"name": row["name"], "enabled": row["enabled"]})
 
     # A name that appears under more than one hash in this window spans a
     # prompt edit; the caller needs to know before it presents them as one row.
@@ -172,7 +183,8 @@ def rejection_reasons(
         # scalar would leave the caller unable to say which name it describes.
         siblings_by_name = {name: len(by_name[name] - {h}) for name in sorted(row["filter_names"])}
         missing = per_hash[h]
-        people = owners.get(h, [])
+        people = list(owners.get(h, {}).values())
+        current = filters_for.get(h, [])
         out.append(
             {
                 "prompt_hash": h,
@@ -186,6 +198,16 @@ def rejection_reasons(
                     else ("shared" if len(people) > 1 else "unknown"),
                     "user_count": len(people),
                     "users": people,
+                    # Whether this prompt can still reject anything. `resolved`
+                    # does not answer it: a disabled filter is still a current
+                    # row, so a retired prompt resolves to its owner exactly
+                    # like a live one. Without this a caller ranking by misfire
+                    # rate leads with a filter that cannot fire, spending the
+                    # reader's attention on the one thing they cannot act on.
+                    # None when no current filter carries this prompt at all,
+                    # because then there is nothing to ask.
+                    "enabled": any(f["enabled"] for f in current) if current else None,
+                    "filters": current,
                 },
                 "sufficient": row["rejected"] >= min_decisions,
                 "totals": {
