@@ -5,17 +5,29 @@ import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from api import criteria, db, events
+from api import criteria, db, events, signals
 from api.auth import AuthedUser, require_user
 from api.models import UploadRequest, UserJobPatch
 from core.urls import normalize_url
 
 router = APIRouter()
 
+# closed_verdict is three-valued and must stay that way: 'open', 'closed', or
+# NULL for never checked. `active` cannot answer this question - it is whatever
+# a board's feed last said and nothing ever clears it, so on a board that is
+# not re-listed (sheet_import, imported once from a sheet) it reports our own
+# stale copy as the posting's state. The closed check observes the posting
+# itself and is applied uniformly across boards, which is what makes it
+# comparable. Collapsing NULL into 'closed' would reintroduce exactly the bug
+# this column exists to fix: 114 of the applications flagged dead by `active`
+# have a closed-check that says the posting is open.
 _JOB_ROW = """
     j.id AS job_id, j.company, j.title, j.locations, j.terms, j.source,
     j.url, j.raw_url, j.active, j.date_posted, j.created_at AS added_at,
     j.extraction_status, j.comp_min, j.comp_max, j.comp_text,
+    (SELECT CASE lc.status WHEN 'passed' THEN 'open' WHEN 'rejected' THEN 'closed' END
+     FROM latest_check lc
+     WHERE lc.url = j.url AND lc.check_type = 'closed') AS closed_verdict,
     uj.status, uj.date_applied, uj.notes, uj.size, uj.recruiter,
     uj.connection1, uj.connection2, uj.documents,
     COALESCE(uj.hidden, FALSE) AS hidden
@@ -308,7 +320,10 @@ def job_detail(job_id: int, user: AuthedUser = Depends(require_user)):
         user,
         job_id,
         "j.id, j.url, j.raw_url, j.company, j.title, j.locations, j.terms, j.source, "
-        "j.active, j.date_posted, j.comp_min, j.comp_max, j.comp_text, j.created_at",
+        "j.active, j.date_posted, j.comp_min, j.comp_max, j.comp_text, j.created_at, "
+        "(SELECT CASE lc.status WHEN 'passed' THEN 'open' WHEN 'rejected' THEN 'closed' END "
+        " FROM latest_check lc "
+        " WHERE lc.url = j.url AND lc.check_type = 'closed') AS closed_verdict",
     )
     content_row = db.query_one(
         "SELECT input_content, created_at FROM ai_queries "
@@ -343,6 +358,9 @@ def job_detail(job_id: int, user: AuthedUser = Depends(require_user)):
     )
     return {
         "job": job,
+        # Every key is optional and absence means the signal does not exist -
+        # never a zero, never something for the caller to re-derive.
+        "signals": signals.signals_for(job),
         "row": db.query_one(
             "SELECT status, date_applied, notes, size, recruiter, connection1, "
             "connection2, documents, hidden, created_at, updated_at "

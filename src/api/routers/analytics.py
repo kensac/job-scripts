@@ -30,7 +30,7 @@ from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from api import db
+from api import db, signals
 from api.auth import AuthedUser
 from api.routers.admin import require_admin
 
@@ -134,24 +134,10 @@ SELECT source,
 FROM per_job GROUP BY source
 """
 
-# Dead on arrival: the FIRST closed-check this catalog ever ran on the posting
-# already said closed. Ordering by qid ASC rather than DESC is the whole
-# difference from the funnel - it asks whether the board handed us something
-# that was already dead, not whether the posting has died since.
-_FIRST_CLOSED_SQL = """
-WITH q AS (
-    SELECT j.source AS source, j.id AS job_id, a.status, a.id AS qid
-    FROM ai_queries a
-    JOIN jobs j ON j.url = a.url
-    WHERE a.check_type = 'closed' AND a.status IN ('passed', 'rejected')
-), firsts AS (
-    SELECT DISTINCT ON (job_id) source, status FROM q ORDER BY job_id, qid ASC
-)
-SELECT source,
-       count(*) AS first_checked,
-       count(*) FILTER (WHERE status = 'rejected') AS dead_on_arrival
-FROM firsts GROUP BY source
-"""
+# Dead on arrival is defined once, in api.signals, because the per-job
+# intelligence pane serves the same number for a single board. Two copies of a
+# "first verdict per posting" query is how the two readings would drift.
+_FIRST_CLOSED_SQL = signals.first_closed_sql()
 
 # cost_usd is summed, never recomputed. It is written at call time against the
 # price that was in force then, so re-deriving it on read would silently
