@@ -204,16 +204,48 @@ def seed_from_mail(user_id: int) -> tuple[int, int]:
         if company_of[key] in over:
             continue
         first = messages[0]
+        # Conditional on the anchor message STILL being unmatched, in one
+        # statement, because two workers can hold this task at once.
+        #
+        # That is not hypothetical: a slow worker kept running this handler
+        # after the reaper had already requeued its task and another worker had
+        # finished it. Nothing stopped the loser writing a second copy of every
+        # application the winner had just created - and a duplicate here does
+        # not merely add a row. `_by_company` refuses to choose between two
+        # applications at one employer, so it would make every future message
+        # at that company permanently unmatchable, silently.
+        #
+        # A unique constraint cannot express this: company and title are
+        # nullable free text, and two genuine applications to the same role at
+        # the same company are legal. The condition that actually matters is
+        # whether this evidence has already been used.
         row = db.query_one(
             """
             INSERT INTO applications (user_id, job_id, company_name, title,
                                       source_provenance, applied_at)
-            VALUES (%s, NULL, %s, %s, 'email', %s)
+            SELECT %(user)s, NULL, %(company)s, %(title)s, 'email', %(sent)s
+            WHERE NOT EXISTS (
+                SELECT 1 FROM application_matches am
+                WHERE am.message_id = %(msg)s
+                  AND am.application_id IS NOT NULL
+                  AND am.id = (
+                      SELECT max(id) FROM application_matches
+                      WHERE message_id = %(msg)s
+                  )
+            )
             RETURNING id
             """,
-            (user_id, first["company"], first["title"], first["sent_at"]),
+            {
+                "user": user_id,
+                "company": first["company"],
+                "title": first["title"],
+                "sent": first["sent_at"],
+                "msg": first["id"],
+            },
         )
         if row is None:
+            # Another worker got there first. Its match is authoritative and
+            # this group is already represented.
             continue
         created += 1
         for msg in messages:
