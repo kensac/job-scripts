@@ -209,3 +209,28 @@ def test_redirected_away_detects_board_index_bounce():
     assert redirected_away(job, job + "/") is False
     assert redirected_away(job, job + "?utm_source=x") is False
     assert redirected_away(job, None) is False
+
+
+# ---------------------------------------------------------------------------
+# Sort-key contract with the frontend
+# ---------------------------------------------------------------------------
+
+
+def test_sort_keys_the_frontend_depends_on_still_exist():
+    """The admin UI maps its visible columns to these key names.
+
+    It maps deliberately rather than rendering whatever the API says is
+    sortable, which keeps the column layout intentional - but it means removing
+    a key here degrades that column to default order SILENTLY, with no error
+    anywhere. This test is the alarm, so the coupling does not rely on someone
+    remembering to mention it.
+
+    If you are removing a key on purpose: update this list and tell whoever
+    owns app/job-scripts, because a column needs to change with it.
+    """
+    from api.routers.admin import _JOBS_SORTABLE, _SORTABLE
+
+    # /admin/jobs - the catalog table's columns.
+    assert {"company", "failed", "total_tokens", "last_seen"} <= set(_JOBS_SORTABLE)
+    # /admin/queries - the responses table's columns.
+    assert {"created_at", "total_tokens", "duration_ms"} <= _SORTABLE
