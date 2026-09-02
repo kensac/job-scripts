@@ -8,7 +8,7 @@ from typing import Any
 
 from api import ai, budget, db, events, metrics, verdicts
 from api.tasks.board import _candidates, _content_ready_urls, _decided_urls, _materialize_passing
-from api.tasks.models import FilterVerdictLean
+from api.tasks.models import FilterVerdict
 from api.tasks.runtime import (
     BATCH_CHUNK_SIZE,
     CHUNK_SIZE,
@@ -50,8 +50,8 @@ async def _check_filter(
         check_type="custom",
         instructions=instructions,
         input_text=f"Company: {company}\nJob Title: {title}\n\nJob Content:\n{content}",
-        response_model=FilterVerdictLean,
-        verdict_of=lambda p: (p.should_filter, ""),
+        response_model=FilterVerdict,
+        verdict_of=lambda p: (p.should_filter, p.reason),
         company=company,
         job_title=title,
         filter_name=filter_name,
@@ -238,7 +238,7 @@ async def handle_run_filter_batch_chunk(task_id: int, payload: dict[str, Any]) -
         await _process_jobs(task_id, user_id, ent, cfg, flt, jobs, parent_id=parent_id)
         return
     instructions = build_custom_instructions(flt["prompt"], flt["on_ambiguous"])
-    schema = to_strict_json_schema(FilterVerdictLean)
+    schema = to_strict_json_schema(FilterVerdict)
     specs, by_url = [], {}
     for job in jobs:
         content = get_content(job["url"])
@@ -314,7 +314,7 @@ async def handle_run_filter_batch_chunk(task_id: int, payload: dict[str, Any]) -
             metrics.AI_CALLS.labels(cfg.provider, cfg.model, "error").inc()
             continue
         try:
-            parsed = FilterVerdictLean(**_json.loads(res.text))
+            parsed = FilterVerdict(**_json.loads(res.text))
         except Exception:
             add_ai_result(
                 url,
@@ -334,7 +334,7 @@ async def handle_run_filter_batch_chunk(task_id: int, payload: dict[str, Any]) -
             url=url,
             check_type="custom",
             rejected=parsed.should_filter,
-            reason="",
+            reason=parsed.reason,
             parsed_json=res.text,
             usage=usage,
             model=cfg.model,
