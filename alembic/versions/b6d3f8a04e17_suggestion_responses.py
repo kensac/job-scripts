@@ -42,7 +42,12 @@ def upgrade() -> None:
         sa.Column("event_id", sa.BigInteger(), nullable=True),
         sa.Column("suggested_status", sa.Text(), nullable=False),
         sa.Column("response", sa.Text(), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
     )
     op.create_index(
         "idx_suggestion_responses_app",
