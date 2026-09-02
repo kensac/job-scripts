@@ -67,7 +67,13 @@ def owner_models(unlimited: bool) -> list:
     return sorted(out)
 
 
-_EFFORTS_OPENAI = ("minimal", "low", "medium", "high")
+# Newer OpenAI models accept "none"/"xhigh"/"max" and REJECT "minimal" with a
+# 400; older ones are the reverse. The union is validated because this gate
+# guards a user-supplied param and a wrong rejection here blocks a legitimate
+# model, while a wrong acceptance surfaces immediately as the provider's own
+# error naming the supported set. Per-model tables would need updating
+# whenever a model ships, which is how they end up wrong.
+_EFFORTS_OPENAI = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
 _EFFORTS_ANTHROPIC = ("low", "medium", "high", "xhigh", "max")
 
 T = TypeVar("T", bound=BaseModel)
