@@ -730,6 +730,21 @@ MANUAL = "manual"
 # is the failure worth refusing.
 MAX_THREAD_FANOUT = 40
 
+# A conversation's key, derived rather than stored.
+#
+# `provider_thread_id` is the FIRST References entry, which is the Message-ID
+# of the message that started the thread. So replies carry it and the ROOT does
+# not - a first message has no References, by definition. That left 1,113
+# messages as the origin of a thread that exists in the database without being
+# part of it: assigning a reply moved its siblings and silently left the
+# original behind.
+#
+# Coalescing to the message's own id closes it, because a root's Message-ID IS
+# the key its replies carry. A message with no thread and no replies coalesces
+# to its own id and matches nothing else, so this cannot group unrelated mail -
+# which is the failure that made subject-based grouping unsafe.
+_THREAD_KEY = "COALESCE(m.provider_thread_id, m.provider_message_id)"
+
 
 class Assignment(BaseModel):
     """One of three targets. An application to attach to, a board job to
@@ -996,12 +1011,11 @@ def assign_message(message_id: int, body: Assignment, user: AuthedUser = Depends
     targets = [message_id]
     if body.whole_thread:
         siblings = db.query(
-            """
+            f"""
             SELECT m.id FROM email_messages m
             WHERE m.user_id = %(user)s
-              AND m.provider_thread_id IS NOT NULL
-              AND m.provider_thread_id = (
-                  SELECT provider_thread_id FROM email_messages WHERE id = %(msg)s
+              AND {_THREAD_KEY} = (
+                  SELECT {_THREAD_KEY} FROM email_messages m WHERE m.id = %(msg)s
               )
               AND m.id <> %(msg)s
             ORDER BY m.id

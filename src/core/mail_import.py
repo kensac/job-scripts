@@ -54,6 +54,29 @@ class ImportedMessage:
     subject: str | None = None
     sent_at: datetime | None = None
     body_text: str | None = None
+    # The threading chain as the message carried it. provider_thread_id keeps
+    # only the FIRST References entry, which is enough to group a reply with
+    # its root and not enough to reconstruct a conversation that was forwarded,
+    # split, or re-rooted. Kept because it is free at parse time and
+    # unrecoverable afterwards - the mbox is 4.2GB and re-reading it to answer a
+    # question we could have answered on the way past is the expensive kind of
+    # cheap.
+    headers: dict[str, str] = field(default_factory=dict)
+
+
+# Only the headers that describe threading. Storing every header would carry
+# routing trace, spam scores and DKIM signatures for 67k messages to answer a
+# question none of them are about.
+_THREADING_HEADERS = ("Message-ID", "References", "In-Reply-To")
+
+
+def _threading_headers(msg) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for name in _THREADING_HEADERS:
+        value = _clean_header(str(msg.get(name, "") or ""))
+        if value:
+            out[name.lower()] = value
+    return out
 
 
 def _strip_nul(text: str) -> str:
@@ -166,6 +189,7 @@ def _from_message(msg: Message, *, source: str, fallback_id: str) -> ImportedMes
         subject=_clean_header(str(msg.get("Subject", "") or "")),
         sent_at=_sent_at(str(msg.get("Date", "") or "") or None),
         body_text=_body(msg),
+        headers=_threading_headers(msg),
     )
 
 

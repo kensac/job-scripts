@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import datetime
 import io
+import tempfile
 import zipfile
+from pathlib import Path
 
 import pytest
 
@@ -205,3 +207,50 @@ def test_a_field_that_is_only_nul_becomes_none(tmp_path):
     p.write_text(text)
     msg = next(iter(read_mbox(p)))
     assert msg.subject is None
+
+
+def test_the_threading_chain_survives_the_import():
+    """provider_thread_id keeps only the FIRST References entry, which groups a
+    reply with its root and cannot reconstruct a conversation that was
+    forwarded, split or re-rooted. The chain is free at parse time and
+    unrecoverable afterwards - the mbox is 4.2GB, and re-reading it to answer a
+    question we could have answered on the way past is the expensive kind of
+    cheap."""
+    raw = (
+        "From a@b.com\r\n"
+        "Message-ID: <c3@acme.com>\r\n"
+        "In-Reply-To: <c2@acme.com>\r\n"
+        "References: <c1@acme.com> <c2@acme.com>\r\n"
+        "From: Acme <a@acme.com>\r\n"
+        "Subject: Re: Your application\r\n"
+        "\r\nbody\r\n"
+    )
+    path = Path(tempfile.mkdtemp()) / "chain.mbox"
+    path.write_text(raw)
+    [msg] = list(read_mbox(path))
+
+    assert msg.headers["message-id"] == "<c3@acme.com>"
+    assert msg.headers["in-reply-to"] == "<c2@acme.com>"
+    assert msg.headers["references"] == "<c1@acme.com> <c2@acme.com>"
+    # The existing field keeps its meaning: the thread's origin.
+    assert msg.provider_thread_id == "<c1@acme.com>"
+
+
+def test_only_threading_headers_are_kept():
+    """Storing every header would carry routing trace, spam scores and DKIM
+    signatures for 67k messages to answer a question none of them are about."""
+    raw = (
+        "From a@b.com\r\n"
+        "Message-ID: <x@acme.com>\r\n"
+        "Received: from mx.example.com by mx2.example.com\r\n"
+        "DKIM-Signature: v=1; a=rsa-sha256; d=acme.com\r\n"
+        "X-Spam-Score: 0.1\r\n"
+        "From: Acme <a@acme.com>\r\n"
+        "Subject: Hello\r\n"
+        "\r\nbody\r\n"
+    )
+    path = Path(tempfile.mkdtemp()) / "noisy.mbox"
+    path.write_text(raw)
+    [msg] = list(read_mbox(path))
+
+    assert set(msg.headers) == {"message-id"}
