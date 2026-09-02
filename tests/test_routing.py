@@ -272,3 +272,52 @@ def test_no_call_site_still_hardcodes_a_batched_model():
 
 def test_db_is_reachable_so_the_cliff_test_means_something(f):
     assert db.query_one("SELECT 1 AS ok")["ok"] == 1
+
+
+def test_every_batched_call_site_goes_through_the_standard_caller():
+    """The ceremony was ten lines copied four times, and they had already
+    drifted: one passed `SHAPE.effort or "low"`, another
+    `SHAPE.resolved_effort() or A_CONSTANT`. The same declaration produced
+    different requests depending on which file you were in.
+
+    Asserting on the source rather than behaviour is deliberate. A call site
+    that unpacks the shape by hand works fine today - that is exactly why four
+    of them drifted without a test failing."""
+    import pathlib
+
+    # Two call sites do not go through it, for reasons rather than by neglect.
+    # Listed so a THIRD cannot appear quietly - which is exactly how the four
+    # copies this deletes accumulated.
+    #
+    # filters.py runs a model the USER configured per filter, not a TaskShape.
+    # There is no declaration for run_batched to take, and routing it would
+    # change which jobs land on the board.
+    #
+    # verify.py reattaches before fetching its rows, so its in-flight check has
+    # to happen earlier than run_batched performs it. Folding it in would make
+    # a resumed chunk re-read the catalog to reach a batch it already has.
+    KNOWN = {"filters.py", "verify.py", "runtime.py"}
+    root = pathlib.Path(__file__).resolve().parent.parent / "src" / "api" / "tasks"
+    offenders = [
+        path.name
+        for path in sorted(root.glob("*.py"))
+        if "submit_or_collect" in path.read_text() and path.name not in KNOWN
+    ]
+    assert offenders == [], (
+        f"{offenders} call submit_or_collect directly; use run_batched so the "
+        "shape cannot be contradicted and the spend lands in analytics"
+    )
+
+
+def test_the_standard_caller_cannot_run_without_a_purpose():
+    """purpose is what every ledger groups by. Making it keyword-only and
+    required is what stops a new caller being invisible in analytics - the
+    grouping is not something anyone has to remember to add."""
+    import inspect
+
+    from api.tasks.runtime import run_batched
+
+    sig = inspect.signature(run_batched)
+    purpose = sig.parameters["purpose"]
+    assert purpose.kind is inspect.Parameter.KEYWORD_ONLY
+    assert purpose.default is inspect.Parameter.empty, "required, not defaulted"

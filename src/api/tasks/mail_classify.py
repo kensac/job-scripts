@@ -23,7 +23,7 @@ from typing import Any, Literal
 from pydantic import BaseModel
 
 from api import db
-from api.tasks.runtime import _batch_event_hook, _set_progress, submit_or_collect
+from api.tasks.runtime import _set_progress, run_batched
 from core.providers.spec import StructuredOutput
 from core.routing import TaskShape, resolve
 
@@ -478,9 +478,8 @@ async def handle_classify_mail(task_id: int, payload: dict[str, Any]) -> None:
     from core.batch import BatchSpec
 
     backfill = bool(payload.get("backfill"))
-    chosen = resolve(BACKFILL_TASK if backfill else ONGOING_TASK)
-    model = chosen.model
-    logger.info(f"Task {task_id}: mail classification on {model} - {chosen.reason}")
+    shape = BACKFILL_TASK if backfill else ONGOING_TASK
+    model = resolve(shape).model
     # Clamped rather than trusted: an enqueuer asking for the whole mailbox in
     # one task would build a spec list far larger than a wave can carry, and
     # the failure would arrive as memory pressure on a worker rather than as a
@@ -567,10 +566,7 @@ async def handle_classify_mail(task_id: int, payload: dict[str, Any]) -> None:
         for r in rows
     ]
     _set_progress(task_id, 0, len(specs), f"mail classification submitted ({model}, half price)")
-    hook = _batch_event_hook(task_id, "mail_classify", model)
-    results = await submit_or_collect(
-        task_id, specs, model, effort_for(model), CLASSIFY_MAX_TOKENS, hook
-    )
+    results, _ = await run_batched(task_id, shape, specs, purpose="mail_classify")
 
     done = 0
     skipped = 0
