@@ -165,3 +165,24 @@ def classify(reason: str | None) -> tuple[str, ...]:
 
 def is_evidence_missing(reason: str | None) -> bool:
     return bool(reason) and bool(_EVIDENCE_MISSING.search(reason))
+
+
+# Postgres spells the word boundary \y where Python spells it \b; the rest of
+# these patterns is syntax both engines read the same way. Verified against the
+# full production corpus: all nine groups return identical counts through
+# `reason ~* sql_pattern(key)` and through classify(). That equality is the
+# point - a drill-through that disagreed with the count linking to it would be
+# worse than having no link at all.
+def _to_sql(pattern: str) -> str:
+    return pattern.replace(r"\b", r"\y")
+
+
+def sql_pattern(key: str) -> str:
+    """The group's pattern as a Postgres regex, for `reason ~* %s`."""
+    for group in GROUPS:
+        if group.key == key:
+            return _to_sql(group.pattern.pattern)
+    raise KeyError(key)
+
+
+EVIDENCE_MISSING_SQL = _to_sql(_EVIDENCE_MISSING.pattern)

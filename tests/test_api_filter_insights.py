@@ -1,7 +1,13 @@
 from __future__ import annotations
 
 from api import db
-from core.reason_taxonomy import GROUP_KEYS, classify, is_evidence_missing
+from core.reason_taxonomy import (
+    EVIDENCE_MISSING_SQL,
+    GROUP_KEYS,
+    classify,
+    is_evidence_missing,
+    sql_pattern,
+)
 from core.store import add_ai_result
 
 # ---------------------------------------------------------------------------
@@ -107,6 +113,44 @@ def test_every_group_key_is_reachable_from_the_sample():
     category to whoever renders it."""
     seen = {k for r in _CORPUS_SAMPLE for k in classify(r)}
     assert set(GROUP_KEYS) - seen == set()
+
+
+def test_sql_patterns_select_exactly_what_classify_labels(client, admin_headers):
+    """The drill-through filters in SQL while the aggregate classifies in
+    Python. If those two ever disagree, a count links to a different set of
+    rows than it counted, which is worse than not linking at all."""
+    for i, reason in enumerate(_CORPUS_SAMPLE):
+        _reject(f"https://j.test/{i}", reason, "hash_aaaa", "f")
+
+    for key in GROUP_KEYS:
+        in_python = {
+            f"https://j.test/{i}" for i, r in enumerate(_CORPUS_SAMPLE) if key in classify(r)
+        }
+        in_sql = {
+            row["url"]
+            for row in db.query(
+                "SELECT url FROM ai_queries WHERE reason ~* %s", (sql_pattern(key),)
+            )
+        }
+        assert in_sql == in_python, key
+
+    missing_python = {
+        f"https://j.test/{i}" for i, r in enumerate(_CORPUS_SAMPLE) if is_evidence_missing(r)
+    }
+    missing_sql = {
+        row["url"]
+        for row in db.query(
+            "SELECT url FROM ai_queries WHERE reason ~* %s", (EVIDENCE_MISSING_SQL,)
+        )
+    }
+    assert missing_sql == missing_python
+
+
+def test_sql_pattern_rejects_an_unknown_key():
+    import pytest
+
+    with pytest.raises(KeyError):
+        sql_pattern("no_such_group")
 
 
 # ---------------------------------------------------------------------------
