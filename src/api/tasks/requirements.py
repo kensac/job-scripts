@@ -47,7 +47,7 @@ REQUIREMENTS_INPUT_CHARS = 20000
 # gpt-5-mini at "minimal" invented one degree, one yoe and no clearances, and
 # truncated nothing. Batched over the whole corpus that is $9.89 against nano's
 # $1.98 - a one-time pass over postings that can never be re-scraped.
-REQUIREMENTS_MODEL = "gpt-5-mini"
+REQUIREMENTS_MODEL = os.environ.get("JOBTRACKER_REQUIREMENTS_MODEL", "gpt-5.6-luna")
 
 
 # "minimal" is not a cost compromise, it is the better answer: low-effort
@@ -55,6 +55,12 @@ REQUIREMENTS_MODEL = "gpt-5-mini"
 # 194) and bought nothing this task needs, since every field is copied off the
 # page rather than deduced.
 REQUIREMENTS_REASONING_EFFORT = "minimal"
+
+# Cheapest first, and every value here is accepted by SOME model in the
+# registry, so swapping the model swaps the effort with it rather than sending
+# one the model refuses. Kept in this order because low-effort reasoning was
+# 78% of the output bill and bought nothing this task needs.
+_EFFORT_PREFERENCE = ("none", "minimal", "low")
 
 
 # Measured p100 over the pilot was 378 tokens; the JSON's whole variable part is
@@ -114,28 +120,53 @@ REQUIREMENTS_TASK = TaskShape(
         ),
         Evidence(
             model="gpt-5-mini",
+            verdict="excluded",
+            finding=(
+                "Extracts well - over the same postings it invented one "
+                "degree, one years-of-experience figure and no clearances, "
+                "and truncated nothing. Excluded on RELIABILITY rather than "
+                "quality: 499 of its 31,999 batched requests failed, against "
+                "0 of 19,971 on nano and 0 of 60,000 on luna. A failed line "
+                "leaves a posting unextracted and looks like a batch that "
+                "worked, so nothing was watching."
+            ),
+            sample_size=31999,
+            measured_on=datetime.date(2026, 9, 2),
+        ),
+        Evidence(
+            model="gpt-5.6-luna",
             verdict="chosen",
             finding=(
-                "Over the same postings invented one degree, one years-of-"
-                "experience figure and no clearances, and truncated nothing."
+                "Zero failures across 60,000 batched requests, the only model "
+                "with a clean record at that volume. Chosen for reliability; "
+                "its extraction quality on this task has NOT been audited the "
+                "way nano and mini were, and that gap is the reason this entry "
+                "exists rather than a note."
             ),
-            sample_size=60,
+            sample_size=60000,
             measured_on=datetime.date(2026, 9, 2),
         ),
     ),
     notes=(
-        "gpt-5-mini rather than nano on measured evidence, not price. Audited "
-        "over 60 real postings against whether the page mentions the fact at "
-        "all: nano invented a clearance level for 12 of 55 postings that never "
-        "mention clearance, and at minimal effort filled 0 and 'none' wherever "
-        "the honest answer was 'unstated' - which is the one distinction this "
-        "extraction exists to keep. mini invented one degree and no clearances."
+        "Not nano, on measured quality: over 60 real postings it invented a "
+        "clearance level for 12 of 55 that never mention clearance, and at "
+        "minimal effort filled 0 and 'none' wherever the honest answer was "
+        "'unstated' - the one distinction this extraction exists to keep. "
+        "Not mini, on measured RELIABILITY: 499 of 31,999 batched requests "
+        "failed against zero on the other two, and a failed line leaves a "
+        "posting unextracted while looking like a batch that worked. luna is "
+        "the only model with a clean record at volume, and its extraction "
+        "quality here has not been audited the way the other two were."
     ),
     structured=StructuredOutput.JSON_SCHEMA,
     batched=True,
     max_output_tokens=REQUIREMENTS_MAX_OUTPUT_TOKENS,
     est_prompt_tokens=2270,
-    effort=REQUIREMENTS_REASONING_EFFORT,
+    # Preference, not a pin. luna REJECTS "minimal" and mini rejects "none",
+    # so a literal effort makes the model unswappable: point this at the other
+    # one and resolve() refuses, or worse a batch submits and fails whole on a
+    # 400. That is #179 exactly. The model picks the first value it accepts.
+    effort_preference=_EFFORT_PREFERENCE,
     candidates=(REQUIREMENTS_MODEL,),
 )
 
