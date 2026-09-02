@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import time
 from urllib.parse import urlparse
 
@@ -48,23 +49,56 @@ def looks_blocked(content: str | None) -> bool:
     return False
 
 
+# A path segment that identifies a specific posting. Two digits minimum is what
+# separates an id (999, 90297, 200681316, a uuid) from the locale and version
+# fragments that share a path with it (en-us, v2, us1) - requiring length alone
+# either missed short ids or matched those.
+_ID_SEGMENT = re.compile(r"^(?=(?:\D*\d){2,})[A-Za-z0-9_-]{3,}$")
+
+
+def _posting_ids(path: str) -> set[str]:
+    return {seg for seg in path.split("/") if _ID_SEGMENT.match(seg)}
+
+
 def redirected_away(requested: str, final: str | None) -> bool:
-    """True when a fetch landed somewhere materially different — the signature
-    of an expired posting bouncing to a board index or careers page. Compared
-    on host+path only, so tracking params and trailing slashes don't count."""
+    """True when a fetch landed on something that is no longer this posting.
+
+    Comparing host+path alone is wrong, and marked live jobs dead. Boards
+    routinely rewrite a posting URL without moving the posting:
+
+        jobs.apple.com/details/200681316
+            -> /details/200681316/cellular-layer-1-control-...   (slug appended)
+        careers.amd.com/jobs/90297
+            -> /careers-home/jobs/90297                          (prefix changed)
+
+    Both are canonicalisation. What actually distinguishes a dead posting is
+    that the destination no longer identifies it - a bounce to /careers or a
+    board index drops the id entirely. So when the requested URL carries an
+    id-like segment, the test is whether that id survives the redirect; only
+    when there is no id to track do we fall back to comparing host and path.
+    """
     if not final:
         return False
     a, b = urlparse(requested), urlparse(final)
-    return (a.netloc, a.path.rstrip("/")) != (b.netloc, b.path.rstrip("/"))
+    if (a.netloc, a.path.rstrip("/")) == (b.netloc, b.path.rstrip("/")):
+        return False
+    ids = _posting_ids(a.path)
+    if ids:
+        return not (ids & _posting_ids(b.path))
+    return True
 
 
 async def fetch_page(url: str) -> tuple[str | None, bool]:
-    """Returns (content, redirected_away).
+    """Returns (content, landed_elsewhere).
 
-    Both halves matter: a redirect means the posting is gone, which is a
-    verdict, while a None with no redirect only means the fetch failed. Callers
-    must not discard the flag — a helper that did exactly that is why redirect
-    detection never reached the daily reverify sweep.
+    The flag is a HINT, never a verdict. A redirect used to short-circuit
+    straight to "this posting is closed" without the page being read, which
+    marked 74 live jobs dead: boards rewrite posting URLs routinely, and no
+    URL comparison can reliably tell a canonicalisation from a bounce.
+
+    So the content comes back either way. The browser followed the redirect
+    and has the page; the closed-check reads it and decides, which is the
+    thing that can actually tell a job posting from a careers index.
     """
     from api import ssrf
     from core.pittcsc_simplify import extract_url_content_ex
@@ -93,11 +127,12 @@ async def fetch_page(url: str) -> tuple[str | None, bool]:
                 metrics.SCRAPES.labels("blocked_target").inc()
                 logger.warning(f"{url} redirected to a non-public target: {landed}")
                 return None, False
-        if redirected_away(url, final_url):
-            metrics.SCRAPE_DURATION.observe(time.monotonic() - start)
+        landed_elsewhere = redirected_away(url, final_url)
+        if landed_elsewhere:
+            # Recorded and logged, but NOT acted on: the content is returned
+            # so the model can judge the page it actually landed on.
             metrics.SCRAPES.labels("redirected").inc()
-            logger.info(f"fetch redirected away: {url} -> {final_url}")
-            return None, True
+            logger.info(f"fetch landed elsewhere: {url} -> {final_url}")
     except TimeoutError:
         metrics.SCRAPE_DURATION.observe(time.monotonic() - start)
         metrics.SCRAPES.labels("timeout").inc()
@@ -108,5 +143,8 @@ async def fetch_page(url: str) -> tuple[str | None, bool]:
         metrics.SCRAPES.labels("blocked").inc()
         logger.info(f"scrape returned a block/interstitial page: {url}")
         return None, False
+    if content:
+        metrics.SCRAPES.labels("ok").inc()
+        return content, landed_elsewhere
     metrics.SCRAPES.labels("ok" if content else "empty").inc()
     return content, False

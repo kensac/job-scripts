@@ -197,6 +197,37 @@ def test_build_custom_instructions_stable_hash():
     assert hashlib.sha256(first.encode()).hexdigest() == hashlib.sha256(second.encode()).hexdigest()
 
 
+def test_canonicalising_redirects_are_not_treated_as_closures():
+    """Real boards rewrite a posting URL without moving the posting, and
+    reading that as a closure marked 74 live jobs dead in production.
+
+    Both examples are the actual redirects those sites serve.
+    """
+    from api.fetching import redirected_away
+
+    # jobs.apple.com appends a title slug to the id.
+    assert (
+        redirected_away(
+            "https://jobs.apple.com/en-us/details/200681316",
+            "https://jobs.apple.com/en-us/details/200681316/cellular-layer-1-control",
+        )
+        is False
+    )
+    # careers.amd.com rewrites the path prefix but keeps the id.
+    assert (
+        redirected_away(
+            "https://careers.amd.com/jobs/90297?icims=1",
+            "https://careers.amd.com/careers-home/jobs/90297?icims=1",
+        )
+        is False
+    )
+    # An ATS migration that keeps the id is still the same posting.
+    assert redirected_away("https://a.test/jobs/90297", "https://b.test/jobs/90297") is False
+    # Losing the id is what actually signals the posting is gone.
+    assert redirected_away("https://a.test/jobs/90297", "https://a.test/jobs") is True
+    assert redirected_away("https://a.test/jobs/90297", "https://a.test/careers") is True
+
+
 def test_redirected_away_detects_board_index_bounce():
     from api.fetching import redirected_away
 
