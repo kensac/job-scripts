@@ -323,3 +323,37 @@ def sender_signal(user_id: int) -> dict[int, dict[str, Any]]:
             "why": why,
         }
     return out
+
+
+def intermediary_domains() -> list[str]:
+    """Sender domains that are platforms rather than one employer's own mail.
+
+    The same rule as sender_signal, across every user rather than one, for the
+    aggregate surfaces that have no user in scope. Defined once here so the
+    threshold and the ATS exemption cannot drift between the per-application
+    reading and the per-company one.
+    """
+    rows = db.query(
+        """
+        WITH first_message AS (
+            SELECT DISTINCT ON (am.application_id) am.application_id, m.from_email
+            FROM application_matches am
+            JOIN email_messages m ON m.id = am.message_id
+            WHERE am.application_id IS NOT NULL
+            ORDER BY am.application_id, m.sent_at ASC
+        )
+        SELECT lower(COALESCE(NULLIF(split_part(f.from_email, '@', 2), ''), '')) AS domain,
+               count(DISTINCT COALESCE(a.company_name, '')) AS companies
+        FROM first_message f
+        JOIN applications a ON a.id = f.application_id
+        WHERE a.dismissed_at IS NULL
+        GROUP BY 1
+        """
+    )
+    return [
+        r["domain"]
+        for r in rows
+        if r["domain"]
+        and not ats.is_ats_email_domain(r["domain"])
+        and int(r["companies"]) >= INTERMEDIARY_COMPANY_NAMES
+    ]

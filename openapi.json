@@ -8133,6 +8133,17 @@
             }
           },
           {
+            "name": "min_sample",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 30,
+              "title": "Min Sample"
+            }
+          },
+          {
             "name": "x-service-token",
             "in": "header",
             "required": false,
