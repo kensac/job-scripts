@@ -11,6 +11,7 @@ from pydantic import BaseModel
 
 from api import ai, metrics
 from api.ai import AIConfig
+from core import pricing
 from core.store import add_ai_result
 
 logger = logging.getLogger("jobtracker_api")
@@ -145,18 +146,15 @@ def record_ai_verdict(
     )
     metrics.CHECKS.labels(check_type, status).inc()
     metrics.AI_CALLS.labels(provider, model, "ok").inc()
-    price = ai.PRICES_PER_MTOK.get(model)
-    if price:
-        mult = 0.5 if batched else 1.0
-        cost = (
-            (
-                usage.get("prompt_tokens", 0) * price[0]
-                + usage.get("completion_tokens", 0) * price[1]
-            )
-            * mult
-            / 1_000_000
-        )
-        metrics.AI_COST_USD.labels(provider, model, key_source).inc(cost)
+    cost = pricing.estimate_cost_usd(
+        model,
+        usage.get("prompt_tokens", 0),
+        usage.get("completion_tokens", 0),
+        cached_tokens=usage.get("cached_tokens"),
+        batched=batched,
+    )
+    if cost is not None:
+        metrics.AI_COST_USD.labels(provider, model, key_source).inc(float(cost))
 
 
 async def refresh_content(

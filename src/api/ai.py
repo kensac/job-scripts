@@ -67,20 +67,6 @@ def owner_models(unlimited: bool) -> list:
     return sorted(out)
 
 
-# USD per 1M tokens (input, output); models absent here emit no cost metric.
-PRICES_PER_MTOK = {
-    "gpt-5-nano": (0.05, 0.40),
-    "gpt-5-mini": (0.25, 2.00),
-    "gpt-5": (1.25, 10.00),
-    "gpt-5.6-luna": (0.20, 1.20),
-    "gpt-5.6-terra": (2.00, 12.00),
-    "gpt-5.6-sol": (4.00, 20.00),
-    "claude-opus-5": (5.00, 25.00),
-    # Sonnet 5's launch intro price ($2/$10) became the standard price.
-    "claude-sonnet-5": (2.00, 10.00),
-    "claude-haiku-4-5": (1.00, 5.00),
-}
-
 _EFFORTS_OPENAI = ("minimal", "low", "medium", "high")
 _EFFORTS_ANTHROPIC = ("low", "medium", "high", "xhigh", "max")
 
@@ -120,12 +106,29 @@ def validate_params(provider: str, params: dict[str, Any]) -> str | None:
     return None
 
 
-def _usage_tuple(prompt: int, completion: int, total: int) -> dict[str, int]:
+def _usage_tuple(
+    prompt: int,
+    completion: int,
+    total: int,
+    cached: int = 0,
+    reasoning: int = 0,
+) -> dict[str, int]:
+    """Cached and reasoning tokens are SUBSETS of prompt and completion
+    respectively, not additions - they are reported so spend can be attributed,
+    never summed into the total."""
     return {
         "prompt_tokens": prompt or 0,
         "completion_tokens": completion or 0,
         "total_tokens": total or (prompt or 0) + (completion or 0),
+        "cached_tokens": cached or 0,
+        "reasoning_tokens": reasoning or 0,
     }
+
+
+def _detail(usage: Any, container: str, field: str) -> int:
+    """Providers nest the cached/reasoning counts one level down and omit the
+    container entirely when the count is zero."""
+    return getattr(getattr(usage, container, None), field, 0) or 0
 
 
 async def parse[T: BaseModel](
@@ -138,6 +141,7 @@ async def parse[T: BaseModel](
     import time as _time
 
     from api import metrics
+    from core import pricing
 
     start = _time.monotonic()
     try:
@@ -150,12 +154,15 @@ async def parse[T: BaseModel](
     metrics.AI_CALLS.labels(cfg.provider, cfg.model, "ok").inc()
     metrics.AI_CALL_DURATION.labels(cfg.provider).observe(_time.monotonic() - start)
     _, usage = result
-    price = PRICES_PER_MTOK.get(cfg.model)
-    if price and usage:
-        cost = (
-            usage["prompt_tokens"] * price[0] + usage["completion_tokens"] * price[1]
-        ) / 1_000_000
-        metrics.AI_COST_USD.labels(cfg.provider, cfg.model, cfg.key_source).inc(cost)
+    if usage:
+        cost = pricing.estimate_cost_usd(
+            cfg.model,
+            usage["prompt_tokens"],
+            usage["completion_tokens"],
+            cached_tokens=usage.get("cached_tokens"),
+        )
+        if cost is not None:
+            metrics.AI_COST_USD.labels(cfg.provider, cfg.model, cfg.key_source).inc(float(cost))
     return result
 
 
@@ -183,6 +190,7 @@ async def _parse[T: BaseModel](
             getattr(response.usage, "input_tokens", 0),
             getattr(response.usage, "output_tokens", 0),
             0,
+            cached=getattr(response.usage, "cache_read_input_tokens", 0) or 0,
         )
         return response.parsed_output, usage
 
@@ -212,6 +220,8 @@ async def _parse[T: BaseModel](
             getattr(u, "input_tokens", 0) or 0,
             getattr(u, "output_tokens", 0) or 0,
             getattr(u, "total_tokens", 0) or 0,
+            cached=_detail(u, "input_tokens_details", "cached_tokens"),
+            reasoning=_detail(u, "output_tokens_details", "reasoning_tokens"),
         )
         return response.output_parsed, usage
 
@@ -235,6 +245,8 @@ async def _parse[T: BaseModel](
         getattr(cu, "prompt_tokens", 0) or 0,
         getattr(cu, "completion_tokens", 0) or 0,
         getattr(cu, "total_tokens", 0) or 0,
+        cached=_detail(cu, "prompt_tokens_details", "cached_tokens"),
+        reasoning=_detail(cu, "completion_tokens_details", "reasoning_tokens"),
     )
     parsed = completion.choices[0].message.parsed if completion.choices else None
     return parsed, usage

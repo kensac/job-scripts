@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from api import crypto, db
 from api.auth import AuthedUser
+from core import pricing
 
 
 @dataclass
@@ -155,12 +156,27 @@ def record_usage(
     prompt_tokens: int,
     completion_tokens: int,
     total_tokens: int,
+    cached_tokens: int = 0,
 ) -> None:
+    """Every call charged to a user. record_usage is the sync path only - work
+    that a human waits on - so it never carries the batch discount."""
     db.execute(
         "INSERT INTO api_usage (user_id, key_source, purpose, model, "
-        "prompt_tokens, completion_tokens, total_tokens) "
-        "VALUES (%s, %s, %s, %s, %s, %s, %s)",
-        (user_id, key_source, purpose, model, prompt_tokens, completion_tokens, total_tokens),
+        "prompt_tokens, completion_tokens, total_tokens, cached_tokens, cost_usd) "
+        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+        (
+            user_id,
+            key_source,
+            purpose,
+            model,
+            prompt_tokens,
+            completion_tokens,
+            total_tokens,
+            cached_tokens,
+            pricing.estimate_cost_usd(
+                model, prompt_tokens, completion_tokens, cached_tokens=cached_tokens
+            ),
+        ),
     )
     from api import metrics
 

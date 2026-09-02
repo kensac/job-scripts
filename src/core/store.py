@@ -12,6 +12,8 @@ import psycopg
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
+from core import pricing
+
 logger = logging.getLogger("jobtracker_store")
 
 
@@ -51,6 +53,7 @@ _INSERT_COLUMNS = [
     "reasoning_tokens",
     "duration_ms",
     "error",
+    "cost_usd",
     "worker",
     "batch_id",
 ]
@@ -181,7 +184,8 @@ def init_db() -> None:
                 cached_tokens BIGINT,
                 reasoning_tokens BIGINT,
                 duration_ms BIGINT,
-                error TEXT
+                error TEXT,
+                cost_usd NUMERIC(12, 6)
             )
             """
         )
@@ -263,6 +267,16 @@ def add_ai_result(
         "reasoning_tokens": reasoning_tokens,
         "duration_ms": duration_ms,
         "error": error,
+        # Priced at write time, not read time: the rate table changes, and a
+        # verdict's cost is what it cost when it ran. batch_id is the only
+        # signal that this went through the half-price Batch API.
+        "cost_usd": pricing.estimate_cost_usd(
+            model,
+            prompt_tokens,
+            completion_tokens,
+            cached_tokens=cached_tokens,
+            batched=batch_id is not None,
+        ),
         "worker": _WORKER,
         "batch_id": batch_id,
     }

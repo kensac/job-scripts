@@ -15,6 +15,7 @@ from typing import Any
 from api import ai, budget, db, events, metrics
 from api.budget import Entitlement
 from api.tasks.board import _demote_closed, _materialize_passing
+from core import pricing
 
 logger = logging.getLogger("jobtracker_worker")
 
@@ -268,8 +269,8 @@ def _batch_event_hook(task_id: int, purpose: str, model: str):
             # Terminal usage report: real token totals -> half-price batch cost.
             inp = counts.get("input_tokens", 0)
             out = counts.get("output_tokens", 0)
-            prices = ai.PRICES_PER_MTOK.get(model)
-            cost = round((inp * prices[0] + out * prices[1]) / 2_000_000, 6) if prices else None
+            est = pricing.estimate_cost_usd(model, inp, out, batched=True)
+            cost = round(float(est), 6) if est is not None else None
             db.execute(
                 "UPDATE ai_batches SET input_tokens = input_tokens + %s, "
                 "output_tokens = output_tokens + %s, "
