@@ -18,7 +18,13 @@ jobs:
       contents: write
     services:
       postgres:
-        image: postgres:18@sha256:4ef4dbc939d61acea57712655ddb4b4ab27419c913f94cca0cd57cb3ea3c2280
+        # pgvector, not plain postgres: migrations CREATE EXTENSION vector, so a
+        # base image without it fails the whole suite at conftest import.
+        # -trixie is load-bearing. The default pg18 tag is bookworm (glibc 2.36)
+        # and prod's cluster was initialised under trixie (glibc 2.41); mixing
+        # them emits collation-version mismatches, which is silent text-index
+        # corruption rather than a loud failure.
+        image: pgvector/pgvector:pg18-trixie@sha256:78bf48b801e792f99e3ac62b5036fd3876e9be48afda16c1e331af1c75ceb2ff
         env:
           POSTGRES_USER: ci
           POSTGRES_PASSWORD: ci
