@@ -41,6 +41,18 @@ POLL_SECONDS = float(os.environ.get("JOBTRACKER_WORKER_POLL", "5"))
 
 INGEST_INTERVAL_MINUTES = int(os.environ.get("JOBTRACKER_INGEST_INTERVAL_MINUTES", "60"))
 
+# How often to ask the provider whether parked batches have landed. One
+# minute, matching the housekeeping tick, which is the floor: a finer bucket
+# cannot fire more often than the loop that reads it.
+#
+# It shares no bucket with the ingest cycle deliberately. On the hourly one a
+# parked task could sit an hour after its batch had finished, and across a
+# multi-round backfill that latency exceeds the provider's own turnaround.
+#
+# Cost is one provider call per OPEN batch and nothing at all when there are
+# none, so the frequency is bounded by politeness rather than expense.
+BATCH_POLL_MINUTES = int(os.environ.get("JOBTRACKER_BATCH_POLL_MINUTES", "1"))
+
 
 # Which task kinds this worker claims; lets small fleet hosts (e.g. an rpi)
 # opt out of scrape-heavy work. Default: all kinds.
@@ -145,7 +157,19 @@ def schedule_ingest_cycle() -> None:
     enqueue("embed_postings", {"cycle": cycle}, dedupe_key=f"embed:{cycle}")
     enqueue("send_digests", {"cycle": day}, dedupe_key=f"digest:{day}")
     enqueue("data_health", {"cycle": cycle}, dedupe_key=f"health:{cycle}")
-    enqueue("poll_batches", {"cycle": cycle}, dedupe_key=f"pollbatch:{cycle}")
+    # Polling gets its OWN bucket, far finer than the ingest cycle. Sharing the
+    # hourly one meant a parked task could sit up to an hour after its batch
+    # had actually finished, and in a multi-round backfill that latency is the
+    # dominant term - larger than the provider's own turnaround.
+    #
+    # The poll costs one provider call per OPEN batch and nothing when there
+    # are none, so the frequency is bounded by politeness rather than expense.
+    poll_bucket = now.replace(
+        minute=(now.minute // BATCH_POLL_MINUTES) * BATCH_POLL_MINUTES,
+        second=0,
+        microsecond=0,
+    ).strftime("%Y-%m-%dT%H:%M")
+    enqueue("poll_batches", {"cycle": poll_bucket}, dedupe_key=f"pollbatch:{poll_bucket}")
     # Hourly sweep for jobs the ingest pipeline left unverified (inline AI
     # checks disabled fleet-side): closed+clearance in one batched call each.
     enqueue("verify_new", {"cycle": cycle}, dedupe_key=f"verify:{cycle}")
