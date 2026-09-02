@@ -174,3 +174,39 @@ def test_an_earlier_event_does_not_resolve_a_later_ask(f):
 
     mail_pipeline.sync_action_items(app)
     assert mail_pipeline.sync_action_items(app)["resolved"] == 0
+
+
+def test_detaching_a_message_closes_the_action_it_asked_for(f):
+    """An item whose event no longer reaches the application is stranded:
+    nothing will ever resolve it, and it stays open forever asking for
+    something about an application it is not part of."""
+    from api import mail_match
+    from api.mail_pipeline import sync_action_items
+
+    uid = f.make_user()
+    app = db.query_one(
+        "INSERT INTO applications (user_id, company_name, title, source_provenance) "
+        "VALUES (%s,'Acme','Engineer','tracker') RETURNING id",
+        (uid,),
+    )["id"]
+    msg = db.query_one(
+        "INSERT INTO email_messages (user_id, provider_message_id, source, subject) "
+        "VALUES (%s,'strand-1','takeout','Assessment') RETURNING id",
+        (uid,),
+    )["id"]
+    db.execute(
+        "INSERT INTO email_events (message_id, kind, confidence) VALUES (%s,'assessment_invite','high')",
+        (msg,),
+    )
+    mail_match.record(msg, mail_match.Match(app, "ats_company", "medium", "test"))
+
+    assert sync_action_items(app)["opened"] == 1
+
+    mail_match.record(msg, mail_match.Match(None, "detached", "none", "wrong application"))
+    result = sync_action_items(app)
+    assert result["resolved"] == 1
+    row = db.query_one(
+        "SELECT resolved_at, resolution FROM action_items WHERE application_id = %s", (app,)
+    )
+    assert row["resolved_at"] is not None
+    assert "no longer part of this application" in row["resolution"]
