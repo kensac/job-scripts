@@ -114,6 +114,12 @@ def schedule_ingest_cycle() -> None:
         )
     day = now.strftime("%Y-%m-%d")
     enqueue("reverify_open", {"cycle": day}, dedupe_key=f"reverify:{day}")
+    enqueue("sync_gmail", {"cycle": cycle}, dedupe_key=f"gmail:{cycle}")
+    # Its own kind and its own key, NOT folded into the sync. Dead-credential
+    # detection is discovery-on-use, so if it only happened inside the sync
+    # then a sync that stops running also stops noticing it cannot run - the
+    # alarm wired to the thing it is alarming about.
+    enqueue("probe_credentials", {"cycle": cycle}, dedupe_key=f"credprobe:{cycle}")
     # Hourly, but only when the previous pass has finished. Each run is capped
     # at EXTRACT_COMP_PER_CYCLE jobs and then waits on the Batch API, which can
     # take hours - enqueuing unconditionally every hour would stack passes up
