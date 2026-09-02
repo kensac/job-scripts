@@ -129,6 +129,24 @@ def _by_company(user_id: int, company: str | None, sent_at) -> Match | None:
     same employer is exactly the case a human or a model should settle, and
     guessing would produce a confident wrong answer that nothing downstream
     can question.
+
+    A TRACKER APPLICATION'S DATE IS A DAY, NOT AN INSTANT, and the day of
+    slack below is that fact rather than a tolerance anyone tuned.
+    `user_jobs.date_applied` is a `date` - a calendar day in a timezone nobody
+    recorded - and storing it as `applied_at` casts it to midnight UTC,
+    inventing an hour, a minute and a second it never had. That invented
+    precision then vetoes the acknowledgement of the application it describes:
+    an ATS replying at 23:57 UTC, which is 19:57 on a summer evening in New
+    York, falls a few minutes before a midnight that only exists because of
+    the cast.
+
+    A timezone-less date is uncertain by exactly one day. That is the width of
+    the datum, so it is the width of the comparison; if the column ever became
+    a real instant the slack should go with it.
+
+    It applies ONLY to tracker rows. An email-derived `applied_at` is a real
+    timestamp taken from a message, so it has no such uncertainty - and its
+    own boundary problem is a different bug, not a wider version of this one.
     """
     key = norm_company(company)
     if not key:
@@ -139,7 +157,9 @@ def _by_company(user_id: int, company: str | None, sent_at) -> Match | None:
         FROM applications a
         WHERE a.user_id = %s
           AND (a.applied_at IS NULL OR %s::timestamptz IS NULL
-               OR a.applied_at <= %s::timestamptz)
+               OR a.applied_at - CASE WHEN a.source_provenance = 'tracker'
+                                      THEN interval '1 day' ELSE interval '0' END
+                  <= %s::timestamptz)
         """,
         (user_id, sent_at, sent_at),
     )
