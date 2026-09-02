@@ -948,7 +948,17 @@ def test_reverify_does_not_overturn_a_closure_settled_while_it_was_parked():
 def test_reverify_records_normally_when_nothing_settled_after_submission():
     url = "https://stale.test/2"
     add_ai_result(url, "rejected", "stale closure", "closed")
-    # Submitted after that verdict, so our evidence is the newer of the two.
+    # Age the verdict using the DATABASE's clock. add_ai_result stamps
+    # created_at from Python while _submitted_batch derives submitted_at from
+    # now(), so leaving them a few milliseconds apart made this test compare
+    # two clocks - and now() is transaction start time, not statement time, so
+    # under a loaded suite the batch could appear to predate the verdict it was
+    # meant to follow. The guard then correctly suppressed the write and the
+    # test failed for a reason that had nothing to do with the guard.
+    db.execute(
+        "UPDATE ai_queries SET created_at = now() - interval '1 hour' WHERE url = %s",
+        (url,),
+    )
     _submitted_batch("batch_fresh", minutes_ago=0)
 
     rows = {url: {"url": url, "company": "C", "title": "T"}}
