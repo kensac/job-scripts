@@ -49,7 +49,9 @@ def usage(user: AuthedUser = Depends(require_user)):
         "spend_by_day": db.query(
             """
             SELECT created_at::date AS day, key_source,
-                   SUM(total_tokens) AS tokens, COUNT(*) AS calls
+                   SUM(total_tokens) AS tokens, COUNT(*) AS calls,
+                   COALESCE(SUM(cost_usd), 0) AS cost_usd,
+                   COUNT(*) FILTER (WHERE cost_usd IS NULL) AS unpriced_calls
             FROM api_usage WHERE user_id = %s AND created_at > now() - interval '30 days'
             GROUP BY 1, 2 ORDER BY 1
             """,
@@ -57,7 +59,10 @@ def usage(user: AuthedUser = Depends(require_user)):
         ),
         "spend_by_purpose": db.query(
             """
-            SELECT purpose, model, SUM(total_tokens) AS tokens, COUNT(*) AS calls
+            SELECT purpose, model, SUM(total_tokens) AS tokens, COUNT(*) AS calls,
+                   COALESCE(SUM(cost_usd), 0) AS cost_usd,
+                   COALESCE(SUM(cached_tokens), 0) AS cached_tokens,
+                   COUNT(*) FILTER (WHERE cost_usd IS NULL) AS unpriced_calls
             FROM api_usage WHERE user_id = %s GROUP BY 1, 2 ORDER BY 3 DESC
             """,
             (user.id,),
