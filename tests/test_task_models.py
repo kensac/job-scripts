@@ -124,6 +124,26 @@ class TestCost:
         assert blocked["est_cycle_cost_usd"] is None
 
 
+class TestOneShape:
+    def test_list_element_single_get_and_put_are_the_same_object(self, client, admin_headers):
+        """One shape, three ways in. A client can refetch the list after a
+        change or render the PUT response directly and get identical data -
+        which is what makes either integration correct rather than one of them
+        being the supported path and the other a trap.
+
+        The list is wrapped as {"tasks": [...]}; the single GET and the PUT
+        response are the bare task object, with recent_changes inside it.
+        """
+        listed = client.get("/v1/admin/task-models", headers=admin_headers).json()
+        assert set(listed) == {"tasks"}
+        element = next(t for t in listed["tasks"] if t["purpose"] == "comp")
+        single = _get(client, admin_headers, "comp")
+        put = _put(client, admin_headers, "comp", model="gpt-5-nano").json()
+        assert sorted(element) == sorted(single) == sorted(put)
+        assert "recent_changes" in single
+        assert single["purpose"] == "comp"
+
+
 class TestOrdering:
     def test_candidates_arrive_in_the_order_they_should_be_shown(self, client, admin_headers):
         """The server orders them because the prices are strings: a client
