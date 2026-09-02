@@ -11460,6 +11460,69 @@
           "note": {
             "type": "string",
             "title": "Note"
+          },
+          "context_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Tokens"
+          },
+          "rate_in_per_mtok": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate In Per Mtok"
+          },
+          "rate_out_per_mtok": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate Out Per Mtok"
+          },
+          "batch_discount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Batch Discount"
+          },
+          "structured_output": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Structured Output"
+          },
+          "reasoning_accepts": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Reasoning Accepts",
+            "default": []
           }
         },
         "type": "object",
