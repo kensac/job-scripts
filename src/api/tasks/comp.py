@@ -10,13 +10,11 @@ from pydantic import BaseModel
 
 from api import db
 from api.tasks.runtime import (
-    _batch_event_hook,
-    _pending_batch_ids,
     _set_progress,
-    submit_or_collect,
+    run_batched,
 )
 from core.providers.spec import StructuredOutput
-from core.routing import TaskShape, resolve
+from core.routing import TaskShape
 from core.store import CONTENT_LATERAL
 
 logger = logging.getLogger("jobtracker_worker")
@@ -148,24 +146,7 @@ async def handle_extract_comp(task_id: int, payload: dict[str, Any]) -> None:
     ]
     by_url = {r["url"]: r["id"] for r in rows}
     _set_progress(task_id, 0, len(specs), "comp batch submitted (half price)")
-    chosen = resolve(COMP_TASK)
-    logger.info(f"Task {task_id}: comp extraction on {chosen.model} - {chosen.reason}")
-    hook = _batch_event_hook(task_id, "comp", chosen.model)
-    existing = _pending_batch_ids(task_id)
-    if existing:
-        from core.batch import collect_batches
-
-        logger.info(f"Task {task_id}: reattaching to {len(existing)} in-flight batch(es)")
-        results = await collect_batches(existing, hook)
-    else:
-        results = await submit_or_collect(
-            task_id,
-            specs,
-            chosen.model,
-            COMP_TASK.effort or "low",
-            COMP_TASK.max_output_tokens,
-            hook,
-        )
+    results, _ = await run_batched(task_id, COMP_TASK, specs, purpose="comp")
     done = 0
     for url, res in results.items():
         job_id = by_url.get(url)

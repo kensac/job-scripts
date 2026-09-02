@@ -177,3 +177,138 @@ def test_pipeline_hides_closed_by_default(client, user_headers):
             "applications"
         ]
     ]
+
+
+def test_analytics_reports_where_the_matcher_refuses(client, admin_headers, f):
+    """Finding a pattern by reading a hundred messages is work a GROUP BY does
+    in a second. The distribution is the point."""
+    uid = f.make_user()
+    for kind, method in (
+        ("rejection", "ats_company"),
+        ("rejection", "unmatched"),
+        ("recruiter_outreach", "not_an_application"),
+    ):
+        mid = db.query_one(
+            "INSERT INTO email_messages (user_id, provider_message_id, source, from_email, "
+            "subject, sent_at, prefilter_hit) VALUES (%s,%s,'takeout','a@greenhouse.io','s',"
+            "now(),TRUE) RETURNING id",
+            (uid, f"an-{kind}-{method}"),
+        )["id"]
+        db.execute(
+            "INSERT INTO email_events (message_id, kind, confidence, model, detail) "
+            "VALUES (%s,%s,'high','gpt-5.6-luna',%s)",
+            (mid, kind, db.jsonb({"company": "Acme"})),
+        )
+        db.execute(
+            "INSERT INTO application_matches (message_id, application_id, method, confidence) "
+            "VALUES (%s, NULL, %s, 'none')",
+            (mid, method),
+        )
+
+    body = client.get("/v1/admin/mail/analytics", headers=admin_headers).json()
+    methods = {r["method"]: r["messages"] for r in body["matching"]}
+    assert methods["unmatched"] == 1
+    assert methods["not_an_application"] == 1, (
+        "deliberately unattached must not read as a matcher failure"
+    )
+    kinds = {r["kind"] for r in body["classification"]}
+    assert {"rejection", "recruiter_outreach"} <= kinds
+    assert body["classification"][0]["model"] == "gpt-5.6-luna"
+
+
+def test_analytics_measures_what_a_prefilter_gate_would_have_cost(client, admin_headers, f):
+    """The prefilter gates nothing on purpose: a filtered-out email is the one
+    unrecoverable failure, because the posting is closed and the thread is not
+    coming back. It survives to answer this question and only this question."""
+    uid = f.make_user()
+    for hit, kind in ((False, "rejection"), (True, "rejection"), (False, "not_job_related")):
+        mid = db.query_one(
+            "INSERT INTO email_messages (user_id, provider_message_id, source, from_email, "
+            "subject, sent_at, prefilter_hit) VALUES (%s,%s,'takeout','a@b.com','s',now(),%s) "
+            "RETURNING id",
+            (uid, f"pf-{hit}-{kind}", hit),
+        )["id"]
+        db.execute(
+            "INSERT INTO email_events (message_id, kind, confidence) VALUES (%s,%s,'high')",
+            (mid, kind),
+        )
+
+    body = client.get("/v1/admin/mail/analytics", headers=admin_headers).json()
+    assert body["prefilter"]["job_related_a_gate_would_have_dropped"] == 1
+    assert body["prefilter"]["job_related_total"] == 2
+
+
+def test_corpus_block_describes_one_population_under_any_window(client, admin_headers, f):
+    """The whole block is corpus-wide, including by_source.
+
+    by_source used to interpolate the window while the totals above it did
+    not, so at days=30 the breakdown summed to LESS than the total it was
+    nested under, and `oldest` reported the 2018 start of an eight-year import
+    on a screen labelled "last 30 days". Not a wrong number - a number
+    counting a different population than its label claims.
+    """
+    uid = f.make_user()
+    for i, (source, days_ago) in enumerate((("takeout", 900), ("gmail", 900), ("gmail", 1))):
+        db.execute(
+            "INSERT INTO email_messages (user_id, provider_message_id, source, from_email, "
+            "subject, sent_at, prefilter_hit) VALUES (%s,%s,%s,'a@b.com','s',"
+            "now() - make_interval(days => %s), TRUE)",
+            (uid, f"cov-{i}", source, days_ago),
+        )
+
+    windowed = client.get("/v1/admin/mail/analytics?days=30", headers=admin_headers).json()
+    corpus = windowed["corpus"]
+    assert corpus["messages"] == 3, "corpus totals must ignore the window"
+    assert sum(r["messages"] for r in corpus["by_source"]) == corpus["messages"], (
+        "by_source must sum to the total it is nested under"
+    )
+    assert corpus["unclassified"] == 3
+
+    whole = client.get("/v1/admin/mail/analytics", headers=admin_headers).json()
+    assert whole["corpus"] == corpus, "the corpus block cannot depend on the window at all"
+    assert whole["window_days"] is None and windowed["window_days"] == 30
+
+
+def test_each_section_ships_the_population_it_counts(client, admin_headers, f):
+    """classification counts every classified message; matching and
+    sender_domains exclude not_job_related. Side by side those invite a
+    subtraction that means nothing, so the denominators travel with the rows
+    instead of being hardcoded by whoever renders them."""
+    uid = f.make_user()
+    for i, kind in enumerate(("rejection", "rejection", "not_job_related")):
+        mid = db.query_one(
+            "INSERT INTO email_messages (user_id, provider_message_id, source, from_email, "
+            "subject, sent_at, prefilter_hit) VALUES (%s,%s,'takeout',%s,'s',now(),TRUE) "
+            "RETURNING id",
+            (uid, f"pop-{i}", f"a@d{i}.com"),
+        )["id"]
+        db.execute(
+            "INSERT INTO email_events (message_id, kind, confidence) VALUES (%s,%s,'high')",
+            (mid, kind),
+        )
+
+    pops = client.get("/v1/admin/mail/analytics", headers=admin_headers).json()["populations"]
+    assert pops["classification"]["messages"] == 3
+    assert pops["classification"]["excludes"] == []
+    assert pops["matching"]["messages"] == 2
+    assert pops["matching"]["excludes"] == ["not_job_related"]
+    assert pops["sender_domains"]["messages"] == 2
+    # LIMIT 40 means the rows can be a truncation; say so in numbers rather
+    # than letting a caller assume it is the whole set.
+    assert pops["sender_domains"]["domains_shown"] == 2
+    assert pops["sender_domains"]["domains_total"] == 2
+
+
+def test_analytics_needs_admin(client, user_headers):
+    assert client.get("/v1/admin/mail/analytics", headers=user_headers).status_code == 403
+
+
+def test_a_literal_route_is_registered_before_the_one_that_would_swallow_it():
+    """/admin/mail/analytics was silently answered by /admin/mail/{message_id}
+    until it was moved above it. FastAPI matches in registration order and does
+    not fall through on a failed conversion, so the literal path has to come
+    first - and nothing about the code reads wrong when it does not."""
+    from api.routers import mail
+
+    paths = [r.path for r in mail.router.routes]
+    assert paths.index("/admin/mail/analytics") < paths.index("/admin/mail/{message_id}")

@@ -17,6 +17,7 @@ from api import ai, budget, db, events, metrics
 from api.budget import Entitlement
 from api.tasks.board import _demote_closed, _materialize_passing
 from core import pricing
+from core.routing import Choice, TaskShape, resolve
 
 logger = logging.getLogger("jobtracker_worker")
 
@@ -417,6 +418,54 @@ def _batch_event_hook(task_id: int, purpose: str, model: str):
         events.publish_task(task_id)
 
     return on_event
+
+
+async def run_batched(
+    task_id: int,
+    shape: TaskShape,
+    specs: list,
+    *,
+    purpose: str,
+) -> tuple[dict[str, Any], Choice]:
+    """The one way a scheduled handler runs a batch.
+
+    Every batch call site had the same ten lines: resolve, build a hook,
+    check for in-flight ids, reattach or submit. Four copies, and they had
+    already drifted - one passed `SHAPE.effort or "low"`, another
+    `SHAPE.resolved_effort() or A_CONSTANT`, so the same declaration produced
+    different requests depending on which file you were in.
+
+    Taking the shape rather than a model, an effort and a token cap removes the
+    chance to disagree with it. The shape is the single declaration of what the
+    work needs; unpacking it at four call sites is what let them diverge.
+
+    `purpose` is required and is what every ledger groups by, so a handler
+    cannot run a batch without its cost, tokens and model landing in analytics.
+    Anything recorded here in future - prompt identity, output samples - lands
+    for every caller at once rather than being added to four files and missed
+    in a fifth.
+    """
+    chosen = resolve(shape)
+    logger.info(f"Task {task_id}: {purpose} on {chosen.model} - {chosen.reason}")
+    hook = _batch_event_hook(task_id, purpose, chosen.model)
+    existing = _pending_batch_ids(task_id)
+    if existing:
+        from core.batch import collect_batches
+
+        logger.info(f"Task {task_id}: reattaching to {len(existing)} in-flight batch(es)")
+        return await collect_batches(existing, hook), chosen
+    results = await submit_or_collect(
+        task_id,
+        specs,
+        chosen.model,
+        # The shape's own answer, not the call site's. A model that rejects the
+        # value is not eligible, so resolve() has already refused rather than
+        # letting a batch fail whole on a bad parameter.
+        shape.resolved_effort() or "",
+        shape.max_output_tokens,
+        hook,
+    )
+    return results, chosen
 
 
 async def submit_or_collect(

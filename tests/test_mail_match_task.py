@@ -244,3 +244,96 @@ async def test_matching_one_user_leaves_the_others_alone(f):
         db.query_one("SELECT count(*) AS n FROM applications WHERE user_id = %s", (second,))["n"]
         == 0
     )
+
+
+def test_a_recruiter_approach_is_never_attached_to_an_application(f):
+    """RippleMatch is a job platform AND a company Kanishk applied to. Its
+    marketing mail extracted company='RippleMatch', matched his real
+    RippleMatch application by name, and 27 platform nudges became evidence
+    about a job he actually applied for."""
+    uid = f.make_user()
+    job = f.make_job(company="RippleMatch", title="Software Engineer")
+    f.make_board_row(uid, job, status="Application Submitted")
+    task.seed_from_tracker(uid)
+
+    msg = _message(uid, subject="still looking for new roles?")
+    _event(msg, "recruiter_outreach", company="RippleMatch", title="Software Engineer")
+
+    counts = task.match_pending(uid)
+    assert counts == {"not_an_application": 1}
+    row = db.query_one(
+        "SELECT application_id, method FROM application_matches WHERE message_id = %s", (msg,)
+    )
+    assert row["application_id"] is None
+    assert row["method"] == "not_an_application", (
+        "deliberately unattached is not the same as 'we looked and found nothing'"
+    )
+
+
+def test_an_approach_already_attached_is_corrected(f):
+    """Matching is append-only and match_pending only considers messages with
+    no current match, so a rule change never reaches what the old rule decided.
+    Without this the fix applies to new mail while the existing wrong
+    attachments stay - a corrected matcher still reporting the numbers that
+    prompted the correction."""
+    uid = f.make_user()
+    app = db.query_one(
+        "INSERT INTO applications (user_id, company_name, title, source_provenance) "
+        "VALUES (%s,'RippleMatch','Software Engineer','tracker') RETURNING id",
+        (uid,),
+    )["id"]
+    msg = _message(uid)
+    _event(msg, "recruiter_outreach", company="RippleMatch", title="Software Engineer")
+    db.execute(
+        "INSERT INTO application_matches (message_id, application_id, method, confidence) "
+        "VALUES (%s,%s,'ats_company','medium')",
+        (msg, app),
+    )
+
+    assert task.detach_unattachable(uid) == 1
+    assert task.detach_unattachable(uid) == 0, "idempotent"
+    row = db.query_one(
+        "SELECT application_id FROM application_matches WHERE message_id = %s ORDER BY id DESC LIMIT 1",
+        (msg,),
+    )
+    assert row["application_id"] is None
+
+
+def test_employer_mail_relayed_by_a_platform_still_matches(f):
+    """The matches through RippleMatch to real employers were CORRECT - it
+    relays employer decisions and the classifier reads the employer. Only the
+    platform's own mail was wrong, so the fix must not cost the rest."""
+    uid = f.make_user()
+    job = f.make_job(company="Plaid", title="Software Engineer")
+    f.make_board_row(uid, job, status="Application Submitted")
+    task.seed_from_tracker(uid)
+
+    msg = _message(uid, subject="An update from Plaid")
+    _event(msg, "rejection", company="Plaid", title="Software Engineer")
+
+    counts = task.match_pending(uid)
+    assert counts == {"ats_company": 1}
+
+
+def test_a_second_worker_cannot_duplicate_a_derived_application(f):
+    """Two workers can hold this task at once. A slow worker kept running this
+    handler after the reaper had requeued its task and another worker had
+    finished it - and nothing stopped the loser writing a second copy of every
+    application the winner had just created.
+
+    A duplicate here does not merely add a row: _by_company refuses to choose
+    between two applications at one employer, so it would make every future
+    message at that company permanently unmatchable, silently."""
+    uid = f.make_user()
+    msg = _message(uid)
+    _event(msg, "rejection", company="Initech", title="Backend Intern")
+
+    task.match_pending(uid)
+    first_created, first_matched = task.seed_from_mail(uid)
+    assert (first_created, first_matched) == (1, 1)
+
+    # The losing worker: its own view of the world still says this message is
+    # unmatched, because it read the rows before the winner wrote.
+    second_created, _ = task.seed_from_mail(uid)
+    assert second_created == 0
+    assert db.query_one("SELECT count(*) AS n FROM applications")["n"] == 1

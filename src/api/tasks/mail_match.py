@@ -204,16 +204,48 @@ def seed_from_mail(user_id: int) -> tuple[int, int]:
         if company_of[key] in over:
             continue
         first = messages[0]
+        # Conditional on the anchor message STILL being unmatched, in one
+        # statement, because two workers can hold this task at once.
+        #
+        # That is not hypothetical: a slow worker kept running this handler
+        # after the reaper had already requeued its task and another worker had
+        # finished it. Nothing stopped the loser writing a second copy of every
+        # application the winner had just created - and a duplicate here does
+        # not merely add a row. `_by_company` refuses to choose between two
+        # applications at one employer, so it would make every future message
+        # at that company permanently unmatchable, silently.
+        #
+        # A unique constraint cannot express this: company and title are
+        # nullable free text, and two genuine applications to the same role at
+        # the same company are legal. The condition that actually matters is
+        # whether this evidence has already been used.
         row = db.query_one(
             """
             INSERT INTO applications (user_id, job_id, company_name, title,
                                       source_provenance, applied_at)
-            VALUES (%s, NULL, %s, %s, 'email', %s)
+            SELECT %(user)s, NULL, %(company)s, %(title)s, 'email', %(sent)s
+            WHERE NOT EXISTS (
+                SELECT 1 FROM application_matches am
+                WHERE am.message_id = %(msg)s
+                  AND am.application_id IS NOT NULL
+                  AND am.id = (
+                      SELECT max(id) FROM application_matches
+                      WHERE message_id = %(msg)s
+                  )
+            )
             RETURNING id
             """,
-            (user_id, first["company"], first["title"], first["sent_at"]),
+            {
+                "user": user_id,
+                "company": first["company"],
+                "title": first["title"],
+                "sent": first["sent_at"],
+                "msg": first["id"],
+            },
         )
         if row is None:
+            # Another worker got there first. Its match is authoritative and
+            # this group is already represented.
             continue
         created += 1
         for msg in messages:
@@ -242,7 +274,7 @@ def match_pending(user_id: int, *, limit: int | None = None) -> dict[str, int]:
             SELECT DISTINCT ON (message_id) message_id, application_id
             FROM application_matches ORDER BY message_id, id DESC
         )
-        SELECT m.id, m.body_text, m.sent_at,
+        SELECT m.id, m.body_text, m.sent_at, e.kind,
                e.detail->>'company' AS company, e.detail->>'role_title' AS title
         FROM email_messages m
         JOIN current_event e ON e.message_id = m.id
@@ -257,16 +289,70 @@ def match_pending(user_id: int, *, limit: int | None = None) -> dict[str, int]:
     )
     counts: dict[str, int] = {}
     for row in rows:
-        match = mail_match.match_message(
-            user_id,
-            body=row["body_text"],
-            company=row["company"],
-            title=row["title"],
-            sent_at=row["sent_at"],
-        )
+        if row["kind"] in mail_match.UNATTACHABLE_KINDS:
+            match = mail_match.Match(
+                None,
+                mail_match.NOT_AN_APPLICATION,
+                "none",
+                f"{row['kind']} describes the person, not an application",
+            )
+        else:
+            match = mail_match.match_message(
+                user_id,
+                body=row["body_text"],
+                company=row["company"],
+                title=row["title"],
+                sent_at=row["sent_at"],
+            )
         mail_match.record(row["id"], match)
         counts[match.method] = counts.get(match.method, 0) + 1
     return counts
+
+
+def detach_unattachable(user_id: int) -> int:
+    """Correct messages already attached that never should have been.
+
+    Matching is append-only and `match_pending` only considers messages with no
+    current match, so a rule change does not reach what the old rule already
+    decided. Without this the fix applies to new mail and silently leaves the
+    existing wrong attachments in place - which is how a corrected matcher
+    still reports the numbers that prompted the correction.
+
+    Idempotent: a message already detached has no current application and is
+    not selected again.
+    """
+    rows = db.query(
+        """
+        WITH current_event AS (
+            SELECT DISTINCT ON (message_id) message_id, kind
+            FROM email_events ORDER BY message_id, id DESC
+        ),
+        current_match AS (
+            SELECT DISTINCT ON (message_id) message_id, application_id
+            FROM application_matches ORDER BY message_id, id DESC
+        )
+        SELECT m.id, e.kind FROM email_messages m
+        JOIN current_event e ON e.message_id = m.id
+        JOIN current_match cm ON cm.message_id = m.id
+        WHERE m.user_id = %(user)s
+          AND e.kind = ANY(%(kinds)s)
+          AND cm.application_id IS NOT NULL
+        """,
+        {"user": user_id, "kinds": sorted(mail_match.UNATTACHABLE_KINDS)},
+    )
+    for row in rows:
+        mail_match.record(
+            row["id"],
+            mail_match.Match(
+                None,
+                mail_match.NOT_AN_APPLICATION,
+                "none",
+                f"{row['kind']} describes the person, not an application",
+            ),
+        )
+    if rows:
+        logger.info(f"user {user_id}: detached {len(rows)} message(s) that describe the person")
+    return len(rows)
 
 
 async def handle_match_mail(task_id: int, payload: dict[str, Any]) -> None:
@@ -302,10 +388,11 @@ async def handle_match_mail(task_id: int, payload: dict[str, Any]) -> None:
         return
 
     limit = payload.get("limit")
-    totals = {"tracked": 0, "derived": 0, "matched": 0, "opened": 0, "resolved": 0}
+    totals = {"tracked": 0, "derived": 0, "matched": 0, "detached": 0, "opened": 0, "resolved": 0}
     for index, user_id in enumerate(user_ids):
         _set_progress(task_id, index, len(user_ids), f"matching user {user_id}")
         totals["tracked"] += seed_from_tracker(user_id)
+        totals["detached"] += detach_unattachable(user_id)
         counts = match_pending(user_id, limit=int(limit) if limit else None)
         totals["matched"] += sum(counts.values())
         created, _ = seed_from_mail(user_id)
@@ -318,6 +405,7 @@ async def handle_match_mail(task_id: int, payload: dict[str, Any]) -> None:
     summary = (
         f"{len(user_ids)} user(s): {totals['tracked']} tracked + {totals['derived']} derived "
         f"applications, {totals['matched']} messages matched, "
+        f"{totals['detached']} detached, "
         f"{totals['opened']} items opened, {totals['resolved']} resolved"
     )
     logger.info(f"Task {task_id}: {summary}")

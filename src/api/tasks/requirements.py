@@ -11,10 +11,8 @@ from pydantic import BaseModel
 
 from api import db
 from api.tasks.runtime import (
-    _batch_event_hook,
-    _pending_batch_ids,
     _set_progress,
-    submit_or_collect,
+    run_batched,
 )
 from core import skills as skills_lib
 from core.providers import StructuredOutput
@@ -27,7 +25,7 @@ from core.requirements import (
     SPONSORSHIPS,
     in_vocabulary,
 )
-from core.routing import TaskShape, resolve
+from core.routing import TaskShape
 from core.store import CONTENT_LATERAL
 
 logger = logging.getLogger("jobtracker_worker")
@@ -337,24 +335,7 @@ async def handle_extract_requirements(task_id: int, payload: dict[str, Any]) -> 
         for r in rows
     }
     _set_progress(task_id, 0, len(specs), "requirements batch submitted (half price)")
-    chosen = resolve(REQUIREMENTS_TASK)
-    logger.info(f"Task {task_id}: requirements extraction on {chosen.model} - {chosen.reason}")
-    hook = _batch_event_hook(task_id, "requirements", chosen.model)
-    existing = _pending_batch_ids(task_id)
-    if existing:
-        from core.batch import collect_batches
-
-        logger.info(f"Task {task_id}: reattaching to {len(existing)} in-flight batch(es)")
-        results = await collect_batches(existing, hook)
-    else:
-        results = await submit_or_collect(
-            task_id,
-            specs,
-            chosen.model,
-            REQUIREMENTS_TASK.resolved_effort() or REQUIREMENTS_REASONING_EFFORT,
-            REQUIREMENTS_MAX_OUTPUT_TOKENS,
-            hook,
-        )
+    results, _ = await run_batched(task_id, REQUIREMENTS_TASK, specs, purpose="requirements")
     done = 0
     for url, res in results.items():
         content_hash = hashes.get(url)

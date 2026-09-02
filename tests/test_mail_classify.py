@@ -50,12 +50,13 @@ def _events(message_id: int):
 
 
 async def _run(monkeypatch, payload, results):
-    async def fake(task_id, specs, model, effort, max_tokens, hook):
-        return results
+    async def fake(task_id, shape, specs, *, purpose):
+        from core.routing import resolve
 
-    monkeypatch.setattr(mail_classify, "submit_or_collect", fake)
+        return results, resolve(shape)
+
+    monkeypatch.setattr(mail_classify, "run_batched", fake)
     monkeypatch.setattr(mail_classify, "_set_progress", lambda *a, **k: None)
-    monkeypatch.setattr(mail_classify, "_batch_event_hook", lambda *a, **k: None)
     await mail_classify.handle_classify_mail(1, payload)
 
 
@@ -239,15 +240,16 @@ async def test_the_cap_is_clamped_not_trusted(monkeypatch, f):
     on a worker rather than as a rejected parameter."""
     seen: dict = {}
 
-    async def fake(task_id, specs, model, effort, max_tokens, hook):
+    async def fake(task_id, shape, specs, *, purpose):
+        from core.routing import resolve
+
         seen["count"] = len(specs)
-        return {}
+        return {}, resolve(shape)
 
     for i in range(3):
         _store(f, mid=f"<cap{i}@x>")
-    monkeypatch.setattr(mail_classify, "submit_or_collect", fake)
+    monkeypatch.setattr(mail_classify, "run_batched", fake)
     monkeypatch.setattr(mail_classify, "_set_progress", lambda *a, **k: None)
-    monkeypatch.setattr(mail_classify, "_batch_event_hook", lambda *a, **k: None)
     monkeypatch.setattr(mail_classify, "MAX_CLASSIFY_PER_CYCLE", 2)
     await mail_classify.handle_classify_mail(1, {"cap": 999999})
     assert seen["count"] <= 2
@@ -608,11 +610,10 @@ async def test_repairing_a_self_sent_message_corrects_it_without_a_model(monkeyp
     async def never(*a, **k):
         nonlocal called
         called = True
-        return {}
+        return {}, None
 
-    monkeypatch.setattr(mail_classify, "submit_or_collect", never)
+    monkeypatch.setattr(mail_classify, "run_batched", never)
     monkeypatch.setattr(mail_classify, "_set_progress", lambda *a, **k: None)
-    monkeypatch.setattr(mail_classify, "_batch_event_hook", lambda *a, **k: None)
     await mail_classify.handle_classify_mail(1, {"message_ids": [mid]})
 
     events = _events(mid)
