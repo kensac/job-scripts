@@ -347,3 +347,54 @@ def test_prompt_hash_filter_composes_with_the_reason_group(client, admin_headers
         headers=admin_headers,
     )
     assert resp.json()["total"] == 1, "both predicates must apply, not either"
+
+
+def test_one_user_with_two_identical_filters_is_not_two_owners(client, admin_headers, f):
+    """Counting user_filters rows instead of people reported a prompt as shared
+    between two users when it belongs to one who wrote it twice. That is a
+    claim about who to go and talk to, so it has to be right."""
+    owner = f.make_user(email="solo@example.test")
+    for name in ("default", "general"):
+        db.execute(
+            "INSERT INTO user_filters (user_id, name, prompt, prompt_hash, enabled) "
+            "VALUES (%s, %s, %s, %s, %s)",
+            (owner, name, "p", "hash_twice", False),
+        )
+    _reject("https://own.test/1", "No pay disclosed.", "hash_twice", "default")
+
+    row = _get(client, admin_headers)["prompt_versions"][0]
+    assert row["owner"]["state"] == "resolved"
+    assert row["owner"]["user_count"] == 1
+    assert [u["email"] for u in row["owner"]["users"]] == ["solo@example.test"]
+    # The two filter rows are still visible, just not miscounted as people.
+    assert [x["name"] for x in row["owner"]["filters"]] == ["default", "general"]
+
+
+def test_enabled_says_whether_this_prompt_can_still_reject_anything(client, admin_headers, f):
+    """`resolved` does not answer it: a disabled filter is still a current row,
+    so a retired prompt resolves to its owner exactly like a live one. A page
+    ranking by misfire rate would otherwise lead with a filter that cannot
+    fire."""
+    user = f.make_user()
+    db.execute(
+        "INSERT INTO user_filters (user_id, name, prompt, prompt_hash, enabled) "
+        "VALUES (%s, %s, %s, %s, %s)",
+        (user, "live", "p", "hash_live", True),
+    )
+    db.execute(
+        "INSERT INTO user_filters (user_id, name, prompt, prompt_hash, enabled) "
+        "VALUES (%s, %s, %s, %s, %s)",
+        (user, "retired", "p2", "hash_retired", False),
+    )
+    _reject("https://own.test/1", "No pay disclosed.", "hash_live", "live")
+    _reject("https://own.test/2", "No pay disclosed.", "hash_retired", "retired")
+    _reject("https://own.test/3", "No pay disclosed.", "hash_gone", "vanished")
+
+    rows = {r["prompt_hash"]: r for r in _get(client, admin_headers)["prompt_versions"]}
+    assert rows["hash_live"]["owner"]["enabled"] is True
+    assert rows["hash_retired"]["owner"]["enabled"] is False
+    # Both resolve to an owner; only `enabled` separates them.
+    assert rows["hash_live"]["owner"]["state"] == "resolved"
+    assert rows["hash_retired"]["owner"]["state"] == "resolved"
+    # No current filter carries this prompt, so there is nothing to ask.
+    assert rows["hash_gone"]["owner"]["enabled"] is None
