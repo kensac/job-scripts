@@ -94,15 +94,54 @@ def test_applications_are_absent_rather_than_zero(client, admin_headers, f):
 
 
 def test_applications_carry_their_status_breakdown(client, admin_headers, f):
+    """The count comes from `applications`, which is the entity; the status
+    breakdown still comes from the board, because a tracker status is a thing
+    the user typed and only tracked postings have one."""
     user_id = f.make_user()
     job_id = f.make_job(source="s", company="Applied", title="a")
     f.make_board_row(user_id, job_id, status="Application Submitted")
     db.execute("UPDATE user_jobs SET date_applied = now() WHERE job_id = %s", (job_id,))
+    db.execute(
+        "INSERT INTO applications (user_id, job_id, company_name, title, source_provenance, "
+        "applied_at) VALUES (%s, %s, 'Applied', 'a', 'tracker', now())",
+        (user_id, job_id),
+    )
 
     apps = _item(client, admin_headers, "applied")["applications"]
     assert apps["n"] == 1
     assert apps["statuses"] == {"Application Submitted": 1}
     assert apps["last_applied_at"] is not None
+
+
+def test_an_application_only_email_knows_about_still_counts(client, admin_headers, f):
+    """The reason for repointing this at `applications`: a 2022 application has
+    no posting in the catalog and no board row, and the old query could not see
+    it. That reported 605 companies when 1,283 had evidence."""
+    user_id = f.make_user()
+    f.make_job(source="s", company="Ghosted", title="a")
+    db.execute(
+        "INSERT INTO applications (user_id, job_id, company_name, title, source_provenance, "
+        "applied_at) VALUES (%s, NULL, 'Ghosted', 'a', 'email', now())",
+        (user_id,),
+    )
+
+    apps = _item(client, admin_headers, "ghosted")["applications"]
+    assert apps["n"] == 1
+    assert apps["statuses"] == {}, "no board row means no tracker status, not a missing count"
+
+
+def test_a_dismissed_application_stops_counting(client, admin_headers, f):
+    """A dismissal says the row should never have existed. Counting it would be
+    counting a known mistake."""
+    user_id = f.make_user()
+    f.make_job(source="s", company="Coursework", title="a")
+    db.execute(
+        "INSERT INTO applications (user_id, job_id, company_name, title, source_provenance, "
+        "applied_at, dismissed_at) VALUES (%s, NULL, 'Coursework', 'a', 'email', now(), now())",
+        (user_id,),
+    )
+
+    assert "applications" not in _item(client, admin_headers, "coursework")
 
 
 def test_open_is_omitted_below_its_floor(client, admin_headers, f):

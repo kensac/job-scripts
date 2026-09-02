@@ -454,3 +454,63 @@ def test_a_snippet_falls_back_when_the_company_is_not_in_the_body(client, user_h
     ]
     assert ev["snippet"]["text"] == "Thanks for applying."
     assert ev["snippet"]["centred_on"] is None, "say so rather than implying it was found"
+
+
+def _mail(uid, *, subject="s", sender="a@b.com", kind=None, company=None):
+    mid = db.query_one(
+        "INSERT INTO email_messages (user_id, provider_message_id, source, subject, from_email, "
+        "sent_at) VALUES (%s,%s,'gmail',%s,%s,now()) RETURNING id",
+        (uid, f"um-{next(_seq)}", subject, sender),
+    )["id"]
+    if kind:
+        db.execute(
+            "INSERT INTO email_events (message_id, kind, confidence, detail) "
+            "VALUES (%s,%s,'high',%s)",
+            (mid, kind, db.jsonb({"company": company} if company else {})),
+        )
+    return mid
+
+
+def test_a_user_can_see_their_own_mail_without_being_an_admin(client, user_headers):
+    """Reading your own inbox should not require the permission to read
+    everyone's. /admin/mail is the debug view: it spans every user and is
+    gated behind infra-admin."""
+    uid = db.query_one("SELECT id FROM users WHERE email = %s", ("user@example.com",))["id"]
+    _mail(uid, subject="Thanks for applying", kind="acknowledgement", company="Acme")
+
+    body = client.get("/v1/user/mail", headers=user_headers).json()
+    assert body["total"] == 1
+    row = body["messages"][0]
+    assert row["kind"] == "acknowledgement"
+    assert row["extracted_company"] == "Acme"
+    assert row["application_id"] is None
+
+
+def test_a_users_mail_list_never_shows_another_users(client, user_headers, other_user_headers):
+    uid = db.query_one("SELECT id FROM users WHERE email = %s", ("user@example.com",))["id"]
+    _mail(uid, subject="Private", kind="offer")
+    assert client.get("/v1/user/mail", headers=other_user_headers).json()["total"] == 0
+
+
+def test_mail_can_be_filtered_by_whether_it_reached_an_application(client, user_headers):
+    """'What arrived and where did it go' is the question this answers, so the
+    unmatched half has to be reachable - that is where a correction starts."""
+    uid = db.query_one("SELECT id FROM users WHERE email = %s", ("user@example.com",))["id"]
+    app_id = _app(uid, company="Acme", title="Engineer")
+    hit = _mail(uid, kind="rejection", company="Acme")
+    _match(hit, app_id)
+    _mail(uid, kind="rejection", company="Nobody")
+
+    assert client.get("/v1/user/mail?matched=true", headers=user_headers).json()["total"] == 1
+    assert client.get("/v1/user/mail?matched=false", headers=user_headers).json()["total"] == 1
+    only = client.get("/v1/user/mail?matched=true", headers=user_headers).json()["messages"][0]
+    assert only["company_name"] == "Acme", "say WHICH application it reached"
+
+
+def test_mail_filters_by_kind_and_search(client, user_headers):
+    uid = db.query_one("SELECT id FROM users WHERE email = %s", ("user@example.com",))["id"]
+    _mail(uid, subject="Offer letter", sender="hr@initech.com", kind="offer")
+    _mail(uid, subject="Rejected", sender="no-reply@acme.com", kind="rejection")
+
+    assert client.get("/v1/user/mail?kind=offer", headers=user_headers).json()["total"] == 1
+    assert client.get("/v1/user/mail?q=initech", headers=user_headers).json()["total"] == 1

@@ -79,12 +79,22 @@ WITH base AS (
     FROM jobs WHERE company <> ''
     GROUP BY lower(btrim(company))
 ), apps AS (
-    SELECT lower(btrim(j.company)) AS company_key,
+    -- `applications`, not `user_jobs`. The board table only knows postings the
+    -- user tracked by hand; `applications` also holds the ones only email
+    -- knows about, whose posting was never in this catalog and never will be.
+    -- Reading the old table reported 605 companies when 1,283 had evidence,
+    -- and it had been that way since the mail pipeline landed - a view that
+    -- silently stopped describing the system it names.
+    --
+    -- Dismissed applications are excluded: a dismissal says the row should
+    -- never have existed, so counting it would be counting a known mistake.
+    SELECT lower(btrim(a.company_name)) AS company_key,
            count(*) AS applications_n,
-           max(uj.date_applied) AS last_applied_at
-    FROM user_jobs uj JOIN jobs j ON j.id = uj.job_id
-    WHERE NOT uj.hidden AND j.company <> ''
-    GROUP BY lower(btrim(j.company))
+           max(a.applied_at)::date AS last_applied_at
+    FROM applications a
+    WHERE a.company_name IS NOT NULL AND btrim(a.company_name) <> ''
+      AND a.dismissed_at IS NULL
+    GROUP BY lower(btrim(a.company_name))
 )
 SELECT base.*,
        COALESCE(apps.applications_n, 0) AS applications_n,
