@@ -658,7 +658,7 @@ async def run_single_check(body: RunCheckBody, user: AuthedUser = Depends(requir
     re-derives from it immediately — no downstream re-run needed, since
     visibility is a read-time predicate rather than stored derived state."""
     from api import verdicts as _verdicts
-    from api.worker import FilterVerdict, JobClosedLean
+    from api.tasks.models import FilterVerdict, JobClosedLean
     from core.filters import build_custom_instructions
     from core.pittcsc_simplify import (
         CLEARANCE_INSTRUCTIONS,

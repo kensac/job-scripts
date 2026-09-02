@@ -3,6 +3,10 @@ from __future__ import annotations
 import pytest
 
 from api import ai, db, fetching, worker
+from api.tasks import content as tasks_content
+from api.tasks import filters as tasks_filters
+from api.tasks import runtime as tasks_runtime
+from api.tasks import verify as tasks_verify
 from core.store import add_ai_result
 
 # ---------------------------------------------------------------------------
@@ -11,8 +15,8 @@ from core.store import add_ai_result
 
 
 def test_enqueue_dedupe_key_second_call_returns_none():
-    first = worker.enqueue("run_filter", {"x": 1}, dedupe_key="dk1")
-    second = worker.enqueue("run_filter", {"x": 2}, dedupe_key="dk1")
+    first = tasks_runtime.enqueue("run_filter", {"x": 1}, dedupe_key="dk1")
+    second = tasks_runtime.enqueue("run_filter", {"x": 2}, dedupe_key="dk1")
     assert first is not None
     assert second is None
     rows = db.query("SELECT id FROM tasks WHERE dedupe_key = %s", ("dk1",))
@@ -29,7 +33,7 @@ def test_claim_task_returns_none_on_empty_queue():
 
 
 def test_claim_task_flips_to_running_and_stamps_worker():
-    task_id = worker.enqueue("run_filter", {"a": 1})
+    task_id = tasks_runtime.enqueue("run_filter", {"a": 1})
     claimed = worker._claim_task()
     assert claimed["id"] == task_id
     row = db.query_one(
@@ -43,8 +47,8 @@ def test_claim_task_flips_to_running_and_stamps_worker():
 
 
 def test_claim_task_claims_in_id_order():
-    first_id = worker.enqueue("run_filter", {"a": 1})
-    second_id = worker.enqueue("run_filter", {"a": 2})
+    first_id = tasks_runtime.enqueue("run_filter", {"a": 1})
+    second_id = tasks_runtime.enqueue("run_filter", {"a": 2})
     assert worker._claim_task()["id"] == first_id
     assert worker._claim_task()["id"] == second_id
 
@@ -55,7 +59,7 @@ def test_claim_task_claims_in_id_order():
 
 
 def test_reap_stale_tasks_requeues_below_max_attempts():
-    task_id = worker.enqueue("run_filter", {})
+    task_id = tasks_runtime.enqueue("run_filter", {})
     worker._claim_task()
     db.execute(
         "UPDATE tasks SET last_heartbeat = now() - interval '20 minutes' WHERE id = %s",
@@ -73,7 +77,7 @@ def test_reap_stale_tasks_requeues_below_max_attempts():
 
 
 def test_reap_stale_tasks_fails_after_max_attempts():
-    task_id = worker.enqueue("run_filter", {})
+    task_id = tasks_runtime.enqueue("run_filter", {})
     db.execute(
         "UPDATE tasks SET status = 'running', attempts = 3, "
         "last_heartbeat = now() - interval '20 minutes' WHERE id = %s",
@@ -86,7 +90,7 @@ def test_reap_stale_tasks_fails_after_max_attempts():
 
 
 def test_reap_stale_tasks_leaves_fresh_heartbeat_running():
-    task_id = worker.enqueue("run_filter", {})
+    task_id = tasks_runtime.enqueue("run_filter", {})
     worker._claim_task()
     worker.reap_stale_tasks()
     row = db.query_one("SELECT status FROM tasks WHERE id = %s", (task_id,))
@@ -99,18 +103,18 @@ def test_reap_stale_tasks_leaves_fresh_heartbeat_running():
 
 
 def test_finish_sets_status_when_running():
-    task_id = worker.enqueue("run_filter", {})
+    task_id = tasks_runtime.enqueue("run_filter", {})
     worker._claim_task()
-    worker._finish(task_id, "done")
+    tasks_runtime._finish(task_id, "done")
     row = db.query_one("SELECT status, finished_at FROM tasks WHERE id = %s", (task_id,))
     assert row["status"] == "done"
     assert row["finished_at"] is not None
 
 
 def test_finish_is_noop_on_cancelled_task():
-    task_id = worker.enqueue("run_filter", {})
+    task_id = tasks_runtime.enqueue("run_filter", {})
     db.execute("UPDATE tasks SET status = 'cancelled' WHERE id = %s", (task_id,))
-    worker._finish(task_id, "done")
+    tasks_runtime._finish(task_id, "done")
     row = db.query_one("SELECT status FROM tasks WHERE id = %s", (task_id,))
     assert row["status"] == "cancelled"
 
@@ -127,7 +131,7 @@ _REQUEUE_SQL = (
 
 
 def test_graceful_exit_requeue_sql_decrements_attempts_on_running_task():
-    task_id = worker.enqueue("run_filter", {})
+    task_id = tasks_runtime.enqueue("run_filter", {})
     worker._claim_task()
     db.execute(_REQUEUE_SQL, (task_id,))
     row = db.query_one(
@@ -141,9 +145,9 @@ def test_graceful_exit_requeue_sql_decrements_attempts_on_running_task():
 
 
 def test_graceful_exit_requeue_sql_noop_on_done_task():
-    task_id = worker.enqueue("run_filter", {})
+    task_id = tasks_runtime.enqueue("run_filter", {})
     worker._claim_task()
-    worker._finish(task_id, "done")
+    tasks_runtime._finish(task_id, "done")
     db.execute(_REQUEUE_SQL, (task_id,))
     row = db.query_one("SELECT status FROM tasks WHERE id = %s", (task_id,))
     assert row["status"] == "done"
@@ -167,7 +171,7 @@ async def test_run_once_dispatches_to_registered_handler(monkeypatch):
         calls.append((task_id, payload))
 
     monkeypatch.setitem(worker.HANDLERS, "test_kind", fake_handler)
-    task_id = worker.enqueue("test_kind", {"x": 1})
+    task_id = tasks_runtime.enqueue("test_kind", {"x": 1})
     assert await worker.run_once() is True
     assert calls == [(task_id, {"x": 1})]
     row = db.query_one("SELECT status FROM tasks WHERE id = %s", (task_id,))
@@ -180,7 +184,7 @@ async def test_run_once_marks_failed_when_handler_raises(monkeypatch):
         raise RuntimeError("boom")
 
     monkeypatch.setitem(worker.HANDLERS, "test_kind", bad_handler)
-    task_id = worker.enqueue("test_kind", {})
+    task_id = tasks_runtime.enqueue("test_kind", {})
     await worker.run_once()
     row = db.query_one("SELECT status, error FROM tasks WHERE id = %s", (task_id,))
     assert row["status"] == "failed"
@@ -189,7 +193,7 @@ async def test_run_once_marks_failed_when_handler_raises(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_run_once_unknown_kind_fails_with_message():
-    task_id = worker.enqueue("no_such_kind", {})
+    task_id = tasks_runtime.enqueue("no_such_kind", {})
     await worker.run_once()
     row = db.query_one("SELECT status, error FROM tasks WHERE id = %s", (task_id,))
     assert row["status"] == "failed"
@@ -202,9 +206,9 @@ async def test_run_once_unknown_kind_fails_with_message():
 
 
 def test_reconcile_chunks_cancels_pending_chunk_of_cancelled_parent():
-    parent_id = worker.enqueue("run_all_filters", {"user_id": 999})
+    parent_id = tasks_runtime.enqueue("run_all_filters", {"user_id": 999})
     db.execute("UPDATE tasks SET status = 'cancelled' WHERE id = %s", (parent_id,))
-    chunk_id = worker.enqueue(
+    chunk_id = tasks_runtime.enqueue(
         "run_filter_chunk",
         {"parent_id": parent_id, "user_id": 999, "filter": {}, "jobs": []},
     )
@@ -215,7 +219,7 @@ def test_reconcile_chunks_cancels_pending_chunk_of_cancelled_parent():
 
 def test_reconcile_chunks_finalizes_waiting_parent_with_no_live_chunks(user_headers):
     user_id = db.query_one("SELECT id FROM users WHERE sub = 'test-user'")["id"]
-    parent_id = worker.enqueue("run_all_filters", {"user_id": user_id})
+    parent_id = tasks_runtime.enqueue("run_all_filters", {"user_id": user_id})
     db.execute("UPDATE tasks SET status = 'waiting' WHERE id = %s", (parent_id,))
     worker._reconcile_chunks()
     row = db.query_one("SELECT status FROM tasks WHERE id = %s", (parent_id,))
@@ -230,7 +234,7 @@ def test_reconcile_chunks_finalizes_waiting_parent_with_no_live_chunks(user_head
 @pytest.mark.asyncio
 async def test_chunked_run_all_filters_lifecycle(monkeypatch, user_headers):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
-    monkeypatch.setattr(worker, "CHUNK_SIZE", 5)
+    monkeypatch.setattr(tasks_filters, "CHUNK_SIZE", 5)
 
     async def no_network(url):
         raise AssertionError(f"scrape attempted for {url}, content should have been cached")
@@ -262,7 +266,7 @@ async def test_chunked_run_all_filters_lifecycle(monkeypatch, user_headers):
         add_ai_result(url, "passed", "content cached", "content", input_content=content)
         add_ai_result(url, "passed", "not closed", "closed")
 
-    parent_id = worker.enqueue("run_all_filters", {"user_id": user_id})
+    parent_id = tasks_runtime.enqueue("run_all_filters", {"user_id": user_id})
 
     assert await worker.run_once() is True
     parent = db.query_one("SELECT status FROM tasks WHERE id = %s", (parent_id,))
@@ -368,19 +372,18 @@ async def test_reverify_jobs_skips_urls_with_fresh_closed_verdicts(monkeypatch):
 
     rows = [{"url": u, "company": "Acme", "title": "SWE"} for u in fresh_urls + stale_urls]
 
-    task_id = worker.enqueue("reverify_open", {})
+    task_id = tasks_runtime.enqueue("reverify_open", {})
     worker._claim_task()
-    await _run_batched(lambda: worker._reverify_jobs(task_id, rows))
+    await _run_batched(lambda: tasks_verify._reverify_jobs(task_id, rows))
 
     assert sorted(check_calls) == sorted(stale_urls)
     assert sorted(fetch_calls) == sorted(stale_urls)
 
 
 def test_batch_event_hook_registers_and_stores_ids():
-    from api import worker
 
-    t1 = worker.enqueue("run_filter_batch_chunk", {"parent_id": 1, "user_id": 1})
-    hook = worker._batch_event_hook(t1, "filter", "gpt-5-nano")
+    t1 = tasks_runtime.enqueue("run_filter_batch_chunk", {"parent_id": 1, "user_id": 1})
+    hook = tasks_runtime._batch_event_hook(t1, "filter", "gpt-5-nano")
     hook("batch_abc", "validating", {"requests": 10, "completed": 0, "failed": 0})
     hook("batch_abc", "in_progress", {"requests": 10, "completed": 4, "failed": 0})
     hook("batch_abc", "completed", {"requests": 10, "completed": 9, "failed": 1})
@@ -389,11 +392,11 @@ def test_batch_event_hook_registers_and_stores_ids():
     row = db.query_one("SELECT * FROM ai_batches WHERE provider_batch_id = 'batch_abc'")
     assert row["status"] == "completed" and row["completed"] == 9
     assert row["failed_count"] == 1 and row["completed_at"] is not None
-    assert worker._pending_batch_ids(t1) == ["batch_abc"]
+    assert tasks_runtime._pending_batch_ids(t1) == ["batch_abc"]
     hook("batch_def", "validating", {"requests": 5, "completed": 0, "failed": 0})
-    assert worker._pending_batch_ids(t1) == ["batch_abc", "batch_def"]
+    assert tasks_runtime._pending_batch_ids(t1) == ["batch_abc", "batch_def"]
     hook("batch_abc", "completed", {"requests": 10, "completed": 9, "failed": 1})
-    assert worker._pending_batch_ids(t1) == ["batch_abc", "batch_def"]
+    assert tasks_runtime._pending_batch_ids(t1) == ["batch_abc", "batch_def"]
 
 
 def test_worker_status_report_upserts():
@@ -413,7 +416,7 @@ def test_worker_status_report_upserts():
 
 @pytest.mark.asyncio
 async def test_verify_new_records_both_verdicts(monkeypatch):
-    from api import db, worker
+    from api import db
     from core import batch as core_batch
     from core.store import add_ai_result
 
@@ -436,12 +439,11 @@ async def test_verify_new_records_both_verdicts(monkeypatch):
         }
 
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
-    import api.worker as w
 
     monkeypatch.setattr("core.batch.submit_responses_batches", _submit_ids)
     monkeypatch.setattr("core.batch.collect_batches", _collect_from(fake_batch))
-    tid = worker.enqueue("verify_new", {"cycle": "t"})
-    await _run_batched(lambda: w.handle_verify_new(tid, {"cycle": "t"}))
+    tid = tasks_runtime.enqueue("verify_new", {"cycle": "t"})
+    await _run_batched(lambda: tasks_verify.handle_verify_new(tid, {"cycle": "t"}))
     rows = db.query(
         "SELECT check_type, status FROM ai_queries WHERE url = 'https://v.test/1' "
         "AND check_type IN ('closed','clearance') ORDER BY check_type"
@@ -492,9 +494,9 @@ async def test_reverify_records_batch_verdicts_and_reattaches(monkeypatch):
     monkeypatch.setattr("core.batch.collect_batches", fake_collect)
 
     rows = [{"url": "https://rv.example.com/1", "company": "Acme", "title": "SWE"}]
-    task_id = worker.enqueue("reverify_chunk", {"parent_id": 1})
+    task_id = tasks_runtime.enqueue("reverify_chunk", {"parent_id": 1})
     worker._claim_task()
-    await _run_batched(lambda: worker._reverify_jobs(task_id, rows))
+    await _run_batched(lambda: tasks_verify._reverify_jobs(task_id, rows))
 
     row = db.query_one(
         "SELECT status, config_name FROM ai_queries WHERE url = 'https://rv.example.com/1' "
@@ -502,11 +504,11 @@ async def test_reverify_records_batch_verdicts_and_reattaches(monkeypatch):
     )
     assert row["status"] == "rejected" and row["config_name"] == "reverify"
     # Parked with its batch id recorded, so the work is recoverable.
-    assert worker._pending_batch_ids(task_id) == ["batch_test_1"]
+    assert tasks_runtime._pending_batch_ids(task_id) == ["batch_test_1"]
     submitted_once = _submit_ids.calls
 
     # Requeued: the stored batch id makes it reattach, never resubmitting.
-    await _run_batched(lambda: worker._reverify_jobs(task_id, rows))
+    await _run_batched(lambda: tasks_verify._reverify_jobs(task_id, rows))
     assert _submit_ids.calls == submitted_once, "resume must not resubmit"
 
 
@@ -516,13 +518,13 @@ async def test_transient_error_requeues_instead_of_failing(monkeypatch):
         raise RuntimeError("can't start new thread")
 
     monkeypatch.setitem(worker.HANDLERS, "test_kind", oom_handler)
-    tid = worker.enqueue("test_kind", {})
+    tid = tasks_runtime.enqueue("test_kind", {})
     assert await worker.run_once() is True
     row = db.query_one("SELECT status, attempts, error FROM tasks WHERE id = %s", (tid,))
     assert row["status"] == "pending" and "transient" in row["error"]
 
     # Past MAX_ATTEMPTS it gives up rather than looping forever.
-    db.execute("UPDATE tasks SET attempts = %s WHERE id = %s", (worker.MAX_ATTEMPTS, tid))
+    db.execute("UPDATE tasks SET attempts = %s WHERE id = %s", (tasks_runtime.MAX_ATTEMPTS, tid))
     assert await worker.run_once() is True
     row = db.query_one("SELECT status FROM tasks WHERE id = %s", (tid,))
     assert row["status"] == "failed"
@@ -534,7 +536,7 @@ async def test_non_transient_error_still_fails_immediately(monkeypatch):
         raise ValueError("genuinely broken")
 
     monkeypatch.setitem(worker.HANDLERS, "test_kind", bad_handler)
-    tid = worker.enqueue("test_kind", {})
+    tid = tasks_runtime.enqueue("test_kind", {})
     assert await worker.run_once() is True
     row = db.query_one("SELECT status, error FROM tasks WHERE id = %s", (tid,))
     assert row["status"] == "failed" and "genuinely broken" in row["error"]
@@ -578,13 +580,13 @@ async def test_content_backfill_caches_pages_and_skips_covered_jobs(monkeypatch)
     monkeypatch.setattr(fetching, "fetch_page", fake_fetch_page)
     monkeypatch.setattr(core_ats, "resolve", lambda url: core_ats.UNSUPPORTED)
 
-    tid = worker.enqueue("fetch_missing_content", {})
-    await worker.handle_fetch_missing_content(tid, {})
+    tid = tasks_runtime.enqueue("fetch_missing_content", {})
+    await tasks_content.handle_fetch_missing_content(tid, {})
 
     assert scraped == ["https://bf.test/needs"]
     # Re-running finds nothing: the task is self-limiting once gaps are closed.
     scraped.clear()
-    await worker.handle_fetch_missing_content(tid, {})
+    await tasks_content.handle_fetch_missing_content(tid, {})
     assert scraped == []
 
 
@@ -622,10 +624,10 @@ async def test_full_sweep_rechecks_even_fresh_verdicts(monkeypatch):
     add_ai_result(url, "passed", "job open", "closed")  # verdict from today
     rows = [{"url": url, "company": "C", "title": "T"}]
 
-    tid = worker.enqueue("reverify_chunk", {"parent_id": 1})
+    tid = tasks_runtime.enqueue("reverify_chunk", {"parent_id": 1})
     worker._claim_task()
-    await _run_batched(lambda: worker._reverify_jobs(tid, rows))
+    await _run_batched(lambda: tasks_verify._reverify_jobs(tid, rows))
     assert checked == [], "normal sweep should skip a verdict made today"
 
-    await _run_batched(lambda: worker._reverify_jobs(tid, rows, force=True))
+    await _run_batched(lambda: tasks_verify._reverify_jobs(tid, rows, force=True))
     assert checked == [url], "forced sweep must re-check it anyway"

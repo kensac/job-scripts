@@ -331,7 +331,7 @@ async def explain_check(job_id: int, body: ExplainBody, user: AuthedUser = Depen
 
     from api import budget
     from api import verdicts as _verdicts
-    from api.worker import FilterVerdict
+    from api.tasks.models import FilterVerdict
     from core.filters import build_custom_instructions
     from core.pittcsc_simplify import (
         CLEARANCE_INSTRUCTIONS,
