@@ -1013,3 +1013,65 @@ def test_the_pipeline_filters_on_whether_there_is_evidence(client, user_headers)
 
     assert client.get("/v1/user/pipeline?evidence=true", headers=user_headers).json()["total"] == 1
     assert client.get("/v1/user/pipeline?evidence=false", headers=user_headers).json()["total"] == 1
+
+
+def test_a_lens_is_a_set_of_stages_not_one(client, user_headers):
+    """Every view worth having is multi-valued - "waiting" is applied AND
+    acknowledged, "over" is rejected AND closed AND withdrawn. A single-valued
+    filter makes a lens either impossible or a client-side re-derivation of a
+    set the server already knows."""
+    uid = db.query_one("SELECT id FROM users WHERE email = %s", ("user@example.com",))["id"]
+    for company, kind in (("A", "acknowledgement"), ("B", "rejection"), ("C", "offer")):
+        app_id = _app(uid, company=company, title="Engineer")
+        mid = _mail(uid, kind=kind, company=company)
+        _match(mid, app_id)
+
+    over = client.get(
+        "/v1/user/pipeline?stage=rejected,closed,withdrawn&include_closed=true",
+        headers=user_headers,
+    ).json()
+    assert over["total"] == 1
+    live = client.get("/v1/user/pipeline?stage=interviewing,assessment,offer", headers=user_headers)
+    assert live.json()["total"] == 1
+
+
+def test_mail_kinds_compose_and_carry_their_counts(client, user_headers):
+    """A tab's number and its contents come from the same predicate, so they
+    cannot disagree - and without the counts a tab either shows none or costs a
+    request each to display a number the server already had."""
+    uid = db.query_one("SELECT id FROM users WHERE email = %s", ("user@example.com",))["id"]
+    _mail(uid, kind="rejection", company="A")
+    _mail(uid, kind="offer", company="B")
+    _mail(uid, kind="not_job_related")
+
+    replies = client.get("/v1/user/mail?kind=rejection,offer", headers=user_headers).json()
+    assert replies["total"] == 2
+    assert replies["by_kind"] == {"rejection": 1, "offer": 1}
+
+    everything = client.get("/v1/user/mail", headers=user_headers).json()
+    assert everything["by_kind"]["not_job_related"] == 1
+
+
+def test_the_pipeline_sorts_on_the_set_not_the_page(client, user_headers):
+    """A client sorting what it was handed sorts one page of a filtered whole
+    and reads as though it sorted everything, which is a quiet lie rather than
+    a missing feature. Longest-silence-first IS the waiting question."""
+    uid = db.query_one("SELECT id FROM users WHERE email = %s", ("user@example.com",))["id"]
+    old = _app(uid, company="Old", title="Engineer")
+    recent = _app(uid, company="Recent", title="Engineer")
+    for app_id, when in ((old, "2024-01-01"), (recent, "2026-01-01")):
+        mid = db.query_one(
+            "INSERT INTO email_messages (user_id, provider_message_id, source, subject, sent_at) "
+            "VALUES (%s,%s,'gmail','s',%s) RETURNING id",
+            (uid, f"srt-{next(_seq)}", when),
+        )["id"]
+        db.execute(
+            "INSERT INTO email_events (message_id, kind, confidence) VALUES (%s,'acknowledgement','high')",
+            (mid,),
+        )
+        _match(mid, app_id)
+
+    quietest = client.get(
+        "/v1/user/pipeline?sort=last_event_at&dir=asc", headers=user_headers
+    ).json()
+    assert quietest["applications"][0]["id"] == old
