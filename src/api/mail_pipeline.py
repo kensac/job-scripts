@@ -122,6 +122,43 @@ def events_for(application_id: int) -> list[dict[str, Any]]:
     )
 
 
+def events_by_application(user_id: int) -> dict[int, list[dict[str, Any]]]:
+    """Every application's events for one user, in one query.
+
+    The per-application version is two queries each, which is fine for a
+    detail view and ruinous for a list: 2,495 applications meant ~5,000
+    queries to render one page. Same predicates as `events_for` - the two
+    must agree, because a list and a detail disagreeing about an
+    application's stage is worse than either being wrong alone.
+    """
+    rows = db.query(
+        """
+        WITH current_match AS (
+            SELECT DISTINCT ON (message_id) message_id, application_id
+            FROM application_matches ORDER BY message_id, id DESC
+        ),
+        current_event AS (
+            SELECT DISTINCT ON (message_id) message_id, kind, id, occurred_at, deadline_at,
+                   deadline_inferred
+            FROM email_events ORDER BY message_id, id DESC
+        )
+        SELECT cm.application_id, e.id, e.kind, e.occurred_at, e.deadline_at,
+               e.deadline_inferred, m.sent_at, m.subject
+        FROM current_match cm
+        JOIN current_event e ON e.message_id = cm.message_id
+        JOIN email_messages m ON m.id = cm.message_id
+        JOIN applications a ON a.id = cm.application_id
+        WHERE a.user_id = %s
+        ORDER BY cm.application_id, e.id
+        """,
+        (user_id,),
+    )
+    grouped: dict[int, list[dict[str, Any]]] = {}
+    for row in rows:
+        grouped.setdefault(row["application_id"], []).append(row)
+    return grouped
+
+
 def state_of(application_id: int) -> dict[str, Any]:
     events = events_for(application_id)
     return {
