@@ -40,10 +40,19 @@ logger = logging.getLogger("jobtracker_worker")
 # date, and silence must not become a fabricated rejection.
 #
 # Measured over the 38,685-message mailbox, batched: luna $10.44, mini $14.99.
-# Ongoing at ~80/day is $11.31/yr on mini, where the per-message quality
-# matters more than the total.
+#
+# ONE model for both paths, on Kanishk's call, and the reason is consistency
+# rather than the $4.55. The backfill classified 67k messages on luna; an
+# ongoing feed on a different model reads the same mail by different standards,
+# so a rejection recognised in the archive might not be recognised next week -
+# and the difference would show up as a change in the funnel that nothing in
+# the funnel explains.
+#
+# The two constants stay separate because their ENV OVERRIDES are separate: the
+# per-task model config can move one path without the other, which is the point
+# of that feature. They simply default to the same model now.
 BACKFILL_MODEL = os.environ.get("JOBTRACKER_MAIL_BACKFILL_MODEL", "gpt-5.6-luna")
-ONGOING_MODEL = os.environ.get("JOBTRACKER_MAIL_ONGOING_MODEL", "gpt-5-mini")
+ONGOING_MODEL = os.environ.get("JOBTRACKER_MAIL_ONGOING_MODEL", "gpt-5.6-luna")
 # A classification spec is the instructions plus a body capped at 20k chars,
 # so ~6k tokens against the same 1.8M-token wave budget comp.py sizes against:
 # ~300 specs per wave, times BATCH_WAVE_CONCURRENCY waves in flight.
