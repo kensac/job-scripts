@@ -313,6 +313,13 @@ def candidates_for(shape: TaskShape, at: datetime.datetime | None = None) -> lis
     Returns the whole catalogue rather than only the eligible ones, because a
     screen offering a short list with no explanation is how someone concludes
     the missing model is a bug. The rejection reason is the useful half.
+
+    ORDERED HERE, cheapest eligible first, then the ineligible alphabetically.
+    The order is the server's job because the prices are Decimals rendered as
+    strings - a client sorting those lexicographically puts "9.00" above
+    "10.00", and a client parsing them into floats to sort has rounded money
+    to avoid it. Sending them in the order they should be shown removes the
+    choice.
     """
     out: list[Candidacy] = []
     for name, (provider, declared) in sorted(providers.MODELS.items()):
@@ -344,7 +351,16 @@ def candidates_for(shape: TaskShape, at: datetime.datetime | None = None) -> lis
                 off_peak=is_off_peak(declared.rates, at),
             )
         )
-    return out
+    # None sorts last among the eligible, which cannot happen - _rejection
+    # already refuses an unpriced model - but the key must total-order anyway.
+    return sorted(
+        out,
+        key=lambda c: (
+            not c.eligible,
+            c.est_cost_usd if c.est_cost_usd is not None else Decimal("Infinity"),
+            c.model,
+        ),
+    )
 
 
 def _params_for(shape: TaskShape, declared: Model) -> dict[str, object]:

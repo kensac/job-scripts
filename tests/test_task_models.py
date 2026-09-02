@@ -124,6 +124,31 @@ class TestCost:
         assert blocked["est_cycle_cost_usd"] is None
 
 
+class TestOrdering:
+    def test_candidates_arrive_in_the_order_they_should_be_shown(self, client, admin_headers):
+        """The server orders them because the prices are strings: a client
+        sorting those lexicographically puts "9.00" above "10.00", and one
+        parsing them into floats to sort has rounded money to avoid it."""
+        candidates = _get(client, admin_headers)["candidates"]
+        eligible = [c for c in candidates if c["eligible"]]
+        assert candidates[: len(eligible)] == eligible, "eligible models come first"
+        costs = [c["est_cycle_cost_usd"] for c in eligible]
+        assert costs == sorted(costs, key=float), "cheapest eligible first"
+
+
+class TestEvidenceCannotBeOrphaned:
+    def test_every_finding_names_a_model_the_screen_will_show(self):
+        """Evidence hangs off a candidate, so a finding about a model that is
+        never offered would silently vanish - and it is the warnings that go
+        missing, not the reassurances."""
+        from core.routing import candidates_for
+
+        for purpose, shape in SHAPES.items():
+            shown = {c.model for c in candidates_for(shape)}
+            for e in shape.evidence:
+                assert e.model in shown, f"{purpose}: evidence about {e.model} is unreachable"
+
+
 class TestOverride:
     def test_a_sanctioned_model_is_not_an_override(self, client, admin_headers):
         r = _put(client, admin_headers, "requirements", model="gpt-5-mini")
