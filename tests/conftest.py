@@ -131,8 +131,39 @@ def _schema_already_provisioned() -> bool:
     return bool(version and version["c"])
 
 
+_PGVECTOR_HELP = (
+    "This Postgres has no pgvector, and a migration needs it.\n"
+    "Point the suite at one that does:\n"
+    "    make testdb-up\n"
+    "    export TEST_DATABASE_URL=postgresql://postgres:test@127.0.0.1:55432/jobtracker_test\n"
+    "Prod and CI both run pgvector; a local install without it is the odd one out."
+)
+
+
+def _provision() -> None:
+    """Migrate, and translate the one failure that has a non-obvious cause.
+
+    The scratch server is built from whatever local install `pg_config` points
+    at, which for most machines is a homebrew Postgres with no vector
+    extension in its sharedir. `CREATE EXTENSION vector` then fails several
+    frames deep at import time, naming neither pgvector nor the way out.
+
+    Deliberately reactive rather than a pre-flight check: a guard that refuses
+    to start whenever pgvector is absent would break every session's suite
+    immediately, for a dependency no migration has needed yet.
+    """
+    import psycopg
+
+    try:
+        db.init_schema()
+    except psycopg.errors.UndefinedFile as exc:  # missing extension control file
+        if "vector" not in str(exc).lower():
+            raise
+        raise RuntimeError(_PGVECTOR_HELP) from exc
+
+
 if not _schema_already_provisioned():
-    db.init_schema()
+    _provision()
 import core.store  # noqa: E402,F401  (import triggers ai_queries creation)
 
 

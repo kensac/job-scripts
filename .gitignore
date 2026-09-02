@@ -248,3 +248,12 @@ configs.toml
 filters.toml
 scripts/run_tracker_launch.sh
 .github/workflows/build-push-ecr.yml
+
+# Personal mail archives used by the email-ingest backfill. Multi-GB, and they
+# are the user's actual mailbox - they must never reach a remote. Ignored here
+# as a backstop; they belong outside the repo entirely.
+*.olm
+*.olm copy
+*.mbox
+takeout-*.zip
+Takeout/

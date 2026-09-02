@@ -1,6 +1,6 @@
 export PYTHONPATH := src
 
-.PHONY: api worker check lint fmt types test testdb-sync testdb-sync-fast integration schema migrate revision db-up db-down
+.PHONY: api worker check lint fmt types test testdb-up testdb-down testdb-sync testdb-sync-fast integration schema migrate revision db-up db-down
 
 api:            ## run the API locally
 	uvicorn api.app:app --port 8000 --reload
@@ -35,6 +35,16 @@ migrate:        ## apply migrations to $$DATABASE_URL
 
 revision:       ## autogenerate a migration: make revision m="add foo"
 	python -m alembic revision --autogenerate -m "$(m)"
+
+testdb-up:      ## docker postgres WITH pgvector on :55432, for the test suite
+	docker run -d --rm --name jobtracker-testdb -p 55432:5432 \
+	  -e POSTGRES_PASSWORD=test -e POSTGRES_DB=jobtracker_test \
+	  pgvector/pgvector:pg18-trixie >/dev/null
+	@until docker exec jobtracker-testdb pg_isready -U postgres >/dev/null 2>&1; do sleep 1; done
+	@echo 'export TEST_DATABASE_URL=postgresql://postgres:test@127.0.0.1:55432/jobtracker_test'
+
+testdb-down:    ## stop it
+	docker stop jobtracker-testdb >/dev/null 2>&1 || true
 
 db-up:          ## throwaway local postgres on :54999 (data in .pgdev)
 	initdb -D .pgdev -U dev --auth=trust -E UTF8 >/dev/null 2>&1 || true
