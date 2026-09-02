@@ -129,6 +129,12 @@ def _posting_age(job: dict[str, Any]) -> dict[str, Any] | None:
     return {"posted_at": posted, "days_listed": int(days)}
 
 
+# Location is part of the key, and leaving it out was a real defect rather
+# than a nicety. Without it a chain listing one role across its estate reads as
+# one enormous repost: Sainsbury's "Trading Assistant" grouped to 1,056 urls
+# spanning 120 distinct locations and 107 days, which is bulk multi-site
+# hiring and not an employer re-listing anything. Keying on location as well
+# leaves 1,510 groups catalog-wide, 89% of them two to five urls.
 _REPOST_SQL = """
 SELECT count(*) AS url_count,
        min(date_posted) AS first_posted_at,
@@ -137,6 +143,7 @@ FROM jobs
 WHERE source = %(source)s
   AND lower(btrim(company)) = %(company)s
   AND lower(btrim(title)) = %(title)s
+  AND locations = %(locations)s
   AND date_posted IS NOT NULL
 """
 
@@ -149,13 +156,24 @@ def _repost(job: dict[str, Any]) -> dict[str, Any] | None:
 
     The match is casefold+trim on free text - there is no company or requisition
     identity in this schema - so the claim a caller may make is "this company
-    name and title string recurred", never "this employer reposts".
+    name and title string recurred", never "this employer reposts". A large
+    url_count in particular means an evergreen requisition rather than a
+    repost cycle, and the two are not separable here: the count is reported so
+    a reader can tell them apart, not so it can be characterised.
     """
     company = (job.get("company") or "").strip().lower()
     title = (job.get("title") or "").strip().lower()
     if not company or not title:
         return None
-    row = db.query_one(_REPOST_SQL, {"source": job["source"], "company": company, "title": title})
+    row = db.query_one(
+        _REPOST_SQL,
+        {
+            "source": job["source"],
+            "company": company,
+            "title": title,
+            "locations": job.get("locations") or [],
+        },
+    )
     if not row or int(row["url_count"]) < REPOST_MIN_URLS:
         return None
     span_days = int((row["last_posted_at"] - row["first_posted_at"]).total_seconds() / _DAY)
