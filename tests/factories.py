@@ -207,10 +207,24 @@ def make_requirements(
     }
     names = ", ".join(columns)
     placeholders = ", ".join(f"%({k})s" for k in columns)
+    # Stamped with the row the content came from, as the handler does. Without
+    # it the row reads as "extracted from we-do-not-know-which page", which the
+    # sweep correctly treats as needing a re-read.
+    current = db.query_one(
+        "SELECT id FROM ai_queries WHERE url = %s AND input_content IS NOT NULL "
+        "AND length(input_content) > 200 ORDER BY (check_type = 'content') DESC, id DESC "
+        "LIMIT 1",
+        (url,),
+    )
     db.execute(
-        f"INSERT INTO job_requirements (url, has_requirements, {names}) "
-        f"VALUES (%(url)s, %(has)s, {placeholders})",
-        {"url": url, "has": has_requirements, **columns},
+        f"INSERT INTO job_requirements (url, has_requirements, content_row_id, {names}) "
+        f"VALUES (%(url)s, %(has)s, %(row_id)s, {placeholders})",
+        {
+            "url": url,
+            "has": has_requirements,
+            "row_id": (current or {}).get("id"),
+            **columns,
+        },
     )
     for kind, raws in (("required", skills_required), ("preferred", skills_preferred)):
         for raw in raws or []:
@@ -233,8 +247,15 @@ def make_embedding(url: str, vector: list[float] | None = None, *, seed: float =
         vector = [1.0] + [0.0] * (EMBEDDING_DIMENSIONS - 1)
         vector[1] = seed
     assert len(vector) == EMBEDDING_DIMENSIONS
+    current = db.query_one(
+        "SELECT id FROM ai_queries WHERE url = %s AND input_content IS NOT NULL "
+        "AND length(input_content) > 200 ORDER BY (check_type = 'content') DESC, id DESC "
+        "LIMIT 1",
+        (url,),
+    )
     db.execute(
-        "INSERT INTO job_embeddings (url, embedding, model, content_hash, input_tokens) "
-        "VALUES (%s, %s, %s, %s, %s) ON CONFLICT (url) DO UPDATE SET embedding = EXCLUDED.embedding",
-        (url, str(vector), EMBEDDING_MODEL, "hash", 100),
+        "INSERT INTO job_embeddings (url, embedding, model, content_hash, content_row_id, "
+        "input_tokens) VALUES (%s, %s, %s, %s, %s, %s) "
+        "ON CONFLICT (url) DO UPDATE SET embedding = EXCLUDED.embedding",
+        (url, str(vector), EMBEDDING_MODEL, "hash", (current or {}).get("id"), 100),
     )

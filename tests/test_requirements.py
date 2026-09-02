@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import hashlib
+
 import pytest
 
 from api import db
 from api.tasks.requirements import (
     _CANDIDATES,
+    REQUIREMENTS_INPUT_CHARS,
     RequirementsExtract,
     _store,
     _years,
@@ -99,6 +102,7 @@ class TestStore:
                 skills_preferred=["Go"],
             ),
             "hash",
+            1,
         )
         row = db.query_one("SELECT * FROM job_requirements WHERE url = %s", (url,))
         assert row is not None
@@ -126,6 +130,7 @@ class TestStore:
                 has_requirements=True, degree_min="Bachelors Degree", clearance="very secret"
             ),
             "hash",
+            1,
         )
         row = db.query_one(
             "SELECT degree_min, clearance FROM job_requirements WHERE url = %s", (url,)
@@ -142,6 +147,7 @@ class TestStore:
                 has_requirements=False, yoe_min=3, degree_min="phd", skills_required=["Python"]
             ),
             "hash",
+            1,
         )
         row = db.query_one("SELECT * FROM job_requirements WHERE url = %s", (url,))
         assert row is not None
@@ -155,9 +161,13 @@ class TestStore:
             url,
             RequirementsExtract(has_requirements=True, skills_required=["Python", "Perl"]),
             "hash-1",
+            1,
         )
         _store(
-            url, RequirementsExtract(has_requirements=True, skills_required=["Python"]), "hash-2"
+            url,
+            RequirementsExtract(has_requirements=True, skills_required=["Python"]),
+            "hash-2",
+            2,
         )
         rows = db.query("SELECT skill FROM job_skills WHERE url = %s", (url,))
         # Perl is gone because the posting no longer asks for it; a left-over
@@ -172,6 +182,7 @@ class TestStore:
             url,
             RequirementsExtract(has_requirements=True, skills_required=["Python", "python"]),
             "hash",
+            1,
         )
         rows = db.query("SELECT skill, skill_raw FROM job_skills WHERE url = %s", (url,))
         assert {r["skill"] for r in rows} == {"python"}
@@ -223,7 +234,7 @@ class TestContentLateralParity:
         for source, expr in (("jobs j", "j.url"), ("(SELECT %(u)s::text AS url) c", "c.url")):
             rows = db.query(
                 f"SELECT q.input_content FROM {source} "
-                f"{CONTENT_LATERAL.format(url=expr)} "
+                f"{CONTENT_LATERAL.format(url=expr, columns='input_content')} "
                 f"WHERE {expr} = %(u)s",
                 {"u": url},
             )
@@ -432,3 +443,82 @@ def _uid(headers: dict) -> int:
     row = db.query_one("SELECT id FROM users WHERE sub = %s", (headers["X-User-Sub"],))
     assert row is not None
     return row["id"]
+
+
+class TestRescrapedPages:
+    """The bug this closes: content_hash was written and read by nothing, so a
+    posting scraped again kept its first extraction forever."""
+
+    def _extracted(self, f, url: str, row_id: int | None):
+        _store(
+            url,
+            RequirementsExtract(has_requirements=True, skills_required=["Perl"]),
+            "hash-of-the-old-page",
+            row_id,
+        )
+
+    def _current_row(self, url: str) -> int:
+        row = db.query_one(
+            "SELECT id FROM ai_queries WHERE url = %s AND input_content IS NOT NULL "
+            "AND length(input_content) > 200 "
+            "ORDER BY (check_type = 'content') DESC, id DESC LIMIT 1",
+            (url,),
+        )
+        assert row is not None
+        return row["id"]
+
+    def test_a_rescraped_page_is_extracted_again(self, f):
+        _, url = f.make_ready_job(content=CONTENT)
+        self._extracted(f, url, self._current_row(url))
+        assert url not in _candidates()
+        # The page is scraped again with different text.
+        f.make_verdict(url, "content", "passed", content="a DIFFERENT description " * 20)
+        assert url in _candidates()
+
+    def test_an_unchanged_rescrape_is_not_paid_for_again(self, f):
+        """A re-scrape that changed nothing is the common case, and the id
+        moving is not evidence the text did. Re-extracting on the id alone
+        would re-pay for the catalog every time a refresh ran."""
+        from api.tasks.requirements import _drop_unchanged_rescrapes
+
+        _, url = f.make_ready_job(content=CONTENT)
+        rows = db.query(_CANDIDATES, {"cap": 10})
+        row = next(r for r in rows if r["url"] == url)
+        _store(
+            url,
+            RequirementsExtract(has_requirements=True),
+            hashlib.sha256(row["input_content"][:REQUIREMENTS_INPUT_CHARS].encode()).hexdigest(),
+            row["content_row_id"],
+        )
+        # Same text arrives again under a new row id.
+        f.make_verdict(url, "content", "passed", content=CONTENT)
+        candidates = db.query(_CANDIDATES, {"cap": 10})
+        assert url in [r["url"] for r in candidates], "the newer row makes it a candidate"
+        assert url not in [r["url"] for r in _drop_unchanged_rescrapes(candidates)]
+
+    def test_an_unchanged_rescrape_stops_coming_back(self, f):
+        """Re-stamped rather than merely skipped, or it is re-examined every
+        cycle forever."""
+        from api.tasks.requirements import _drop_unchanged_rescrapes
+
+        _, url = f.make_ready_job(content=CONTENT)
+        rows = db.query(_CANDIDATES, {"cap": 10})
+        row = next(r for r in rows if r["url"] == url)
+        _store(
+            url,
+            RequirementsExtract(has_requirements=True),
+            hashlib.sha256(row["input_content"][:REQUIREMENTS_INPUT_CHARS].encode()).hexdigest(),
+            row["content_row_id"],
+        )
+        f.make_verdict(url, "content", "passed", content=CONTENT)
+        _drop_unchanged_rescrapes(db.query(_CANDIDATES, {"cap": 10}))
+        assert url not in _candidates()
+
+    def test_a_row_that_does_not_know_its_page_is_re_read_once(self, f):
+        """Every row predating this migration has content_row_id NULL, which
+        reads as "we do not know which page this came from". Guessing a row
+        would pin a stale answer permanently; re-reading once costs one pass.
+        """
+        _, url = f.make_ready_job(content=CONTENT)
+        self._extracted(f, url, None)
+        assert url in _candidates()
