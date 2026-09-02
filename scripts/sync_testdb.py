@@ -78,6 +78,12 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--name", default="jobtracker_test")
     ap.add_argument("--fast", action="store_true", help="skip the large text columns")
+    ap.add_argument(
+        "--reader-role",
+        metavar="NAME",
+        help="create/rotate a SELECT-only login on the test db and print its URL, "
+        "so CI never holds the production superuser",
+    )
     args = ap.parse_args()
 
     src_url = os.environ.get("DATABASE_URL")
@@ -198,10 +204,47 @@ def main() -> int:
         dst.execute("DROP EXTENSION IF EXISTS postgres_fdw CASCADE")
         dst.commit()
 
+    if args.reader_role:
+        _grant_reader(dst_url, args.reader_role, args.name)
+
     print(f"\nsynced {total} rows into {args.name}")
     print("run integration tests with:")
     print(f"  TEST_DATABASE_URL='{dst_url}' make integration")
     return 0
+
+
+def _grant_reader(dst_url: str, role: str, dbname: str) -> None:
+    """Create/refresh a login role with SELECT on the test database only.
+
+    CI should never hold the production superuser. This role can read the
+    synced copy and nothing else - not production, and not write access to the
+    copy - which is all the integration tests need.
+    """
+    import secrets
+
+    from psycopg import sql
+
+    password = secrets.token_urlsafe(24)
+    role_id = sql.Identifier(role)
+    # A role password cannot be a bound parameter, so it has to be inlined.
+    # sql.Literal does the quoting rather than an f-string doing it by hand.
+    pw = sql.Literal(password)
+    with psycopg.connect(dst_url, autocommit=True) as conn:
+        exists = conn.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (role,)).fetchone()
+        verb = sql.SQL("ALTER ROLE") if exists else sql.SQL("CREATE ROLE")
+        conn.execute(sql.SQL("{} {} WITH LOGIN PASSWORD {}").format(verb, role_id, pw))
+        conn.execute(f'GRANT CONNECT ON DATABASE "{dbname}" TO "{role}"')
+        conn.execute(f'GRANT USAGE ON SCHEMA public TO "{role}"')
+        conn.execute(f'GRANT SELECT ON ALL TABLES IN SCHEMA public TO "{role}"')
+        conn.execute(
+            f'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO "{role}"'
+        )
+    parts = urlparse(dst_url)
+    reader_url = urlunparse(
+        parts._replace(netloc=f"{role}:{password}@{parts.hostname}:{parts.port or 5432}")
+    )
+    print(f"\nread-only role {role!r} refreshed. Set this as the CI secret:")
+    print(f"  gh secret set TEST_DATABASE_URL --body '{reader_url}'")
 
 
 if __name__ == "__main__":

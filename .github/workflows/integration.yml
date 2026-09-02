@@ -1,0 +1,49 @@
+name: Integration tests
+
+# Deliberately NOT on pull_request. These run against a database holding real
+# production data, so the credential must never be reachable from a workflow
+# an outside contributor can influence. Schedule plus manual dispatch keeps it
+# to code that is already on main.
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: integration
+  cancel-in-progress: false
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    # Absent secret = skipped, not failed. A red badge for "not configured"
+    # teaches people to ignore the badge.
+    if: github.repository == 'kensac/job-scripts'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Check credential is configured
+        id: creds
+        env:
+          TEST_DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}
+        run: |
+          if [ -z "$TEST_DATABASE_URL" ]; then
+            echo "TEST_DATABASE_URL is not set; skipping integration tests."
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run integration tests
+        if: steps.creds.outputs.configured == 'true'
+        env:
+          TEST_DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}
+          APP_ENCRYPTION_KEY: ${{ secrets.APP_ENCRYPTION_KEY }}
+          JOBTRACKER_SERVICE_TOKEN: ci
+          PYTHONPATH: src
+        run: pytest -q -m integration tests
