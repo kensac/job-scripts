@@ -354,12 +354,8 @@ def pipeline_detail(application_id: int, user: AuthedUser = Depends(require_user
     if app is None:
         raise HTTPException(status_code=404, detail="application not found")
     events = mail_pipeline.events_for(application_id)
-    return {
-        **app,
-        "stage": mail_pipeline.stage_for(events),
-        "events": events,
-        "matches": db.query(
-            """
+    matches = db.query(
+        """
             WITH touched AS (
                 SELECT DISTINCT message_id FROM application_matches WHERE application_id = %(app)s
             ),
@@ -376,8 +372,17 @@ def pipeline_detail(application_id: int, user: AuthedUser = Depends(require_user
             JOIN current_match cm ON cm.message_id = am.message_id
             ORDER BY am.message_id, am.id
             """,
-            {"app": application_id},
-        ),
+        {"app": application_id},
+    )
+    # Every match carries what it was decided FROM, not just what it decided.
+    # Without this a person has to open their mail client to check a match,
+    # which is the same as not being able to check it.
+    evidence = _evidence_for(sorted({m["message_id"] for m in matches}))
+    return {
+        **app,
+        "stage": mail_pipeline.stage_for(events),
+        "events": events,
+        "matches": [{**m, "evidence": evidence.get(m["message_id"])} for m in matches],
         "actions": db.query(
             "SELECT * FROM action_items WHERE application_id = %s ORDER BY due_at NULLS LAST, id",
             (application_id,),
@@ -684,3 +689,120 @@ def assign_message(message_id: int, body: Assignment, user: AuthedUser = Depends
     )
     mail_pipeline.sync_action_items(application_id)
     return {"ok": True, "application_id": application_id}
+
+
+# Enough to judge a match without opening the mail client, and short enough to
+# send one per row. Two sentences either side of the company mention is what a
+# person actually reads before deciding.
+SNIPPET_RADIUS = 220
+
+
+def _snippet(body: str | None, needle: str | None) -> dict[str, Any] | None:
+    """The part of the message the match was made on, not the first 220 chars.
+
+    An email's opening is a greeting and a logo alt-text; the sentence naming
+    the company is somewhere in the middle. Centring the excerpt on that term
+    is the difference between evidence and a preview - a preview shows that
+    mail exists, evidence shows why it was attached to THIS application.
+    """
+    text = (body or "").strip()
+    if not text:
+        return None
+    found = -1
+    if needle:
+        found = text.lower().find(needle.strip().lower())
+    if found < 0:
+        return {
+            "text": text[: SNIPPET_RADIUS * 2],
+            "centred_on": None,
+            "truncated": len(text) > SNIPPET_RADIUS * 2,
+        }
+    start = max(0, found - SNIPPET_RADIUS)
+    end = min(len(text), found + len(needle or "") + SNIPPET_RADIUS)
+    return {
+        "text": text[start:end],
+        "centred_on": needle,
+        "truncated": start > 0 or end < len(text),
+    }
+
+
+def _evidence_for(message_ids: list[int]) -> dict[int, dict[str, Any]]:
+    """What each match actually rested on.
+
+    The rationale field says what the matcher concluded; this says what it
+    concluded it FROM. A person checking a match needs the second one - the
+    company the classifier read out of the mail is the thing tier 2 and 3
+    compared, so if that extraction is wrong the match is wrong and no amount
+    of staring at the conclusion reveals it.
+    """
+    if not message_ids:
+        return {}
+    rows = db.query(
+        """
+        WITH current_event AS (
+            SELECT DISTINCT ON (message_id) message_id, kind, confidence, detail, model
+            FROM email_events ORDER BY message_id, id DESC
+        )
+        SELECT m.id, m.from_email, m.subject, m.sent_at, m.body_text,
+               e.kind, e.confidence, e.detail, e.model
+        FROM email_messages m
+        LEFT JOIN current_event e ON e.message_id = m.id
+        WHERE m.id = ANY(%s)
+        """,
+        (message_ids,),
+    )
+    out: dict[int, dict[str, Any]] = {}
+    for row in rows:
+        detail = row["detail"] or {}
+        company = detail.get("company")
+        out[row["id"]] = {
+            # What the classifier read out of the mail. Tier 2 and 3 compare
+            # THIS, not the raw text, so a wrong extraction is a wrong match.
+            "extracted_company": company,
+            "extracted_title": detail.get("role_title"),
+            "classified_as": row["kind"],
+            "classifier_confidence": row["confidence"],
+            "classifier_model": row["model"],
+            # The sender is the one fact no model produced. An ATS domain is
+            # near-proof of a real application; a .edu sender usually is not.
+            "from_domain": (row["from_email"] or "").split("@")[-1].lower() or None,
+            "snippet": _snippet(row["body_text"], company),
+            "body_chars": len(row["body_text"] or ""),
+        }
+    return out
+
+
+@router.get("/user/messages/{message_id}")
+def message_detail(message_id: int, user: AuthedUser = Depends(require_user)):
+    """The whole message, for when the excerpt is not enough.
+
+    Read-only and user-scoped. The body is already stored - withholding it
+    would mean a person has to leave for their mail client to check a decision
+    this system made, which is the same as not being able to check it.
+    """
+    row = db.query_one(
+        "SELECT id, provider_message_id, provider_thread_id, source, from_email, from_name, "
+        "to_emails, subject, sent_at, body_text, prefilter_hit, prefilter_reason "
+        "FROM email_messages WHERE id = %s AND user_id = %s",
+        (message_id, user.id),
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="message not found")
+    return {
+        **row,
+        "events": db.query(
+            "SELECT id, kind, confidence, occurred_at, deadline_at, deadline_inferred, detail, "
+            "model, created_at FROM email_events WHERE message_id = %s ORDER BY id",
+            (message_id,),
+        ),
+        "matches": db.query(
+            """
+            SELECT am.id, am.application_id, am.method, am.confidence, am.rationale,
+                   am.created_at, a.company_name, a.title
+            FROM application_matches am
+            LEFT JOIN applications a ON a.id = am.application_id
+            WHERE am.message_id = %s ORDER BY am.id
+            """,
+            (message_id,),
+        ),
+    }
