@@ -251,3 +251,51 @@ async def test_the_cap_is_clamped_not_trusted(monkeypatch, f):
     monkeypatch.setattr(mail_classify, "MAX_CLASSIFY_PER_CYCLE", 2)
     await mail_classify.handle_classify_mail(1, {"cap": 999999})
     assert seen["count"] <= 2
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected_date"),
+    [
+        ("2026-09-08", datetime.date(2026, 9, 8)),
+        ("2026-09-08T17:00:00Z", datetime.date(2026, 9, 8)),
+        (None, None),
+        ("", None),
+        # The one that failed a 1,200-message task in production: the model
+        # states the year and month and does not know the day.
+        ("2022-09-??", None),
+        ("soon", None),
+        ("2026-13-45", None),
+    ],
+)
+def test_partial_dates_become_nothing(raw, expected_date):
+    """A partial date is not a deadline. Inventing the 1st or the 30th to make
+    it parse would be exactly the fabrication the schema exists to prevent."""
+    got = mail_classify.parse_deadline(raw)
+    assert (got.date() if got else None) == expected_date
+    if got is not None:
+        assert got.tzinfo is not None
+
+
+@pytest.mark.asyncio
+async def test_one_unwritable_row_does_not_discard_the_batch(monkeypatch, f):
+    """The batch is already paid for. Losing every other classification to one
+    bad row is the expensive way to be strict - and the skipped row is picked
+    up next sweep anyway, because it still has no event."""
+    ids = []
+    for i in range(3):
+        _uid, mid = _store(f, mid=f"<bad{i}@x>")
+        ids.append(mid)
+
+    good = (
+        '{"kind":"rejection","company":"Acme","role_title":null,'
+        '"deadline":null,"deadline_is_explicit":false,"confidence":"high"}'
+    )
+    results = {str(m): _Res(good) for m in ids}
+    # A key that is not an integer: int(key) raises inside the write.
+    results["not-a-message-id"] = _Res(good)
+
+    await _run(monkeypatch, {}, results)
+    written = db.query_one(
+        "SELECT count(*) AS c FROM email_events WHERE message_id = ANY(%s)", (ids,)
+    )
+    assert written is not None and written["c"] == 3
