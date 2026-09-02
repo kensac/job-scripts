@@ -334,3 +334,35 @@ class Report(Base):
     resolution_note: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
     resolved_at: Mapped[datetime.datetime | None]
+
+
+class UserOAuthToken(Base):
+    """A user's stored OAuth grant for one external provider.
+
+    One row per (user, provider), not an append-only log: unlike a verdict, a
+    superseded refresh token has no historical value and is a live security
+    object, so reconnecting replaces rather than appends.
+
+    Nothing here records a "connected"/"needs reconnect" status. The only fact
+    worth storing is the observation that the provider rejected the refresh
+    token, which is `invalid_at`; the state the UI renders is derived from it.
+    """
+
+    __tablename__ = "user_oauth_tokens"
+
+    user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    provider: Mapped[str] = mapped_column(Text, primary_key=True)
+    refresh_token_enc: Mapped[bytes] = mapped_column(BYTEA)
+    access_token_enc: Mapped[bytes | None] = mapped_column(BYTEA)
+    access_token_expires_at: Mapped[datetime.datetime | None]
+    # What the provider actually GRANTED, which is not necessarily what we
+    # asked for: a user can decline an individual scope on the consent screen
+    # and Google still returns a token.
+    scopes: Mapped[list[str]] = mapped_column(server_default=text("'{}'"))
+    account_email: Mapped[str | None] = mapped_column(Text)
+    invalid_at: Mapped[datetime.datetime | None]
+    invalid_reason: Mapped[str | None] = mapped_column(Text)
+    connected_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+    updated_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)

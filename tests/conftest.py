@@ -149,6 +149,7 @@ _MUTABLE_TABLES = [
     "user_filters",
     "user_settings",
     "user_sources",
+    "user_oauth_tokens",
     "ai_queries",
     "api_usage",
     "reports",

@@ -1043,7 +1043,10 @@ def patch_source(name: str, body: SourceBody, user: AuthedUser = Depends(require
     return row
 
 
-_CONFIG_KEYS = {"signups_enabled"}
+# key -> the type its value must have. Was a bare set of names back when
+# every config value was a bool; the mailbox gate is a list of group names, so
+# the endpoint validates per key rather than assuming one shape for all.
+_CONFIG_KEYS: dict[str, type] = {"signups_enabled": bool, "gmail_connect_groups": list}
 
 
 @router.get("/config")
@@ -1053,15 +1056,24 @@ def get_config(user: AuthedUser = Depends(require_admin)):
 
 
 class ConfigPut(BaseModel):
-    value: bool
+    value: bool | list[str]
 
 
 @router.put("/config/{key}")
 def put_config(key: str, body: ConfigPut, user: AuthedUser = Depends(require_admin)):
-    if key not in _CONFIG_KEYS:
+    expected = _CONFIG_KEYS.get(key)
+    if expected is None:
         raise HTTPException(
             400,
             detail={"code": "UNKNOWN_KEY", "message": f"key must be one of {sorted(_CONFIG_KEYS)}"},
+        )
+    if not isinstance(body.value, expected):
+        raise HTTPException(
+            400,
+            detail={
+                "code": "INVALID_VALUE",
+                "message": f"{key} takes a {expected.__name__}",
+            },
         )
     db.execute(
         "INSERT INTO app_config (key, value) VALUES (%s, %s) "
