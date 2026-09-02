@@ -158,3 +158,50 @@ def test_read_archive_dispatches_on_extension(tmp_path):
     assert isinstance(next(read_archive(_write(tmp_path, "a.mbox", MBOX))), ImportedMessage)
     with pytest.raises(ValueError, match="unsupported archive"):
         next(read_archive(_write(tmp_path, "a.txt", "x")))
+
+
+def test_nul_bytes_are_stripped_from_every_text_field(tmp_path):
+    """Postgres text columns cannot contain 0x00 and reject the whole INSERT
+    if one appears - with no indication of which message or which field.
+
+    Real mailboxes contain them: mis-declared encodings, binary fragments in
+    malformed multipart bodies, truncated attachments. One NUL anywhere would
+    fail an entire 38,685-message import, in a 1000-row batch, hours in. Found
+    by running the real archive against a scratch database before production,
+    which is why that is now the rule.
+    """
+    text = (
+        "From b@x Mon Sep  1 10:00:00 2026\n"
+        "From: Bad\x00Name <no-reply\x00@greenhouse.io>\n"
+        "Subject: Your\x00application\n"
+        "Message-ID: <nul\x001@x>\n"
+        "Date: Mon, 1 Sep 2026 10:00:00 +0000\n"
+        "Content-Type: text/plain\n\n"
+        "Thanks for\x00 applying.\n"
+    )
+    p = tmp_path / "nul.mbox"
+    p.write_text(text)
+    msg = next(iter(read_mbox(p)))
+    for value in (
+        msg.provider_message_id,
+        msg.subject,
+        msg.from_email,
+        msg.from_name,
+        msg.body_text,
+        *msg.to_emails,
+    ):
+        assert value is None or "\x00" not in value
+
+
+def test_a_field_that_is_only_nul_becomes_none(tmp_path):
+    """Not an empty string: an all-NUL subject carried no information, and
+    NULL says that where '' would look like a deliberate blank."""
+    text = (
+        "From b@x Mon Sep  1 10:00:00 2026\n"
+        "From: a@b.test\nSubject: \x00\x00\n"
+        "Message-ID: <nul2@x>\n\nbody\n"
+    )
+    p = tmp_path / "nul2.mbox"
+    p.write_text(text)
+    msg = next(iter(read_mbox(p)))
+    assert msg.subject is None
