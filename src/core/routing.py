@@ -57,6 +57,7 @@ import datetime
 import os
 from dataclasses import dataclass, field
 from decimal import Decimal
+from enum import StrEnum
 
 from core import providers
 from core.pricing import estimate_cost_usd, is_off_peak
@@ -96,6 +97,47 @@ def server_key(provider: str) -> str:
     return os.environ.get(known.api_key_env, "") if known else ""
 
 
+class ModelChangeEffect(StrEnum):
+    """What happens to work already done when this task's model changes.
+
+    Declared rather than inferred, because it is a fact about the handler's
+    candidate query and nothing here can see one. Getting it wrong on a screen
+    is worse than omitting it: the two answers point in opposite directions.
+    """
+
+    # The sweep skips rows it has already done regardless of which model did
+    # them, so a switch leaves the finished work alone and the catalog ends up
+    # holding answers from both models. Nothing is re-paid; nothing is
+    # reconciled either.
+    MIXES = "mixes"
+    # The sweep's skip-check is scoped by model, so the next cycle sees no
+    # completed work and re-pays for all of it. tasks/filters.py is the case:
+    # get_custom_result(url, prompt_hash, model=cfg.model).
+    RERUNS = "reruns"
+
+
+@dataclass(frozen=True)
+class Evidence:
+    """A measured finding about one model on this kind of work.
+
+    Structured rather than prose because it has to reach a person overriding
+    the choice from a screen, attached to the option it is about. A sentence in
+    a code comment cannot do that, and a sentence hardcoded in the client rots
+    the first time someone re-measures.
+
+    sample_size is required, not garnish. "nano fabricated clearances" and
+    "nano fabricated clearances in 12 of 55 postings" are different claims, and
+    only the second can be argued with.
+    """
+
+    model: str
+    # "excluded" or "chosen" - which way the finding cuts for this task.
+    verdict: str
+    finding: str
+    sample_size: int
+    measured_on: datetime.date
+
+
 @dataclass(frozen=True)
 class TaskShape:
     """What a piece of work needs, declared rather than implied.
@@ -109,6 +151,10 @@ class TaskShape:
     # The weakest structured-output mode the task can work with. Batched
     # extraction wants JSON_SCHEMA: the provider enforces the shape, so a bad
     # answer is a provider error rather than 20,000 rows of wrong keys.
+    # The stable key for this task, and the same string the ledgers group by.
+    # It lives on the declaration rather than being passed beside it so a
+    # caller cannot name one purpose while running another's shape.
+    purpose: str
     structured: StructuredOutput
     # True when the work is scheduled and can wait hours for a batch. This is a
     # HARD constraint, not a preference: submit_or_collect needs a provider
@@ -146,6 +192,25 @@ class TaskShape:
         return self.effort or _preferred_effort(self, declared)
 
     params: dict[str, object] = field(default_factory=dict)
+    # Human-readable label for the configuration screen.
+    label: str = ""
+    # The most requests one sweep of this task will make. Declared so a model
+    # switch can be priced per cycle server-side rather than the client
+    # multiplying a rate by a number it guessed - this repo's rule is that cost
+    # comes from the server or nowhere. 0 means the sweep is unbounded and a
+    # cycle cost genuinely cannot be projected, which the payload says rather
+    # than papering over.
+    per_cycle: int = 0
+    # WHY these candidates and not others, in a sentence. This exists because
+    # the reasoning is otherwise a code comment, and a person overriding the
+    # choice from a UI cannot read code comments. mail_classify's exclusion of
+    # gpt-5-nano - measured fabrication, 12 invented clearances across 55
+    # postings - is exactly the sentence that has to reach the screen.
+    notes: str = ""
+    # What a model change does to work already finished. See ModelChangeEffect.
+    on_model_change: ModelChangeEffect = ModelChangeEffect.MIXES
+    # Measured findings, per model. Rendered beside the option each is about.
+    evidence: tuple[Evidence, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -160,6 +225,10 @@ class Choice:
     # Why this one rather than the others, for the log line at the call site.
     # A choice nobody can explain is a choice nobody can review.
     reason: str
+    # True when a human picked this model instead of the ones the call site
+    # sanctioned. Carried so the log line and the screen both say so - an
+    # override that looks like a default is the failure mode here.
+    overridden: bool = False
 
 
 def _rejection(shape: TaskShape, name: str, declared: Model | None, provider: str | None) -> str:
@@ -214,7 +283,107 @@ def _preferred_effort(shape: TaskShape, declared: Model) -> str | None:
     return declared.reasoning.default
 
 
-def resolve(shape: TaskShape, at: datetime.datetime | None = None) -> Choice:
+@dataclass(frozen=True)
+class Candidacy:
+    """Whether one model could run this task, and what it would cost.
+
+    Built for the configuration screen, which must offer only models the
+    task's declared needs admit - a model that cannot enforce a schema must
+    not be selectable for a batched extraction, and the client should not have
+    to re-derive that rule to know it.
+    """
+
+    model: str
+    provider: str
+    eligible: bool
+    # Empty when eligible; otherwise the requirement that excluded it, in the
+    # same words resolve() would have raised.
+    rejection: str
+    sanctioned: bool
+    est_cost_usd: Decimal | None
+    # per_cycle x the per-call cost, or None when the sweep is unbounded and a
+    # cycle figure would be invented rather than computed.
+    est_cycle_cost_usd: Decimal | None
+    off_peak: bool
+
+
+def candidates_for(shape: TaskShape, at: datetime.datetime | None = None) -> list[Candidacy]:
+    """Every declared model, judged against this task.
+
+    Returns the whole catalogue rather than only the eligible ones, because a
+    screen offering a short list with no explanation is how someone concludes
+    the missing model is a bug. The rejection reason is the useful half.
+
+    ORDERED HERE, cheapest eligible first, then the ineligible alphabetically.
+    The order is the server's job because the prices are Decimals rendered as
+    strings - a client sorting those lexicographically puts "9.00" above
+    "10.00", and a client parsing them into floats to sort has rounded money
+    to avoid it. Sending them in the order they should be shown removes the
+    choice.
+    """
+    out: list[Candidacy] = []
+    for name, (provider, declared) in sorted(providers.MODELS.items()):
+        if not declared.selectable:
+            continue
+        why = _rejection(shape, name, declared, provider)
+        per_call = (
+            None
+            if why
+            else estimate_cost_usd(
+                name,
+                shape.est_prompt_tokens,
+                shape.max_output_tokens,
+                batched=shape.batched,
+                at=at,
+            )
+        )
+        out.append(
+            Candidacy(
+                model=name,
+                provider=provider,
+                eligible=not why,
+                rejection=why,
+                sanctioned=name in shape.candidates,
+                est_cost_usd=per_call,
+                est_cycle_cost_usd=(
+                    per_call * shape.per_cycle if per_call is not None and shape.per_cycle else None
+                ),
+                off_peak=is_off_peak(declared.rates, at),
+            )
+        )
+    # None sorts last among the eligible, which cannot happen - _rejection
+    # already refuses an unpriced model - but the key must total-order anyway.
+    return sorted(
+        out,
+        key=lambda c: (
+            not c.eligible,
+            c.est_cost_usd if c.est_cost_usd is not None else Decimal("Infinity"),
+            c.model,
+        ),
+    )
+
+
+def _params_for(shape: TaskShape, declared: Model) -> dict[str, object]:
+    """The request params this shape implies for this model.
+
+    Shared by the resolved path and the override path so a configured model
+    cannot end up with different effort handling than a sanctioned one - which
+    would make an override change two things when the person changed one.
+    """
+    params = dict(shape.params)
+    if declared.reasoning.param:
+        effort = shape.effort or _preferred_effort(shape, declared)
+        if effort:
+            params.setdefault(declared.reasoning.param, effort)
+    params.setdefault("max_output_tokens", shape.max_output_tokens)
+    return params
+
+
+def resolve(
+    shape: TaskShape,
+    at: datetime.datetime | None = None,
+    override: str | None = None,
+) -> Choice:
     """The cheapest sanctioned model that can actually do the work.
 
     `at` is the moment the work runs, passed through to pricing because one
@@ -226,6 +395,40 @@ def resolve(shape: TaskShape, at: datetime.datetime | None = None) -> Choice:
     """
     if not shape.candidates:
         raise NoEligibleModel("no candidate models were declared for this task")
+
+    # An override replaces the caller's judgment, deliberately - the person who
+    # owns the system may overrule a call site. It does NOT replace the task's
+    # declared needs: a model that cannot do the work would fail at the
+    # provider, mid-batch, having already been paid for. Capability stays hard,
+    # sanction becomes soft, and the difference is the whole design.
+    if override:
+        declared = providers.model(override)
+        provider = providers.provider_of(override)
+        why = _rejection(shape, override, declared, provider)
+        if why:
+            raise NoEligibleModel(f"{override} cannot run this task - {why}")
+        assert provider is not None and declared is not None
+        cost = estimate_cost_usd(
+            override,
+            shape.est_prompt_tokens,
+            shape.max_output_tokens,
+            batched=shape.batched,
+            at=at,
+        )
+        sanctioned = override in shape.candidates
+        return Choice(
+            provider=provider,
+            model=override,
+            params=_params_for(shape, declared),
+            est_cost_usd=cost,
+            off_peak=is_off_peak(declared.rates, at),
+            reason=(
+                "configured override"
+                if sanctioned
+                else "configured override, outside the models this call site sanctioned"
+            ),
+            overridden=not sanctioned,
+        )
 
     eligible: list[tuple[Decimal, str, str, bool]] = []
     rejected: list[str] = []
@@ -260,12 +463,7 @@ def resolve(shape: TaskShape, at: datetime.datetime | None = None) -> Choice:
     )
     declared = providers.model(name)
     assert declared is not None
-    params = dict(shape.params)
-    if declared.reasoning.param:
-        effort = shape.effort or _preferred_effort(shape, declared)
-        if effort:
-            params.setdefault(declared.reasoning.param, effort)
-    params.setdefault("max_output_tokens", shape.max_output_tokens)
+    params = _params_for(shape, declared)
 
     if len(shape.candidates) == 1:
         reason = "the only model the caller sanctioned"

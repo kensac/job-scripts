@@ -326,6 +326,32 @@ class Task(Base):
     finished_at: Mapped[datetime.datetime | None]
 
 
+class TaskModelOverride(Base):
+    """The model a person chose for a task, append-only.
+
+    Latest row per purpose wins, and a NULL model is how an override is
+    cleared - deleting the row would erase the fact that one existed, which is
+    what a monthly review is looking for when a regression turns up weeks
+    after the switch that caused it.
+    """
+
+    __tablename__ = "task_model_overrides"
+    __table_args__ = (Index("idx_task_model_overrides_purpose", "purpose", "id"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
+    purpose: Mapped[str] = mapped_column(Text)
+    model: Mapped[str | None] = mapped_column(Text)
+    # Recorded at decision time, not re-derived: the sanctioned set lives in
+    # code and moves, so a row holding only the model could not say later
+    # whether it was an override when it was made.
+    overrode_sanctioned: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    reason: Mapped[str | None] = mapped_column(Text)
+    changed_by: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+
+
 class AiPrompt(Base):
     """One row per distinct instruction text, whatever sends it.
 

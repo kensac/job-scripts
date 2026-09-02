@@ -26,6 +26,7 @@ MON_OFF = datetime.datetime(2026, 9, 7, 12, tzinfo=datetime.UTC)
 
 def _shape(**kw) -> TaskShape:
     base = dict(
+        purpose="test-task",
         structured=SO.JSON_SCHEMA,
         batched=True,
         max_output_tokens=1000,
@@ -310,14 +311,26 @@ def test_every_batched_call_site_goes_through_the_standard_caller():
 
 
 def test_the_standard_caller_cannot_run_without_a_purpose():
-    """purpose is what every ledger groups by. Making it keyword-only and
-    required is what stops a new caller being invisible in analytics - the
-    grouping is not something anyone has to remember to add."""
+    """purpose is what every ledger groups by, and it now comes from the SHAPE
+    rather than beside it - so a caller cannot name one purpose while running
+    another's shape, and the key that configures a task is the key that reports
+    it. Required on the declaration is what stops a new caller being invisible
+    in analytics; it is not something anyone has to remember to add.
+    """
+    import dataclasses
     import inspect
 
     from api.tasks.runtime import run_batched
 
-    sig = inspect.signature(run_batched)
-    purpose = sig.parameters["purpose"]
-    assert purpose.kind is inspect.Parameter.KEYWORD_ONLY
-    assert purpose.default is inspect.Parameter.empty, "required, not defaulted"
+    assert "purpose" not in inspect.signature(run_batched).parameters
+    field = next(f for f in dataclasses.fields(TaskShape) if f.name == "purpose")
+    assert field.default is dataclasses.MISSING, "required, not defaulted"
+
+
+def test_every_registered_task_is_keyed_by_its_own_purpose():
+    """One registry, so a task cannot be configurable under a name nothing
+    reports, or reported under a name nothing configures."""
+    from api.tasks import SHAPES
+
+    for key, shape in SHAPES.items():
+        assert shape.purpose == key
