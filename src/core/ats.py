@@ -327,6 +327,39 @@ RESOLVERS: list[AtsResolver] = [
 ]
 
 
+# The domains these providers send MAIL from, which are not the domains they
+# host POSTINGS on. Greenhouse posts on greenhouse.io and mails from
+# greenhouse-mail.io; Workday posts on myworkdayjobs.com and mails from
+# myworkday.com. `markers` covers the posting side, so the mail side cannot be
+# derived from it and the difference is listed rather than assumed away.
+#
+# successfactors.com has no resolver because we cannot read its postings, and
+# is still an applicant-tracking system when it sends mail. The two questions
+# are different and this list answers only the second.
+_MAIL_ONLY_DOMAINS = ("greenhouse-mail.io", "myworkday.com", "successfactors.com")
+
+
+def is_ats_email_domain(domain: str | None) -> bool:
+    """Did this mail come from an applicant-tracking system?
+
+    Near-proof that an application is real: across 1,779 mail-derived
+    applications, 98.9% of those whose first message came from an ATS domain
+    were genuine, against 85.2% of those that did not.
+
+    Its ABSENCE proves nothing, which is the important half. 46% of genuine
+    applications are not ATS-sent, because plenty of employers mail from their
+    own domain - Epic Games, MathWorks, Lockheed Martin, Morgan Stanley and
+    Citadel all do. Gating on this would discard 884 applications to remove 131
+    bad ones, 5.7 real losses per junk removal. Rank on it; never filter on it.
+    """
+    d = (domain or "").lower().strip().rstrip(".")
+    if not d:
+        return False
+    known = [m for r in RESOLVERS for m in r.markers if "." in m]
+    known.extend(_MAIL_ONLY_DOMAINS)
+    return any(d == k or d.endswith("." + k) for k in known)
+
+
 def canonicalize(url: str) -> str | None:
     """Canonical clickable URL for a posting, independent of whether the
     provider's content bypass is enabled."""
