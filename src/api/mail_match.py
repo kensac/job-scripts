@@ -98,7 +98,7 @@ def _by_exact_link(user_id: int, body: str | None) -> Match | None:
     return None
 
 
-def _norm_company(value: str | None) -> str:
+def norm_company(value: str | None) -> str:
     """Loose enough that 'Stripe' and 'Stripe, Inc.' agree.
 
     company is free text on both sides, so exact equality would treat those as
@@ -118,7 +118,7 @@ def _by_company(user_id: int, company: str | None, sent_at) -> Match | None:
     guessing would produce a confident wrong answer that nothing downstream
     can question.
     """
-    key = _norm_company(company)
+    key = norm_company(company)
     if not key:
         return None
     rows = db.query(
@@ -131,7 +131,7 @@ def _by_company(user_id: int, company: str | None, sent_at) -> Match | None:
         """,
         (user_id, sent_at, sent_at),
     )
-    candidates = [r for r in rows if _norm_company(r["company_name"]) == key]
+    candidates = [r for r in rows if norm_company(r["company_name"]) == key]
     if len(candidates) == 1:
         return Match(
             candidates[0]["id"],
@@ -145,7 +145,7 @@ def _by_company(user_id: int, company: str | None, sent_at) -> Match | None:
 
 
 def _by_company_and_title(user_id: int, company: str | None, title: str | None) -> Match | None:
-    key, role = _norm_company(company), _norm_company(title)
+    key, role = norm_company(company), norm_company(title)
     if not key or not role:
         return None
     rows = db.query(
@@ -154,7 +154,7 @@ def _by_company_and_title(user_id: int, company: str | None, title: str | None) 
     candidates = [
         r
         for r in rows
-        if _norm_company(r["company_name"]) == key and _norm_company(r["title"]) == role
+        if norm_company(r["company_name"]) == key and norm_company(r["title"]) == role
     ]
     if len(candidates) == 1:
         return Match(
