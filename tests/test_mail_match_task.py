@@ -11,6 +11,8 @@ from __future__ import annotations
 import datetime
 import itertools
 
+import pytest
+
 from api import db
 from api.tasks import mail_match as task
 
@@ -204,3 +206,41 @@ def test_the_cap_rises_to_a_real_job_search(f):
 
     other = f.make_user()
     assert task.derived_cap(other) == task.CAP_FLOOR, "a user with no history still derives"
+
+
+@pytest.mark.asyncio
+async def test_a_scheduled_run_covers_every_user(f):
+    """The schedule is fleet-wide but matching is per-user by construction, so
+    an unscoped run has to iterate. A task that silently did only the first
+    user would look identical to one that did everybody."""
+    first, second = f.make_user(), f.make_user()
+    for uid in (first, second):
+        job = f.make_job(company=f"Acme{uid}", title="Engineer")
+        f.make_board_row(uid, job, status="Application Submitted")
+
+    await task.handle_match_mail(f.make_task("match_mail", {}), {})
+
+    for uid in (first, second):
+        assert (
+            db.query_one("SELECT count(*) AS n FROM applications WHERE user_id = %s", (uid,))["n"]
+            == 1
+        )
+
+
+@pytest.mark.asyncio
+async def test_matching_one_user_leaves_the_others_alone(f):
+    first, second = f.make_user(), f.make_user()
+    for uid in (first, second):
+        job = f.make_job(company=f"Acme{uid}", title="Engineer")
+        f.make_board_row(uid, job, status="Application Submitted")
+
+    await task.handle_match_mail(f.make_task("match_mail", {}), {"user_id": first})
+
+    assert (
+        db.query_one("SELECT count(*) AS n FROM applications WHERE user_id = %s", (first,))["n"]
+        == 1
+    )
+    assert (
+        db.query_one("SELECT count(*) AS n FROM applications WHERE user_id = %s", (second,))["n"]
+        == 0
+    )

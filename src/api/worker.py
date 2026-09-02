@@ -127,6 +127,26 @@ def schedule_ingest_cycle() -> None:
     day = now.strftime("%Y-%m-%d")
     enqueue("reverify_open", {"cycle": day}, dedupe_key=f"reverify:{day}")
     enqueue("sync_gmail", {"cycle": cycle}, dedupe_key=f"gmail:{cycle}")
+    # Importing mail nobody classifies is an inbox, not an ingest. The sync
+    # above runs hourly, so without these two the pipeline would fill
+    # email_messages forever and derive nothing from it.
+    #
+    # Both carry the same cross-cycle guard as the batched extractions: each
+    # parks on the Batch API and can outlive its own cycle, so the dedupe key
+    # alone would stack a pass an hour on top of one still waiting. Separate
+    # checks so a slow classification does not stop matching from running -
+    # matching is cheap and re-runs improve on themselves as new board rows
+    # appear, which is exactly when it should not be blocked.
+    if not db.query_one(
+        "SELECT 1 FROM tasks WHERE kind = 'classify_mail' "
+        "AND status IN ('pending', 'running', 'waiting', 'awaiting_batch') LIMIT 1"
+    ):
+        enqueue("classify_mail", {"cycle": cycle}, dedupe_key=f"mailclassify:{cycle}")
+    if not db.query_one(
+        "SELECT 1 FROM tasks WHERE kind = 'match_mail' "
+        "AND status IN ('pending', 'running', 'waiting') LIMIT 1"
+    ):
+        enqueue("match_mail", {"cycle": cycle}, dedupe_key=f"mailmatch:{cycle}")
     # Its own kind and its own key, NOT folded into the sync. Dead-credential
     # detection is discovery-on-use, so if it only happened inside the sync
     # then a sync that stops running also stops noticing it cannot run - the

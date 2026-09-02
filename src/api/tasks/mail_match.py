@@ -270,29 +270,55 @@ def match_pending(user_id: int, *, limit: int | None = None) -> dict[str, int]:
 
 
 async def handle_match_mail(task_id: int, payload: dict[str, Any]) -> None:
-    user_id = int(payload["user_id"])
+    """Match every user's mail, or one user's when asked.
+
+    Scheduled runs carry no user_id: matching is per-user by construction (the
+    candidate set is that user's applications) but the schedule is fleet-wide,
+    and a task that silently did only user 1 would look identical to one that
+    did everybody.
+    """
+    requested = payload.get("user_id")
+    if requested:
+        user_ids = [int(requested)]
+    else:
+        # Users with mail OR with tracked applications. Scoping to mail alone
+        # would leave anyone who has not connected Gmail with an empty
+        # applications table and therefore no funnel at all, which reads as
+        # "you have applied to nothing" rather than "we have no mail for you".
+        user_ids = [
+            r["user_id"]
+            for r in db.query(
+                """
+                SELECT user_id FROM email_messages
+                UNION
+                SELECT user_id FROM user_jobs WHERE status = ANY(%s)
+                ORDER BY user_id
+                """,
+                (list(APPLIED_STATUSES),),
+            )
+        ]
+    if not user_ids:
+        _set_progress(task_id, 0, 0, "no mail to match")
+        return
+
     limit = payload.get("limit")
-
-    _set_progress(task_id, 0, 4, "seeding applications from the tracker")
-    seeded = seed_from_tracker(user_id)
-
-    _set_progress(task_id, 1, 4, f"{seeded} tracker applications; matching")
-    counts = match_pending(user_id, limit=int(limit) if limit else None)
-
-    _set_progress(task_id, 2, 4, "deriving applications from unmatched mail")
-    created, derived = seed_from_mail(user_id)
-
-    _set_progress(task_id, 3, 4, "syncing action items")
-    opened = resolved = 0
-    for app in db.query("SELECT id FROM applications WHERE user_id = %s", (user_id,)):
-        result = sync_action_items(app["id"])
-        opened += result["opened"]
-        resolved += result["resolved"]
+    totals = {"tracked": 0, "derived": 0, "matched": 0, "opened": 0, "resolved": 0}
+    for index, user_id in enumerate(user_ids):
+        _set_progress(task_id, index, len(user_ids), f"matching user {user_id}")
+        totals["tracked"] += seed_from_tracker(user_id)
+        counts = match_pending(user_id, limit=int(limit) if limit else None)
+        totals["matched"] += sum(counts.values())
+        created, _ = seed_from_mail(user_id)
+        totals["derived"] += created
+        for app in db.query("SELECT id FROM applications WHERE user_id = %s", (user_id,)):
+            result = sync_action_items(app["id"])
+            totals["opened"] += result["opened"]
+            totals["resolved"] += result["resolved"]
 
     summary = (
-        f"{seeded} tracked + {created} derived applications; "
-        f"{sum(counts.values())} matched {counts}; "
-        f"{derived} derived-matched; {opened} items opened, {resolved} resolved"
+        f"{len(user_ids)} user(s): {totals['tracked']} tracked + {totals['derived']} derived "
+        f"applications, {totals['matched']} messages matched, "
+        f"{totals['opened']} items opened, {totals['resolved']} resolved"
     )
     logger.info(f"Task {task_id}: {summary}")
-    _set_progress(task_id, 4, 4, summary)
+    _set_progress(task_id, len(user_ids), len(user_ids), summary)
