@@ -123,11 +123,9 @@ def test_finish_is_noop_on_cancelled_task():
 # _graceful_exit's requeue SQL (can't call the handler itself, it os._exit()s)
 # ---------------------------------------------------------------------------
 
-_REQUEUE_SQL = (
-    "UPDATE tasks SET status = 'pending', attempts = GREATEST(attempts - 1, 0), "
-    "started_at = NULL, last_heartbeat = NULL "
-    "WHERE id = %s AND status = 'running' AND worker = %s AND attempts = %s"
-)
+# The statement itself, not a copy of it: editing the requeue in worker.py has
+# to move these tests or break them.
+_REQUEUE_SQL = worker._REQUEUE_ON_EXIT_SQL
 
 
 def test_graceful_exit_requeue_sql_decrements_attempts_on_running_task():
