@@ -173,6 +173,48 @@ def enqueue(kind: str, payload: Dict[str, Any], dedupe_key: Optional[str] = None
     return row["id"] if row else None
 
 
+class AwaitingBatch(Exception):
+    """Raised by a handler that has submitted provider batches and has nothing
+    left to do until they finish.
+
+    A batch lives entirely provider-side while it queues, so a worker that sits
+    polling one is doing no work and cannot be used for anything else. Raising
+    this parks the task and frees the slot; poll_batches resumes it once every
+    batch reached a terminal state, or gives up once the provider has breached
+    its own completion window.
+    """
+
+
+def _park_awaiting_batch(task_id: int, batch_ids: List[str]) -> bool:
+    """Records the batches a task is waiting on and releases the worker.
+
+    The ids go in the payload so a resumed run reattaches to work already paid
+    for instead of resubmitting - the same guarantee _pending_batch_ids gave a
+    crashed worker, now used as the normal path rather than as recovery.
+
+    Returns False when the task was no longer claimable (cancelled, or reaped
+    out from under us). That matters: the batches are already submitted and
+    billed, so losing their ids here would orphan paid work with nothing left
+    pointing at it. The caller must surface that rather than park silently.
+    """
+    with db.pool.connection() as conn:
+        result = conn.execute(
+            """
+            UPDATE tasks SET status = 'awaiting_batch', started_at = NULL,
+                last_heartbeat = NULL,
+                payload = jsonb_set(
+                    COALESCE(payload, '{}'::jsonb), '{batch_ids}',
+                    COALESCE(payload->'batch_ids', '[]'::jsonb) || %(ids)s::jsonb)
+            WHERE id = %(tid)s AND status IN ('running', 'pending')
+            """,
+            {"ids": db.jsonb(batch_ids), "tid": task_id},
+        )
+        parked = bool(result.rowcount)
+    if parked:
+        events.publish_task(task_id)
+    return parked
+
+
 def _finish(task_id: int, status: str, error: Optional[str] = None) -> None:
     # Only running tasks can be finished; an admin 'cancelled' status sticks.
     db.execute(
@@ -281,8 +323,11 @@ def _materialize_passing(user_id: int) -> int:
 def _maybe_finalize_parent(parent_id: int) -> None:
     _update_parent_progress(parent_id)
     live = db.query_one(
+        # awaiting_batch counts as live: a parked chunk has work in flight
+        # at the provider, and finalizing the parent without it would publish
+        # partial results as if they were complete.
         "SELECT COUNT(*) AS c FROM tasks WHERE kind = ANY(%s) "
-        "AND parent_id = %s AND status IN ('pending', 'running')",
+        "AND parent_id = %s AND status IN ('pending', 'running', 'awaiting_batch')",
         (CHUNK_KINDS, parent_id),
     )
     if live and live["c"]:
@@ -331,7 +376,7 @@ def _reconcile_chunks() -> None:
         SELECT id FROM tasks t WHERE t.status = 'waiting'
         AND NOT EXISTS (SELECT 1 FROM tasks c WHERE c.kind = ANY(%s)
             AND c.parent_id = t.id
-            AND c.status IN ('pending', 'running'))
+            AND c.status IN ('pending', 'running', 'awaiting_batch'))
         """,
         (CHUNK_KINDS,),
     ):
@@ -657,7 +702,7 @@ async def handle_run_filter_batch_chunk(task_id: int, payload: Dict[str, Any]) -
 
     from openai.lib._pydantic import to_strict_json_schema
 
-    from core.batch import BatchSpec, run_responses_batch
+    from core.batch import BatchSpec
 
     user_id = payload["user_id"]
     flt = payload["filter"]
@@ -711,9 +756,9 @@ async def handle_run_filter_batch_chunk(task_id: int, payload: Dict[str, Any]) -
             logger.info(f"Task {task_id}: reattaching to {len(existing)} in-flight batch(es)")
             results = await collect_batches(existing, hook)
         else:
-            results = await run_responses_batch(
-                specs, cfg.model, cfg.params.get("reasoning_effort", "medium"), 6000,
-                on_event=hook,
+            results = await submit_or_collect(
+                task_id, specs, cfg.model,
+                cfg.params.get("reasoning_effort", "medium"), 6000, hook,
             )
     finally:
         hb.cancel()
@@ -864,7 +909,7 @@ async def handle_ingest_source(task_id: int, payload: Dict[str, Any]) -> None:
     for u in users:
         active = db.query_one(
             "SELECT 1 AS x FROM tasks WHERE kind = 'run_all_filters' "
-            "AND status IN ('pending', 'running', 'waiting') "
+            "AND status IN ('pending', 'running', 'waiting', 'awaiting_batch') "
             "AND (payload->>'user_id')::bigint = %s LIMIT 1",
             (u["id"],),
         )
@@ -956,7 +1001,7 @@ async def _reverify_jobs(
     """Two phases: gather evidence concurrently (ATS gone-detection, then
     content — the fleet-distributed, network-bound part), then settle every
     remaining verdict in ONE half-price batch instead of a call per job."""
-    from core.batch import BatchSpec, collect_batches, run_responses_batch
+    from core.batch import BatchSpec, collect_batches
     from core.pittcsc_simplify import CLOSED_INSTRUCTIONS
     from openai.lib._pydantic import to_strict_json_schema
 
@@ -1054,7 +1099,7 @@ async def _reverify_jobs(
             BatchSpec(url, CLOSED_INSTRUCTIONS, content[:20000], "JobClosedLean", schema)
             for url, content in needs_ai
         ]
-        results = await run_responses_batch(specs, model, "low", 1000, on_event=hook)
+        results = await submit_or_collect(task_id, specs, model, "low", 1000, hook)
         _record_reverify_results(results, by_url, model)
     _set_progress(task_id, total, total, "reverified")
     if parent_id:
@@ -1196,6 +1241,52 @@ def _batch_event_hook(task_id: int, purpose: str, model: str):
     return on_event
 
 
+async def submit_or_collect(
+    task_id: int,
+    specs: list,
+    model: str,
+    reasoning_effort: str,
+    max_output_tokens: int,
+    hook,
+) -> Dict[str, Any]:
+    """The one way a scheduled handler runs a batch.
+
+    First call submits and raises AwaitingBatch, freeing the worker. When
+    poll_batches sees every batch reach a terminal state it flips the task back
+    to pending; the handler then re-runs, lands here again, finds the ids in
+    its payload and collects the results without resubmitting.
+
+    Callers must build their specs before calling and be safe to re-run from
+    the top, which they already are - every batched sweep was written to be
+    idempotent by re-sweep.
+    """
+    from core.batch import collect_batches, submit_responses_batches
+
+    existing = _pending_batch_ids(task_id)
+    if existing:
+        logger.info(f"Task {task_id}: collecting {len(existing)} finished batch(es)")
+        return await collect_batches(existing, hook)
+
+    if not specs:
+        return {}
+    ids = await submit_responses_batches(
+        specs, model, reasoning_effort, max_output_tokens, on_event=hook
+    )
+    if not ids:
+        # Nothing was accepted by the provider; fail normally so the usual
+        # retry path applies rather than parking forever.
+        raise RuntimeError("no batches were accepted by the provider")
+    if not _park_awaiting_batch(task_id, ids):
+        # ai_batches still records them (the event hook fired on submission),
+        # so they are recoverable by hand - but nothing will collect them
+        # automatically, which is worth failing loudly over.
+        raise RuntimeError(
+            f"submitted {len(ids)} batch(es) but task {task_id} was no longer "
+            f"claimable; ids recorded in ai_batches: {', '.join(ids)}"
+        )
+    raise AwaitingBatch()
+
+
 def _pending_batch_ids(task_id: int) -> List[str]:
     row = db.query_one("SELECT payload->'batch_ids' AS ids FROM tasks WHERE id = %s", (task_id,))
     return list(row["ids"]) if row and row["ids"] else []
@@ -1333,7 +1424,7 @@ def _annualize(value: Optional[float], period: str) -> Optional[int]:
 
 
 async def handle_extract_comp(task_id: int, payload: Dict[str, Any]) -> None:
-    from core.batch import BatchSpec, run_responses_batch
+    from core.batch import BatchSpec
     from openai.lib._pydantic import to_strict_json_schema
 
     rows = db.query(
@@ -1370,8 +1461,8 @@ async def handle_extract_comp(task_id: int, payload: Dict[str, Any]) -> None:
         logger.info(f"Task {task_id}: reattaching to {len(existing)} in-flight batch(es)")
         results = await collect_batches(existing, hook)
     else:
-        results = await run_responses_batch(
-            specs, ai.DEFAULT_MODELS["openai"], "low", 1500, on_event=hook
+        results = await submit_or_collect(
+            task_id, specs, ai.DEFAULT_MODELS["openai"], "low", 1500, hook
         )
     done = 0
     for url, res in results.items():
@@ -1415,6 +1506,71 @@ async def handle_extract_comp(task_id: int, payload: Dict[str, Any]) -> None:
         if done % 200 == 0:
             _set_progress(task_id, done, len(specs), "comp extracted")
     _set_progress(task_id, done, len(specs), "comp extracted")
+
+
+async def handle_poll_batches(task_id: int, payload: Dict[str, Any]) -> None:
+    """Resumes tasks whose provider batches have finished.
+
+    This is the half that makes parking safe: without it a parked task would
+    wait forever. It only asks the provider for status - it never downloads
+    output - so checking every in-flight batch costs about as much as checking
+    one, and the handler that resumes does the actual collection.
+    """
+    from core.batch import batch_states, completion_window_seconds, is_terminal
+
+    parked = db.query(
+        "SELECT id, kind, payload FROM tasks WHERE status = 'awaiting_batch' ORDER BY id"
+    )
+    if not parked:
+        _set_progress(task_id, 0, 0, "nothing awaiting batches")
+        return
+
+    # The provider guarantees a terminal state inside the window we asked for,
+    # so that window IS the deadline - no invented timeout, and it moves
+    # automatically if BATCH_COMPLETION_WINDOW ever changes.
+    window = completion_window_seconds()
+    resumed = expired = 0
+    for t in parked:
+        ids = list((t["payload"] or {}).get("batch_ids") or [])
+        if not ids:
+            # Parked with nothing to wait for: resume rather than strand it.
+            _resume_parked(t["id"])
+            resumed += 1
+            continue
+        states = await batch_states(ids)
+        # A batch we cannot read a status for is treated as unfinished, so a
+        # transient provider error delays a resume instead of dropping results.
+        if all(is_terminal(states.get(b, "")) for b in ids):
+            _resume_parked(t["id"])
+            resumed += 1
+            continue
+        overdue = db.query_one(
+            "SELECT 1 FROM ai_batches WHERE provider_batch_id = ANY(%s) "
+            "AND submitted_at < now() - make_interval(secs => %s) LIMIT 1",
+            (ids, window),
+        )
+        if overdue:
+            # Past the provider's own guarantee. Resume anyway: collection
+            # records whatever did land and leaves the rest to the next sweep,
+            # which is strictly better than failing and discarding paid work.
+            logger.warning(
+                f"Task {t['id']} batches exceeded the {window}s completion window; collecting"
+            )
+            _resume_parked(t["id"])
+            expired += 1
+    _set_progress(
+        task_id, resumed + expired, len(parked),
+        f"{resumed} resumed, {expired} past the completion window",
+    )
+
+
+def _resume_parked(task_id: int) -> None:
+    db.execute(
+        "UPDATE tasks SET status = 'pending', started_at = NULL, last_heartbeat = NULL "
+        "WHERE id = %s AND status = 'awaiting_batch'",
+        (task_id,),
+    )
+    events.publish_task(task_id)
 
 
 async def handle_data_health(task_id: int, payload: Dict[str, Any]) -> None:
@@ -1529,7 +1685,7 @@ async def handle_verify_new(task_id: int, payload: Dict[str, Any]) -> None:
     half-price call per job yields both verdicts. Idempotent by re-sweep —
     only successful lines produce verdict rows; anything missed or failed is
     picked up by the next cycle's sweep."""
-    from core.batch import BatchSpec, run_responses_batch
+    from core.batch import BatchSpec
     from core.store import add_ai_result
     from openai.lib._pydantic import to_strict_json_schema
 
@@ -1585,7 +1741,7 @@ async def handle_verify_new(task_id: int, payload: Dict[str, Any]) -> None:
 
         results = await collect_batches(existing, hook)
     else:
-        results = await run_responses_batch(specs, model, "low", 1000, on_event=hook)
+        results = await submit_or_collect(task_id, specs, model, "low", 1000, hook)
     done = 0
     for url, res in results.items():
         job = by_url.get(url)
@@ -1644,6 +1800,7 @@ HANDLERS = {
     "verify_new": handle_verify_new,
     "fetch_missing_content": handle_fetch_missing_content,
     "data_health": handle_data_health,
+    "poll_batches": handle_poll_batches,
 }
 
 
@@ -1677,11 +1834,12 @@ def schedule_ingest_cycle() -> None:
     # tasks per cycle; this stops overlap ACROSS cycles.
     if not db.query_one(
         "SELECT 1 FROM tasks WHERE kind = 'extract_comp' "
-        "AND status IN ('pending', 'running', 'waiting') LIMIT 1"
+        "AND status IN ('pending', 'running', 'waiting', 'awaiting_batch') LIMIT 1"
     ):
         enqueue("extract_comp", {"cycle": cycle}, dedupe_key=f"comp:{cycle}")
     enqueue("send_digests", {"cycle": day}, dedupe_key=f"digest:{day}")
     enqueue("data_health", {"cycle": cycle}, dedupe_key=f"health:{cycle}")
+    enqueue("poll_batches", {"cycle": cycle}, dedupe_key=f"pollbatch:{cycle}")
     # Hourly sweep for jobs the ingest pipeline left unverified (inline AI
     # checks disabled fleet-side): closed+clearance in one batched call each.
     enqueue("verify_new", {"cycle": cycle}, dedupe_key=f"verify:{cycle}")
@@ -1779,6 +1937,11 @@ async def run_once() -> bool:
         _finish(task["id"], "done")
         metrics.TASKS_PROCESSED.labels(task["kind"], "done").inc()
         logger.info(f"Task {task['id']} done")
+    except AwaitingBatch:
+        # Parked, not finished and not failed: the slot is free and the task
+        # resumes when its batches land.
+        metrics.TASKS_PROCESSED.labels(task["kind"], "awaiting_batch").inc()
+        logger.info(f"Task {task['id']} parked awaiting batches")
     except Exception as exc:
         if _is_transient(exc) and task["attempts"] < MAX_ATTEMPTS:
             # Host ran out of memory/threads, not a broken task: put it back so

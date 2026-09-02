@@ -40,6 +40,22 @@ BATCH_WAVE_CONCURRENCY = int(os.environ.get("JOBTRACKER_BATCH_WAVE_CONCURRENCY",
 BATCH_CHARS_PER_TOKEN = 4
 BATCH_POLL_INTERVAL = 30.0
 
+
+def completion_window_seconds() -> int:
+    """Seconds the provider is allowed to take, read from the window we ask
+    for rather than assumed. A batch that is still non-terminal past this has
+    breached the provider's own guarantee and is the caller's to give up on,
+    so the deadline is derived from BATCH_COMPLETION_WINDOW and moves with it.
+    """
+    window = BATCH_COMPLETION_WINDOW.strip().lower()
+    if window.endswith("h"):
+        return int(float(window[:-1]) * 3600)
+    if window.endswith("d"):
+        return int(float(window[:-1]) * 86400)
+    if window.endswith("m"):
+        return int(float(window[:-1]) * 60)
+    raise ValueError(f"unrecognised completion window: {BATCH_COMPLETION_WINDOW!r}")
+
 _TERMINAL_STATES = {"completed", "failed", "expired", "cancelled"}
 
 
@@ -241,16 +257,15 @@ async def _collect_batch(
     return results
 
 
-async def _run_chunk(
+async def _submit_chunk(
     client: AsyncOpenAI,
     specs: List[BatchSpec],
     model: str,
     reasoning_effort: str,
     max_output_tokens: int,
     on_event: BatchEventHook = None,
-) -> Dict[str, BatchResult]:
-    results: Dict[str, BatchResult] = {spec.custom_id: BatchResult(spec.custom_id) for spec in specs}
-
+) -> str:
+    """Uploads one wave and returns its provider batch id."""
     payload = "\n".join(
         json.dumps(_build_line(spec, model, reasoning_effort, max_output_tokens))
         for spec in specs
@@ -272,8 +287,25 @@ async def _run_chunk(
             on_event(batch.id, batch.status, {"est_tokens": est, "requests": len(specs)})
         except Exception:
             logger.exception("batch event hook failed")
+    return batch.id
 
-    batch = await _wait_for_batch(client, batch.id, on_event)
+
+async def _run_chunk(
+    client: AsyncOpenAI,
+    specs: List[BatchSpec],
+    model: str,
+    reasoning_effort: str,
+    max_output_tokens: int,
+    on_event: BatchEventHook = None,
+) -> Dict[str, BatchResult]:
+    """Submit-and-wait, retained for callers that genuinely need a result in
+    hand. The scheduled paths use submit_responses_batches + collect_batches
+    instead so they do not hold a worker while the provider queues."""
+    results: Dict[str, BatchResult] = {spec.custom_id: BatchResult(spec.custom_id) for spec in specs}
+    batch_id = await _submit_chunk(
+        client, specs, model, reasoning_effort, max_output_tokens, on_event
+    )
+    batch = await _wait_for_batch(client, batch_id, on_event)
     collected = await _collect_batch(client, batch, results)
     _emit_usage(on_event, batch.id, batch.status, collected)
     return collected
@@ -302,6 +334,61 @@ async def collect_batches(
             {k: v for k, v in results.items() if k not in before},
         )
     return results
+
+
+async def submit_responses_batches(
+    specs: List[BatchSpec],
+    model: str,
+    reasoning_effort: str,
+    max_output_tokens: int,
+    on_event: BatchEventHook = None,
+) -> List[str]:
+    """Creates every wave and returns their provider ids WITHOUT waiting.
+
+    Splitting submission from collection is what lets a caller release its
+    worker: a batch lives entirely provider-side while it queues, so holding a
+    slot to poll it is pure waste. Waves are all created up front for the same
+    reason - there is nothing local to ration, so no concurrency limit is
+    needed here.
+    """
+    client = _client()
+    if not client or not specs:
+        return []
+    chunks = _chunk_specs(specs, max_output_tokens)
+    logger.info(f"Submitting {len(specs)} requests as {len(chunks)} batch(es)")
+    ids: List[str] = []
+    for index, chunk in enumerate(chunks, start=1):
+        try:
+            batch = await _submit_chunk(
+                client, chunk, model, reasoning_effort, max_output_tokens, on_event
+            )
+        except Exception as exc:
+            # A failed submission must not discard the waves already created
+            # and paid for; the unsubmitted specs fall to the next sweep.
+            logger.warning(f"Batch wave {index}/{len(chunks)} submission failed: {exc}")
+            continue
+        ids.append(batch)
+    return ids
+
+
+async def batch_states(batch_ids: List[str]) -> Dict[str, str]:
+    """Provider status per batch id. A status call only - it never downloads
+    output - so polling many batches costs about as much as polling one."""
+    client = _client()
+    if not client:
+        return {}
+    states: Dict[str, str] = {}
+    for batch_id in batch_ids:
+        try:
+            batch = await client.batches.retrieve(batch_id)
+            states[batch_id] = batch.status
+        except Exception as exc:
+            logger.warning(f"Batch {batch_id} status check failed: {exc}")
+    return states
+
+
+def is_terminal(state: str) -> bool:
+    return state in _TERMINAL_STATES
 
 
 async def run_responses_batch(
