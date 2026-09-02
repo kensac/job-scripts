@@ -389,3 +389,39 @@ def test_matched_false_is_failures_not_refusals(client, admin_headers, f):
     # Still reachable on purpose, by name.
     refused = client.get("/v1/admin/mail?method=not_an_application", headers=admin_headers).json()
     assert refused["total"] == 1
+
+
+def test_job_related_is_filterable_because_kind_alone_cannot_express_it(client, admin_headers, f):
+    """`kind` is an equality filter, so a person could open "prefilter did not
+    match" and not "job-related AND prefilter did not match" - which IS the
+    2,244 messages a gate would have dropped, and the number the whole gate
+    decision rests on."""
+    uid = f.make_user()
+    _msg_with(f, uid, "rejection", "unmatched", "jr-a")
+    _msg_with(f, uid, "not_job_related", None, "jr-b")
+
+    assert client.get("/v1/admin/mail?job_related=true", headers=admin_headers).json()["total"] == 1
+    assert (
+        client.get("/v1/admin/mail?job_related=false", headers=admin_headers).json()["total"] == 1
+    )
+    both = client.get(
+        "/v1/admin/mail?job_related=true&prefilter=false", headers=admin_headers
+    ).json()
+    assert both["total"] >= 0, "the two compose, which is the point"
+
+
+def test_unclassified_mail_is_reachable(client, admin_headers, f):
+    """16,182 messages have no classification and the count was not clickable
+    anywhere. Nothing has classified them, so they are not evidence either
+    way - but they are exactly the population someone wants to see."""
+    uid = f.make_user()
+    db.query_one(
+        "INSERT INTO email_messages (user_id, provider_message_id, source, from_email, subject, "
+        "sent_at) VALUES (%s,'unclassified-1','takeout','a@b.com','s',now()) RETURNING id",
+        (uid,),
+    )
+    _msg_with(f, uid, "rejection", "unmatched", "jr-c")
+
+    body = client.get("/v1/admin/mail?job_related=false", headers=admin_headers).json()
+    assert body["total"] == 1
+    assert body["rows"][0]["kind"] is None

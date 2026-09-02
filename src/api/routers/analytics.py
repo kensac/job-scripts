@@ -128,6 +128,16 @@ _FIRST_CLOSED_SQL = signals.first_closed_sql()
 # was run on it, and `priced` separates "this cost nothing" from "we do not
 # know what this cost": content and extraction rows carry no model and no
 # cost, and folding them into a zero would understate the bill.
+# ALL TIME, deliberately, and now said out loud in the response.
+#
+# /admin/spend defaults to 30 days and this takes no window at all, so a reader
+# comparing the two was comparing a lifetime against a month with nothing on
+# either page saying so. Found by personal-portfolio-e3 while checking whether
+# the two spend figures could be reconciled - they cannot, and this was the
+# difference nobody could see.
+#
+# All-time is the right window HERE: the question is whether a board has earned
+# its keep, which is a question about its whole life, not the last month.
 _SPEND_SQL = """
 SELECT j.source AS source, a.model,
        count(*) AS calls,
@@ -367,6 +377,10 @@ def _spend_summary(rows: list[dict[str, Any]], min_sample: int) -> dict[str, Any
     priced_calls = sum(int(r["priced_calls"]) for r in rows)
     cost = sum(r["cost_usd"] for r in rows if r["cost_usd"] is not None)
     return {
+        # Said out loud, because /admin/spend defaults to 30 days and this does
+        # not. A reader comparing the two was comparing a lifetime against a
+        # month with nothing on either page saying so.
+        "window": "all_time",
         "calls": calls,
         "total_tokens": sum(int(r["total_tokens"]) for r in rows),
         "cost_usd": float(cost),
