@@ -22,6 +22,7 @@ from pydantic import BaseModel
 
 from api import db
 from api.tasks.runtime import _batch_event_hook, _set_progress, submit_or_collect
+from core import providers
 
 logger = logging.getLogger("jobtracker_worker")
 
@@ -58,7 +59,7 @@ CLASSIFY_PER_CYCLE = int(os.environ.get("JOBTRACKER_MAIL_CLASSIFY_PER_CYCLE", "1
 MAX_CLASSIFY_PER_CYCLE = int(os.environ.get("JOBTRACKER_MAIL_CLASSIFY_MAX", "5000"))
 
 # Reasoning effort is PER MODEL, because these two do not accept the same
-# values. Probed against the live APIs:
+# values. Probed against the live APIs, which name the sets in their 400s:
 #
 #   gpt-5-mini    accepts minimal, low, medium, high   REJECTS none
 #   gpt-5.6-luna  accepts none, low, medium, high,     REJECTS minimal
@@ -74,14 +75,35 @@ MAX_CLASSIFY_PER_CYCLE = int(os.environ.get("JOBTRACKER_MAIL_CLASSIFY_MAX", "500
 # A shared constant is what shipped first, and it 400'd on every ongoing call
 # while backfill worked, because the value chosen suited only the model that
 # had been dry-run by hand.
-_EFFORT_BY_MODEL = {
-    "gpt-5.6-luna": "none",
-    "gpt-5-mini": "minimal",
-}
+#
+# Which value each model accepts is NOT restated here. It is declared in
+# core/providers/, the model picks the first of these it accepts, and a second
+# copy keyed by model name would drift the moment a model is swapped by env
+# var - which both model constants above can be.
+_EFFORT_PREFERENCE = ("none", "minimal", "low")
 
-# Every model in the intersection above, so an unconfigured model still gets a
-# value both generations accept rather than failing the whole batch.
+# Every model in the intersection above, so a model the registry has not been
+# taught still gets a value both generations accept rather than failing the
+# whole batch. Deliberately not the cheapest: guessing cheap at an unknown
+# model is how the 400 happened.
 FALLBACK_EFFORT = "low"
+
+
+def effort_for(model: str) -> str:
+    """The cheapest reasoning effort this model actually accepts.
+
+    Unknown models get the intersection value rather than a guess: a batch
+    submits whole and fails whole, so a rejected parameter costs the entire
+    run, not one call.
+    """
+    declared = providers.model(model)
+    if declared is None:
+        return FALLBACK_EFFORT
+    for effort in _EFFORT_PREFERENCE:
+        if effort in declared.reasoning.accepts:
+            return effort
+    return declared.reasoning.default or FALLBACK_EFFORT
+
 
 # Enough for the schema's handful of short fields. The model does not reason
 # here, so a larger ceiling buys nothing and a smaller one truncates JSON
@@ -143,16 +165,6 @@ class MailClassification(BaseModel):
     deadline: str | None
     deadline_is_explicit: bool
     confidence: Literal["high", "medium", "low"]
-
-
-def effort_for(model: str) -> str:
-    """The cheapest reasoning effort this model actually accepts.
-
-    Unknown models get the intersection value rather than a guess: a batch
-    submits whole and fails whole, so a rejected parameter costs the entire
-    run, not one call.
-    """
-    return _EFFORT_BY_MODEL.get(model, FALLBACK_EFFORT)
 
 
 # Dates the model actually returns, measured over 200 real messages rather

@@ -78,10 +78,14 @@ def test_sql_and_python_agree(prompt, completion, cached, batched):
     row in Python. Two renderings of one formula; if they disagree, historical
     spend and live spend are measured differently and no chart is trustworthy.
     """
-    rate_in, rate_out = pricing.PRICES_PER_MTOK[NANO]
+    price = pricing.rates_for(NANO)
+    assert price is not None
+    tier = price.tiers[0]
     expr = pricing.cost_sql(
         model_rate_in="%(rate_in)s::numeric",
         model_rate_out="%(rate_out)s::numeric",
+        model_rate_cached_in="%(rate_cached)s::numeric",
+        batch_rate="%(batch_rate)s::numeric",
         prompt="%(prompt)s::bigint",
         completion="%(completion)s::bigint",
         cached="%(cached)s::bigint",
@@ -90,8 +94,10 @@ def test_sql_and_python_agree(prompt, completion, cached, batched):
     row = db.query_one(
         f"SELECT {expr} AS cost",
         {
-            "rate_in": str(rate_in),
-            "rate_out": str(rate_out),
+            "rate_in": str(tier.rate_in),
+            "rate_out": str(tier.rate_out),
+            "rate_cached": str(pricing.cached_rate(tier)),
+            "batch_rate": str(price.batch_rate if price.batch_rate is not None else 1),
             "prompt": prompt,
             "completion": completion,
             "cached": cached,

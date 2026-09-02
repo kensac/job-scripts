@@ -13,8 +13,8 @@ import pytest
 
 from api import db, mail_store
 from api.tasks import HANDLERS, mail_classify
+from core import pricing
 from core.mail_import import ImportedMessage
-from core.pricing import PRICES_PER_MTOK
 
 
 class _Res:
@@ -63,8 +63,8 @@ def test_both_models_are_priced():
     """If a model is missing from the price table its spend books as NULL and
     the classification run is invisible to /admin/spend - a silent hole in
     exactly the surface built to catch silent holes."""
-    assert mail_classify.BACKFILL_MODEL in PRICES_PER_MTOK
-    assert mail_classify.ONGOING_MODEL in PRICES_PER_MTOK
+    assert pricing.rates_for(mail_classify.BACKFILL_MODEL) is not None
+    assert pricing.rates_for(mail_classify.ONGOING_MODEL) is not None
 
 
 def test_handler_is_registered():

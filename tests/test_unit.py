@@ -147,7 +147,9 @@ def test_validate_params_rejects_invalid_effort():
     assert ai.validate_params("anthropic", {"effort": "bogus"}) is not None
 
 
-def test_validate_params_temperature_only_for_openai_compatible():
+def test_validate_params_temperature_follows_the_declared_capability():
+    """Declared per provider now rather than a hardcoded provider name, so a
+    provider that does accept temperature says so in its descriptor."""
     assert ai.validate_params("openai_compatible", {"temperature": 0.5}) is None
     assert ai.validate_params("openai", {"temperature": 0.5}) is not None
 
@@ -161,7 +163,7 @@ def test_provider_of_model():
 def test_prices_cover_every_catalog_model():
     for models in ai.MODEL_CATALOG.values():
         for entry in models:
-            assert entry["model"] in pricing.PRICES_PER_MTOK, entry["model"]
+            assert pricing.rates_for(entry["model"]) is not None, entry["model"]
 
 
 # ---------------------------------------------------------------------------

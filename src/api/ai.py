@@ -8,31 +8,28 @@ from anthropic import AsyncAnthropic
 from openai import AsyncOpenAI
 from pydantic import BaseModel
 
-PROVIDERS = ("openai", "anthropic", "openai_compatible")
+from core import providers
 
-DEFAULT_MODELS = {
-    "openai": "gpt-5-nano",
-    "anthropic": "claude-opus-5",
-    "openai_compatible": None,
-}
+PROVIDERS = (*providers.PROVIDERS, "openai_compatible")
+
+# The first model a provider declares is its default.
+DEFAULT_MODELS: dict[str, str | None] = {
+    name: p.models[0].name if p.models else None for name, p in providers.PROVIDERS.items()
+} | {"openai_compatible": None}
+
+# The server's own workhorse model. Separate from DEFAULT_MODELS because that
+# map is legitimately nullable - openai_compatible has no default, the user
+# supplies one - while the internal batch paths need a concrete model and
+# should not each re-assert that this particular entry is not None.
+DEFAULT_OPENAI_MODEL: str = providers.PROVIDERS["openai"].models[0].name
 
 # Shown in the UI model picker; openai_compatible accepts any model string.
-MODEL_CATALOG = {
-    "openai": [
-        {"model": "gpt-5-nano", "note": "Cheapest, used by default; fine for most filters"},
-        {"model": "gpt-5-mini", "note": "Better judgment on nuanced criteria"},
-        {"model": "gpt-5", "note": "Strong general model"},
-        {"model": "gpt-5.6-luna", "note": "Newest small model, fast and cheap"},
-        {"model": "gpt-5.6-terra", "note": "Newest mid-tier, strong quality"},
-        {"model": "gpt-5.6-sol", "note": "Newest flagship, highest cost"},
-    ],
-    "anthropic": [
-        {"model": "claude-opus-5", "note": "Most capable, best default for Anthropic keys"},
-        {"model": "claude-sonnet-5", "note": "Strong quality at lower cost"},
-        {"model": "claude-haiku-4-5", "note": "Fast and cheap for simple filters"},
-    ],
-    "openai_compatible": [],
-}
+# Projected from the registry rather than maintained beside it - a second list
+# of models is a second list to forget to update.
+MODEL_CATALOG: dict[str, list[dict[str, str]]] = {
+    name: [{"model": m.name, "note": m.note} for m in p.models if m.selectable]
+    for name, p in providers.PROVIDERS.items()
+} | {"openai_compatible": []}
 
 OWNER_KEY_MODELS = {
     m.strip()
@@ -40,7 +37,7 @@ OWNER_KEY_MODELS = {
     if m.strip()
 }
 
-_SERVER_KEY_ENVS = {"openai": "OPENAI_API_KEY", "anthropic": "ANTHROPIC_API_KEY"}
+_SERVER_KEY_ENVS = {name: p.api_key_env for name, p in providers.PROVIDERS.items()}
 
 
 def server_key(provider: str) -> str:
@@ -48,17 +45,14 @@ def server_key(provider: str) -> str:
 
 
 def provider_of_model(model: str) -> str | None:
-    for provider, models in MODEL_CATALOG.items():
-        if any(m["model"] == model for m in models):
-            return provider
-    return None
+    return providers.provider_of(model)
 
 
 def owner_models(unlimited: bool) -> list:
     """Models usable on the server's keys: everything for unlimited users,
     the allowlist for budgeted ones - per provider with a key configured."""
     out = []
-    for provider in ("openai", "anthropic"):
+    for provider in providers.PROVIDERS:
         if not server_key(provider):
             continue
         for m in MODEL_CATALOG[provider]:
@@ -67,14 +61,46 @@ def owner_models(unlimited: bool) -> list:
     return sorted(out)
 
 
-# Newer OpenAI models accept "none"/"xhigh"/"max" and REJECT "minimal" with a
-# 400; older ones are the reverse. The union is validated because this gate
-# guards a user-supplied param and a wrong rejection here blocks a legitimate
-# model, while a wrong acceptance surfaces immediately as the provider's own
-# error naming the supported set. Per-model tables would need updating
-# whenever a model ships, which is how they end up wrong.
-_EFFORTS_OPENAI = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
-_EFFORTS_ANTHROPIC = ("low", "medium", "high", "xhigh", "max")
+def _declared_efforts(provider: str, model: str | None) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """The (accepts, rejects) a model declares, or the provider's union.
+
+    A model this registry does not know is NOT validated - both tuples come
+    back empty and the call goes through. That is deliberate. A wrong rejection
+    blocks a model that works and surfaces as a mystery outage; a wrong
+    acceptance comes back as the provider's own error naming what it supports.
+    Being stricter than the vendor only makes us slower than the vendor, and a
+    table that blocks a model shipped yesterday is exactly that.
+
+    When the caller does not know which model the params are for, the union
+    across the provider's declared models is the permissive answer - but it is
+    now DERIVED from the per-model declarations rather than hand-maintained
+    beside them, which is what let the two OpenAI generations' incompatible
+    sets sit in one tuple.
+    """
+    declared = providers.model(model)
+    if declared is not None:
+        return declared.reasoning.accepts, declared.reasoning.rejects
+    if model:
+        # A named model this registry has never heard of: validate nothing and
+        # let the provider answer. This is the case the rule exists for - a
+        # model that shipped after the table was last read must not be blocked
+        # by the table's ignorance.
+        return (), ()
+    known = providers.PROVIDERS.get(provider)
+    if known is None:
+        return (), ()
+    accepts: set[str] = set()
+    for m in known.models:
+        accepts.update(m.reasoning.accepts)
+    return tuple(sorted(accepts)), ()
+
+
+def _effort_param(provider: str) -> str | None:
+    known = providers.PROVIDERS.get(provider)
+    if known is None or not known.models:
+        return None
+    return known.models[0].reasoning.param
+
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -89,23 +115,37 @@ class AIConfig:
     params: dict[str, Any] = field(default_factory=dict)
 
 
-def validate_params(provider: str, params: dict[str, Any]) -> str | None:
-    """Returns an error message, or None when valid."""
+def validate_params(provider: str, params: dict[str, Any], model: str | None = None) -> str | None:
+    """Returns an error message, or None when valid.
+
+    `model` is optional because the settings route does not always know it. When
+    it is given and declared, the reasoning value is checked against that
+    model's own accepted set; otherwise against the provider's union.
+    """
     allowed = {"reasoning_effort", "effort", "max_output_tokens", "temperature"}
     unknown = set(params) - allowed
     if unknown:
         return f"unknown params: {sorted(unknown)}"
-    if "reasoning_effort" in params and params["reasoning_effort"] not in _EFFORTS_OPENAI:
-        return f"reasoning_effort must be one of {_EFFORTS_OPENAI}"
-    if "effort" in params and params["effort"] not in _EFFORTS_ANTHROPIC:
-        return f"effort must be one of {_EFFORTS_ANTHROPIC}"
+    accepts, rejects = _declared_efforts(provider, model)
+    for key in ("reasoning_effort", "effort"):
+        if key not in params:
+            continue
+        value = params[key]
+        if value in rejects:
+            return f"{model or provider} rejects {key}={value!r}"
+        if accepts and value not in accepts:
+            return f"{key} must be one of {accepts}"
     if "max_output_tokens" in params:
         v = params["max_output_tokens"]
         if not isinstance(v, int) or not 256 <= v <= 64000:
             return "max_output_tokens must be an integer between 256 and 64000"
     if "temperature" in params:
-        if provider != "openai_compatible":
-            return "temperature is only supported for openai_compatible providers"
+        known = providers.PROVIDERS.get(provider)
+        supported = provider == "openai_compatible" or (
+            known is not None and known.supports_temperature
+        )
+        if not supported:
+            return "temperature is not supported for this provider"
         v = params["temperature"]
         if not isinstance(v, (int, float)) or not 0 <= v <= 2:
             return "temperature must be between 0 and 2"
@@ -231,6 +271,12 @@ async def _parse[T: BaseModel](
         )
         return response.output_parsed, usage
 
+    # Everything that is not OpenAI's Responses API lands here: xAI and any
+    # user-configured openai_compatible endpoint. Both accept a strict
+    # json_schema response_format, which is what .parse() sends, so neither
+    # needs a branch of its own. DeepSeek is the provider that will: it accepts
+    # only response_format json_object and rejects json_schema outright, so it
+    # cannot use this path at all.
     completion_kwargs: dict[str, Any] = {}
     if "temperature" in cfg.params:
         completion_kwargs["temperature"] = cfg.params["temperature"]

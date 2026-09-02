@@ -799,7 +799,7 @@ async def run_single_check(body: RunCheckBody, user: AuthedUser = Depends(requir
         provider="openai",
         api_key=key,
         key_source="owner",
-        model=ai.DEFAULT_MODELS["openai"],
+        model=ai.DEFAULT_OPENAI_MODEL,
         params={"reasoning_effort": "medium" if body.with_reason else "low"},
     )
     parsed, usage = await _verdicts.run_check(
@@ -1511,6 +1511,15 @@ def stats(user: AuthedUser = Depends(require_admin)):
     )
     total_cost = Decimal(0)
     for row in by_model:
+        if pricing.is_tiered(row["model"]):
+            # This prices SUMMED tokens, and a tiered model's rate depends on
+            # each individual request's prompt length. A thousand small calls
+            # sum into a tier none of them was billed at, so the only honest
+            # answer here is "not priced" - the same NULL an unknown model
+            # gets. Per-row cost_usd is written at call time and is the right
+            # source for a total once this endpoint sums that instead.
+            row["cost_usd"] = None
+            continue
         # Batched and synchronous tokens bill at different rates, so they are
         # priced as two separate calls and summed - one blended rate over the
         # whole model would be wrong by up to 2x depending on the mix.

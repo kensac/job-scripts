@@ -146,7 +146,7 @@ async def _reverify_jobs(
 
     if not ai.server_key("openai"):
         raise LookupError("no server OpenAI key for reverification")
-    model = ai.DEFAULT_MODELS["openai"]
+    model = ai.DEFAULT_OPENAI_MODEL
     by_url = {r["url"]: r for r in rows}
     hook = _batch_event_hook(task_id, "reverify", model)
 
@@ -369,7 +369,7 @@ async def handle_verify_new(task_id: int, payload: dict[str, Any]) -> None:
     ]
     by_url = {r["url"]: r for r in rows}
     _set_progress(task_id, 0, len(specs), "verify batch submitted (half price)")
-    model = ai.DEFAULT_MODELS["openai"]
+    model = ai.DEFAULT_OPENAI_MODEL
     hook = _batch_event_hook(task_id, "verify", model)
     existing = _pending_batch_ids(task_id)
     if existing:

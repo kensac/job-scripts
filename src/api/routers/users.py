@@ -170,7 +170,7 @@ def put_settings(body: SettingsPut, user: AuthedUser = Depends(require_user)):
         )
     provider = (row or {}).get("ai_provider") or "openai"
     if body.ai_params is not None:
-        error = ai.validate_params(provider, body.ai_params)
+        error = ai.validate_params(provider, body.ai_params, body.ai_model)
         if error:
             raise HTTPException(400, detail={"code": "INVALID_PARAMS", "message": error})
     if body.ai_model is not None:
