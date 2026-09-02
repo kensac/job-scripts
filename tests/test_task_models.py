@@ -116,6 +116,28 @@ class TestCost:
         cheaper = next(c for c in body["candidates"] if c["model"] == "gpt-5-nano")
         assert float(cheaper["est_cycle_cost_delta_usd"]) < 0
 
+    def test_a_time_varying_price_says_so_rather_than_claiming_a_state(self, client, admin_headers):
+        """This replaced an `off_peak` flag that could never be true: it was
+        computed with no timestamp, which means peak by the pricing rule, so it
+        reported "not currently discounted" when what it knew was "nobody asked
+        what time it is". False read as a finding.
+
+        What is knowable without a clock is whether the model is billed by the
+        hour at all, which is a caveat belonging beside the price.
+        """
+        body = _get(client, admin_headers, "comp")
+        for c in body["candidates"]:
+            assert "off_peak" not in c
+            assert isinstance(c["price_varies_by_time"], bool)
+        # No OpenAI model is billed by the hour; DeepSeek is, and is offered
+        # here as an ineligible candidate with its reason.
+        assert not any(
+            c["price_varies_by_time"] for c in body["candidates"] if c["provider"] == "openai"
+        )
+        assert all(
+            c["price_varies_by_time"] for c in body["candidates"] if c["provider"] == "deepseek"
+        )
+
     def test_an_ineligible_model_carries_no_price(self, client, admin_headers):
         """Absent means absent. A zero would read as free."""
         body = _get(client, admin_headers)
