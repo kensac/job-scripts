@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from api import ai, budget, crypto, db
 from api.auth import AuthedUser, require_service, require_user
 from api.models import ApiKeyPut, SettingsPut
+from core import providers as core_providers
 
 router = APIRouter()
 
@@ -70,16 +71,37 @@ def usage(user: AuthedUser = Depends(require_user)):
     }
 
 
-_PROVIDER_PARAMS = {
-    "openai": ["reasoning_effort", "max_output_tokens"],
-    "anthropic": ["effort", "max_output_tokens"],
-    "openai_compatible": ["temperature", "max_output_tokens"],
-}
+# Derived from the datasheets rather than listed here. This was a hardcoded
+# map of three providers and it never gained xai or deepseek, so adding them to
+# the picker would have raised KeyError on a page that only ever showed two.
+# The reasoning parameter is per MODEL, not per provider - xAI accepts it on
+# some of its models and rejects it on others - so the provider offers the
+# union and validate_params still checks the specific model.
+def _provider_params(provider: str) -> list[str]:
+    known = core_providers.PROVIDERS.get(provider)
+    if known is None:
+        # openai_compatible is a user-supplied endpoint with no datasheet: we
+        # do not know what it accepts, so offer the portable minimum.
+        return ["temperature", "max_output_tokens"]
+    params = {m.reasoning.param for m in known.models if m.reasoning.param}
+    if known.supports_temperature:
+        params.add("temperature")
+    return [*sorted(params), "max_output_tokens"]
 
 
 class ModelEntry(BaseModel):
     model: str
     note: str
+    # What the datasheet declares. The page showed a name and a note while the
+    # provider modules carried rates, context, batch eligibility and which
+    # reasoning values each model accepts - so choosing a model meant guessing
+    # at everything that distinguishes one from another.
+    context_tokens: int | None = None
+    rate_in_per_mtok: float | None = None
+    rate_out_per_mtok: float | None = None
+    batch_discount: float | None = None
+    structured_output: str | None = None
+    reasoning_accepts: list[str] = []
 
 
 class ProviderEntry(BaseModel):
@@ -96,12 +118,46 @@ class ModelsResponse(BaseModel):
     addable_providers: list[str]
 
 
+def _catalog(provider: str) -> list[dict]:
+    """The provider's selectable models, carrying what their datasheet says.
+
+    None stays None throughout: a rate nobody has looked up is not zero, and a
+    context window nobody has recorded is not unlimited. The page renders the
+    gap rather than a confident wrong number.
+    """
+    known = core_providers.PROVIDERS.get(provider)
+    if known is None:
+        return list(ai.MODEL_CATALOG.get(provider, []))
+    out = []
+    for m in known.models:
+        if not m.selectable:
+            continue
+        tier = m.rates.tiers[0] if m.rates.tiers else None
+        out.append(
+            {
+                "model": m.name,
+                "note": m.note,
+                "context_tokens": m.context_tokens,
+                "rate_in_per_mtok": float(tier.rate_in) if tier else None,
+                "rate_out_per_mtok": float(tier.rate_out) if tier else None,
+                "batch_discount": float(m.rates.batch_rate)
+                if m.rates.batch_rate is not None
+                else None,
+                "structured_output": m.structured_output.mode.value
+                if m.structured_output.mode
+                else None,
+                "reasoning_accepts": list(m.reasoning.accepts),
+            }
+        )
+    return out
+
+
 def _provider_entry(provider: str, models: list) -> dict:
     return {
         "provider": provider,
         "default_model": ai.DEFAULT_MODELS[provider],
         "models": models,
-        "params": _PROVIDER_PARAMS[provider],
+        "params": _provider_params(provider),
     }
 
 
@@ -120,11 +176,17 @@ def models(user: AuthedUser = Depends(require_user)):
     owner_allowed: list = []
     if settings and settings["has_key"]:
         provider = settings["ai_provider"] or "openai"
-        providers.append(_provider_entry(provider, ai.MODEL_CATALOG[provider]))
+        providers.append(_provider_entry(provider, _catalog(provider)))
     elif ent.owner_key:
         owner_allowed = budget.owner_allowed_models(user.groups)
-        for provider in ("openai", "anthropic"):
-            models_list = [m for m in ai.MODEL_CATALOG[provider] if m["model"] in owner_allowed]
+        # Every provider the fleet models, not a hardcoded pair. This said
+        # ("openai", "anthropic") from before xAI and DeepSeek existed, so two
+        # fully modelled and fully priced providers were invisible here while
+        # being selectable everywhere else. owner_allowed_models already
+        # intersects with the keys the server actually holds, so listing them
+        # all cannot offer something unrunnable.
+        for provider in ai.MODEL_CATALOG:
+            models_list = [m for m in _catalog(provider) if m["model"] in owner_allowed]
             if models_list:
                 providers.append(_provider_entry(provider, models_list))
     return {
