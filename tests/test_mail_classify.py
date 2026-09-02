@@ -668,3 +668,44 @@ async def test_a_job_related_deadline_is_still_recorded(monkeypatch, f):
     assert row is not None
     assert row["deadline_at"] == datetime.datetime(2026, 3, 1, tzinfo=datetime.UTC)
     assert row["detail"]["when_dropped_as_not_job_related"] is False
+
+
+@pytest.mark.asyncio
+async def test_a_sweep_does_not_reselect_what_another_sweep_is_already_paying_for(monkeypatch, f):
+    """'No events yet' stays true for the whole time a message sits in the
+    provider's queue. So an hourly sweep selected the same messages again and
+    submitted them again: three tasks an hour apart, each carrying an identical
+    1,156 requests, all in flight at once. The cost is not queue depth - it is
+    paying repeatedly for one answer."""
+    from api.worker import AwaitingBatch
+
+    for i in range(3):
+        _store(f, mid=f"<inflight{i}@x>")
+
+    first_claim: list[int] = []
+
+    async def capture(task_id, shape, specs):
+
+        first_claim.extend(int(s.custom_id) for s in specs)
+        raise AwaitingBatch(["batch_stuck"])
+
+    monkeypatch.setattr(mail_classify, "run_batched", capture)
+    monkeypatch.setattr(mail_classify, "_set_progress", lambda *a, **k: None)
+
+    first = f.make_task("classify_mail", {})
+    with pytest.raises(AwaitingBatch):
+        await mail_classify.handle_classify_mail(first, {})
+    assert len(first_claim) == 3
+    db.execute("UPDATE tasks SET status = 'awaiting_batch' WHERE id = %s", (first,))
+
+    second_claim: list[int] = []
+
+    async def second_capture(task_id, shape, specs):
+        from core.routing import resolve
+
+        second_claim.extend(int(s.custom_id) for s in specs)
+        return {}, resolve(shape)
+
+    monkeypatch.setattr(mail_classify, "run_batched", second_capture)
+    await mail_classify.handle_classify_mail(f.make_task("classify_mail", {}), {})
+    assert second_claim == [], "the first task is already paying for these"
