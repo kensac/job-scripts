@@ -23,6 +23,8 @@ from api.tasks.runtime import (
     enqueue,
     submit_or_collect,
 )
+from core.providers.spec import StructuredOutput
+from core.routing import TaskShape, resolve
 from core.store import CONTENT_LATERAL
 
 logger = logging.getLogger("jobtracker_worker")
@@ -146,7 +148,7 @@ async def _reverify_jobs(
 
     if not ai.server_key("openai"):
         raise LookupError("no server OpenAI key for reverification")
-    model = ai.DEFAULT_OPENAI_MODEL
+    model = resolve(VERIFY_TASK).model
     by_url = {r["url"]: r for r in rows}
     hook = _batch_event_hook(task_id, "reverify", model)
 
@@ -241,11 +243,37 @@ async def _reverify_jobs(
             BatchSpec(url, CLOSED_INSTRUCTIONS, content[:20000], "JobClosedVerdict", schema)
             for url, content in needs_ai
         ]
-        results = await submit_or_collect(task_id, specs, model, "low", 1000, hook)
+        results = await submit_or_collect(
+            task_id,
+            specs,
+            model,
+            VERIFY_TASK.effort or "low",
+            VERIFY_TASK.max_output_tokens,
+            hook,
+        )
         _record_reverify_results(results, by_url, model)
     _set_progress(task_id, total, total, "reverified")
     if parent_id:
         _update_parent_progress(parent_id)
+
+
+# Closed/clearance verification, batched. One candidate, so this resolves to
+# gpt-5-nano exactly as it did when the name was written inline - the change is
+# that a missing key or a model that cannot enforce a schema now fails here,
+# with a reason, instead of at the provider after a wave has been built.
+#
+# Deliberately NOT widened to a second model. tasks/filters.py scopes its
+# cached-verdict check by model, so a sweep that answered on a different model
+# than last cycle would see no cached verdicts and re-run everything at full
+# price. See core/routing.py.
+VERIFY_TASK = TaskShape(
+    structured=StructuredOutput.JSON_SCHEMA,
+    batched=True,
+    max_output_tokens=1000,
+    est_prompt_tokens=5500,
+    effort="low",
+    candidates=("gpt-5-nano",),
+)
 
 
 async def handle_reverify_open(task_id: int, payload: dict[str, Any]) -> None:
@@ -369,7 +397,7 @@ async def handle_verify_new(task_id: int, payload: dict[str, Any]) -> None:
     ]
     by_url = {r["url"]: r for r in rows}
     _set_progress(task_id, 0, len(specs), "verify batch submitted (half price)")
-    model = ai.DEFAULT_OPENAI_MODEL
+    model = resolve(VERIFY_TASK).model
     hook = _batch_event_hook(task_id, "verify", model)
     existing = _pending_batch_ids(task_id)
     if existing:

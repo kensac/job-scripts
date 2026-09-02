@@ -22,9 +22,11 @@ from pydantic import BaseModel
 
 from api import db
 from api.tasks.runtime import _batch_event_hook, _set_progress, submit_or_collect
-from core import providers
+from core.providers.spec import StructuredOutput
+from core.routing import TaskShape, resolve
 
 logger = logging.getLogger("jobtracker_worker")
+
 
 # The one-time historical sweep and the ongoing trickle are priced differently
 # enough to be different models, and neither is the fleet default.
@@ -40,7 +42,6 @@ logger = logging.getLogger("jobtracker_worker")
 # matters more than the total.
 BACKFILL_MODEL = os.environ.get("JOBTRACKER_MAIL_BACKFILL_MODEL", "gpt-5.6-luna")
 ONGOING_MODEL = os.environ.get("JOBTRACKER_MAIL_ONGOING_MODEL", "gpt-5-mini")
-
 # A classification spec is the instructions plus a body capped at 20k chars,
 # so ~6k tokens against the same 1.8M-token wave budget comp.py sizes against:
 # ~300 specs per wave, times BATCH_WAVE_CONCURRENCY waves in flight.
@@ -95,20 +96,44 @@ def effort_for(model: str) -> str:
     Unknown models get the intersection value rather than a guess: a batch
     submits whole and fails whole, so a rejected parameter costs the entire
     run, not one call.
+
+    The choosing itself now lives in core.routing, which every task resolves
+    through; this keeps the name and the unknown-model floor that callers here
+    rely on, without a second copy of the preference walk.
     """
-    declared = providers.model(model)
-    if declared is None:
-        return FALLBACK_EFFORT
-    for effort in _EFFORT_PREFERENCE:
-        if effort in declared.reasoning.accepts:
-            return effort
-    return declared.reasoning.default or FALLBACK_EFFORT
+    return _classify_task(model).resolved_effort() or FALLBACK_EFFORT
 
 
 # Enough for the schema's handful of short fields. The model does not reason
 # here, so a larger ceiling buys nothing and a smaller one truncates JSON
 # mid-string, which arrives as an unparsable line rather than an error.
 CLASSIFY_MAX_TOKENS = 400
+
+
+def _classify_task(model: str) -> TaskShape:
+    """One model per shape, never a list.
+
+    The choice above is an evidence judgment, not an optimisation: a router
+    minimising cost subject to declared capability would pick nano and reinstate
+    exactly the fabrication these two models were chosen to avoid. Resolution
+    still earns its place - it checks the key, the schema capability and the
+    price, and it is where the effort walk happens.
+    """
+    return TaskShape(
+        structured=StructuredOutput.JSON_SCHEMA,
+        batched=True,
+        max_output_tokens=CLASSIFY_MAX_TOKENS,
+        # Ranking only, and only ever against itself here, since there is one
+        # candidate. The real spec size is ~6k tokens.
+        est_prompt_tokens=6000,
+        effort_preference=_EFFORT_PREFERENCE,
+        candidates=(model,),
+    )
+
+
+BACKFILL_TASK = _classify_task(BACKFILL_MODEL)
+ONGOING_TASK = _classify_task(ONGOING_MODEL)
+
 
 EVENT_KINDS = (
     "acknowledgement",
@@ -278,7 +303,9 @@ async def handle_classify_mail(task_id: int, payload: dict[str, Any]) -> None:
     from core.batch import BatchSpec
 
     backfill = bool(payload.get("backfill"))
-    model = BACKFILL_MODEL if backfill else ONGOING_MODEL
+    chosen = resolve(BACKFILL_TASK if backfill else ONGOING_TASK)
+    model = chosen.model
+    logger.info(f"Task {task_id}: mail classification on {model} - {chosen.reason}")
     # Clamped rather than trusted: an enqueuer asking for the whole mailbox in
     # one task would build a spec list far larger than a wave can carry, and
     # the failure would arrive as memory pressure on a worker rather than as a

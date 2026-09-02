@@ -42,6 +42,12 @@ async def _check_filter(
 ) -> dict[str, int] | None:
     """Runs one custom-filter check via the shared verdict primitive; returns
     usage, or None when a cached verdict made the call unnecessary."""
+    # Scoped to the model on purpose: a verdict from a different model is not
+    # this model's verdict. The consequence is a cost cliff worth knowing about
+    # before anyone lets the router hand this sweep more than one model - the
+    # first cycle that picks differently sees NO cached verdicts and re-runs
+    # the whole candidate set at full price. core/routing.py carries the
+    # numbers; tests/test_routing.py pins the behaviour.
     if get_custom_result(url, prompt_hash, model=cfg.model):
         return None
     _, usage = await verdicts.run_check(
