@@ -1,7 +1,7 @@
 """task_model_overrides: the model a person chose for a task, append-only
 
 Revision ID: e5b3d7c2f194
-Revises: d4a9c1e7b358
+Revises: a1c4e7f2b930
 Create Date: 2026-09-02 12:10:00.000000
 
 Which model runs a task is currently a decision made in code, at the call site,
@@ -29,7 +29,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 revision: str = 'e5b3d7c2f194'
-down_revision: Union[str, None] = 'd4a9c1e7b358'
+down_revision: Union[str, None] = 'a1c4e7f2b930'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
