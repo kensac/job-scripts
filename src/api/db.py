@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import atexit
 import os
-from typing import Any
+from typing import Any, LiteralString, cast
 
 import dotenv
 from psycopg.rows import dict_row
@@ -103,20 +103,41 @@ def _seed_sources() -> None:
         )
 
 
+def _as_query(sql: str) -> LiteralString:
+    """psycopg types execute() to accept only LiteralString, which is a good
+    default: it stops a caller passing a runtime-built string. This codebase
+    does build SQL at runtime, but only by interpolating whitelisted fragments
+    (_SORTABLE, fixed column names, re.escape'd literals) - never a user value,
+    which always travels as a bound parameter.
+
+    The cast states that invariant in one place instead of scattering a type
+    ignore over every call site, so if the invariant ever breaks there is a
+    single obvious thing to re-read.
+    """
+    return cast("LiteralString", sql)
+
+
 def query(sql: str, params: Any = None) -> list[dict[str, Any]]:
     with pool.connection() as conn:
-        return [dict(r) for r in conn.execute(sql, params).fetchall()]
+        return [dict(r) for r in conn.execute(_as_query(sql), params).fetchall()]
 
 
 def query_one(sql: str, params: Any = None) -> dict[str, Any] | None:
     with pool.connection() as conn:
-        row = conn.execute(sql, params).fetchone()
+        row = conn.execute(_as_query(sql), params).fetchone()
     return dict(row) if row else None
 
 
 def execute(sql: str, params: Any = None) -> None:
     with pool.connection() as conn:
-        conn.execute(sql, params)
+        conn.execute(_as_query(sql), params)
+
+
+def execute_count(sql: str, params: Any = None) -> int:
+    """execute(), but returns how many rows it touched - for the callers whose
+    whole purpose is that number (the reaper counting requeues, say)."""
+    with pool.connection() as conn:
+        return conn.execute(_as_query(sql), params).rowcount
 
 
 def jsonb(value: Any) -> Jsonb:

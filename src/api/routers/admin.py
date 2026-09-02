@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -352,7 +353,8 @@ def list_tasks(
     # id-cursor pagination: stable under new tasks arriving while the admin
     # loads more (offset would shift and duplicate rows).
     limit = max(1, min(limit, 500))
-    clauses, params = [], {"limit": limit + 1}
+    clauses: list[str] = []
+    params: dict[str, Any] = {"limit": limit + 1}
     if status:
         clauses.append("status = %(status)s")
         params["status"] = status
@@ -956,6 +958,9 @@ def delete_source(name: str, force: bool = False, user: AuthedUser = Depends(req
         """,
         {"n": name},
     )
+    # The aggregate always returns exactly one row, but assert it rather than
+    # subscript an Optional - a silent None here would 500 mid-delete.
+    assert attached is not None
     if not force and (attached["jobs"] or attached["subscribers"] or attached["board_rows"]):
         raise HTTPException(
             409,
@@ -1405,7 +1410,8 @@ def stats(user: AuthedUser = Depends(require_admin)):
         ) / 1_000_000
         row["cost_usd"] = round(cost, 6)
         total_cost += cost
-    totals["cost_usd"] = round(total_cost, 6)
+    if totals is not None:
+        totals["cost_usd"] = round(total_cost, 6)
 
     return {
         "totals": totals,
