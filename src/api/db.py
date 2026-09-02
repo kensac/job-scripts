@@ -34,6 +34,9 @@ _GROUP_BUDGET_SEED = [
 # so the Testing-mode OAuth client is not exposed to users who would hit its
 # 100-test-user cap. oauth.ALL_GROUPS opens it to everyone.
 _APP_CONFIG_SEED = [("signups_enabled", True), ("gmail_connect_groups", ["infra-admins"])]
+# One source of truth for a seeded key's value: the seed writes it, and
+# get_config falls back to it when the row is missing.
+_APP_CONFIG_DEFAULTS = dict(_APP_CONFIG_SEED)
 
 
 # One constant key, so every process that does startup DDL queues behind the
@@ -72,8 +75,24 @@ def init_schema() -> None:
 
 
 def get_config(key: str, default: Any = None) -> Any:
+    """A seeded key's declared value IS its default, so an unseeded row behaves
+    exactly like a seeded one.
+
+    The seed runs after `_migrate()`, in separate transactions and outside the
+    advisory lock. A container that migrates and then dies before reaching it
+    leaves alembic reporting head with the row absent - and every caller that
+    passed its own fallback silently getting that fallback instead. For a
+    feature gate that reads as "the feature did not ship", with no error, no
+    exception and nothing for a health check to see.
+
+    Falling back to the seed is not failing open: it is the same value a
+    successful seed would have written. `default` still covers keys that are
+    not seeded at all.
+    """
     row = query_one("SELECT value FROM app_config WHERE key = %s", (key,))
-    return row["value"] if row else default
+    if row:
+        return row["value"]
+    return _APP_CONFIG_DEFAULTS.get(key, default)
 
 
 def _migrate() -> None:
