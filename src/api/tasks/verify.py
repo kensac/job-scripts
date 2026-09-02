@@ -34,16 +34,74 @@ REVERIFY_DAYS = int(os.environ.get("JOBTRACKER_REVERIFY_DAYS", "7"))
 REVERIFY_PER_CYCLE = int(os.environ.get("JOBTRACKER_REVERIFY_PER_CYCLE", "0"))  # 0 = all stale
 
 
+def _evidence_superseded(results: dict[str, Any]) -> set[str]:
+    """Urls whose closed verdict was settled AFTER the evidence in hand.
+
+    A batched reverify scrapes a page, submits, and parks; poll_batches
+    resumes it whenever the provider finishes, which can be hours later. The
+    page text in that batch is therefore as old as the submission, and in the
+    meantime another path (ATS gone-detection, a fresh sweep) may have recorded
+    a closure from newer evidence. Verdicts are append-only and the latest row
+    wins, so writing ours last would overturn that with a stale page and put a
+    dead posting back on people's boards.
+
+    The batch's own submitted_at is the age of the evidence: everything in the
+    request was gathered before it. A url with no batch id or no registry row
+    cannot be dated, so it records as before rather than being dropped on a
+    suspicion.
+    """
+    urls = [u for u, res in results.items() if res.text and not res.error]
+    if not urls:
+        return set()
+    batch_ids = list({res.batch_id for res in results.values() if res.batch_id})
+    submitted = {
+        row["provider_batch_id"]: row["submitted_at"]
+        for row in db.query(
+            "SELECT provider_batch_id, submitted_at FROM ai_batches "
+            "WHERE provider_batch_id = ANY(%s)",
+            (batch_ids,),
+        )
+    }
+    settled = {
+        row["url"]: row["created_at"]
+        for row in db.query(
+            "SELECT DISTINCT ON (url) url, created_at FROM ai_queries "
+            "WHERE url = ANY(%s) AND check_type = 'closed' "
+            "AND status IN ('passed', 'rejected') ORDER BY url, id DESC",
+            (urls,),
+        )
+    }
+    superseded = set()
+    for url in urls:
+        evidence_at = submitted.get(results[url].batch_id or "")
+        latest = settled.get(url)
+        if evidence_at is not None and latest is not None and latest > evidence_at:
+            superseded.add(url)
+    return superseded
+
+
 def _record_reverify_results(
     results: dict[str, Any], by_url: dict[str, dict[str, Any]], model: str
 ) -> int:
     """Turns batch lines into closed verdicts. Only parseable lines record —
     anything failed or missing simply stays stale and the next daily sweep
-    picks it up, which is what makes the whole task idempotent."""
+    picks it up, which is what makes the whole task idempotent.
+
+    Recording is guarded at the point of the write rather than in the caller,
+    because a resumed chunk reattaches to its batch and returns before the
+    caller's staleness filter ever runs. Guarding here covers every path into
+    this function by construction.
+    """
+    superseded = _evidence_superseded(results)
+    if superseded:
+        logger.info(
+            f"reverify: {len(superseded)} url(s) settled by newer evidence "
+            "while the batch was in flight; leaving those verdicts alone"
+        )
     recorded = 0
     for url, res in results.items():
         job = by_url.get(url)
-        if job is None or res.error or not res.text:
+        if job is None or res.error or not res.text or url in superseded:
             continue
         try:
             parsed = JobClosedLean.model_validate_json(res.text)
