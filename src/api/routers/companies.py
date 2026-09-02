@@ -369,6 +369,14 @@ def _item(
         "company_name": base["company_name"],
         "total_postings_seen": total,
         "comp": {
+            # The qualification travels WITH the number rather than in the
+            # response-level caveats list, because a caveat one refactor away
+            # from the datum it qualifies is a caveat that will eventually be
+            # dropped. n_extracted is a count of what OUR extractor found; it
+            # is not a count of what this employer published, and the two are
+            # not separable here.
+            "measures": "postings where our extractor found a pay range",
+            "not": "what this company chooses to disclose",
             "n_extracted": int(base["comp_found"]),
             "n_total": total,
             "by_currency": [
@@ -384,6 +392,7 @@ def _item(
         # Named for what the extractor did, because that is all these three
         # can honestly claim. They sum to total_postings_seen.
         "extraction": {
+            "measures": "what our extractor did, per posting",
             "found_pay": int(base["comp_found"]),
             "ran_found_nothing": int(base["comp_ran_found_nothing"]),
             "not_attempted": int(base["comp_not_attempted"]),

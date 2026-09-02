@@ -237,7 +237,17 @@ def admin_list_sources(user: AuthedUser = Depends(require_admin)):
                    (SELECT COUNT(*) FROM user_sources us WHERE us.source = s.name) AS subscribers,
                    li.status AS last_ingest_status,
                    li.finished_at AS last_ingest_at,
-                   li.error AS last_ingest_error
+                   li.error AS last_ingest_error,
+                   -- The number that retires a source, and the only one that
+                   -- can. last_ingest_at says the fetch worked; this says the
+                   -- fetch found anything we had not already seen. They
+                   -- diverge, and the gap IS the signal: fulltime_ouckah has
+                   -- 215 successful ingests and has produced no new posting
+                   -- since the catalog was reseeded, reporting green every
+                   -- hour. Six configured sources have never produced one at
+                   -- all. Nothing in this response could previously say so.
+                   (SELECT MAX(j.created_at) FROM jobs j WHERE j.source = s.name)
+                       AS last_new_posting_at
             FROM sources s
             LEFT JOIN LATERAL (
                 SELECT status, finished_at, error FROM tasks

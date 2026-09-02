@@ -77,6 +77,22 @@ class Job(Base):
     locations: Mapped[list[str]] = mapped_column(server_default=text("'{}'"))
     terms: Mapped[list[str]] = mapped_column(server_default=text("'{}'"))
     source: Mapped[str] = mapped_column(Text)
+    # NOT "this role is open". This is feed state: catalog.upsert_postings
+    # writes it straight from whatever the board last said (active =
+    # EXCLUDED.active) and NOTHING in this codebase ever clears it. So a board
+    # that only ever lists live postings keeps every row it has supplied at
+    # true forever, while a feed carrying an explicit per-posting flag
+    # accumulates false. That is a difference in feed format, not in the job.
+    #
+    # It is therefore not comparable across sources, and reading it as closure
+    # has already shipped one user-facing bug: 478 applications were badged
+    # "no longer live" off this flag, of which 114 had a closed-check saying
+    # the posting was OPEN and 363 had never been checked at all. Exactly one
+    # was backed by evidence.
+    #
+    # For "is this role still open", use the closed check - an AI verdict
+    # against the posting url, applied uniformly across boards. Job rows serve
+    # it as `closed_verdict` ('open' | 'closed' | NULL for never checked).
     active: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
     date_posted: Mapped[datetime.datetime | None]
     uploaded_by: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id"))
