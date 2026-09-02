@@ -126,12 +126,26 @@ WHERE company <> '' AND comp_extracted
 GROUP BY lower(btrim(company)), comp_currency
 """
 
+# Keyed and filtered exactly like the count above it, because the two are
+# rendered together and a whole must be counted the same way as its parts.
+# They previously disagreed: the count came from `applications` keyed on
+# company_name and excluding dismissals, while this came from `user_jobs` keyed
+# on jobs.company with no dismissal filter. Adjacent numbers from two tables
+# with two keys read as a total and its breakdown and were neither.
+#
+# `board_status` is still what the user typed, so an application with no board
+# row contributes to the count and to no status - that is a real gap between
+# what mail knows and what he has recorded, and it should be visible rather
+# than reconciled away.
 _STATUS_SQL = """
-SELECT lower(btrim(j.company)) AS company_key, uj.status, count(*) AS n
-FROM user_jobs uj JOIN jobs j ON j.id = uj.job_id
-WHERE NOT uj.hidden AND j.company <> '' AND uj.status IS NOT NULL AND uj.status <> ''
-  AND lower(btrim(j.company)) = ANY(%(keys)s)
-GROUP BY lower(btrim(j.company)), uj.status
+SELECT lower(btrim(a.company_name)) AS company_key, uj.status, count(*) AS n
+FROM applications a
+JOIN user_jobs uj ON uj.job_id = a.job_id AND uj.user_id = a.user_id
+WHERE a.company_name IS NOT NULL AND btrim(a.company_name) <> ''
+  AND a.dismissed_at IS NULL AND NOT uj.hidden
+  AND uj.status IS NOT NULL AND uj.status <> ''
+  AND lower(btrim(a.company_name)) = ANY(%(keys)s)
+GROUP BY lower(btrim(a.company_name)), uj.status
 """
 
 # The same instrument the board row and the per-job signal use: the latest

@@ -514,3 +514,114 @@ def test_mail_filters_by_kind_and_search(client, user_headers):
 
     assert client.get("/v1/user/mail?kind=offer", headers=user_headers).json()["total"] == 1
     assert client.get("/v1/user/mail?q=initech", headers=user_headers).json()["total"] == 1
+
+
+def _board(uid, company, title, status="Application Submitted"):
+    job = db.query_one(
+        "INSERT INTO jobs (url, raw_url, source, company, title, active) "
+        "VALUES (%s,%s,'fulltime',%s,%s,TRUE) RETURNING id",
+        (f"https://s/{next(_seq)}", f"https://s/{next(_seq)}", company, title),
+    )["id"]
+    db.execute(
+        "INSERT INTO user_jobs (user_id, job_id, status, date_applied) VALUES (%s,%s,%s,now())",
+        (uid, job, status),
+    )
+    app_id = db.query_one(
+        "INSERT INTO applications (user_id, job_id, company_name, title, source_provenance, "
+        "applied_at) VALUES (%s,%s,%s,%s,'tracker',now()) RETURNING id",
+        (uid, job, company, title),
+    )["id"]
+    return job, app_id
+
+
+def test_a_rejection_is_suggested_not_applied(client, user_headers):
+    """user_jobs.status is what the user typed. A system that silently rewrites
+    it stops being trustworthy at the moment it is most confident."""
+    uid = db.query_one("SELECT id FROM users WHERE email = %s", ("user@example.com",))["id"]
+    job, app_id = _board(uid, "Acme", "Engineer")
+    mid = _mail(uid, subject="An update from Acme", kind="rejection", company="Acme")
+    _match(mid, app_id)
+
+    body = client.get("/v1/user/suggestions", headers=user_headers).json()
+    assert body["total"] == 1
+    s = body["suggestions"][0]
+    assert s["board_status"] == "Application Submitted"
+    assert s["suggested_status"] == "Rejected"
+    assert s["evidence"]["from_domain"] is not None, "a suggestion he cannot check is faith"
+
+    assert db.query_one("SELECT status FROM user_jobs WHERE job_id = %s", (job,))["status"] == (
+        "Application Submitted"
+    ), "nothing moves until he says so"
+
+
+def test_accepting_moves_the_board(client, user_headers):
+    uid = db.query_one("SELECT id FROM users WHERE email = %s", ("user@example.com",))["id"]
+    job, app_id = _board(uid, "Acme", "Engineer")
+    mid = _mail(uid, kind="rejection", company="Acme")
+    _match(mid, app_id)
+    ev = db.query_one("SELECT id FROM email_events WHERE message_id = %s", (mid,))["id"]
+
+    resp = client.post(
+        f"/v1/user/suggestions/{app_id}/{ev}", headers=user_headers, json={"response": "accepted"}
+    )
+    assert resp.status_code == 200
+    assert db.query_one("SELECT status FROM user_jobs WHERE job_id = %s", (job,))["status"] == (
+        "Rejected"
+    )
+    assert client.get("/v1/user/suggestions", headers=user_headers).json()["total"] == 0
+
+
+def test_dismissing_silences_the_evidence_not_the_question(client, user_headers):
+    """A dismissal keyed on the event means a LATER rejection from the same
+    company gets asked again - which is what makes dismissing safe rather than
+    a decision he can never revisit."""
+    uid = db.query_one("SELECT id FROM users WHERE email = %s", ("user@example.com",))["id"]
+    job, app_id = _board(uid, "Acme", "Engineer")
+    first = _mail(uid, kind="rejection", company="Acme")
+    _match(first, app_id)
+    ev = db.query_one("SELECT id FROM email_events WHERE message_id = %s", (first,))["id"]
+
+    client.post(
+        f"/v1/user/suggestions/{app_id}/{ev}", headers=user_headers, json={"response": "dismissed"}
+    )
+    assert client.get("/v1/user/suggestions", headers=user_headers).json()["total"] == 0
+    assert db.query_one("SELECT status FROM user_jobs WHERE job_id = %s", (job,))["status"] == (
+        "Application Submitted"
+    ), "dismissing changes nothing"
+
+    later = _mail(uid, kind="rejection", company="Acme")
+    _match(later, app_id)
+    assert client.get("/v1/user/suggestions", headers=user_headers).json()["total"] == 1
+
+
+def test_nothing_is_suggested_once_he_has_moved_it_himself(client, user_headers):
+    """If the board already says Rejected, the mail is confirming what he knows
+    rather than telling him something."""
+    uid = db.query_one("SELECT id FROM users WHERE email = %s", ("user@example.com",))["id"]
+    _job, app_id = _board(uid, "Acme", "Engineer", status="Rejected")
+    mid = _mail(uid, kind="rejection", company="Acme")
+    _match(mid, app_id)
+    assert client.get("/v1/user/suggestions", headers=user_headers).json()["total"] == 0
+
+
+def test_an_acknowledgement_suggests_nothing(client, user_headers):
+    """It means the application is alive, which the board already says."""
+    uid = db.query_one("SELECT id FROM users WHERE email = %s", ("user@example.com",))["id"]
+    _job, app_id = _board(uid, "Acme", "Engineer")
+    mid = _mail(uid, kind="acknowledgement", company="Acme")
+    _match(mid, app_id)
+    assert client.get("/v1/user/suggestions", headers=user_headers).json()["total"] == 0
+
+
+def test_another_users_suggestion_cannot_be_answered(client, user_headers, other_user_headers):
+    uid = db.query_one("SELECT id FROM users WHERE email = %s", ("user@example.com",))["id"]
+    _job, app_id = _board(uid, "Private", "Engineer")
+    mid = _mail(uid, kind="rejection", company="Private")
+    _match(mid, app_id)
+    ev = db.query_one("SELECT id FROM email_events WHERE message_id = %s", (mid,))["id"]
+    resp = client.post(
+        f"/v1/user/suggestions/{app_id}/{ev}",
+        headers=other_user_headers,
+        json={"response": "accepted"},
+    )
+    assert resp.status_code == 404
