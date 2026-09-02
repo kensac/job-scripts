@@ -206,6 +206,38 @@ def detect() -> list[dict[str, Any]]:
                 }
             )
 
+    # A stored mailbox credential the provider has rejected. Nothing else in
+    # the system surfaces this: mail ingest simply stops finding anything,
+    # which is indistinguishable from a quiet week. The OAuth client is in
+    # Testing mode with a restricted scope, so Google expires its refresh
+    # tokens after seven days and this is expected to fire on that cadence -
+    # it is the reconnect prompt, not a symptom of a bug.
+    for r in db.query(
+        """
+        SELECT t.user_id, t.provider, t.account_email, t.invalid_reason,
+               u.email AS user_email,
+               date_trunc('second', now() - t.invalid_at)::text AS dead_for
+        FROM user_oauth_tokens t JOIN users u ON u.id = t.user_id
+        WHERE t.invalid_at IS NOT NULL
+        """
+    ):
+        mailbox = r["account_email"] or r["user_email"] or f"user {r['user_id']}"
+        found.append(
+            {
+                "kind": "oauth_token_invalid",
+                # Per (provider, user) rather than per mailbox: the address is
+                # nullable, and the alert must still be unique without it.
+                "subject": f"{r['provider']}:{r['user_id']}",
+                "severity": "warning",
+                "message": (
+                    f"{r['provider']} access for {mailbox} was rejected "
+                    f"{r['dead_for']} ago ({r['invalid_reason']}) — mail ingest is "
+                    "stopped until it is reconnected in tracker settings."
+                ),
+                "detail": dict(r),
+            }
+        )
+
     return found
 
 

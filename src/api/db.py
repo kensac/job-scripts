@@ -29,7 +29,11 @@ _GROUP_BUDGET_SEED = [
 ]
 
 
-_APP_CONFIG_SEED = [("signups_enabled", True)]
+# Groups allowed to connect a mailbox. A list rather than a bool because the
+# gate is "who", not "whether", and seeded closed to everyone but infra-admins
+# so the Testing-mode OAuth client is not exposed to users who would hit its
+# 100-test-user cap. oauth.ALL_GROUPS opens it to everyone.
+_APP_CONFIG_SEED = [("signups_enabled", True), ("gmail_connect_groups", ["infra-admins"])]
 
 
 # One constant key, so every process that does startup DDL queues behind the

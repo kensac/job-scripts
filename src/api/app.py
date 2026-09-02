@@ -10,6 +10,7 @@ from api.routers import (
     admin,
     filter_insights,
     filters,
+    gmail,
     jobs,
     sources,
     spend,
@@ -43,6 +44,7 @@ app.include_router(stats.router, prefix="/v1")
 app.include_router(admin.router, prefix="/v1")
 app.include_router(spend.router, prefix="/v1")
 app.include_router(filter_insights.router, prefix="/v1")
+app.include_router(gmail.router, prefix="/v1")
 metrics.instrument(app)
 
 
