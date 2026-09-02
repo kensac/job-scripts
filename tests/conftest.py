@@ -135,7 +135,11 @@ _PGVECTOR_HELP = (
     "This Postgres has no pgvector, and a migration needs it.\n"
     "Point the suite at one that does:\n"
     "    make testdb-up\n"
-    "    export TEST_DATABASE_URL=postgresql://postgres:test@127.0.0.1:55432/jobtracker_test\n"
+    # Not restated here. The container's port is derived from the checkout path
+    # so that parallel worktrees cannot share one database, which means this
+    # file cannot know it - and a second hardcoded copy would be wrong for
+    # every checkout but one.
+    '    # then export the line it prints, or: eval "$(make testdb-url)"\n'
     "Prod and CI both run pgvector; a local install without it is the odd one out."
 )
 
