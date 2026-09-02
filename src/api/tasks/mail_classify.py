@@ -43,12 +43,31 @@ ONGOING_MODEL = os.environ.get("JOBTRACKER_MAIL_ONGOING_MODEL", "gpt-5-mini")
 # ~300 specs per wave, times BATCH_WAVE_CONCURRENCY waves in flight.
 CLASSIFY_PER_CYCLE = int(os.environ.get("JOBTRACKER_MAIL_CLASSIFY_PER_CYCLE", "1200"))
 
-# "none", not "minimal". luna rejects "minimal" outright - the API answers
-# 400 unsupported_value and the whole batch fails - and classification is a
-# labelling task that gains nothing from reasoning anyway. A dry run measured
-# ~40 output tokens per message at "none" against the ~200 assumed, which is
-# most of why the corpus estimate fell from $10.44 to $7.35.
-CLASSIFY_EFFORT = "none"
+# Reasoning effort is PER MODEL, because these two do not accept the same
+# values. Probed against the live APIs:
+#
+#   gpt-5-mini    accepts minimal, low, medium, high   REJECTS none
+#   gpt-5.6-luna  accepts none, low, medium, high,     REJECTS minimal
+#                         xhigh, max
+#
+# The intersection is only {low, medium, high}, so a single shared constant
+# would have to give up the cheapest setting on both. Each gets its cheapest
+# accepted value instead: classification is a labelling task that gains
+# nothing from reasoning, and a dry run measured ~40 output tokens per message
+# at luna/none against the ~200 assumed - most of why the corpus estimate fell
+# from $10.44 to $7.35.
+#
+# A shared constant is what shipped first, and it 400'd on every ongoing call
+# while backfill worked, because the value chosen suited only the model that
+# had been dry-run by hand.
+_EFFORT_BY_MODEL = {
+    "gpt-5.6-luna": "none",
+    "gpt-5-mini": "minimal",
+}
+
+# Every model in the intersection above, so an unconfigured model still gets a
+# value both generations accept rather than failing the whole batch.
+FALLBACK_EFFORT = "low"
 
 # Enough for the schema's handful of short fields. The model does not reason
 # here, so a larger ceiling buys nothing and a smaller one truncates JSON
@@ -112,6 +131,16 @@ class MailClassification(BaseModel):
     confidence: Literal["high", "medium", "low"]
 
 
+def effort_for(model: str) -> str:
+    """The cheapest reasoning effort this model actually accepts.
+
+    Unknown models get the intersection value rather than a guess: a batch
+    submits whole and fails whole, so a rejected parameter costs the entire
+    run, not one call.
+    """
+    return _EFFORT_BY_MODEL.get(model, FALLBACK_EFFORT)
+
+
 def _spec_text(row: dict[str, Any]) -> str:
     return (
         f"From: {row.get('from_email') or ''}\n"
@@ -153,7 +182,7 @@ async def handle_classify_mail(task_id: int, payload: dict[str, Any]) -> None:
     _set_progress(task_id, 0, len(specs), f"mail classification submitted ({model}, half price)")
     hook = _batch_event_hook(task_id, "mail_classify", model)
     results = await submit_or_collect(
-        task_id, specs, model, CLASSIFY_EFFORT, CLASSIFY_MAX_TOKENS, hook
+        task_id, specs, model, effort_for(model), CLASSIFY_MAX_TOKENS, hook
     )
 
     done = 0

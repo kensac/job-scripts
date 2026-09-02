@@ -178,14 +178,45 @@ async def test_not_job_related_is_a_real_verdict(monkeypatch, f):
     assert _events(mid)[0]["kind"] == "not_job_related"
 
 
-def test_effort_is_accepted_by_the_configured_models():
-    """A batch is submitted whole and fails whole. gpt-5.6-luna rejects
-    "minimal" outright with a 400 - found by dry-running live calls before
-    committing to a $10 batch, which is now the standing rule."""
-    from api.ai import _EFFORTS_OPENAI
+# Probed against the live APIs. Each model REJECTS the other's cheapest value,
+# so the intersection is only {low, medium, high}.
+_PROBED_ACCEPTS = {
+    "gpt-5-mini": {"minimal", "low", "medium", "high"},
+    "gpt-5.6-luna": {"none", "low", "medium", "high", "xhigh", "max"},
+}
 
-    assert mail_classify.CLASSIFY_EFFORT in _EFFORTS_OPENAI
-    assert mail_classify.CLASSIFY_EFFORT != "minimal"
+
+def test_each_model_gets_an_effort_it_actually_accepts():
+    """The bug this replaces: the original test asserted the effort was in
+    ai._EFFORTS_OPENAI, a UNION across model generations. "none" is in that
+    union because the 5.6 family accepts it, so the test passed while
+    gpt-5-mini rejected the value on every call - 400, and a batch submits
+    whole and fails whole.
+
+    Backfill worked and ongoing did not, which is the worst shape for
+    noticing: the path exercised by hand was fine and the scheduled one was
+    dead. Validating against a union is what hid it, so this validates
+    against the models actually configured.
+    """
+    for model in (mail_classify.BACKFILL_MODEL, mail_classify.ONGOING_MODEL):
+        accepts = _PROBED_ACCEPTS.get(model)
+        assert accepts is not None, f"{model} configured but never probed"
+        assert mail_classify.effort_for(model) in accepts
+
+
+def test_an_unknown_model_gets_a_value_both_generations_accept():
+    """A rejected parameter costs the whole batch, not one call, so the
+    fallback has to be in the intersection rather than a guess."""
+    effort = mail_classify.effort_for("some-model-that-ships-tomorrow")
+    for accepts in _PROBED_ACCEPTS.values():
+        assert effort in accepts
+
+
+def test_the_two_models_do_not_share_an_effort_by_accident():
+    """If they ever do, it should be because the intersection changed, not
+    because someone collapsed the table back to one constant."""
+    assert mail_classify.effort_for(mail_classify.BACKFILL_MODEL) == "none"
+    assert mail_classify.effort_for(mail_classify.ONGOING_MODEL) == "minimal"
 
 
 def test_max_tokens_leaves_room_for_the_schema():

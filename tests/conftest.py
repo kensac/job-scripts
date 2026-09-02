@@ -148,18 +148,33 @@ def _provision() -> None:
     extension in its sharedir. `CREATE EXTENSION vector` then fails several
     frames deep at import time, naming neither pgvector nor the way out.
 
-    Deliberately reactive rather than a pre-flight check: a guard that refuses
-    to start whenever pgvector is absent would break every session's suite
-    immediately, for a dependency no migration has needed yet.
-    """
-    import psycopg
+    The cause is matched on the CHAIN, not on the top-level type. Alembic runs
+    through SQLAlchemy, so psycopg's UndefinedFile arrives wrapped in
+    sqlalchemy.exc.OperationalError - the first version of this guard caught
+    the psycopg class directly and therefore never fired once. Matching the
+    extension name in the message text is cruder and works regardless of how
+    many layers wrap it.
 
+    Deliberately reactive rather than a pre-flight check: a guard that refused
+    to start whenever pgvector was absent would break every session's suite
+    immediately, for a dependency no migration had needed yet.
+    """
     try:
         db.init_schema()
-    except psycopg.errors.UndefinedFile as exc:  # missing extension control file
-        if "vector" not in str(exc).lower():
+    except Exception as exc:
+        text = " ".join(str(e) for e in _causes(exc))
+        if "vector.control" not in text and 'extension "vector"' not in text:
             raise
         raise RuntimeError(_PGVECTOR_HELP) from exc
+
+
+def _causes(exc: BaseException) -> list[BaseException]:
+    chain, seen = [], set()
+    while exc is not None and id(exc) not in seen:
+        seen.add(id(exc))
+        chain.append(exc)
+        exc = exc.__cause__ or exc.__context__  # type: ignore[assignment]
+    return chain
 
 
 if not _schema_already_provisioned():
