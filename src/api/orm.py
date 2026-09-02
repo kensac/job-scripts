@@ -418,3 +418,132 @@ class UserOAuthToken(Base):
     invalid_reason: Mapped[str | None] = mapped_column(Text)
     connected_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
     updated_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+
+
+class EmailMessage(Base):
+    __tablename__ = "email_messages"
+    __table_args__ = (
+        UniqueConstraint("user_id", "provider_message_id", name="uq_email_messages_provider_id"),
+        Index("idx_email_messages_thread", "user_id", "provider_thread_id"),
+        Index("idx_email_messages_sent", "user_id", "sent_at"),
+        Index("idx_email_messages_unclassified", "user_id", "id"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"))
+    provider_message_id: Mapped[str] = mapped_column(Text)
+    provider_thread_id: Mapped[str | None] = mapped_column(Text)
+    source: Mapped[str] = mapped_column(Text)
+    from_email: Mapped[str | None] = mapped_column(Text)
+    from_name: Mapped[str | None] = mapped_column(Text)
+    to_emails: Mapped[Any] = mapped_column(ARRAY(Text), server_default=text("'{}'"))
+    subject: Mapped[str | None] = mapped_column(Text)
+    sent_at: Mapped[datetime.datetime | None] = mapped_column(TIMESTAMP(timezone=True))
+    body_text: Mapped[str | None] = mapped_column(Text)
+    headers: Mapped[Any | None] = mapped_column(JSONB)
+    prefilter_hit: Mapped[bool | None] = mapped_column(Boolean)
+    prefilter_reason: Mapped[str | None] = mapped_column(Text)
+    imported_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=_now
+    )
+
+
+class Application(Base):
+    __tablename__ = "applications"
+    __table_args__ = (
+        Index("idx_applications_user_job", "user_id", "job_id"),
+        Index("idx_applications_company", "user_id", text("lower(company_name)")),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"))
+    # Nullable on purpose: an application predating the catalog has no posting
+    # and never will.
+    job_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("jobs.id", ondelete="SET NULL")
+    )
+    company_name: Mapped[str | None] = mapped_column(Text)
+    title: Mapped[str | None] = mapped_column(Text)
+    source_provenance: Mapped[str] = mapped_column(Text, server_default="email")
+    applied_at: Mapped[datetime.datetime | None] = mapped_column(TIMESTAMP(timezone=True))
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=_now
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=_now
+    )
+
+
+class EmailEvent(Base):
+    __tablename__ = "email_events"
+    __table_args__ = (Index("idx_email_events_latest", "message_id", "kind", text("id DESC")),)
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
+    message_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("email_messages.id", ondelete="CASCADE")
+    )
+    kind: Mapped[str] = mapped_column(Text)
+    confidence: Mapped[str | None] = mapped_column(Text)
+    occurred_at: Mapped[datetime.datetime | None] = mapped_column(TIMESTAMP(timezone=True))
+    deadline_at: Mapped[datetime.datetime | None] = mapped_column(TIMESTAMP(timezone=True))
+    deadline_inferred: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    detail: Mapped[Any | None] = mapped_column(JSONB)
+    model: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=_now
+    )
+
+
+class ApplicationMatch(Base):
+    __tablename__ = "application_matches"
+    __table_args__ = (
+        Index("idx_application_matches_latest", "message_id", text("id DESC")),
+        Index("idx_application_matches_app", "application_id"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
+    message_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("email_messages.id", ondelete="CASCADE")
+    )
+    # NULL records "we looked and found nothing", which is a different fact
+    # from never having looked.
+    application_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("applications.id", ondelete="CASCADE")
+    )
+    method: Mapped[str] = mapped_column(Text)
+    confidence: Mapped[str | None] = mapped_column(Text)
+    rationale: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=_now
+    )
+
+
+class ActionItem(Base):
+    __tablename__ = "action_items"
+    __table_args__ = (
+        Index(
+            "idx_action_items_open",
+            "user_id",
+            "due_at",
+            postgresql_where=text("resolved_at IS NULL"),
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"))
+    application_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("applications.id", ondelete="CASCADE")
+    )
+    event_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("email_events.id", ondelete="CASCADE")
+    )
+    kind: Mapped[str] = mapped_column(Text)
+    due_at: Mapped[datetime.datetime | None] = mapped_column(TIMESTAMP(timezone=True))
+    resolved_at: Mapped[datetime.datetime | None] = mapped_column(TIMESTAMP(timezone=True))
+    resolution: Mapped[str | None] = mapped_column(Text)
+    resolved_by_event_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("email_events.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=_now
+    )
