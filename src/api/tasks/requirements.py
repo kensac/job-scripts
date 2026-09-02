@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime
 import hashlib
 import logging
 import os
@@ -25,7 +26,7 @@ from core.requirements import (
     SPONSORSHIPS,
     in_vocabulary,
 )
-from core.routing import TaskShape
+from core.routing import Evidence, TaskShape
 from core.store import CONTENT_LATERAL
 
 logger = logging.getLogger("jobtracker_worker")
@@ -70,14 +71,6 @@ REQUIREMENTS_MAX_OUTPUT_TOKENS = 1000
 # checks it can do what this task needs rather than choosing it for cost.
 # est_prompt_tokens is the fitted figure from the pilot below, not the
 # conservative chunking estimate: it ranks candidates and never becomes a bill.
-REQUIREMENTS_TASK = TaskShape(
-    structured=StructuredOutput.JSON_SCHEMA,
-    batched=True,
-    max_output_tokens=REQUIREMENTS_MAX_OUTPUT_TOKENS,
-    est_prompt_tokens=2270,
-    effort=REQUIREMENTS_REASONING_EFFORT,
-    candidates=(REQUIREMENTS_MODEL,),
-)
 
 
 # Bounded per cycle for the same reason comp extraction is: one task must not
@@ -99,6 +92,51 @@ REQUIREMENTS_TASK = TaskShape(
 # 47.0M input and 4.0M output tokens, $9.89 batched at REQUIREMENTS_MODEL.
 EXTRACT_REQUIREMENTS_PER_CYCLE = int(
     os.environ.get("JOBTRACKER_EXTRACT_REQUIREMENTS_PER_CYCLE", "2179")
+)
+
+
+REQUIREMENTS_TASK = TaskShape(
+    purpose="requirements",
+    label="Requirements extraction",
+    per_cycle=EXTRACT_REQUIREMENTS_PER_CYCLE,
+    evidence=(
+        Evidence(
+            model="gpt-5-nano",
+            verdict="excluded",
+            finding=(
+                "Invented a clearance level for 12 of 55 postings whose page "
+                "never mentions clearance, and at minimal effort filled 0 and "
+                "'none' wherever the honest answer was 'unstated' - which is "
+                "the distinction this extraction exists to keep."
+            ),
+            sample_size=60,
+            measured_on=datetime.date(2026, 9, 2),
+        ),
+        Evidence(
+            model="gpt-5-mini",
+            verdict="chosen",
+            finding=(
+                "Over the same postings invented one degree, one years-of-"
+                "experience figure and no clearances, and truncated nothing."
+            ),
+            sample_size=60,
+            measured_on=datetime.date(2026, 9, 2),
+        ),
+    ),
+    notes=(
+        "gpt-5-mini rather than nano on measured evidence, not price. Audited "
+        "over 60 real postings against whether the page mentions the fact at "
+        "all: nano invented a clearance level for 12 of 55 postings that never "
+        "mention clearance, and at minimal effort filled 0 and 'none' wherever "
+        "the honest answer was 'unstated' - which is the one distinction this "
+        "extraction exists to keep. mini invented one degree and no clearances."
+    ),
+    structured=StructuredOutput.JSON_SCHEMA,
+    batched=True,
+    max_output_tokens=REQUIREMENTS_MAX_OUTPUT_TOKENS,
+    est_prompt_tokens=2270,
+    effort=REQUIREMENTS_REASONING_EFFORT,
+    candidates=(REQUIREMENTS_MODEL,),
 )
 
 
@@ -335,7 +373,7 @@ async def handle_extract_requirements(task_id: int, payload: dict[str, Any]) -> 
         for r in rows
     }
     _set_progress(task_id, 0, len(specs), "requirements batch submitted (half price)")
-    results, _ = await run_batched(task_id, REQUIREMENTS_TASK, specs, purpose="requirements")
+    results, _ = await run_batched(task_id, REQUIREMENTS_TASK, specs)
     done = 0
     for url, res in results.items():
         content_hash = hashes.get(url)

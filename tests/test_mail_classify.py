@@ -50,7 +50,7 @@ def _events(message_id: int):
 
 
 async def _run(monkeypatch, payload, results):
-    async def fake(task_id, shape, specs, *, purpose):
+    async def fake(task_id, shape, specs):
         from core.routing import resolve
 
         return results, resolve(shape)
@@ -240,7 +240,7 @@ async def test_the_cap_is_clamped_not_trusted(monkeypatch, f):
     on a worker rather than as a rejected parameter."""
     seen: dict = {}
 
-    async def fake(task_id, shape, specs, *, purpose):
+    async def fake(task_id, shape, specs):
         from core.routing import resolve
 
         seen["count"] = len(specs)

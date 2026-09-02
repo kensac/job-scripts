@@ -25,7 +25,7 @@ from pydantic import BaseModel
 from api import db
 from api.tasks.runtime import _set_progress, run_batched
 from core.providers.spec import StructuredOutput
-from core.routing import TaskShape, resolve
+from core.routing import Evidence, TaskShape, resolve
 
 logger = logging.getLogger("jobtracker_worker")
 
@@ -103,7 +103,7 @@ def effort_for(model: str) -> str:
     through; this keeps the name and the unknown-model floor that callers here
     rely on, without a second copy of the preference walk.
     """
-    return _classify_task(model).resolved_effort() or FALLBACK_EFFORT
+    return _classify_task(model, "effort_probe", "").resolved_effort() or FALLBACK_EFFORT
 
 
 # Enough for the schema's handful of short fields. The model does not reason
@@ -112,7 +112,7 @@ def effort_for(model: str) -> str:
 CLASSIFY_MAX_TOKENS = 400
 
 
-def _classify_task(model: str) -> TaskShape:
+def _classify_task(model: str, purpose: str, label: str) -> TaskShape:
     """One model per shape, never a list.
 
     The choice above is an evidence judgment, not an optimisation: a router
@@ -122,6 +122,37 @@ def _classify_task(model: str) -> TaskShape:
     price, and it is where the effort walk happens.
     """
     return TaskShape(
+        purpose=purpose,
+        label=label,
+        per_cycle=MAX_CLASSIFY_PER_CYCLE,
+        evidence=(
+            Evidence(
+                model="gpt-5-nano",
+                verdict="excluded",
+                finding=(
+                    "Invented a clearance level for 12 of 55 postings whose page "
+                    "never mentions clearance, and at minimal effort filled 0 and "
+                    "'none' wherever the honest answer was 'unstated' - which is "
+                    "the distinction this extraction exists to keep."
+                ),
+                sample_size=60,
+                measured_on=datetime.date(2026, 9, 2),
+            ),
+        ),
+        # The comment that used to live above BACKFILL_MODEL, promoted to data
+        # so it reaches a person overriding this from a screen. A code comment
+        # cannot warn the one reader who most needs the warning.
+        notes=(
+            "gpt-5-nano is excluded on evidence rather than price: measured on "
+            "extraction-shaped work it fabricates, inventing 12 clearances "
+            "across 55 postings and filling 0/'none' wherever the true answer "
+            "is 'unstated'. The same shape applies here - a deadline that was "
+            "never stated must not become a guessed date, and silence must not "
+            "become a fabricated rejection. Backfill and ongoing are priced "
+            "differently enough to be different models: over the 38,685-message "
+            "mailbox, batched, luna is $10.44 and mini $14.99, while ongoing at "
+            "~80/day is $11.31/yr on mini where per-message quality matters more."
+        ),
         structured=StructuredOutput.JSON_SCHEMA,
         batched=True,
         max_output_tokens=CLASSIFY_MAX_TOKENS,
@@ -133,8 +164,10 @@ def _classify_task(model: str) -> TaskShape:
     )
 
 
-BACKFILL_TASK = _classify_task(BACKFILL_MODEL)
-ONGOING_TASK = _classify_task(ONGOING_MODEL)
+BACKFILL_TASK = _classify_task(
+    BACKFILL_MODEL, "mail_classify_backfill", "Mail classification (backfill)"
+)
+ONGOING_TASK = _classify_task(ONGOING_MODEL, "mail_classify", "Mail classification (ongoing)")
 
 
 EVENT_KINDS = (
@@ -566,7 +599,7 @@ async def handle_classify_mail(task_id: int, payload: dict[str, Any]) -> None:
         for r in rows
     ]
     _set_progress(task_id, 0, len(specs), f"mail classification submitted ({model}, half price)")
-    results, _ = await run_batched(task_id, shape, specs, purpose="mail_classify")
+    results, _ = await run_batched(task_id, shape, specs)
 
     done = 0
     skipped = 0
