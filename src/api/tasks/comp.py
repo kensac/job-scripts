@@ -131,7 +131,7 @@ async def handle_extract_comp(task_id: int, payload: dict[str, Any]) -> None:
     ]
     by_url = {r["url"]: r["id"] for r in rows}
     _set_progress(task_id, 0, len(specs), "comp batch submitted (half price)")
-    hook = _batch_event_hook(task_id, "comp", ai.DEFAULT_MODELS["openai"])
+    hook = _batch_event_hook(task_id, "comp", ai.DEFAULT_OPENAI_MODEL)
     existing = _pending_batch_ids(task_id)
     if existing:
         from core.batch import collect_batches
@@ -140,7 +140,7 @@ async def handle_extract_comp(task_id: int, payload: dict[str, Any]) -> None:
         results = await collect_batches(existing, hook)
     else:
         results = await submit_or_collect(
-            task_id, specs, ai.DEFAULT_MODELS["openai"], "low", 1500, hook
+            task_id, specs, ai.DEFAULT_OPENAI_MODEL, "low", 1500, hook
         )
     done = 0
     for url, res in results.items():

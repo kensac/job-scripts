@@ -34,19 +34,36 @@ def _backfill_ai_queries() -> None:
     """Price historical rows from the one price table, rather than restating it
     in SQL - a second copy here is exactly the drift this migration exists to
     end."""
-    from core.pricing import PRICES_PER_MTOK, cost_sql
+    from core.pricing import cost_sql
+    from core.providers import MODELS
 
     expr = cost_sql(
         model_rate_in="CAST(:rate_in AS numeric)",
         model_rate_out="CAST(:rate_out AS numeric)",
+        model_rate_cached_in="CAST(:rate_cached AS numeric)",
+        batch_rate="CAST(:batch_rate AS numeric)",
         batched="batch_id IS NOT NULL",
     )
-    for model, (rate_in, rate_out) in PRICES_PER_MTOK.items():
+    # Only the first tier is bound. Every row this backfill can reach predates
+    # the tiered providers - the rows are all gpt-* and gpt-* has a single tier
+    # - so tier selection has nothing to choose between here. A tiered model
+    # cannot be priced by one statement per model anyway; it needs one per
+    # (model, prompt range), which is the shape to reach for if this is ever
+    # re-run against a table that has them.
+    for model, (_provider, declared) in MODELS.items():
+        price = declared.rates
+        tier = price.tiers[0]
         op.execute(
             sa.text(
                 f"UPDATE ai_queries SET cost_usd = {expr} "
                 "WHERE model = :model AND cost_usd IS NULL"
-            ).bindparams(model=model, rate_in=str(rate_in), rate_out=str(rate_out))
+            ).bindparams(
+                model=model,
+                rate_in=str(tier.rate_in),
+                rate_out=str(tier.rate_out),
+                rate_cached=str(tier.rate_cached_in if tier.rate_cached_in is not None else tier.rate_in),
+                batch_rate=str(price.batch_rate if price.batch_rate is not None else 1),
+            )
         )
 
 
