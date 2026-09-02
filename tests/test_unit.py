@@ -304,3 +304,19 @@ def test_requirements_declares_a_shape_the_model_can_actually_serve():
     # "minimal" is the whole point of the pinning: nano rejects it outright and
     # a batch fails whole, so an unchecked effort costs the entire run.
     assert REQUIREMENTS_TASK.resolved_effort() == "minimal"
+
+
+def test_alembic_has_exactly_one_head():
+    """Two sessions wrote migrations against the same parent and merged within
+    minutes. Neither was wrong and they touched different tables, but alembic
+    cannot pick between two heads - `upgrade head` fails outright, so nothing
+    migrates and every deploy stops.
+
+    Parallel work makes this a recurring hazard rather than a one-off, and it
+    is invisible until something tries to migrate."""
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    script = ScriptDirectory.from_config(Config("alembic.ini"))
+    heads = script.get_heads()
+    assert len(heads) == 1, f"{len(heads)} alembic heads: {heads}; add a merge revision"
