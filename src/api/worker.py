@@ -124,6 +124,15 @@ def schedule_ingest_cycle() -> None:
         "AND status IN ('pending', 'running', 'waiting', 'awaiting_batch') LIMIT 1"
     ):
         enqueue("extract_comp", {"cycle": cycle}, dedupe_key=f"comp:{cycle}")
+    # Same non-overlap guard, and for the same reason: a capped pass that then
+    # parks on the Batch API for hours would otherwise stack a new pass on top
+    # of itself every cycle. Kept separate from the comp check so one pass
+    # waiting on a slow batch does not block the other from ever starting.
+    if not db.query_one(
+        "SELECT 1 FROM tasks WHERE kind = 'extract_requirements' "
+        "AND status IN ('pending', 'running', 'waiting', 'awaiting_batch') LIMIT 1"
+    ):
+        enqueue("extract_requirements", {"cycle": cycle}, dedupe_key=f"requirements:{cycle}")
     enqueue("send_digests", {"cycle": day}, dedupe_key=f"digest:{day}")
     enqueue("data_health", {"cycle": cycle}, dedupe_key=f"health:{cycle}")
     enqueue("poll_batches", {"cycle": cycle}, dedupe_key=f"pollbatch:{cycle}")

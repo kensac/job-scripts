@@ -12,6 +12,7 @@ from api.routers import (
     filters,
     gmail,
     jobs,
+    requirements,
     sources,
     spend,
     stats,
@@ -41,6 +42,7 @@ app.include_router(jobs.router, prefix="/v1")
 app.include_router(filters.router, prefix="/v1")
 app.include_router(sources.router, prefix="/v1")
 app.include_router(stats.router, prefix="/v1")
+app.include_router(requirements.router, prefix="/v1")
 app.include_router(admin.router, prefix="/v1")
 app.include_router(spend.router, prefix="/v1")
 app.include_router(filter_insights.router, prefix="/v1")

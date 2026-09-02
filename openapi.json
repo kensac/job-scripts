@@ -2895,6 +2895,228 @@
         }
       }
     },
+    "/v1/requirements/market": {
+      "get": {
+        "summary": "Market",
+        "description": "What the roles this user is targeting actually ask for.\n\nCounts are reported against `postings` - the number of postings in the\nslice - rather than as shares, because a share hides how thin a slice is.\n\"Kubernetes in 3 of 7 postings\" and \"Kubernetes in 43% of postings\" read the\nsame and mean very different things.",
+        "operationId": "market_v1_requirements_market_get",
+        "parameters": [
+          {
+            "name": "seniority",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Seniority"
+            }
+          },
+          {
+            "name": "employment_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Employment Type"
+            }
+          },
+          {
+            "name": "x-service-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-Service-Token"
+            }
+          },
+          {
+            "name": "x-user-sub",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Sub"
+            }
+          },
+          {
+            "name": "x-user-email",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Email"
+            }
+          },
+          {
+            "name": "x-user-name",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Name"
+            }
+          },
+          {
+            "name": "x-user-groups",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Groups"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/requirements/gap": {
+      "get": {
+        "summary": "Gap",
+        "description": "Where the user's stated background falls short of the slice.\n\nEach gap counts only postings that STATE the requirement. A posting silent\nabout a degree is not evidence the user's degree is enough, and counting it\nas a pass would report a reachability number the market never promised.",
+        "operationId": "gap_v1_requirements_gap_get",
+        "parameters": [
+          {
+            "name": "seniority",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Seniority"
+            }
+          },
+          {
+            "name": "employment_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Employment Type"
+            }
+          },
+          {
+            "name": "x-service-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-Service-Token"
+            }
+          },
+          {
+            "name": "x-user-sub",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Sub"
+            }
+          },
+          {
+            "name": "x-user-email",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Email"
+            }
+          },
+          {
+            "name": "x-user-name",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Name"
+            }
+          },
+          {
+            "name": "x-user-groups",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Groups"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/admin/filter-presets": {
       "get": {
         "summary": "Admin List Presets",
@@ -7906,6 +8128,86 @@
         "type": "object",
         "title": "AuthorizeRequest"
       },
+      "Background": {
+        "properties": {
+          "yoe": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 50.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Yoe"
+          },
+          "degree": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Degree"
+          },
+          "degree_fields": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 20,
+            "title": "Degree Fields"
+          },
+          "skills": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 200,
+            "title": "Skills"
+          },
+          "clearance": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Clearance"
+          },
+          "citizen": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Citizen"
+          },
+          "needs_sponsorship": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Needs Sponsorship"
+          }
+        },
+        "type": "object",
+        "title": "Background",
+        "description": "What the user says they bring, in the same vocabulary the extraction\nwrites, so the gap query compares like with like instead of guessing at a\nfree-text resume. Every field is optional: an unset field means \"do not\nmeasure me against this\", which is a different answer from zero."
+      },
       "CallbackRequest": {
         "properties": {
           "code": {
@@ -8623,6 +8925,16 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/Criteria"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "background": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Background"
               },
               {
                 "type": "null"

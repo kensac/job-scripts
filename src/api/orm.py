@@ -87,6 +87,57 @@ class Job(Base):
     created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
 
 
+class JobRequirements(Base):
+    """What a posting says it requires, keyed by url rather than by job id.
+
+    No foreign key to jobs, deliberately: a quarter of the urls with stored page
+    text have no job row, and those postings are closed and unscrapable. Same
+    reasoning as ai_queries - a cache of paid AI work outlives the job row.
+    """
+
+    __tablename__ = "job_requirements"
+    __table_args__ = (
+        Index("idx_job_requirements_seniority", "seniority"),
+        Index("idx_job_requirements_employment", "employment_type"),
+    )
+
+    url: Mapped[str] = mapped_column(Text, primary_key=True)
+    has_requirements: Mapped[bool] = mapped_column(Boolean)
+    # NULL is "the posting does not say", which is not "zero" and not "none".
+    yoe_min: Mapped[int | None]
+    yoe_max: Mapped[int | None]
+    degree_min: Mapped[str | None] = mapped_column(Text)
+    degree_required: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    degree_fields: Mapped[list[str]] = mapped_column(server_default=text("'{}'"))
+    enrollment_required: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    seniority: Mapped[str | None] = mapped_column(Text)
+    employment_type: Mapped[str | None] = mapped_column(Text)
+    clearance: Mapped[str | None] = mapped_column(Text)
+    citizenship_required: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    sponsorship: Mapped[str | None] = mapped_column(Text)
+    model: Mapped[str | None] = mapped_column(Text)
+    content_hash: Mapped[str | None] = mapped_column(Text)
+    extracted_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+
+
+class JobSkill(Base):
+    """One row per skill a posting names, canonical form beside the raw text.
+
+    Rows rather than an array column because the whole feature is a GROUP BY
+    over a filtered slice. skill_raw is the primary key component so two raw
+    spellings may collapse onto one canonical skill without colliding, and so a
+    better normalisation is an UPDATE rather than another paid AI pass.
+    """
+
+    __tablename__ = "job_skills"
+    __table_args__ = (Index("idx_job_skills_skill", "skill", "kind"),)
+
+    url: Mapped[str] = mapped_column(Text, primary_key=True)
+    kind: Mapped[str] = mapped_column(Text, primary_key=True)
+    skill_raw: Mapped[str] = mapped_column(Text, primary_key=True)
+    skill: Mapped[str] = mapped_column(Text)
+
+
 class UserJob(Base):
     __tablename__ = "user_jobs"
 
@@ -177,6 +228,7 @@ class UserSettings(Base):
     api_key_enc: Mapped[bytes | None] = mapped_column(BYTEA)
     bypass_sponsorship_filter: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
     criteria: Mapped[dict] = mapped_column(server_default=text("'{}'::jsonb"))
+    background: Mapped[dict] = mapped_column(server_default=text("'{}'::jsonb"))
     ai_provider: Mapped[str] = mapped_column(Text, server_default=text("'openai'"))
     ai_base_url: Mapped[str | None] = mapped_column(Text)
     ai_model: Mapped[str | None] = mapped_column(Text)

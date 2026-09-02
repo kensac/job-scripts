@@ -23,6 +23,7 @@ from api.tasks.runtime import (
     enqueue,
     submit_or_collect,
 )
+from core.store import CONTENT_LATERAL
 
 logger = logging.getLogger("jobtracker_worker")
 
@@ -270,7 +271,7 @@ async def handle_verify_new(task_id: int, payload: dict[str, Any]) -> None:
     from core.batch import BatchSpec
 
     rows = db.query(
-        """
+        f"""
         SELECT j.url, j.company, j.title, q.input_content,
                NOT EXISTS (
                    SELECT 1 FROM ai_queries c WHERE c.url = j.url
@@ -281,12 +282,7 @@ async def handle_verify_new(task_id: int, payload: dict[str, Any]) -> None:
                      AND c.check_type = 'clearance'
                      AND c.status IN ('passed', 'rejected')) AS needs_clearance
         FROM jobs j
-        JOIN LATERAL (
-            SELECT input_content FROM ai_queries q
-            WHERE q.url = j.url AND q.input_content IS NOT NULL
-              AND length(q.input_content) > 200
-            ORDER BY (q.check_type = 'content') DESC, q.id DESC LIMIT 1
-        ) q ON TRUE
+        {CONTENT_LATERAL.format(url="j.url")}
         WHERE j.active AND (
             NOT EXISTS (
                 SELECT 1 FROM ai_queries c WHERE c.url = j.url
