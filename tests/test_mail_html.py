@@ -168,3 +168,36 @@ def test_a_message_with_no_markup_reports_nothing_to_load(client, user_headers, 
     body = client.get(f"/v1/user/messages/{row['id']}", headers=user_headers).json()
     assert body["body_html"] is None
     assert body["blocked_remote_content"] == 0
+
+
+def test_a_thread_serves_the_same_safe_markup_as_a_single_message(client, user_headers, f):
+    """A thread is where a person reads mail in context. Serving stripped text
+    there and rendered mail one click away would be the same message in two
+    shapes, and the thread is the one that gets read first."""
+    from api import db
+
+    uid = db.query_one("SELECT id FROM users WHERE sub = 'test-user'")["id"]
+    ids = []
+    for n in range(2):
+        row = db.query_one(
+            "INSERT INTO email_messages (user_id, provider_message_id, provider_thread_id, "
+            "source, from_email, subject, sent_at, body_text, body_html) VALUES "
+            "(%s, %s, 'thr-1', 'olm', 'a@b.com', 's', now(), %s, %s) RETURNING id",
+            (
+                uid,
+                f"thr-msg-{n}",
+                "plain",
+                f'<p onclick="steal()">message {n}'
+                f'<img src="https://tracker.test/px.gif"><script>x()</script></p>',
+            ),
+        )
+        ids.append(row["id"])
+
+    body = client.get(f"/v1/user/messages/{ids[0]}/thread", headers=user_headers).json()
+    assert len(body["messages"]) == 2
+    for message in body["messages"]:
+        assert "script" not in (message["body_html"] or "").lower()
+        assert "onclick" not in (message["body_html"] or "").lower()
+        assert message["blocked_remote_content"] == 1
+        assert "data-blocked-src" in message["body_html"]
+        assert "tracker.test" in message["body_html"], "kept so it can be loaded on request"
