@@ -213,3 +213,54 @@ class TestAlertSubjectKind:
         )
         body = client.get("/v1/admin/health", headers=admin_headers).json()
         assert body["open"][0]["subject_kind"] == health.SUBJECT_TASK
+
+
+class TestPollBatchesDoesNotPileUp:
+    """A poll is idempotent and stateless - it reports on whatever is open
+    right now - so a second one waiting behind the first has nothing of its
+    own to do. Eleven had queued behind an hour of scraping, and each would
+    hold a worker slot when it ran, competing with the collection of batches
+    already paid for.
+    """
+
+    def _schedule(self):
+        from api.worker import schedule_ingest_cycle
+
+        schedule_ingest_cycle()
+
+    def _polls(self):
+        return db.query("SELECT id, status FROM tasks WHERE kind = 'poll_batches' ORDER BY id")
+
+    def test_one_is_enqueued_when_none_is_waiting(self, f):
+        self._schedule()
+        assert len(self._polls()) == 1
+
+    def test_a_second_is_not_enqueued_from_a_later_bucket(self, f):
+        """Across buckets is the case that matters. The dedupe key already
+        stops two polls in the same bucket, so a test that calls the scheduler
+        twice in one minute passes without the guard - which is what my first
+        version of this test did."""
+        db.execute(
+            "INSERT INTO tasks (kind, payload, status, dedupe_key) "
+            "VALUES ('poll_batches', '{}'::jsonb, 'pending', 'pollbatch:an-earlier-bucket')"
+        )
+        self._schedule()
+        assert len(self._polls()) == 1
+
+    def test_a_second_is_not_enqueued_while_one_is_running(self, f):
+        db.execute(
+            "INSERT INTO tasks (kind, payload, status) "
+            "VALUES ('poll_batches', '{}'::jsonb, 'running')"
+        )
+        self._schedule()
+        assert len(self._polls()) == 1
+
+    def test_a_finished_poll_does_not_block_the_next(self, f):
+        """The guard must not stop polling altogether - a parked task waits on
+        it, and batches expire."""
+        db.execute(
+            "INSERT INTO tasks (kind, payload, status, finished_at) "
+            "VALUES ('poll_batches', '{}'::jsonb, 'done', now())"
+        )
+        self._schedule()
+        assert len(self._polls()) == 2

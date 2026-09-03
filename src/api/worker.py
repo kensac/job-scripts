@@ -190,7 +190,22 @@ def schedule_ingest_cycle() -> None:
         second=0,
         microsecond=0,
     ).strftime("%Y-%m-%dT%H:%M")
-    enqueue("poll_batches", {"cycle": poll_bucket}, dedupe_key=f"pollbatch:{poll_bucket}")
+    # The dedupe key stops two polls per BUCKET; this stops a queue of them
+    # across buckets. A poll is idempotent and stateless - it reports on
+    # whatever is open right now - so a second one waiting behind the first has
+    # nothing of its own to do, and eleven had piled up behind an hour of
+    # scraping. That is not merely wasteful: each holds a worker slot when it
+    # finally runs, and the thing it is competing with is the collection of
+    # batches that have already been paid for.
+    #
+    # Same distinction as the classify bug: "has it run" and "has it been
+    # enqueued" are different questions, and scheduling on the second one
+    # re-queues work that is already in flight.
+    if not db.query_one(
+        "SELECT 1 FROM tasks WHERE kind = 'poll_batches' "
+        "AND status IN ('pending', 'running') LIMIT 1"
+    ):
+        enqueue("poll_batches", {"cycle": poll_bucket}, dedupe_key=f"pollbatch:{poll_bucket}")
     # Hourly sweep for jobs the ingest pipeline left unverified (inline AI
     # checks disabled fleet-side): closed+clearance in one batched call each.
     # Same non-overlap guard as comp, requirements and mail classification, and
