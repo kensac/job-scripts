@@ -1179,6 +1179,95 @@ def test_a_thread_row_carries_what_a_row_needs(client, user_headers):
     assert row["last_activity_at"] is not None
 
 
+def test_silence_is_a_filter_because_it_is_the_question_people_ask(client, user_headers):
+    """`evidence=false` is "no mail at all". This is "no mail LATELY", which is
+    the ghosting question - and silence since an acknowledgement is still
+    silence, so it measures from the last thing that happened rather than from
+    applying."""
+    uid = db.query_one("SELECT id FROM users WHERE email = %s", ("user@example.com",))["id"]
+    quiet = db.query_one(
+        "INSERT INTO applications (user_id, company_name, title, source_provenance, applied_at) "
+        "VALUES (%s,'Quiet','Engineer','tracker', now() - interval '200 days') RETURNING id",
+        (uid,),
+    )["id"]
+    recent = db.query_one(
+        "INSERT INTO applications (user_id, company_name, title, source_provenance, applied_at) "
+        "VALUES (%s,'Recent','Engineer','tracker', now() - interval '3 days') RETURNING id",
+        (uid,),
+    )["id"]
+    # Applied long ago but acknowledged yesterday: not silent.
+    talking = db.query_one(
+        "INSERT INTO applications (user_id, company_name, title, source_provenance, applied_at) "
+        "VALUES (%s,'Talking','Engineer','tracker', now() - interval '200 days') RETURNING id",
+        (uid,),
+    )["id"]
+    mid = db.query_one(
+        "INSERT INTO email_messages (user_id, provider_message_id, source, subject, sent_at) "
+        "VALUES (%s,%s,'gmail','hi', now() - interval '1 day') RETURNING id",
+        (uid, f"quiet-{next(_seq)}"),
+    )["id"]
+    db.execute(
+        "INSERT INTO email_events (message_id, kind, confidence) "
+        "VALUES (%s,'acknowledgement','high')",
+        (mid,),
+    )
+    _match(mid, talking)
+
+    body = client.get("/v1/user/pipeline?silent_days=60", headers=user_headers).json()
+    assert [a["id"] for a in body["applications"]] == [quiet]
+    assert recent not in [a["id"] for a in body["applications"]]
+    assert talking not in [a["id"] for a in body["applications"]], (
+        "silence is measured from the last thing that happened, not from applying"
+    )
+
+
+def test_a_finished_application_is_not_silent(client, user_headers):
+    """A rejection is an answer. Listing it as unanswered would put closed
+    applications in the pile of things still waiting."""
+    uid = db.query_one("SELECT id FROM users WHERE email = %s", ("user@example.com",))["id"]
+    done = db.query_one(
+        "INSERT INTO applications (user_id, company_name, title, source_provenance, applied_at) "
+        "VALUES (%s,'Done','Engineer','tracker', now() - interval '300 days') RETURNING id",
+        (uid,),
+    )["id"]
+    mid = db.query_one(
+        "INSERT INTO email_messages (user_id, provider_message_id, source, subject, sent_at) "
+        "VALUES (%s,%s,'gmail','no', now() - interval '250 days') RETURNING id",
+        (uid, f"done-{next(_seq)}"),
+    )["id"]
+    db.execute(
+        "INSERT INTO email_events (message_id, kind, confidence) VALUES (%s,'rejection','high')",
+        (mid,),
+    )
+    _match(mid, done)
+
+    body = client.get("/v1/user/pipeline?silent_days=60", headers=user_headers).json()
+    assert done not in [a["id"] for a in body["applications"]]
+
+
+def test_conversations_sort_on_the_set(client, user_headers):
+    """Oldest-conversation-first is how a backlog is worked, and it cannot be
+    done client-side without sorting one page of a filtered whole."""
+    uid = db.query_one("SELECT id FROM users WHERE email = %s", ("user@example.com",))["id"]
+    for key, when in (("old-convo", "2024-01-01"), ("new-convo", "2026-01-01")):
+        mid = db.query_one(
+            "INSERT INTO email_messages (user_id, provider_message_id, provider_thread_id, "
+            "source, subject, from_email, sent_at) VALUES (%s,%s,%s,'gmail','s','a@b.com',%s) "
+            "RETURNING id",
+            (uid, f"ts-{next(_seq)}", key, when),
+        )["id"]
+        db.execute(
+            "INSERT INTO email_events (message_id, kind, confidence) "
+            "VALUES (%s,'acknowledgement','high')",
+            (mid,),
+        )
+
+    oldest = client.get("/v1/user/threads?sort=started_at&dir=asc", headers=user_headers).json()
+    assert oldest["threads"][0]["thread_id"] == "old-convo"
+    newest = client.get("/v1/user/threads", headers=user_headers).json()
+    assert newest["threads"][0]["thread_id"] == "new-convo"
+
+
 def test_the_unmatched_queue_is_work_not_the_whole_mailbox(client, user_headers):
     """It shipped showing 63,598 messages - essentially the entire mailbox -
     because personal mail correctly has no application and always will. A queue

@@ -9246,6 +9246,23 @@
             }
           },
           {
+            "name": "silent_days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Silent Days"
+            }
+          },
+          {
             "name": "sort",
             "in": "query",
             "required": false,
@@ -11161,6 +11178,26 @@
                 }
               ],
               "title": "Q"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "last_activity_at",
+              "title": "Sort"
+            }
+          },
+          {
+            "name": "dir",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "desc",
+              "title": "Dir"
             }
           },
           {
