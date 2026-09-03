@@ -753,9 +753,17 @@ def reattach_match(
 ):
     """Undo a detach, by the same append."""
     _owned_application(application_id, user.id)
-    match = db.query_one("SELECT message_id FROM application_matches WHERE id = %s", (match_id,))
+    # Bound to the application, exactly as detach is. Owning the application
+    # says nothing about owning the MATCH: without this the match_id was taken
+    # from the request and trusted, so any match in the table - including
+    # another user's - could have its message appended to an application the
+    # caller does own, which is that message's content crossing to a stranger.
+    match = db.query_one(
+        "SELECT message_id FROM application_matches WHERE id = %s AND application_id = %s",
+        (match_id, application_id),
+    )
     if match is None:
-        raise HTTPException(status_code=404, detail="match not found")
+        raise HTTPException(status_code=404, detail="match not found on this application")
     db.execute(
         "INSERT INTO application_matches (message_id, application_id, method, confidence, "
         "rationale) VALUES (%s, %s, 'manual', 'high', %s)",
@@ -1409,7 +1417,24 @@ def answer_suggestion(
     )
     if app is None:
         raise HTTPException(status_code=404, detail="application not found")
-    event = db.query_one("SELECT id, kind FROM email_events WHERE id = %s", (event_id,))
+    # The event has to belong to a message currently matched to THIS
+    # application - the same join the suggestion list is built from. Checking
+    # only that the application is owned left event_id taken from the request
+    # and trusted, so another user's event could decide which status this
+    # application moved to.
+    event = db.query_one(
+        """
+        WITH current_match AS (
+            SELECT DISTINCT ON (message_id) message_id, application_id
+            FROM application_matches ORDER BY message_id, id DESC
+        )
+        SELECT e.id, e.kind
+        FROM email_events e
+        JOIN current_match cm ON cm.message_id = e.message_id
+        WHERE e.id = %s AND cm.application_id = %s
+        """,
+        (event_id, application_id),
+    )
     if event is None or event["kind"] not in _STATUS_FROM_EVENT:
         raise HTTPException(status_code=404, detail="no suggestion for that event")
 
