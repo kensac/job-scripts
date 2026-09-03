@@ -54,6 +54,7 @@ app.include_router(companies.router, prefix="/v1")
 app.include_router(spend.router, prefix="/v1")
 app.include_router(mail.router, prefix="/v1")
 app.include_router(filter_insights.router, prefix="/v1")
+app.include_router(filter_insights.user_router, prefix="/v1")
 app.include_router(gmail.router, prefix="/v1")
 metrics.instrument(app)
 

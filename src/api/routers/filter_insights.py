@@ -27,7 +27,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Query
 
 from api import db
-from api.auth import AuthedUser
+from api.auth import AuthedUser, require_user
 from api.routers.admin import require_admin
 from core import reason_taxonomy
 from core.reason_taxonomy import (
@@ -94,6 +94,39 @@ def _bucket() -> dict[str, Any]:
         "evidence_missing_decisions": 0,
         "evidence_missing_jobs": set(),
     }
+
+
+def _classify_rejections(
+    hashes: list[str], rejections: list[dict[str, Any]]
+) -> tuple[dict[str, dict[str, dict[str, Any]]], dict[str, dict[str, Any]]]:
+    """One classification pass, shared by the admin and user views.
+
+    A reason can land in several groups, so the per-hash evidence-missing
+    totals ride along here rather than being summed from the groups
+    afterwards: a reason in three groups is still one decision.
+    """
+    grouped: dict[str, dict[str, dict[str, Any]]] = {
+        h: collections.defaultdict(_bucket) for h in hashes
+    }
+    per_hash: dict[str, dict[str, Any]] = {h: {"decisions": 0, "jobs": set()} for h in hashes}
+    for row in rejections:
+        buckets = grouped[row["prompt_hash"]]
+        reason, url = row["reason"], row["url"]
+        missing = is_evidence_missing(reason)
+        if missing:
+            totals_for_hash = per_hash[row["prompt_hash"]]
+            totals_for_hash["decisions"] += 1
+            totals_for_hash["jobs"].add(url)
+        keys = classify(reason) or (UNGROUPED,)
+        for key in keys:
+            b = buckets[key]
+            b["decisions"] += 1
+            b["distinct_jobs"].add(url)
+            b["phrasings"][reason] += 1
+            if missing:
+                b["evidence_missing_decisions"] += 1
+                b["evidence_missing_jobs"].add(url)
+    return grouped, per_hash
 
 
 def _finish(bucket: dict[str, Any], examples: int) -> dict[str, Any]:
@@ -235,6 +268,9 @@ def rejection_reasons(
                count(*) AS evaluated,
                count(*) FILTER (WHERE status = 'passed') AS passed,
                count(*) FILTER (WHERE status = 'rejected') AS rejected,
+               count(*) FILTER (
+                   WHERE status = 'rejected' AND reason IS NOT NULL AND reason <> ''
+               ) AS rejected_with_reason,
                count(DISTINCT url) AS distinct_jobs_evaluated,
                count(DISTINCT url) FILTER (WHERE status = 'rejected')
                    AS distinct_jobs_rejected,
@@ -290,30 +326,7 @@ def rejection_reasons(
         for name in row["filter_names"]:
             by_name[name].add(row["prompt_hash"])
 
-    grouped: dict[str, dict[str, dict[str, Any]]] = {
-        h: collections.defaultdict(_bucket) for h in hashes
-    }
-    # Per-hash evidence-missing totals ride along on the same pass; they are
-    # not the sum of the groups', because a reason in three groups is still
-    # one decision.
-    per_hash: dict[str, dict[str, Any]] = {h: {"decisions": 0, "jobs": set()} for h in hashes}
-    for row in rejections:
-        buckets = grouped[row["prompt_hash"]]
-        reason, url = row["reason"], row["url"]
-        missing = is_evidence_missing(reason)
-        if missing:
-            totals_for_hash = per_hash[row["prompt_hash"]]
-            totals_for_hash["decisions"] += 1
-            totals_for_hash["jobs"].add(url)
-        keys = classify(reason) or (UNGROUPED,)
-        for key in keys:
-            b = buckets[key]
-            b["decisions"] += 1
-            b["distinct_jobs"].add(url)
-            b["phrasings"][reason] += 1
-            if missing:
-                b["evidence_missing_decisions"] += 1
-                b["evidence_missing_jobs"].add(url)
+    grouped, per_hash = _classify_rejections(hashes, rejections)
 
     out = []
     for row in totals:
@@ -355,6 +368,12 @@ def rejection_reasons(
                     "evaluated": row["evaluated"],
                     "passed": row["passed"],
                     "rejected": row["rejected"],
+                    # The groups below are computed over rejections that
+                    # carry a reason, which is NOT all of them: the batched
+                    # paths recorded none between 2026-08-27 and the fix, so
+                    # a caller dividing a group by `rejected` understates it.
+                    # This is the denominator the groups are actually of.
+                    "rejected_with_reason": row["rejected_with_reason"],
                     "distinct_jobs_evaluated": row["distinct_jobs_evaluated"],
                     "distinct_jobs_rejected": row["distinct_jobs_rejected"],
                     "evidence_missing_decisions": missing["decisions"],
@@ -398,4 +417,164 @@ def _empty(days: int, min_decisions: int) -> dict[str, Any]:
         "examples_selection": _examples_selection(),
         "evidence_missing_criterion": _criterion(),
         "prompt_versions": [],
+    }
+
+
+user_router = APIRouter(prefix="/user/filter-insights")
+
+# What the caller's own filters rejected, in the same vocabulary as the admin
+# view and scoped to prompts they hold.
+#
+# Scoped by prompt_hash, not by user id, and that is deliberate: a custom
+# verdict keys on (url, check_type, prompt_hash) and carries no user, so
+# `prompt_hash IN (my filters)` is exactly the set the board's own visibility
+# predicate uses. It is therefore the set that explains what the caller SEES.
+# Two people running the same preset share those verdicts - one may be reading
+# evaluations the other paid for - which is correct here, because they are
+# facts about public postings rather than about either person.
+#
+# `ai_queries.filter_name` is NEVER returned. It embeds the owner as
+# `user1:pay_tier_200`, so echoing it would leak another user's id and filter
+# names to anyone who adopted the same preset. Names come from the caller's
+# own user_filters rows instead.
+_USER_HASHES_SQL = """
+SELECT prompt_hash, name, enabled FROM user_filters
+WHERE user_id = %(uid)s AND prompt_hash IS NOT NULL ORDER BY name
+"""
+
+
+@user_router.get("/rejection-reasons")
+def my_rejection_reasons(
+    days: int = Query(30, ge=1, le=365),
+    min_decisions: int = Query(_DEFAULT_MIN_DECISIONS, ge=1),
+    examples: int = Query(3, ge=0, le=5),
+    user: AuthedUser = Depends(require_user),
+) -> dict[str, Any]:
+    """Why your filters rejected what they rejected.
+
+    The admin view answers this across everyone, which means the person who
+    can actually fix a misfiring filter - its owner - could not see it. Same
+    taxonomy and same floors, so the two surfaces cannot describe the same
+    prompt differently.
+    """
+    mine = db.query(_USER_HASHES_SQL, {"uid": user.id})
+    if not mine:
+        return _empty(days, min_decisions)
+
+    # A hash can carry several of the caller's own filter names - one prompt
+    # here is both "default" and "general" - so the row is keyed on the prompt
+    # and lists the names, rather than pretending to be one filter.
+    names_for: dict[str, list[dict[str, Any]]] = collections.defaultdict(list)
+    for row in mine:
+        names_for[row["prompt_hash"]].append({"name": row["name"], "enabled": row["enabled"]})
+    hashes = sorted(names_for)
+    params: dict[str, Any] = {"days": days, "hashes": hashes}
+
+    totals = db.query(
+        f"""
+        SELECT prompt_hash,
+               count(*) AS evaluated,
+               count(*) FILTER (WHERE status = 'passed') AS passed,
+               count(*) FILTER (WHERE status = 'rejected') AS rejected,
+               count(*) FILTER (
+                   WHERE status = 'rejected' AND reason IS NOT NULL AND reason <> ''
+               ) AS rejected_with_reason,
+               count(DISTINCT url) AS distinct_jobs_evaluated,
+               count(DISTINCT url) FILTER (WHERE status = 'rejected')
+                   AS distinct_jobs_rejected,
+               min(created_at) AS first_seen,
+               max(created_at) AS last_seen
+        FROM ai_queries
+        WHERE check_type = 'custom' AND prompt_hash = ANY(%(hashes)s) AND {_WINDOW}
+        GROUP BY 1
+        """,
+        params,
+    )
+    rejections = db.query(
+        f"""
+        SELECT prompt_hash, url, reason FROM ai_queries
+        WHERE check_type = 'custom' AND status = 'rejected'
+          AND prompt_hash = ANY(%(hashes)s)
+          AND reason IS NOT NULL AND reason <> '' AND {_WINDOW}
+        """,
+        params,
+    )
+    grouped, per_hash = _classify_rejections(hashes, rejections)
+
+    seen = {row["prompt_hash"] for row in totals}
+    out = []
+    for row in totals:
+        h = row["prompt_hash"]
+        buckets = grouped[h]
+        missing = per_hash[h]
+        out.append(
+            {
+                "prompt_hash": h,
+                "filters": names_for[h],
+                "first_seen": row["first_seen"],
+                "last_seen": row["last_seen"],
+                "sufficient": row["rejected"] >= min_decisions,
+                "totals": {
+                    "evaluated": row["evaluated"],
+                    "passed": row["passed"],
+                    "rejected": row["rejected"],
+                    "rejected_with_reason": row["rejected_with_reason"],
+                    "distinct_jobs_evaluated": row["distinct_jobs_evaluated"],
+                    "distinct_jobs_rejected": row["distinct_jobs_rejected"],
+                    "evidence_missing_decisions": missing["decisions"],
+                    "evidence_missing_distinct_jobs": len(missing["jobs"]),
+                },
+                "groups": sorted(
+                    (
+                        {
+                            "key": g.key,
+                            "label": GROUP_LABELS[g.key],
+                            **_finish(buckets[g.key], examples),
+                        }
+                        for g in GROUPS
+                        if g.key in buckets
+                    ),
+                    key=lambda g: g["decisions"],
+                    reverse=True,
+                ),
+                UNGROUPED: _finish(buckets.get(UNGROUPED) or _bucket(), examples),
+            }
+        )
+    # A filter that decided nothing in the window is still the caller's, and
+    # showing nothing at all would read as "no problems" rather than "nothing
+    # ran". Zero rows say which.
+    for h in hashes:
+        if h not in seen:
+            out.append(
+                {
+                    "prompt_hash": h,
+                    "filters": names_for[h],
+                    "first_seen": None,
+                    "last_seen": None,
+                    "sufficient": False,
+                    "totals": dict.fromkeys(
+                        (
+                            "evaluated",
+                            "passed",
+                            "rejected",
+                            "rejected_with_reason",
+                            "distinct_jobs_evaluated",
+                            "distinct_jobs_rejected",
+                            "evidence_missing_decisions",
+                            "evidence_missing_distinct_jobs",
+                        ),
+                        0,
+                    ),
+                    "groups": [],
+                    "ungrouped": _finish(_bucket(), examples),
+                }
+            )
+    out.sort(key=lambda r: r["totals"]["rejected"], reverse=True)
+    return {
+        "window_days": days,
+        "unit": "decisions",
+        "min_decisions": min_decisions,
+        "overlapping_groups": True,
+        "evidence_missing_criterion": _criterion(),
+        "prompt_versions": out,
     }
