@@ -249,3 +249,34 @@ def test_every_declared_stage_has_something_that_produces_it():
     # board rather than from mail. Everything else must have an event.
     producible = from_events | {"applied", "withdrawn"}
     assert declared <= producible, f"no producer for {sorted(declared - producible)}"
+
+
+def test_settles_on_separates_awaiting_from_never_closeable():
+    """`resolved_at IS NULL` means two different things and the difference is
+    the whole product.
+
+    An assessment invite is awaiting an event that may still arrive. An offer
+    is not: measured over the corpus, of 71 applications carrying an offer
+    event only 11 have ANY later event, and no kind follows one reliably —
+    because no email says "you accepted". Rendering both as open asserts a
+    live obligation for the second that has never existed.
+    """
+    from api.mail_pipeline import settles_on
+
+    assert "acknowledgement" in settles_on("complete_assessment")
+    assert "interview_scheduled" in settles_on("schedule_interview")
+    # Deliberately never-closeable: nothing observable settles either.
+    assert settles_on("respond_to_offer") == ["rejection"]
+    assert settles_on("reply_to_recruiter") == []
+    assert settles_on("no_such_kind") == []
+
+
+def test_every_action_kind_declares_what_settles_it():
+    """A kind that opens items but is absent from _RESOLVING_EVENTS would be
+    silently never-closeable, which is the same defect as an empty list but
+    without saying so."""
+    from api.mail_pipeline import _EVENT_TO_ACTION, _RESOLVING_EVENTS
+
+    assert set(_EVENT_TO_ACTION.values()) <= set(_RESOLVING_EVENTS), (
+        "an action kind with no _RESOLVING_EVENTS entry cannot declare itself never-closeable"
+    )

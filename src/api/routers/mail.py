@@ -25,6 +25,20 @@ from api.tasks.mail_classify import EVENT_KINDS
 
 router = APIRouter()
 
+
+def _with_settling(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Tags each action item with what could ever close it.
+
+    An unresolved item means two different things and a caller cannot tell
+    them apart from resolved_at alone: an assessment invite from last week is
+    awaiting an event that may still arrive, while an offer from 2020 was
+    never going to be closed by anything, because no email says "you
+    accepted". An empty `settles_on` says the second, and such an item must
+    not be rendered as a live obligation.
+    """
+    return [{**row, "settles_on": mail_pipeline.settles_on(row["kind"])} for row in rows]
+
+
 _SORTABLE = {
     "sent_at": "m.sent_at",
     "imported_at": "m.imported_at",
@@ -640,14 +654,16 @@ def pipeline(
         "applications": page,
         "total": len(rows),
         "has_more": offset + len(page) < len(rows),
-        "actions": db.query(
-            """
+        "actions": _with_settling(
+            db.query(
+                """
             SELECT ai.*, a.company_name, a.title
             FROM action_items ai LEFT JOIN applications a ON a.id = ai.application_id
             WHERE ai.user_id = %s AND ai.resolved_at IS NULL
             ORDER BY ai.due_at NULLS LAST, ai.id
             """,
-            (user.id,),
+                (user.id,),
+            )
         ),
     }
 
@@ -703,9 +719,12 @@ def pipeline_detail(application_id: int, user: AuthedUser = Depends(require_user
         "stage": mail_pipeline.stage_for(events, app["board_status"]),
         "events": events,
         "matches": [{**m, "evidence": evidence.get(m["message_id"])} for m in matches],
-        "actions": db.query(
-            "SELECT * FROM action_items WHERE application_id = %s ORDER BY due_at NULLS LAST, id",
-            (application_id,),
+        "actions": _with_settling(
+            db.query(
+                "SELECT * FROM action_items WHERE application_id = %s "
+                "ORDER BY due_at NULLS LAST, id",
+                (application_id,),
+            )
         ),
     }
 
