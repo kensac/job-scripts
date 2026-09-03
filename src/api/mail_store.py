@@ -58,6 +58,7 @@ def store_messages(user_id: int, messages: Iterable[ImportedMessage]) -> int:
                     user_id,
                     message.provider_message_id,
                     message.provider_thread_id,
+                    message.thread_topic,
                     message.source,
                     message.from_email,
                     message.from_name,
@@ -74,10 +75,10 @@ def store_messages(user_id: int, messages: Iterable[ImportedMessage]) -> int:
             cur.executemany(
                 """
                 INSERT INTO email_messages (
-                    user_id, provider_message_id, provider_thread_id, source,
+                    user_id, provider_message_id, provider_thread_id, thread_topic, source,
                     from_email, from_name, to_emails, subject, sent_at,
                     body_text, prefilter_hit, prefilter_reason, headers
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (user_id, provider_message_id) DO UPDATE SET
                     -- Only ever improve. A thinner copy from another archive
                     -- must not blank a field an earlier import already filled.
@@ -86,6 +87,9 @@ def store_messages(user_id: int, messages: Iterable[ImportedMessage]) -> int:
                     sent_at = COALESCE(EXCLUDED.sent_at, email_messages.sent_at),
                     provider_thread_id = COALESCE(
                         email_messages.provider_thread_id, EXCLUDED.provider_thread_id
+                    ),
+                    thread_topic = COALESCE(
+                        email_messages.thread_topic, EXCLUDED.thread_topic
                     ),
                     prefilter_hit = EXCLUDED.prefilter_hit,
                     prefilter_reason = EXCLUDED.prefilter_reason,

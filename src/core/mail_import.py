@@ -50,6 +50,11 @@ class ImportedMessage:
     provider_message_id: str
     source: str
     provider_thread_id: str | None = None
+    # Outlook's ThreadTopic: a normalised subject, NOT a conversation id. It
+    # groups mail usefully within one employer and collides wildly across
+    # employers, so it is kept and named for what it is rather than stored in
+    # provider_thread_id, where every consumer would read it as identity.
+    thread_topic: str | None = None
     from_email: str | None = None
     from_name: str | None = None
     to_emails: list[str] = field(default_factory=list)
@@ -343,7 +348,12 @@ def _olm_entries(raw: bytes, *, source: str, origin: str) -> Iterator[ImportedMe
                 or f"{source}-{origin}-{idx}"
             ),
             source=source,
-            provider_thread_id=_clean_header(_olm_text(node, "OPFMessageCopyThreadTopic")),
+            # No thread id: this export exposes no conversation identity. The
+            # nearest thing it offers, ThreadTopic, is a normalised subject,
+            # and putting it here made every ATS autoresponder sharing a
+            # subject line look like one conversation.
+            provider_thread_id=None,
+            thread_topic=_clean_header(_olm_text(node, "OPFMessageCopyThreadTopic")),
             from_email=_clean_header(sender),
             from_name=_clean_header(_olm_text(node, "OPFMessageCopyFromAddresses")),
             to_emails=[r for r in (_clean_header(a) for a in addresses) if r and r != sender],
