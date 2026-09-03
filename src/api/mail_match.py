@@ -258,7 +258,33 @@ def record(message_id: int, match: Match, *, actor_user_id: int | None = None) -
     NULL means the matcher wrote it. Whether that human was the message's owner
     or an administrator correcting someone else's data is derived by comparing
     this against the owner, rather than recorded twice.
+
+    A verdict from the MATCHER that repeats the one already standing is not
+    appended. "We looked and found nothing" is a real state and the first one
+    is worth recording - that is what lets a later re-run be measured against
+    it. The second identical one says the same thing with a newer timestamp.
+    Without this, re-deciding already-decided messages appends a fresh
+    `unmatched` row per message per sweep: at 6,124 unmatched and an hourly
+    cycle that is roughly 147,000 rows a day of a log repeating itself, burying
+    the transitions the log exists to show.
+
+    A HUMAN's verdict is always appended, even when it matches. That someone
+    looked and affirmed the answer is a different fact from the matcher
+    producing it again, and it is the fact `actor_user_id` exists to carry.
+
+    Rationale is excluded from the comparison deliberately: it is prose from
+    whichever tier answered, and two `unmatched` verdicts differing only in
+    wording are one decision.
     """
+    if actor_user_id is None:
+        current = latest(message_id)
+        if (
+            current is not None
+            and current["application_id"] == match.application_id
+            and current["method"] == match.method
+            and current["confidence"] == match.confidence
+        ):
+            return
     db.execute(
         """
         INSERT INTO application_matches

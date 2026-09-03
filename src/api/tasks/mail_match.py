@@ -318,7 +318,18 @@ def match_pending(user_id: int, *, limit: int | None = None) -> dict[str, int]:
         LEFT JOIN current_match cm ON cm.message_id = m.id
         WHERE m.user_id = %(user)s
           AND e.kind <> 'not_job_related'
-          AND cm.message_id IS NULL
+          -- application_id IS NULL, not message_id IS NULL. The latter meant
+          -- "never looked", so a message that once came back `unmatched` was
+          -- frozen against whatever applications existed at that moment -
+          -- directly against this module's own claim that a message which
+          -- could not be matched in March can match in September. 8,462
+          -- unmatched verdicts were written before 1,779 applications were
+          -- created, and nothing would ever have revisited them.
+          --
+          -- Re-deciding is safe because it only ever reaches messages holding
+          -- no application, and `record` suppresses a verdict identical to the
+          -- one standing, so a sweep that changes nothing writes nothing.
+          AND cm.application_id IS NULL
         ORDER BY m.sent_at NULLS LAST, m.id
         """
         + ("LIMIT %(limit)s" if limit else ""),
