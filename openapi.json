@@ -9913,6 +9913,22 @@
             }
           },
           {
+            "name": "classified",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Classified"
+            }
+          },
+          {
             "name": "application_id",
             "in": "query",
             "required": false,

@@ -394,15 +394,13 @@ def test_a_match_carries_what_it_was_decided_from(client, user_headers):
     assert ev["classified_as"] == "rejection"
     assert ev["classifier_model"] == "gpt-5.6-luna"
     assert ev["from_domain"] == "tesla.com", "the one fact no model produced"
-    # Centred on the company mention, not the greeting: an email opens with a
-    # salutation and a logo, and the sentence that decided this is in the
-    # middle. Only for a message long enough that excerpting saves anything -
-    # a short mail comes back whole, because two thirds of a short message
-    # plus a link to the rest is worse than the message.
-    assert ev["snippet"]["is_whole_message"] is False
-    assert ev["snippet"]["centred_on"] == "Tesla"
-    assert "not to move forward" in ev["snippet"]["text"]
-    assert "Dear Kanishk" not in ev["snippet"]["text"]
+    # The WHOLE message, and where the company is mentioned in it. An excerpt
+    # meant reading a fragment, clicking, and reading the same message again
+    # from the top with no marker on the part that mattered.
+    assert ev["mention"]["text"].startswith("Dear Kanishk")
+    assert "not to move forward" in ev["mention"]["text"]
+    assert ev["mention"]["term"] == "Tesla"
+    assert ev["mention"]["text"][ev["mention"]["start"] : ev["mention"]["end"]] == "Tesla"
 
 
 def test_the_whole_message_is_readable_without_leaving(client, user_headers):
@@ -433,7 +431,7 @@ def test_another_users_message_body_is_not_readable(client, user_headers, other_
     assert client.get(f"/v1/user/messages/{mid}", headers=other_user_headers).status_code == 404
 
 
-def test_a_snippet_falls_back_when_the_company_is_not_in_the_body(client, user_headers):
+def test_the_mention_says_when_the_company_is_not_in_the_body(client, user_headers):
     """The extracted company often does not appear verbatim - the classifier
     reads it from a signature or a logo. The excerpt still has to render."""
     uid = db.query_one("SELECT id FROM users WHERE email = %s", ("user@example.com",))["id"]
@@ -458,8 +456,9 @@ def test_a_snippet_falls_back_when_the_company_is_not_in_the_body(client, user_h
     ev = client.get(f"/v1/user/pipeline/{app_id}", headers=user_headers).json()["matches"][0][
         "evidence"
     ]
-    assert ev["snippet"]["text"] == "Thanks for applying."
-    assert ev["snippet"]["centred_on"] is None, "say so rather than implying it was found"
+    assert ev["mention"]["text"] == "Thanks for applying."
+    assert ev["mention"]["start"] is None, "say the company is not in the body, do not imply it"
+    assert ev["mention"]["term"] is None
 
 
 def _mail(uid, *, subject="s", sender="a@b.com", kind=None, company=None):
@@ -1178,3 +1177,36 @@ def test_a_thread_row_carries_what_a_row_needs(client, user_headers):
     assert "offer" in row["kinds"]
     assert row["latest_message_id"] == ids[-1]
     assert row["last_activity_at"] is not None
+
+
+def test_the_unmatched_queue_is_work_not_the_whole_mailbox(client, user_headers):
+    """It shipped showing 63,598 messages - essentially the entire mailbox -
+    because personal mail correctly has no application and always will. A queue
+    of things to fix must exclude the three populations that are already right:
+    not-job-related, unclassified, and the matcher's deliberate refusals."""
+    uid = db.query_one("SELECT id FROM users WHERE email = %s", ("user@example.com",))["id"]
+
+    real = _mail(uid, subject="An update from Acme", kind="rejection", company="Acme")
+    _mail(uid, subject="RE: Happy Diwali", kind="not_job_related")
+    db.query_one(
+        "INSERT INTO email_messages (user_id, provider_message_id, source, subject, sent_at) "
+        "VALUES (%s,%s,'gmail','test mail',now()) RETURNING id",
+        (uid, f"unclass-{next(_seq)}"),
+    )
+    approach = _mail(uid, subject="Still looking?", kind="recruiter_outreach", company="Globex")
+    db.execute(
+        "INSERT INTO application_matches (message_id, application_id, method, confidence) "
+        "VALUES (%s, NULL, 'not_an_application', 'none')",
+        (approach,),
+    )
+
+    queue = client.get("/v1/user/mail?matched=false", headers=user_headers).json()
+    assert [m["id"] for m in queue["messages"]] == [real]
+    assert queue["total"] == 1, "one thing to fix, not four"
+
+    # Each excluded population stays reachable on purpose, by its own name.
+    backlog = client.get("/v1/user/mail?classified=false", headers=user_headers).json()
+    assert [m["subject"] for m in backlog["messages"]] == ["test mail"]
+    assert (
+        client.get("/v1/user/mail?kind=not_job_related", headers=user_headers).json()["total"] == 1
+    )
