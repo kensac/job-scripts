@@ -25,7 +25,7 @@ def _url() -> str:
     url = os.environ["DATABASE_URL"]
     for prefix in ("postgresql://", "postgres://"):
         if url.startswith(prefix):
-            return "postgresql+psycopg://" + url[len(prefix):]
+            return "postgresql+psycopg://" + url[len(prefix) :]
     return url
 
 
