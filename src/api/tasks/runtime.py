@@ -349,7 +349,13 @@ def _set_progress(task_id: int, done: int, total: int, label: str) -> None:
     # liveness of the run that replaced it, and the reaper would never see it.
     owned, owned_params = _owned(task_id)
     db.execute(
-        f"UPDATE tasks SET progress = %(progress)s, last_heartbeat = now() "
+        # progress_at moves ONLY when the value differs. A handler that reports
+        # the same numbers again has not advanced, and stamping it would make a
+        # stalled handler indistinguishable from a working one - the same
+        # mistake as a timer-driven heartbeat, one column along.
+        f"UPDATE tasks SET progress = %(progress)s, last_heartbeat = now(), "
+        f"    progress_at = CASE WHEN progress IS DISTINCT FROM %(progress)s "
+        f"                       THEN now() ELSE progress_at END "
         f"WHERE id = %(tid)s{owned}",
         {
             "progress": db.jsonb({"done": done, "total": total, "label": label}),

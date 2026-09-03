@@ -357,6 +357,12 @@ class Task(Base):
     worker: Mapped[str | None] = mapped_column(Text)
     last_heartbeat: Mapped[datetime.datetime | None]
     progress: Mapped[Any | None] = mapped_column(JSONB)
+    # WHEN PROGRESS LAST CHANGED, which is not when the row was last written.
+    # A heartbeat proves the process is alive; this is the only column that can
+    # say the WORK advanced, and telling those apart is the open problem a
+    # wedged handler exposed. Set only on an actual change, so a handler
+    # re-reporting the same numbers does not look like movement.
+    progress_at: Mapped[datetime.datetime | None]
     error: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
     started_at: Mapped[datetime.datetime | None]
