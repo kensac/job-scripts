@@ -375,8 +375,10 @@ def test_a_match_carries_what_it_was_decided_from(client, user_headers):
             "Update on your application",
             "careers@tesla.com",
             datetime.datetime(2025, 6, 1, tzinfo=datetime.UTC),
-            "Dear Kanishk,\n\n" + ("filler " * 60) + "We have decided not to move forward "
-            "with your application to Tesla for the Frontend role. " + ("more " * 60),
+            # Long enough that excerpting genuinely saves something; a short
+            # message comes back whole and would not exercise the centring.
+            "Dear Kanishk,\n\n" + ("filler " * 200) + "We have decided not to move forward "
+            "with your application to Tesla for the Frontend role. " + ("more " * 200),
         ),
     )["id"]
     db.execute(
@@ -393,7 +395,11 @@ def test_a_match_carries_what_it_was_decided_from(client, user_headers):
     assert ev["classifier_model"] == "gpt-5.6-luna"
     assert ev["from_domain"] == "tesla.com", "the one fact no model produced"
     # Centred on the company mention, not the greeting: an email opens with a
-    # salutation and a logo, and the sentence that decided this is in the middle.
+    # salutation and a logo, and the sentence that decided this is in the
+    # middle. Only for a message long enough that excerpting saves anything -
+    # a short mail comes back whole, because two thirds of a short message
+    # plus a link to the rest is worse than the message.
+    assert ev["snippet"]["is_whole_message"] is False
     assert ev["snippet"]["centred_on"] == "Tesla"
     assert "not to move forward" in ev["snippet"]["text"]
     assert "Dear Kanishk" not in ev["snippet"]["text"]
