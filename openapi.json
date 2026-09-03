@@ -2895,6 +2895,85 @@
         }
       }
     },
+    "/v1/user/funnel": {
+      "get": {
+        "summary": "Funnel",
+        "description": "What happened to the applications, as counts with their denominator.\n\nEvery stage ships `reached` and `of` rather than a percentage, because the\nprose that matters is \"299 of 714\", not \"42%\".\n\nThe per-source breakdown is the one that decides whether a board is worth\nkeeping - volume and survival say nothing about whether a source has ever\nproduced an interview. It is thin today by construction: an application is\ncreated when a TRACKED posting is marked applied, and that has happened for\nessentially one source, so the rest report their real n and are flagged\nbelow the floor rather than rendered as zero rates.",
+        "operationId": "funnel_v1_user_funnel_get",
+        "parameters": [
+          {
+            "name": "x-service-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-Service-Token"
+            }
+          },
+          {
+            "name": "x-user-sub",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Sub"
+            }
+          },
+          {
+            "name": "x-user-email",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Email"
+            }
+          },
+          {
+            "name": "x-user-name",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Name"
+            }
+          },
+          {
+            "name": "x-user-groups",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Groups"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/requirements/market": {
       "get": {
         "summary": "Market",

@@ -151,3 +151,112 @@ def test_email_digest_toggle_generates_token_and_unsubscribe_works(client, user_
     )
     assert row2["email_digest"] is False
     assert client.get("/v1/digest/unsubscribe?token=bogus", headers=service_only).status_code == 404
+
+
+def _apply_event(f, user_id: int, job_id: int, kind: str) -> None:
+    """A tracked application plus one classified message matched to it."""
+    from api import db
+
+    app = db.query_one(
+        "INSERT INTO applications (user_id, job_id, company_name, title, source_provenance) "
+        "VALUES (%s, %s, 'Acme', 'Engineer', 'tracker') RETURNING id",
+        (user_id, job_id),
+    )
+    assert app is not None
+    msg = db.query_one(
+        "INSERT INTO email_messages (user_id, provider_message_id, source, from_email, "
+        "subject, sent_at) VALUES (%s, %s, 'takeout', 'a@b.com', 's', now()) RETURNING id",
+        (user_id, f"fn-{job_id}"),
+    )
+    assert msg is not None
+    db.execute(
+        "INSERT INTO email_events (message_id, kind, confidence) VALUES (%s, %s, 'high')",
+        (msg["id"], kind),
+    )
+    db.execute(
+        "INSERT INTO application_matches (message_id, application_id, method, confidence) "
+        "VALUES (%s, %s, 'ats_company', 'high')",
+        (msg["id"], app["id"]),
+    )
+
+
+def test_funnel_counts_stages_with_their_denominator(client, user_headers, f):
+    """ "299 of 714" is the sentence that matters, not "42%"."""
+    from api import db
+
+    uid = db.query_one("SELECT id FROM users WHERE sub = 'test-user'")["id"]
+    _apply_event(f, uid, f.make_job(source="board-a"), "acknowledgement")
+    _apply_event(f, uid, f.make_job(source="board-a"), "rejection")
+    db.execute(
+        "INSERT INTO applications (user_id, job_id, company_name, title, source_provenance) "
+        "VALUES (%s, %s, 'Acme', 'Engineer', 'tracker')",
+        (uid, f.make_job(source="board-a")),
+    )
+
+    body = client.get("/v1/user/funnel", headers=user_headers).json()
+    stages = {s["stage"]: s for s in body["overall"]["stages"]}
+    assert body["overall"]["applications"] == 3
+    assert stages["acknowledged"]["reached"] == 1
+    assert stages["acknowledged"]["of"] == 3
+    assert stages["rejected"]["reached"] == 1
+
+
+def test_funnel_omits_the_offer_stage_and_says_so(client, user_headers, f):
+    """71 applications reach `offer` against 53 reaching interview_invite.
+    A funnel reading "more offers than interviews" discredits every number
+    beside it, so the stage is omitted and the omission is stated."""
+    body = client.get("/v1/user/funnel", headers=user_headers).json()
+    assert "offer" not in {s["stage"] for s in body["overall"]["stages"]}
+    excluded = {e["stage"]: e["reason"] for e in body["excluded_stages"]}
+    assert "offer" in excluded
+    assert "reclassification" in excluded["offer"]
+
+
+def test_a_stage_reached_then_superseded_still_counts(client, user_headers, f):
+    """Reaching a stage means the event ever arrived, not that it is current -
+    an application acknowledged and then rejected belongs in both. That is
+    what makes it a funnel rather than a snapshot, and why stages do not sum
+    to the total."""
+    from api import db
+
+    uid = db.query_one("SELECT id FROM users WHERE sub = 'test-user'")["id"]
+    job_id = f.make_job(source="board-b")
+    _apply_event(f, uid, job_id, "acknowledgement")
+    app = db.query_one("SELECT id FROM applications WHERE job_id = %s", (job_id,))
+    msg = db.query_one(
+        "INSERT INTO email_messages (user_id, provider_message_id, source, from_email, "
+        "subject, sent_at) VALUES (%s, 'fn-later', 'takeout', 'a@b.com', 's', now()) RETURNING id",
+        (uid,),
+    )
+    db.execute(
+        "INSERT INTO email_events (message_id, kind, confidence) VALUES (%s, 'rejection', 'high')",
+        (msg["id"],),
+    )
+    db.execute(
+        "INSERT INTO application_matches (message_id, application_id, method, confidence) "
+        "VALUES (%s, %s, 'ats_company', 'high')",
+        (msg["id"], app["id"]),
+    )
+
+    stages = {
+        s["stage"]: s["reached"]
+        for s in client.get("/v1/user/funnel", headers=user_headers).json()["overall"]["stages"]
+    }
+    assert stages["acknowledged"] == 1
+    assert stages["rejected"] == 1
+
+
+def test_per_source_funnel_flags_a_sample_too_small_to_read(client, user_headers, f):
+    """The board->outcome number is thin by construction: an application is
+    created when a TRACKED posting is marked applied, and that has happened
+    for essentially one source. Report the real n, flagged, rather than a
+    rate off two rows."""
+    from api import db
+
+    uid = db.query_one("SELECT id FROM users WHERE sub = 'test-user'")["id"]
+    _apply_event(f, uid, f.make_job(source="tiny-board"), "acknowledgement")
+
+    body = client.get("/v1/user/funnel", headers=user_headers).json()
+    row = next(r for r in body["by_source"] if r["source"] == "tiny-board")
+    assert row["applications"] == 1
+    assert row["below_sample_floor"] is True
