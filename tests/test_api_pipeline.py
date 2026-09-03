@@ -1081,3 +1081,100 @@ def test_the_pipeline_sorts_on_the_set_not_the_page(client, user_headers):
         "/v1/user/pipeline?sort=last_event_at&dir=asc", headers=user_headers
     ).json()
     assert quietest["applications"][0]["id"] == old
+
+
+def test_a_thread_reads_as_a_conversation_including_its_first_message(client, user_headers):
+    """Mail is a flat list and the unit a person thinks in is the exchange:
+    19,995 messages sit in conversations of more than one, so roughly a third
+    of the corpus is shown out of its context.
+
+    The root is included because the thread key coalesces to the message's own
+    id - a reply carries the starter's Message-ID and the starter carries
+    nothing, so keying on the provider field alone leaves the original out of
+    its own conversation."""
+    uid = db.query_one("SELECT id FROM users WHERE email = %s", ("user@example.com",))["id"]
+    root = db.query_one(
+        "INSERT INTO email_messages (user_id, provider_message_id, provider_thread_id, source, "
+        "subject, from_email, sent_at) VALUES (%s,'<r@acme>',NULL,'takeout','Your application',"
+        "'a@acme.com','2025-06-01') RETURNING id",
+        (uid,),
+    )["id"]
+    reply = db.query_one(
+        "INSERT INTO email_messages (user_id, provider_message_id, provider_thread_id, source, "
+        "subject, from_email, sent_at) VALUES (%s,'<r2@acme>','<r@acme>','takeout',"
+        "'Re: Your application','a@acme.com','2025-06-02') RETURNING id",
+        (uid,),
+    )["id"]
+
+    body = client.get(f"/v1/user/messages/{reply}/thread", headers=user_headers).json()
+    assert [m["id"] for m in body["messages"]] == [root, reply], "oldest first, root included"
+    assert body["truncated"] is False
+
+
+def test_a_thread_says_when_it_was_cut(client, user_headers):
+    """The longest key in this corpus holds 474 messages - a mailing list
+    reusing a thread id rather than a conversation. A thread silently cut reads
+    as a thread that ended."""
+    uid = db.query_one("SELECT id FROM users WHERE email = %s", ("user@example.com",))["id"]
+    ids = _threaded(uid, "long-thread", 5)
+    body = client.get(f"/v1/user/messages/{ids[0]}/thread?limit=2", headers=user_headers).json()
+    assert len(body["messages"]) == 2
+    assert body["truncated"] is True
+
+
+def test_a_message_with_no_conversation_is_a_thread_of_one(client, user_headers):
+    uid = db.query_one("SELECT id FROM users WHERE email = %s", ("user@example.com",))["id"]
+    alone = _mail(uid, subject="Standalone", kind="acknowledgement")
+    body = client.get(f"/v1/user/messages/{alone}/thread", headers=user_headers).json()
+    assert [m["id"] for m in body["messages"]] == [alone]
+
+
+def test_another_users_thread_is_not_readable(client, user_headers, other_user_headers):
+    uid = db.query_one("SELECT id FROM users WHERE email = %s", ("user@example.com",))["id"]
+    mid = _mail(uid, kind="rejection")
+    assert (
+        client.get(f"/v1/user/messages/{mid}/thread", headers=other_user_headers).status_code == 404
+    )
+
+
+def test_threads_list_as_conversations_not_messages(client, user_headers):
+    """Grouping a page of messages client-side produces partial threads at the
+    page boundaries - a conversation cut in half by pagination reads as a
+    conversation that is half that long, which is a lie exactly where nobody
+    looks for one."""
+    uid = db.query_one("SELECT id FROM users WHERE email = %s", ("user@example.com",))["id"]
+    _threaded(uid, "convo-a", 3, kind="rejection", company="Acme")
+    _threaded(uid, "convo-b", 2, kind="acknowledgement", company="Beta")
+
+    body = client.get("/v1/user/threads", headers=user_headers).json()
+    assert body["total"] == 2
+    counts = sorted(t["message_count"] for t in body["threads"])
+    assert counts == [2, 3], "one row per conversation, carrying its size"
+
+
+def test_needs_attention_is_the_correctable_pile(client, user_headers):
+    """Job-related mail that reached no application. Not 'unread' - we have no
+    such concept and inventing one would be a second inbox to maintain."""
+    uid = db.query_one("SELECT id FROM users WHERE email = %s", ("user@example.com",))["id"]
+    app_id = _app(uid, company="Matched", title="Engineer")
+    done = _threaded(uid, "convo-done", 1, kind="rejection", company="Matched")
+    _match(done[0], app_id)
+    _threaded(uid, "convo-open", 2, kind="rejection", company="Orphan")
+
+    needs = client.get("/v1/user/threads?needs_attention=true", headers=user_headers).json()
+    assert needs["total"] == 1
+    assert needs["threads"][0]["message_count"] == 2
+
+    settled = client.get("/v1/user/threads?needs_attention=false", headers=user_headers).json()
+    assert settled["total"] == 1, "the filter and its inverse are complements"
+
+
+def test_a_thread_row_carries_what_a_row_needs(client, user_headers):
+    uid = db.query_one("SELECT id FROM users WHERE email = %s", ("user@example.com",))["id"]
+    ids = _threaded(uid, "convo-rich", 2, kind="offer", company="Acme")
+    row = client.get("/v1/user/threads", headers=user_headers).json()["threads"][0]
+    assert row["subject"] is not None
+    assert row["participants"] == ["a@acme.com"]
+    assert "offer" in row["kinds"]
+    assert row["latest_message_id"] == ids[-1]
+    assert row["last_activity_at"] is not None
