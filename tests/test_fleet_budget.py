@@ -264,6 +264,30 @@ class TestTheCeilingIsVisibleBeforeItFires:
         assert "scope" in st and "shared_key_possible" in st
         assert st["scope"] != st["excludes"]
 
+    def test_the_money_fields_serialise_as_numbers_not_strings(self):
+        """The admin page does arithmetic on these. Task-model costs are
+        deliberately strings elsewhere in this API, so which one a money field
+        is cannot be assumed from the name - and a string arriving where a
+        number is expected renders as NaN rather than failing loudly.
+
+        Pinned because personal-portfolio-e3 typed the page against numbers.
+        If a Decimal here ever needs string precision, this test fails and the
+        frontend gets told instead of finding out on screen.
+        """
+        from fastapi.encoders import jsonable_encoder
+
+        encoded = jsonable_encoder(budget.fleet_budget_status(Decimal("1.5")))
+        for field in (
+            "spent_usd",
+            "ceiling_usd",
+            "cycle_cost_usd",
+            "headroom_usd",
+            "used_fraction",
+            "projected_usd",
+        ):
+            assert isinstance(encoded[field], (int, float)), field
+            assert not isinstance(encoded[field], bool), field
+
     def test_a_disabled_ceiling_says_so_rather_than_reporting_zero(self, monkeypatch):
         monkeypatch.setattr(budget, "FLEET_WEEKLY_CYCLES", 0)
         st = budget.fleet_budget_status()
