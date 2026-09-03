@@ -171,8 +171,17 @@ def seed_from_mail(user_id: int) -> tuple[int, int]:
     permanently ambiguous to `_by_company`.
 
     Grouping is by thread where the provider gave us one, falling back to
-    company and role. Thread coverage is 99% on Outlook archives but 15% on
-    Takeout, so the fallback is the common path, not the exception.
+    company and role.
+
+    That 99% Outlook "thread coverage" this once claimed was not threading. The
+    .olm importer filled provider_thread_id from ThreadTopic, a normalised
+    SUBJECT, so every ATS autoresponder sharing a subject line grouped as one
+    conversation and derived a single application - "Nittany Lion Careers
+    Application Confirmation" alone was 56 messages across 32 employers. Outlook
+    mail now carries no thread id at all and its topic lives in thread_topic,
+    so the (company, role) fallback is the path for it, as it always should
+    have been. Real thread ids remain on Takeout (first References entry) and
+    Gmail (its own threadId).
     """
     known = _existing_companies(user_id)
     cap = derived_cap(user_id)

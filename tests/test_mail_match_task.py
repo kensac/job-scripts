@@ -337,3 +337,43 @@ def test_a_second_worker_cannot_duplicate_a_derived_application(f):
     second_created, _ = task.seed_from_mail(uid)
     assert second_created == 0
     assert db.query_one("SELECT count(*) AS n FROM applications")["n"] == 1
+
+
+def test_a_shared_subject_does_not_collapse_distinct_employers(f):
+    """The .olm importer filled provider_thread_id from ThreadTopic, a
+    normalised subject. seed_from_mail prefers the thread key, so every ATS
+    autoresponder sharing a subject grouped into ONE application and took its
+    company from whichever message sorted first.
+
+    "Nittany Lion Careers Application Confirmation" was 56 messages across 32
+    employers, all attached to a single G3 Technologies application. This is
+    that shape, minimised: same subject, different employers, and Outlook mail
+    now arrives with no thread id so (company, title) decides.
+    """
+    uid = f.make_user()
+    subject = "Nittany Lion Careers Application Confirmation"
+    for company in ("Honor Device", "Modo Labs", "Manatal"):
+        mid = _message(uid, subject=subject, thread=None)
+        _event(mid, "acknowledgement", company=company, title="Software Engineer")
+
+    created, _ = task.seed_from_mail(uid)
+    assert created == 3, "one application per employer, not one per subject"
+    companies = {
+        r["company_name"]
+        for r in db.query("SELECT company_name FROM applications WHERE user_id = %s", (uid,))
+    }
+    assert companies == {"Honor Device", "Modo Labs", "Manatal"}
+
+
+def test_a_real_provider_thread_still_groups(f):
+    """Takeout and Gmail thread ids are genuine threading identities - the
+    first References entry and Gmail's own threadId - and neither has ever
+    equalled a subject. Grouping by them stays."""
+    uid = f.make_user()
+    for _ in range(3):
+        mid = _message(uid, subject="Re: your application", thread="<root@greenhouse.io>")
+        _event(mid, "acknowledgement", company="Acme", title="Software Engineer")
+
+    created, matched = task.seed_from_mail(uid)
+    assert created == 1, "one real conversation is one application"
+    assert matched == 3

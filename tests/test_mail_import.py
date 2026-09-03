@@ -301,3 +301,24 @@ def test_a_plain_mbox_still_reads(tmp_path):
     path = tmp_path / "plain.mbox"
     path.write_bytes(_mbox_bytes())
     assert len(list(read_mbox(path))) == 2
+
+
+def test_olm_thread_topic_is_not_stored_as_a_thread_id():
+    """OPFMessageCopyThreadTopic is a normalised SUBJECT. Stored in
+    provider_thread_id it made every message sharing a subject line look like
+    one conversation, which is how 56 confirmations from 32 employers became a
+    single derived application."""
+    messages = list(
+        _olm_entries(
+            b"<emails><email>"
+            b"<OPFMessageCopyMessageID>&lt;one@x&gt;</OPFMessageCopyMessageID>"
+            b"<OPFMessageCopySubject>Application Confirmation</OPFMessageCopySubject>"
+            b"<OPFMessageCopyThreadTopic>Application Confirmation</OPFMessageCopyThreadTopic>"
+            b"</email></emails>",
+            source="olm",
+            origin="t.xml",
+        )
+    )
+    assert len(messages) == 1
+    assert messages[0].provider_thread_id is None, "a subject is not a thread identity"
+    assert messages[0].thread_topic == "Application Confirmation", "and it is not discarded"

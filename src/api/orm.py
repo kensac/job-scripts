@@ -582,6 +582,10 @@ class EmailMessage(Base):
     user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"))
     provider_message_id: Mapped[str] = mapped_column(Text)
     provider_thread_id: Mapped[str | None] = mapped_column(Text)
+    # Outlook's ThreadTopic: a normalised subject, not a conversation id. Kept
+    # because it groups mail usefully within one employer, and named for what
+    # it is so nothing reads it as identity again.
+    thread_topic: Mapped[str | None] = mapped_column(Text)
     source: Mapped[str] = mapped_column(Text)
     from_email: Mapped[str | None] = mapped_column(Text)
     from_name: Mapped[str | None] = mapped_column(Text)
