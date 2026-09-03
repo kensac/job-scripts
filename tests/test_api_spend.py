@@ -224,3 +224,45 @@ def test_an_unpriced_model_is_counted_but_not_costed(client, admin_headers):
     body = client.get("/v1/admin/spend?days=30", headers=admin_headers).json()
     comp = next(r for r in body["by_purpose"] if r["purpose"] == "comp")
     assert comp["unpriced_calls"] == 1
+
+
+def test_a_purpose_can_be_opened_to_its_calls(client, admin_headers):
+    """by_purpose was a dead end by construction: nothing renders api_usage
+    rows, so a purpose's total could be read and never opened. The Responses
+    page is over ai_queries, which cannot see work that produced no verdict -
+    which is most of the bill."""
+    from api import budget
+
+    budget.record_fleet_usage("mail_classify", "gpt-5.6-luna", 1_000_000, 100_000)
+    budget.record_fleet_usage("comp", "gpt-5-nano", 1000, 100)
+
+    body = client.get("/v1/admin/spend/calls?purpose=mail_classify", headers=admin_headers).json()
+    assert body["totals"]["calls"] == 1
+    assert body["calls"][0]["purpose"] == "mail_classify"
+    assert body["calls"][0]["batched"] is True
+
+
+def test_unpriced_is_its_own_question_not_a_cheap_one(client, admin_headers):
+    """A NULL cost is not a cheap call. It means nobody looked the rate up, and
+    the set we cannot price is a different question from the set that was
+    inexpensive."""
+    from api import budget
+
+    budget.record_fleet_usage("comp", "some-unreleased-model", 1000, 100)
+    budget.record_fleet_usage("comp", "gpt-5-nano", 1000, 100)
+
+    unpriced = client.get(
+        "/v1/admin/spend/calls?purpose=comp&unpriced=true", headers=admin_headers
+    ).json()
+    assert unpriced["totals"]["calls"] == 1
+    assert unpriced["calls"][0]["model"] == "some-unreleased-model"
+    assert unpriced["calls"][0]["cost_usd"] is None
+
+    priced = client.get(
+        "/v1/admin/spend/calls?purpose=comp&unpriced=false", headers=admin_headers
+    ).json()
+    assert priced["totals"]["calls"] == 1
+
+
+def test_the_call_list_needs_admin(client, user_headers):
+    assert client.get("/v1/admin/spend/calls", headers=user_headers).status_code == 403

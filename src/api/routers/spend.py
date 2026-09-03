@@ -213,3 +213,69 @@ def spend(
         # from the batching expectation.
         "interactive_contexts": list(INTERACTIVE_CONTEXTS),
     }
+
+
+@router.get("/admin/spend/calls")
+def spend_calls(
+    purpose: str | None = Query(default=None),
+    model: str | None = Query(default=None),
+    batched: bool | None = Query(default=None),
+    unpriced: bool | None = Query(default=None),
+    days: int = Query(default=30, ge=1, le=3650),
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    user: AuthedUser = Depends(require_admin),
+):
+    """The calls behind a purpose.
+
+    `by_purpose` was a dead end by construction: nothing anywhere renders
+    `api_usage` rows, so a purpose's total could be read and never opened. The
+    Responses page is over `ai_queries`, which is the verdict log and cannot
+    see work that produced no verdict - which is most of the bill.
+
+    `unpriced` is its own filter rather than a cost sort, because a NULL cost
+    is not a cheap call. It means nobody looked the rate up, and the set of
+    calls we cannot price is a different question from the set that was
+    inexpensive.
+    """
+    where = ["created_at >= now() - make_interval(days => %(days)s)"]
+    params: dict[str, Any] = {"days": days, "limit": limit, "offset": offset}
+    if purpose:
+        where.append("purpose = %(purpose)s")
+        params["purpose"] = purpose
+    if model:
+        where.append("model = %(model)s")
+        params["model"] = model
+    if batched is not None:
+        where.append("batched = %(batched)s")
+        params["batched"] = batched
+    if unpriced is not None:
+        where.append("cost_usd IS NULL" if unpriced else "cost_usd IS NOT NULL")
+    predicate = " AND ".join(where)
+
+    totals = _scalars(
+        f"""
+        SELECT COUNT(*) AS calls,
+               COALESCE(SUM(cost_usd), 0) AS cost_usd,
+               COUNT(*) FILTER (WHERE cost_usd IS NULL) AS unpriced_calls,
+               COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+               COALESCE(SUM(completion_tokens), 0) AS completion_tokens
+        FROM api_usage WHERE {predicate}
+        """,
+        params,
+    )
+    return {
+        "calls": db.query(
+            f"""
+            SELECT id, created_at, purpose, model, key_source, batched,
+                   prompt_tokens, completion_tokens, total_tokens, cached_tokens,
+                   cost_usd, user_id
+            FROM api_usage WHERE {predicate}
+            ORDER BY created_at DESC, id DESC
+            LIMIT %(limit)s OFFSET %(offset)s
+            """,
+            params,
+        ),
+        "totals": totals,
+        "window_days": days,
+    }

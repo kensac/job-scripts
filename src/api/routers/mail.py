@@ -51,6 +51,7 @@ def _where(
     q: str | None,
     method: str | None = None,
     job_related: bool | None = None,
+    classified: bool | None = None,
 ) -> tuple[str, dict[str, Any]]:
     clauses: list[str] = []
     params: dict[str, Any] = {}
@@ -72,6 +73,15 @@ def _where(
         else:
             clauses.append("mt.application_id IS NULL AND COALESCE(mt.method, '') <> %(refused)s")
             params["refused"] = mail_match.NOT_AN_APPLICATION
+    if classified is not None:
+        # THREE states, not two. "Not job related" and "nothing has looked at
+        # it yet" are different facts and I collapsed them - the same mistake
+        # as unmatched versus not_an_application, made in the filter written to
+        # fix that one. e3 found it from the frontend: the prefilter matrix
+        # inner-joins email_events and so counts only CLASSIFIED messages,
+        # while job_related=false also matched the 16,182 unclassified, so the
+        # cell linked to a larger set than the number it displayed.
+        clauses.append("ev.kind IS NOT NULL" if classified else "ev.kind IS NULL")
     if job_related is not None:
         # `kind` is an equality filter, so "job-related" - the whole point of
         # the prefilter matrix - was not expressible: a person could open
@@ -81,10 +91,13 @@ def _where(
         #
         # NULL kind is not job-related here: nothing has classified it, so it
         # cannot be evidence either way.
+        # Both branches now require a classification, so job_related is a
+        # statement about what the classifier SAID rather than about whether it
+        # has spoken. Ask `classified=false` for the backlog.
         clauses.append(
             "ev.kind IS NOT NULL AND ev.kind <> 'not_job_related'"
             if job_related
-            else "(ev.kind IS NULL OR ev.kind = 'not_job_related')"
+            else "ev.kind = 'not_job_related'"
         )
     if method == NEVER_ATTEMPTED:
         clauses.append("mt.match_id IS NULL")
@@ -126,6 +139,7 @@ def list_mail(
     prefilter: bool | None = None,
     method: str | None = None,
     job_related: bool | None = None,
+    classified: bool | None = None,
     q: str | None = None,
     sort: str = "sent_at",
     dir: str = "desc",
@@ -141,6 +155,7 @@ def list_mail(
         q=q,
         method=method,
         job_related=job_related,
+        classified=classified,
     )
     page = max(1, page)
     page_size = max(1, min(page_size, 200))
