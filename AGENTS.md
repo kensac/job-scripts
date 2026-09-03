@@ -1,0 +1,49 @@
+# Working on this project
+
+Instructions for any coding agent working in this repository. Read this file
+first, then the topic document covering what you are about to do.
+
+These are instructions, not history. Follow them.
+
+## Non-negotiable
+
+1. **Production-grade only.** No patches, no hotfixes. If a design turns out
+   wrong, rearchitect it. Never trade correctness for a smaller diff.
+2. **Measure before you assert.** A mechanism inferred from reading code is a
+   hypothesis until you count the rows it applies to. State what your sample
+   can support, and count "cannot tell" separately.
+3. **Before asserting what a system does, open the thing that does it.** Not
+   the documentation about it, not your own earlier finding, not a summary.
+   This applies hardest when the description is yours.
+4. **Never attribute an AI assistant in commits, PR bodies, or code comments.**
+5. **The production database is read-only.** SELECT and EXPLAIN only, unless
+   explicitly authorised for a specific operation.
+6. **Never send an authenticated request to the production API.** Any
+   authenticated request auto-provisions a user row, which is a write.
+
+## Topic documents
+
+| Read this | Before you |
+|---|---|
+| [working-agreement.md](docs/agents/working-agreement.md) | Take a task, own a feature, or coordinate with another agent |
+| [engineering-standards.md](docs/agents/engineering-standards.md) | Write or change any code |
+| [data-and-truth.md](docs/agents/data-and-truth.md) | Put a number, a state, or an inference in front of a person |
+| [architecture.md](docs/agents/architecture.md) | Change the pipeline, the matcher, or anything it reads |
+| [testing.md](docs/agents/testing.md) | Write a test or trust one |
+| [migrations.md](docs/agents/migrations.md) | Touch the schema |
+| [deployment.md](docs/agents/deployment.md) | Claim anything is deployed |
+| [frontend.md](docs/agents/frontend.md) | Change any user-visible surface |
+
+## Repository map
+
+- `src/api/` — FastAPI application. Routers, task handlers, matching, pipeline.
+- `src/core/` — provider datasheets, pricing, routing, storage primitives.
+- `alembic/` — migrations. See migrations.md before adding one.
+- `tests/` — integration tests against a real database. See testing.md.
+- The frontend lives in a separate repository and has its own AGENTS.md.
+
+## Commands
+
+- `make check` — lint, format, types, compile, tests. CI gates on this.
+- `make testdb-up` / `make testdb-down` — disposable test database.
+- Regenerate `openapi.json` when routes change.
