@@ -248,15 +248,29 @@ def fleet_budget_status(projected_usd: Decimal | None = None) -> dict[str, Any]:
         # a comment, because a budget screen that silently excludes part of the
         # spend is honest sentence by sentence and misleading as a whole.
         #
-        # It counts calls this application recorded. The provider key is shared
-        # with other services in the fleet and copies of it are held elsewhere,
-        # so anything they spend bills to the same account, appears provider-
-        # side as the same principal, and is invisible here. This is a ceiling
-        # on what jobtracker spends, not a ceiling on the bill.
+        # It counts calls this application recorded, and that is the whole of
+        # what it can count. Spend on the same provider account that this
+        # application did not make is invisible here by construction, whoever
+        # made it - so this is a ceiling on what jobtracker spends, never a
+        # ceiling on the bill.
+        #
+        # scope is a property of the code and is always true. excludes is a
+        # property of the DEPLOYMENT: as of 2026-09-03 the OPENAI_API_KEY is
+        # deliberately shared with karakeep and wardrowbe, with prefixed copies
+        # in Infisical for the remote workers. This process cannot verify that
+        # - it has one key and no way to ask who else holds it - so it is
+        # stated as the possibility it is rather than asserted as fact. If the
+        # keys are ever split, scope stays true and only the possibility goes
+        # away.
         "scope": "calls recorded by this application",
         "excludes": (
-            "other services sharing the same provider key; their spend bills to "
-            "the same account and cannot be seen from here"
+            "any spend on the same provider account that this application did "
+            "not make, which is invisible here whoever made it"
+        ),
+        "shared_key_possible": True,
+        "shared_key_note": (
+            "the provider key was deliberately shared with other fleet services "
+            "as of 2026-09-03; this process cannot confirm that from here"
         ),
     }
 

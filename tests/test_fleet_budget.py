@@ -233,13 +233,36 @@ class TestTheCeilingIsVisibleBeforeItFires:
         assert st["ceiling_usd"] == st["cycle_cost_usd"] * st["cycles"]
 
     def test_it_says_what_it_cannot_see(self):
-        """The provider key is shared with other services in the fleet, so
-        their spend bills to the same account and is invisible here. A budget
-        screen that silently excluded it would be honest sentence by sentence
-        and misleading as a whole."""
+        """A budget screen that silently excluded part of the spend would be
+        honest sentence by sentence and misleading as a whole."""
         st = budget.fleet_budget_status()
         assert "this application" in st["scope"]
-        assert "same provider key" in st["excludes"]
+        assert st["excludes"]
+
+    def test_what_it_cannot_see_does_not_depend_on_who_spent_it(self):
+        """The earlier wording named the shared key as the exclusion, which
+        made the disclosure only as true as that deployment fact. The ceiling
+        cannot see spend this application did not record, whoever made it -
+        that holds if the keys are split tomorrow."""
+        st = budget.fleet_budget_status()
+        assert "did not make" in st["excludes"]
+        assert "provider key" not in st["excludes"]
+
+    def test_the_shared_key_is_a_possibility_not_an_assertion(self):
+        """This process holds one key and has no way to ask who else holds it.
+        Stating it as fact would be inferring a deployment property from code
+        that cannot observe it."""
+        st = budget.fleet_budget_status()
+        assert st["shared_key_possible"] is True
+        assert "cannot confirm" in st["shared_key_note"]
+
+    def test_scope_is_true_independently_of_the_deployment(self):
+        """scope is a property of the code and survives a key split; only the
+        possibility goes away. They are separate fields so a UI can drop one
+        without dropping the other."""
+        st = budget.fleet_budget_status()
+        assert "scope" in st and "shared_key_possible" in st
+        assert st["scope"] != st["excludes"]
 
     def test_a_disabled_ceiling_says_so_rather_than_reporting_zero(self, monkeypatch):
         monkeypatch.setattr(budget, "FLEET_WEEKLY_CYCLES", 0)
