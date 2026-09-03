@@ -193,3 +193,35 @@ def test_the_admin_queue_takes_the_owner_as_a_parameter(client, me, f):
 
     body = client.get(f"/v1/admin/resolve/queue?user_id={uid}", headers=admin).json()
     assert body["total"] == 1
+
+
+def test_the_candidate_picker_serves_the_same_declared_choices(client, me):
+    """The modal is where a person actually makes this decision, and it is
+    reached from the mail list as well as the queue. A modal that builds its
+    own verb list decides eligibility client-side, which is the thing a
+    server-declared contract exists to prevent."""
+    headers, uid = me
+    mid = _msg(uid, "<pick@x>", "rejection", "Acme")
+
+    body = client.get(f"/v1/user/messages/{mid}/candidates", headers=headers).json()
+    choices = {c["choice"]: c for c in body["choices"]}
+    assert set(choices) == {"assign_application", "not_an_application", "not_job_related"}
+    assert choices["assign_application"]["eligible"] is False
+    assert choices["assign_application"]["reason"] == "no application at this company yet"
+
+
+def test_the_picker_and_the_queue_agree_on_eligibility(client, me):
+    """One builder, so the two surfaces cannot drift. If they were built
+    separately the first conditional verb would make one of them wrong with
+    nothing saying which."""
+    headers, uid = me
+    db.execute(
+        "INSERT INTO applications (user_id, company_name, source_provenance) "
+        "VALUES (%s, 'Acme', 'tracker')",
+        (uid,),
+    )
+    mid = _msg(uid, "<agree@x>", "rejection", "Acme")
+
+    picker = client.get(f"/v1/user/messages/{mid}/candidates", headers=headers).json()["choices"]
+    queued = client.get("/v1/user/resolve/queue", headers=headers).json()["items"][0]["choices"]
+    assert picker == queued
