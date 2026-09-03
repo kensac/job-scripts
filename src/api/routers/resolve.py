@@ -18,6 +18,7 @@ rather than a second one.
 from __future__ import annotations
 
 import datetime
+from collections import Counter
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -28,6 +29,8 @@ from api.auth import AuthedUser, require_user
 from api.routers.admin import require_admin
 
 router = APIRouter()
+
+_EPOCH = datetime.datetime.min.replace(tzinfo=datetime.UTC)
 
 # Kinds that are about a job at all. `not_job_related` is excluded because it
 # is already resolved - the classifier said this is not job mail and nothing
@@ -93,6 +96,8 @@ class ResolveMessage(BaseModel):
 class ResolveItem(BaseModel):
     id: str
     kind: str
+    rank: int
+    rank_reason: str
     message: ResolveMessage
     candidates: list[ResolveCandidate]
     choices: list[ResolveChoice]
@@ -101,6 +106,9 @@ class ResolveItem(BaseModel):
 class ResolveQueue(BaseModel):
     items: list[ResolveItem]
     total: int
+    # How many sit at each rank, so a page can say "40 need you, 3,623 do
+    # not" rather than implying the first fifty are all there is.
+    by_rank: dict[str, int]
 
 
 class ResolveResult(BaseModel):
@@ -163,7 +171,6 @@ WHERE m.user_id = %(user)s
   -- to stop repeating.
   AND COALESCE(cm.method, '') <> %(refused)s
 ORDER BY m.sent_at DESC NULLS LAST
-LIMIT %(limit)s OFFSET %(offset)s
 """
 
 
@@ -224,6 +231,63 @@ def choices_for_message(
     ]
 
 
+# What a row is worth deciding, highest first. Ordering rather than scoring,
+# and every step of it derived rather than weighted:
+#
+#   3  resolving it would MOVE a live application's stage
+#   2  it can be attached to something, but attaching changes no stage
+#   1  no application exists at that company yet, so only a refusal is available
+#
+# The top rank is the whole point. A rejection landing on an application still
+# showing "applied" changes what the board says; an acknowledgement landing on
+# the same application changes nothing, because stage is derived from the
+# strongest event and an acknowledgement is never the strongest. Sorting by
+# recency alone put those two side by side and let 2,884 year-old rows bury
+# the forty that arrived this month.
+#
+# NOTHING IS HIDDEN. Every row is still returned and `total` still counts them
+# all, because nothing in this population is unresolvable - a person can refuse
+# any of it, so "low priority" is the honest claim and "cannot be settled" is
+# not. That distinction belongs to action items, 157 of which have no event
+# that can ever close them, and those get absence rather than a low rank when
+# they become rows.
+_RANK_MOVES_STAGE = 3
+_RANK_ATTACHABLE = 2
+_RANK_REFUSAL_ONLY = 1
+
+_RANK_REASONS = {
+    _RANK_MOVES_STAGE: "answering this moves an application",
+    _RANK_ATTACHABLE: "can be attached, but the stage would not move",
+    _RANK_REFUSAL_ONLY: "no application at this company yet",
+}
+
+
+def _rank(
+    kind: str, candidates: list[dict[str, Any]], events: dict[int, list[dict[str, Any]]]
+) -> int:
+    if not candidates:
+        return _RANK_REFUSAL_ONLY
+    for app in candidates:
+        own = events.get(app["id"], [])
+        before = mail_pipeline.stage_for(own)
+        if before in mail_pipeline.TERMINAL:
+            continue
+        # Would attaching this message move the stage? Asked of the same
+        # function the board reads, over the application's real events, rather
+        # than a second table saying which kinds count - so it cannot disagree
+        # with what the board will show once the person answers.
+        # `id` matters: stage_for breaks ties among terminal events by taking
+        # the newest, so a hypothetical event has to look newer than the real
+        # ones or a rejection already present would win over the one being
+        # considered and the answer would be "changes nothing" for the exact
+        # case that changes the most.
+        newest = max((e.get("id") or 0) for e in own) if own else 0
+        after = mail_pipeline.stage_for([*own, {"kind": kind, "sent_at": None, "id": newest + 1}])
+        if after != before:
+            return _RANK_MOVES_STAGE
+    return _RANK_ATTACHABLE
+
+
 def _queue_for(owner_id: int, limit: int, offset: int) -> dict[str, Any]:
     rows = db.query(
         _QUEUE_SQL,
@@ -231,26 +295,30 @@ def _queue_for(owner_id: int, limit: int, offset: int) -> dict[str, Any]:
             "user": owner_id,
             "kinds": list(_AWAITING_KINDS),
             "refused": mail_match.NOT_AN_APPLICATION,
-            "limit": limit,
-            "offset": offset,
         },
     )
     if not rows:
-        return {"items": [], "total": 0}
+        return {"items": [], "total": 0, "by_rank": {}}
 
     apps = db.query(
         "SELECT id, company_name, title, applied_at FROM applications "
         "WHERE user_id = %s AND dismissed_at IS NULL",
         (owner_id,),
     )
+    events = mail_pipeline.events_by_application(owner_id)
     items = []
     for row in rows:
         key = mail_match.norm_company(row["company"])
         candidates = [a for a in apps if key and mail_match.norm_company(a["company_name"]) == key]
+        rank = _rank(row["kind"], candidates, events)
         items.append(
             {
                 "id": f"message:{row['id']}",
                 "kind": "unmatched_message",
+                "rank": rank,
+                # Why it sits where it does, so the ordering is answerable
+                # rather than something the page has to take on trust.
+                "rank_reason": _RANK_REASONS[rank],
                 "message": {
                     "id": row["id"],
                     "subject": row["subject"],
@@ -268,7 +336,19 @@ def _queue_for(owner_id: int, limit: int, offset: int) -> dict[str, Any]:
                 ),
             }
         )
-    return {"items": items, "total": len(items)}
+    # RANKED BEFORE PAGED. Sorting inside a page would reorder fifty rows and
+    # call it a ranking of three and a half thousand - the page would look
+    # sensible and the ordering would be a lie.
+    items.sort(key=lambda i: i["message"]["sent_at"] or _EPOCH, reverse=True)
+    items.sort(key=lambda i: i["rank"], reverse=True)
+    by_rank = Counter(i["rank"] for i in items)
+    return {
+        "items": items[offset : offset + limit],
+        "total": len(items),
+        # What is below the fold, so a page can say "40 need you, 3,623 do not"
+        # rather than implying the first fifty are all there is.
+        "by_rank": {_RANK_REASONS[k]: v for k, v in sorted(by_rank.items(), reverse=True)},
+    }
 
 
 def _resolve(item_id: str, body: ResolveRequest, owner_id: int, actor_user_id: int) -> dict:

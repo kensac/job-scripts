@@ -14118,6 +14118,14 @@
             "type": "string",
             "title": "Kind"
           },
+          "rank": {
+            "type": "integer",
+            "title": "Rank"
+          },
+          "rank_reason": {
+            "type": "string",
+            "title": "Rank Reason"
+          },
           "message": {
             "$ref": "#/components/schemas/ResolveMessage"
           },
@@ -14140,6 +14148,8 @@
         "required": [
           "id",
           "kind",
+          "rank",
+          "rank_reason",
           "message",
           "candidates",
           "choices"
@@ -14238,12 +14248,20 @@
           "total": {
             "type": "integer",
             "title": "Total"
+          },
+          "by_rank": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "By Rank"
           }
         },
         "type": "object",
         "required": [
           "items",
-          "total"
+          "total",
+          "by_rank"
         ],
         "title": "ResolveQueue"
       },
