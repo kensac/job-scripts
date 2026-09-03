@@ -20,7 +20,14 @@ from typing import Any
 import requests
 
 from api import oauth
-from core.mail_import import MAX_BODY_CHARS, ImportedMessage, _clean, _html_to_text, _sent_at
+from core.mail_import import (
+    MAX_BODY_CHARS,
+    MAX_HTML_CHARS,
+    ImportedMessage,
+    _clean,
+    _html_to_text,
+    _sent_at,
+)
 
 logger = logging.getLogger("jobtracker_api")
 
@@ -82,11 +89,14 @@ def _walk_parts(payload: dict[str, Any]) -> Iterator[dict[str, Any]]:
         yield from _walk_parts(part)
 
 
-def _body(payload: dict[str, Any]) -> str | None:
-    """text/plain if present, else HTML converted.
+def _body(payload: dict[str, Any]) -> tuple[str | None, str | None]:
+    """The readable text, and the markup it came from.
 
-    ATS mail is frequently HTML-only, so preferring plain text but accepting
-    HTML is the difference between reading most rejections and missing them.
+    text/plain if present, else HTML converted - ATS mail is frequently
+    HTML-only, so preferring plain text but accepting HTML is the difference
+    between reading most rejections and missing them. The HTML is now kept
+    alongside rather than discarded: the plain part winning for the classifier
+    is no reason to throw away the part a reader wants to see.
     """
     plain: list[str] = []
     html: list[str] = []
@@ -99,8 +109,12 @@ def _body(payload: dict[str, Any]) -> str | None:
             plain.append(data)
         elif mime == "text/html":
             html.append(data)
-    text = "\n".join(plain) if plain else _html_to_text("\n".join(html))
-    return _clean(text)[:MAX_BODY_CHARS] or None
+    markup = "\n".join(html) if html else None
+    text = "\n".join(plain) if plain else _html_to_text(markup or "")
+    return (
+        _clean(text)[:MAX_BODY_CHARS] or None,
+        markup[:MAX_HTML_CHARS] if markup else None,
+    )
 
 
 def to_imported(message: dict[str, Any]) -> ImportedMessage:
@@ -117,6 +131,7 @@ def to_imported(message: dict[str, Any]) -> ImportedMessage:
 
     sender = getaddresses([_header(payload, "From") or ""])
     from_name, from_email = sender[0] if sender else ("", "")
+    text, html_source = _body(payload)
     return ImportedMessage(
         provider_message_id=rfc_id or f"gmail-{message.get('id')}",
         source="gmail",
@@ -126,7 +141,8 @@ def to_imported(message: dict[str, Any]) -> ImportedMessage:
         to_emails=[addr for _, addr in getaddresses([to_line]) if addr],
         subject=(_header(payload, "Subject") or "").strip() or None,
         sent_at=_sent_at(_header(payload, "Date")),
-        body_text=_body(payload),
+        body_text=text,
+        body_html=html_source,
     )
 
 
