@@ -113,7 +113,12 @@ def test_the_owner_is_told_a_correction_was_an_administrators(client, admin, f):
 
     assert _corrected_by(admin_id, uid) == "administrator"
     assert _corrected_by(uid, uid) == "you"
-    assert _corrected_by(None, uid) is None
+    # Four answers, not three. A machine wrote it, or a person did and there
+    # is no record of which - every human correction predating this column
+    # lands in the second case, and the logs are append-only so it can never
+    # be resolved. Rendering that as "nobody corrected it" would be a lie.
+    assert _corrected_by(None, uid, model="gpt-5-nano") == "model"
+    assert _corrected_by(None, uid) == "unknown"
 
 
 def test_reverting_restores_the_models_answer_and_records_the_actor(client, admin, f):
@@ -156,3 +161,47 @@ def test_an_unknown_message_is_a_404_not_a_crash(client, admin):
         ).status_code
         == 404
     )
+
+
+def test_an_admin_refusal_is_not_filed_as_a_matcher_failure(client, admin, f):
+    """`not_an_application` is not `unmatched`: deliberately attached to
+    nothing versus looked and found nothing. Recording every admin no-match as
+    method='manual' with a null application put it back in the queue of things
+    needing attention, because the unmatched cut reads exactly that shape as a
+    failure - so the admin took the correct action and nothing said otherwise.
+    """
+    headers, admin_id = admin
+    _uid, _app_id, msg_id = _owner_with_message(f)
+
+    resp = client.post(
+        f"/v1/admin/mail/{msg_id}/match",
+        json={"application_id": None, "outcome": "not_an_application"},
+        headers=headers,
+    )
+    assert resp.status_code == 200, resp.text
+    row = db.query_one(
+        "SELECT application_id, method, confidence, actor_user_id FROM application_matches "
+        "WHERE message_id = %s ORDER BY id DESC LIMIT 1",
+        (msg_id,),
+    )
+    assert row["application_id"] is None
+    assert row["method"] == "not_an_application", "a refusal, not a failure"
+    assert row["actor_user_id"] == admin_id
+
+
+def test_a_plain_no_match_still_reads_as_a_failure_to_find_one(client, admin, f):
+    """The weaker claim is the default. A no-match with no reason given is
+    'looked and found nothing', which is what a caller that predates the field
+    means and the safe reading of what it says."""
+    headers, _ = admin
+    _uid, _app_id, msg_id = _owner_with_message(f)
+
+    resp = client.post(
+        f"/v1/admin/mail/{msg_id}/match", json={"application_id": None}, headers=headers
+    )
+    assert resp.status_code == 200, resp.text
+    row = db.query_one(
+        "SELECT method FROM application_matches WHERE message_id = %s ORDER BY id DESC LIMIT 1",
+        (msg_id,),
+    )
+    assert row["method"] == "manual"

@@ -9293,7 +9293,7 @@
     "/v1/admin/mail/{message_id}/match": {
       "post": {
         "summary": "Override Match",
-        "description": "Correct a match by hand.\n\nAn append, not an edit: the matcher's own attempt survives underneath, so\na systematically wrong tier stays visible in the history instead of being\nquietly papered over one row at a time. That history is the only evidence\nthat the matcher needs fixing rather than the row.",
+        "description": "Correct a match by hand.\n\nAn append, not an edit: the matcher's own attempt survives underneath, so\na systematically wrong tier stays visible in the history instead of being\nquietly papered over one row at a time. That history is the only evidence\nthat the matcher needs fixing rather than the row.\n\nA null application_id needs `outcome` to say WHICH no-match is meant,\nbecause the two are not the same fact and the queue treats them\ndifferently. Attaching to an application ignores it - the outcome of a\nmatch is the match.",
         "operationId": "override_match_v1_admin_mail__message_id__match_post",
         "parameters": [
           {
@@ -13153,6 +13153,15 @@
               }
             ],
             "title": "Application Id"
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "no_application_found",
+              "not_an_application"
+            ],
+            "title": "Outcome",
+            "default": "no_application_found"
           }
         },
         "type": "object",

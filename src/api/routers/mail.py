@@ -13,7 +13,7 @@ append-only, so a correction is a newer row, not an edit.
 from __future__ import annotations
 
 import datetime
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -416,19 +416,63 @@ def mail_detail(message_id: int, user: AuthedUser = Depends(require_admin)):
 
 class MatchOverride(BaseModel):
     application_id: int | None
+    # WHICH no-match this is, when application_id is null. Without it every
+    # admin no-match was recorded as method='manual' with a null application,
+    # which the unmatched predicate reads as a matcher FAILURE - so an admin
+    # who correctly decided a recruiter approach belongs to no application put
+    # it straight back into the queue of things needing attention, and nothing
+    # said so. `not_an_application` is not `unmatched`: deliberately attached
+    # to nothing versus looked and found nothing, a distinction that has now
+    # mattered on six surfaces.
+    #
+    # Default keeps the old behaviour for callers that do not send it: a
+    # no-match with no reason given is a failure to find one, which is the
+    # weaker claim and the safe one.
+    outcome: Literal["no_application_found", "not_an_application"] = "no_application_found"
 
 
-def _corrected_by(actor_user_id: int | None, viewer_id: int) -> str | None:
-    """Who made this correction, from the viewer's point of view.
+def _resync_applications(message_id: int) -> list[int]:
+    """Resync every application this message feeds, and say which they were.
 
-    None when no person did - the matcher or the classifier wrote it. The
-    admin's corrections are surfaced to the affected user rather than hidden:
-    a correction someone cannot see is one they cannot question, and a person
-    finding their own data changed with no account of who changed it is worse
-    than the correction being visible.
+    A changed kind can change what an application is waiting for, and it can
+    change an application the person is not currently looking at - so the ids
+    come back rather than an `ok`. Both the correction and the revert need
+    this, which is why it is one function.
     """
+    affected = [
+        r["application_id"]
+        for r in db.query(
+            """
+            SELECT DISTINCT application_id FROM application_matches
+            WHERE message_id = %s AND application_id IS NOT NULL
+            """,
+            (message_id,),
+        )
+    ]
+    for application_id in affected:
+        mail_pipeline.sync_action_items(application_id)
+    return affected
+
+
+def _corrected_by(actor_user_id: int | None, viewer_id: int, model: str | None = None) -> str:
+    """Who decided this row, from the viewer's point of view.
+
+    FOUR ANSWERS, not three, and the fourth is the honest one. A machine wrote
+    it; the viewer wrote it; an administrator wrote it; or a person wrote it
+    before this column existed and there is no record of which person. That
+    last case is not the same as "nobody corrected it" and must not be rendered
+    as if it were - every human correction made before actor_user_id was added
+    lands there, and the logs are append-only so it can never be resolved.
+
+    The admin's corrections are surfaced to the affected user rather than
+    hidden: a correction someone cannot see is one they cannot question, and
+    finding your own data changed with no account of who changed it is worse
+    than the change being visible.
+    """
+    if model is not None:
+        return "model"
     if actor_user_id is None:
-        return None
+        return "unknown"
     return "you" if actor_user_id == viewer_id else "administrator"
 
 
@@ -499,6 +543,11 @@ def override_match(message_id: int, body: MatchOverride, user: AuthedUser = Depe
     a systematically wrong tier stays visible in the history instead of being
     quietly papered over one row at a time. That history is the only evidence
     that the matcher needs fixing rather than the row.
+
+    A null application_id needs `outcome` to say WHICH no-match is meant,
+    because the two are not the same fact and the queue treats them
+    differently. Attaching to an application ignores it - the outcome of a
+    match is the match.
     """
     message = db.query_one("SELECT user_id FROM email_messages WHERE id = %s", (message_id,))
     if not message:
@@ -512,15 +561,19 @@ def override_match(message_id: int, body: MatchOverride, user: AuthedUser = Depe
             # another's application. 404 rather than 403: whether that
             # application exists is not something the caller is entitled to.
             raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown application"})
+    # A deliberate refusal is recorded as the matcher's own refusal method, so
+    # every reader that already distinguishes the two - the unmatched cut, the
+    # analytics breakdown, the pipeline filter - sees it without being taught a
+    # fourth value. Agreeing with the matcher should look like agreeing with it.
+    if body.application_id is None and body.outcome == "not_an_application":
+        method, confidence = mail_match.NOT_AN_APPLICATION, "high"
+    else:
+        method = MANUAL
+        confidence = "high" if body.application_id is not None else "none"
     mail_match.record(
         message_id,
         actor_user_id=user.id,
-        match=mail_match.Match(
-            body.application_id,
-            "manual",
-            "high" if body.application_id is not None else "none",
-            f"set by admin {user.sub}",
-        ),
+        match=mail_match.Match(body.application_id, method, confidence, f"set by admin {user.sub}"),
     )
     if body.application_id is not None:
         mail_pipeline.sync_action_items(body.application_id)
@@ -816,7 +869,14 @@ def pipeline_detail(application_id: int, user: AuthedUser = Depends(require_user
                 # owner and as an administrator to anyone else, so there is no
                 # second copy of that distinction to drift. NULL actor means
                 # the matcher decided it.
-                "corrected_by": _corrected_by(m["actor_user_id"], user.id),
+                "corrected_by": _corrected_by(
+                    m["actor_user_id"],
+                    user.id,
+                    # A match has no `model` column. The matcher's own rows
+                    # carry its tier as the method; only a person writes
+                    # 'manual' or 'detached'.
+                    model=None if m["method"] in _HUMAN_MATCH_METHODS else m["method"],
+                ),
             }
             for m in matches
         ],
@@ -954,6 +1014,11 @@ def restore_application(
 
 
 MANUAL = "manual"
+
+# Methods only a person writes. Every other method is one of the matcher's
+# tiers, so the method column is what tells a human match from a machine one -
+# `application_matches` has no `model` column to ask instead.
+_HUMAN_MATCH_METHODS = frozenset({MANUAL, DETACHED})
 
 
 # How many messages one assignment may carry. A conversation is a handful of
@@ -1740,21 +1805,7 @@ def _apply_classification(
         "VALUES (%s, %s, 'high', %s, NULL, %s)",
         (message_id, body.kind, db.jsonb(detail), actor_user_id),
     )
-    # A corrected kind can change what the application is waiting for - and it
-    # can change an application the person is not currently looking at, which
-    # is why the ids come back rather than an ok.
-    affected = [
-        r["application_id"]
-        for r in db.query(
-            """
-            SELECT DISTINCT application_id FROM application_matches
-            WHERE message_id = %s AND application_id IS NOT NULL
-            """,
-            (message_id,),
-        )
-    ]
-    for application_id in affected:
-        mail_pipeline.sync_action_items(application_id)
+    affected = _resync_applications(message_id)
     return {
         "ok": True,
         "message_id": message["id"],
@@ -1817,7 +1868,15 @@ def _apply_revert(message_id: int, *, actor_user_id: int) -> dict[str, Any]:
             actor_user_id,
         ),
     )
-    return {"ok": True, "already": False, "kind": model_answer["kind"]}
+    # The same affected ids classify returns. A revert moves the derived stage
+    # exactly as a correction does, and possibly on an application nobody is
+    # looking at, so it cannot be an {ok: true}.
+    return {
+        "ok": True,
+        "already": False,
+        "kind": model_answer["kind"],
+        "affected_application_ids": _resync_applications(message_id),
+    }
 
 
 @router.get("/user/messages/{message_id}/thread")

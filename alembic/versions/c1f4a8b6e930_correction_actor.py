@@ -20,6 +20,14 @@ NULL means no person: the matcher or the classifier wrote it. Together with
 `model` that gives the full provenance of every row - `model` says which
 machine, `actor_user_id` says which human, and neither being set has never
 happened and would be a bug.
+
+Parented on c41d7e9a20b8 rather than on a7f3c9e1d582, which both this and
+c41d7e9a20b8 were written against in parallel. Two revisions sharing a parent
+is two heads, and `alembic upgrade head` refuses outright - a failure neither
+branch's CI can see, because each is green against its own parent and it only
+appears once both are on main. The order between them is free: that one adds a
+column to email_messages, this one adds columns to application_matches and
+email_events, and they share no table.
 """
 
 from typing import Sequence, Union
@@ -28,7 +36,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision: str = "c1f4a8b6e930"
-down_revision: Union[str, None] = "a7f3c9e1d582"
+down_revision: Union[str, None] = "c41d7e9a20b8"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
