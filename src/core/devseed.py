@@ -1,23 +1,26 @@
-"""A development database shaped like production, not like a fixture.
+"""Fabricated rows shaped like production, for the tests that assert shapes.
 
-This exists because a fixture cannot falsify the assumption it was built from.
-In one night the deleted mock layer produced a 422 on every resolve assignment
-(the client typed a field as an object, the router takes a bare id, and the
-fixture encoded the same wrong belief so nothing testing against it could
-catch it), four envelope-key mismatches, an "infinite append" bug that was a
-stub ignoring its page parameter, and a "63,598 unmatched" figure that was
-somebody's own fixture read back as a production observation.
+NOT the dev API's data source. That is a throwaway COPY of production
+(`scripts/sync_testdb.py --dev-role`, then `make dev-api`), because a copy
+cannot get the shape wrong - it IS the shape, including the awkward cases
+nobody has found yet. This module exists for the case a copy cannot serve: CI,
+which has no production credentials and must still be able to assert that the
+API's responses carry the shapes the frontend depends on.
 
-The load-bearing property here is not realism for its own sake: it is that the
-seed writes through the SAME tables the API serves, and the backend's own
-tests assert the API's responses over it. A shape cannot drift from the wire,
-because it is the wire.
+The tests over this seed read it back THROUGH THE API rather than out of the
+tables. That is the whole point. A fixture cannot falsify the assumption it
+was built from, and the mock layer this replaced produced a 422 on every
+resolve assignment (the client typed a field as an object, the router takes a
+bare id, and the fixture encoded the same wrong belief so nothing testing
+against it could catch it), four envelope-key mismatches, an "infinite append"
+bug that was a stub ignoring its page parameter, and a "63,598 unmatched"
+figure that was somebody's own fixture read back as a production observation.
 
-EVERY ODDITY BELOW IS MEASURED, not invented. The bugs that got through this
-week were all in awkward cases, so tidy rows would reproduce none of them:
+EVERY ODDITY BELOW IS MEASURED, not invented, because tidy rows would
+reproduce none of those:
 
   comp_currency is NULL on 96% of rows carrying an amount (452 of 11,442)
-  body_text holds raw HTML on 54.8% of messages (36,820 of 67,177)
+  body_text held raw HTML on 54.8% of messages (36,820 of 67,177)
   72% of messages carry at least one remote tracker, 2.0 fetches each
   email_events.confidence is a STRING - 'high' 81,788, 'medium' 138, 'low' 22
   detail.role_title EXISTS as a key and is NULL on 90% (73,892 of 81,948)
