@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import shutil
 import socket
@@ -7,7 +8,9 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from urllib.parse import urlparse
 
+import psycopg
 import pytest
 from cryptography.fernet import Fernet
 
@@ -117,6 +120,54 @@ os.environ["DATABASE_URL"] = (
 )
 
 from api import db  # noqa: E402  (import only after DATABASE_URL is set)
+
+# One pytest process per database, enforced rather than assumed.
+#
+# The autouse fixture below TRUNCATEs every mutable table between tests. Two
+# runs sharing a database therefore delete each other's rows mid-test, and the
+# symptom is never a truncation error - it is a foreign key violation on an id
+# that existed when the row was read and did not when it was written, with the
+# id varying run to run. Reproduced deterministically: two concurrent runs of
+# tests/test_mail_match_task.py against one database produced 1 and 3 failures
+# with "Key (user_id)=(4) is not present in table users" and "Key (job_id)=(5)
+# is not present in table jobs". Each run passes alone.
+#
+# That looks exactly like a bug in whatever code the losing test happened to
+# be exercising, which is what makes it expensive: the reader debugs their own
+# change. The container's PORT is already derived from the checkout so
+# parallel worktrees cannot collide, but two runs in ONE checkout still can -
+# a second terminal, or a full-suite run started while another is going.
+#
+# An advisory lock is the cheapest thing that converts silent corruption into
+# a sentence. It is per-database and released when this connection closes, so
+# a crashed run does not wedge the next one. The key is derived from a fixed
+# string rather than picked, so it cannot collide with db.py's schema lock.
+_EXCLUSIVE_KEY = int.from_bytes(
+    hashlib.sha256(b"jobtracker-pytest-exclusive").digest()[:8], "big", signed=True
+)
+
+
+def _claim_database_exclusively() -> None:
+    conn = psycopg.connect(os.environ["DATABASE_URL"], autocommit=True)
+    row = conn.execute("SELECT pg_try_advisory_lock(%s) AS got", (_EXCLUSIVE_KEY,)).fetchone()
+    if not (row and row[0]):
+        conn.close()
+        raise RuntimeError(
+            "another pytest run is already using this database "
+            f"({urlparse(os.environ['DATABASE_URL']).path.lstrip('/')}).\n"
+            "Two runs sharing one database TRUNCATE each other's rows between "
+            "tests, which surfaces as foreign key violations on ids that "
+            "vanished mid-test - in whichever test happened to lose the race, "
+            "not in the one that caused it.\n"
+            "Wait for the other run, or point TEST_DATABASE_URL at a different "
+            "database."
+        )
+    # Held for the life of the process; never closed explicitly, so the lock
+    # outlives every fixture and is released only when this process exits.
+    globals()["_exclusive_conn"] = conn
+
+
+_claim_database_exclusively()
 
 
 def _schema_already_provisioned() -> bool:
