@@ -58,12 +58,17 @@ SUBJECT_SOURCE = "source"
 SUBJECT_HOST = "host"
 SUBJECT_PROVIDER_USER = "provider_user"
 SUBJECT_TASK = "task"
+# The spend ledger's grouping key, not a task kind: the batch purpose is
+# "mail_classify" where the task kind is "classify_mail". Linking one to the
+# other lands on nothing.
+SUBJECT_PURPOSE = "purpose"
 
 _SUBJECT_KINDS = {
     "ats_text_collapse": SUBJECT_SOURCE,
     "extraction_failing": SUBJECT_HOST,
     "oauth_token_invalid": SUBJECT_PROVIDER_USER,
     "batch_parked_too_long": SUBJECT_TASK,
+    "batch_failed_whole": SUBJECT_PURPOSE,
 }
 
 
@@ -328,6 +333,56 @@ def detect() -> list[dict[str, Any]]:
                     "kind": r["kind"],
                     "parked": r["parked"],
                     "oldest_hours": round(hours, 1),
+                },
+            }
+        )
+
+    # A batch is submitted whole and fails whole, so failed_count = requests is
+    # a DIFFERENT event from some requests failing: it means the submission was
+    # rejected on grounds that applied to every request in it (an unsupported
+    # reasoning_effort, a model that will not take the schema), not that some
+    # inputs were bad. That distinction is the threshold - there is no picked
+    # failure rate here, because the two cases have different causes and only
+    # this one is certainly a defect.
+    #
+    # Nothing else reports it. The task finishes 'done' with no error, because
+    # collection succeeded at collecting nothing: on 2026-09-02 a 499-request
+    # mail_classify batch failed every request and its task closed clean, which
+    # is the same summary-line-is-not-the-measurement shape as a clean exit
+    # reading as success. Zero tokens and zero cost are then CORRECT - nothing
+    # ran - so the spend ledger cannot see it either.
+    #
+    # Bounded to one completion window for the same reason the parked detector
+    # uses it: inside that window the work can still be resubmitted, so the
+    # alert is actionable. Older ones are history and would alarm forever.
+    for r in db.query(
+        """
+        SELECT purpose, model, COUNT(*) AS batches, SUM(requests) AS requests,
+               MAX(EXTRACT(epoch FROM now() - submitted_at)) AS oldest_secs
+        FROM ai_batches
+        WHERE requests > 0 AND failed_count = requests
+          AND submitted_at > now() - make_interval(secs => %(window)s)
+        GROUP BY purpose, model
+        """,
+        {"window": window},
+    ):
+        found.append(
+            {
+                "kind": "batch_failed_whole",
+                "subject": r["purpose"],
+                "severity": "critical",
+                "message": (
+                    f"{r['batches']} {r['purpose']} batch(es) on {r['model']} came back with "
+                    f"every one of their {r['requests']} requests failed. A batch fails whole, "
+                    "so this is the submission being rejected rather than bad inputs. The task "
+                    "finishes 'done' with no error and no cost, so nothing else reports it."
+                ),
+                "detail": {
+                    "purpose": r["purpose"],
+                    "model": r["model"],
+                    "batches": r["batches"],
+                    "requests": r["requests"],
+                    "oldest_hours": round((r["oldest_secs"] or 0) / 3600, 1),
                 },
             }
         )
