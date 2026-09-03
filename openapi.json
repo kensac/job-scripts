@@ -8809,6 +8809,97 @@
         }
       }
     },
+    "/v1/admin/mail/consistency": {
+      "get": {
+        "summary": "Classification Consistency",
+        "description": "Where the classifier gave identical inputs different answers.\n\nA label-free regression metric: no ground truth, only self-agreement, so\nit stays checkable after the corpus changes and after the model does.\n\nIT COVERS A MINORITY OF THE CORPUS and says so rather than being read as\nan accuracy figure - only messages whose body repeats can be checked this\nway, and that is a fraction of the whole. `messages_covered` against\n`messages_classified` is the denominator; a rate quoted without it would\nbe describing a canary as if it were a census.",
+        "operationId": "classification_consistency_v1_admin_mail_consistency_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 25,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "x-service-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-Service-Token"
+            }
+          },
+          {
+            "name": "x-user-sub",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Sub"
+            }
+          },
+          {
+            "name": "x-user-email",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Email"
+            }
+          },
+          {
+            "name": "x-user-name",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Name"
+            }
+          },
+          {
+            "name": "x-user-groups",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Groups"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/admin/mail/analytics": {
       "get": {
         "summary": "Mail Analytics",

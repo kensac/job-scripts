@@ -18,7 +18,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
-from api import db, mail_match, mail_pipeline
+from api import db, mail_match, mail_pipeline, rates
 from api.auth import AuthedUser, require_user
 from api.routers.admin import require_admin
 from api.tasks.mail_classify import EVENT_KINDS
@@ -200,6 +200,102 @@ def list_mail(
         "total": total["c"] if total else 0,
         "page": page,
         "page_size": page_size,
+    }
+
+
+# Identical input must not get different labels. That is checkable forever
+# without anyone hand-labelling anything, which is what makes it a regression
+# metric rather than an audit: it needs no ground truth, only agreement with
+# itself.
+#
+# GROUPED BY BODY, NOT BY SUBJECT. Grouping on sender+subject reports 6.6% of
+# groups inconsistent, and the worst offenders are all "Re:" threads - a
+# conversation is many different messages sharing a subject, and its parts
+# SHOULD get different kinds. Hashing the body measures what the claim
+# actually is. Digits are normalised out first so that a template differing
+# only by a reference number still counts as the same input.
+#
+# Two copies is the floor because you need two to disagree, and the floor is
+# not load-bearing: the rate is 1.7% at two, 2.2% at three, 2.9% at ten. A
+# number that barely moves across the range is one nobody needs to tune.
+_CONSISTENCY_SQL = """
+WITH latest AS (
+    SELECT DISTINCT ON (message_id) message_id, kind
+    FROM email_events ORDER BY message_id, id DESC
+),
+groups AS (
+    SELECT lower(m.from_email) AS sender,
+           md5(regexp_replace(m.body_text, '[0-9]+', '#', 'g')) AS body_hash,
+           count(*) AS copies,
+           count(DISTINCT l.kind) AS kinds,
+           array_agg(DISTINCT l.kind) AS kind_list,
+           (array_agg(m.subject ORDER BY m.id))[1] AS subject,
+           (array_agg(m.id ORDER BY m.id))[1] AS example_message_id
+    FROM email_messages m
+    JOIN latest l ON l.message_id = m.id
+    WHERE m.body_text IS NOT NULL AND length(m.body_text) > %(min_len)s
+    GROUP BY 1, 2
+    HAVING count(*) >= 2
+)
+SELECT * FROM groups ORDER BY kinds DESC, copies DESC
+"""
+
+# Below this a body is a stub - a bare signature, a one-line auto-reply - and
+# thousands of them hash together into a group that means nothing.
+_CONSISTENCY_MIN_BODY = 200
+
+
+@router.get("/admin/mail/consistency")
+def classification_consistency(
+    limit: int = Query(default=25, ge=1, le=200),
+    user: AuthedUser = Depends(require_admin),
+):
+    """Where the classifier gave identical inputs different answers.
+
+    A label-free regression metric: no ground truth, only self-agreement, so
+    it stays checkable after the corpus changes and after the model does.
+
+    IT COVERS A MINORITY OF THE CORPUS and says so rather than being read as
+    an accuracy figure - only messages whose body repeats can be checked this
+    way, and that is a fraction of the whole. `messages_covered` against
+    `messages_classified` is the denominator; a rate quoted without it would
+    be describing a canary as if it were a census.
+    """
+    rows = db.query(_CONSISTENCY_SQL, {"min_len": _CONSISTENCY_MIN_BODY})
+    inconsistent = [r for r in rows if r["kinds"] > 1]
+    covered = sum(r["copies"] for r in rows)
+    total_row = db.query_one(
+        """
+        WITH latest AS (
+            SELECT DISTINCT ON (message_id) message_id FROM email_events
+            ORDER BY message_id, id DESC
+        )
+        SELECT count(*) AS c FROM latest
+        """
+    )
+    return {
+        "groups": rates.rate(len(inconsistent), len(rows), rates.DEFAULT_MIN_SAMPLE),
+        "messages": rates.rate(
+            sum(r["copies"] for r in inconsistent), covered, rates.DEFAULT_MIN_SAMPLE
+        ),
+        # What the rate is a rate OF. Only repeated bodies are checkable, so
+        # this is a canary over part of the corpus rather than a measure of it.
+        "coverage": {
+            "messages_covered": covered,
+            "messages_classified": int((total_row or {}).get("c", 0)),
+            "min_copies": 2,
+            "min_body_chars": _CONSISTENCY_MIN_BODY,
+        },
+        "worst": [
+            {
+                "sender": r["sender"],
+                "subject": r["subject"],
+                "copies": r["copies"],
+                "kinds": sorted(r["kind_list"]),
+                "example_message_id": r["example_message_id"],
+            }
+            for r in inconsistent[:limit]
+        ],
     }
 
 
