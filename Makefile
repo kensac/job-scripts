@@ -1,6 +1,6 @@
 export PYTHONPATH := src
 
-.PHONY: api worker check lint fmt types test testdb-up testdb-down testdb-url testdb-sync testdb-sync-fast integration schema migrate revision db-up db-down
+.PHONY: api worker check lint fmt types test dev-up dev-api dev-url dev-down testdb-up testdb-down testdb-url testdb-sync testdb-sync-fast integration schema migrate revision db-up db-down
 
 api:            ## run the API locally
 	uvicorn api.app:app --port 8000 --reload
@@ -75,6 +75,51 @@ testdb-down:    ## stop this checkout's test database
 
 testdb-url:     ## print this checkout's TEST_DATABASE_URL
 	@echo 'export TEST_DATABASE_URL=$(TESTPG_URL)' 
+
+# --- dev API ------------------------------------------------------------
+# A real API over a disposable database, so the frontend can verify against
+# real response shapes. The mock layer it replaces produced a 422 on every
+# resolve assignment, four envelope-key mismatches and an "infinite append"
+# bug, all because a fixture cannot falsify the assumption it was built from.
+#
+# Same port derivation as the test database and a different offset, so a dev
+# API and a test run in one checkout do not fight over a port.
+DEVPG_NAME := jobtracker-devdb-$(shell pwd | shasum | cut -c1-8)
+DEVPG_PORT := $(shell echo $$((56000 + 0x$(shell pwd | shasum | cut -c1-6) % 1000)))
+DEVPG_URL := postgresql://postgres:dev@127.0.0.1:$(DEVPG_PORT)/jobtracker_dev
+DEV_API_PORT ?= 8000
+
+dev-up:         ## disposable postgres, migrated and seeded with real shapes
+	docker run -d --rm --name $(DEVPG_NAME) -p $(DEVPG_PORT):5432 \
+	  -e POSTGRES_PASSWORD=dev -e POSTGRES_DB=jobtracker_dev \
+	  pgvector/pgvector:pg18-trixie >/dev/null
+	@# pg_isready reports ready DURING init, before the server accepts real
+	@# connections - the first run of this target failed on exactly that. Wait
+	@# for a query to succeed, which is the thing alembic is about to do.
+	@until docker exec $(DEVPG_NAME) psql -U postgres -d jobtracker_dev -c 'select 1' \
+	  >/dev/null 2>&1; do sleep 1; done
+	@DATABASE_URL=$(DEVPG_URL) python -m alembic upgrade head >/dev/null
+	@DATABASE_URL=$(DEVPG_URL) python -c "import core.store" >/dev/null
+	@DATABASE_URL=$(DEVPG_URL) python -c "from core.devseed import seed; print(seed())"
+	@echo 'export DATABASE_URL=$(DEVPG_URL)'
+
+dev-api:        ## run the API against the dev database (needs dev-up)
+	DATABASE_URL=$(DEVPG_URL) JOBTRACKER_SERVICE_TOKEN=dev-token \
+	  uvicorn api.app:app --port $(DEV_API_PORT) --reload
+
+dev-url:        ## print this checkout's dev DATABASE_URL and the headers to send
+	@echo 'export DATABASE_URL=$(DEVPG_URL)'
+	@echo '# API on http://127.0.0.1:$(DEV_API_PORT), send these headers:'
+	@echo '#   X-Service-Token: dev-token'
+	@echo '#   X-User-Sub: dev-user'
+	@echo '#   X-User-Email: dev@example.test'
+	@echo '#   X-User-Groups: infra-admins,jobtracker-users-internal'
+
+dev-down:       ## stop this checkout's dev database
+	@# -f rather than stop: a container left behind by a failed dev-up blocks
+	@# the next one on a name conflict, which is how the first run of this
+	@# target wasted a cycle.
+	docker rm -f $(DEVPG_NAME) >/dev/null 2>&1 || true
 
 db-up:          ## throwaway local postgres on :54999 (data in .pgdev)
 	initdb -D .pgdev -U dev --auth=trust -E UTF8 >/dev/null 2>&1 || true
