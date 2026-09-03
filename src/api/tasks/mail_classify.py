@@ -23,7 +23,7 @@ from typing import Any, Literal
 from pydantic import BaseModel
 
 from api import db
-from api.tasks.runtime import _set_progress, run_batched
+from api.tasks.runtime import _pending_batch_ids, _set_progress, run_batched
 from core.providers.spec import StructuredOutput
 from core.routing import Evidence, TaskShape, resolve
 
@@ -614,6 +614,43 @@ def _heal_self_sent(identities: list[str]) -> int:
     return len(rows)
 
 
+_SELECTION = f"""
+            SELECT m.id, m.from_email, m.subject, m.sent_at, m.body_text,
+                   FALSE AS self_sent
+            FROM email_messages m
+            JOIN users u ON u.id = m.user_id
+            WHERE NOT EXISTS (SELECT 1 FROM email_events e WHERE e.message_id = m.id)
+              AND NOT {_SELF_SENT}
+              -- Not already paid for. "No events yet" is true of a message the
+              -- moment it is submitted and stays true for the hours it waits in
+              -- the provider's queue, so a later sweep selected the SAME
+              -- messages and submitted them again: three tasks an hour apart
+              -- each carrying an identical 1,156 requests, all in flight at
+              -- once. The cost is not the queue depth, it is paying repeatedly
+              -- for one answer.
+              --
+              -- Reading the in-flight ids from the parked tasks rather than
+              -- from a column, because the payload is where submit_or_collect
+              -- already records them and a second copy would be a second thing
+              -- to keep true.
+              AND NOT EXISTS (
+                  SELECT 1 FROM tasks t
+                  WHERE t.kind = 'classify_mail'
+                    -- Not this task. On resume it is 'running' and its own
+                    -- claims are in its own payload, so without this it
+                    -- excludes everything it is holding and selects nothing.
+                    AND t.id <> %(task_id)s
+                    AND t.status IN ('pending', 'running', 'waiting', 'awaiting_batch')
+                    AND t.payload -> 'claimed_message_ids' @> to_jsonb(m.id)
+              )
+            -- Likely job mail first. The prefilter gates nothing, so this only
+            -- changes the ORDER in which the whole mailbox is worked through -
+            -- which matters because the useful results arrive sooner.
+            ORDER BY m.prefilter_hit DESC NULLS LAST, m.id DESC
+            LIMIT %(cap)s
+            """
+
+
 async def handle_classify_mail(task_id: int, payload: dict[str, Any]) -> None:
     from openai.lib._pydantic import to_strict_json_schema
 
@@ -677,38 +714,8 @@ async def handle_classify_mail(task_id: int, payload: dict[str, Any]) -> None:
         logger.info(f"Task {task_id}: re-classifying {len(rows)} of {len(ids)} requested messages")
     else:
         rows = db.query(
-            f"""
-            SELECT m.id, m.from_email, m.subject, m.sent_at, m.body_text,
-                   FALSE AS self_sent
-            FROM email_messages m
-            JOIN users u ON u.id = m.user_id
-            WHERE NOT EXISTS (SELECT 1 FROM email_events e WHERE e.message_id = m.id)
-              AND NOT {_SELF_SENT}
-              -- Not already paid for. "No events yet" is true of a message the
-              -- moment it is submitted and stays true for the hours it waits in
-              -- the provider's queue, so a later sweep selected the SAME
-              -- messages and submitted them again: three tasks an hour apart
-              -- each carrying an identical 1,156 requests, all in flight at
-              -- once. The cost is not the queue depth, it is paying repeatedly
-              -- for one answer.
-              --
-              -- Reading the in-flight ids from the parked tasks rather than
-              -- from a column, because the payload is where submit_or_collect
-              -- already records them and a second copy would be a second thing
-              -- to keep true.
-              AND NOT EXISTS (
-                  SELECT 1 FROM tasks t
-                  WHERE t.kind = 'classify_mail'
-                    AND t.status IN ('pending', 'running', 'waiting', 'awaiting_batch')
-                    AND t.payload -> 'claimed_message_ids' @> to_jsonb(m.id)
-              )
-            -- Likely job mail first. The prefilter gates nothing, so this only
-            -- changes the ORDER in which the whole mailbox is worked through -
-            -- which matters because the useful results arrive sooner.
-            ORDER BY m.prefilter_hit DESC NULLS LAST, m.id DESC
-            LIMIT %(cap)s
-            """,
-            {"cap": cap, "identities": identities},
+            _SELECTION,
+            {"cap": cap, "identities": identities, "task_id": task_id},
         )
     # Self-sent mail only reaches here through an explicit message_ids repair,
     # because the sweep excludes it. Correcting one needs no model: the header
@@ -729,7 +736,22 @@ async def handle_classify_mail(task_id: int, payload: dict[str, Any]) -> None:
     if corrected:
         logger.info(f"Task {task_id}: corrected {len(corrected)} self-sent message(s)")
 
-    if not rows:
+    # A resume has batches waiting. It must reach run_batched even with nothing
+    # new to classify, because that is where the finished batch is collected -
+    # and _finish drops batch_ids afterwards as provably spent, so returning
+    # here throws away work the provider has already been paid for.
+    #
+    # That is not hypothetical. It was survivable during the backfill because
+    # there was always other mail to select, so rows was non-empty and the
+    # batch got collected as a side effect. With the backfill done, "nothing
+    # else to classify" is the normal state and this became the normal path:
+    # claim the new mail, submit, park, resume, find nothing, drop the batch.
+    # Two batches reached 'completed' at the provider with 0 input tokens, 0
+    # output tokens and NULL cost recorded, which is what a batch that was
+    # never downloaded looks like, and 2,646 messages sat unclassified behind
+    # claims that were never going to be collected.
+    resuming = bool(_pending_batch_ids(task_id))
+    if not rows and not resuming:
         _set_progress(task_id, len(corrected), len(corrected), "nothing to classify")
         return
 
@@ -741,16 +763,36 @@ async def handle_classify_mail(task_id: int, payload: dict[str, Any]) -> None:
     #
     # Merged rather than replaced, because submit_or_collect writes batch_ids
     # into this same payload and a requeued attempt reattaches through it.
-    db.execute(
-        "UPDATE tasks SET payload = COALESCE(payload, '{}'::jsonb) || %s WHERE id = %s",
-        (db.jsonb({"claimed_message_ids": [r["id"] for r in rows]}), task_id),
-    )
+    #
+    # Not on a resume. run_batched short-circuits to collecting the existing
+    # batches and never submits these specs, so writing them here would leave
+    # the ledger naming messages nobody ever paid for - and un-naming the ones
+    # actually in flight.
+    if not resuming:
+        db.execute(
+            "UPDATE tasks SET payload = COALESCE(payload, '{}'::jsonb) || %s WHERE id = %s",
+            (db.jsonb({"claimed_message_ids": [r["id"] for r in rows]}), task_id),
+        )
+
+    # Keyed by the messages actually in flight when resuming, so a collected
+    # result can still find the sent_at its deadline parsing needs.
+    if resuming:
+        claimed = db.query_one(
+            "SELECT COALESCE(payload -> 'claimed_message_ids', '[]'::jsonb) AS ids "
+            "FROM tasks WHERE id = %s",
+            (task_id,),
+        )
+        in_flight = [int(i) for i in ((claimed or {}).get("ids") or [])]
+        rows = db.query("SELECT id, sent_at FROM email_messages WHERE id = ANY(%s)", (in_flight,))
+        specs_source: list = []
+    else:
+        specs_source = rows
 
     by_id = {r["id"]: r["sent_at"] for r in rows}
     schema = to_strict_json_schema(MailClassification)
     specs = [
         BatchSpec(str(r["id"]), _INSTRUCTIONS, _spec_text(r), "MailClassification", schema)
-        for r in rows
+        for r in specs_source
     ]
     _set_progress(task_id, 0, len(specs), f"mail classification submitted ({model}, half price)")
     results, _ = await run_batched(task_id, shape, specs)
