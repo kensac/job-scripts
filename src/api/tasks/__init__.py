@@ -28,6 +28,7 @@ from api.tasks.mail_sync import (
     handle_probe_credentials,
     handle_sync_gmail,
 )
+from api.tasks.message_html import handle_backfill_message_html
 from api.tasks.requirements import handle_extract_requirements
 from api.tasks.uploads import handle_extract_upload
 from api.tasks.verify import (
@@ -55,6 +56,7 @@ SHAPES = {
 HANDLERS = {
     "extract_upload": lambda task_id, payload: handle_extract_upload(payload),
     "classify_mail": handle_classify_mail,
+    "backfill_message_html": handle_backfill_message_html,
     "match_mail": handle_match_mail,
     "sync_gmail": handle_sync_gmail,
     "import_archive": handle_import_archive,

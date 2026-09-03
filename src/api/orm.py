@@ -593,6 +593,15 @@ class EmailMessage(Base):
     subject: Mapped[str | None] = mapped_column(Text)
     sent_at: Mapped[datetime.datetime | None] = mapped_column(TIMESTAMP(timezone=True))
     body_text: Mapped[str | None] = mapped_column(Text)
+    # The markup the message actually arrived as, kept so a reader can render
+    # mail as mail. body_text stays the derived plain text and remains what
+    # the classifier reads and what mention offsets index into - two fields
+    # with two jobs, deliberately not one.
+    #
+    # NULL means the markup was not recoverable, not that the mail was plain:
+    # imports before this column existed discarded it, and the import path
+    # streams the archive without retaining a copy.
+    body_html: Mapped[str | None] = mapped_column(Text)
     headers: Mapped[Any | None] = mapped_column(JSONB)
     prefilter_hit: Mapped[bool | None] = mapped_column(Boolean)
     prefilter_reason: Mapped[str | None] = mapped_column(Text)

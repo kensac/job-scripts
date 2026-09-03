@@ -66,6 +66,7 @@ def store_messages(user_id: int, messages: Iterable[ImportedMessage]) -> int:
                     message.subject,
                     message.sent_at,
                     message.body_text,
+                    message.body_html,
                     verdict.hit,
                     verdict.reason,
                     db.jsonb(message.headers) if message.headers else None,
@@ -77,12 +78,15 @@ def store_messages(user_id: int, messages: Iterable[ImportedMessage]) -> int:
                 INSERT INTO email_messages (
                     user_id, provider_message_id, provider_thread_id, thread_topic, source,
                     from_email, from_name, to_emails, subject, sent_at,
-                    body_text, prefilter_hit, prefilter_reason, headers
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    body_text, body_html, prefilter_hit, prefilter_reason, headers
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (user_id, provider_message_id) DO UPDATE SET
                     -- Only ever improve. A thinner copy from another archive
                     -- must not blank a field an earlier import already filled.
                     body_text = COALESCE(EXCLUDED.body_text, email_messages.body_text),
+                    -- Same only-ever-improve rule: an archive that cannot
+                    -- supply markup must not blank markup another one did.
+                    body_html = COALESCE(EXCLUDED.body_html, email_messages.body_html),
                     subject = COALESCE(EXCLUDED.subject, email_messages.subject),
                     sent_at = COALESCE(EXCLUDED.sent_at, email_messages.sent_at),
                     provider_thread_id = COALESCE(
