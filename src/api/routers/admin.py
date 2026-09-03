@@ -8,7 +8,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from api import ai, db, events
+from api import ai, db, events, health
 from api.auth import AuthedUser, require_user
 from core import pricing, reason_taxonomy
 
@@ -855,14 +855,26 @@ def data_health(user: AuthedUser = Depends(require_admin)):
         # a detector that is off and says nothing is indistinguishable from a
         # detector that sees nothing.
         "suppressed": [],
-        "open": db.query(
-            "SELECT * FROM health_alerts WHERE resolved_at IS NULL "
-            "ORDER BY severity, last_seen DESC"
-        ),
-        "recently_resolved": db.query(
-            "SELECT * FROM health_alerts WHERE resolved_at > now() - interval '7 days' "
-            "ORDER BY resolved_at DESC LIMIT 20"
-        ),
+        # subject_kind says WHAT an alert's subject is - a source, a host, a
+        # provider and user, a task kind. It is not the same thing across
+        # detectors, and the dashboard linked all of them to the sources page,
+        # which is correct for two of five. Annotated on read from the one map
+        # in health.py rather than stored per row, so alerts already open get
+        # the right answer without a backfill.
+        "open": [
+            {**a, "subject_kind": health.subject_kind_for(a["kind"])}
+            for a in db.query(
+                "SELECT * FROM health_alerts WHERE resolved_at IS NULL "
+                "ORDER BY severity, last_seen DESC"
+            )
+        ],
+        "recently_resolved": [
+            {**a, "subject_kind": health.subject_kind_for(a["kind"])}
+            for a in db.query(
+                "SELECT * FROM health_alerts WHERE resolved_at > now() - interval '7 days' "
+                "ORDER BY resolved_at DESC LIMIT 20"
+            )
+        ],
         "content_mix": db.query(
             """
             SELECT j.source,

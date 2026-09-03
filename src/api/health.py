@@ -37,6 +37,53 @@ FRESH_CHECK_WINDOW = "3 days"
 RESOLVE_GRACE = "3 hours"
 
 
+# What an alert's `subject` actually holds, per detector.
+#
+# It is not one kind of thing: two detectors put a source in it, one a host,
+# one a provider and user id, one a task kind. The dashboard linked all of them
+# to /job-scripts/sources?src=<subject>, which is right for two of five - the
+# other three sent an operator to a page that selects nothing, and an empty
+# sources page reads as a source that has disappeared rather than as a link
+# that was never right.
+#
+# Declared here rather than guessed from the value client-side, which would be
+# the frontend encoding semantics it cannot see.
+#
+# Kept as a map from alert kind rather than a column on health_alerts, because
+# it is a property of the DETECTOR and never varies between two alerts of the
+# same kind. A column would store the same answer on every row, go stale if a
+# detector changed what it puts in subject, and need a backfill to say anything
+# about the alerts already open.
+SUBJECT_SOURCE = "source"
+SUBJECT_HOST = "host"
+SUBJECT_PROVIDER_USER = "provider_user"
+SUBJECT_TASK = "task"
+
+_SUBJECT_KINDS = {
+    "ats_text_collapse": SUBJECT_SOURCE,
+    "extraction_failing": SUBJECT_HOST,
+    "oauth_token_invalid": SUBJECT_PROVIDER_USER,
+    "batch_parked_too_long": SUBJECT_TASK,
+}
+
+
+def subject_kind_for(alert_kind: str) -> str | None:
+    """What this kind of alert puts in its subject, or None when unknown.
+
+    None rather than a default: a wrong link is worse than no link, which is
+    the whole reason this exists. A detector added without an entry here gets
+    plain text, which is honest, instead of inheriting whatever the last one
+    used.
+
+    The rate-spike kinds are generated per check_type, so they are matched by
+    shape rather than listed - listing them would mean a new check_type
+    silently losing its link.
+    """
+    if alert_kind.endswith("_rate_spike"):
+        return SUBJECT_SOURCE
+    return _SUBJECT_KINDS.get(alert_kind)
+
+
 def _pct(part: int, whole: int) -> float:
     return (part / whole) if whole else 0.0
 
