@@ -84,6 +84,13 @@ def main() -> int:
         help="create/rotate a SELECT-only login on the test db and print its URL, "
         "so CI never holds the production superuser",
     )
+    ap.add_argument(
+        "--dev-role",
+        metavar="NAME",
+        help="create/rotate a READ-WRITE login on the test db and print its URL, "
+        "for a local dev API. Writes, because the app provisions a user on the "
+        "first authenticated request and the whole point is to click around",
+    )
     args = ap.parse_args()
 
     src_url = os.environ.get("DATABASE_URL")
@@ -204,13 +211,40 @@ def main() -> int:
         dst.execute("DROP EXTENSION IF EXISTS postgres_fdw CASCADE")
         dst.commit()
 
+    _stamp_synced_at(dst_url)
+
     if args.reader_role:
         _grant_reader(dst_url, args.reader_role, args.name)
+    if args.dev_role:
+        _grant_dev(dst_url, args.dev_role, args.name)
 
     print(f"\nsynced {total} rows into {args.name}")
     print("run integration tests with:")
     print(f"  TEST_DATABASE_URL='{dst_url}' make integration")
     return 0
+
+
+def _stamp_synced_at(dst_url: str) -> None:
+    """Record when this copy was cut, IN the copy.
+
+    A copy that goes stale without anyone noticing is the fixture problem one
+    layer out: the data is real, it is just no longer true. Anyone reading the
+    copy - a dev API, a frontend rendering against it, an integration run -
+    can now say how old the thing they are looking at is, without needing
+    access to whatever cut it.
+
+    In app_config rather than a file because a file does not travel with a
+    database, and the question is always asked of the data.
+    """
+    import datetime
+    import json
+
+    with psycopg.connect(dst_url, autocommit=True) as conn:
+        conn.execute(
+            "INSERT INTO app_config (key, value) VALUES ('testdb_synced_at', %s) "
+            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+            (json.dumps(datetime.datetime.now(tz=datetime.UTC).isoformat()),),
+        )
 
 
 def _grant_reader(dst_url: str, role: str, dbname: str) -> None:
@@ -245,6 +279,55 @@ def _grant_reader(dst_url: str, role: str, dbname: str) -> None:
     )
     print(f"\nread-only role {role!r} refreshed. Set this as the CI secret:")
     print(f"  gh secret set TEST_DATABASE_URL --body '{reader_url}'")
+
+
+def _grant_dev(dst_url: str, role: str, dbname: str) -> None:
+    """Create/refresh a login with read-write on the COPY and nothing else.
+
+    THE ISOLATION HERE IS A CREDENTIAL, NOT A NETWORK. jobtracker-db is
+    deliberately published on the public internet - that is how the oci and
+    kanishk-desktop workers reach it - so "it runs locally" buys nothing at
+    all: a process handed the production DSN connects from anywhere on earth.
+    What keeps a dev API off production is that this role cannot log into it.
+
+    Read-write rather than SELECT-only because the app writes on the first
+    authenticated request: require_user provisions a user row, and a dev API
+    that 500s on sign-in is not a dev API. That is also why this role must
+    never be pointed at production - it can write whatever it reaches.
+    """
+    import secrets
+
+    from psycopg import sql
+
+    password = secrets.token_urlsafe(24)
+    role_id = sql.Identifier(role)
+    pw = sql.Literal(password)
+    with psycopg.connect(dst_url, autocommit=True) as conn:
+        exists = conn.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (role,)).fetchone()
+        verb = sql.SQL("ALTER ROLE") if exists else sql.SQL("CREATE ROLE")
+        conn.execute(sql.SQL("{} {} WITH LOGIN PASSWORD {}").format(verb, role_id, pw))
+        # NOSUPERUSER/NOCREATEDB stated rather than assumed: an ALTER on a role
+        # that already exists inherits whatever it had, so a role that was
+        # once something else does not quietly stay that way.
+        conn.execute(sql.SQL("ALTER ROLE {} NOSUPERUSER NOCREATEDB NOCREATEROLE").format(role_id))
+        conn.execute(f'GRANT CONNECT ON DATABASE "{dbname}" TO "{role}"')
+        conn.execute(f'GRANT USAGE, CREATE ON SCHEMA public TO "{role}"')
+        conn.execute(f'GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO "{role}"')
+        conn.execute(f'GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO "{role}"')
+        conn.execute(
+            f'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL PRIVILEGES ON TABLES TO "{role}"'
+        )
+        conn.execute(
+            f"ALTER DEFAULT PRIVILEGES IN SCHEMA public "
+            f'GRANT ALL PRIVILEGES ON SEQUENCES TO "{role}"'
+        )
+    parts = urlparse(dst_url)
+    dev_url = urlunparse(
+        parts._replace(netloc=f"{role}:{password}@{parts.hostname}:{parts.port or 5432}")
+    )
+    print(f"\ndev role {role!r} refreshed. It can read and write {dbname} and NOTHING else.")
+    print(f"  export JOBTRACKER_DEV_DATABASE_URL='{dev_url}'")
+    print("  make dev-api")
 
 
 if __name__ == "__main__":
