@@ -22,6 +22,7 @@ from api import db, mail_match, mail_pipeline
 from api.auth import AuthedUser, require_user
 from api.routers.admin import require_admin
 from api.tasks.mail_classify import EVENT_KINDS
+from core.mail_html import sanitise
 
 router = APIRouter()
 
@@ -1505,14 +1506,27 @@ def message_detail(message_id: int, user: AuthedUser = Depends(require_user)):
     """
     row = db.query_one(
         "SELECT id, provider_message_id, provider_thread_id, source, from_email, from_name, "
-        "to_emails, subject, sent_at, body_text, prefilter_hit, prefilter_reason "
+        "to_emails, subject, sent_at, body_text, body_html, prefilter_hit, prefilter_reason "
         "FROM email_messages WHERE id = %s AND user_id = %s",
         (message_id, user.id),
     )
     if row is None:
         raise HTTPException(status_code=404, detail="message not found")
+    # Sanitised on READ, never stored sanitised: body_html stays the message as
+    # it arrived, so a better sanitiser improves every message ever received
+    # rather than only the ones that come next. The raw markup is deliberately
+    # NOT returned - a caller that has it will eventually render it.
+    raw_html = row.pop("body_html", None)
+    safe_html, blocked = sanitise(raw_html) if raw_html else (None, 0)
     return {
         **row,
+        "body_html": safe_html,
+        # Remote sources are moved to data-blocked-* rather than deleted, and
+        # this is the count a reader needs to offer "load images" - and to say
+        # what loading them would cost. 72% of this corpus carries at least one
+        # tracker; a remote image loading on open tells the sender the moment
+        # the mail was read.
+        "blocked_remote_content": blocked,
         "events": db.query(
             "SELECT id, kind, confidence, occurred_at, deadline_at, deadline_inferred, detail, "
             "model, created_at FROM email_events WHERE message_id = %s ORDER BY id",
