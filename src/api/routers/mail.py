@@ -1602,3 +1602,150 @@ def revert_classification(message_id: int, user: AuthedUser = Depends(require_us
         ),
     )
     return {"ok": True, "already": False, "kind": model_answer["kind"]}
+
+
+@router.get("/user/messages/{message_id}/thread")
+def read_thread(
+    message_id: int,
+    limit: int = Query(default=MAX_THREAD_FANOUT, ge=1, le=200),
+    user: AuthedUser = Depends(require_user),
+):
+    """The conversation this message belongs to, oldest first.
+
+    Mail is a flat list of messages and the unit a person thinks in is the
+    exchange: 19,995 messages sit in 4,141 conversations of more than one, so
+    roughly a third of the corpus is currently shown out of its context.
+
+    Keyed on COALESCE(thread id, own message id), the same derivation #235
+    introduced - the provider's thread id is the first References entry, which
+    every reply carries and the message that STARTED the thread does not. Left
+    alone it excludes the original from its own conversation.
+
+    Capped and honest about it. The longest key in this corpus holds 474
+    messages, which is a mailing list reusing a thread id rather than a
+    conversation, and a reader who asked for a thread should not be handed one.
+    """
+    _owned_message(message_id, user.id)
+    rows = db.query(
+        f"""
+        WITH key AS (
+            SELECT {_THREAD_KEY} AS k FROM email_messages m WHERE m.id = %(msg)s
+        ),
+        current_event AS (
+            SELECT DISTINCT ON (message_id) message_id, kind, confidence, detail
+            FROM email_events ORDER BY message_id, id DESC
+        ),
+        current_match AS (
+            SELECT DISTINCT ON (message_id) message_id, application_id, method
+            FROM application_matches ORDER BY message_id, id DESC
+        )
+        SELECT m.id, m.subject, m.from_email, m.from_name, m.sent_at, m.source,
+               m.body_text, ce.kind, ce.confidence,
+               ce.detail->>'company' AS extracted_company,
+               cm.application_id, cm.method,
+               a.company_name, a.title
+        FROM email_messages m
+        LEFT JOIN current_event ce ON ce.message_id = m.id
+        LEFT JOIN current_match cm ON cm.message_id = m.id
+        LEFT JOIN applications a ON a.id = cm.application_id
+        WHERE m.user_id = %(user)s AND {_THREAD_KEY} = (SELECT k FROM key)
+        ORDER BY m.sent_at, m.id
+        LIMIT %(limit)s
+        """,
+        {"user": user.id, "msg": message_id, "limit": limit + 1},
+    )
+    truncated = len(rows) > limit
+    return {
+        "messages": rows[:limit],
+        "total": len(rows[:limit]),
+        # Said rather than implied. A conversation silently cut at 40 reads as
+        # a conversation that ended.
+        "truncated": truncated,
+    }
+
+
+@router.get("/user/threads")
+def list_threads(
+    needs_attention: bool | None = Query(default=None),
+    q: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    user: AuthedUser = Depends(require_user),
+):
+    """Conversations, newest activity first.
+
+    The list form of a thread rather than a list of messages. Grouping a page
+    of messages client-side would produce partial threads at the page
+    boundaries - a conversation cut in half by pagination reads as a
+    conversation that is half that long, which is a lie exactly where nobody
+    looks for one.
+
+    Keyed on COALESCE(thread id, own message id), the same derivation the
+    thread reader uses, so a conversation contains the message that started it.
+
+    needs_attention is the correctable pile: a thread carrying job-related mail
+    that reached no application. Not "unread" - we have no such concept and
+    inventing one would be a second inbox to maintain.
+    """
+    where = ["m.user_id = %(user)s"]
+    params: dict[str, Any] = {"user": user.id, "limit": limit, "offset": offset}
+    if q:
+        where.append("(m.subject ILIKE %(q)s OR m.from_email ILIKE %(q)s)")
+        params["q"] = f"%{q}%"
+    predicate = " AND ".join(where)
+
+    # One predicate, negated rather than written twice: two spellings of the
+    # same condition is how a filter and its inverse stop being complements.
+    _CORRECTABLE = (
+        "bool_or(ce.kind IS NOT NULL AND ce.kind <> 'not_job_related' "
+        "AND cm.application_id IS NULL)"
+    )
+    having = ""
+    if needs_attention is True:
+        having = f"HAVING {_CORRECTABLE}"
+    elif needs_attention is False:
+        having = f"HAVING NOT {_CORRECTABLE}"
+
+    base = f"""
+        FROM email_messages m
+        LEFT JOIN (
+            SELECT DISTINCT ON (message_id) message_id, kind FROM email_events
+            ORDER BY message_id, id DESC
+        ) ce ON ce.message_id = m.id
+        LEFT JOIN (
+            SELECT DISTINCT ON (message_id) message_id, application_id FROM application_matches
+            ORDER BY message_id, id DESC
+        ) cm ON cm.message_id = m.id
+        WHERE {predicate}
+        GROUP BY {_THREAD_KEY}
+        {having}
+    """
+    total = db.query_one(f"SELECT count(*) AS n FROM (SELECT 1 {base}) s", params)
+    rows = db.query(
+        f"""
+        SELECT {_THREAD_KEY} AS thread_id,
+               count(*) AS message_count,
+               max(m.sent_at) AS last_activity_at,
+               min(m.sent_at) AS started_at,
+               (array_agg(m.subject ORDER BY m.sent_at) FILTER (WHERE m.subject IS NOT NULL))[1]
+                   AS subject,
+               array_agg(DISTINCT m.from_email) FILTER (WHERE m.from_email IS NOT NULL)
+                   AS participants,
+               array_agg(DISTINCT ce.kind) FILTER (WHERE ce.kind IS NOT NULL) AS kinds,
+               count(*) FILTER (
+                   WHERE ce.kind IS NOT NULL AND ce.kind <> 'not_job_related'
+                     AND cm.application_id IS NULL
+               ) > 0 AS needs_attention,
+               (array_agg(m.id ORDER BY m.sent_at DESC))[1] AS latest_message_id,
+               max(cm.application_id) AS application_id
+        {base}
+        ORDER BY max(m.sent_at) DESC NULLS LAST
+        LIMIT %(limit)s OFFSET %(offset)s
+        """,
+        params,
+    )
+    return {
+        "threads": rows,
+        "total": (total or {}).get("n", 0),
+        "has_more": offset + len(rows) < (total or {}).get("n", 0),
+    }
