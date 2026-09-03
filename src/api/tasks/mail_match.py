@@ -188,10 +188,18 @@ def seed_from_mail(user_id: int) -> tuple[int, int]:
 
     groups: dict[tuple[str, ...], list[dict[str, Any]]] = {}
     company_of: dict[tuple[str, ...], str] = {}
+    # Evidence that names the employer but not the role. It cannot key a group
+    # - there is nothing to key it on - but it is still evidence of when the
+    # user applied, and leaving it out of applied_at is what made the derived
+    # date veto the very messages it was derived from.
+    titleless: dict[str, list[dict[str, Any]]] = {}
     for msg in _unmatched_applied_messages(user_id):
         company = mail_match.norm_company(msg["company"])
         title = mail_match.norm_company(msg["title"])
-        if not company or not title or company in known:
+        if not company or company in known:
+            continue
+        if not title:
+            titleless.setdefault(company, []).append(msg)
             continue
         thread = msg["provider_thread_id"]
         key = ("t", thread) if thread else ("c", company, title)
@@ -213,6 +221,26 @@ def seed_from_mail(user_id: int) -> tuple[int, int]:
         if company_of[key] in over:
             continue
         first = messages[0]
+        # applied_at over ALL the evidence at this group, not just the part
+        # that happened to carry a role title.
+        #
+        # Taking the earliest TITLED message and then using it as a floor made
+        # the date veto its own earlier evidence: 159 of 161 blocked messages
+        # have no role_title, and the margins are absurd - Battelle by four
+        # seconds, Werfen by fifty-four. The earliest evidence was discarded
+        # and then used to rule itself out.
+        #
+        # Only where the company has exactly one group. With several, a
+        # title-less message could belong to any of them, and quietly assigning
+        # it to one would replace a wrong answer with a different wrong answer.
+        # It stays unmatched, which is the honest state and re-runnable.
+        evidence = messages
+        if counts[company_of[key]] == 1:
+            evidence = messages + titleless.get(company_of[key], [])
+        applied_at = min(
+            (m["sent_at"] for m in evidence if m["sent_at"] is not None),
+            default=first["sent_at"],
+        )
         # Conditional on the anchor message STILL being unmatched, in one
         # statement, because two workers can hold this task at once.
         #
@@ -248,7 +276,7 @@ def seed_from_mail(user_id: int) -> tuple[int, int]:
                 "user": user_id,
                 "company": first["company"],
                 "title": first["title"],
-                "sent": first["sent_at"],
+                "sent": applied_at,
                 "msg": first["id"],
             },
         )
