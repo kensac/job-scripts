@@ -578,9 +578,12 @@ async def run_batched(
     in a fifth.
     """
     purpose = shape.purpose
-    # Before anything is submitted: a batch the provider has accepted is
-    # billable whether or not this system still wants it.
-    budget.check_fleet_budget()
+    existing = _pending_batch_ids(task_id)
+    if not existing:
+        # Only when about to SUBMIT. A resuming task is collecting work the
+        # provider has already been paid for, and refusing that would discard
+        # it - the ceiling exists to stop new spend, not to strand old.
+        budget.check_fleet_budget()
     chosen = resolve(shape, override=configured_model(purpose))
     logger.info(f"Task {task_id}: {purpose} on {chosen.model} - {chosen.reason}")
     # Every spec in a sweep carries the same instructions - they are module
@@ -588,7 +591,6 @@ async def run_batched(
     # submitting, so a sweep that dies mid-flight still says what it asked.
     prompt_id = _record_prompt(purpose, specs[0].instructions) if specs else None
     hook = _batch_event_hook(task_id, purpose, chosen.model, prompt_id=prompt_id)
-    existing = _pending_batch_ids(task_id)
     if existing:
         from core.batch import collect_batches
 
