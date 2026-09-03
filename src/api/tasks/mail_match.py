@@ -304,11 +304,11 @@ def match_pending(user_id: int, *, limit: int | None = None) -> dict[str, int]:
     rows = db.query(
         """
         WITH current_event AS (
-            SELECT DISTINCT ON (message_id) message_id, kind, detail
+            SELECT DISTINCT ON (message_id) message_id, kind, detail, created_at
             FROM email_events ORDER BY message_id, id DESC
         ),
         current_match AS (
-            SELECT DISTINCT ON (message_id) message_id, application_id
+            SELECT DISTINCT ON (message_id) message_id, application_id, created_at
             FROM application_matches ORDER BY message_id, id DESC
         )
         SELECT m.id, m.body_text, m.sent_at, e.kind,
@@ -330,6 +330,26 @@ def match_pending(user_id: int, *, limit: int | None = None) -> dict[str, int]:
           -- no application, and `record` suppresses a verdict identical to the
           -- one standing, so a sweep that changes nothing writes nothing.
           AND cm.application_id IS NULL
+          -- ...and only where the answer could actually have moved since we
+          -- last looked. Re-deciding every unmatched message every sweep is
+          -- correct and ruinous: that set does not shrink, so a three-minute
+          -- handler became a sixty-minute one holding a third of the fleet
+          -- while the cheap work queued behind it.
+          --
+          -- Two things can change a verdict and nothing else can. A new
+          -- application may be the candidate that was missing - which is the
+          -- whole finding: 289 of 297 recoverable messages have an application
+          -- created after their verdict was written. Or the message was
+          -- reclassified, so a different rule now applies, which is what
+          -- leaves a recruiter approach holding a stale `unmatched`.
+          AND (
+              cm.message_id IS NULL
+              OR e.created_at > cm.created_at
+              OR EXISTS (
+                  SELECT 1 FROM applications a
+                  WHERE a.user_id = %(user)s AND a.created_at > cm.created_at
+              )
+          )
         ORDER BY m.sent_at NULLS LAST, m.id
         """
         + ("LIMIT %(limit)s" if limit else ""),
@@ -436,13 +456,37 @@ async def handle_match_mail(task_id: int, payload: dict[str, Any]) -> None:
         return
 
     limit = payload.get("limit")
-    totals = {"tracked": 0, "derived": 0, "matched": 0, "detached": 0, "opened": 0, "resolved": 0}
+    # `swept` is how many messages were DECIDED, not how many were matched.
+    # It was called "matched" and reported as "messages matched", which is the
+    # sweep size wearing a success metric's name: a run that decided 5,004
+    # messages and attached none of them read as "5004 messages matched", and a
+    # run whose predicate selected nothing read as "0 messages matched" - which
+    # was taken as evidence that a working change had recovered nothing and
+    # came within one decision of reverting 1,506 corrections.
+    totals = {
+        "tracked": 0,
+        "derived": 0,
+        "swept": 0,
+        "attached": 0,
+        "detached": 0,
+        "opened": 0,
+        "resolved": 0,
+    }
     for index, user_id in enumerate(user_ids):
         _set_progress(task_id, index, len(user_ids), f"matching user {user_id}")
         totals["tracked"] += seed_from_tracker(user_id)
         totals["detached"] += detach_unattachable(user_id)
         counts = match_pending(user_id, limit=int(limit) if limit else None)
-        totals["matched"] += sum(counts.values())
+        totals["swept"] += sum(counts.values())
+        # Messages that came out of this sweep holding an application. The
+        # verdicts that attach nothing - `unmatched`, and the deliberate
+        # refusals - are real outcomes but they are not matches, and counting
+        # them as such is what made the two indistinguishable.
+        totals["attached"] += sum(
+            n
+            for method, n in counts.items()
+            if method not in (mail_match.UNMATCHED, mail_match.NOT_AN_APPLICATION)
+        )
         created, _ = seed_from_mail(user_id)
         totals["derived"] += created
         for app in db.query("SELECT id FROM applications WHERE user_id = %s", (user_id,)):
@@ -452,7 +496,8 @@ async def handle_match_mail(task_id: int, payload: dict[str, Any]) -> None:
 
     summary = (
         f"{len(user_ids)} user(s): {totals['tracked']} tracked + {totals['derived']} derived "
-        f"applications, {totals['matched']} messages matched, "
+        f"applications, {totals['swept']} messages swept "
+        f"({totals['attached']} now attached), "
         f"{totals['detached']} detached, "
         f"{totals['opened']} items opened, {totals['resolved']} resolved"
     )

@@ -572,3 +572,39 @@ def test_an_unattachable_kind_stops_reading_as_a_matching_failure(f):
     _event(mid, "recruiter_outreach", company="Acme")
     task.match_pending(uid)
     assert mail_match.latest(mid)["method"] == mail_match.NOT_AN_APPLICATION
+
+
+@pytest.mark.asyncio
+async def test_the_sweep_counter_does_not_report_itself_as_matches(f):
+    """`swept` counts messages DECIDED; `attached` counts those that came out
+    holding an application. They were one field called "matched", so a sweep
+    that decided thousands and attached none read as thousands matched - and a
+    sweep whose predicate selected nothing read as zero matched, which was
+    taken as evidence a working change had recovered nothing."""
+    uid = f.make_user()
+    # Two messages that cannot attach: no application at either company, and
+    # no role title, so seed_from_mail cannot derive one from them either.
+    for i in range(2):
+        mid = _message(uid, sent_at=datetime.datetime(2026, 3, 2, tzinfo=datetime.UTC))
+        _event(mid, "rejection", company=f"Nowhere{i}")
+
+    await task.handle_match_mail(1, {"user_id": uid})
+    label = db.query_one("SELECT progress->>'label' AS l FROM tasks WHERE id = 1")
+    row = db.query_one(
+        "SELECT count(*) AS n FROM application_matches am "
+        "JOIN email_messages m ON m.id = am.message_id WHERE m.user_id = %s",
+        (uid,),
+    )
+    assert row["n"] == 2, "both were decided"
+    assert (
+        db.query_one(
+            "SELECT count(*) AS n FROM application_matches am "
+            "JOIN email_messages m ON m.id = am.message_id "
+            "WHERE m.user_id = %s AND am.application_id IS NOT NULL",
+            (uid,),
+        )["n"]
+        == 0
+    ), "and neither attached"
+    if label and label["l"]:
+        assert "2 messages swept" in label["l"]
+        assert "0 now attached" in label["l"]
