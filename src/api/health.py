@@ -238,6 +238,53 @@ def detect() -> list[dict[str, Any]]:
             }
         )
 
+    # A task parked on a provider batch, past the provider's own guarantee.
+    #
+    # This matters more now that every batched sweep refuses to start while one
+    # of its own is in flight. That guard stops double payment and converts a
+    # stuck task into a SILENT stall: the sweep simply never runs again, and
+    # nothing else says so. comp, requirements and mail classification have had
+    # that property for a while and verify_new now has it too.
+    #
+    # The threshold is the provider's completion window rather than a picked
+    # number of hours. Inside it, waiting is what a batch is supposed to do;
+    # past it, the provider has broken its own promise AND poll_batches has
+    # failed to give up on it, which is two things wrong at once. It moves
+    # automatically if BATCH_COMPLETION_WINDOW ever changes.
+    from core.batch import completion_window_seconds
+
+    window = completion_window_seconds()
+    for r in db.query(
+        """
+        SELECT kind, COUNT(*) AS parked,
+               MAX(EXTRACT(epoch FROM now() - COALESCE(started_at, created_at))) AS oldest_secs
+        FROM tasks
+        WHERE status = 'awaiting_batch'
+          AND COALESCE(started_at, created_at) < now() - make_interval(secs => %(window)s)
+        GROUP BY kind
+        """,
+        {"window": window},
+    ):
+        hours = (r["oldest_secs"] or 0) / 3600
+        found.append(
+            {
+                "kind": "batch_parked_too_long",
+                "subject": r["kind"],
+                "severity": "critical",
+                "message": (
+                    f"{r['parked']} {r['kind']} task(s) have been waiting on a provider "
+                    f"batch for up to {hours:.0f}h, past the {window / 3600:.0f}h completion "
+                    "window. The sweep does not start another while one is in flight, so "
+                    "this task is not running at all."
+                ),
+                "detail": {
+                    "kind": r["kind"],
+                    "parked": r["parked"],
+                    "oldest_hours": round(hours, 1),
+                },
+            }
+        )
+
     return found
 
 

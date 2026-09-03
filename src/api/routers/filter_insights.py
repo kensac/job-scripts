@@ -29,6 +29,7 @@ from fastapi import APIRouter, Depends, Query
 from api import db
 from api.auth import AuthedUser
 from api.routers.admin import require_admin
+from core import reason_taxonomy
 from core.reason_taxonomy import (
     EVIDENCE_MISSING_DESCRIPTION,
     EVIDENCE_MISSING_PHRASES,
@@ -50,12 +51,38 @@ _DEFAULT_MIN_DECISIONS = int(1 / _MAX_SWING_PER_DECISION)
 
 _WINDOW = "created_at >= now() - make_interval(days => %(days)s)"
 
+# The residual bucket, named once. It is both the key in the response and the
+# value `group` accepts on the phrasings listing, so a caller can drill into
+# "matched nothing" the same way it drills into any named group. Cannot
+# collide with a taxonomy key - those are all specific.
+UNGROUPED = "ungrouped"
+
 
 def _criterion() -> dict[str, Any]:
     return {
         "method": "phrase_match",
         "description": EVIDENCE_MISSING_DESCRIPTION,
         "phrases": list(EVIDENCE_MISSING_PHRASES),
+    }
+
+
+def _examples_selection() -> dict[str, Any]:
+    """How the examples were chosen, published for the same reason the
+    evidence-missing criterion is: a caller that has to narrate a number will
+    narrate it from somewhere, and if the derivation is not in the payload it
+    comes from memory, or from whoever explained it once. That is not
+    hypothetical - `distinct_phrasings` counts exactly what its name says, and
+    a page still rendered "the three most common" over it, because the field
+    was named correctly and the sentence around it was not.
+    """
+    return {
+        "method": "sample",
+        "ordered_by": "decisions desc, then phrasing",
+        "description": (
+            "A reproducible sample of `distinct_phrasings`, not a frequency "
+            "ranking. Phrasings in this corpus almost never repeat, so counts "
+            "are nearly all 1 and there is no meaningful 'most common'."
+        ),
     }
 
 
@@ -78,7 +105,20 @@ def _finish(bucket: dict[str, Any], examples: int) -> dict[str, Any]:
         "evidence_missing_distinct_jobs": len(bucket["evidence_missing_jobs"]),
         # Most frequent phrasings rather than arbitrary ones: an example is
         # standing in for a group, so it should be typical of it.
-        "examples": [text for text, _ in bucket["phrasings"].most_common(examples)],
+        # Ordered by count then text, which makes the choice reproducible
+        # rather than dependent on the order rows arrived in. It does NOT make
+        # it representative: the model writes a near-unique sentence almost
+        # every time - 30 of 14,050 distinct phrasings in production repeat at
+        # all - so nearly every count here is 1 and "most frequent" is not a
+        # meaningful ranking. Treat these as a sample of `distinct_phrasings`,
+        # which is why that number ships beside them, and use the phrasings
+        # listing when the distribution itself is the question.
+        "examples": [
+            text
+            for text, _ in sorted(bucket["phrasings"].items(), key=lambda kv: (-kv[1], kv[0]))[
+                :examples
+            ]
+        ],
     }
 
 
@@ -97,6 +137,81 @@ def groups(user: AuthedUser = Depends(require_admin)) -> dict[str, Any]:
     return {
         "groups": [{"key": g.key, "label": GROUP_LABELS[g.key]} for g in GROUPS],
         "evidence_missing_criterion": _criterion(),
+    }
+
+
+@router.get("/phrasings")
+def phrasings(
+    prompt_hash: str,
+    group: str | None = None,
+    days: int = Query(30, ge=1, le=365),
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    user: AuthedUser = Depends(require_admin),
+) -> dict[str, Any]:
+    """Every distinct phrasing in one group of one prompt version, with counts.
+
+    The counts are the point. "159 distinct phrasings" answers a different
+    question depending on whether it is three sentences repeated fifty times
+    or 159 near-unique ones, and in this corpus it is overwhelmingly the
+    latter - so the distribution is the evidence that the grouping is doing
+    real work rather than collapsing text that was already identical.
+
+    Scoped by prompt_hash like everything else here, because a phrasing count
+    that spanned prompt versions would not match the group count it was opened
+    from.
+    """
+    where = [
+        "check_type = 'custom'",
+        "status = 'rejected'",
+        "reason IS NOT NULL",
+        "reason <> ''",
+        "prompt_hash = %(prompt_hash)s",
+        _WINDOW,
+    ]
+    params: dict[str, Any] = {"prompt_hash": prompt_hash, "days": days}
+    if group is not None:
+        if group == UNGROUPED:
+            # The residual is defined by matching nothing, so it is the
+            # conjunction of every pattern's negation rather than a pattern.
+            for g in GROUPS:
+                where.append(f"reason !~* %(ng_{g.key})s")
+                params[f"ng_{g.key}"] = reason_taxonomy.sql_pattern(g.key)
+        else:
+            where.append("reason ~* %(group)s")
+            params["group"] = reason_taxonomy.sql_pattern(group)
+    clause = " AND ".join(where)
+
+    totals = db.query_one(
+        f"SELECT count(DISTINCT reason) AS phrasings, count(*) AS decisions "
+        f"FROM ai_queries WHERE {clause}",
+        params,
+    )
+    rows = db.query(
+        f"""
+        SELECT reason AS phrasing, count(*) AS decisions,
+               count(DISTINCT url) AS distinct_jobs
+        FROM ai_queries WHERE {clause}
+        GROUP BY reason
+        ORDER BY count(*) DESC, reason
+        LIMIT %(limit)s OFFSET %(offset)s
+        """,
+        {**params, "limit": limit, "offset": offset},
+    )
+    total_phrasings = (totals or {}).get("phrasings", 0)
+    return {
+        "prompt_hash": prompt_hash,
+        "group": group,
+        "window_days": days,
+        "total_phrasings": total_phrasings,
+        "total_decisions": (totals or {}).get("decisions", 0),
+        "offset": offset,
+        "limit": limit,
+        "returned": len(rows),
+        # Stated rather than implied: a caller must be able to say "showing 50
+        # of 159" instead of silently presenting a page as the whole set.
+        "has_more": offset + len(rows) < total_phrasings,
+        "phrasings": [dict(r) for r in rows],
     }
 
 
@@ -190,7 +305,7 @@ def rejection_reasons(
             totals_for_hash = per_hash[row["prompt_hash"]]
             totals_for_hash["decisions"] += 1
             totals_for_hash["jobs"].add(url)
-        keys = classify(reason) or ("__ungrouped__",)
+        keys = classify(reason) or (UNGROUPED,)
         for key in keys:
             b = buckets[key]
             b["decisions"] += 1
@@ -258,7 +373,7 @@ def rejection_reasons(
                     key=lambda g: g["decisions"],
                     reverse=True,
                 ),
-                "ungrouped": _finish(buckets.get("__ungrouped__") or _bucket(), examples),
+                UNGROUPED: _finish(buckets.get(UNGROUPED) or _bucket(), examples),
             }
         )
 
@@ -268,6 +383,7 @@ def rejection_reasons(
         "unit": "decisions",
         "min_decisions": min_decisions,
         "overlapping_groups": True,
+        "examples_selection": _examples_selection(),
         "evidence_missing_criterion": _criterion(),
         "prompt_versions": out,
     }
@@ -279,6 +395,7 @@ def _empty(days: int, min_decisions: int) -> dict[str, Any]:
         "unit": "decisions",
         "min_decisions": min_decisions,
         "overlapping_groups": True,
+        "examples_selection": _examples_selection(),
         "evidence_missing_criterion": _criterion(),
         "prompt_versions": [],
     }

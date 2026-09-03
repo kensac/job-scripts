@@ -192,7 +192,21 @@ def schedule_ingest_cycle() -> None:
     enqueue("poll_batches", {"cycle": poll_bucket}, dedupe_key=f"pollbatch:{poll_bucket}")
     # Hourly sweep for jobs the ingest pipeline left unverified (inline AI
     # checks disabled fleet-side): closed+clearance in one batched call each.
-    enqueue("verify_new", {"cycle": cycle}, dedupe_key=f"verify:{cycle}")
+    # Same non-overlap guard as comp, requirements and mail classification, and
+    # for the same reason: verify_new batches and parks, and its predicate -
+    # jobs with no closed/clearance verdict - stays true for the whole time its
+    # batch is in flight. A second task would re-select the same jobs and pay
+    # for them again.
+    #
+    # It has not fired yet only because verify batches are small and finish
+    # inside the hour: zero of 36 hours of batches were submitted while another
+    # was still open. That is a property of the provider being fast, not of the
+    # code being right - extract_requirements has sat parked for 12 hours today.
+    if not db.query_one(
+        "SELECT 1 FROM tasks WHERE kind = 'verify_new' "
+        "AND status IN ('pending', 'running', 'waiting', 'awaiting_batch') LIMIT 1"
+    ):
+        enqueue("verify_new", {"cycle": cycle}, dedupe_key=f"verify:{cycle}")
     # Backlog walker: jobs ingested before content-caching existed (or whose
     # scrape failed) can never be checked until their page is cached.
     enqueue("fetch_missing_content", {"cycle": cycle}, dedupe_key=f"content:{cycle}")

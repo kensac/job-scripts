@@ -386,13 +386,32 @@ def _batch_event_hook(
             out = counts.get("output_tokens", 0)
             est = pricing.estimate_cost_usd(model, inp, out, batched=True)
             cost = round(float(est), 6) if est is not None else None
-            db.execute(
-                "UPDATE ai_batches SET input_tokens = input_tokens + %s, "
-                "output_tokens = output_tokens + %s, "
-                "est_cost_usd = COALESCE(est_cost_usd, 0) + COALESCE(%s, 0), "
-                "updated_at = now() WHERE provider_batch_id = %s",
-                (inp, out, cost, batch_id),
+            # SET, not +=. A batch's usage is a fact about that batch, and
+            # this reports the totals for the whole batch every time it is
+            # collected - so adding meant a second collection doubled it.
+            #
+            # Reachable: a task that collects and then fails keeps its
+            # batch_ids, is requeued, reattaches and collects the same batch
+            # again. Checked before changing it - 92 batched tasks sit at
+            # attempts=2, which is the ordinary park-and-resume, and none is at
+            # attempts=3, which is what a collect-fail-recollect needs. Unfired,
+            # and it stops being unfired at exactly the wrong moment.
+            #
+            # The same reasoning applies to the ledger row below, which is why
+            # it is keyed on the batch rather than appended.
+            written = db.execute_count(
+                "UPDATE ai_batches SET input_tokens = %s, output_tokens = %s, "
+                "est_cost_usd = %s, updated_at = now() "
+                "WHERE provider_batch_id = %s "
+                "AND (input_tokens, output_tokens) IS DISTINCT FROM (%s, %s)",
+                (inp, out, cost, batch_id, inp, out),
             )
+            if not written:
+                # Already recorded with these exact totals: this is a repeat
+                # collection of a batch that has not changed, so the ledger
+                # must not gain a second row for it either.
+                events.publish_task(task_id)
+                return
             # The same numbers into the spend ledger. Every batched caller
             # passes through here and already names a purpose, so a new AI
             # caller shows up in analytics without anyone wiring it - the hook

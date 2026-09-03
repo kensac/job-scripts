@@ -25,6 +25,20 @@ from api.tasks.mail_classify import EVENT_KINDS
 
 router = APIRouter()
 
+
+def _with_settling(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Tags each action item with what could ever close it.
+
+    An unresolved item means two different things and a caller cannot tell
+    them apart from resolved_at alone: an assessment invite from last week is
+    awaiting an event that may still arrive, while an offer from 2020 was
+    never going to be closed by anything, because no email says "you
+    accepted". An empty `settles_on` says the second, and such an item must
+    not be rendered as a live obligation.
+    """
+    return [{**row, "settles_on": mail_pipeline.settles_on(row["kind"])} for row in rows]
+
+
 _SORTABLE = {
     "sent_at": "m.sent_at",
     "imported_at": "m.imported_at",
@@ -655,14 +669,16 @@ def pipeline(
         "applications": page,
         "total": len(rows),
         "has_more": offset + len(page) < len(rows),
-        "actions": db.query(
-            """
+        "actions": _with_settling(
+            db.query(
+                """
             SELECT ai.*, a.company_name, a.title
             FROM action_items ai LEFT JOIN applications a ON a.id = ai.application_id
             WHERE ai.user_id = %s AND ai.resolved_at IS NULL
             ORDER BY ai.due_at NULLS LAST, ai.id
             """,
-            (user.id,),
+                (user.id,),
+            )
         ),
     }
 
@@ -718,9 +734,12 @@ def pipeline_detail(application_id: int, user: AuthedUser = Depends(require_user
         "stage": mail_pipeline.stage_for(events, app["board_status"]),
         "events": events,
         "matches": [{**m, "evidence": evidence.get(m["message_id"])} for m in matches],
-        "actions": db.query(
-            "SELECT * FROM action_items WHERE application_id = %s ORDER BY due_at NULLS LAST, id",
-            (application_id,),
+        "actions": _with_settling(
+            db.query(
+                "SELECT * FROM action_items WHERE application_id = %s "
+                "ORDER BY due_at NULLS LAST, id",
+                (application_id,),
+            )
         ),
     }
 
@@ -910,6 +929,7 @@ _USER_MAIL_SORTS = {
 def user_mail(
     kind: str | None = Query(default=None),
     matched: bool | None = Query(default=None),
+    classified: bool | None = Query(default=None),
     application_id: int | None = Query(default=None),
     sort: str = Query(default="sent_at"),
     dir: str = Query(default="desc"),
@@ -942,6 +962,12 @@ def user_mail(
     if q:
         where.append("(m.subject ILIKE %(q)s OR m.from_email ILIKE %(q)s)")
         params["q"] = f"%{q}%"
+    if classified is not None:
+        # The backlog, reachable by its own name. Excluded from the unmatched
+        # queue because nothing has looked at it yet, which is a different
+        # state from the matcher having failed - and a queue that mixes them
+        # asks a person to fix something no decision has been made about.
+        where.append("ce.kind IS NOT NULL" if classified else "ce.kind IS NULL")
     if application_id is not None:
         # The reverse trip. Without it an application can only link to a
         # company text search, which returns a DIFFERENT set and would quietly
@@ -951,7 +977,26 @@ def user_mail(
     if matched is True:
         where.append("cm.application_id IS NOT NULL")
     elif matched is False:
-        where.append("cm.application_id IS NULL")
+        # A queue of things to fix, not a list of everything without an
+        # application. Personal mail correctly has no application and always
+        # will, so including it made "unmatched" 63,598 - essentially the whole
+        # mailbox - when the population a person can actually act on is 4,458.
+        #
+        # Three exclusions, each for its own reason:
+        #   not_job_related      already right, and 83% of the corpus
+        #   unclassified         nothing has looked yet; that is a backlog,
+        #                        reachable as classified=false
+        #   not_an_application   the matcher refused ON PURPOSE - a recruiter
+        #                        approach belongs to no application by design
+        #
+        # I fixed the third on /admin/mail in #237 and left this endpoint
+        # alone, which is how the queue built on it shipped useless.
+        where.append(
+            "cm.application_id IS NULL "
+            "AND ce.kind IS NOT NULL AND ce.kind <> 'not_job_related' "
+            "AND COALESCE(cm.method, '') <> %(refused)s"
+        )
+        params["refused"] = mail_match.NOT_AN_APPLICATION
     predicate = " AND ".join(where)
 
     base = f"""
@@ -1208,49 +1253,31 @@ def assign_message(message_id: int, body: Assignment, user: AuthedUser = Depends
     }
 
 
-# Enough to judge a match without opening the mail client, and short enough to
-# send one per row. Two sentences either side of the company mention is what a
-# person actually reads before deciding.
-SNIPPET_RADIUS = 220
+def _mention(body: str | None, needle: str | None) -> dict[str, Any] | None:
+    """The whole message, and WHERE the company is mentioned in it.
 
+    Not an excerpt. An excerpt meant reading a fragment, clicking, and then
+    reading the same message again from the top with no marker on the part that
+    mattered - the reader did the finding twice and we helped neither time.
 
-def _snippet(body: str | None, needle: str | None) -> dict[str, Any] | None:
-    """The part of the message the match was made on, not the first 220 chars.
+    Offsets rather than a highlighted string, so the client decides how to mark
+    it and the body stays exactly what the sender wrote. `start` is null when
+    the company does not appear verbatim, which is common: the classifier reads
+    it off a signature or a logo as often as out of a sentence.
 
-    An email's opening is a greeting and a logo alt-text; the sentence naming
-    the company is somewhere in the middle. Centring the excerpt on that term
-    is the difference between evidence and a preview - a preview shows that
-    mail exists, evidence shows why it was attached to THIS application.
+    The body is already capped at MAX_BODY_CHARS on the way in, so this cannot
+    be unbounded no matter how long the original was.
     """
     text = (body or "").strip()
     if not text:
         return None
-    # An excerpt exists to avoid sending 20,000 characters. When the whole
-    # message is not much longer than the excerpt would be, excerpting saves
-    # nothing and costs everything: the reader gets two thirds of a short mail
-    # and a link to read the third they are missing.
-    #
-    # The bound comes from the excerpt's own size rather than a chosen number:
-    # at most twice what we would have sent anyway, in exchange for never
-    # truncating something the reader could simply have read.
-    if len(text) <= SNIPPET_RADIUS * 4:
-        return {"text": text, "centred_on": None, "truncated": False, "is_whole_message": True}
-    found = -1
-    if needle:
-        found = text.lower().find(needle.strip().lower())
-    if found < 0:
-        return {
-            "text": text[: SNIPPET_RADIUS * 2],
-            "centred_on": None,
-            "truncated": len(text) > SNIPPET_RADIUS * 2,
-        }
-    start = max(0, found - SNIPPET_RADIUS)
-    end = min(len(text), found + len(needle or "") + SNIPPET_RADIUS)
+    term = (needle or "").strip()
+    found = text.lower().find(term.lower()) if term else -1
     return {
-        "text": text[start:end],
-        "centred_on": needle,
-        "truncated": start > 0 or end < len(text),
-        "is_whole_message": False,
+        "text": text,
+        "start": found if found >= 0 else None,
+        "end": found + len(term) if found >= 0 else None,
+        "term": term if found >= 0 else None,
     }
 
 
@@ -1294,7 +1321,7 @@ def _evidence_for(message_ids: list[int]) -> dict[int, dict[str, Any]]:
             # The sender is the one fact no model produced. An ATS domain is
             # near-proof of a real application; a .edu sender usually is not.
             "from_domain": (row["from_email"] or "").split("@")[-1].lower() or None,
-            "snippet": _snippet(row["body_text"], company),
+            "mention": _mention(row["body_text"], company),
             "body_chars": len(row["body_text"] or ""),
         }
     return out
