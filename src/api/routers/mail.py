@@ -581,6 +581,7 @@ def pipeline(
     provenance: str | None = Query(default=None),
     tier: str | None = Query(default=None),
     evidence: bool | None = Query(default=None),
+    silent_days: int | None = Query(default=None, ge=0),
     sort: str = Query(default="applied_at"),
     dir: str = Query(default="desc"),
     q: str | None = Query(default=None),
@@ -614,6 +615,20 @@ def pipeline(
         rows = [r for r in rows if r["source_provenance"] == provenance]
     if tier:
         rows = [r for r in rows if r["strongest_tier"] == tier]
+    if silent_days is not None:
+        # Applied, and nothing since. `evidence=false` is "no mail at all";
+        # this is "no mail LATELY", which is the ghosting question and the one
+        # a person actually asks. Measured against the last thing that
+        # happened - a reply, or applying if nothing has - because silence
+        # since an acknowledgement is still silence.
+        cutoff = datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=silent_days)
+        rows = [
+            r
+            for r in rows
+            if (r["last_event_at"] or r["applied_at"]) is not None
+            and (r["last_event_at"] or r["applied_at"]) < cutoff
+            and r["stage"] not in mail_pipeline.TERMINAL
+        ]
     if evidence is not None:
         # The summary reports with_evidence and without_evidence; without this
         # the numbers are not clickable and the population behind them is
@@ -1715,10 +1730,22 @@ def read_thread(
     }
 
 
+# Aggregates, so they are the ORDER BY expressions rather than column names.
+# started_at ascending is "oldest conversation first", which is how a backlog
+# is worked; message_count descending finds the ones that have been going on.
+_THREAD_SORTS = {
+    "last_activity_at": "max(m.sent_at)",
+    "started_at": "min(m.sent_at)",
+    "message_count": "count(*)",
+}
+
+
 @router.get("/user/threads")
 def list_threads(
     needs_attention: bool | None = Query(default=None),
     q: str | None = Query(default=None),
+    sort: str = Query(default="last_activity_at"),
+    dir: str = Query(default="desc"),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     user: AuthedUser = Depends(require_user),
@@ -1772,6 +1799,10 @@ def list_threads(
         {having}
     """
     total = db.query_one(f"SELECT count(*) AS n FROM (SELECT 1 {base}) s", params)
+    # Whitelisted, because these are aggregates concatenated into SQL and an
+    # unknown value must fall back rather than reach the database.
+    order = _THREAD_SORTS.get(sort, _THREAD_SORTS["last_activity_at"])
+    direction = "ASC" if dir == "asc" else "DESC"
     rows = db.query(
         f"""
         SELECT {_THREAD_KEY} AS thread_id,
@@ -1790,7 +1821,7 @@ def list_threads(
                (array_agg(m.id ORDER BY m.sent_at DESC))[1] AS latest_message_id,
                max(cm.application_id) AS application_id
         {base}
-        ORDER BY max(m.sent_at) DESC NULLS LAST
+        ORDER BY {order} {direction} NULLS LAST
         LIMIT %(limit)s OFFSET %(offset)s
         """,
         params,

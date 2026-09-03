@@ -122,6 +122,18 @@ def norm_company(value: str | None) -> str:
     return re.sub(r"[^a-z0-9]+", "", text)
 
 
+# An employer cannot reply before you apply. Shared by both company tiers so
+# they cannot drift: tier 3 had no window at all and matched a 2025 rejection
+# to a 2026 application, which is the same predicate missing rather than a
+# different rule.
+_NOT_BEFORE_APPLYING = """
+    (a.applied_at IS NULL OR %s::timestamptz IS NULL
+     OR a.applied_at - CASE WHEN a.source_provenance = 'tracker'
+                            THEN interval '1 day' ELSE interval '0' END
+        <= %s::timestamptz)
+"""
+
+
 def _by_company(user_id: int, company: str | None, sent_at) -> Match | None:
     """One application at that company inside the window, or nothing.
 
@@ -156,10 +168,9 @@ def _by_company(user_id: int, company: str | None, sent_at) -> Match | None:
         SELECT a.id, a.company_name, a.title, a.applied_at
         FROM applications a
         WHERE a.user_id = %s
-          AND (a.applied_at IS NULL OR %s::timestamptz IS NULL
-               OR a.applied_at - CASE WHEN a.source_provenance = 'tracker'
-                                      THEN interval '1 day' ELSE interval '0' END
-                  <= %s::timestamptz)
+          AND """
+        + _NOT_BEFORE_APPLYING
+        + """
         """,
         (user_id, sent_at, sent_at),
     )
@@ -176,12 +187,30 @@ def _by_company(user_id: int, company: str | None, sent_at) -> Match | None:
     return None
 
 
-def _by_company_and_title(user_id: int, company: str | None, title: str | None) -> Match | None:
+def _by_company_and_title(
+    user_id: int, company: str | None, title: str | None, sent_at=None
+) -> Match | None:
+    """Company and title, INSIDE THE SAME WINDOW tier 2 uses.
+
+    It had no date bound at all, which is how a rejection from 2025 attached
+    itself to an application made in 2026: the company matched, the title
+    matched, and nothing asked whether the mail could possibly be about it.
+    Repeat applications to one employer for one role are exactly the case this
+    tier exists to serve, so being time-blind made it wrong precisely where it
+    was meant to help - and it collapsed every message for that role, across
+    every year, onto one application.
+    """
     key, role = norm_company(company), norm_company(title)
     if not key or not role:
         return None
     rows = db.query(
-        "SELECT id, company_name, title FROM applications WHERE user_id = %s", (user_id,)
+        """
+        SELECT a.id, a.company_name, a.title
+        FROM applications a
+        WHERE a.user_id = %s
+          AND """
+        + _NOT_BEFORE_APPLYING,
+        (user_id, sent_at, sent_at),
     )
     candidates = [
         r
@@ -215,7 +244,7 @@ def match_message(
     for finder in (
         lambda: _by_exact_link(user_id, body),
         lambda: _by_company(user_id, company, sent_at),
-        lambda: _by_company_and_title(user_id, company, title),
+        lambda: _by_company_and_title(user_id, company, title, sent_at),
     ):
         found = finder()
         if found is not None:
