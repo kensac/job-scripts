@@ -69,6 +69,7 @@ _SUBJECT_KINDS = {
     "oauth_token_invalid": SUBJECT_PROVIDER_USER,
     "batch_parked_too_long": SUBJECT_TASK,
     "batch_failed_whole": SUBJECT_PURPOSE,
+    "handler_overdue": SUBJECT_TASK,
 }
 
 
@@ -383,6 +384,79 @@ def detect() -> list[dict[str, Any]]:
                     "batches": r["batches"],
                     "requests": r["requests"],
                     "oldest_hours": round((r["oldest_secs"] or 0) / 3600, 1),
+                },
+            }
+        )
+
+    # A HANDLER THAT STOPPED PROGRESSING LOOKS EXACTLY LIKE ONE THAT IS ALIVE.
+    # Liveness is a daemon thread beating on a timer, so it proves the process
+    # exists and says nothing about whether the work advances. The reaper keys
+    # on that heartbeat, so a wedged handler is never requeued: it holds its
+    # worker until someone recreates the container. On 2026-09-03 a match_mail
+    # task sat 60 minutes against a 5.2-minute worst case, on attempt 1, with a
+    # 20-second-old heartbeat, holding one of three workers while ten
+    # poll_batches queued behind it.
+    #
+    # Process alive and handler progressing are different facts and the schema
+    # has one column for them. Until it has two, this is what says so.
+    #
+    # THE THRESHOLD IS EACH KIND'S OWN WORST CASE PLUS THE REAPER'S OWN
+    # TIMEOUT. Both already exist: the max is what this handler has actually
+    # taken, over every run it has ever completed, and HEARTBEAT_TIMEOUT_MINUTES
+    # is the fleet's declared patience for a task showing no sign of life.
+    # Past its own precedent by more than the margin the fleet already treats
+    # as decisive. No per-kind constant to keep current, and it adapts as a
+    # handler gets slower or faster.
+    #
+    # Unwindowed deliberately: the max over ALL history is the conservative
+    # direction. A handler that used to be slow suppresses its own alert, which
+    # under-reports rather than crying wolf.
+    from api.tasks.runtime import HEARTBEAT_TIMEOUT_MINUTES
+
+    for r in db.query(
+        """
+        WITH history AS (
+            SELECT kind, COUNT(*) AS runs,
+                   MAX(EXTRACT(epoch FROM finished_at - started_at)) AS max_secs
+            FROM tasks
+            WHERE status = 'done' AND started_at IS NOT NULL AND finished_at IS NOT NULL
+            GROUP BY kind
+        )
+        SELECT t.id, t.kind, t.worker, h.runs, h.max_secs,
+               EXTRACT(epoch FROM now() - t.started_at) AS running_secs
+        FROM tasks t JOIN history h ON h.kind = t.kind
+        WHERE t.status = 'running' AND t.started_at IS NOT NULL
+          AND EXTRACT(epoch FROM now() - t.started_at)
+              > h.max_secs + %(grace)s
+        ORDER BY EXTRACT(epoch FROM now() - t.started_at) DESC
+        """,
+        {"grace": HEARTBEAT_TIMEOUT_MINUTES * 60},
+    ):
+        running_min = (r["running_secs"] or 0) / 60
+        max_min = (r["max_secs"] or 0) / 60
+        found.append(
+            {
+                "kind": "handler_overdue",
+                "subject": r["kind"],
+                "severity": "critical",
+                "message": (
+                    f"{r['kind']} task {r['id']} has been running {running_min:.0f} min on "
+                    f"{r['worker']}. The longest of its {r['runs']} completed runs took "
+                    f"{max_min:.1f} min. Its heartbeat is a timer, not a sign of progress, so "
+                    "the reaper will not requeue it and it holds its worker until the container "
+                    "is recreated."
+                ),
+                # The sample is reported because the bound IS the sample: a kind
+                # with three completed runs has a much weaker "worst case" than
+                # one with a thousand, and the reader can see which they have.
+                "detail": {
+                    "task_id": r["id"],
+                    "kind": r["kind"],
+                    "worker": r["worker"],
+                    "running_minutes": round(running_min, 1),
+                    "longest_completed_minutes": round(max_min, 1),
+                    "completed_runs": r["runs"],
+                    "grace_minutes": HEARTBEAT_TIMEOUT_MINUTES,
                 },
             }
         )
