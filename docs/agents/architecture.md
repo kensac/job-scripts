@@ -84,6 +84,27 @@ A handler that never yields holds its worker until it finishes. Long handlers
 should hold progress in the database so an interruption resumes rather than
 restarts.
 
+## Time
+
+Containers run on a local timezone by deliberate convention; hosts and the
+database are UTC. **Store aware UTC, never naive local time.** A timezone-less
+date is uncertain by exactly one day, and any comparison against it should
+carry that width rather than inventing an hour by casting.
+
+## Named places
+
+These exist in exactly one place each. Change them there, and never write a
+fresh copy:
+
+- **Job visibility** — a read-time conjunctive predicate in `routers/jobs.py`,
+  mirrored in the board task's materialise and candidate queries. Per-object
+  routes format the same predicate. Change all of them together.
+- **AI pricing** — `core/pricing.py`, rendered as both Python and SQL from one
+  source with a parity test.
+- **Provider facts** — one datasheet per provider under `core/providers/`.
+- **Task handlers** — `api/tasks/`, one module per family. The task runtime
+  imports nothing from the worker; the worker imports only the handler table.
+
 ## Visibility and ownership
 
 Job visibility is a read-time conjunctive predicate, spelled in one place and
