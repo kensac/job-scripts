@@ -13,7 +13,7 @@ append-only, so a correction is a newer row, not an edit.
 from __future__ import annotations
 
 import datetime
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -416,6 +416,123 @@ def mail_detail(message_id: int, user: AuthedUser = Depends(require_admin)):
 
 class MatchOverride(BaseModel):
     application_id: int | None
+    # WHICH no-match this is, when application_id is null. Without it every
+    # admin no-match was recorded as method='manual' with a null application,
+    # which the unmatched predicate reads as a matcher FAILURE - so an admin
+    # who correctly decided a recruiter approach belongs to no application put
+    # it straight back into the queue of things needing attention, and nothing
+    # said so. `not_an_application` is not `unmatched`: deliberately attached
+    # to nothing versus looked and found nothing, a distinction that has now
+    # mattered on six surfaces.
+    #
+    # Default keeps the old behaviour for callers that do not send it: a
+    # no-match with no reason given is a failure to find one, which is the
+    # weaker claim and the safe one.
+    outcome: Literal["no_application_found", "not_an_application"] = "no_application_found"
+
+
+def _resync_applications(message_id: int) -> list[int]:
+    """Resync every application this message feeds, and say which they were.
+
+    A changed kind can change what an application is waiting for, and it can
+    change an application the person is not currently looking at - so the ids
+    come back rather than an `ok`. Both the correction and the revert need
+    this, which is why it is one function.
+    """
+    affected = [
+        r["application_id"]
+        for r in db.query(
+            """
+            SELECT DISTINCT application_id FROM application_matches
+            WHERE message_id = %s AND application_id IS NOT NULL
+            """,
+            (message_id,),
+        )
+    ]
+    for application_id in affected:
+        mail_pipeline.sync_action_items(application_id)
+    return affected
+
+
+def _corrected_by(actor_user_id: int | None, viewer_id: int, model: str | None = None) -> str:
+    """Who decided this row, from the viewer's point of view.
+
+    FOUR ANSWERS, not three, and the fourth is the honest one. A machine wrote
+    it; the viewer wrote it; an administrator wrote it; or a person wrote it
+    before this column existed and there is no record of which person. That
+    last case is not the same as "nobody corrected it" and must not be rendered
+    as if it were - every human correction made before actor_user_id was added
+    lands there, and the logs are append-only so it can never be resolved.
+
+    The admin's corrections are surfaced to the affected user rather than
+    hidden: a correction someone cannot see is one they cannot question, and
+    finding your own data changed with no account of who changed it is worse
+    than the change being visible.
+    """
+    if model is not None:
+        return "model"
+    if actor_user_id is None:
+        return "unknown"
+    return "you" if actor_user_id == viewer_id else "administrator"
+
+
+def _admin_message(message_id: int) -> dict[str, Any]:
+    """Any user's message, for an administrator.
+
+    Deliberately NOT `_owned_message`: the whole point of these routes is that
+    the admin corrects other people's mailboxes - friends and family, not a
+    hypothetical. The ownership rule that applies is `require_admin` on the
+    route; what this returns is the OWNER, because every helper below needs to
+    be scoped to them rather than to the caller.
+    """
+    message = db.query_one(
+        "SELECT id, user_id, subject, from_email, sent_at, body_text "
+        "FROM email_messages WHERE id = %s",
+        (message_id,),
+    )
+    if message is None:
+        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown message"})
+    return message
+
+
+@router.get("/admin/mail/{message_id}/candidates")
+def admin_match_candidates(
+    message_id: int,
+    q: str | None = Query(default=None),
+    limit: int = Query(default=25, ge=1, le=100),
+    user: AuthedUser = Depends(require_admin),
+):
+    """The same picker the user gets, over the message owner's applications.
+
+    The admin panel offered a bare application-id field, which requires
+    knowing an id that is not displayed anywhere - so the only correction
+    available in practice was no correction. This is the identical ranking the
+    user side computes, including the candidates `_by_company` refused to
+    choose between, which are the ones a person is best placed to settle.
+    """
+    message = _admin_message(message_id)
+    return _candidates_payload(message, message["user_id"], q, limit)
+
+
+@router.post("/admin/mail/{message_id}/classify")
+def admin_correct_classification(
+    message_id: int, body: Reclassification, user: AuthedUser = Depends(require_admin)
+):
+    """Correct what a message IS, in someone else's mailbox.
+
+    Recorded against the admin rather than the owner: `actor_user_id` is the
+    caller, so a later reader can tell an administrator's correction from the
+    owner's own without a second flag saying which.
+    """
+    message = _admin_message(message_id)
+    return _apply_classification(message, body, actor_user_id=user.id)
+
+
+@router.post("/admin/mail/{message_id}/classify/revert")
+def admin_revert_classification(message_id: int, user: AuthedUser = Depends(require_admin)):
+    """Undo a correction by restoring the model's last answer."""
+    _admin_message(message_id)
+    return _apply_revert(message_id, actor_user_id=user.id)
 
 
 @router.post("/admin/mail/{message_id}/match")
@@ -426,6 +543,11 @@ def override_match(message_id: int, body: MatchOverride, user: AuthedUser = Depe
     a systematically wrong tier stays visible in the history instead of being
     quietly papered over one row at a time. That history is the only evidence
     that the matcher needs fixing rather than the row.
+
+    A null application_id needs `outcome` to say WHICH no-match is meant,
+    because the two are not the same fact and the queue treats them
+    differently. Attaching to an application ignores it - the outcome of a
+    match is the match.
     """
     message = db.query_one("SELECT user_id FROM email_messages WHERE id = %s", (message_id,))
     if not message:
@@ -439,14 +561,19 @@ def override_match(message_id: int, body: MatchOverride, user: AuthedUser = Depe
             # another's application. 404 rather than 403: whether that
             # application exists is not something the caller is entitled to.
             raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown application"})
+    # A deliberate refusal is recorded as the matcher's own refusal method, so
+    # every reader that already distinguishes the two - the unmatched cut, the
+    # analytics breakdown, the pipeline filter - sees it without being taught a
+    # fourth value. Agreeing with the matcher should look like agreeing with it.
+    if body.application_id is None and body.outcome == "not_an_application":
+        method, confidence = mail_match.NOT_AN_APPLICATION, "high"
+    else:
+        method = MANUAL
+        confidence = "high" if body.application_id is not None else "none"
     mail_match.record(
         message_id,
-        mail_match.Match(
-            body.application_id,
-            "manual",
-            "high" if body.application_id is not None else "none",
-            f"set by admin {user.sub}",
-        ),
+        actor_user_id=user.id,
+        match=mail_match.Match(body.application_id, method, confidence, f"set by admin {user.sub}"),
     )
     if body.application_id is not None:
         mail_pipeline.sync_action_items(body.application_id)
@@ -715,7 +842,8 @@ def pipeline_detail(application_id: int, user: AuthedUser = Depends(require_user
                 FROM application_matches ORDER BY message_id, id DESC
             )
             SELECT am.id, am.message_id, am.application_id, am.method, am.confidence,
-                   am.rationale, am.created_at, m.subject, m.from_email, m.sent_at,
+                   am.rationale, am.created_at, am.actor_user_id,
+                   m.subject, m.from_email, m.sent_at,
                    (cm.id = am.id) AS in_force
             FROM application_matches am
             JOIN touched tm ON tm.message_id = am.message_id
@@ -733,7 +861,28 @@ def pipeline_detail(application_id: int, user: AuthedUser = Depends(require_user
         **app,
         "stage": mail_pipeline.stage_for(events, app["board_status"]),
         "events": events,
-        "matches": [{**m, "evidence": evidence.get(m["message_id"])} for m in matches],
+        "matches": [
+            {
+                **m,
+                "evidence": evidence.get(m["message_id"]),
+                # Derived, not stored: the same actor id reads as "you" to the
+                # owner and as an administrator to anyone else, so there is no
+                # second copy of that distinction to drift. NULL actor means
+                # the matcher decided it.
+                "corrected_by": _corrected_by(
+                    m["actor_user_id"],
+                    user.id,
+                    # A match has no `model` column. The matcher's own rows
+                    # carry its tier as the method; only a person writes
+                    # 'manual' or 'detached'.
+                    model=None if m["method"] in _HUMAN_MATCH_METHODS else m["method"],
+                ),
+            }
+            for m in matches
+        ],
+        # Both additions kept: #227 wraps actions in their settling state,
+        # this branch adds who corrected each match. Independent answers to
+        # the same question - what does this row let a person question.
         "actions": _with_settling(
             db.query(
                 "SELECT * FROM action_items WHERE application_id = %s "
@@ -865,6 +1014,11 @@ def restore_application(
 
 
 MANUAL = "manual"
+
+# Methods only a person writes. Every other method is one of the matcher's
+# tiers, so the method column is what tells a human match from a machine one -
+# `application_matches` has no `model` column to ask instead.
+_HUMAN_MATCH_METHODS = frozenset({MANUAL, DETACHED})
 
 
 # How many messages one assignment may carry. A conversation is a handful of
@@ -1068,6 +1222,20 @@ def match_candidates(
     applying to", and there is nothing to attach to until one exists.
     """
     message = _owned_message(message_id, user.id)
+    return _candidates_payload(message, user.id, q, limit)
+
+
+def _candidates_payload(
+    message: dict[str, Any], owner_id: int, q: str | None, limit: int
+) -> dict[str, Any]:
+    """Candidates for a message, scoped to the message's OWNER.
+
+    Separated from the route because the admin view asks the same question
+    about somebody else's mailbox. The owner is a parameter rather than the
+    caller precisely so that difference is stated once instead of a second
+    copy of the ranking drifting from this one.
+    """
+    message_id = message["id"]
     event = db.query_one(
         "SELECT detail FROM email_events WHERE message_id = %s ORDER BY id DESC LIMIT 1",
         (message_id,),
@@ -1084,9 +1252,9 @@ def match_candidates(
         LEFT JOIN user_jobs uj ON uj.job_id = a.job_id AND uj.user_id = a.user_id
         WHERE a.user_id = %s
         """,
-        (user.id,),
+        (owner_id,),
     )
-    events = mail_pipeline.events_by_application(user.id)
+    events = mail_pipeline.events_by_application(owner_id)
     needle = (q or "").lower().strip()
     scored = []
     for app in apps:
@@ -1122,7 +1290,7 @@ def match_candidates(
         ORDER BY uj.date_applied DESC NULLS LAST
         LIMIT %(limit)s
         """,
-        {"user": user.id, "q": q, "like": f"%{needle}%", "limit": limit},
+        {"user": owner_id, "q": q, "like": f"%{needle}%", "limit": limit},
     )
     return {
         "message": {
@@ -1600,6 +1768,20 @@ def correct_classification(
     restating it - the same property that makes detaching work.
     """
     message = _owned_message(message_id, user.id)
+    return _apply_classification(message, body, actor_user_id=user.id)
+
+
+def _apply_classification(
+    message: dict[str, Any], body: Reclassification, *, actor_user_id: int
+) -> dict[str, Any]:
+    """Append a corrected classification, recording WHO corrected it.
+
+    `actor_user_id` is not always the message's owner: an administrator
+    correcting somebody else's mailbox writes their own id here, and whether
+    that was a self-correction is derived by comparing the two rather than
+    stored a second time.
+    """
+    message_id = message["id"]
     if body.kind not in EVENT_KINDS:
         raise HTTPException(status_code=400, detail=f"kind must be one of {sorted(EVENT_KINDS)}")
     current = db.query_one(
@@ -1619,25 +1801,11 @@ def correct_classification(
     detail["corrected_by_user"] = True
 
     db.execute(
-        "INSERT INTO email_events (message_id, kind, confidence, detail, model) "
-        "VALUES (%s, %s, 'high', %s, NULL)",
-        (message_id, body.kind, db.jsonb(detail)),
+        "INSERT INTO email_events (message_id, kind, confidence, detail, model, actor_user_id) "
+        "VALUES (%s, %s, 'high', %s, NULL, %s)",
+        (message_id, body.kind, db.jsonb(detail), actor_user_id),
     )
-    # A corrected kind can change what the application is waiting for - and it
-    # can change an application the person is not currently looking at, which
-    # is why the ids come back rather than an ok.
-    affected = [
-        r["application_id"]
-        for r in db.query(
-            """
-            SELECT DISTINCT application_id FROM application_matches
-            WHERE message_id = %s AND application_id IS NOT NULL
-            """,
-            (message_id,),
-        )
-    ]
-    for application_id in affected:
-        mail_pipeline.sync_action_items(application_id)
+    affected = _resync_applications(message_id)
     return {
         "ok": True,
         "message_id": message["id"],
@@ -1666,6 +1834,11 @@ def revert_classification(message_id: int, user: AuthedUser = Depends(require_us
     never classified this message, because there is nothing to restore.
     """
     _owned_message(message_id, user.id)
+    return _apply_revert(message_id, actor_user_id=user.id)
+
+
+def _apply_revert(message_id: int, *, actor_user_id: int) -> dict[str, Any]:
+    """Restore the model's last answer, recording who asked for the restore."""
     model_answer = db.query_one(
         "SELECT kind, confidence, detail, model FROM email_events "
         "WHERE message_id = %s AND model IS NOT NULL ORDER BY id DESC LIMIT 1",
@@ -1684,17 +1857,26 @@ def revert_classification(message_id: int, user: AuthedUser = Depends(require_us
     detail.pop("corrected_by_user", None)
     detail.pop("corrected_note", None)
     db.execute(
-        "INSERT INTO email_events (message_id, kind, confidence, detail, model) "
-        "VALUES (%s, %s, %s, %s, %s)",
+        "INSERT INTO email_events (message_id, kind, confidence, detail, model, actor_user_id) "
+        "VALUES (%s, %s, %s, %s, %s, %s)",
         (
             message_id,
             model_answer["kind"],
             model_answer["confidence"],
             db.jsonb(detail),
             model_answer["model"],
+            actor_user_id,
         ),
     )
-    return {"ok": True, "already": False, "kind": model_answer["kind"]}
+    # The same affected ids classify returns. A revert moves the derived stage
+    # exactly as a correction does, and possibly on an application nobody is
+    # looking at, so it cannot be an {ok: true}.
+    return {
+        "ok": True,
+        "already": False,
+        "kind": model_answer["kind"],
+        "affected_application_ids": _resync_applications(message_id),
+    }
 
 
 @router.get("/user/messages/{message_id}/thread")

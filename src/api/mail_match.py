@@ -252,13 +252,27 @@ def match_message(
     return Match(None, UNMATCHED, "none", "no candidate matched")
 
 
-def record(message_id: int, match: Match) -> None:
+def record(message_id: int, match: Match, *, actor_user_id: int | None = None) -> None:
+    """Append a match. `actor_user_id` is the HUMAN who decided it, if any.
+
+    NULL means the matcher wrote it. Whether that human was the message's owner
+    or an administrator correcting someone else's data is derived by comparing
+    this against the owner, rather than recorded twice.
+    """
     db.execute(
         """
-        INSERT INTO application_matches (message_id, application_id, method, confidence, rationale)
-        VALUES (%s, %s, %s, %s, %s)
+        INSERT INTO application_matches
+            (message_id, application_id, method, confidence, rationale, actor_user_id)
+        VALUES (%s, %s, %s, %s, %s, %s)
         """,
-        (message_id, match.application_id, match.method, match.confidence, match.rationale),
+        (
+            message_id,
+            match.application_id,
+            match.method,
+            match.confidence,
+            match.rationale,
+            actor_user_id,
+        ),
     )
 
 

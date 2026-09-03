@@ -674,6 +674,11 @@ class EmailEvent(Base):
     deadline_inferred: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     detail: Mapped[Any | None] = mapped_column(JSONB)
     model: Mapped[str | None] = mapped_column(Text)
+    # `model` says which machine wrote this, `actor_user_id` says which human.
+    # Both NULL has never happened and would be a bug.
+    actor_user_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="SET NULL")
+    )
     created_at: Mapped[datetime.datetime] = mapped_column(
         TIMESTAMP(timezone=True), server_default=_now
     )
@@ -698,6 +703,12 @@ class ApplicationMatch(Base):
     method: Mapped[str] = mapped_column(Text)
     confidence: Mapped[str | None] = mapped_column(Text)
     rationale: Mapped[str | None] = mapped_column(Text)
+    # Which HUMAN wrote this row; NULL means the matcher did. Whether that
+    # human was the owner or an administrator is derived by comparing this
+    # against the message's owner rather than stored a second time.
+    actor_user_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="SET NULL")
+    )
     created_at: Mapped[datetime.datetime] = mapped_column(
         TIMESTAMP(timezone=True), server_default=_now
     )
