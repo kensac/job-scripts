@@ -418,6 +418,79 @@ class MatchOverride(BaseModel):
     application_id: int | None
 
 
+def _corrected_by(actor_user_id: int | None, viewer_id: int) -> str | None:
+    """Who made this correction, from the viewer's point of view.
+
+    None when no person did - the matcher or the classifier wrote it. The
+    admin's corrections are surfaced to the affected user rather than hidden:
+    a correction someone cannot see is one they cannot question, and a person
+    finding their own data changed with no account of who changed it is worse
+    than the correction being visible.
+    """
+    if actor_user_id is None:
+        return None
+    return "you" if actor_user_id == viewer_id else "administrator"
+
+
+def _admin_message(message_id: int) -> dict[str, Any]:
+    """Any user's message, for an administrator.
+
+    Deliberately NOT `_owned_message`: the whole point of these routes is that
+    the admin corrects other people's mailboxes - friends and family, not a
+    hypothetical. The ownership rule that applies is `require_admin` on the
+    route; what this returns is the OWNER, because every helper below needs to
+    be scoped to them rather than to the caller.
+    """
+    message = db.query_one(
+        "SELECT id, user_id, subject, from_email, sent_at, body_text "
+        "FROM email_messages WHERE id = %s",
+        (message_id,),
+    )
+    if message is None:
+        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown message"})
+    return message
+
+
+@router.get("/admin/mail/{message_id}/candidates")
+def admin_match_candidates(
+    message_id: int,
+    q: str | None = Query(default=None),
+    limit: int = Query(default=25, ge=1, le=100),
+    user: AuthedUser = Depends(require_admin),
+):
+    """The same picker the user gets, over the message owner's applications.
+
+    The admin panel offered a bare application-id field, which requires
+    knowing an id that is not displayed anywhere - so the only correction
+    available in practice was no correction. This is the identical ranking the
+    user side computes, including the candidates `_by_company` refused to
+    choose between, which are the ones a person is best placed to settle.
+    """
+    message = _admin_message(message_id)
+    return _candidates_payload(message, message["user_id"], q, limit)
+
+
+@router.post("/admin/mail/{message_id}/classify")
+def admin_correct_classification(
+    message_id: int, body: Reclassification, user: AuthedUser = Depends(require_admin)
+):
+    """Correct what a message IS, in someone else's mailbox.
+
+    Recorded against the admin rather than the owner: `actor_user_id` is the
+    caller, so a later reader can tell an administrator's correction from the
+    owner's own without a second flag saying which.
+    """
+    message = _admin_message(message_id)
+    return _apply_classification(message, body, actor_user_id=user.id)
+
+
+@router.post("/admin/mail/{message_id}/classify/revert")
+def admin_revert_classification(message_id: int, user: AuthedUser = Depends(require_admin)):
+    """Undo a correction by restoring the model's last answer."""
+    _admin_message(message_id)
+    return _apply_revert(message_id, actor_user_id=user.id)
+
+
 @router.post("/admin/mail/{message_id}/match")
 def override_match(message_id: int, body: MatchOverride, user: AuthedUser = Depends(require_admin)):
     """Correct a match by hand.
@@ -441,7 +514,8 @@ def override_match(message_id: int, body: MatchOverride, user: AuthedUser = Depe
             raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown application"})
     mail_match.record(
         message_id,
-        mail_match.Match(
+        actor_user_id=user.id,
+        match=mail_match.Match(
             body.application_id,
             "manual",
             "high" if body.application_id is not None else "none",
@@ -715,7 +789,8 @@ def pipeline_detail(application_id: int, user: AuthedUser = Depends(require_user
                 FROM application_matches ORDER BY message_id, id DESC
             )
             SELECT am.id, am.message_id, am.application_id, am.method, am.confidence,
-                   am.rationale, am.created_at, m.subject, m.from_email, m.sent_at,
+                   am.rationale, am.created_at, am.actor_user_id,
+                   m.subject, m.from_email, m.sent_at,
                    (cm.id = am.id) AS in_force
             FROM application_matches am
             JOIN touched tm ON tm.message_id = am.message_id
@@ -733,7 +808,21 @@ def pipeline_detail(application_id: int, user: AuthedUser = Depends(require_user
         **app,
         "stage": mail_pipeline.stage_for(events, app["board_status"]),
         "events": events,
-        "matches": [{**m, "evidence": evidence.get(m["message_id"])} for m in matches],
+        "matches": [
+            {
+                **m,
+                "evidence": evidence.get(m["message_id"]),
+                # Derived, not stored: the same actor id reads as "you" to the
+                # owner and as an administrator to anyone else, so there is no
+                # second copy of that distinction to drift. NULL actor means
+                # the matcher decided it.
+                "corrected_by": _corrected_by(m["actor_user_id"], user.id),
+            }
+            for m in matches
+        ],
+        # Both additions kept: #227 wraps actions in their settling state,
+        # this branch adds who corrected each match. Independent answers to
+        # the same question - what does this row let a person question.
         "actions": _with_settling(
             db.query(
                 "SELECT * FROM action_items WHERE application_id = %s "
@@ -1068,6 +1157,20 @@ def match_candidates(
     applying to", and there is nothing to attach to until one exists.
     """
     message = _owned_message(message_id, user.id)
+    return _candidates_payload(message, user.id, q, limit)
+
+
+def _candidates_payload(
+    message: dict[str, Any], owner_id: int, q: str | None, limit: int
+) -> dict[str, Any]:
+    """Candidates for a message, scoped to the message's OWNER.
+
+    Separated from the route because the admin view asks the same question
+    about somebody else's mailbox. The owner is a parameter rather than the
+    caller precisely so that difference is stated once instead of a second
+    copy of the ranking drifting from this one.
+    """
+    message_id = message["id"]
     event = db.query_one(
         "SELECT detail FROM email_events WHERE message_id = %s ORDER BY id DESC LIMIT 1",
         (message_id,),
@@ -1084,9 +1187,9 @@ def match_candidates(
         LEFT JOIN user_jobs uj ON uj.job_id = a.job_id AND uj.user_id = a.user_id
         WHERE a.user_id = %s
         """,
-        (user.id,),
+        (owner_id,),
     )
-    events = mail_pipeline.events_by_application(user.id)
+    events = mail_pipeline.events_by_application(owner_id)
     needle = (q or "").lower().strip()
     scored = []
     for app in apps:
@@ -1122,7 +1225,7 @@ def match_candidates(
         ORDER BY uj.date_applied DESC NULLS LAST
         LIMIT %(limit)s
         """,
-        {"user": user.id, "q": q, "like": f"%{needle}%", "limit": limit},
+        {"user": owner_id, "q": q, "like": f"%{needle}%", "limit": limit},
     )
     return {
         "message": {
@@ -1600,6 +1703,20 @@ def correct_classification(
     restating it - the same property that makes detaching work.
     """
     message = _owned_message(message_id, user.id)
+    return _apply_classification(message, body, actor_user_id=user.id)
+
+
+def _apply_classification(
+    message: dict[str, Any], body: Reclassification, *, actor_user_id: int
+) -> dict[str, Any]:
+    """Append a corrected classification, recording WHO corrected it.
+
+    `actor_user_id` is not always the message's owner: an administrator
+    correcting somebody else's mailbox writes their own id here, and whether
+    that was a self-correction is derived by comparing the two rather than
+    stored a second time.
+    """
+    message_id = message["id"]
     if body.kind not in EVENT_KINDS:
         raise HTTPException(status_code=400, detail=f"kind must be one of {sorted(EVENT_KINDS)}")
     current = db.query_one(
@@ -1619,9 +1736,9 @@ def correct_classification(
     detail["corrected_by_user"] = True
 
     db.execute(
-        "INSERT INTO email_events (message_id, kind, confidence, detail, model) "
-        "VALUES (%s, %s, 'high', %s, NULL)",
-        (message_id, body.kind, db.jsonb(detail)),
+        "INSERT INTO email_events (message_id, kind, confidence, detail, model, actor_user_id) "
+        "VALUES (%s, %s, 'high', %s, NULL, %s)",
+        (message_id, body.kind, db.jsonb(detail), actor_user_id),
     )
     # A corrected kind can change what the application is waiting for - and it
     # can change an application the person is not currently looking at, which
@@ -1666,6 +1783,11 @@ def revert_classification(message_id: int, user: AuthedUser = Depends(require_us
     never classified this message, because there is nothing to restore.
     """
     _owned_message(message_id, user.id)
+    return _apply_revert(message_id, actor_user_id=user.id)
+
+
+def _apply_revert(message_id: int, *, actor_user_id: int) -> dict[str, Any]:
+    """Restore the model's last answer, recording who asked for the restore."""
     model_answer = db.query_one(
         "SELECT kind, confidence, detail, model FROM email_events "
         "WHERE message_id = %s AND model IS NOT NULL ORDER BY id DESC LIMIT 1",
@@ -1684,14 +1806,15 @@ def revert_classification(message_id: int, user: AuthedUser = Depends(require_us
     detail.pop("corrected_by_user", None)
     detail.pop("corrected_note", None)
     db.execute(
-        "INSERT INTO email_events (message_id, kind, confidence, detail, model) "
-        "VALUES (%s, %s, %s, %s, %s)",
+        "INSERT INTO email_events (message_id, kind, confidence, detail, model, actor_user_id) "
+        "VALUES (%s, %s, %s, %s, %s, %s)",
         (
             message_id,
             model_answer["kind"],
             model_answer["confidence"],
             db.jsonb(detail),
             model_answer["model"],
+            actor_user_id,
         ),
     )
     return {"ok": True, "already": False, "kind": model_answer["kind"]}
