@@ -273,7 +273,10 @@ async def handle_run_filter_batch_chunk(task_id: int, payload: dict[str, Any]) -
                 raise asyncio.CancelledError
 
     hb = asyncio.create_task(_heartbeat())
-    hook = _batch_event_hook(task_id, "filter", cfg.model)
+    # charged_to_user: the loop below books every result against this
+    # user with budget.record_usage, so the hook must not book the same
+    # tokens again against the fleet.
+    hook = _batch_event_hook(task_id, "filter", cfg.model, charged_to_user=True)
     try:
         existing = _pending_batch_ids(task_id)
         if existing:

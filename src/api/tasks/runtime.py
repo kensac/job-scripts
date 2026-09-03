@@ -359,10 +359,25 @@ def _set_progress(task_id: int, done: int, total: int, label: str) -> None:
     events.publish_task(task_id)
 
 
-def _batch_event_hook(task_id: int, purpose: str, model: str, prompt_id: int | None = None):
+def _batch_event_hook(
+    task_id: int,
+    purpose: str,
+    model: str,
+    prompt_id: int | None = None,
+    *,
+    charged_to_user: bool = False,
+):
     """Registers every provider batch in ai_batches as it progresses, and
     stores submitted batch ids on the task payload so a requeued attempt
-    reattaches instead of resubmitting (double spend + orphaned results)."""
+    reattaches instead of resubmitting (double spend + orphaned results).
+
+    `charged_to_user` says the caller already books these tokens against a
+    person, so this must not book them again against the fleet. Filter runs are
+    the case: the batched sweep records every result with budget.record_usage(user_id)
+    and this hook was recording the same tokens a second time with user_id NULL.
+    Two rows for one call made /admin/spend read filter work at double its cost
+    and let one person's usage consume the fleet's weekly ceiling.
+    """
 
     def on_event(batch_id: str, status: str, counts: dict[str, int]) -> None:
         if "input_tokens" in counts or "output_tokens" in counts:
@@ -383,7 +398,8 @@ def _batch_event_hook(task_id: int, purpose: str, model: str, prompt_id: int | N
             # caller shows up in analytics without anyone wiring it - the hook
             # cannot be used without a purpose, and that is all the grouping
             # needs.
-            budget.record_fleet_usage(purpose, model, inp, out, batched=True)
+            if not charged_to_user:
+                budget.record_fleet_usage(purpose, model, inp, out, batched=True)
             events.publish_task(task_id)
             return
         db.execute(

@@ -153,3 +153,55 @@ def test_every_task_is_covered_by_the_ceiling():
         "mail_classify",
         "mail_classify_backfill",
     }
+
+
+class TestFilterWorkIsNotFleetWork:
+    """A user's filter run was booked twice: once against them by the sweep's
+    own loop, once against the fleet by the batch hook. Measured on prod over
+    seven days: 9,986,361 fleet tokens against 10,009,493 user tokens for the
+    same work, reporting $1.6134 of filter spend where $0.5813 was real.
+    """
+
+    def _fire(self, purpose, **kw):
+        from api.tasks.runtime import _batch_event_hook
+
+        hook = _batch_event_hook(1, purpose, "gpt-5-nano", **kw)
+        hook("b-usage", "submitted", {"requests": 1, "completed": 0, "failed": 0})
+        hook("b-usage", "completed", {"input_tokens": 1000, "output_tokens": 100})
+
+    def _fleet_rows(self, purpose):
+        return db.query(
+            "SELECT * FROM api_usage WHERE user_id IS NULL AND purpose = %s", (purpose,)
+        )
+
+    def test_work_charged_to_a_user_is_not_charged_to_the_fleet_as_well(self):
+        self._fire("filter", charged_to_user=True)
+        assert self._fleet_rows("filter") == []
+
+    def test_fleet_work_still_books_against_the_fleet(self):
+        """The default must stay fleet, or #212's whole point - a new AI caller
+        appearing in analytics with no wiring - is undone."""
+        self._fire("comp")
+        assert len(self._fleet_rows("comp")) == 1
+
+    def test_the_batch_row_is_written_either_way(self):
+        """Only the ledger entry is suppressed. ai_batches is the record of
+        what the provider did and is not about who pays."""
+        self._fire("filter", charged_to_user=True)
+        row = db.query_one("SELECT input_tokens FROM ai_batches WHERE provider_batch_id='b-usage'")
+        assert row is not None and row["input_tokens"] == 1000
+
+    def test_a_users_filter_run_cannot_consume_the_fleet_ceiling(self, monkeypatch):
+        """The control shipped in the spend-ceiling change read this double
+        booking as fleet spend, so one person's filters could stop every
+        scheduled sweep - which is what its own test said must not happen."""
+        monkeypatch.setattr(budget, "FLEET_WEEKLY_CYCLES", 1)
+        # Enough to breach several times over, so the assertion is about the
+        # user_id predicate and not about a magnitude that happens to fit.
+        for i in range(60):
+            from api.tasks.runtime import _batch_event_hook
+
+            hook = _batch_event_hook(1, "filter", "gpt-5-nano", charged_to_user=True)
+            hook(f"b{i}", "submitted", {"requests": 1, "completed": 0, "failed": 0})
+            hook(f"b{i}", "completed", {"input_tokens": 200_000_000, "output_tokens": 0})
+        budget.check_fleet_budget()
