@@ -23,6 +23,25 @@ def _park(kind: str, hours: float = 0.5) -> int:
     return row["id"]
 
 
+def _batch(
+    purpose: str, requests: int, failed: int, hours: float = 1.0, model: str = "gpt-5-mini"
+) -> None:
+    db.execute(
+        "INSERT INTO ai_batches (provider_batch_id, purpose, model, requests, completed, "
+        "failed_count, status, submitted_at) VALUES (%s, %s, %s, %s, %s, %s, 'completed', "
+        "now() - make_interval(secs => %s))",
+        (
+            f"b-{purpose}-{model}-{requests}-{failed}-{hours}",
+            purpose,
+            model,
+            requests,
+            requests - failed,
+            failed,
+            int(hours * 3600),
+        ),
+    )
+
+
 class TestVerifyNewDoesNotOverlapItself:
     """verify_new batches and parks, and its predicate - jobs with no verdict -
     stays true while the batch is in flight. A second task re-selects the same
@@ -156,6 +175,65 @@ class TestAStalledSweepIsVisible:
         assert {a["subject"] for a in self._alerts()} == {"extract_comp", "classify_mail"}
 
 
+class TestABatchThatFailedEveryRequestIsVisible:
+    """A 499-request mail_classify batch failed every request on 2026-09-02 and
+    its task closed 'done' with no error, because collection succeeded at
+    collecting nothing. Zero tokens and zero cost are correct - nothing ran -
+    so the spend ledger cannot see it either. Nothing reported it at all.
+    """
+
+    def _alerts(self):
+        from api import health
+
+        return [f for f in health.detect() if f["kind"] == "batch_failed_whole"]
+
+    def test_a_batch_that_failed_every_request_is_critical(self, f):
+        _batch("mail_classify", requests=499, failed=499)
+        alerts = self._alerts()
+        assert len(alerts) == 1
+        assert alerts[0]["severity"] == "critical"
+        assert alerts[0]["subject"] == "mail_classify"
+
+    def test_a_batch_that_succeeded_is_not_an_alert(self, f):
+        _batch("mail_classify", requests=499, failed=0)
+        assert self._alerts() == []
+
+    def test_a_partial_failure_is_a_different_event_and_does_not_alert(self, f):
+        """A batch fails WHOLE when the submission is rejected. Some requests
+        failing means bad inputs, which is not certainly a defect - and giving
+        it a failure-rate threshold would be inventing one."""
+        _batch("mail_classify", requests=499, failed=498)
+        assert self._alerts() == []
+
+    def test_an_empty_batch_is_not_a_whole_failure(self, f):
+        """0 = 0 satisfies failed_count = requests arithmetically and is not a
+        failure of anything."""
+        _batch("mail_classify", requests=0, failed=0)
+        assert self._alerts() == []
+
+    def test_it_stops_alerting_once_the_work_can_no_longer_be_resubmitted(self, f):
+        """Bounded to one completion window, like the parked detector: inside
+        it the batch can still be resubmitted, so the alert is actionable."""
+        from core.batch import completion_window_seconds
+
+        _batch(
+            "mail_classify", requests=499, failed=499, hours=completion_window_seconds() / 3600 + 2
+        )
+        assert self._alerts() == []
+
+    def test_the_message_says_why_nothing_else_reports_it(self, f):
+        _batch("extract_comp", requests=10, failed=10)
+        message = self._alerts()[0]["message"]
+        assert "done" in message and "no cost" in message
+
+    def test_each_model_is_its_own_alert(self, f):
+        """One model rejecting a parameter is the case this exists for, so a
+        second model failing must not be folded into the first."""
+        _batch("extract_comp", requests=10, failed=10, model="gpt-5-mini")
+        _batch("extract_comp", requests=10, failed=10, model="gpt-5.6-luna")
+        assert {a["detail"]["model"] for a in self._alerts()} == {"gpt-5-mini", "gpt-5.6-luna"}
+
+
 class TestAlertSubjectKind:
     """An alert's subject is not one kind of thing: two detectors put a source
     in it, one a host, one a provider and user, one a task kind. The dashboard
@@ -169,6 +247,15 @@ class TestAlertSubjectKind:
         assert health.subject_kind_for("extraction_failing") == health.SUBJECT_HOST
         assert health.subject_kind_for("oauth_token_invalid") == health.SUBJECT_PROVIDER_USER
         assert health.subject_kind_for("batch_parked_too_long") == health.SUBJECT_TASK
+        assert health.subject_kind_for("batch_failed_whole") == health.SUBJECT_PURPOSE
+
+    def test_a_purpose_is_not_a_task_kind(self):
+        """batch_failed_whole's subject is the spend ledger's purpose
+        ("mail_classify"); the task kind is "classify_mail". Declaring it
+        SUBJECT_TASK would link to a task kind that does not exist."""
+        from api import health
+
+        assert health.SUBJECT_PURPOSE != health.SUBJECT_TASK
 
     def test_generated_rate_spike_kinds_are_matched_by_shape(self):
         """They are built per check_type, so listing them would mean a new
