@@ -138,6 +138,36 @@ def _html_to_text(html: str) -> str:
     return _clean(unescape(_TAG.sub(" ", html)))
 
 
+# A field holds markup when it contains a CLOSING tag. Derived from the corpus
+# rather than picked: of 28,451 .olm bodies, 27,221 contain a "<" at all and
+# 27,198 contain a closing tag, so the 23 that differ are plain text using "<"
+# legitimately - a bare address in angle brackets, or "a < b". Matching on "<"
+# alone would run those through a stripper that has nothing to strip.
+_MARKUP = re.compile(r"</[a-z][a-z0-9]*>", re.IGNORECASE)
+
+
+def _olm_body_text(body: str | None, html: str | None) -> str | None:
+    """The readable text of an .olm message, chosen by CONTENT not by name.
+
+    OPFMessageCopyBody is named for text and holds raw markup on 96% of this
+    corpus - 27,221 of 28,451 messages carry tags and 20,359 leak CSS
+    declarations. The previous form was `body or _html_to_text(html)`, so a
+    non-empty body short-circuited the conversion and the markup went straight
+    into body_text, which is what the classifier reads and what the reader
+    renders as prose. The model has been reading doctype declarations.
+
+    This is the same mistake as the ThreadTopic one fixed in #259 one line
+    down, found independently: that trusted OPFMessageCopyThreadTopic to be a
+    thread id when it is a normalised subject. The .olm field names describe
+    what Outlook meant, not what the export contains, so a new field from this
+    format is not safe to use on its name alone.
+    """
+    if body and not _MARKUP.search(body):
+        return body
+    markup = html or body
+    return _html_to_text(markup) if markup else None
+
+
 def _body(msg: Message) -> str | None:
     """Prefer text/plain; fall back to stripped HTML.
 
@@ -333,9 +363,10 @@ def _olm_entries(raw: bytes, *, source: str, origin: str) -> Iterator[ImportedMe
         logger.warning("olm: unparsable xml in %s, skipping", origin)
         return
     for idx, node in enumerate(root.iter("email")):
-        body = _olm_text(node, "OPFMessageCopyBody")
-        html = _olm_text(node, "OPFMessageCopyHTMLBody")
-        text = body or (_html_to_text(html) if html else None)
+        text = _olm_body_text(
+            _olm_text(node, "OPFMessageCopyBody"),
+            _olm_text(node, "OPFMessageCopyHTMLBody"),
+        )
         addresses = [
             (e.get("OPFContactEmailAddressAddress") or "")
             for e in node.iter("emailAddress")

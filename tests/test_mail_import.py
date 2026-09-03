@@ -322,3 +322,71 @@ def test_olm_thread_topic_is_not_stored_as_a_thread_id():
     assert len(messages) == 1
     assert messages[0].provider_thread_id is None, "a subject is not a thread identity"
     assert messages[0].thread_topic == "Application Confirmation", "and it is not discarded"
+
+
+def _olm_body(body: str = "", html: str = "") -> str | None:
+    """One .olm message carrying the given body fields, through the real parser."""
+    parts = b"<emails><email><OPFMessageCopyMessageID>&lt;b@x&gt;</OPFMessageCopyMessageID>"
+    if body:
+        parts += b"<OPFMessageCopyBody>" + body.encode() + b"</OPFMessageCopyBody>"
+    if html:
+        parts += b"<OPFMessageCopyHTMLBody>" + html.encode() + b"</OPFMessageCopyHTMLBody>"
+    messages = list(_olm_entries(parts + b"</email></emails>", source="olm", origin="t.xml"))
+    assert len(messages) == 1
+    return messages[0].body_text
+
+
+def test_an_olm_body_full_of_markup_is_converted_not_trusted():
+    """OPFMessageCopyBody is named for text and holds raw markup on 96% of this
+    corpus: 27,221 of 28,451 messages carry tags and 20,359 leak CSS. The old
+    form was `body or _html_to_text(html)`, so a non-empty body short-circuited
+    the conversion and a doctype declaration went into the field the classifier
+    reads as prose."""
+    text = _olm_body(
+        body="&lt;!DOCTYPE html&gt;&lt;html&gt;&lt;body&gt;"
+        "&lt;p&gt;Thanks for applying.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;"
+    )
+    assert text is not None
+    assert "Thanks for applying." in text
+    assert "<" not in text and "DOCTYPE" not in text
+
+
+def test_a_genuinely_plain_olm_body_is_left_alone():
+    text = _olm_body(body="Thanks for applying. We will be in touch.")
+    assert text == "Thanks for applying. We will be in touch."
+
+
+def test_an_angle_bracket_that_is_not_a_tag_does_not_trigger_conversion():
+    """23 of 28,451 bodies contain a "<" with no closing tag - a bare address
+    or an inequality. Matching on "<" alone would run them through a stripper
+    that has nothing to strip and would eat the address."""
+    text = _olm_body(body="Reply to &lt;careers@example.com&gt; if 3 &lt; 5.")
+    assert text == "Reply to <careers@example.com> if 3 < 5."
+
+
+def test_the_dedicated_html_field_is_still_preferred_when_the_body_is_markup():
+    """Both fields carry markup on most of this corpus. The HTML field is the
+    one the format intends for it, so it wins over re-stripping the body."""
+    text = _olm_body(
+        body="&lt;p&gt;stale&lt;/p&gt;",
+        html="&lt;p&gt;current&lt;/p&gt;",
+    )
+    assert text is not None
+    assert "current" in text and "stale" not in text
+
+
+def test_an_html_only_message_still_converts():
+    text = _olm_body(html="&lt;p&gt;Interview scheduled.&lt;/p&gt;")
+    assert text is not None
+    assert "Interview scheduled." in text
+
+
+def test_a_document_with_no_text_becomes_empty_rather_than_markup():
+    """Five of 400 sampled real messages convert to nothing - calendar invites
+    whose whole body is `<html><head><meta></head></html>`. There is no text to
+    lose, and empty is the honest answer where raw markup would poison the
+    classifier."""
+    text = _olm_body(
+        body='&lt;html&gt;&lt;head&gt;&lt;meta charset="utf-8"&gt;&lt;/head&gt;&lt;/html&gt;'
+    )
+    assert not (text or "").strip()
