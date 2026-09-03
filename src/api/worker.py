@@ -13,6 +13,7 @@ import logging
 import os
 import signal
 import socket
+import threading
 import time
 from typing import Any
 
@@ -292,6 +293,16 @@ def _is_transient(exc: Exception) -> bool:
 # it pinned to whenever the row was first inserted - it survived every restart
 # and every deploy, so a column named for a start time answered a different
 # question entirely, and a roll could look like it had not happened.
+# How often a busy worker proves it is alive.
+#
+# Bounded above by the two things that read the answer: the admin fleet view
+# calls a worker dead after 90 seconds without a beat, and the reaper requeues
+# a task after HEARTBEAT_TIMEOUT_MINUTES without one. Sixty seconds keeps the
+# screen truthful with a beat of slack, and puts fifteen beats inside the
+# reaper's window so losing several in a row still cannot orphan a live task.
+HEARTBEAT_SECONDS = 60
+
+
 _PROCESS_STARTED_AT = datetime.datetime.now(datetime.UTC)
 
 
@@ -329,13 +340,26 @@ async def run_once() -> bool:
         return True
     task_start = time.monotonic()
 
-    async def _liveness() -> None:
+    stop_beating = threading.Event()
+
+    def _liveness() -> None:
         # Progress-based heartbeats stall when every job in flight is slow;
         # this proves the process is alive so the reaper only requeues tasks
-        # whose worker actually died. Also keeps worker_status fresh so a
-        # host deep in a long chunk never reads as dead.
-        while True:
-            await asyncio.sleep(60)
+        # whose worker actually died. Also keeps worker_status fresh so a host
+        # deep in a long chunk never reads as dead.
+        #
+        # A THREAD, not an asyncio task, and that is the whole point. A handler
+        # declared `async def` that never awaits blocks the event loop for its
+        # entire run, so a coroutine heartbeat is never scheduled and the
+        # liveness signal fails exactly when the work is longest. Two handler
+        # modules contain no await at all - mail_match and message_html - and
+        # match_mail was measured holding a worker for 428 seconds while the
+        # admin fleet view reported it dead the whole time.
+        #
+        # Liveness must not depend on the thing it is monitoring. A thread
+        # beats whether or not the loop is free, which is what a heartbeat is
+        # for.
+        while not stop_beating.wait(HEARTBEAT_SECONDS):
             beat = db.execute_count(
                 "UPDATE tasks SET last_heartbeat = now() WHERE id = %s AND status = 'running' "
                 "AND worker = %s AND attempts = %s",
@@ -348,7 +372,8 @@ async def run_once() -> bool:
                 return
             _report_worker_status(task["id"])
 
-    hb = asyncio.create_task(_liveness())
+    hb = threading.Thread(target=_liveness, name="liveness", daemon=True)
+    hb.start()
     try:
         await handler(task["id"], task["payload"])
         _finish(task["id"], "done")
@@ -383,7 +408,12 @@ async def run_once() -> bool:
             metrics.TASKS_PROCESSED.labels(task["kind"], "failed").inc()
             logger.exception(f"Task {task['id']} failed")
     finally:
-        hb.cancel()
+        # Signalled rather than cancelled: a thread cannot be cancelled, and
+        # the wait() returns immediately so the join costs nothing. Joined so
+        # the beat cannot outlive the claim it vouches for and stamp a task the
+        # next loop iteration has already moved on from.
+        stop_beating.set()
+        hb.join(timeout=5)
         set_current_claim(None)
         _current_claim = None
     metrics.TASK_DURATION.labels(task["kind"]).observe(time.monotonic() - task_start)
