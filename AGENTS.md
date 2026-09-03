@@ -40,7 +40,12 @@ These are instructions, not history. Follow them.
 - `src/core/` — provider datasheets, pricing, routing, storage primitives.
 - `alembic/` — migrations. See migrations.md before adding one.
 - `tests/` — integration tests against a real database. See testing.md.
-- The frontend lives in a separate repository and has its own AGENTS.md.
+- The frontend lives in a separate repository, `personal-portfolio`, under
+  `app/job-tracker/` (a person's own data) and `app/job-scripts/` (the
+  administrative view). It is not documented there — [frontend.md](docs/agents/frontend.md)
+  in this repository carries the standards a change to those surfaces must
+  meet, so a feature can be specified from here and coordinated with whoever
+  is working in that repository.
 
 ## Commands
 

@@ -1,6 +1,13 @@
 # User-visible surfaces
 
-The frontend lives in a separate repository. These rules hold in both.
+The frontend lives in the `personal-portfolio` repository, under
+`app/job-tracker/` and `app/job-scripts/`. These are the standards a change to
+those surfaces must meet.
+
+They are recorded here rather than there so a feature can be specified
+completely from this repository — an API change and the surface that consumes
+it are one piece of work, and whoever owns the frontend half needs to be told
+what the whole thing is, not just the endpoint.
 
 ## Components
 
