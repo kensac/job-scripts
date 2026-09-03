@@ -18,7 +18,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 
-from api import db
+from api import budget, db
 from api.auth import AuthedUser
 from api.routers.admin import require_admin
 
@@ -196,6 +196,11 @@ def spend(
         # ai_queries prices per URL and cannot see non-posting work; api_usage
         # prices every call and cannot say which posting it was about. Stating
         # both, labelled, beats printing one and calling it the total.
+        # Where spend sits against its ceiling, not just what it totals. The
+        # ceiling existed only inside the check that enforced it, so the first
+        # time anyone saw it was when scheduled work stopped - a control nobody
+        # can see is a control that only ever surprises.
+        "fleet_budget": budget.fleet_budget_status(),
         "ledger": {
             "spend_total_usd": ledger_total,
             "verdict_total_usd": totals.get("cost_usd"),
