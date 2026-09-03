@@ -11,6 +11,7 @@ import logging
 import os
 import time
 from contextvars import ContextVar
+from decimal import Decimal
 from typing import Any, LiteralString, NamedTuple
 
 from api import ai, budget, db, events, metrics
@@ -579,12 +580,19 @@ async def run_batched(
     """
     purpose = shape.purpose
     existing = _pending_batch_ids(task_id)
+    chosen = resolve(shape, override=configured_model(purpose))
     if not existing:
         # Only when about to SUBMIT. A resuming task is collecting work the
         # provider has already been paid for, and refusing that would discard
         # it - the ceiling exists to stop new spend, not to strand old.
-        budget.check_fleet_budget()
-    chosen = resolve(shape, override=configured_model(purpose))
+        #
+        # Priced with what THIS submission will cost, not just what has been
+        # spent. A ceiling checked against history alone lets one large batch
+        # cross it in a single step and refuses on the following cycle, after
+        # the money is gone - which is the failure the ceiling exists to
+        # prevent, committed by the ceiling.
+        per_call = chosen.est_cost_usd or Decimal(0)
+        budget.check_fleet_budget(per_call * len(specs))
     logger.info(f"Task {task_id}: {purpose} on {chosen.model} - {chosen.reason}")
     # Every spec in a sweep carries the same instructions - they are module
     # constants - so the first is the prompt for the batch. Recorded before

@@ -140,8 +140,11 @@ class TestTheSweepRefuses:
         from api.tasks.runtime import run_batched
 
         source = inspect.getsource(run_batched)
-        assert "check_fleet_budget()" in source
-        assert source.index("check_fleet_budget()") < source.index("submit_or_collect")
+        # The call now carries a projection, so match the name rather than an
+        # exact spelling - a test pinned to the argument list breaks on a real
+        # improvement, which is what happened when the projection was added.
+        assert "check_fleet_budget(" in source
+        assert source.index("check_fleet_budget(") < source.index("submit_or_collect")
 
 
 def test_every_task_is_covered_by_the_ceiling():
@@ -205,3 +208,90 @@ class TestFilterWorkIsNotFleetWork:
             hook(f"b{i}", "submitted", {"requests": 1, "completed": 0, "failed": 0})
             hook(f"b{i}", "completed", {"input_tokens": 200_000_000, "output_tokens": 0})
         budget.check_fleet_budget()
+
+
+class TestTheCeilingIsVisibleBeforeItFires:
+    """The ceiling existed only inside the check that enforced it, so the first
+    time anyone saw it was when scheduled work stopped. A control nobody can
+    see is a control that only ever surprises.
+    """
+
+    def test_the_status_is_a_position_not_a_total(self):
+        """A total answers "what have I spent". Deciding whether to start a
+        backfill needs "how much room is left", which is a different question
+        and the one nothing could answer."""
+        st = budget.fleet_budget_status()
+        assert st["ceiling_usd"] > 0
+        assert st["headroom_usd"] == st["ceiling_usd"] - st["spent_usd"]
+        assert 0 <= st["used_fraction"] <= 1 or st["spent_usd"] > st["ceiling_usd"]
+
+    def test_the_ceiling_is_reported_in_the_unit_it_is_defined_in(self):
+        """Dollars alone invite someone to round the number and lose the
+        derivation; the ceiling is a count of full sweeps."""
+        st = budget.fleet_budget_status()
+        assert st["cycles"] == budget.FLEET_WEEKLY_CYCLES
+        assert st["ceiling_usd"] == st["cycle_cost_usd"] * st["cycles"]
+
+    def test_it_says_what_it_cannot_see(self):
+        """The provider key is shared with other services in the fleet, so
+        their spend bills to the same account and is invisible here. A budget
+        screen that silently excluded it would be honest sentence by sentence
+        and misleading as a whole."""
+        st = budget.fleet_budget_status()
+        assert "this application" in st["scope"]
+        assert "same provider key" in st["excludes"]
+
+    def test_a_disabled_ceiling_says_so_rather_than_reporting_zero(self, monkeypatch):
+        monkeypatch.setattr(budget, "FLEET_WEEKLY_CYCLES", 0)
+        st = budget.fleet_budget_status()
+        assert st["enabled"] is False
+        assert st["headroom_usd"] is None
+        assert st["used_fraction"] is None
+
+
+class TestTheCeilingCountsWhatIsAboutToBeSpent:
+    """Checked against history alone, one large batch crossed the ceiling in a
+    single step and the refusal arrived on the next cycle - after the money was
+    gone. That is the failure the ceiling exists to prevent, committed by the
+    ceiling.
+    """
+
+    def test_a_submission_that_would_cross_the_ceiling_is_refused(self):
+        ceiling = budget.fleet_cycle_cost_usd() * budget.FLEET_WEEKLY_CYCLES
+        with pytest.raises(budget.FleetBudgetExceeded, match="would add"):
+            budget.check_fleet_budget(ceiling + Decimal("1"))
+
+    def test_a_submission_that_fits_is_allowed(self):
+        budget.check_fleet_budget(Decimal("0.01"))
+
+    def test_the_refusal_names_what_the_submission_would_add(self):
+        """So the number in the message is the decision being refused, not a
+        running total the reader has to difference themselves."""
+        ceiling = budget.fleet_cycle_cost_usd() * budget.FLEET_WEEKLY_CYCLES
+        with pytest.raises(budget.FleetBudgetExceeded) as exc:
+            budget.check_fleet_budget(ceiling * 2)
+        assert "would add" in str(exc.value)
+
+    def test_history_alone_still_refuses(self, monkeypatch):
+        """The original behaviour has to survive: spend already past the
+        ceiling stops new work even when the next submission is tiny."""
+        monkeypatch.setattr(budget, "FLEET_WEEKLY_CYCLES", 1)
+        _spend(str(budget.fleet_cycle_cost_usd() + Decimal("1")))
+        with pytest.raises(budget.FleetBudgetExceeded):
+            budget.check_fleet_budget(Decimal("0.0001"))
+
+    def test_a_projection_is_not_required(self):
+        """Callers that cannot price a submission still get the old check
+        rather than an error."""
+        budget.check_fleet_budget()
+
+
+class TestTheSweepPricesItsOwnSubmission:
+    def test_run_batched_projects_before_submitting(self):
+        import inspect
+
+        from api.tasks.runtime import run_batched
+
+        source = inspect.getsource(run_batched)
+        assert "check_fleet_budget(" in source
+        assert "len(specs)" in source, "the projection must scale with the submission"

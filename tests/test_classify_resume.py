@@ -158,7 +158,7 @@ class TestTheCeilingDoesNotStrandPaidWork:
 
         tid = _task([], batch_ids=["batch_paid_for"])
 
-        def refuse():
+        def refuse(projected_usd=None):
             raise budget.FleetBudgetExceeded("over")
 
         monkeypatch.setattr(runtime.budget, "check_fleet_budget", refuse)
@@ -178,7 +178,7 @@ class TestTheCeilingDoesNotStrandPaidWork:
 
         tid = _task([])
 
-        def refuse():
+        def refuse(projected_usd=None):
             raise budget.FleetBudgetExceeded("over")
 
         monkeypatch.setattr(runtime.budget, "check_fleet_budget", refuse)
