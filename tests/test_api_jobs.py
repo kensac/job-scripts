@@ -429,3 +429,30 @@ def test_an_amount_with_no_captured_currency_says_so(client, user_headers, f):
     )
     assert row["comp_min"] == 90000
     assert row["comp_currency"] is None, "absent currency must be visible, not implied"
+
+
+def test_comp_carries_the_period_and_basis_it_was_derived_from(client, user_headers):
+    """comp.py writes comp_period and comp_basis so an annualised figure can say
+    what it was annualised FROM - its own comment is that a yearly number with
+    no period beside it cannot be audited. Both were written and neither was
+    selected, so an hourly rate and a salary rendered identically: a $45/hr
+    posting and a $94k posting both showed as "$94k".
+    """
+    uid = _uid(user_headers)
+    _subscribe(uid, "src-comp")
+    job_id = _insert_job("src-comp", "https://comp.test/1")
+    db.execute(
+        "UPDATE jobs SET comp_min = 94000, comp_max = 94000, comp_text = '$45/hr', "
+        "comp_currency = 'USD', comp_period = 'hourly', comp_basis = 'base' WHERE id = %s",
+        (job_id,),
+    )
+    _pass_closed("https://comp.test/1")
+
+    listed = client.get("/v1/user/jobs", headers=user_headers).json()["rows"]
+    row = next(r for r in listed if r["job_id"] == job_id)
+    assert row["comp_period"] == "hourly"
+    assert row["comp_basis"] == "base"
+
+    detail = client.get(f"/v1/user/jobs/{job_id}/detail", headers=user_headers).json()["job"]
+    assert detail["comp_period"] == "hourly"
+    assert detail["comp_basis"] == "base"
