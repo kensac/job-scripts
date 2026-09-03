@@ -154,3 +154,62 @@ class TestAStalledSweepIsVisible:
         _park("extract_comp", hours=over)
         _park("classify_mail", hours=over)
         assert {a["subject"] for a in self._alerts()} == {"extract_comp", "classify_mail"}
+
+
+class TestAlertSubjectKind:
+    """An alert's subject is not one kind of thing: two detectors put a source
+    in it, one a host, one a provider and user, one a task kind. The dashboard
+    linked all of them to the sources page, which is right for two of five.
+    """
+
+    def test_each_detector_declares_what_its_subject_is(self):
+        from api import health
+
+        assert health.subject_kind_for("ats_text_collapse") == health.SUBJECT_SOURCE
+        assert health.subject_kind_for("extraction_failing") == health.SUBJECT_HOST
+        assert health.subject_kind_for("oauth_token_invalid") == health.SUBJECT_PROVIDER_USER
+        assert health.subject_kind_for("batch_parked_too_long") == health.SUBJECT_TASK
+
+    def test_generated_rate_spike_kinds_are_matched_by_shape(self):
+        """They are built per check_type, so listing them would mean a new
+        check_type silently losing its link."""
+        from api import health
+
+        assert health.subject_kind_for("closed_rate_spike") == health.SUBJECT_SOURCE
+        assert health.subject_kind_for("clearance_rate_spike") == health.SUBJECT_SOURCE
+
+    def test_an_unknown_kind_gets_no_subject_kind(self):
+        """None rather than a default: a wrong link is worse than no link,
+        which is the whole reason this exists."""
+        from api import health
+
+        assert health.subject_kind_for("something_added_later") is None
+
+    def test_every_detector_this_module_emits_is_mapped(self):
+        """A detector without an entry renders as plain text - honest, but it
+        should be a decision rather than an oversight."""
+        import inspect
+        import re
+
+        from api import health
+
+        emitted = set(re.findall(r'"kind": "([a-z_]+)"', inspect.getsource(health)))
+        unmapped = {k for k in emitted if health.subject_kind_for(k) is None}
+        assert not unmapped, f"detectors with no subject_kind: {unmapped}"
+
+    def test_the_admin_endpoint_annotates_open_alerts(self, client, admin_headers):
+        from api import health
+
+        health.record(
+            [
+                {
+                    "kind": "batch_parked_too_long",
+                    "subject": "extract_comp",
+                    "severity": "critical",
+                    "message": "m",
+                    "detail": {},
+                }
+            ]
+        )
+        body = client.get("/v1/admin/health", headers=admin_headers).json()
+        assert body["open"][0]["subject_kind"] == health.SUBJECT_TASK
