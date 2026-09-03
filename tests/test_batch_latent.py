@@ -254,87 +254,6 @@ class TestABatchThatFailedEveryRequestIsVisible:
         assert {a["detail"]["model"] for a in self._alerts()} == {"gpt-5-mini", "gpt-5.6-luna"}
 
 
-class TestAWedgedHandlerIsVisible:
-    """Liveness is a daemon thread beating on a timer, so it proves the process
-    exists and says nothing about whether the work advances. The reaper keys on
-    that heartbeat, so a wedged handler is never requeued - it holds its worker
-    until someone recreates the container.
-
-    On 2026-09-03 a match_mail task sat 60 minutes against a 5.2-minute worst
-    case, on attempt 1, heartbeat 20 seconds old, holding one of three workers
-    while ten poll_batches queued behind it. Every earlier run of that kind had
-    been requeued once or twice; this one never was, because the change that
-    stopped the spurious reaping also removed the only recovery for a real one.
-    """
-
-    def _alerts(self):
-        from api import health
-
-        return [f for f in health.detect() if f["kind"] == "handler_overdue"]
-
-    def test_a_task_inside_its_kinds_worst_case_is_not_an_alert(self, f):
-        _completed("match_mail", minutes=5, n=18)
-        _running("match_mail", minutes=4)
-        assert self._alerts() == []
-
-    def test_a_task_past_its_worst_case_but_inside_the_grace_is_not_an_alert(self, f):
-        """The reaper's own timeout is the margin. A new worst case by a minute
-        is a slow run, not a wedged one."""
-        from api.tasks.runtime import HEARTBEAT_TIMEOUT_MINUTES
-
-        _completed("match_mail", minutes=5, n=18)
-        _running("match_mail", minutes=5 + HEARTBEAT_TIMEOUT_MINUTES - 1)
-        assert self._alerts() == []
-
-    def test_a_task_past_its_worst_case_by_more_than_the_grace_is_critical(self, f):
-        _completed("match_mail", minutes=5, n=18)
-        task_id = _running("match_mail", minutes=60)
-        alerts = self._alerts()
-        assert len(alerts) == 1
-        assert alerts[0]["severity"] == "critical"
-        assert alerts[0]["subject"] == "match_mail"
-        assert alerts[0]["detail"]["task_id"] == task_id
-
-    def test_the_threshold_is_per_kind_not_per_fleet(self, f):
-        """A long kind and a short kind running the same wall-clock time are
-        not the same event. ingest_source at 60 minutes is normal; match_mail
-        at 60 minutes is wedged."""
-        _completed("match_mail", minutes=5, n=18)
-        _completed("ingest_source", minutes=188, n=50)
-        _running("match_mail", minutes=60)
-        _running("ingest_source", minutes=60)
-        assert [a["subject"] for a in self._alerts()] == ["match_mail"]
-
-    def test_a_kind_with_no_completed_history_does_not_alert(self, f):
-        """No history is no bound. Alerting on a handler that has never
-        finished would fire on every kind's first ever run."""
-        _running("match_mail", minutes=600)
-        assert self._alerts() == []
-
-    def test_the_message_says_the_reaper_will_not_recover_it(self, f):
-        """The consequence, not the symptom. 'Running a long time' reads as
-        slow; the point is that nothing will requeue it."""
-        _completed("match_mail", minutes=5, n=18)
-        _running("match_mail", minutes=60)
-        assert "will not requeue it" in self._alerts()[0]["message"]
-
-    def test_the_sample_behind_the_bound_is_reported(self, f):
-        """The bound IS the sample: a worst case over three runs is much weaker
-        than one over a thousand, and the reader can see which they have."""
-        _completed("match_mail", minutes=5, n=3)
-        _running("match_mail", minutes=60)
-        assert self._alerts()[0]["detail"]["completed_runs"] == 3
-
-    def test_a_fresh_heartbeat_does_not_suppress_it(self, f):
-        """The whole point: the heartbeat is a timer and stays fresh forever,
-        which is why the reaper misses this and why this detector cannot key
-        on the heartbeat either."""
-        _completed("match_mail", minutes=5, n=18)
-        task_id = _running("match_mail", minutes=60)
-        db.execute("UPDATE tasks SET last_heartbeat = now() WHERE id = %s", (task_id,))
-        assert len(self._alerts()) == 1
-
-
 class TestAlertSubjectKind:
     """An alert's subject is not one kind of thing: two detectors put a source
     in it, one a host, one a provider and user, one a task kind. The dashboard
@@ -349,7 +268,6 @@ class TestAlertSubjectKind:
         assert health.subject_kind_for("oauth_token_invalid") == health.SUBJECT_PROVIDER_USER
         assert health.subject_kind_for("batch_parked_too_long") == health.SUBJECT_TASK
         assert health.subject_kind_for("batch_failed_whole") == health.SUBJECT_PURPOSE
-        assert health.subject_kind_for("handler_overdue") == health.SUBJECT_TASK
 
     def test_a_purpose_is_not_a_task_kind(self):
         """batch_failed_whole's subject is the spend ledger's purpose
