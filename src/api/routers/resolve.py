@@ -17,6 +17,7 @@ rather than a second one.
 
 from __future__ import annotations
 
+import datetime
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -45,6 +46,67 @@ _AWAITING_KINDS = (
 ASSIGN = "assign_application"
 NOT_AN_APPLICATION = "not_an_application"
 NOT_JOB_RELATED = "not_job_related"
+
+
+# DECLARED RESPONSE SCHEMAS, which is not the house style yet and should be.
+# 123 of the 128 operations in openapi.json ship `"schema": {}`, so a client
+# and this server can disagree about an envelope and nothing mechanical
+# notices - four such mismatches were found by hand in one day, every one
+# silent. A generated schema is the only place that drift becomes detectable,
+# and the newest surface is the cheapest place to start rather than a
+# retrofit.
+class ResolveChoiceAffects(BaseModel):
+    messages: int
+
+
+# exclude_none on the routes below is load-bearing, not tidiness. `affects`
+# omitted means one message and `reason` omitted means the verb is available;
+# serialising either as an explicit null would say something the contract does
+# not - and the picker reads presence, not value.
+class ResolveChoice(BaseModel):
+    choice: str
+    label: str
+    eligible: bool
+    reason: str | None = None
+    # Omitted when the verb touches exactly one message, and omission MEANS
+    # one rather than unknown.
+    affects: ResolveChoiceAffects | None = None
+
+
+class ResolveCandidate(BaseModel):
+    id: int
+    company_name: str | None = None
+    title: str | None = None
+    applied_at: datetime.datetime | None = None
+
+
+class ResolveMessage(BaseModel):
+    id: int
+    subject: str | None = None
+    from_email: str | None = None
+    sent_at: datetime.datetime | None = None
+    classified_as: str | None = None
+    extracted_company: str | None = None
+    extracted_title: str | None = None
+
+
+class ResolveItem(BaseModel):
+    id: str
+    kind: str
+    message: ResolveMessage
+    candidates: list[ResolveCandidate]
+    choices: list[ResolveChoice]
+
+
+class ResolveQueue(BaseModel):
+    items: list[ResolveItem]
+    total: int
+
+
+class ResolveResult(BaseModel):
+    ok: bool
+    choice: str
+    application_id: int | None = None
 
 
 class ResolveRequest(BaseModel):
@@ -121,6 +183,47 @@ def _thread_size(user_id: int, message_id: int, thread: str | None) -> int:
     return max(1, int((row or {}).get("c", 1)))
 
 
+def choices_for_message(
+    owner_id: int, message_id: int, company: str | None, thread: str | None
+) -> list[dict[str, Any]]:
+    """The verbs available on one message, decided HERE rather than by the
+    caller.
+
+    Shared with the candidate picker, which is the surface a person actually
+    makes this decision on. A modal that builds the verb list itself has to
+    decide eligibility client-side, and eligibility decided client-side is
+    exactly what a server-declared contract exists to prevent - the first time
+    a verb becomes conditional, one of the two lists is wrong and nothing says
+    which.
+    """
+    key = mail_match.norm_company(company)
+    has_candidate = False
+    if key:
+        rows = db.query(
+            "SELECT company_name FROM applications WHERE user_id = %s AND dismissed_at IS NULL",
+            (owner_id,),
+        )
+        has_candidate = any(mail_match.norm_company(r["company_name"]) == key for r in rows)
+    if has_candidate:
+        assign = _choice(
+            ASSIGN,
+            "Belongs to an application",
+            messages=_thread_size(owner_id, message_id, thread),
+        )
+    else:
+        assign = _choice(
+            ASSIGN,
+            "Belongs to an application",
+            eligible=False,
+            reason="no application at this company yet",
+        )
+    return [
+        assign,
+        _choice(NOT_AN_APPLICATION, "Belongs to no application"),
+        _choice(NOT_JOB_RELATED, "Not job mail"),
+    ]
+
+
 def _queue_for(owner_id: int, limit: int, offset: int) -> dict[str, Any]:
     rows = db.query(
         _QUEUE_SQL,
@@ -144,18 +247,6 @@ def _queue_for(owner_id: int, limit: int, offset: int) -> dict[str, Any]:
     for row in rows:
         key = mail_match.norm_company(row["company"])
         candidates = [a for a in apps if key and mail_match.norm_company(a["company_name"]) == key]
-        moves = _thread_size(owner_id, row["id"], row["provider_thread_id"])
-        if candidates:
-            assign = _choice(ASSIGN, "Belongs to an application", messages=moves)
-        else:
-            # Not hidden. A verb that is unavailable and says why teaches more
-            # than a verb that silently is not there.
-            assign = _choice(
-                ASSIGN,
-                "Belongs to an application",
-                eligible=False,
-                reason="no application at this company yet",
-            )
         items.append(
             {
                 "id": f"message:{row['id']}",
@@ -172,11 +263,9 @@ def _queue_for(owner_id: int, limit: int, offset: int) -> dict[str, Any]:
                 # The matcher refused to choose between these on purpose, which
                 # is exactly the decision a person is best placed to settle.
                 "candidates": candidates,
-                "choices": [
-                    assign,
-                    _choice(NOT_AN_APPLICATION, "Belongs to no application"),
-                    _choice(NOT_JOB_RELATED, "Not job mail"),
-                ],
+                "choices": choices_for_message(
+                    owner_id, row["id"], row["company"], row["provider_thread_id"]
+                ),
             }
         )
     return {"items": items, "total": len(items)}
@@ -240,7 +329,7 @@ def _resolve(item_id: str, body: ResolveRequest, owner_id: int, actor_user_id: i
     return {"ok": True, "choice": body.choice}
 
 
-@router.get("/user/resolve/queue")
+@router.get("/user/resolve/queue", response_model=ResolveQueue, response_model_exclude_none=True)
 def resolve_queue(
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
@@ -250,12 +339,14 @@ def resolve_queue(
     return _queue_for(user.id, limit, offset)
 
 
-@router.post("/user/resolve/{item_id}")
+@router.post(
+    "/user/resolve/{item_id}", response_model=ResolveResult, response_model_exclude_none=True
+)
 def resolve_item(item_id: str, body: ResolveRequest, user: AuthedUser = Depends(require_user)):
     return _resolve(item_id, body, owner_id=user.id, actor_user_id=user.id)
 
 
-@router.get("/admin/resolve/queue")
+@router.get("/admin/resolve/queue", response_model=ResolveQueue, response_model_exclude_none=True)
 def admin_resolve_queue(
     user_id: int = Query(...),
     limit: int = Query(default=50, ge=1, le=200),
@@ -267,7 +358,9 @@ def admin_resolve_queue(
     return _queue_for(user_id, limit, offset)
 
 
-@router.post("/admin/resolve/{item_id}")
+@router.post(
+    "/admin/resolve/{item_id}", response_model=ResolveResult, response_model_exclude_none=True
+)
 def admin_resolve_item(
     item_id: str,
     body: ResolveRequest,

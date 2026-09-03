@@ -20,6 +20,7 @@ from pydantic import BaseModel
 
 from api import db, mail_match, mail_pipeline, rates
 from api.auth import AuthedUser, require_user
+from api.routers import resolve
 from api.routers.admin import require_admin
 from api.tasks.mail_classify import EVENT_KINDS
 from core.mail_html import sanitise
@@ -583,7 +584,7 @@ def _admin_message(message_id: int) -> dict[str, Any]:
     be scoped to them rather than to the caller.
     """
     message = db.query_one(
-        "SELECT id, user_id, subject, from_email, sent_at, body_text "
+        "SELECT id, user_id, subject, from_email, sent_at, body_text, provider_thread_id "
         "FROM email_messages WHERE id = %s",
         (message_id,),
     )
@@ -1158,8 +1159,8 @@ class Assignment(BaseModel):
 
 def _owned_message(message_id: int, user_id: int) -> dict[str, Any]:
     row = db.query_one(
-        "SELECT id, subject, from_email, sent_at, body_text FROM email_messages "
-        "WHERE id = %s AND user_id = %s",
+        "SELECT id, subject, from_email, sent_at, body_text, provider_thread_id "
+        "FROM email_messages WHERE id = %s AND user_id = %s",
         (message_id, user_id),
     )
     if row is None:
@@ -1401,6 +1402,14 @@ def _candidates_payload(
         "applications": [
             {k: v for k, v in row.items() if not k.startswith("_")} for row in scored[:limit]
         ],
+        # The verbs available here, decided by the server. The modal is the
+        # surface a person actually makes this decision on, and it is reached
+        # from the mail list and the unmatched queue rather than only from a
+        # queue page - so it needs the same declared choices the queue rows
+        # carry, or its eligibility is a client-side guess.
+        "choices": resolve.choices_for_message(
+            owner_id, message_id, company, message.get("provider_thread_id")
+        ),
         "total_applications": len(scored),
         # The count the matcher choked on. Two or more means it refused on
         # purpose rather than finding nothing.
