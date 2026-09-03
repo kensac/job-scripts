@@ -171,13 +171,110 @@ def run_all_filters(user: AuthedUser = Depends(require_user)):
     return {"task_id": task_id}
 
 
+# What a preset would show TODAY, without spending anything.
+#
+# Custom verdicts key on (url, check_type, prompt_hash) and prompt_hash is
+# computed from the prompt text and on_ambiguous alone - nothing user-specific
+# - so two people running the same preset share a cache. Verified against
+# production: all 10 stored user_filters hashes equal hash(prompt,
+# on_ambiguous) exactly.
+#
+# That matters most for someone with no API key, who would otherwise face
+# 7,397 postings that pass the closed and clearance gates with no way to
+# narrow them. Adopting a preset with coverage turns that into a readable
+# board immediately. Adopting one WITHOUT coverage shows an empty board until
+# AI runs, which is worse than the wall - so the numbers ship with the preset
+# rather than the choice being made blind. Today one preset of eleven has any
+# cached verdicts at all.
+_PRESET_COVERAGE_SQL = """
+WITH q AS (
+    SELECT j.id AS job_id, j.url AS url, a.check_type, a.status, a.id AS qid
+    FROM ai_queries a
+    JOIN jobs j ON j.url = a.url
+    WHERE j.active AND a.check_type IN ('closed', 'clearance')
+      AND a.status IN ('passed', 'rejected')
+), latest AS (
+    -- Deduping on jobs.id rather than the url text is load-bearing for speed,
+    -- not tidiness: the url-keyed version of this pair of queries measured
+    -- 134s and 20s against production. Sorting integers keeps it in memory.
+    SELECT DISTINCT ON (job_id, check_type) job_id, url, check_type, status
+    FROM q ORDER BY job_id, check_type, qid DESC
+), eligible AS (
+    -- Both gates passed. HAVING count(*) = 2 beats a self-join on the same
+    -- CTE, which is what made the original slow.
+    SELECT min(url) AS url
+    FROM latest WHERE status = 'passed'
+    GROUP BY job_id HAVING count(*) = 2
+), judged AS (
+    SELECT DISTINCT ON (url, prompt_hash) url, prompt_hash, status
+    FROM ai_queries
+    WHERE check_type = 'custom' AND prompt_hash = ANY(%(hashes)s)
+      AND status IN ('passed', 'rejected')
+    ORDER BY url, prompt_hash, id DESC
+)
+SELECT jd.prompt_hash,
+       count(*) AS judged,
+       count(*) FILTER (WHERE jd.status = 'passed') AS would_show,
+       (SELECT count(*) FROM eligible) AS eligible
+FROM eligible e JOIN judged jd ON jd.url = e.url
+GROUP BY jd.prompt_hash
+"""
+
+_ELIGIBLE_SQL = """
+WITH q AS (
+    SELECT j.id AS job_id, a.check_type, a.status, a.id AS qid
+    FROM ai_queries a
+    JOIN jobs j ON j.url = a.url
+    WHERE j.active AND a.check_type IN ('closed', 'clearance')
+      AND a.status IN ('passed', 'rejected')
+), latest AS (
+    SELECT DISTINCT ON (job_id, check_type) job_id, check_type, status
+    FROM q ORDER BY job_id, check_type, qid DESC
+)
+SELECT count(*) AS eligible FROM (
+    SELECT job_id FROM latest WHERE status = 'passed'
+    GROUP BY job_id HAVING count(*) = 2
+) both_gates
+"""
+
+
 @router.get("/filter-presets")
 def list_presets(user: AuthedUser = Depends(require_user)):
+    presets = db.query(
+        "SELECT id, name, description, prompt, on_ambiguous, fail_closed "
+        "FROM filter_presets WHERE active ORDER BY name"
+    )
+    hashes = {p["id"]: _hash(p["prompt"], p["on_ambiguous"]) for p in presets}
+    coverage = {
+        row["prompt_hash"]: row
+        for row in db.query(_PRESET_COVERAGE_SQL, {"hashes": list(hashes.values())})
+    }
+    eligible_row = db.query_one(_ELIGIBLE_SQL)
+    eligible = int(eligible_row["eligible"]) if eligible_row else 0
     return {
-        "presets": db.query(
-            "SELECT id, name, description, prompt, on_ambiguous, fail_closed "
-            "FROM filter_presets WHERE active ORDER BY name"
-        )
+        "presets": [
+            {
+                **preset,
+                "coverage": _coverage(coverage.get(hashes[preset["id"]]), eligible),
+            }
+            for preset in presets
+        ],
+        "eligible_postings": eligible,
+    }
+
+
+def _coverage(row: dict | None, eligible: int) -> dict:
+    """Counts, not a rate. "170 of 7,397 already judged" is the sentence; a
+    percentage hides that the remainder is unjudged rather than rejected."""
+    judged = int(row["judged"]) if row else 0
+    return {
+        "would_show_now": int(row["would_show"]) if row else 0,
+        "already_judged": judged,
+        "eligible": eligible,
+        # Postings this preset has never been run against. They are not
+        # rejections - nothing has looked at them, and looking costs an AI
+        # call the adopter may not be able to make.
+        "needs_ai": max(eligible - judged, 0),
     }
 
 
