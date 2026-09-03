@@ -377,3 +377,61 @@ def test_a_real_provider_thread_still_groups(f):
     created, matched = task.seed_from_mail(uid)
     assert created == 1, "one real conversation is one application"
     assert matched == 3
+
+
+def test_derived_applied_at_does_not_veto_its_own_earlier_evidence(f):
+    """The floor was the earliest TITLED message, then used to rule out the
+    title-less ones - 159 of 161 blocked messages carry no role_title, and
+    Battelle missed by four seconds. The date was derived from a subset of the
+    evidence and then used against the rest of it."""
+    uid = f.make_user()
+    early = datetime.datetime(2026, 3, 1, 9, 0, tzinfo=datetime.UTC)
+    later = datetime.datetime(2026, 3, 1, 9, 0, 4, tzinfo=datetime.UTC)
+
+    bare = _message(uid, sent_at=early)
+    _event(bare, "acknowledgement", company="Battelle")
+    titled = _message(uid, sent_at=later)
+    _event(titled, "acknowledgement", company="Battelle", title="Software Engineer")
+
+    created, _ = task.seed_from_mail(uid)
+    assert created == 1
+    row = db.query_one("SELECT applied_at FROM applications WHERE user_id = %s", (uid,))
+    assert row["applied_at"] == early, "the floor must include the evidence it was derived from"
+
+
+def test_titleless_evidence_is_not_guessed_at_an_ambiguous_company(f):
+    """Two roles at one employer: a message naming neither cannot be assigned
+    to one of them. Lowering both floors on its say-so would replace a silent
+    wrong answer with a different silent wrong answer."""
+    uid = f.make_user()
+    early = datetime.datetime(2026, 3, 1, tzinfo=datetime.UTC)
+    later = datetime.datetime(2026, 6, 1, tzinfo=datetime.UTC)
+
+    bare = _message(uid, sent_at=early)
+    _event(bare, "acknowledgement", company="Acme")
+    for role in ("Backend Engineer", "Data Engineer"):
+        mid = _message(uid, sent_at=later)
+        _event(mid, "acknowledgement", company="Acme", title=role)
+
+    created, _ = task.seed_from_mail(uid)
+    assert created == 2
+    dates = {
+        r["applied_at"]
+        for r in db.query("SELECT applied_at FROM applications WHERE user_id = %s", (uid,))
+    }
+    assert dates == {later}, "an ambiguous message must not lower either floor"
+
+
+def test_titleless_evidence_still_leaves_the_message_unmatched_here(f):
+    """seed_from_mail only creates applications; attaching is the matcher's
+    job. Lowering the floor is what lets the tiers reach the message on the
+    next run, which is the re-runnable path rather than a second matcher."""
+    uid = f.make_user()
+    early = datetime.datetime(2026, 3, 1, tzinfo=datetime.UTC)
+    bare = _message(uid, sent_at=early)
+    _event(bare, "acknowledgement", company="Battelle")
+    titled = _message(uid, sent_at=datetime.datetime(2026, 3, 2, tzinfo=datetime.UTC))
+    _event(titled, "acknowledgement", company="Battelle", title="Software Engineer")
+
+    _created, matched = task.seed_from_mail(uid)
+    assert matched == 1, "only the titled group's own messages are attached here"
