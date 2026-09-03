@@ -225,3 +225,105 @@ def test_the_picker_and_the_queue_agree_on_eligibility(client, me):
     picker = client.get(f"/v1/user/messages/{mid}/candidates", headers=headers).json()["choices"]
     queued = client.get("/v1/user/resolve/queue", headers=headers).json()["items"][0]["choices"]
     assert picker == queued
+
+
+def _app(uid: int, company: str) -> int:
+    row = db.query_one(
+        "INSERT INTO applications (user_id, company_name, source_provenance) "
+        "VALUES (%s, %s, 'tracker') RETURNING id",
+        (uid, company),
+    )
+    assert row is not None
+    return row["id"]
+
+
+def _attach(mid: int, app_id: int) -> None:
+    db.execute(
+        "INSERT INTO application_matches (message_id, application_id, method, confidence) "
+        "VALUES (%s, %s, 'company_name', 'high')",
+        (mid, app_id),
+    )
+
+
+def test_a_row_that_would_move_an_application_outranks_one_that_would_not(client, me):
+    """A rejection landing on an application still showing "applied" changes
+    what the board says. An acknowledgement landing on the same application
+    changes nothing, because stage is derived from the strongest event and an
+    acknowledgement is never the strongest. Sorting by recency alone put those
+    two side by side."""
+    headers, uid = me
+    app_id = _app(uid, "Acme")
+    _attach(_msg(uid, "<seed@x>", "acknowledgement", "Acme"), app_id)
+    _msg(uid, "<ack@x>", "acknowledgement", "Acme")
+    _msg(uid, "<rej@x>", "rejection", "Acme")
+
+    items = client.get("/v1/user/resolve/queue", headers=headers).json()["items"]
+    assert items[0]["message"]["classified_as"] == "rejection"
+    assert items[0]["rank_reason"] == "answering this moves an application"
+    assert items[1]["rank_reason"] == "can be attached, but the stage would not move"
+
+
+def test_a_message_with_no_application_ranks_last_and_says_why(client, me):
+    headers, uid = me
+    app_id = _app(uid, "Acme")
+    _attach(_msg(uid, "<s2@x>", "acknowledgement", "Acme"), app_id)
+    _msg(uid, "<orphan@x>", "rejection", "Nowhere Inc")
+    _msg(uid, "<known@x>", "rejection", "Acme")
+
+    items = client.get("/v1/user/resolve/queue", headers=headers).json()["items"]
+    assert items[-1]["message"]["extracted_company"] == "Nowhere Inc"
+    assert items[-1]["rank_reason"] == "no application at this company yet"
+
+
+def test_ranking_happens_before_paging(client, me):
+    """Sorting inside a page would reorder fifty rows and call it a ranking of
+    three and a half thousand: the page looks sensible and the ordering is a
+    lie. The high-rank row is oldest here, so a recency sort would bury it."""
+    headers, uid = me
+    app_id = _app(uid, "Acme")
+    _attach(_msg(uid, "<s3@x>", "acknowledgement", "Acme"), app_id)
+    old = db.query_one(
+        "INSERT INTO email_messages (user_id, provider_message_id, source, from_email, subject, "
+        "sent_at, body_text) VALUES (%s, '<old@x>', 'gmail', 'hr@acme.test', 'Old', %s, 'b') "
+        "RETURNING id",
+        (uid, datetime.datetime(2020, 1, 1, tzinfo=datetime.UTC)),
+    )
+    db.execute(
+        "INSERT INTO email_events (message_id, kind, confidence, detail, model) "
+        "VALUES (%s, 'rejection', 'high', %s, 'gpt-5-nano')",
+        (old["id"], db.jsonb({"company": "Acme"})),
+    )
+    for i in range(3):
+        _msg(uid, f"<new{i}@x>", "acknowledgement", "Acme")
+
+    first = client.get("/v1/user/resolve/queue?limit=1", headers=headers).json()
+    assert first["items"][0]["message"]["id"] == old["id"]
+    assert first["total"] == 4, "total counts the whole queue, not the page"
+
+
+def test_the_queue_says_what_is_below_the_fold(client, me):
+    """A page showing fifty of 3,663 must be able to say "40 need you, 3,623
+    do not" rather than implying the fifty are all there is."""
+    headers, uid = me
+    app_id = _app(uid, "Acme")
+    _attach(_msg(uid, "<s4@x>", "acknowledgement", "Acme"), app_id)
+    _msg(uid, "<r1@x>", "rejection", "Acme")
+    _msg(uid, "<o1@x>", "rejection", "Elsewhere Ltd")
+
+    body = client.get("/v1/user/resolve/queue?limit=1", headers=headers).json()
+    assert len(body["items"]) == 1
+    assert body["by_rank"]["answering this moves an application"] == 1
+    assert body["by_rank"]["no application at this company yet"] == 1
+
+
+def test_nothing_is_hidden_from_the_queue(client, me):
+    """Every row is still returned. Nothing in this population is
+    unresolvable - a person can refuse any of it - so "low priority" is the
+    honest claim and "cannot be settled" is not."""
+    headers, uid = me
+    for i in range(4):
+        _msg(uid, f"<keep{i}@x>", "acknowledgement", "Nowhere Inc")
+
+    body = client.get("/v1/user/resolve/queue", headers=headers).json()
+    assert body["total"] == 4
+    assert len(body["items"]) == 4
