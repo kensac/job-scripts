@@ -8306,6 +8306,184 @@
         }
       }
     },
+    "/v1/admin/spend/calls": {
+      "get": {
+        "summary": "Spend Calls",
+        "description": "The calls behind a purpose.\n\n`by_purpose` was a dead end by construction: nothing anywhere renders\n`api_usage` rows, so a purpose's total could be read and never opened. The\nResponses page is over `ai_queries`, which is the verdict log and cannot\nsee work that produced no verdict - which is most of the bill.\n\n`unpriced` is its own filter rather than a cost sort, because a NULL cost\nis not a cheap call. It means nobody looked the rate up, and the set of\ncalls we cannot price is a different question from the set that was\ninexpensive.",
+        "operationId": "spend_calls_v1_admin_spend_calls_get",
+        "parameters": [
+          {
+            "name": "purpose",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Purpose"
+            }
+          },
+          {
+            "name": "model",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Model"
+            }
+          },
+          {
+            "name": "batched",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Batched"
+            }
+          },
+          {
+            "name": "unpriced",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Unpriced"
+            }
+          },
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 3650,
+              "minimum": 1,
+              "default": 30,
+              "title": "Days"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 500,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "x-service-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-Service-Token"
+            }
+          },
+          {
+            "name": "x-user-sub",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Sub"
+            }
+          },
+          {
+            "name": "x-user-email",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Email"
+            }
+          },
+          {
+            "name": "x-user-name",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Name"
+            }
+          },
+          {
+            "name": "x-user-groups",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Groups"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/admin/mail": {
       "get": {
         "summary": "List Mail",
@@ -8405,6 +8583,22 @@
                 }
               ],
               "title": "Job Related"
+            }
+          },
+          {
+            "name": "classified",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Classified"
             }
           },
           {

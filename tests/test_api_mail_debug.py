@@ -422,6 +422,13 @@ def test_unclassified_mail_is_reachable(client, admin_headers, f):
     )
     _msg_with(f, uid, "rejection", "unmatched", "jr-c")
 
-    body = client.get("/v1/admin/mail?job_related=false", headers=admin_headers).json()
+    # `classified=false`, not `job_related=false`. Three states, not two:
+    # "not job related" is what the classifier SAID, and this is the pile it
+    # has not spoken about. Collapsing them made the prefilter cells link to a
+    # larger set than the number they displayed.
+    body = client.get("/v1/admin/mail?classified=false", headers=admin_headers).json()
     assert body["total"] == 1
     assert body["rows"][0]["kind"] is None
+
+    said_not_job = client.get("/v1/admin/mail?job_related=false", headers=admin_headers).json()
+    assert said_not_job["total"] == 0, "nothing here was CALLED not-job-related"
