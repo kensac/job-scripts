@@ -87,6 +87,10 @@ _APP_CONFIG_SEED = [
     # covers a person noticing a roll request; tighten it when every host
     # self-deploys. gcp-vps ran an hour behind on 2026-09-04 unnoticed.
     ("fleet_roll_minutes", 120),
+    # Distinct location strings classified per hourly cycle. The backlog is
+    # 8,735 strings; set low for a first look at GET /admin/locations, then
+    # raised to clear it in one cycle.
+    ("classify_locations_per_cycle", 10000),
 ]
 # One source of truth for a seeded key's value: the seed writes it, and
 # get_config falls back to it when the row is missing.

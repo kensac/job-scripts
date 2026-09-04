@@ -232,6 +232,11 @@ def schedule_ingest_cycle() -> None:
         "AND status IN ('pending', 'running', 'waiting', 'awaiting_batch') LIMIT 1"
     ):
         enqueue("extract_requirements", {"cycle": cycle}, dedupe_key=f"requirements:{cycle}")
+    if not db.query_one(
+        "SELECT 1 FROM tasks WHERE kind = 'classify_locations' "
+        "AND status IN ('pending', 'running', 'waiting', 'awaiting_batch') LIMIT 1"
+    ):
+        enqueue("classify_locations", {"cycle": cycle}, dedupe_key=f"locations:{cycle}")
     # No cross-cycle guard, unlike the two batched extractions: this pass is
     # synchronous and bounded to minutes, so it cannot still be running an hour
     # later for the next one to stack on top of. The dedupe key is enough.

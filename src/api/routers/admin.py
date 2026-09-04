@@ -811,6 +811,60 @@ def list_batches(hours: int = 72, user: AuthedUser = Depends(require_admin)):
     return {"rows": rows}
 
 
+class LocationPut(BaseModel):
+    country: str | None = Field(default=None, max_length=2)
+    region: str | None = Field(default=None, max_length=2)
+    city: str | None = None
+    remote: bool = False
+
+
+@router.get("/locations")
+def list_locations(
+    q: str | None = None,
+    unplaced: bool = False,
+    limit: int = 200,
+    user: AuthedUser = Depends(require_admin),
+):
+    """The classified location strings, most recent first; q searches the
+    text, unplaced narrows to strings the model could not place."""
+    where = ["true"]
+    params: dict[str, Any] = {"limit": max(1, min(limit, 1000))}
+    if q:
+        where.append("text ILIKE %(q)s")
+        params["q"] = f"%{q}%"
+    if unplaced:
+        where.append("country IS NULL AND NOT remote")
+    rows = db.query(
+        f"SELECT text, country, region, city, remote, model, classified_at FROM locations "
+        f"WHERE {' AND '.join(where)} ORDER BY classified_at DESC, text LIMIT %(limit)s",
+        params,
+    )
+    total = db.query_one("SELECT COUNT(*) AS c FROM locations")
+    return {"rows": rows, "total": total["c"] if total else 0}
+
+
+@router.put("/locations/{text}")
+def put_location(text: str, body: LocationPut, user: AuthedUser = Depends(require_admin)):
+    """A person's classification of one string, kept over the model's: the
+    sweep never re-asks about a string that has a row."""
+    from api.tasks.locations import LocationExtract, store
+
+    store(
+        text.strip(),
+        LocationExtract(
+            country=body.country or "",
+            region=body.region or "",
+            city=body.city or "",
+            remote=body.remote,
+        ),
+        model="admin",
+    )
+    return db.query_one(
+        "SELECT text, country, region, city, remote, model FROM locations WHERE text = %s",
+        (text.strip(),),
+    )
+
+
 @router.get("/workers")
 def list_workers(user: AuthedUser = Depends(require_admin)):
     """Live fleet view: every worker's heartbeat, what it's running right now,
@@ -1693,6 +1747,10 @@ _CONFIG_KEYS: dict[str, _Key] = {
         int,
         "Minutes a worker may run a different release from the api before it counts as a "
         "host that did not deploy.",
+    ),
+    # Read by api.tasks.locations.handle_classify_locations.
+    "classify_locations_per_cycle": _Key(
+        int, "Distinct location strings the hourly classification cycle sends to the model."
     ),
 }
 
