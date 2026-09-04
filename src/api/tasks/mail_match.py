@@ -294,6 +294,84 @@ def seed_from_mail(user_id: int) -> tuple[int, int]:
     return created, matched
 
 
+def recompute_derived_floors(user_id: int) -> int:
+    """Lower an email-derived applied_at that was computed from less evidence
+    than now exists. Returns how many moved.
+
+    seed_from_mail only ever creates applications for groups that do not
+    already have one, so the rule it applies is the rule at the moment of
+    creation. When that rule was corrected to compute the floor over ALL the
+    evidence at a group rather than only the messages carrying a role title,
+    the correction reached nothing that already existed - 1,813 applications
+    kept floors taken from the titled subset, and 383 messages stayed blocked
+    by them.
+
+    A fix that cannot reach its own population reads as done and is not, so
+    this runs every sweep rather than once. It is idempotent by construction:
+    a floor that is already the earliest evidence does not move, so a sweep
+    that changes nothing writes nothing and the second run is a no-op.
+
+    ONLY EVER LOWERS. Raising a floor would invalidate matches already made
+    against it, and there is no evidence that could justify it - a later
+    message is not proof the application started later.
+    """
+    derived = db.query(
+        "SELECT id, company_name, applied_at FROM applications "
+        "WHERE user_id = %s AND source_provenance = 'email' AND applied_at IS NOT NULL",
+        (user_id,),
+    )
+    if not derived:
+        return 0
+
+    earliest_attached: dict[int, Any] = {}
+    for row in db.query(
+        """
+        WITH cm AS (SELECT DISTINCT ON (message_id) message_id, application_id
+                    FROM application_matches ORDER BY message_id, id DESC)
+        SELECT cm.application_id AS app_id, min(m.sent_at) AS earliest
+        FROM cm JOIN email_messages m ON m.id = cm.message_id
+        WHERE cm.application_id IS NOT NULL AND m.user_id = %s AND m.sent_at IS NOT NULL
+        GROUP BY 1
+        """,
+        (user_id,),
+    ):
+        earliest_attached[row["app_id"]] = row["earliest"]
+
+    # Unattached evidence, folded in only where the company has exactly one
+    # derived application. With several, a message naming no role could belong
+    # to any of them, and lowering one floor on its say-so is the guess
+    # seed_from_mail already refuses to make.
+    by_company: dict[str, list[dict[str, Any]]] = {}
+    for app in derived:
+        by_company.setdefault(mail_match.norm_company(app["company_name"]), []).append(app)
+    earliest_loose: dict[str, Any] = {}
+    for row in _unmatched_applied_messages(user_id):
+        key = mail_match.norm_company(row["company"])
+        if not key or row["sent_at"] is None:
+            continue
+        if earliest_loose.get(key) is None or row["sent_at"] < earliest_loose[key]:
+            earliest_loose[key] = row["sent_at"]
+
+    moved = 0
+    for app in derived:
+        candidates = [app["applied_at"]]
+        if (attached := earliest_attached.get(app["id"])) is not None:
+            candidates.append(attached)
+        key = mail_match.norm_company(app["company_name"])
+        if len(by_company.get(key, [])) == 1 and earliest_loose.get(key) is not None:
+            candidates.append(earliest_loose[key])
+        floor = min(candidates)
+        if floor < app["applied_at"]:
+            db.execute(
+                "UPDATE applications SET applied_at = %s WHERE id = %s AND applied_at > %s",
+                (floor, app["id"], floor),
+            )
+            moved += 1
+    if moved:
+        logger.info(f"user {user_id}: lowered {moved} derived applied_at floor(s)")
+    return moved
+
+
 def match_pending(user_id: int, *, limit: int | None = None) -> dict[str, int]:
     """Run the tiers over every job-related message with no match recorded.
 
@@ -469,6 +547,7 @@ async def handle_match_mail(task_id: int, payload: dict[str, Any]) -> None:
         "swept": 0,
         "attached": 0,
         "detached": 0,
+        "floors_lowered": 0,
         "opened": 0,
         "resolved": 0,
     }
@@ -476,6 +555,9 @@ async def handle_match_mail(task_id: int, payload: dict[str, Any]) -> None:
         _set_progress(task_id, index, len(user_ids), f"matching user {user_id}")
         totals["tracked"] += seed_from_tracker(user_id)
         totals["detached"] += detach_unattachable(user_id)
+        # Before matching, so a floor lowered now releases its messages in the
+        # same sweep rather than the next one.
+        totals["floors_lowered"] += recompute_derived_floors(user_id)
         counts = match_pending(user_id, limit=int(limit) if limit else None)
         totals["swept"] += sum(counts.values())
         # Messages that came out of this sweep holding an application. The
@@ -499,6 +581,7 @@ async def handle_match_mail(task_id: int, payload: dict[str, Any]) -> None:
         f"applications, {totals['swept']} messages swept "
         f"({totals['attached']} now attached), "
         f"{totals['detached']} detached, "
+        f"{totals['floors_lowered']} floors lowered, "
         f"{totals['opened']} items opened, {totals['resolved']} resolved"
     )
     logger.info(f"Task {task_id}: {summary}")
