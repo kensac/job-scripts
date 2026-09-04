@@ -526,6 +526,12 @@ class WorkerStatus(Base):
     started_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
     last_seen: Mapped[datetime.datetime] = mapped_column(server_default=_now)
     current_task_id: Mapped[int | None] = mapped_column(BigInteger)
+    # What this worker will claim. Reported by the worker rather than inferred,
+    # because the filters live in host environment and nothing else can see
+    # them. queue_stalled reads these so a host is not called stalled by work
+    # it is configured to refuse.
+    kinds: Mapped[list[str]] = mapped_column(server_default=text("'{}'"))
+    excluded_kinds: Mapped[list[str]] = mapped_column(server_default=text("'{}'"))
 
 
 class HealthAlert(Base):
