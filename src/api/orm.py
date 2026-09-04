@@ -516,6 +516,22 @@ class AiBatch(Base):
     est_cost_usd: Mapped[Any | None] = mapped_column(Numeric(12, 6))
     submitted_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
     updated_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+
+
+class AiBatchError(Base):
+    """Every per-request error a provider batch returned, as the provider
+    wrote it. The batch row says how many failed; this says why, which is
+    the only thing that distinguishes a rejected submission from a model
+    that cannot take the schema. Stored whole and groomed later."""
+
+    __tablename__ = "ai_batch_errors"
+    __table_args__ = (Index("idx_ai_batch_errors_batch", "provider_batch_id"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
+    provider_batch_id: Mapped[str] = mapped_column(Text)
+    custom_id: Mapped[str] = mapped_column(Text, server_default=text("''"))
+    error: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
     completed_at: Mapped[datetime.datetime | None]
 
 

@@ -204,6 +204,12 @@ async def refresh_content(
         )
         return ats_res.text, None
 
+    if host_paced(url):
+        # Deferred, not failed: no row is written, so the next cycle tries
+        # again once the host's hour has room. Writing 'failed' here would
+        # park the posting for fetch_retry_after_hours, which is a day of
+        # silence for a host that only asked to be fed slowly.
+        return None, None
     if scrape_sem is not None:
         async with scrape_sem:
             content, redirected = await fetching.fetch_page(url)
