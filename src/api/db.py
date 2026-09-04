@@ -81,6 +81,12 @@ _APP_CONFIG_SEED = [
     # scans of ai_queries per call, a quarter of all server time on the box
     # for lifetime totals that move once an hour. 1 is as good as off.
     ("admin_stats_cache_seconds", 60),
+    # Minutes a worker may heartbeat on a release other than the api's before
+    # that is a host that did not deploy. A lockstep roll finishes inside ten,
+    # but gcp-vps is deployed by hand until its runner exists, so the window
+    # covers a person noticing a roll request; tighten it when every host
+    # self-deploys. gcp-vps ran an hour behind on 2026-09-04 unnoticed.
+    ("fleet_roll_minutes", 120),
 ]
 # One source of truth for a seeded key's value: the seed writes it, and
 # get_config falls back to it when the row is missing.
