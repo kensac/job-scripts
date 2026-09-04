@@ -5,8 +5,6 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from api.criteria import COMP_MAX
-
 
 class UserJobPatch(BaseModel):
     status: str | None = None
@@ -51,8 +49,6 @@ class SourcesPut(BaseModel):
 class Criteria(BaseModel):
     date_posted_after: datetime.date | None = None
     excluded_locations: list[str] = Field(default_factory=list, max_length=100)
-    included_locations: list[str] = Field(default_factory=list, max_length=100)
-    comp_min: int | None = Field(default=None, ge=0, le=COMP_MAX)
 
 
 class SettingsPut(BaseModel):
