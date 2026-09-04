@@ -10,7 +10,7 @@ from typing import Any, NamedTuple
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from api import ai, db, events, health
+from api import ai, db, events, health, sorting
 from api.auth import AuthedUser, require_user
 from core import pricing, reason_taxonomy
 
@@ -2075,10 +2075,10 @@ def list_jobs(
         {having}
     """
     total_row = db.query_one(f"SELECT COUNT(*) AS c FROM ({base}) sub", params)
-    sort_col = _JOBS_SORTABLE.get(sort, "last_seen")
-    direction = "ASC" if dir == "asc" else "DESC"
+    sorts = sorting.parse(sort, dir, _JOBS_SORTABLE, "last_seen")
     rows = db.query(
-        f"{base} ORDER BY {sort_col} {direction} NULLS LAST, url LIMIT %(limit)s OFFSET %(offset)s",
+        f"{base} ORDER BY {sorting.clause(sorts, _JOBS_SORTABLE)}, url "
+        "LIMIT %(limit)s OFFSET %(offset)s",
         {**params, "limit": page_size, "offset": (page - 1) * page_size},
     )
     for r in rows:
@@ -2092,8 +2092,9 @@ def list_jobs(
         "has_more": page * page_size < total,
         # Echoed so the UI can render the active sort without duplicating the
         # default, and sortable so it never has to guess the accepted keys.
-        "sort": sort if sort in _JOBS_SORTABLE else "last_seen",
-        "dir": direction.lower(),
+        "sort": sorts[0]["key"],
+        "dir": sorts[0]["dir"],
+        "sorts": sorts,
         "sortable": sorted(_JOBS_SORTABLE),
     }
 
