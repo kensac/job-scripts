@@ -1,10 +1,13 @@
-"""What the market asks for, and where the user falls short of it.
+"""What the market asks for, across the jobs one user can actually see.
 
-The frequency table is the easy half and not the point: knowing that 41% of
-targeted roles want Kubernetes is only useful next to whether the user has it.
-Every endpoint here reads the same slice - the jobs this user can actually see -
-so the market number and the gap number can never disagree about what "the roles
-I'm targeting" means.
+The frequency table is scoped to the user's own visible slice rather than to
+every posting, so "41% of the roles I'm targeting want Kubernetes" means the
+roles they are targeting - the same set their board shows them.
+
+A gap endpoint measured that table against a single stated background until
+#301. It went with the background column: one profile is a ceiling on a person
+who wants backend and frontend roles at once, and filters are already per
+profile. It had never had data to run on and nothing consumed it.
 """
 
 from __future__ import annotations
@@ -16,7 +19,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from api import criteria, db
 from api.auth import AuthedUser, require_user
 from api.routers.jobs import _VISIBILITY, _require_visible_job
-from core import skills as skills_lib
 from core.requirements import (
     CLEARANCE_LEVELS,
     DEGREE_LEVELS,
@@ -74,8 +76,7 @@ def _slice_sql(body: str) -> str:
 
 def _params(user: AuthedUser, seniority: str | None, employment_type: str | None) -> dict[str, Any]:
     settings = db.query_one(
-        "SELECT bypass_sponsorship_filter, criteria, background FROM user_settings "
-        "WHERE user_id = %s",
+        "SELECT bypass_sponsorship_filter, criteria FROM user_settings WHERE user_id = %s",
         (user.id,),
     )
     return {
@@ -85,11 +86,6 @@ def _params(user: AuthedUser, seniority: str | None, employment_type: str | None
         "employment_type": employment_type,
         **criteria.params(settings),
     }
-
-
-def _background(user_id: int) -> dict[str, Any]:
-    row = db.query_one("SELECT background FROM user_settings WHERE user_id = %s", (user_id,))
-    return (row or {}).get("background") or {}
 
 
 @router.get("/requirements/market")
@@ -211,107 +207,6 @@ def market(
         "seniority": seniorities,
         "employment_type": employment,
         "flags": flags,
-    }
-
-
-@router.get("/requirements/gap")
-def gap(
-    user: AuthedUser = Depends(require_user),
-    seniority: str | None = Query(default=None),
-    employment_type: str | None = Query(default=None),
-):
-    """Where the user's stated background falls short of the slice.
-
-    Each gap counts only postings that STATE the requirement. A posting silent
-    about a degree is not evidence the user's degree is enough, and counting it
-    as a pass would report a reachability number the market never promised.
-    """
-    background = _background(user.id)
-    params = _params(user, seniority, employment_type)
-    total = db.query_one(_slice_sql("SELECT COUNT(*) AS postings FROM slice"), params)
-    postings = (total or {}).get("postings", 0)
-
-    # Canonicalised on read, not on write: the user keeps their own spelling in
-    # settings, and improving the alias table fixes every stored background at
-    # once instead of only the ones saved since.
-    have = {s for s in (skills_lib.canonical(x) for x in background.get("skills") or []) if s}
-
-    missing: list[dict] = []
-    strengths: list[dict] = []
-    if postings:
-        rows = db.query(
-            _slice_sql(
-                """
-                SELECT s.skill, COUNT(DISTINCT s.url) AS postings
-                FROM slice sl JOIN job_skills s ON s.url = sl.url
-                WHERE s.kind = 'required'
-                GROUP BY s.skill ORDER BY postings DESC, s.skill
-                """
-            ),
-            params,
-        )
-        for row in rows:
-            target = strengths if row["skill"] in have else missing
-            if len(target) < TOP_SKILLS:
-                target.append({"skill": row["skill"], "postings": row["postings"]})
-        # A skill nobody in the slice asks for is worth saying out loud: it is
-        # the half of the gap analysis that tells the user where their effort
-        # is already spent rather than where to spend more.
-        asked = {row["skill"] for row in rows}
-        unused = sorted(have - asked)
-    else:
-        unused = sorted(have)
-
-    yoe = background.get("yoe")
-    degree = background.get("degree")
-    clearance = background.get("clearance")
-    citizen = background.get("citizen")
-    needs_sponsorship = background.get("needs_sponsorship")
-    blockers = db.query_one(
-        _slice_sql(
-            """
-            SELECT
-              COUNT(*) FILTER (WHERE %(yoe)s::int IS NOT NULL
-                                 AND yoe_min IS NOT NULL
-                                 AND yoe_min > %(yoe)s) AS years_short,
-              COALESCE(MAX(yoe_min) FILTER (WHERE %(yoe)s::int IS NOT NULL
-                                              AND yoe_min > %(yoe)s), 0) AS years_max_asked,
-              COUNT(*) FILTER (WHERE %(degree)s::text IS NOT NULL
-                                 AND degree_required AND degree_min IS NOT NULL
-                                 AND array_position(%(degrees)s::text[], degree_min)
-                                     > array_position(%(degrees)s::text[], %(degree)s)
-                              ) AS degree_short,
-              COUNT(*) FILTER (WHERE enrollment_required) AS enrollment_required,
-              COUNT(*) FILTER (WHERE %(clearance)s::text IS NOT NULL
-                                 AND clearance IS NOT NULL
-                                 AND array_position(%(clearances)s::text[], clearance)
-                                     > array_position(%(clearances)s::text[], %(clearance)s)
-                              ) AS clearance_short,
-              COUNT(*) FILTER (WHERE %(citizen)s::bool IS FALSE
-                                 AND citizenship_required) AS citizenship_blocked,
-              COUNT(*) FILTER (WHERE %(sponsor)s::bool IS TRUE
-                                 AND sponsorship = 'not_offered') AS sponsorship_blocked
-            FROM slice
-            """
-        ),
-        {
-            **params,
-            "yoe": yoe,
-            "degree": degree,
-            "degrees": list(DEGREE_LEVELS),
-            "clearance": clearance,
-            "clearances": list(CLEARANCE_LEVELS),
-            "citizen": citizen,
-            "sponsor": needs_sponsorship,
-        },
-    )
-    return {
-        "postings": postings,
-        "background_set": bool(background),
-        "missing_skills": missing,
-        "matching_skills": strengths,
-        "unused_skills": unused,
-        "blockers": blockers,
     }
 
 

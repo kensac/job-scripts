@@ -298,139 +298,21 @@ class TestMarketEndpoint:
         assert sum(d["postings"] for d in body["degree"]) == 1
 
 
-class TestGapEndpoint:
-    def _slice(self, user_headers, f, n_python: int = 2, n_rust: int = 1):
-        source = f.make_source()
-        f.subscribe(_uid(user_headers), source)
-        urls = []
-        for i in range(n_python + n_rust):
-            _, url = f.make_ready_job(source=source, content=CONTENT)
-            f.make_requirements(url, skills_required=["Python"] if i < n_python else ["Rust"])
-            urls.append(url)
-        return source, urls
+class TestSettingsRejectsBackground:
+    """The column and its endpoint are gone (#301); a client still sending it
+    must be told, not answered 200 for a write that stored nothing."""
 
-    def _set_background(self, client, headers, background):
-        r = client.put("/v1/user/settings", headers=headers, json={"background": background})
-        assert r.status_code == 200, r.text
-
-    def test_splits_the_market_by_what_the_user_has(self, client, user_headers, f):
-        self._slice(user_headers, f)
-        self._set_background(client, user_headers, {"skills": ["python"]})
-        body = client.get("/v1/requirements/gap", headers=user_headers).json()
-        assert [s["skill"] for s in body["matching_skills"]] == ["python"]
-        assert [s["skill"] for s in body["missing_skills"]] == ["rust"]
-
-    def test_matches_on_canonical_form_not_the_users_spelling(self, client, user_headers, f):
-        source = f.make_source()
-        f.subscribe(_uid(user_headers), source)
-        _, url = f.make_ready_job(source=source, content=CONTENT)
-        f.make_requirements(url, skills_required=["Kubernetes"])
-        self._set_background(client, user_headers, {"skills": ["K8s"]})
-        body = client.get("/v1/requirements/gap", headers=user_headers).json()
-        assert [s["skill"] for s in body["matching_skills"]] == ["kubernetes"]
-        assert body["missing_skills"] == []
-
-    def test_names_skills_the_market_never_asks_for(self, client, user_headers, f):
-        self._slice(user_headers, f, n_rust=0)
-        self._set_background(client, user_headers, {"skills": ["python", "COBOL"]})
-        body = client.get("/v1/requirements/gap", headers=user_headers).json()
-        assert body["unused_skills"] == ["cobol"]
-
-    def test_counts_postings_that_ask_for_more_years(self, client, user_headers, f):
-        source = f.make_source()
-        f.subscribe(_uid(user_headers), source)
-        for years in (1, 5, None):
-            _, url = f.make_ready_job(source=source, content=CONTENT)
-            f.make_requirements(url, yoe_min=years)
-        self._set_background(client, user_headers, {"yoe": 2})
-        body = client.get("/v1/requirements/gap", headers=user_headers).json()
-        # Only the 5-year posting is out of reach. The silent one is NOT
-        # counted as a shortfall: saying nothing is not saying no.
-        assert body["blockers"]["years_short"] == 1
-        assert body["blockers"]["years_max_asked"] == 5
-
-    def test_degree_gap_compares_levels_not_strings(self, client, user_headers, f):
-        source = f.make_source()
-        f.subscribe(_uid(user_headers), source)
-        for level in ("high_school", "bachelors", "phd"):
-            _, url = f.make_ready_job(source=source, content=CONTENT)
-            f.make_requirements(url, degree_min=level, degree_required=True)
-        self._set_background(client, user_headers, {"degree": "bachelors"})
-        body = client.get("/v1/requirements/gap", headers=user_headers).json()
-        assert body["blockers"]["degree_short"] == 1
-
-    def test_a_preferred_degree_is_not_a_gap(self, client, user_headers, f):
-        source = f.make_source()
-        f.subscribe(_uid(user_headers), source)
-        _, url = f.make_ready_job(source=source, content=CONTENT)
-        f.make_requirements(url, degree_min="phd", degree_required=False)
-        self._set_background(client, user_headers, {"degree": "bachelors"})
-        body = client.get("/v1/requirements/gap", headers=user_headers).json()
-        assert body["blockers"]["degree_short"] == 0
-
-    def test_clearance_and_authorisation_blockers(self, client, user_headers, f):
-        source = f.make_source()
-        f.subscribe(_uid(user_headers), source)
-        _, cleared = f.make_ready_job(source=source, content=CONTENT)
-        _, citizens = f.make_ready_job(source=source, content=CONTENT)
-        _, no_visa = f.make_ready_job(source=source, content=CONTENT)
-        f.make_requirements(cleared, clearance="top_secret")
-        f.make_requirements(citizens, citizenship_required=True)
-        f.make_requirements(no_visa, sponsorship="not_offered")
-        self._set_background(
-            client,
-            user_headers,
-            {"clearance": "none", "citizen": False, "needs_sponsorship": True},
-        )
-        blockers = client.get("/v1/requirements/gap", headers=user_headers).json()["blockers"]
-        assert blockers["clearance_short"] == 1
-        assert blockers["citizenship_blocked"] == 1
-        assert blockers["sponsorship_blocked"] == 1
-
-    def test_an_unset_background_field_measures_nothing(self, client, user_headers, f):
-        source = f.make_source()
-        f.subscribe(_uid(user_headers), source)
-        _, url = f.make_ready_job(source=source, content=CONTENT)
-        f.make_requirements(url, yoe_min=9, degree_min="phd", degree_required=True)
-        self._set_background(client, user_headers, {"skills": ["python"]})
-        blockers = client.get("/v1/requirements/gap", headers=user_headers).json()["blockers"]
-        # Not "you pass", but "you did not say" - a zero here would read as
-        # reachable and is exactly the claim the data cannot support.
-        assert blockers["years_short"] == 0
-        assert blockers["degree_short"] == 0
-
-    def test_does_not_leak_another_users_slice(self, client, user_headers, other_user_headers, f):
-        self._slice(other_user_headers, f)
-        self._set_background(client, user_headers, {"skills": ["python"]})
-        body = client.get("/v1/requirements/gap", headers=user_headers).json()
-        assert body["postings"] == 0
-        assert body["missing_skills"] == []
-
-
-class TestBackgroundSettings:
-    def test_round_trips_through_settings(self, client, user_headers):
-        r = client.put(
-            "/v1/user/settings",
-            headers=user_headers,
-            json={"background": {"yoe": 3, "degree": "Bachelors", "skills": ["Python"]}},
-        )
-        assert r.status_code == 200
-        body = client.get("/v1/user/settings", headers=user_headers).json()
-        assert body["background"]["yoe"] == 3
-        assert body["background"]["degree"] == "bachelors"
-
-    def test_rejects_a_level_outside_the_vocabulary(self, client, user_headers):
-        r = client.put(
-            "/v1/user/settings", headers=user_headers, json={"background": {"degree": "wizardry"}}
-        )
+    def test_a_background_key_is_rejected_not_ignored(self, client, user_headers):
+        r = client.put("/v1/user/settings", headers=user_headers, json={"background": {"yoe": 3}})
         assert r.status_code == 422
 
-    def test_other_settings_survive_a_background_write(self, client, user_headers):
+    def test_the_settings_response_has_no_background(self, client, user_headers):
         client.put("/v1/user/settings", headers=user_headers, json={"email_digest": True})
-        client.put("/v1/user/settings", headers=user_headers, json={"background": {"yoe": 1}})
         body = client.get("/v1/user/settings", headers=user_headers).json()
-        assert body["email_digest"] is True
-        assert body["background"]["yoe"] == 1
+        assert "background" not in body
+
+    def test_the_gap_endpoint_is_gone(self, client, user_headers):
+        assert client.get("/v1/requirements/gap", headers=user_headers).status_code == 404
 
 
 class TestVocabularies:

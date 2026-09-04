@@ -46,6 +46,30 @@ def test_invalid_ai_params_for_provider_is_400(client, user_headers):
     assert resp.json()["detail"]["code"] == "INVALID_PARAMS"
 
 
+def test_unknown_keys_are_rejected_but_prefs_stays_open(client, user_headers):
+    """Two rules that read as one and are not.
+
+    The MODEL forbids unknown keys, so a client still writing `background`
+    after #301 is told rather than answered 200 for a write that stored
+    nothing. `prefs` is a jsonb passthrough and its CONTENTS are not a
+    schema - the tracker's onboarding keeps its dismissal and its sponsorship
+    answer in there, and a forbid that reached inside would delete that
+    surface's only durable state.
+    """
+    rejected = client.put("/v1/user/settings", json={"background": {}}, headers=user_headers)
+    assert rejected.status_code == 422
+
+    ok = client.put(
+        "/v1/user/settings",
+        json={"prefs": {"onboarding:sponsorship-answered": True, "anything": [1, 2]}},
+        headers=user_headers,
+    )
+    assert ok.status_code == 200
+    prefs = client.get("/v1/user/settings", headers=user_headers).json()["prefs"]
+    assert prefs["onboarding:sponsorship-answered"] is True
+    assert prefs["anything"] == [1, 2]
+
+
 # ---------------------------------------------------------------------------
 # PUT /v1/user/settings/api-key
 # ---------------------------------------------------------------------------

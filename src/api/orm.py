@@ -285,7 +285,6 @@ class UserSettings(Base):
     api_key_enc: Mapped[bytes | None] = mapped_column(BYTEA)
     bypass_sponsorship_filter: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
     criteria: Mapped[dict] = mapped_column(server_default=text("'{}'::jsonb"))
-    background: Mapped[dict] = mapped_column(server_default=text("'{}'::jsonb"))
     ai_provider: Mapped[str] = mapped_column(Text, server_default=text("'openai'"))
     ai_base_url: Mapped[str | None] = mapped_column(Text)
     ai_model: Mapped[str | None] = mapped_column(Text)

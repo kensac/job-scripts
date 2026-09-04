@@ -1053,8 +1053,45 @@ def test_mail_kinds_compose_and_carry_their_counts(client, user_headers):
     assert replies["total"] == 2
     assert replies["by_kind"] == {"rejection": 1, "offer": 1}
 
-    everything = client.get("/v1/user/mail", headers=user_headers).json()
-    assert everything["by_kind"]["not_job_related"] == 1
+    # The counts follow the lens rather than the mailbox, which is the same
+    # property one level up: not_job_related is absent from the default's
+    # counts because it is absent from the default's rows.
+    default = client.get("/v1/user/mail", headers=user_headers).json()
+    assert default["by_kind"] == {"rejection": 1, "offer": 1}
+
+
+def test_mail_defaults_to_job_mail_and_hides_nothing(client, user_headers):
+    """Nothing is filtered at ingest on purpose - a missed job email is
+    unrecoverable - and that rule about what to STORE was being read as a rule
+    about what to SHOW. 86.6% of the corpus is not_job_related, so the
+    unfiltered default handed a person their whole mailbox (#301).
+
+    Everything excluded stays reachable by its own name, and naming a
+    narrowing replaces the default lens instead of stacking with it."""
+    uid = db.query_one("SELECT id FROM users WHERE email = %s", ("user@example.com",))["id"]
+    job = _mail(uid, subject="Thanks for applying", kind="acknowledgement", company="Acme")
+    noise = _mail(uid, subject="RE: Happy Diwali", kind="not_job_related")
+    db.query_one(
+        "INSERT INTO email_messages (user_id, provider_message_id, source, subject, sent_at) "
+        "VALUES (%s,%s,'gmail','nobody has looked',now()) RETURNING id",
+        (uid, f"unclass-{next(_seq)}"),
+    )
+
+    default = client.get("/v1/user/mail", headers=user_headers).json()
+    assert [m["id"] for m in default["messages"]] == [job]
+
+    noise_only = client.get("/v1/user/mail?kind=not_job_related", headers=user_headers).json()
+    assert noise_only["total"] == 1
+    backlog = client.get("/v1/user/mail?classified=false", headers=user_headers).json()
+    assert [m["subject"] for m in backlog["messages"]] == ["nobody has looked"]
+
+    # An application's own messages are exempt: 638 matched messages in
+    # production classify not_job_related (measured 2026-09-03), and dropping
+    # them would make "the messages behind this application" untrue.
+    app_id = _app(uid, company="Acme", title="Engineer")
+    _match(noise, app_id)
+    attached = client.get(f"/v1/user/mail?application_id={app_id}", headers=user_headers).json()
+    assert [m["id"] for m in attached["messages"]] == [noise]
 
 
 def test_the_pipeline_sorts_on_the_set_not_the_page(client, user_headers):

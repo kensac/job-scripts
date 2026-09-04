@@ -3,10 +3,9 @@ from __future__ import annotations
 import datetime
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 from api.criteria import COMP_MAX
-from core.requirements import CLEARANCE_LEVELS, DEGREE_LEVELS, MAX_PLAUSIBLE_YOE, in_vocabulary
 
 
 class UserJobPatch(BaseModel):
@@ -56,56 +55,23 @@ class Criteria(BaseModel):
     comp_min: int | None = Field(default=None, ge=0, le=COMP_MAX)
 
 
-def _checked(value: str | None, allowed: tuple[str, ...], field: str) -> str | None:
-    """Rejects rather than silently drops an unknown level.
-
-    core.requirements.in_vocabulary answers None for anything outside the
-    vocabulary, which is right for a model's answer - there is nobody to tell.
-    A user typing their own degree is different: silently storing None would
-    show them a gap analysis measured against a background they did not give.
-    """
-    if value is None or not value.strip():
-        return None
-    token = in_vocabulary(value, allowed)
-    if token is None:
-        raise ValueError(f"{field} must be one of: {', '.join(allowed)}")
-    return token
-
-
-class Background(BaseModel):
-    """What the user says they bring, in the same vocabulary the extraction
-    writes, so the gap query compares like with like instead of guessing at a
-    free-text resume. Every field is optional: an unset field means "do not
-    measure me against this", which is a different answer from zero.
-    """
-
-    yoe: int | None = Field(default=None, ge=0, le=MAX_PLAUSIBLE_YOE)
-    degree: str | None = None
-    degree_fields: list[str] = Field(default_factory=list, max_length=20)
-    skills: list[str] = Field(default_factory=list, max_length=200)
-    clearance: str | None = None
-    citizen: bool | None = None
-    needs_sponsorship: bool | None = None
-
-    @field_validator("degree")
-    @classmethod
-    def _degree(cls, v: str | None) -> str | None:
-        return _checked(v, DEGREE_LEVELS, "degree")
-
-    @field_validator("clearance")
-    @classmethod
-    def _clearance(cls, v: str | None) -> str | None:
-        return _checked(v, CLEARANCE_LEVELS, "clearance")
-
-
 class SettingsPut(BaseModel):
+    """Rejects unknown keys rather than dropping them.
+
+    `background` was a key here until it was removed, and a client still
+    sending it needs to be told. Pydantic's default is to discard an
+    unrecognised key silently, which would answer 200 to a write that
+    stored nothing - the one failure a caller cannot detect.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
     column_layout: Any | None = None
     prefs: dict[str, Any] | None = None
     ai_model: str | None = Field(default=None, max_length=200)
     ai_params: dict[str, Any] | None = None
     bypass_sponsorship_filter: bool | None = None
     criteria: Criteria | None = None
-    background: Background | None = None
     email_digest: bool | None = None
 
 
