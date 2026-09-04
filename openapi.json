@@ -14441,6 +14441,9 @@
                 "type": "integer"
               },
               {
+                "type": "string"
+              },
+              {
                 "items": {
                   "type": "string"
                 },

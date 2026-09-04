@@ -66,6 +66,16 @@ _APP_CONFIG_SEED = [
     # after 12 in an hour) is added here, from the alert, at the rate it
     # tolerates. Hosts are data, so none is written into code.
     ("fetch_host_limits", {}),
+    # Which engine fetches a posting page after the ATS resolvers decline.
+    # static_first tries a browserless fetch with a real Chrome fingerprint
+    # and falls through to the browser unless the page plainly came back
+    # whole; chromium goes straight to the browser as before. Switchable
+    # without a roll, so the share each engine serves can be read off the
+    # content rows (reason 'static' vs 'scraped') and the choice revisited.
+    ("fetch_engine", "static_first"),
+    # The text-length gate under static_first; see api.fetching.fetch_static
+    # for the measurement behind 1,500.
+    ("static_fetch_min_chars", 1500),
 ]
 # One source of truth for a seeded key's value: the seed writes it, and
 # get_config falls back to it when the row is missing.

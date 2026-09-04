@@ -207,6 +207,18 @@ and admitted again, the upsert reactivates them. An aggregator list is not
 such a signal, and an empty pull is a broken fetch rather than an empty
 board, so neither retires anything.
 
+**A posting page is fetched by the cheapest tier that plainly worked.** In
+order: the ATS resolver (an API call), then, when `fetch_engine` is
+`static_first`, a browserless fetch with a real Chrome fingerprint
+(`fetching.fetch_static`) accepted only as an HTML 200 whose extracted text
+clears `static_fetch_min_chars` and reads as a page, then the browser. A
+tier that returns None costs nothing downstream; the browser is the
+guaranteed floor. Measured on 2026-09-04 over 431 pages: the static tier
+recovered one browser-served page in seven whole, and every JavaScript
+shell fell under the gate. The content row's reason (`ats text`, `static`,
+`scraped`) is how the share each tier serves is read, so the engine can be
+switched in config and judged from the rows rather than assumed.
+
 **A host that blocks bursts is drip-fed, not pulled off.** `fetch_host_limits`
 (persisted config, host to page fetches per hour) paces the browser fetch
 fleet-wide: `verdicts.host_paced` counts the hour's content rows for the host

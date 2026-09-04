@@ -132,7 +132,7 @@ def detect() -> list[dict[str, Any]]:
           -- and counting those in the denominator silently buries the ATS
           -- share far below the `base >= 0.30` floor — which is why this
           -- detector had never once fired.
-          AND q.reason IN ('ats text', 'scraped')
+          AND q.reason IN ('ats text', 'scraped', 'static')
           AND q.created_at > now() - interval '8 days'
           -- Backlog sweeps and live ingest are different populations with
           -- different ATS-text shares, so comparing a backfill-heavy baseline
@@ -709,7 +709,7 @@ def _detect_boards() -> list[dict[str, Any]]:
                COUNT(*) FILTER (WHERE created_at BETWEEN now() - interval '8 days'
                                 AND now() - interval '24 hours' AND reason = 'ats text') AS base_ats
         FROM ai_queries
-        WHERE check_type = 'content' AND reason IN ('ats text', 'scraped')
+        WHERE check_type = 'content' AND reason IN ('ats text', 'scraped', 'static')
           AND created_at > now() - interval '8 days'
         GROUP BY 1
         HAVING CASE
