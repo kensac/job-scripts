@@ -77,6 +77,26 @@ _RESOLVING_EVENTS = {
 WITHDRAWN_STATUSES = ("No Longer Interested", "Withdrawn")
 
 
+# What the mail implies the board should say. Only kinds where the evidence is
+# unambiguous about the OUTCOME - an acknowledgement means the application is
+# alive, which the board already says, so it proposes nothing.
+STATUS_FROM_EVENT = {
+    "rejection": "Rejected",
+    "position_closed": "No Longer Available",
+    "offer": "Offer",
+    "interview_invite": "Interviewing",
+    "interview_scheduled": "Interviewing",
+}
+
+# Board statuses that mean "still waiting". A proposal is only worth making
+# against one of these: if the user has already moved it on, the mail is
+# confirming what they know rather than telling them something.
+UNRESOLVED_BOARD_STATUSES = ("Application Submitted", "Follow-up")
+
+ACCEPTED = "accepted"
+DISMISSED = "dismissed"
+
+
 def settles_on(kind: str) -> list[str]:
     """The event kinds that can close this ask, which is often none.
 
@@ -96,6 +116,169 @@ def settles_on(kind: str) -> list[str]:
     not a task waiting on a reply that will never be observable.
     """
     return list(_RESOLVING_EVENTS.get(kind, ()))
+
+
+def with_settling(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Tags each action item with what could ever close it.
+
+    An unresolved item means two different things and a caller cannot tell
+    them apart from resolved_at alone: an assessment invite from last week is
+    awaiting an event that may still arrive, while an offer from 2020 was
+    never going to be closed by anything, because no email says "you
+    accepted". An empty `settles_on` says the second, and such an item must
+    not be rendered as a live obligation.
+    """
+    return [{**row, "settles_on": settles_on(row["kind"])} for row in rows]
+
+
+def proposals_for(user_id: int) -> list[dict[str, Any]]:
+    """Where the mail and the board disagree, as things to confirm.
+
+    Never an overwrite. `user_jobs.status` is what the user typed, and a system
+    that silently rewrites it stops being trustworthy at exactly the moment it
+    is most confident. So this says "we think you were rejected" and waits.
+
+    Derived at read time rather than stored, so a proposal disappears on its
+    own once the user acts on the board directly, or once a reclassification
+    retracts the evidence. Only their ANSWER is a fact worth keeping.
+
+    LEFT JOIN, not JOIN. The inner join asked "what does the board say" of
+    applications that have no board row, which is 1,817 of 2,543 here: mail
+    predating the catalog is the normal case and `applications.job_id` is
+    nullable by design. It silenced 947 of 1,159 proposals - not by deciding
+    they were wrong, but by never forming the question. The predicate that
+    survives is the one that was actually meant: there is no board row to
+    disagree with, or the board row still says the application is live.
+
+    `board_updatable` says whether answering can move anything, so the caller
+    states the consequence before the click rather than reporting a status it
+    did not write afterwards.
+    """
+    rows = db.query(
+        """
+        WITH current_match AS (
+            SELECT DISTINCT ON (message_id) message_id, application_id
+            FROM application_matches ORDER BY message_id, id DESC
+        ),
+        current_event AS (
+            SELECT DISTINCT ON (message_id) message_id, id, kind, detail
+            FROM email_events ORDER BY message_id, id DESC
+        )
+        SELECT DISTINCT ON (a.id, e.kind)
+               a.id AS application_id, a.company_name, a.title, a.job_id,
+               uj.status AS board_status, uj.date_applied,
+               uj.user_id IS NOT NULL AS board_updatable,
+               e.id AS event_id, e.kind, m.id AS message_id, m.sent_at
+        FROM applications a
+        LEFT JOIN user_jobs uj ON uj.job_id = a.job_id AND uj.user_id = a.user_id
+        JOIN current_match cm ON cm.application_id = a.id
+        JOIN current_event e ON e.message_id = cm.message_id
+        JOIN email_messages m ON m.id = cm.message_id
+        WHERE a.user_id = %(user)s
+          AND a.dismissed_at IS NULL
+          AND (uj.user_id IS NULL OR uj.status = ANY(%(unresolved)s))
+          AND e.kind = ANY(%(kinds)s)
+          AND NOT EXISTS (
+              SELECT 1 FROM suggestion_responses sr
+              WHERE sr.application_id = a.id AND sr.event_id = e.id
+          )
+        ORDER BY a.id, e.kind, e.id DESC
+        """,
+        {
+            "user": user_id,
+            "unresolved": list(UNRESOLVED_BOARD_STATUSES),
+            "kinds": sorted(STATUS_FROM_EVENT),
+        },
+    )
+    return [
+        {
+            **row,
+            "suggested_status": STATUS_FROM_EVENT[row["kind"]],
+            "board_reason": None
+            if row["board_updatable"]
+            else "this application is not on your board, so there is no status to move",
+        }
+        for row in rows
+    ]
+
+
+def answer_proposal(
+    user_id: int, application_id: int, event_id: int, response: str
+) -> dict[str, Any] | None:
+    """Record the answer, and move the board only where there is a board.
+
+    Returns None when the event is not currently evidence about this
+    application, which the caller renders as a 404. The event has to belong to
+    a message matched to THIS application - the same join the proposal list is
+    built from. Checking only that the application is owned left `event_id`
+    taken from the request and trusted, so another user's event could decide
+    which status this application moved to.
+
+    Both answers are recorded, against the EVENT, so a dismissal silences this
+    piece of evidence rather than the question. A later rejection from the same
+    company is new evidence and gets asked again - which is what makes
+    dismissing safe rather than a decision that can never be revisited. A
+    dismissal is also the signal that STATUS_FROM_EVENT is wrong for that case,
+    which is only readable because the decline is stored rather than dropped.
+
+    REPORTS WHAT IT TOUCHED, not what it would have touched. Accepting on an
+    application with no board row wrote nothing and said the status had moved,
+    so the caller was told about a change no SELECT could find.
+    """
+    app = db.query_one(
+        "SELECT id, job_id FROM applications WHERE id = %s AND user_id = %s",
+        (application_id, user_id),
+    )
+    if app is None:
+        return None
+    event = db.query_one(
+        """
+        WITH current_match AS (
+            SELECT DISTINCT ON (message_id) message_id, application_id
+            FROM application_matches ORDER BY message_id, id DESC
+        )
+        SELECT e.id, e.kind
+        FROM email_events e
+        JOIN current_match cm ON cm.message_id = e.message_id
+        WHERE e.id = %s AND cm.application_id = %s
+        """,
+        (event_id, application_id),
+    )
+    if event is None or event["kind"] not in STATUS_FROM_EVENT:
+        return None
+
+    status = STATUS_FROM_EVENT[event["kind"]]
+    db.execute(
+        "INSERT INTO suggestion_responses (user_id, application_id, event_id, "
+        "suggested_status, response) VALUES (%s, %s, %s, %s, %s)",
+        (user_id, application_id, event_id, status, response),
+    )
+    updated = 0
+    if response == ACCEPTED and app["job_id"] is not None:
+        # The COUNT, not the fact that the statement ran. `applications.job_id`
+        # survives the board row being deleted (ON DELETE SET NULL is on the
+        # job, not on user_jobs), so a non-null job_id is not proof there is a
+        # row to update - and an UPDATE that matched nothing exits cleanly.
+        updated = db.execute_count(
+            "UPDATE user_jobs SET status = %s, updated_at = now() "
+            "WHERE user_id = %s AND job_id = %s",
+            (status, user_id, app["job_id"]),
+        )
+    return {
+        "ok": True,
+        "response": response,
+        "board_updated": bool(updated),
+        # Present only when a row actually moved. The proposed status is still
+        # readable from `suggested_status` on the item that offered it.
+        "board_status": status if updated else None,
+        "reason": None
+        if updated
+        else (
+            "recorded; this application is not on your board, so no status moved"
+            if response == ACCEPTED
+            else "recorded; declining moves nothing by design"
+        ),
+    }
 
 
 def stage_for(events: list[dict[str, Any]], board_status: str | None = None) -> str:
@@ -146,7 +329,7 @@ def events_for(application_id: int) -> list[dict[str, Any]]:
             FROM email_events ORDER BY message_id, id DESC
         )
         SELECT e.id, e.kind, e.occurred_at, e.deadline_at, e.deadline_inferred,
-               m.sent_at, m.subject
+               m.id AS message_id, m.sent_at, m.subject
         FROM current_match cm
         JOIN current_event e ON e.message_id = cm.message_id
         JOIN email_messages m ON m.id = cm.message_id
@@ -178,7 +361,7 @@ def events_by_application(user_id: int) -> dict[int, list[dict[str, Any]]]:
             FROM email_events ORDER BY message_id, id DESC
         )
         SELECT cm.application_id, e.id, e.kind, e.occurred_at, e.deadline_at,
-               e.deadline_inferred, m.sent_at, m.subject
+               e.deadline_inferred, m.id AS message_id, m.sent_at, m.subject
         FROM current_match cm
         JOIN current_event e ON e.message_id = cm.message_id
         JOIN email_messages m ON m.id = cm.message_id

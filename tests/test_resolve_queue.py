@@ -257,7 +257,12 @@ def test_a_row_that_would_move_an_application_outranks_one_that_would_not(client
     _msg(uid, "<ack@x>", "acknowledgement", "Acme")
     _msg(uid, "<rej@x>", "rejection", "Acme")
 
-    items = client.get("/v1/user/resolve/queue", headers=headers).json()["items"]
+    # Scoped to one kind. The seeded attachment is now a queue row in its own
+    # right - a matcher attachment nobody has confirmed - and this test is
+    # about how MESSAGES rank against each other.
+    items = client.get("/v1/user/resolve/queue?kind=unmatched_message", headers=headers).json()[
+        "items"
+    ]
     assert items[0]["message"]["classified_as"] == "rejection"
     assert items[0]["rank_reason"] == "answering this moves an application"
     assert items[1]["rank_reason"] == "can be attached, but the stage would not move"
@@ -296,7 +301,9 @@ def test_ranking_happens_before_paging(client, me):
     for i in range(3):
         _msg(uid, f"<new{i}@x>", "acknowledgement", "Acme")
 
-    first = client.get("/v1/user/resolve/queue?limit=1", headers=headers).json()
+    first = client.get(
+        "/v1/user/resolve/queue?limit=1&kind=unmatched_message", headers=headers
+    ).json()
     assert first["items"][0]["message"]["id"] == old["id"]
     assert first["total"] == 4, "total counts the whole queue, not the page"
 
@@ -310,10 +317,15 @@ def test_the_queue_says_what_is_below_the_fold(client, me):
     _msg(uid, "<r1@x>", "rejection", "Acme")
     _msg(uid, "<o1@x>", "rejection", "Elsewhere Ltd")
 
-    body = client.get("/v1/user/resolve/queue?limit=1", headers=headers).json()
+    body = client.get(
+        "/v1/user/resolve/queue?limit=1&kind=unmatched_message", headers=headers
+    ).json()
     assert len(body["items"]) == 1
-    assert body["by_rank"]["answering this moves an application"] == 1
-    assert body["by_rank"]["no application at this company yet"] == 1
+    # Kind-neutral labels: the queue holds four kinds and three of them are not
+    # about attaching anything, so the bucket cannot use the message wording.
+    # The narrower sentence is on the row, in `rank_reason`.
+    assert body["by_rank"]["answering this changes what the product says"] == 1
+    assert body["by_rank"]["only a refusal is available"] == 1
 
 
 def test_nothing_is_hidden_from_the_queue(client, me):

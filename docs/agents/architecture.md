@@ -35,6 +35,21 @@ systems post on one domain and send from another.
 that exclude anything already decided freeze the answer against a smaller world
 than exists now.
 
+**The matcher never overturns a person, and the check belongs at the write.** A
+human verdict stays reconsiderable by a human, from the queue that exists to
+reconsider it; what it must not be is undone by the next sweep, because then
+rejecting a match achieves nothing. A selection predicate cannot enforce this:
+the sweep reads its candidates, then writes minutes later, and the decision can
+land in between. That is not hypothetical - the only human decision ever
+recorded in production was overwritten exactly that way, an hour after it was
+made.
+
+**Every write to `application_matches` goes through `mail_match.record`**, so
+`actor_user_id` cannot be omitted. Three endpoints wrote the table directly and
+none of them set it, which is why rows reading `manual` are not evidence a
+person was there, and why "has anyone reviewed this attachment" was
+unanswerable by query for 15,090 rows.
+
 ## Providers and cost
 
 Provider facts live in one datasheet per provider, declared rather than
@@ -112,6 +127,12 @@ fresh copy:
 - **Provider facts** — one datasheet per provider under `core/providers/`.
 - **Task handlers** — `api/tasks/`, one module per family. The task runtime
   imports nothing from the worker; the worker imports only the handler table.
+- **What the mail implies the board should say** — `mail_pipeline.proposals_for`
+  and `answer_proposal`. The route that lists proposals and the queue that
+  merges them into everything else read the same function; a second spelling
+  would drift, and the first one already had - an inner join against
+  `user_jobs` silenced 947 of 1,159 proposals by never forming the question for
+  applications that have no board row.
 
 ## Reading production from outside it
 

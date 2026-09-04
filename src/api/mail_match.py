@@ -41,6 +41,17 @@ UNMATCHED = "unmatched"
 # cold approach into evidence about a real application.
 NOT_AN_APPLICATION = "not_an_application"
 
+# Methods only a person writes, spelled here beside the matcher's own tiers so
+# the two vocabularies cannot drift apart in two modules. MANUAL is an
+# attachment a person chose; DETACHED is a person saying this message does not
+# belong to the application it is on. `application_matches` has no `model`
+# column, so the method is what separates a human row from a machine one - and
+# `actor_user_id` is what says WHICH human, which is the distinction these
+# methods alone cannot make.
+MANUAL = "manual"
+DETACHED = "detached"
+HUMAN_METHODS = frozenset({MANUAL, DETACHED})
+
 # Kinds that describe the user rather than an application, and so must never
 # be attached to one. Already excluded from creating applications
 # (tasks/mail_match.APPLIED_KINDS); this is the same rule on the matching side,
@@ -291,6 +302,22 @@ def record(message_id: int, match: Match, *, actor_user_id: int | None = None) -
     or an administrator correcting someone else's data is derived by comparing
     this against the owner, rather than recorded twice.
 
+    THE MATCHER NEVER OVERTURNS A PERSON. Not a preference - it happened. The
+    single human decision ever recorded in production (match 14911, message
+    126111 assigned to application 2507 at 19:16) was superseded an hour later
+    by row 14912, `unmatched`, "no candidate matched", written by the matcher.
+    `match_pending` selects on `cm.application_id IS NULL` and so could not
+    have selected that message after 19:16; it selected it before, and wrote
+    the verdict it had computed against a world that had since changed. A
+    selection predicate cannot close that window because the window is between
+    the selection and the write. The check has to be at the write.
+
+    This does not freeze the answer, which is the rule it would otherwise
+    break: a human verdict stays reconsiderable BY A HUMAN, from the queue that
+    exists to reconsider it, where every candidate is shown rather than the one
+    the matcher would have picked. What it stops is a rejection being undone by
+    the sweep that follows it, which would make rejecting a match pointless.
+
     A verdict from the MATCHER that repeats the one already standing is not
     appended. "We looked and found nothing" is a real state and the first one
     is worth recording - that is what lets a later re-run be measured against
@@ -310,6 +337,9 @@ def record(message_id: int, match: Match, *, actor_user_id: int | None = None) -
     """
     if actor_user_id is None:
         current = latest(message_id)
+        if current is not None and current["actor_user_id"] is not None:
+            logger.debug(f"message {message_id}: a person decided this; matcher stands down")
+            return
         if (
             current is not None
             and current["application_id"] == match.application_id
@@ -340,4 +370,50 @@ def latest(message_id: int) -> dict | None:
     return db.query_one(
         "SELECT * FROM application_matches WHERE message_id = %s ORDER BY id DESC LIMIT 1",
         (message_id,),
+    )
+
+
+def confirm(message_id: int, current: dict, *, actor_user_id: int, note: str | None = None) -> None:
+    """A person looked at this attachment and says it is right.
+
+    KEEPS THE METHOD AND CONFIDENCE the matcher wrote. Rewriting them to
+    `manual` would make a confirmation indistinguishable from a hand-made
+    match and would destroy the only thing worth measuring here: whether
+    `ats_company` at medium confidence is right often enough to stop asking.
+    The tier that produced the attachment is the grouping key for that, and it
+    survives only if confirming preserves it.
+
+    `actor_user_id` is what changes, and it is the whole answer to "has anyone
+    looked at this". Append rather than update, so the unreviewed row it
+    replaces stays readable underneath.
+    """
+    record(
+        message_id,
+        Match(
+            current["application_id"],
+            current["method"],
+            current["confidence"],
+            note or "confirmed by a person",
+        ),
+        actor_user_id=actor_user_id,
+    )
+
+
+def reject(message_id: int, *, actor_user_id: int, note: str | None = None) -> None:
+    """A person says this message does not belong to the application it is on.
+
+    The same append `detach` writes, because it is the same fact - one is
+    reached from the application and the other from the review queue, and two
+    spellings of one decision is how the two surfaces come to disagree about
+    what the queue contains.
+
+    DELETES NOTHING and names no replacement. `application_id` NULL with a
+    method that is not `not_an_application` is exactly the state the queue
+    selects, so the message comes back as a question for a person rather than
+    for the matcher, which will not touch a row a person wrote.
+    """
+    record(
+        message_id,
+        Match(None, DETACHED, "none", note or "rejected by a person"),
+        actor_user_id=actor_user_id,
     )
