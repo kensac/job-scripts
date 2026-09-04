@@ -5,17 +5,17 @@ on:
   push:
     branches:
       - main
+  # The auto-fix commit below is pushed with the workflow token, and pushes by
+  # that token start no workflow on their own; the run dispatches this
+  # workflow on the branch explicitly instead, so the fixed commit is checked.
+  workflow_dispatch:
 
 jobs:
   check:
-    # Skip only the redundant re-run triggered by our own openapi auto-commit
-    # push; never skip via commit-message markers — [skip ci] in the commit
-    # body survives into squash-merge messages and silently kills ALL workflow
-    # runs for the merge push on main.
-    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: write
     services:
       postgres:
         # pgvector, not plain postgres: migrations CREATE EXTENSION vector, so a
@@ -40,25 +40,70 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          # Check out the PR branch itself (not the merge ref) so the
-          # regenerated schema can be committed back to it.
+          # Check out the branch itself (not the merge ref) so a fix can be
+          # committed back to it.
           ref: ${{ github.head_ref || github.ref_name }}
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: '3.13'
           cache: pip
-      - run: pip install -r requirements.txt
-      - name: Lint
-        run: |
+      - run: |
+          pip install -r requirements.txt
           pip install -r requirements-dev.txt
-          ruff check src tests
+      # Mechanical fixes are committed, not reported. Lint autofixes,
+      # formatting and the generated openapi.json are the three things a
+      # human only ever fixes by running a command, so the run runs it: when
+      # anything changed, the fix is pushed as its own commit, this workflow is
+      # dispatched on that commit, and this run stops here green. The
+      # dispatched run is the one that judges the branch; a fix that leaves a
+      # real failure behind fails there, on a commit that already carries the
+      # mechanical corrections. Only the pull request's own run fixes, and only
+      # for branches in this repository: the dispatched run judges and never
+      # fixes, so a fix that does not converge (a schema that differs run to
+      # run) shows up as one failing check rather than an unbounded chain of
+      # green runs each pushing a commit; a fork's token cannot push, and its
+      # run falls through to the checks below.
+      - name: Auto-fix lint, format and schema
+        id: autofix
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          JOBTRACKER_SERVICE_TOKEN: ci
+          APP_ENCRYPTION_KEY: ci
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ruff check --fix src tests || true
+          ruff format src tests
+          # Migrate before exporting: importing the app runs the legacy
+          # IF NOT EXISTS DDL in core.store, and a later migration that adds
+          # one of those columns then fails as a duplicate.
+          python -m alembic upgrade head
+          python -m api.export_schema > openapi.json
+          if git diff --quiet -- src tests openapi.json; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add src tests openapi.json
+          git commit -m "chore: auto-fix lint, format and schema"
+          git push
+          gh workflow run "${{ github.workflow }}" --ref "${{ github.head_ref || github.ref_name }}"
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+          echo "::notice::Pushed mechanical fixes as a new commit; its own run judges the branch"
+      - name: Lint
+        if: steps.autofix.outputs.changed != 'true'
+        run: ruff check src tests
       - name: Format check
+        if: steps.autofix.outputs.changed != 'true'
         run: ruff format --check src tests
       - name: Type check
+        if: steps.autofix.outputs.changed != 'true'
         run: pyright
       - name: Compile all sources
+        if: steps.autofix.outputs.changed != 'true'
         run: python -m compileall -q src
       - name: Migrations apply cleanly
+        if: steps.autofix.outputs.changed != 'true'
         run: python -m alembic upgrade head
       # The WHOLE suite, with no marker filter. Three populations run here:
       # the hermetic tests on a truncated database, the `corpus` tests against
@@ -69,33 +114,21 @@ jobs:
       #
       # NOTHING IN THIS FILE MAY READ A SECRET. That is the whole point: this
       # workflow runs on pull_request, so anything it can reach is reachable
-      # from a branch an outside contributor can push.
+      # from a branch an outside contributor can push. The workflow token is
+      # not a secret in that sense: on a fork's pull request it is read-only.
       - name: Run tests
+        if: steps.autofix.outputs.changed != 'true'
         env:
           TEST_DATABASE_URL: postgresql://ci:ci@localhost:5432/jobtracker_ci
           JOBTRACKER_SERVICE_TOKEN: ci
         run: |
           export APP_ENCRYPTION_KEY=$(python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
-          pip install -r requirements-dev.txt
           pytest -q tests
       - name: Models match migrations (autogen must be empty)
+        if: steps.autofix.outputs.changed != 'true'
         run: |
           python -m alembic revision --autogenerate -m ci_drift_check
           f=$(ls alembic/versions/*ci_drift_check*.py)
           if grep -qE "op\.(add|drop|create|alter)" "$f"; then
             echo "::error::ORM models drifted from migrations - generate a real migration"; cat "$f"; exit 1
-          fi
-      - name: Regenerate openapi.json (auto-commit if stale)
-        env:
-          JOBTRACKER_SERVICE_TOKEN: ci
-          APP_ENCRYPTION_KEY: ci
-        run: |
-          python -m api.export_schema > openapi.json
-          if ! git diff --quiet -- openapi.json; then
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git add openapi.json
-            git commit -m "chore: regenerate openapi.json"
-            git push
-            echo "::notice::openapi.json was stale - regenerated and committed"
           fi
