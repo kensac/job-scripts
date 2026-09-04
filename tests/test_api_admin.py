@@ -756,3 +756,81 @@ def test_a_selection_cancels_everything_that_matches_not_one_page_of_it(client, 
     assert client.post("/v1/admin/tasks/cancel", json={}, headers=admin_headers).status_code == 400
     r = client.post("/v1/admin/tasks/cancel", json={"status": "done"}, headers=admin_headers)
     assert r.status_code == 400 and r.json()["detail"]["code"] == "NOT_CANCELLABLE"
+
+
+def test_a_recheck_runs_on_the_chosen_model_and_that_choice_becomes_the_default(
+    client, admin_headers, monkeypatch
+):
+    """Kanishk: a re-check should offer another model and default to the one
+    last used for that option. The choice is per check option, persisted on
+    the user's prefs, and offered back with the models the caller may run."""
+    from api import ai, verdicts
+    from core.pittcsc_simplify import JobClosedResponse
+
+    db.execute(
+        "INSERT INTO jobs (url, source, company, title) VALUES ('https://rc.test/1','s','C','T')"
+    )
+    jid = db.query_one("SELECT id FROM jobs WHERE url = 'https://rc.test/1'")["id"]
+    db.execute(
+        "INSERT INTO group_budgets (group_name, weekly_token_budget, allowed_models) "
+        "VALUES ('infra-admins', NULL, ARRAY['gpt-5-nano', 'gpt-5.6-luna']) "
+        "ON CONFLICT (group_name) DO UPDATE SET allowed_models = EXCLUDED.allowed_models"
+    )
+    monkeypatch.setattr(ai, "server_key", lambda provider: "sk-test")
+
+    async def fake_refresh(url, **kw):
+        return "A posting body long enough to check.", None
+
+    seen: list[str] = []
+
+    async def fake_parse(cfg, instructions, input_text, response_model):
+        seen.append(cfg.model)
+        usage = {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
+        if "requires_clearance_or_restrictions" in response_model.model_fields:
+            return response_model(
+                requires_clearance_or_restrictions=False, reason="", restriction_type=None
+            ), usage
+        return JobClosedResponse(is_closed=False, reason="still open"), usage
+
+    monkeypatch.setattr(verdicts, "refresh_content", fake_refresh)
+    monkeypatch.setattr(ai, "parse", fake_parse)
+
+    opts = client.get("/v1/admin/checks/options", headers=admin_headers).json()
+    assert "gpt-5.6-luna" in opts["models"] and opts["defaults"] == {}
+
+    r = client.post(
+        "/v1/admin/checks/run",
+        json={"job_id": jid, "check": "closed", "model": "gpt-5.6-luna"},
+        headers=admin_headers,
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["model"] == "gpt-5.6-luna" and seen == ["gpt-5.6-luna"]
+    row = db.query_one(
+        "SELECT model FROM ai_queries WHERE url = 'https://rc.test/1' AND check_type = 'closed' "
+        "ORDER BY id DESC LIMIT 1"
+    )
+    assert row["model"] == "gpt-5.6-luna"
+
+    # Next time, no model given: the last choice for THIS option is the default.
+    r = client.post(
+        "/v1/admin/checks/run", json={"job_id": jid, "check": "closed"}, headers=admin_headers
+    )
+    assert r.json()["model"] == "gpt-5.6-luna" and seen[-1] == "gpt-5.6-luna"
+    assert client.get("/v1/admin/checks/options", headers=admin_headers).json()["defaults"] == {
+        "closed": "gpt-5.6-luna"
+    }
+    # A different option keeps its own default.
+    r = client.post(
+        "/v1/admin/checks/run",
+        json={"job_id": jid, "check": "clearance"},
+        headers=admin_headers,
+    )
+    assert r.json()["model"] == "gpt-5-nano"
+
+    # A model outside what the caller may run is refused with the list.
+    r = client.post(
+        "/v1/admin/checks/run",
+        json={"job_id": jid, "check": "closed", "model": "gpt-5.6-sol"},
+        headers=admin_headers,
+    )
+    assert r.status_code == 400 and r.json()["detail"]["code"] == "MODEL_NOT_ALLOWED"

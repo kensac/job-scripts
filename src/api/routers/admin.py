@@ -919,10 +919,57 @@ def batch_jobs(
     return {"batch": batch, "rows": rows, "total": n, "has_more": offset + len(rows) < n}
 
 
+def _recheck_models(user: AuthedUser) -> list[str]:
+    """The models a manual re-check may run: what this caller is allowed on
+    the server key, intersected with the keys the server holds. Same rule as
+    everything else that spends on the owner key; not a second list."""
+    from api import budget
+
+    return budget.owner_allowed_models(user.groups)
+
+
+def _recheck_defaults(user_id: int) -> dict[str, str]:
+    """Per check option, the model this person last chose for a re-check.
+    Lives in user_settings.prefs so it needs no schema and travels with the
+    rest of their preferences."""
+    row = db.query_one("SELECT prefs FROM user_settings WHERE user_id = %s", (user_id,))
+    prefs = (row or {}).get("prefs") or {}
+    defaults = prefs.get("recheck_models") or {}
+    return {k: v for k, v in defaults.items() if isinstance(v, str)}
+
+
+def _remember_recheck_model(user_id: int, check: str, model: str) -> None:
+    db.execute(
+        """
+        INSERT INTO user_settings (user_id, prefs)
+        VALUES (%(uid)s, jsonb_build_object('recheck_models', jsonb_build_object(%(check)s::text, %(model)s::text)))
+        ON CONFLICT (user_id) DO UPDATE SET prefs =
+            COALESCE(user_settings.prefs, '{}'::jsonb)
+            || jsonb_build_object('recheck_models',
+                 COALESCE(user_settings.prefs->'recheck_models', '{}'::jsonb)
+                 || jsonb_build_object(%(check)s::text, %(model)s::text)),
+            updated_at = now()
+        """,
+        {"uid": user_id, "check": check, "model": model},
+    )
+
+
+@router.get("/checks/options")
+def recheck_options(user: AuthedUser = Depends(require_admin)):
+    """What a re-check may run on, and what this person chose last time per
+    option, so the picker opens on the model they ended on rather than the
+    cheapest one every time."""
+    return {"models": _recheck_models(user), "defaults": _recheck_defaults(user.id)}
+
+
 class RunCheckBody(BaseModel):
     job_id: int
     check: str
     with_reason: bool = True
+    # The model to run on. Omitted: the model last chosen for this check
+    # option, else the default. Given: must be one the caller may run, and
+    # becomes the default for this option once it has run.
+    model: str | None = None
 
 
 @router.post("/checks/run")
@@ -1012,14 +1059,32 @@ async def run_single_check(body: RunCheckBody, user: AuthedUser = Depends(requir
             detail={"code": "NO_CONTENT", "message": "could not fetch this posting just now"},
         )
     content = {"input_content": fresh}
-    key = ai.server_key("openai")
+    allowed = _recheck_models(user)
+    if body.model is not None:
+        if body.model not in allowed:
+            raise HTTPException(
+                400,
+                detail={
+                    "code": "MODEL_NOT_ALLOWED",
+                    "message": f"{body.model} is not a model you can run a re-check on",
+                    "allowed": allowed,
+                },
+            )
+        model = body.model
+    else:
+        # The model this person ended on for this option last time, if it is
+        # still one they may run; otherwise the cheapest default.
+        remembered = _recheck_defaults(user.id).get(body.check)
+        model = remembered if remembered in allowed else ai.DEFAULT_OPENAI_MODEL
+    provider = ai.provider_of_model(model) or "openai"
+    key = ai.server_key(provider)
     if not key:
         raise HTTPException(503, detail={"code": "NO_SERVER_KEY", "message": "no server key"})
     cfg = ai.AIConfig(
-        provider="openai",
+        provider=provider,
         api_key=key,
         key_source="owner",
-        model=ai.DEFAULT_OPENAI_MODEL,
+        model=model,
         params={"reasoning_effort": "medium" if body.with_reason else "low"},
     )
     parsed, usage = await _verdicts.run_check(
@@ -1045,11 +1110,16 @@ async def run_single_check(body: RunCheckBody, user: AuthedUser = Depends(requir
             },
         )
     rejected, reason = verdict_of(parsed)
+    if body.model is not None:
+        # Only a run that happened sets the default: a refused or failed
+        # choice is not the one the person "last used".
+        _remember_recheck_model(user.id, body.check, model)
     return {
         "check": body.check,
         "status": "rejected" if rejected else "passed",
         "reason": reason,
         "tokens": usage.get("total_tokens", 0),
+        "model": model,
     }
 
 
