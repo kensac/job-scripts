@@ -105,6 +105,41 @@ fresh copy:
 - **Task handlers** — `api/tasks/`, one module per family. The task runtime
   imports nothing from the worker; the worker imports only the handler table.
 
+## Reading production from outside it
+
+**Anything that reads the production database shares production's blast
+radius**, including development tooling. A tool that only reads is not
+therefore safe.
+
+**A long read blocks schema changes.** A bulk read holds a shared lock for its
+whole duration; a queued `ALTER TABLE` waits behind it, and everything after
+that queues behind the ALTER. The application runs migrations at startup, so a
+read that outlives a deploy prevents the application from starting at all —
+containers sit at "waiting for application startup" while every health check,
+image digest and container status reports normal.
+
+The property to build for is that such a tool **cannot** hold a lock long
+enough to matter, not that someone remembers when to run it:
+
+- **Chunk the read** so no cursor outlives a deploy. One transaction per range
+  means a queued DDL waits one chunk instead of one table. This also makes the
+  copy resumable, which a large transfer needs regardless.
+- **Set `idle_in_transaction_session_timeout` on the reading role** as the
+  backstop. A tool that dies at the client end can otherwise leave a cursor
+  pinned indefinitely — the danger window is not the run's duration, it is
+  unbounded until someone kills the connection.
+- Set both as role-level defaults so a future caller cannot forget them.
+
+Two levers that look right and are not: `statement_timeout` caps how long the
+read runs but the DDL still queues for that whole period, and any timeout long
+enough to copy a large table is long enough to stall a deploy. `lock_timeout`
+governs locks a session **waits for**, not ones it **holds**.
+
+**A foreign-data-wrapper session is opaque from the source side.** It shows as
+`FETCH n FROM cN` with no table name, so grepping the source for what you think
+it is reading finds nothing and proves nothing. Identify it by client address
+and application name.
+
 ## Visibility and ownership
 
 Job visibility is a read-time conjunctive predicate, spelled in one place and
