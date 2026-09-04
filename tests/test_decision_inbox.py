@@ -575,9 +575,15 @@ def test_an_ineligible_assign_still_declares_where_its_target_comes_from(client,
 
 
 def test_assign_is_eligible_exactly_when_there_are_candidates(client, me):
-    """The frontend expands `candidates` when the verb is pressed, so an
-    eligible verb beside an empty list is a button nobody can complete. One
-    index answers both, rather than two predicates agreeing by luck."""
+    """ON THE QUEUE, where the row's candidates and the eligibility index are
+    the same set read under the same key. The frontend expands `candidates`
+    when the verb is pressed, so an eligible verb beside an empty list is a
+    button nobody can complete.
+
+    The picker does not make this promise and must not be read as if it did:
+    its list is search-filtered, and a query matching nothing does not stop an
+    application existing.
+    """
     headers, uid = me
     _app(uid, company="Acme, Inc.")
     _msg(uid, "<match@x>", "rejection", "Acme")
@@ -589,3 +595,47 @@ def test_assign_is_eligible_exactly_when_there_are_candidates(client, me):
     # And the normalisation is the matcher's, so "Acme" reaches "Acme, Inc.".
     hit = next(i for i in _items(client, headers, "unmatched_message") if i["candidates"])
     assert hit["candidates"][0]["company_name"] == "Acme, Inc."
+
+
+def test_assigning_to_a_dismissed_application_is_refused(client, me):
+    """Declared eligibility has to be enforced where the write happens or it is
+    decoration. The server said "no application at this company yet" for a
+    dismissed one and then accepted it as a target, so a client that ignored
+    `eligible` got its way and mail landed on an application whose whole
+    meaning is that it should never have existed."""
+    headers, uid = me
+    app = _app(uid)
+    db.execute("UPDATE applications SET dismissed_at = now() WHERE id = %s", (app,))
+    mid = _msg(uid, "<dismissed@x>", "rejection", "Acme")
+
+    assign = _choices(_items(client, headers, "unmatched_message")[0])["assign_application"]
+    assert assign["eligible"] is False
+
+    resp = client.post(
+        f"/v1/user/resolve/message:{mid}",
+        json={"choice": "assign_application", "target": app},
+        headers=headers,
+    )
+    assert resp.status_code == 409
+    assert resp.json()["detail"]["code"] == "DISMISSED"
+    assert mail_match.latest(mid) is None, "and nothing was written"
+
+
+def test_each_surface_names_its_own_target_list(client, me):
+    """A client reads `payload[choice.target_source]`. The queue calls its list
+    `candidates` and the picker calls its list `applications`, so one constant
+    would point one of them at a field its own response does not have - the
+    hardcoded fact moved one module along rather than removed."""
+    headers, uid = me
+    _app(uid)
+    mid = _msg(uid, "<source@x>", "rejection", "Acme")
+
+    row = _items(client, headers, "unmatched_message")[0]
+    source = _choices(row)["assign_application"]["target_source"]
+    assert source == "candidates"
+    assert row[source], "the queue's declared source resolves against the queue's own payload"
+
+    picker = client.get(f"/v1/user/messages/{mid}/candidates", headers=headers).json()
+    picked = {c["choice"]: c for c in picker["choices"]}["assign_application"]
+    assert picked["target_source"] == "applications"
+    assert picker[picked["target_source"]], "and the picker's against the picker's"

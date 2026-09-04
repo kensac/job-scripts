@@ -63,10 +63,13 @@ ACCEPT_STATUS = "accept_status"
 DECLINE_STATUS = "decline_status"
 MARK_DONE = "mark_done"
 
-# Where a verb's target comes from. One value today, named rather than implied,
-# so a verb that ever picks from somewhere else is a value the client switches
-# on instead of a second thing it already had to know.
+# Where a verb's target comes from: the name of the field, ON THIS RESPONSE,
+# holding the options. Not a global constant - the two surfaces that offer
+# these verbs hold their applications under different keys, so each declares
+# its own and a client reads `payload[choice.target_source]` without knowing
+# which surface it is on.
 CANDIDATES = "candidates"
+PICKER_APPLICATIONS = "applications"
 
 UNMATCHED_MESSAGE = "unmatched_message"
 UNCONFIRMED_MATCH = "unconfirmed_match"
@@ -420,6 +423,7 @@ def choices_for_message(
     apps_by_company: dict[str, list[dict[str, Any]]],
     company: str | None,
     thread_size: int,
+    target_source: str,
 ) -> list[dict[str, Any]]:
     """The verbs available on one message, decided HERE rather than by the
     caller.
@@ -431,23 +435,33 @@ def choices_for_message(
     a verb becomes conditional, one of the two lists is wrong and nothing says
     which.
 
-    Takes the index and the thread size rather than fetching them. Required,
-    not defaulted: a default is how "I did not have this" hides inside shared
-    code as if it were "there is nothing", and both are already in hand at
-    every call site.
+    Takes the index, the thread size and the name of its own target list rather
+    than fetching or assuming them. Required, not defaulted: a default is how
+    "I did not have this" hides inside shared code as if it were "there is
+    nothing", and all three are already in hand at every call site.
+
+    `target_source` IS A PER-SURFACE FACT and that is why the caller states it.
+    Two surfaces share these verbs and they hold their applications under
+    different keys - the queue row calls the list `candidates`, the picker
+    calls it `applications`. A constant here would name whichever one was
+    written first and be wrong on the other, which is the same hardcoded fact
+    the field exists to remove, moved one module along.
+
+    ELIGIBILITY IS "AN APPLICATION EXISTS AT THIS COMPANY", not "the list in
+    front of you is non-empty". On the queue those coincide, because the row's
+    candidates and this index are the same set read under the same key. On the
+    picker they do not: its list is search-filtered, and typing a query that
+    matches nothing does not stop the application existing. So the caller that
+    wants the stronger claim - eligible exactly when its own list is non-empty
+    - is the queue, and it holds there by construction rather than by promise.
     """
     key = mail_match.norm_company(company)
-    # Eligible EXACTLY WHEN the row's `candidates` is non-empty, because both
-    # read this index under the same normalised key. The frontend expands
-    # `candidates` when the verb is pressed, so an eligible verb beside an
-    # empty list would be a button a person cannot complete - and that would be
-    # two predicates agreeing by luck rather than one predicate.
     if key and apps_by_company.get(key):
         assign = _choice(
             ASSIGN,
             "Belongs to an application",
             messages=thread_size,
-            target_source=CANDIDATES,
+            target_source=target_source,
         )
     else:
         assign = _choice(
@@ -455,7 +469,7 @@ def choices_for_message(
             "Belongs to an application",
             eligible=False,
             reason="no application at this company yet",
-            target_source=CANDIDATES,
+            target_source=target_source,
         )
     return [
         assign,
@@ -590,6 +604,7 @@ def _message_items(
                     apps_by_company,
                     row["company"],
                     threads.get(row["provider_thread_id"] or "", 1),
+                    CANDIDATES,
                 ),
             }
         )
@@ -817,11 +832,30 @@ def _resolve_message(
             raise HTTPException(
                 400, detail={"code": "TARGET_REQUIRED", "message": "assign needs an application"}
             )
+        # `dismissed_at IS NULL` is the same predicate the verb's eligibility is
+        # declared from, ENFORCED HERE rather than only announced. Without it
+        # the server said "no application at this company yet" for a dismissed
+        # one and then accepted it as a target anyway, so the declaration was
+        # decoration: a client that ignored `eligible` got its way, and mail
+        # landed on an application whose whole meaning is that it should never
+        # have existed.
         owner = db.query_one(
-            "SELECT id FROM applications WHERE id = %s AND user_id = %s", (body.target, owner_id)
+            "SELECT id, dismissed_at FROM applications WHERE id = %s AND user_id = %s",
+            (body.target, owner_id),
         )
         if owner is None:
             raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown application"})
+        if owner["dismissed_at"] is not None:
+            # 409 rather than 404: it exists and the caller may see it, but the
+            # state it is in refuses the verb, and saying so is what lets them
+            # restore it instead of guessing at a missing row.
+            raise HTTPException(
+                409,
+                detail={
+                    "code": "DISMISSED",
+                    "message": "that application is dismissed; restore it before assigning to it",
+                },
+            )
         mail_match.record(
             message_id,
             mail_match.Match(

@@ -213,7 +213,15 @@ def test_the_candidate_picker_serves_the_same_declared_choices(client, me):
 def test_the_picker_and_the_queue_agree_on_eligibility(client, me):
     """One builder, so the two surfaces cannot drift. If they were built
     separately the first conditional verb would make one of them wrong with
-    nothing saying which."""
+    nothing saying which.
+
+    Everything except `target_source`, which is a per-surface fact and the one
+    thing that SHOULD differ: a client reads `payload[choice.target_source]`,
+    and the two responses hold their applications under different keys. This
+    compared the whole dict and so asserted more than its own name - agreeing
+    on the field that must not agree would mean one surface was pointing at a
+    list the other one owns.
+    """
     headers, uid = me
     db.execute(
         "INSERT INTO applications (user_id, company_name, source_provenance) "
@@ -224,7 +232,16 @@ def test_the_picker_and_the_queue_agree_on_eligibility(client, me):
 
     picker = client.get(f"/v1/user/messages/{mid}/candidates", headers=headers).json()["choices"]
     queued = client.get("/v1/user/resolve/queue", headers=headers).json()["items"][0]["choices"]
-    assert picker == queued
+
+    def without_source(choices):
+        return [{k: v for k, v in c.items() if k != "target_source"} for c in choices]
+
+    assert without_source(picker) == without_source(queued)
+    sources = [
+        (p.get("target_source"), q.get("target_source"))
+        for p, q in zip(picker, queued, strict=True)
+    ]
+    assert sources == [("applications", "candidates"), (None, None), (None, None)]
 
 
 def _app(uid: int, company: str) -> int:
