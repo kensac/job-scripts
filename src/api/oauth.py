@@ -114,15 +114,36 @@ class ProviderError(OAuthError):
     """The provider's endpoint failed in a way that is not the user's problem."""
 
 
+def _required_env(name: str) -> str:
+    """A worker without the credential is a misconfigured host, not a dead grant.
+
+    os.environ[...] raised a bare KeyError whose whole message was the variable
+    name, and it surfaced on the one task whose stated purpose is to notice a
+    revoked token. transmission and the laptop checkout both failed this way on
+    2026-09-04 while every container host passed, so the alarm built to tell
+    "your mail stopped" from "a quiet week" was reporting neither.
+
+    ProviderError, deliberately: this is not the user's problem and must never
+    be read as NeedsReconnect.
+    """
+    try:
+        return os.environ[name]
+    except KeyError:
+        raise ProviderError(
+            f"{name} is not set on worker {os.environ.get('JOBTRACKER_WORKER_NAME', '?')}; "
+            "the grant is fine, this host cannot refresh it"
+        ) from None
+
+
 def _client_id() -> str:
-    return os.environ["GOOGLE_OAUTH_CLIENT_ID"]
+    return _required_env("GOOGLE_OAUTH_CLIENT_ID")
 
 
 def _client_secret() -> str:
     # Read at call time rather than bound at import: the value is injected from
     # Infisical, and a module-level constant would freeze whatever was present
     # when the process started. It never leaves this module.
-    return os.environ["GOOGLE_OAUTH_CLIENT_SECRET"]
+    return _required_env("GOOGLE_OAUTH_CLIENT_SECRET")
 
 
 def redirect_uris() -> list[str]:
