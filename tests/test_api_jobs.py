@@ -222,10 +222,33 @@ def test_criteria_included_locations_is_an_allowlist(client, user_headers):
     assert austin not in ids
 
 
-def test_criteria_comp_min_rejects_an_extra_digit(client, user_headers):
-    resp = client.put(
+def test_criteria_comp_min_rejects_outside_the_column_domain(client, user_headers):
+    """An unbounded Python int must 422, not reach psycopg and 500.
+
+    Deliberately not a plausibility check: a bar of $150M is accepted, because
+    it is merely useless (it matches nothing that publishes pay) rather than
+    invalid, and no honest threshold separates ambition from a typo.
+    """
+    ok = client.put(
         "/v1/user/settings",
         json={"criteria": {"comp_min": 150_000_000}},
+        headers=user_headers,
+    )
+    assert ok.status_code == 200
+
+    # Above int4 but inside bigint: the parameter cast must match the column,
+    # or this reaches Postgres as "integer out of range" and 500s.
+    wide = client.put(
+        "/v1/user/settings",
+        json={"criteria": {"comp_min": 3_000_000_000}},
+        headers=user_headers,
+    )
+    assert wide.status_code == 200
+    assert client.get("/v1/user/jobs", headers=user_headers).status_code == 200
+
+    resp = client.put(
+        "/v1/user/settings",
+        json={"criteria": {"comp_min": 2**63}},
         headers=user_headers,
     )
     assert resp.status_code == 422

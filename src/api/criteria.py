@@ -3,12 +3,13 @@ from __future__ import annotations
 import re
 from typing import Any
 
-# The highest compensation advertised anywhere in the corpus is $4.16M
-# (max(comp_max) over jobs, read 2026-09-03; 8 rows sit above $1M). A user's
-# floor above that would match nothing that publishes pay, so this ceiling is
-# set at the next round number above the observed maximum: high enough that no
-# honest bar is rejected, low enough that a fat-fingered extra digit is.
-MAX_PLAUSIBLE_COMP = 5_000_000
+# jobs.comp_min is bigint, so this is the column's domain, not a judgement
+# about salaries. It exists to make an out-of-range bar a 422 rather than a
+# 500 at parameter-adaptation time; Python ints are unbounded and psycopg
+# cannot adapt one that does not fit. No plausibility ceiling is defensible
+# here - a bar above the highest advertised figure simply matches nothing that
+# publishes pay, which is a legible outcome rather than an invalid input.
+COMP_MAX = 2**63 - 1
 
 # Structured per-user criteria applied to source-derived visibility and to
 # filter-run candidacy (so AI never spends on jobs a user excludes outright).
@@ -30,8 +31,8 @@ SQL = """
         AND (NOT %(crit_has_incl)s OR EXISTS (
               SELECT 1 FROM unnest(j.locations) loc
               JOIN unnest(%(crit_incl)s::text[]) inc ON lower(loc) ~ ('\\m' || inc || '\\M')))
-        AND (%(crit_comp_min)s::int IS NULL OR j.comp_min IS NULL
-             OR j.comp_min >= %(crit_comp_min)s::int)
+        AND (%(crit_comp_min)s::bigint IS NULL OR j.comp_min IS NULL
+             OR j.comp_min >= %(crit_comp_min)s::bigint)
 """
 
 

@@ -13546,7 +13546,7 @@
             "anyOf": [
               {
                 "type": "integer",
-                "maximum": 5000000.0,
+                "maximum": 9.223372036854776e+18,
                 "minimum": 0.0
               },
               {
