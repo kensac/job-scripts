@@ -1237,7 +1237,9 @@ WITH ranked AS (
            lag(am.actor_user_id) OVER (PARTITION BY am.message_id ORDER BY am.id) AS prev_actor
     FROM application_matches am
     JOIN email_messages m ON m.id = am.message_id
-    WHERE m.user_id = %(user)s
+    -- NULL means every user, which is what /job-scripts is: the view across
+    -- the fleet, not one person's data behind a permission level.
+    WHERE (%(user)s::bigint IS NULL OR m.user_id = %(user)s)
 ),
 attached AS (
     SELECT method, confidence,
@@ -1270,8 +1272,16 @@ ORDER BY 3 DESC, 1
 
 
 @router.get("/admin/resolve/rates", response_model=ReviewRates, response_model_exclude_none=True)
-def admin_review_rates(user_id: int = Query(...), user: AuthedUser = Depends(require_admin)):
+def admin_review_rates(
+    user_id: int | None = Query(default=None), user: AuthedUser = Depends(require_admin)
+):
     """How often a person agrees with each tier, and how much nobody has read.
+
+    `user_id` is OPTIONAL and omitting it means the whole fleet. /job-scripts
+    is the view across all users rather than one user's data with a permission
+    level on it, so "is `ats_company` right" is the question it exists to ask -
+    and a required owner made the fleet-wide form of it unaskable, which is the
+    only form that decides whether a tier keeps writing unattended.
 
     Read-only, and deliberately without the verbs. An administrator answering
     somebody else's match is a different act from the owner answering it, and

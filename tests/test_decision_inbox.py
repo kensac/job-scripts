@@ -519,6 +519,28 @@ def test_rates_say_not_measured_rather_than_zero(client, me):
     assert body["never_reviewed"] == 1
 
 
+def test_rates_answer_the_fleet_wide_question_without_an_owner(client, me, f):
+    """/job-scripts is the view across all users, not one user's data behind a
+    permission level. "Is `ats_company` right" is the question that decides
+    whether a tier keeps attaching mail unattended, and requiring an owner made
+    the only useful form of it unaskable."""
+    headers, uid = me
+    admin = _auth_headers("inbox-admin3", "inboxadmin3@example.com", ["infra-admins"])
+    assert client.post("/v1/users/bootstrap", headers=admin).status_code == 200
+    _attach(_msg(uid, "<mine@x>", "rejection", "Acme"), _app(uid))
+
+    other = f.make_user()
+    _attach(_msg(other, "<theirs@x>", "rejection", "Beta"), _app(other, company="Beta"))
+
+    fleet = client.get("/v1/admin/resolve/rates", headers=admin)
+    assert fleet.status_code == 200, fleet.text
+    assert fleet.json()["never_reviewed"] == 2, "both users' attachments"
+
+    mine = client.get(f"/v1/admin/resolve/rates?user_id={uid}", headers=admin).json()
+    assert mine["never_reviewed"] == 1, "and an owner still narrows it"
+    assert headers is not None
+
+
 def test_a_rejection_is_counted_against_the_tier_that_made_the_attachment(client, me):
     """A `detached` row names no tier, so counting a rejection by its own
     method would put every one of them in one bucket and no tier would ever
