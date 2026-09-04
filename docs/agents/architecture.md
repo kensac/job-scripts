@@ -122,21 +122,36 @@ another.
   wrong": app-aware detectors comparing a window against a baseline, opening
   and resolving alerts, mailing once. A new detector is written when a
   pattern emerges, never one per traceback.
-- **Errors and events** (`api/telemetry.py`, PostHog) answer "what failed,
-  where, on which release": every unhandled exception in a request handler or
-  a worker's handler, and a queryable event wherever the service swallows or
-  retries a failure that would otherwise leave no trace (`task_failed`,
-  `task_requeued`, `tasks_reaped`, `tasks_lost`, `ingest_pull_failed`,
-  `fetch_failed`, `fetch_deferred`, `ai_call_failed`, `alert_opened`,
-  `alert_resolved`, `worker_started`). Every event carries `host` and
-  `release` (the image's commit, from the build arg), and the user's subject
-  where a request has one.
+- **Errors, events, logs and traces** (`api/telemetry.py`, PostHog, one
+  project end to end with the frontend) answer "what failed, where, on which
+  release, inside which request or task": every unhandled exception in a
+  request handler or a worker's handler; a queryable event wherever the
+  service swallows or retries a failure that would otherwise leave no trace
+  (`task_failed`, `task_requeued`, `tasks_reaped`, `tasks_lost`,
+  `ingest_pull_failed`, `fetch_failed`, `fetch_deferred`, `ai_call_failed`,
+  `alert_opened`, `alert_resolved`, `worker_started`); every log record at
+  INFO and above, through OpenTelemetry; and one span per HTTP request, per
+  worker task and per outbound `requests` call (the board pulls and ATS
+  resolvers), so a trace of the queue reads as tasks with their fetches
+  underneath. Every record carries `service.name` (`jobtracker-api` or
+  `jobtracker-worker`), `service.instance.id` (the worker's fleet name),
+  `host`, and `release` (the image's commit, from the build arg); every
+  exception and event carries the ids of the span it happened inside, so an
+  error links to its request or task. PostHog is a generic OTLP receiver:
+  the full `/i/v1/logs` and `/i/v1/traces` paths, bearer-authenticated with
+  the same project key.
+
+How much goes is a measurement, not a guess: everything ships first
+(`POSTHOG_TRACE_SAMPLE=1.0`, `POSTHOG_LOG_LEVEL=INFO`), the daily volume is
+read in PostHog, and the two knobs come down if the bill or the noise says
+so. Errors and events are never sampled.
 
 `telemetry` is a no-op without `POSTHOG_API_KEY`, so tests and a bare checkout
-need no destination. It never raises: a telemetry failure must not become the
-second failure of the thing it was recording. The frontend captures its own
-exceptions and records upstream API failures on its side; this layer is for
-failures inside the service that never surface as a bad HTTP answer.
+need no destination, and it says so once at startup; it never raises, and
+counts what it could not send in `jobtracker_telemetry_failures_total`. The
+frontend captures its own exceptions and records upstream API failures on its
+side; this layer is for failures inside the service that never surface as a
+bad HTTP answer.
 
 ## The worker fleet
 

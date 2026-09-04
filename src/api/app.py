@@ -31,7 +31,7 @@ async def _lifespan(app: FastAPI):
 
     db.init_schema()
     metrics.serve()
-    telemetry.init()
+    telemetry.init("jobtracker-api")
     yield
     telemetry.shutdown()
 
@@ -79,6 +79,10 @@ app.include_router(filter_insights.router, prefix="/v1")
 app.include_router(filter_insights.user_router, prefix="/v1")
 app.include_router(gmail.router, prefix="/v1")
 metrics.instrument(app)
+# At import, before the middleware stack is built: the instrumentation takes a
+# lazy tracer that starts producing spans once telemetry.init() sets the
+# provider at startup, and stays a no-op without a key.
+telemetry.instrument_app(app)
 
 
 @app.get("/healthz")

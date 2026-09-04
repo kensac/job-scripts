@@ -25,6 +25,12 @@ TELEMETRY_FAILURES = Counter(
     "Telemetry records that could not be sent",
     ["kind"],
 )
+# A labelled counter exports nothing until its first increment, so "zero
+# failures" and "the failure path was never reached" read the same on
+# /metrics. Homelab found exactly that on the first roll. Both children exist
+# from process start, at zero, which is the number a health check can read.
+for _kind in ("event", "exception"):
+    TELEMETRY_FAILURES.labels(_kind)
 
 TASKS_PROCESSED = Counter(
     "jobtracker_worker_tasks_total",
