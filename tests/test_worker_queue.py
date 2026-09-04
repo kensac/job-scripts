@@ -8,6 +8,7 @@ from api.tasks import filters as tasks_filters
 from api.tasks import runtime as tasks_runtime
 from api.tasks import verify as tasks_verify
 from core.store import add_ai_result
+from tests.factories import finished
 
 # ---------------------------------------------------------------------------
 # enqueue / dedupe
@@ -574,7 +575,7 @@ async def test_reverify_jobs_skips_urls_with_fresh_closed_verdicts(monkeypatch):
 
     monkeypatch.setattr(fetching, "fetch_page", fake_fetch_page)
     monkeypatch.setattr("core.batch.submit_responses_batches", _submit_ids)
-    monkeypatch.setattr("core.batch.collect_batches", _collect_from(fake_batch))
+    monkeypatch.setattr("core.batch.collect_finished_batches", finished(_collect_from(fake_batch)))
 
     fresh_urls = ["https://x.example.com/fresh-1", "https://x.example.com/fresh-2"]
     stale_urls = ["https://x.example.com/stale-1", "https://x.example.com/stale-2"]
@@ -656,7 +657,7 @@ async def test_verify_new_records_both_verdicts(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
 
     monkeypatch.setattr("core.batch.submit_responses_batches", _submit_ids)
-    monkeypatch.setattr("core.batch.collect_batches", _collect_from(fake_batch))
+    monkeypatch.setattr("core.batch.collect_finished_batches", finished(_collect_from(fake_batch)))
     tid = tasks_runtime.enqueue("verify_new", {"cycle": "t"})
     await _run_batched(tid, lambda: tasks_verify.handle_verify_new(tid, {"cycle": "t"}))
     rows = db.query(
@@ -703,7 +704,7 @@ async def test_batched_verdicts_record_their_reason(monkeypatch):
 
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     monkeypatch.setattr("core.batch.submit_responses_batches", _submit_ids)
-    monkeypatch.setattr("core.batch.collect_batches", _collect_from(fake_batch))
+    monkeypatch.setattr("core.batch.collect_finished_batches", finished(_collect_from(fake_batch)))
     tid = tasks_runtime.enqueue("verify_new", {"cycle": "t"})
     await _run_batched(tid, lambda: tasks_verify.handle_verify_new(tid, {"cycle": "t"}))
 
@@ -754,8 +755,8 @@ async def test_reverify_records_batch_verdicts_and_reattaches(monkeypatch):
 
     monkeypatch.setattr(fetching, "fetch_page", fake_fetch_page)
     monkeypatch.setattr("core.batch.submit_responses_batches", _submit_ids)
-    monkeypatch.setattr("core.batch.collect_batches", _collect_from(fake_batch))
-    monkeypatch.setattr("core.batch.collect_batches", fake_collect)
+    monkeypatch.setattr("core.batch.collect_finished_batches", finished(_collect_from(fake_batch)))
+    monkeypatch.setattr("core.batch.collect_finished_batches", finished(fake_collect))
 
     rows = [{"url": "https://rv.example.com/1", "company": "Acme", "title": "SWE"}]
     task_id = tasks_runtime.enqueue("reverify_chunk", {"parent_id": 1})
@@ -767,13 +768,10 @@ async def test_reverify_records_batch_verdicts_and_reattaches(monkeypatch):
         "AND check_type = 'closed' ORDER BY id DESC LIMIT 1"
     )
     assert row["status"] == "rejected" and row["config_name"] == "reverify"
-    # Parked with its batch id recorded, so the work is recoverable.
-    assert tasks_runtime._pending_batch_ids(task_id) == ["batch_test_1"]
-    submitted_once = _submit_ids.calls
-
-    # Requeued: the stored batch id makes it reattach, never resubmitting.
-    await _run_batched(task_id, lambda: tasks_verify._reverify_jobs(task_id, rows))
-    assert _submit_ids.calls == submitted_once, "resume must not resubmit"
+    # Collected, so nothing is left to reattach to: a rerun cannot download
+    # and re-record the same batch. Reattaching to a batch still in flight is
+    # covered in test_batch_stragglers.
+    assert tasks_runtime._pending_batch_ids(task_id) == []
 
 
 @pytest.mark.asyncio
@@ -881,7 +879,7 @@ async def test_full_sweep_rechecks_even_fresh_verdicts(monkeypatch):
     monkeypatch.setattr(fetching, "fetch_page", fake_fetch)
     monkeypatch.setattr(core_ats, "resolve", lambda url: core_ats.UNSUPPORTED)
     monkeypatch.setattr("core.batch.submit_responses_batches", _submit_ids)
-    monkeypatch.setattr("core.batch.collect_batches", _collect_from(fake_batch))
+    monkeypatch.setattr("core.batch.collect_finished_batches", finished(_collect_from(fake_batch)))
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
 
     url = "https://fs.test/1"

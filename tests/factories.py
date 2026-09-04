@@ -259,3 +259,13 @@ def make_embedding(url: str, vector: list[float] | None = None, *, seed: float =
         "ON CONFLICT (url) DO UPDATE SET embedding = EXCLUDED.embedding",
         (url, str(vector), EMBEDDING_MODEL, "hash", (current or {}).get("id"), 100),
     )
+
+
+def finished(collector):
+    """Adapts a fake that returns results alone into the shape collect_finished_batches
+    returns: everything it yields counts as finished, nothing stays parked."""
+
+    async def _collect(batch_ids, on_event=None):
+        return await collector(batch_ids, on_event), []
+
+    return _collect

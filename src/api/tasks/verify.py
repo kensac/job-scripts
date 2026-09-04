@@ -20,6 +20,7 @@ from api.tasks.runtime import (
     _pending_batch_ids,
     _set_progress,
     _update_parent_progress,
+    collect_pending,
     enqueue,
     submit_or_collect,
 )
@@ -143,7 +144,7 @@ async def _reverify_jobs(
     remaining verdict in ONE half-price batch instead of a call per job."""
     from openai.lib._pydantic import to_strict_json_schema
 
-    from core.batch import BatchSpec, collect_batches
+    from core.batch import BatchSpec
     from core.pittcsc_simplify import CLOSED_INSTRUCTIONS
 
     if not ai.server_key("openai"):
@@ -157,7 +158,7 @@ async def _reverify_jobs(
     existing = _pending_batch_ids(task_id)
     if existing:
         logger.info(f"Task {task_id}: reattaching to {len(existing)} reverify batch(es)")
-        results = await collect_batches(existing, hook)
+        results = await collect_pending(task_id, hook)
         _record_reverify_results(results, by_url, model)
         _set_progress(task_id, len(rows), len(rows), "reverified")
         if parent_id:
@@ -412,9 +413,7 @@ async def handle_verify_new(task_id: int, payload: dict[str, Any]) -> None:
     hook = _batch_event_hook(task_id, "verify", model)
     existing = _pending_batch_ids(task_id)
     if existing:
-        from core.batch import collect_batches
-
-        results = await collect_batches(existing, hook)
+        results = await collect_pending(task_id, hook)
     else:
         results = await submit_or_collect(task_id, specs, model, "low", 1000, hook)
     done = 0

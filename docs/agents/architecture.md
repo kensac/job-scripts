@@ -81,13 +81,18 @@ task's own work from it will make the task discard results it already paid for.
 **Collection must be reachable when there is nothing new to submit.** An early
 return on an empty selection, placed before collection, strands completed work.
 
-**A task waiting on several batches resumes only when every one of them is
-terminal.** One straggler therefore holds every finished batch beside it, and
-the results stay uncollected although they are already paid for. This is
-latency rather than loss — the overdue path collects whatever landed once the
-provider's window passes — but the wait is bounded by that window, not by the
-batches that finished. Size a batch knowing that its slowest request sets when
-any of it can be read.
+**A task waiting on several batches collects the ones that finished and parks
+again on the rest.** The unit of partial collection is the batch, not the
+request: a provider batch yields nothing until it is terminal, so its slowest
+request sets when any of it can be read. Size a batch knowing that. The poll
+resumes a task once some of its batches are terminal and the rest have run
+past `batch_straggler_hours` (persisted config); the resumed handler goes
+through `collect_pending`, which takes what landed and rewrites the payload
+to the ids still running, and the worker parks a handler that returns with
+ids left rather than finishing it. A handler must therefore be safe to run
+again from the top with a subset of its results, which every batched sweep
+already is: they iterate the results they were given and re-select on the
+next run.
 
 Dry-run a handful of live calls before committing to a large batch. A batch
 fails whole, and the dry run also measures real token counts.
