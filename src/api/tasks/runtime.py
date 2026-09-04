@@ -343,7 +343,13 @@ def _reconcile_chunks() -> None:
         _maybe_finalize_parent(r["id"])
 
 
-def _set_progress(task_id: int, done: int, total: int, label: str) -> None:
+def _set_progress(
+    task_id: int, done: int, total: int, label: str, extra: dict[str, Any] | None = None
+) -> None:
+    # `extra` is for counts a handler wants queryable afterwards (what an
+    # ingest fetched, kept, cached, failed to fetch). The label is for a
+    # person; the health detectors read the keys.
+    #
     # The heartbeat rides along with progress, so this write has to respect the
     # claim too: a worker that lost the task would otherwise keep proving the
     # liveness of the run that replaced it, and the reaper would never see it.
@@ -358,7 +364,7 @@ def _set_progress(task_id: int, done: int, total: int, label: str) -> None:
         f"                       THEN now() ELSE progress_at END "
         f"WHERE id = %(tid)s{owned}",
         {
-            "progress": db.jsonb({"done": done, "total": total, "label": label}),
+            "progress": db.jsonb({"done": done, "total": total, "label": label, **(extra or {})}),
             "tid": task_id,
             **owned_params,
         },
