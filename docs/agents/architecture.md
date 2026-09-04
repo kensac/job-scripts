@@ -107,6 +107,51 @@ A handler that never yields holds its worker until it finishes. Long handlers
 should hold progress in the database so an interruption resumes rather than
 restarts.
 
+A worker runs one task at a time, and its housekeeping (reaping, scheduling,
+gauges) runs only between tasks. A long task therefore starves scheduling on
+that worker; keep tasks short and let the queue carry the volume.
+
+## Sources and boards
+
+**A source is a row, never a code path.** The format is read off its
+listings URL by `core/boards.py`; a new board in a known format is added on
+the Sources page, and a new format is one fetcher returning the same
+`JobPosting` as the rest. The row carries what ingest needs and nothing
+derived: `company` (required where the system never names it), a
+`title_pattern` that gates which titles enter the catalog, and an
+`ingest_interval_hours`. `sources.active = false` stops both the scrape and
+every AI check on that board's postings; a bundle (`source_groups`) or a
+format is a way of selecting rows for that flag and the interval through
+`POST /admin/sources/switch`, not a second layer of state.
+
+**What a pattern excludes is not lost.** Every pull records the postings the
+pattern did not admit in `screened_postings`, refreshed per pull and aged out
+by `screened_retention_days`, so a candidate pattern is judged against what
+the board actually listed (`pattern-preview`) before it replaces the live one.
+A posting a wider pattern admits arrives in `jobs` on the next pull; nothing
+downstream reads the screened table.
+
+**A page fetch that returns nothing leaves a record.** It is a `content` row
+with `status = 'failed'` and no text, and nothing retries that URL inside
+`fetch_retry_after_hours`. Without the record the hourly cycle was the retry:
+every dead link, every hour, from every worker, which was most of the fleet's
+block rate.
+
+**The scheduler queues one ingest per source, however far behind.** A pending
+ingest blocks the next cycle's for that source; a running one does not. A
+source on a longer interval than the cycle waits while its last successful or
+in-flight pull is younger than the interval; a failed pull does not count.
+
+**Every ingest leaves its counts on its task** (`fetched`, `kept`, `cached`,
+`fetch_failed`, `gone`, `already_cached`, `skipped_recent_failure`). They are
+the only record of what one pull saw, and they are what the board detectors
+in `api/health.py` and the admin ingest summary read. A board that pulls fine
+and delivers nothing is visible as exactly that.
+
+The knobs above (`fetch_retry_after_hours`, `screened_retention_days`,
+`queue_stall_minutes`, `ingest_backlog_cycles`) are `app_config` rows, not
+constants; see engineering-standards.md.
+
 ## Time
 
 Containers run on a local timezone by deliberate convention; hosts and the
