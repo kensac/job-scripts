@@ -31,6 +31,17 @@ TELEMETRY_FAILURES = Counter(
 # from process start, at zero, which is the number a health check can read.
 for _kind in ("event", "exception"):
     TELEMETRY_FAILURES.labels(_kind)
+# Zero failures cannot be told from zero attempts, and homelab read socket
+# tables in three network namespaces to answer "is it shipping" for want of
+# this. Every OTLP export attempt, by records in the batch.
+TELEMETRY_EXPORTS = Counter(
+    "jobtracker_telemetry_exports_total",
+    "OTLP records the service tried to ship, by outcome",
+    ["kind", "result"],
+)
+for _kind in ("traces", "logs"):
+    for _result in ("ok", "failed"):
+        TELEMETRY_EXPORTS.labels(_kind, _result)
 
 TASKS_PROCESSED = Counter(
     "jobtracker_worker_tasks_total",

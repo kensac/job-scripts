@@ -120,6 +120,24 @@ def _shipping_handler(level: int, logger_provider: Any) -> logging.Handler:
     return ShippingHandler(level=level, logger_provider=logger_provider)
 
 
+def _counted(exporter: Any, kind: str) -> Any:
+    """Counts every export attempt on the exporter, by records and outcome,
+    in jobtracker_telemetry_exports_total. Both OTLP exporters answer an
+    enum whose SUCCESS member means the receiver took the batch."""
+    from api.metrics import TELEMETRY_EXPORTS
+
+    export = exporter.export
+
+    def counted(batch: Any, *args: Any, **kwargs: Any) -> Any:
+        result = export(batch, *args, **kwargs)
+        ok = getattr(result, "name", "") == "SUCCESS"
+        TELEMETRY_EXPORTS.labels(kind, "ok" if ok else "failed").inc(len(batch))
+        return result
+
+    exporter.export = counted
+    return exporter
+
+
 def init(service: str = "jobtracker", instance: str | None = None) -> None:
     """Builds the clients once, from POSTHOG_API_KEY and POSTHOG_HOST. Called
     at API startup and worker startup with the process's service name and,
@@ -184,7 +202,9 @@ def init(service: str = "jobtracker", instance: str | None = None) -> None:
         resource=resource, sampler=ParentBased(TraceIdRatioBased(ratio))
     )
     _tracer_provider.add_span_processor(
-        BatchSpanProcessor(OTLPSpanExporter(endpoint=f"{host}/i/v1/traces", headers=headers))
+        BatchSpanProcessor(
+            _counted(OTLPSpanExporter(endpoint=f"{host}/i/v1/traces", headers=headers), "traces")
+        )
     )
     trace.set_tracer_provider(_tracer_provider)
     _tracer = trace.get_tracer(service)
@@ -200,7 +220,9 @@ def init(service: str = "jobtracker", instance: str | None = None) -> None:
 
     _logger_provider = LoggerProvider(resource=resource)
     _logger_provider.add_log_record_processor(
-        BatchLogRecordProcessor(OTLPLogExporter(endpoint=f"{host}/i/v1/logs", headers=headers))
+        BatchLogRecordProcessor(
+            _counted(OTLPLogExporter(endpoint=f"{host}/i/v1/logs", headers=headers), "logs")
+        )
     )
     set_logger_provider(_logger_provider)
     # Every record the service logs, at INFO and above, with the active trace

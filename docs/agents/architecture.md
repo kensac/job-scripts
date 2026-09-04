@@ -148,7 +148,7 @@ so. Errors and events are never sampled.
 
 `telemetry` is a no-op without `POSTHOG_API_KEY`, so tests and a bare checkout
 need no destination, and it says so once at startup; it never raises, and
-counts what it could not send in `jobtracker_telemetry_failures_total`. The
+counts what it could not send in `jobtracker_telemetry_failures_total` and every OTLP export attempt in `jobtracker_telemetry_exports_total{kind,result}`, so whether it is shipping is one query and zero failures is never mistaken for zero attempts. The
 frontend captures its own exceptions and records upstream API failures on its
 side; this layer is for failures inside the service that never surface as a
 bad HTTP answer.

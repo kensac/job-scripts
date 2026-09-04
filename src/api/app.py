@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Request
@@ -23,6 +24,13 @@ from api.routers import (
     task_models,
     users,
 )
+
+
+# uvicorn configures its own loggers and leaves the root at WARNING, so the
+# service's INFO records, the telemetry startup line among them, were dropped
+# before any handler saw them; the api looked uninstrumented in its own logs
+# while shipping. Same call the worker makes at startup.
+logging.basicConfig(level=logging.INFO)
 
 
 @asynccontextmanager
