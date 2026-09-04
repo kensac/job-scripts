@@ -76,6 +76,11 @@ _APP_CONFIG_SEED = [
     # The text-length gate under static_first; see api.fetching.fetch_static
     # for the measurement behind 1,500.
     ("static_fetch_min_chars", 1500),
+    # How long GET /admin/stats serves the same answer. The dashboard refetches
+    # it on every worker event: 642 calls a day at 583 ms each, five full
+    # scans of ai_queries per call, a quarter of all server time on the box
+    # for lifetime totals that move once an hour. 1 is as good as off.
+    ("admin_stats_cache_seconds", 60),
 ]
 # One source of truth for a seeded key's value: the seed writes it, and
 # get_config falls back to it when the row is missing.

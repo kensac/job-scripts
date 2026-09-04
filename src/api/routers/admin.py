@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import time
 from decimal import Decimal
 from typing import Any
 
@@ -1653,6 +1654,8 @@ _CONFIG_KEYS: dict[str, type] = {
     "fetch_engine": str,
     # Text-length gate for the browserless engine; api.fetching.fetch_static.
     "static_fetch_min_chars": int,
+    # Seconds GET /admin/stats serves a cached answer. Seeded in api.db.
+    "admin_stats_cache_seconds": int,
 }
 
 # A string key takes exactly one of these; the message names them.
@@ -2095,8 +2098,26 @@ def options(user: AuthedUser = Depends(require_admin)):
     }
 
 
+_stats_cache: tuple[float, dict[str, Any]] | None = None
+
+
 @router.get("/stats")
 def stats(user: AuthedUser = Depends(require_admin)):
+    """Lifetime totals over ai_queries, served from a per-process cache for
+    admin_stats_cache_seconds. Every call is five full scans of the largest
+    table, and the dashboard asks on every worker event; the totals move by
+    a few rows an hour. ponytail: per-process cache, so each api replica
+    scans once per window; shared cache if replicas multiply."""
+    global _stats_cache
+    ttl = int(db.get_config("admin_stats_cache_seconds"))
+    if _stats_cache and time.monotonic() - _stats_cache[0] < ttl:
+        return _stats_cache[1]
+    result = _compute_stats()
+    _stats_cache = (time.monotonic(), result)
+    return result
+
+
+def _compute_stats() -> dict[str, Any]:
     totals = db.query_one(
         """
         SELECT COUNT(*) AS queries,
