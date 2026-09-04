@@ -63,8 +63,7 @@ def _notify(fresh: list[dict[str, Any]]) -> None:
         return
 
     admins = db.query(
-        "SELECT DISTINCT email FROM users WHERE email LIKE '%%@%%' "
-        "AND 'infra-admins' = ANY(groups)"
+        "SELECT DISTINCT email FROM users WHERE email LIKE '%%@%%' AND 'infra-admins' = ANY(groups)"
     )
     if not admins:
         logger.error("health alert NOT mailed: no infra-admins with an address (ids=%s)", ids)
@@ -81,7 +80,6 @@ def _notify(fresh: list[dict[str, Any]]) -> None:
     if not delivered:
         return
     db.execute(
-        "UPDATE health_alerts SET notified_at = now() "
-        "WHERE id = ANY(%s) AND notified_at IS NULL",
+        "UPDATE health_alerts SET notified_at = now() WHERE id = ANY(%s) AND notified_at IS NULL",
         (ids,),
     )
