@@ -242,6 +242,9 @@ class Source(Base):
     company: Mapped[str | None] = mapped_column(Text)
     # Case-insensitive regex a title must match to be ingested; NULL takes all.
     title_pattern: Mapped[str | None] = mapped_column(Text)
+    # Hours between pulls; 1 is the hourly cycle. A bundle of a few hundred
+    # company boards is set to 24 in one write through the category switch.
+    ingest_interval_hours: Mapped[int] = mapped_column(Integer, server_default=text("1"))
 
 
 class SourceGroup(Base):

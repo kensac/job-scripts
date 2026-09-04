@@ -126,11 +126,23 @@ def schedule_ingest_cycle() -> None:
     # 40 minutes later behind two aggregator ingests, with the next cycle due
     # to add 79 more. A RUNNING ingest does not block the next cycle's task,
     # because that one will be claimed as soon as it finishes.
+    #
+    # A source on a longer interval than the cycle is skipped while its last
+    # successful or in-flight ingest is younger than that interval. A FAILED
+    # one does not count, so a board on a daily interval that failed retries
+    # next cycle rather than tomorrow. Hourly sources (interval 1) are governed
+    # by the per-cycle dedupe alone, which is exact where an age check drifts.
     for s in db.query(
         """
-        SELECT name FROM sources s WHERE active AND NOT EXISTS (
+        SELECT name FROM sources s WHERE active
+          AND NOT EXISTS (
             SELECT 1 FROM tasks t WHERE t.kind = 'ingest_source' AND t.status = 'pending'
               AND t.payload->>'source' = s.name)
+          AND (s.ingest_interval_hours <= 1 OR NOT EXISTS (
+            SELECT 1 FROM tasks t WHERE t.kind = 'ingest_source'
+              AND t.status IN ('running', 'done')
+              AND t.payload->>'source' = s.name
+              AND t.created_at > now() - make_interval(hours => s.ingest_interval_hours)))
         """
     ):
         enqueue(

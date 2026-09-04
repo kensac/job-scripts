@@ -5720,7 +5720,7 @@
     "/v1/admin/sources/switch": {
       "post": {
         "summary": "Switch Sources",
-        "description": "One write flips a whole category of boards.\n\nsources.active is already the switch that stops both the scrape and the AI\nspend on a board's postings (SUBSCRIBED_SOURCE in core/store.py), so a\ncategory is a way of SELECTING rows for that write, not a second layer of\nstate. Every row shows its own flag afterwards, and nothing is overridden\nsilently. The top level is the format (all Workday boards), the level below\nis a bundle (the quant firms), and names catch the rest.",
+        "description": "One write sets a whole category of boards: on or off, and how often\nthey are pulled.\n\nsources.active is already the switch that stops both the scrape and the AI\nspend on a board's postings (SUBSCRIBED_SOURCE in core/store.py), and\ningest_interval_hours is what the scheduler reads, so a category is a way\nof SELECTING rows for those writes, not a second layer of state. Every row\nshows its own values afterwards, and nothing is overridden silently. The\ntop level is the format (all Workday boards), the level below is a bundle\n(the quant firms), and names catch the rest.",
         "operationId": "switch_sources_v1_admin_sources_switch_post",
         "parameters": [
           {
@@ -15324,6 +15324,19 @@
               }
             ],
             "title": "Title Pattern"
+          },
+          "ingest_interval_hours": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 168.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ingest Interval Hours"
           }
         },
         "type": "object",
@@ -15396,8 +15409,28 @@
       "SourceSwitchBody": {
         "properties": {
           "active": {
-            "type": "boolean",
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Active"
+          },
+          "ingest_interval_hours": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 168.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ingest Interval Hours"
           },
           "kind": {
             "anyOf": [
@@ -15437,9 +15470,6 @@
           }
         },
         "type": "object",
-        "required": [
-          "active"
-        ],
         "title": "SourceSwitchBody"
       },
       "SourcesPut": {
