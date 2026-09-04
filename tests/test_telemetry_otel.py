@@ -115,3 +115,20 @@ def test_a_shipped_log_record_is_scrubbed_and_the_exporter_never_ships_its_own()
     # The original record is untouched for the stdout handler.
     assert rec.exc_info is not None and rec.args == (42,)
     assert telemetry.scrub("x" * 5000).endswith("[truncated]")
+
+
+def test_every_export_attempt_is_counted_by_outcome():
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+    from api.metrics import TELEMETRY_EXPORTS
+
+    ok = TELEMETRY_EXPORTS.labels("traces", "ok")
+    before = ok._value.get()
+    exporter = telemetry._counted(InMemorySpanExporter(), "traces")
+    exporter.export([object(), object()])
+    assert ok._value.get() == before + 2
+    failed = TELEMETRY_EXPORTS.labels("traces", "failed")
+    before_failed = failed._value.get()
+    exporter.shutdown()
+    exporter.export([object()])
+    assert failed._value.get() == before_failed + 1
