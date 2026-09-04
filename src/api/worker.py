@@ -476,8 +476,14 @@ async def run_once() -> bool:
 
     hb = threading.Thread(target=_liveness, name="liveness", daemon=True)
     hb.start()
+    span_ids: dict[str, str] = {}
     try:
-        await handler(task["id"], task["payload"])
+        # One span per task, so a trace of the queue reads as tasks with
+        # their board fetches and model calls underneath, and an exception
+        # captured inside carries this span's ids.
+        with telemetry.task_span(task, WORKER_NAME) as ids:
+            span_ids.update(ids)
+            await handler(task["id"], task["payload"])
         if repark_if_unfinished(task["id"]):
             # The handler collected the batches that had finished and left
             # the rest on its payload: it waits on those, it is not done.
@@ -511,7 +517,7 @@ async def run_once() -> bool:
             events.publish_task(task["id"])
             metrics.TASKS_PROCESSED.labels(task["kind"], "requeued").inc()
             logger.warning(f"Task {task['id']} hit a transient error, requeued: {exc}")
-            telemetry.capture("task_requeued", properties=_task_props(task, exc))
+            telemetry.capture("task_requeued", properties={**_task_props(task, exc), **span_ids})
         else:
             _finish(task["id"], "failed", str(exc))
             metrics.TASKS_PROCESSED.labels(task["kind"], "failed").inc()
@@ -519,8 +525,8 @@ async def run_once() -> bool:
             # The traceback and the event both: the traceback groups with
             # its siblings in the error tracker, the event is what a query
             # over failures by kind and worker reads.
-            telemetry.capture_exception(exc, properties=_task_props(task, exc))
-            telemetry.capture("task_failed", properties=_task_props(task, exc))
+            telemetry.capture_exception(exc, properties={**_task_props(task, exc), **span_ids})
+            telemetry.capture("task_failed", properties={**_task_props(task, exc), **span_ids})
     finally:
         # Signalled rather than cancelled: a thread cannot be cancelled, and
         # the wait() returns immediately so the join costs nothing. Joined so
@@ -550,7 +556,7 @@ def main() -> None:
         (WORKER_NAME,),
     )
     metrics.serve()
-    telemetry.init()
+    telemetry.init("jobtracker-worker", WORKER_NAME)
     ingest_enabled = os.environ.get("JOBTRACKER_INGEST_SCHEDULER", "1") == "1"
     logger.info(
         f"Worker started (kinds={WORKER_KINDS or 'all'}, "

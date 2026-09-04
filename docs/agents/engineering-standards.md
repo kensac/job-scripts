@@ -114,3 +114,7 @@ and what breaks if it is reversed, not what the line does.
 
 Comments are frequently wrong. Verify a claim in a comment before relying on
 it, and correct it when you find it stale.
+
+## Migrations are generated from the models
+
+The ORM models in `src/api/orm.py` are the schema. A schema change is a model change followed by `make revision m="..."`, which autogenerates the migration; the generated file is then read and, where the change moves data (a copy, a backfill, a seed of both halves of a rename), the data step is added to it by hand. Nobody writes a schema migration from scratch: the two copies drifted every time someone did, and CI's autogenerate drift check exists to catch exactly that. Non-additive changes (drops, renames) still go through the expand-then-contract shape and the before-merge conversation with homelab; generation does not change what is safe to roll, only who writes it.

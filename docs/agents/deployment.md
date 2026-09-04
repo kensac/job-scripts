@@ -85,3 +85,5 @@ run is not evidence that the right image is live.
 ## Error tracking
 
 Every api and worker container carries `POSTHOG_API_KEY` and `POSTHOG_HOST` (rendered from Infisical by the config repos; the key is PostHog's public ingest key for the project the frontend already reports to). Without the key the telemetry layer is a no-op, so a container missing it runs and merely reports nothing. `JOBTRACKER_REVISION` is baked into the image from the build arg `GIT_SHA` by the GHCR workflow; nothing sets it at deploy time, and a local build without the arg reads `unknown`.
+
+`POSTHOG_HOST` is PostHog's direct ingest host (https://us.i.posthog.com); the service does not go through the browser proxy, which exists to dodge ad blockers a server never meets and whose downtime would otherwise take the service's telemetry with it. Two volume knobs, read once at startup: `POSTHOG_TRACE_SAMPLE` (fraction of traces kept, default 1.0) and `POSTHOG_LOG_LEVEL` (lowest log level shipped, default INFO). Errors and events are never sampled. Each container's startup log carries one line naming the service, instance, host, release and both knobs, or DISABLED when the key is unset.
