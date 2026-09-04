@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from openai import AsyncOpenAI
 from openai.types import Batch
 
+from core import store
+
 # on_event(batch_id, status, {"requests": n, "completed": x, "failed": y})
 BatchEventHook = Callable[[str, str, dict[str, int]], None] | None
 
@@ -206,6 +208,10 @@ async def _collect_batch(
             if result.text is None and result.error is None:
                 result.error = f"batch {batch.status}"
         if not batch.output_file_id:
+            for result in results.values():
+                if result.batch_id is None:
+                    result.batch_id = batch.id
+            _record_errors(batch, results)
             return results
 
     if batch.output_file_id:
@@ -252,7 +258,34 @@ async def _collect_batch(
         except Exception as exc:
             logger.warning(f"Failed to read batch error file: {exc}")
 
+    _record_errors(batch, results)
     return results
+
+
+def _record_errors(batch: Batch, results: dict[str, BatchResult]) -> None:
+    """Every error this batch returned, stored as the provider wrote it.
+
+    Per-request errors come from the error file. A batch-level rejection
+    (validation failed before any request ran) arrives on the batch object
+    with no error file at all, and is the reason for a batch that failed
+    whole; it is written onto every result and stored once under an empty
+    custom_id, so the whole failure keeps its reason.
+    """
+    batch_errors = getattr(getattr(batch, "errors", None), "data", None) or []
+    messages = [getattr(e, "message", None) or str(e) for e in batch_errors]
+    placeholder = f"batch {batch.status}"
+    for result in results.values():
+        if result.text is None and messages and result.error in (None, "", placeholder):
+            result.error = "; ".join(messages)
+    errors = {cid: r.error for cid, r in results.items() if r.error and r.batch_id == batch.id}
+    if messages and not errors:
+        errors = {"": "; ".join(messages)}
+    if not errors:
+        return
+    try:
+        store.record_batch_errors(batch.id, errors)
+    except Exception as exc:
+        logger.warning(f"Failed to record batch errors for {batch.id}: {exc}")
 
 
 async def _submit_chunk(

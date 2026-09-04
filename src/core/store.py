@@ -518,3 +518,22 @@ def get_all_custom_filter_jobs() -> list[dict[str, Any]]:
 
 
 init_db()
+
+
+def record_batch_errors(provider_batch_id: str, errors: dict[str, str]) -> None:
+    """Every per-request error a batch returned, as the provider wrote it.
+
+    The batch row counts failures; only the text says whether the submission
+    was rejected (every request, one reason) or a few inputs were bad. It was
+    read at collection and dropped by every handler that skips errored
+    results, so 21,525 failed requirements requests on 2026-09-04 left no
+    reason anywhere. Stored whole; groom later.
+    """
+    rows = [(provider_batch_id, cid, err) for cid, err in errors.items() if err]
+    if not rows:
+        return
+    with _pool.connection() as conn, conn.cursor() as cur:
+        cur.executemany(
+            "INSERT INTO ai_batch_errors (provider_batch_id, custom_id, error) VALUES (%s, %s, %s)",
+            rows,
+        )

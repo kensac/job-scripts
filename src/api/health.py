@@ -366,17 +366,42 @@ def detect() -> list[dict[str, Any]]:
     # Bounded to one completion window for the same reason the parked detector
     # uses it: inside that window the work can still be resubmitted, so the
     # alert is actionable. Older ones are history and would alarm forever.
+    #
+    # And bounded by the purpose's own recovery: a whole failure that a later
+    # batch for the same purpose survived is fixed, whatever fixed it, and an
+    # alert that outlives its fix by the rest of the window trains the reader
+    # to wait it out. On 2026-09-04 requirements failed whole on gpt-5-nano
+    # from 07:00 to 16:00 and succeeded on the sanctioned model from 17:00;
+    # the alert stayed open past 19:00 on the morning's batches alone.
+    #
+    # The message carries the provider's reason where one was stored
+    # (ai_batch_errors, the most frequent text): "rejected" alone left the
+    # 21,525-request failure unanswerable.
     for r in db.query(
         """
+        WITH failed AS (
+            SELECT provider_batch_id, purpose, model, requests, submitted_at
+            FROM ai_batches b
+            WHERE requests > 0 AND failed_count = requests
+              AND submitted_at > now() - make_interval(secs => %(window)s)
+              AND NOT EXISTS (
+                SELECT 1 FROM ai_batches later
+                WHERE later.purpose = b.purpose AND later.submitted_at > b.submitted_at
+                  AND later.requests > 0 AND later.failed_count < later.requests
+                  AND later.status IN ('completed', 'failed', 'expired', 'cancelled'))
+        )
         SELECT purpose, model, COUNT(*) AS batches, SUM(requests) AS requests,
-               MAX(EXTRACT(epoch FROM now() - submitted_at)) AS oldest_secs
-        FROM ai_batches
-        WHERE requests > 0 AND failed_count = requests
-          AND submitted_at > now() - make_interval(secs => %(window)s)
+               MAX(EXTRACT(epoch FROM now() - submitted_at)) AS oldest_secs,
+               (SELECT e.error FROM ai_batch_errors e
+                WHERE e.provider_batch_id IN (SELECT provider_batch_id FROM failed f2
+                                              WHERE f2.purpose = f.purpose)
+                GROUP BY e.error ORDER BY COUNT(*) DESC LIMIT 1) AS reason
+        FROM failed f
         GROUP BY purpose, model
         """,
         {"window": window},
     ):
+        reason = f" The provider said: {r['reason']}" if r["reason"] else ""
         found.append(
             {
                 "kind": "batch_failed_whole",
@@ -387,6 +412,7 @@ def detect() -> list[dict[str, Any]]:
                     f"every one of their {r['requests']} requests failed. A batch fails whole, "
                     "so this is the submission being rejected rather than bad inputs. The task "
                     "finishes 'done' with no error and no cost, so nothing else reports it."
+                    f"{reason}"
                 ),
                 "detail": {
                     "purpose": r["purpose"],
@@ -394,6 +420,7 @@ def detect() -> list[dict[str, Any]]:
                     "batches": r["batches"],
                     "requests": r["requests"],
                     "oldest_hours": round((r["oldest_secs"] or 0) / 3600, 1),
+                    "reason": r["reason"],
                 },
             }
         )

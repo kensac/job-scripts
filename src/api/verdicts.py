@@ -6,10 +6,11 @@ import logging
 import time
 from collections.abc import Callable
 from typing import Any, TypeVar
+from urllib.parse import urlparse
 
 from pydantic import BaseModel
 
-from api import ai, metrics
+from api import ai, db, metrics
 from api.ai import AIConfig
 from core import pricing
 from core.store import add_ai_result
@@ -157,6 +158,35 @@ def record_ai_verdict(
         metrics.AI_COST_USD.labels(provider, model, key_source).inc(float(cost))
 
 
+def host_paced(url: str) -> bool:
+    """True when this url's host has used its hourly fetch allowance.
+
+    app_config fetch_host_limits maps a host to page fetches per hour,
+    fleet-wide; a host absent from it is not paced. The allowance is counted
+    from the content rows the fleet wrote for that host in the last hour,
+    passed or failed, so every worker reads the same ledger and no worker
+    needs to know about the others. A host that blocks bursts (www.tesla.com
+    served 12 pages in an hour on 2026-09-03 and then blocked 19 of the next
+    32) is drip-fed at the rate it tolerates instead of being pulled off.
+    """
+    limits = db.get_config("fetch_host_limits") or {}
+    host = urlparse(url).netloc.lower()
+    per_hour = limits.get(host)
+    if not per_hour:
+        return False
+    row = db.query_one(
+        "SELECT COUNT(*) AS n FROM ai_queries WHERE check_type = 'content' "
+        "AND created_at > now() - interval '1 hour' "
+        "AND (url LIKE %(https)s OR url LIKE %(http)s)",
+        {"https": f"https://{host}/%", "http": f"http://{host}/%"},
+    )
+    used = row["n"] if row else 0
+    if used >= per_hour:
+        logger.info(f"{host}: {used} of {per_hour} fetches this hour used; deferring {url}")
+        return True
+    return False
+
+
 async def refresh_content(
     url: str,
     company: str = "",
@@ -204,6 +234,12 @@ async def refresh_content(
         )
         return ats_res.text, None
 
+    if host_paced(url):
+        # Deferred, not failed: no row is written, so the next cycle tries
+        # again once the host's hour has room. Writing 'failed' here would
+        # park the posting for fetch_retry_after_hours, which is a day of
+        # silence for a host that only asked to be fed slowly.
+        return None, None
     if scrape_sem is not None:
         async with scrape_sem:
             content, redirected = await fetching.fetch_page(url)

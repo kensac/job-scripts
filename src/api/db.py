@@ -61,6 +61,11 @@ _APP_CONFIG_SEED = [
     # Provider batches normally land within the hour; the stragglers seen
     # on 2026-09-04 sat 14 hours at a few requests short.
     ("batch_straggler_hours", 4),
+    # Host -> page fetches per hour, fleet-wide. Empty means no host is paced;
+    # a host that blocks bursts (www.tesla.com blocked 19 of 32 in a day
+    # after 12 in an hour) is added here, from the alert, at the rate it
+    # tolerates. Hosts are data, so none is written into code.
+    ("fetch_host_limits", {}),
 ]
 # One source of truth for a seeded key's value: the seed writes it, and
 # get_config falls back to it when the row is missing.
