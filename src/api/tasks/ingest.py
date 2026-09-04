@@ -48,6 +48,20 @@ async def handle_ingest_source(task_id: int, payload: dict[str, Any]) -> None:
         int(db.get_config("screened_retention_days")),
     )
     upserted = catalog.upsert_postings(postings, source["name"])
+    # A company board lists every open posting, so a catalog row this pull
+    # did not admit is closed (the board dropped it) or retired (the pattern
+    # no longer admits it); either way it stops costing checks and leaves
+    # boards through _demote_closed. Listed and admitted again, the upsert
+    # above sets it active. Not for aggregator lists, whose rows age off on
+    # their own schedule, and not on an empty pull, which is a broken fetch
+    # rather than an empty board. Nothing did this before: 4,554 of 6,306
+    # active company-board rows on 2026-09-04 were titles the pattern no
+    # longer admitted, each still eligible for every sweep.
+    if fetched and boards.kind(source["listings_url"]) in boards.AUTHORITATIVE:
+        retired = catalog.retire_unlisted(source["name"], [p.url for p in postings])
+        metrics.INGEST_JOBS.labels(source["name"], "retired").inc(retired)
+    else:
+        retired = 0
     metrics.INGEST_JOBS.labels(source["name"], "fetched").inc(fetched)
     metrics.INGEST_JOBS.labels(source["name"], "title_excluded").inc(fetched - len(postings))
     metrics.INGEST_JOBS.labels(source["name"], "upserted").inc(upserted)
@@ -135,6 +149,7 @@ async def handle_ingest_source(task_id: int, payload: dict[str, Any]) -> None:
             "cached": cached,
             "fetch_failed": fetch_failed,
             "gone": gone,
+            "retired": retired,
         },
     )
 
