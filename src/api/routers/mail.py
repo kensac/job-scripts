@@ -1406,11 +1406,16 @@ def _candidates_payload(
         "choices": resolve.choices_for_message(
             # Only the undismissed ones decide eligibility. This list carries
             # dismissed applications so the picker can show them; assigning to
-            # one is not a verb the queue offers, so they must not make
-            # "belongs to an application" look available.
+            # one is refused at the write, so they must not make "belongs to an
+            # application" look available.
             resolve.by_company([a for a in apps if a["dismissed_at"] is None]),
             company,
             resolve.thread_size(owner_id, message.get("provider_thread_id")),
+            # This payload calls its list `applications`, not `candidates`. A
+            # client reads `payload[choice.target_source]`, so naming the
+            # queue's key here would point it at a field this response does not
+            # have - the hardcoded fact moved rather than removed.
+            resolve.PICKER_APPLICATIONS,
         ),
         "total_applications": len(scored),
         # The count the matcher choked on. Two or more means it refused on

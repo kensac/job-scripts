@@ -12260,15 +12260,22 @@
     "/v1/admin/resolve/rates": {
       "get": {
         "summary": "Admin Review Rates",
-        "description": "How often a person agrees with each tier, and how much nobody has read.\n\nRead-only, and deliberately without the verbs. An administrator answering\nsomebody else's match is a different act from the owner answering it, and\nit already has a home on the resolve routes above where `actor_user_id`\nrecords which of the two happened. What this surface is for is deciding\nwhether a tier should keep writing unattended, which is a question about\nthe aggregate rather than about any row.",
+        "description": "How often a person agrees with each tier, and how much nobody has read.\n\n`user_id` is OPTIONAL and omitting it means the whole fleet. /job-scripts\nis the view across all users rather than one user's data with a permission\nlevel on it, so \"is `ats_company` right\" is the question it exists to ask -\nand a required owner made the fleet-wide form of it unaskable, which is the\nonly form that decides whether a tier keeps writing unattended.\n\nRead-only, and deliberately without the verbs. An administrator answering\nsomebody else's match is a different act from the owner answering it, and\nit already has a home on the resolve routes above where `actor_user_id`\nrecords which of the two happened. What this surface is for is deciding\nwhether a tier should keep writing unattended, which is a question about\nthe aggregate rather than about any row.",
         "operationId": "admin_review_rates_v1_admin_resolve_rates_get",
         "parameters": [
           {
             "name": "user_id",
             "in": "query",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": "integer",
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
               "title": "User Id"
             }
           },
@@ -14443,6 +14450,28 @@
                 "type": "null"
               }
             ]
+          },
+          "needs_target": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Needs Target"
+          },
+          "target_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Source"
           }
         },
         "type": "object",

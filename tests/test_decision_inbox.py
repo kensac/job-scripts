@@ -519,6 +519,28 @@ def test_rates_say_not_measured_rather_than_zero(client, me):
     assert body["never_reviewed"] == 1
 
 
+def test_rates_answer_the_fleet_wide_question_without_an_owner(client, me, f):
+    """/job-scripts is the view across all users, not one user's data behind a
+    permission level. "Is `ats_company` right" is the question that decides
+    whether a tier keeps attaching mail unattended, and requiring an owner made
+    the only useful form of it unaskable."""
+    headers, uid = me
+    admin = _auth_headers("inbox-admin3", "inboxadmin3@example.com", ["infra-admins"])
+    assert client.post("/v1/users/bootstrap", headers=admin).status_code == 200
+    _attach(_msg(uid, "<mine@x>", "rejection", "Acme"), _app(uid))
+
+    other = f.make_user()
+    _attach(_msg(other, "<theirs@x>", "rejection", "Beta"), _app(other, company="Beta"))
+
+    fleet = client.get("/v1/admin/resolve/rates", headers=admin)
+    assert fleet.status_code == 200, fleet.text
+    assert fleet.json()["never_reviewed"] == 2, "both users' attachments"
+
+    mine = client.get(f"/v1/admin/resolve/rates?user_id={uid}", headers=admin).json()
+    assert mine["never_reviewed"] == 1, "and an owner still narrows it"
+    assert headers is not None
+
+
 def test_a_rejection_is_counted_against_the_tier_that_made_the_attachment(client, me):
     """A `detached` row names no tier, so counting a rejection by its own
     method would put every one of them in one bucket and no tier would ever
@@ -541,3 +563,101 @@ def test_a_rejection_is_counted_against_the_tier_that_made_the_attachment(client
     assert rates["company_title"]["rejected"] == 1
     assert rates["company_title"]["confirm_rate"] == 0.0
     assert "detached" not in rates
+
+
+def test_a_verb_that_needs_an_argument_says_so(client, me):
+    """The last thing a client had to hardcode. Without this it has to know
+    that `assign_application` is the verb with a target, which is exactly what
+    declaring the verbs exists to avoid - the second such verb would make every
+    client wrong."""
+    headers, uid = me
+    _app(uid)
+    _msg(uid, "<needs@x>", "rejection", "Acme")
+
+    choices = _choices(_items(client, headers, "unmatched_message")[0])
+    assert choices["assign_application"]["needs_target"] is True
+    assert choices["assign_application"]["target_source"] == "candidates"
+    # Omission means the verb takes no argument, the same presence-not-value
+    # rule `affects` and `reason` follow.
+    for verb in ("not_an_application", "not_job_related"):
+        assert "needs_target" not in choices[verb]
+        assert "target_source" not in choices[verb]
+
+
+def test_an_ineligible_assign_still_declares_where_its_target_comes_from(client, me):
+    """`needs_target` is a property of the VERB, not of this row's luck. A
+    client that only learns it from eligible rows learns it from a sample."""
+    headers, uid = me
+    _msg(uid, "<nocand@x>", "rejection", "Nowhere Inc")
+
+    assign = _choices(_items(client, headers, "unmatched_message")[0])["assign_application"]
+    assert assign["eligible"] is False
+    assert assign["needs_target"] is True
+    assert assign["target_source"] == "candidates"
+
+
+def test_assign_is_eligible_exactly_when_there_are_candidates(client, me):
+    """ON THE QUEUE, where the row's candidates and the eligibility index are
+    the same set read under the same key. The frontend expands `candidates`
+    when the verb is pressed, so an eligible verb beside an empty list is a
+    button nobody can complete.
+
+    The picker does not make this promise and must not be read as if it did:
+    its list is search-filtered, and a query matching nothing does not stop an
+    application existing.
+    """
+    headers, uid = me
+    _app(uid, company="Acme, Inc.")
+    _msg(uid, "<match@x>", "rejection", "Acme")
+    _msg(uid, "<nomatch@x>", "rejection", "Nowhere Inc")
+
+    for item in _items(client, headers, "unmatched_message"):
+        eligible = _choices(item)["assign_application"]["eligible"]
+        assert eligible == bool(item["candidates"]), item["message"]["extracted_company"]
+    # And the normalisation is the matcher's, so "Acme" reaches "Acme, Inc.".
+    hit = next(i for i in _items(client, headers, "unmatched_message") if i["candidates"])
+    assert hit["candidates"][0]["company_name"] == "Acme, Inc."
+
+
+def test_assigning_to_a_dismissed_application_is_refused(client, me):
+    """Declared eligibility has to be enforced where the write happens or it is
+    decoration. The server said "no application at this company yet" for a
+    dismissed one and then accepted it as a target, so a client that ignored
+    `eligible` got its way and mail landed on an application whose whole
+    meaning is that it should never have existed."""
+    headers, uid = me
+    app = _app(uid)
+    db.execute("UPDATE applications SET dismissed_at = now() WHERE id = %s", (app,))
+    mid = _msg(uid, "<dismissed@x>", "rejection", "Acme")
+
+    assign = _choices(_items(client, headers, "unmatched_message")[0])["assign_application"]
+    assert assign["eligible"] is False
+
+    resp = client.post(
+        f"/v1/user/resolve/message:{mid}",
+        json={"choice": "assign_application", "target": app},
+        headers=headers,
+    )
+    assert resp.status_code == 409
+    assert resp.json()["detail"]["code"] == "DISMISSED"
+    assert mail_match.latest(mid) is None, "and nothing was written"
+
+
+def test_each_surface_names_its_own_target_list(client, me):
+    """A client reads `payload[choice.target_source]`. The queue calls its list
+    `candidates` and the picker calls its list `applications`, so one constant
+    would point one of them at a field its own response does not have - the
+    hardcoded fact moved one module along rather than removed."""
+    headers, uid = me
+    _app(uid)
+    mid = _msg(uid, "<source@x>", "rejection", "Acme")
+
+    row = _items(client, headers, "unmatched_message")[0]
+    source = _choices(row)["assign_application"]["target_source"]
+    assert source == "candidates"
+    assert row[source], "the queue's declared source resolves against the queue's own payload"
+
+    picker = client.get(f"/v1/user/messages/{mid}/candidates", headers=headers).json()
+    picked = {c["choice"]: c for c in picker["choices"]}["assign_application"]
+    assert picked["target_source"] == "applications"
+    assert picker[picked["target_source"]], "and the picker's against the picker's"
