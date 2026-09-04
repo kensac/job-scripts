@@ -18,6 +18,18 @@ class UserJobPatch(BaseModel):
     hidden: bool | None = None
 
 
+class UserJobsBulkPatch(BaseModel):
+    """One patch for a selection. Same field vocabulary as UserJobPatch; the
+    cap keeps one request from holding a transaction over a whole catalog."""
+
+    job_ids: list[int] = Field(min_length=1, max_length=5000)
+    patch: UserJobPatch
+
+
+class UserJobsBulkIds(BaseModel):
+    job_ids: list[int] = Field(min_length=1, max_length=5000)
+
+
 class UploadRequest(BaseModel):
     urls: list[str] = Field(min_length=1, max_length=50)
 

@@ -360,15 +360,34 @@ def create_source(body: SourceBody, user: AuthedUser = Depends(require_admin)):
     )
 
 
+# Whitelisted sort keys for the users ledger; the SQL names the computed
+# columns of the query below, so a key cannot reach anything the row does not
+# already show.
+_USERS_SORTABLE = {
+    "last_seen_at": "u.last_seen_at",
+    "created_at": "u.created_at",
+    "email": "lower(u.email)",
+    "name": "lower(u.name)",
+    "board_rows": "board_rows",
+    "enabled_filters": "enabled_filters",
+    "sources": "sources",
+    "owner_tokens_week": "owner_tokens_week",
+}
+
+
 @router.get("/users")
 def list_users(
     limit: int = 50,
     offset: int = 0,
+    sort: str = "last_seen_at",
+    dir: str = "desc",
     user: AuthedUser = Depends(require_admin),
 ):
     limit = max(1, min(limit, 200))
+    sort_col = _USERS_SORTABLE.get(sort, "u.last_seen_at")
+    direction = "ASC" if dir == "asc" else "DESC"
     rows = db.query(
-        """
+        f"""
         SELECT u.id, u.sub, u.email, u.name, u.groups, u.created_at, u.last_seen_at,
                s.api_key_enc IS NOT NULL AS has_byo_key,
                s.ai_provider, s.ai_model, s.bypass_sponsorship_filter,
@@ -380,11 +399,20 @@ def list_users(
                          WHERE a.user_id = u.id AND a.key_source = 'owner'
                            AND a.created_at > now() - interval '7 days'), 0) AS owner_tokens_week
         FROM users u LEFT JOIN user_settings s ON s.user_id = u.id
-        ORDER BY u.last_seen_at DESC LIMIT %(limit)s OFFSET %(offset)s
+        ORDER BY {sort_col} {direction} NULLS LAST, u.id LIMIT %(limit)s OFFSET %(offset)s
         """,
         {"limit": limit + 1, "offset": max(0, offset)},
     )
-    return {"users": rows[:limit], "has_more": len(rows) > limit}
+    return {
+        "users": rows[:limit],
+        "has_more": len(rows) > limit,
+        # Echoed and enumerated for the same reason as /admin/jobs: the page
+        # renders the active sort without duplicating the default and never
+        # has to guess the accepted keys.
+        "sort": sort if sort in _USERS_SORTABLE else "last_seen_at",
+        "dir": direction.lower(),
+        "sortable": sorted(_USERS_SORTABLE),
+    }
 
 
 @router.get("/users/{user_id}")
