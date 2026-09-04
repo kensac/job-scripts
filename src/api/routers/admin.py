@@ -202,7 +202,16 @@ def list_source_requests(
         """,
         {"status": status, "limit": limit + 1, "offset": max(0, offset)},
     )
-    return {"rows": rows[:limit], "has_more": len(rows) > limit}
+    # The badge on the Requests tab used to show the page size and read as
+    # the count; at 389 sources a queue of requests can exceed a page.
+    total = db.query_one(
+        f"SELECT count(*) AS n FROM source_requests sr {where}", {"status": status}
+    )
+    return {
+        "rows": rows[:limit],
+        "has_more": len(rows) > limit,
+        "total": total["n"] if total else 0,
+    }
 
 
 class ResolveSourceRequest(BaseModel):
@@ -236,6 +245,10 @@ def admin_list_sources(user: AuthedUser = Depends(require_admin)):
         """
             SELECT s.name, s.listings_url, s.description, s.active, s.created_at,
                    s.company, s.title_pattern, s.ingest_interval_hours,
+                   -- Bundle membership per row, so grouping the list needs no
+                   -- client-side join of 389 rows against every bundle.
+                   COALESCE((SELECT array_agg(g.name ORDER BY g.name) FROM source_groups g
+                             WHERE s.name = ANY(g.members)), '{}') AS groups,
                    (SELECT COUNT(*) FROM jobs j WHERE j.source = s.name) AS jobs,
                    (SELECT COUNT(*) FROM user_sources us WHERE us.source = s.name) AS subscribers,
                    li.status AS last_ingest_status,
@@ -452,6 +465,7 @@ def user_detail(user_id: int, user: AuthedUser = Depends(require_admin)):
 def list_tasks(
     status: str | None = None,
     kind: str | None = None,
+    source: str | None = None,
     limit: int = 100,
     before_id: int | None = None,
     user: AuthedUser = Depends(require_admin),
@@ -467,6 +481,11 @@ def list_tasks(
     if kind:
         clauses.append("kind = %(kind)s")
         params["kind"] = kind
+    if source:
+        # Ingest tasks are most of the queue at 389 boards; this cuts it to
+        # one board's history.
+        clauses.append("payload->>'source' = %(source)s")
+        params["source"] = source
     if before_id is not None:
         clauses.append("id < %(before_id)s")
         params["before_id"] = before_id
@@ -721,23 +740,34 @@ def query_options(user: AuthedUser = Depends(require_admin)):
 
 
 @router.get("/batches/{provider_batch_id}/jobs")
-def batch_jobs(provider_batch_id: str, user: AuthedUser = Depends(require_admin)):
+def batch_jobs(
+    provider_batch_id: str,
+    limit: int = 200,
+    offset: int = 0,
+    user: AuthedUser = Depends(require_admin),
+):
     """Every verdict this batch produced, with its own token cost — so a batch
-    is inspectable down to the individual job."""
+    is inspectable down to the individual job. Paged: a batch is up to 500
+    requests and the drill-down rendered every one of them."""
     batch = db.query_one(
         "SELECT * FROM ai_batches WHERE provider_batch_id = %s", (provider_batch_id,)
     )
     if not batch:
         raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown batch"})
+    limit = max(1, min(limit, 500))
+    offset = max(0, offset)
+    total = db.query_one(
+        "SELECT count(*) AS n FROM ai_queries WHERE batch_id = %s", (provider_batch_id,)
+    )
     rows = db.query(
         """
         SELECT q.id, q.url, q.check_type, q.status, q.reason, q.company, q.job_title,
                q.prompt_tokens, q.completion_tokens, q.total_tokens, q.cached_tokens,
                q.created_at, j.source, j.id AS job_id
         FROM ai_queries q LEFT JOIN jobs j ON j.url = q.url
-        WHERE q.batch_id = %s ORDER BY q.id
+        WHERE q.batch_id = %s ORDER BY q.id LIMIT %s OFFSET %s
         """,
-        (provider_batch_id,),
+        (provider_batch_id, limit, offset),
     )
     for r in rows:
         cost = pricing.estimate_cost_usd(
@@ -748,7 +778,8 @@ def batch_jobs(provider_batch_id: str, user: AuthedUser = Depends(require_admin)
             batched=True,
         )
         r["est_cost_usd"] = round(float(cost), 6) if cost is not None else None
-    return {"batch": batch, "rows": rows}
+    n = total["n"] if total else 0
+    return {"batch": batch, "rows": rows, "total": n, "has_more": offset + len(rows) < n}
 
 
 class RunCheckBody(BaseModel):
