@@ -1178,7 +1178,13 @@ def switch_sources(body: SourceSwitchBody, user: AuthedUser = Depends(require_ad
 # key -> the type its value must have. Was a bare set of names back when
 # every config value was a bool; the mailbox gate is a list of group names, so
 # the endpoint validates per key rather than assuming one shape for all.
-_CONFIG_KEYS: dict[str, type] = {"signups_enabled": bool, "gmail_connect_groups": list}
+_CONFIG_KEYS: dict[str, type] = {
+    "signups_enabled": bool,
+    "gmail_connect_groups": list,
+    # Hours a posting whose page fetch came back empty waits before any ingest
+    # or backfill tries it again. Read by api.tasks.board.fetch_retry_interval.
+    "fetch_retry_after_hours": int,
+}
 
 
 @router.get("/config")
@@ -1188,7 +1194,7 @@ def get_config(user: AuthedUser = Depends(require_admin)):
 
 
 class ConfigPut(BaseModel):
-    value: bool | list[str]
+    value: bool | int | list[str]
 
 
 @router.put("/config/{key}")
@@ -1199,7 +1205,19 @@ def put_config(key: str, body: ConfigPut, user: AuthedUser = Depends(require_adm
             400,
             detail={"code": "UNKNOWN_KEY", "message": f"key must be one of {sorted(_CONFIG_KEYS)}"},
         )
-    if not isinstance(body.value, expected):
+    # bool is an int to isinstance, so an int key checks the exact type and
+    # refuses zero and below: a retry window of 0 hours is the hourly
+    # hammering this key exists to stop.
+    if expected is int:
+        if type(body.value) is not int or body.value < 1:
+            raise HTTPException(
+                400,
+                detail={
+                    "code": "INVALID_VALUE",
+                    "message": f"{key} takes a whole number of 1 or more",
+                },
+            )
+    elif not isinstance(body.value, expected):
         raise HTTPException(
             400,
             detail={

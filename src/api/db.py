@@ -33,7 +33,14 @@ _GROUP_BUDGET_SEED = [
 # gate is "who", not "whether", and seeded closed to everyone but infra-admins
 # so the Testing-mode OAuth client is not exposed to users who would hit its
 # 100-test-user cap. oauth.ALL_GROUPS opens it to everyone.
-_APP_CONFIG_SEED = [("signups_enabled", True), ("gmail_connect_groups", ["infra-admins"])]
+_APP_CONFIG_SEED = [
+    ("signups_enabled", True),
+    ("gmail_connect_groups", ["infra-admins"]),
+    # How long a posting whose page fetch came back empty waits before any
+    # ingest or backfill tries it again. The hourly cycle used to be the
+    # retry: 24 attempts a day at the same dead URL from every worker.
+    ("fetch_retry_after_hours", 24),
+]
 # One source of truth for a seeded key's value: the seed writes it, and
 # get_config falls back to it when the row is missing.
 _APP_CONFIG_DEFAULTS = dict(_APP_CONFIG_SEED)

@@ -630,3 +630,34 @@ def test_sources_carry_their_format_and_a_switch_flips_a_whole_category(client, 
         ).status_code
         == 404
     )
+
+
+def test_the_fetch_retry_window_is_persisted_config_with_a_floor(client, admin_headers):
+    """The window used to be a constant. It is a row an admin edits; the seed
+    is its default, and the route refuses the values that would defeat it
+    (zero hours is the hourly hammering the key exists to stop, and a bool is
+    an int to isinstance)."""
+    from api import db
+    from api.tasks.board import fetch_retry_interval
+
+    assert (
+        client.get("/v1/admin/config", headers=admin_headers).json()["config"][
+            "fetch_retry_after_hours"
+        ]
+        == 24
+    )
+    assert fetch_retry_interval() == "24 hours"
+
+    r = client.put(
+        "/v1/admin/config/fetch_retry_after_hours", json={"value": 6}, headers=admin_headers
+    )
+    assert r.status_code == 200, r.text
+    assert db.get_config("fetch_retry_after_hours") == 6
+    assert fetch_retry_interval() == "6 hours"
+
+    for bad in (0, -3, True):
+        r = client.put(
+            "/v1/admin/config/fetch_retry_after_hours", json={"value": bad}, headers=admin_headers
+        )
+        assert r.status_code in (400, 422), (bad, r.text)
+    assert db.get_config("fetch_retry_after_hours") == 6

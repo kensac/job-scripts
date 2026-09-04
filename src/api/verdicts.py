@@ -222,6 +222,17 @@ async def refresh_content(
         add_ai_result(
             url, "passed", "scraped", "content", input_content=content, config_name="content-cache"
         )
+    else:
+        # A fetch that came back with nothing (blocked, timed out, empty) left
+        # no record, so every hourly ingest and every backfill tried it again:
+        # fulltime had 52 such postings on 2026-09-04 and spent 20 minutes an
+        # hour on them, from every worker, which is also most of the fleet's
+        # block rate. The row is the memory the callers key off to wait a day
+        # before retrying. No input_content, so nothing downstream reads it as
+        # a page; extraction_failing counts it, which it could never do before.
+        add_ai_result(
+            url, "failed", "fetch returned nothing", "content", config_name="content-cache"
+        )
     return content, None
 
 

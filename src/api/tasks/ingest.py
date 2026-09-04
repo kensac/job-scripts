@@ -12,7 +12,7 @@ import re
 from typing import Any
 
 from api import db, metrics, verdicts
-from api.tasks.board import _content_ready_urls
+from api.tasks.board import _content_attempted_urls, _content_ready_urls
 from api.tasks.runtime import _cancelled, _set_progress, enqueue
 
 logger = logging.getLogger("jobtracker_worker")
@@ -61,20 +61,29 @@ async def handle_ingest_source(task_id: int, payload: dict[str, Any]) -> None:
     # ~2,800 sequential queries pulling ~15MB to compute a boolean, hourly.
     total = len(candidates)
     have_content = _content_ready_urls([p.url for p in candidates])
-    cached = fetch_failed = 0
+    # A posting whose fetch came back empty inside the retry window is not
+    # tried again this hour; see FETCH_RETRY_AFTER for why once a day.
+    tried_recently = _content_attempted_urls([p.url for p in candidates]) - have_content
+    cached = fetch_failed = gone = 0
     for i, p in enumerate(candidates):
         if i % 10 == 0 and _cancelled(task_id):
             logger.info(f"Task {task_id} cancelled mid-ingest")
             return
-        if p.url in have_content:
+        if p.url in have_content or p.url in tried_recently:
             continue
         try:
-            await verdicts.refresh_content(
+            content, closure = await verdicts.refresh_content(
                 p.url, company=p.company, job_title=p.title, context="ingest"
             )
         except Exception:
             fetch_failed += 1
             logger.warning(f"Ingest {source['name']}: content fetch failed for {p.url}")
+            continue
+        if closure:
+            gone += 1
+            continue
+        if not content:
+            fetch_failed += 1
             continue
         cached += 1
         metrics.INGEST_JOBS.labels(source["name"], "cached").inc()
@@ -92,8 +101,10 @@ async def handle_ingest_source(task_id: int, payload: dict[str, Any]) -> None:
             "fetched": fetched,
             "kept": len(postings),
             "already_cached": len(have_content),
+            "skipped_recent_failure": len(tried_recently),
             "cached": cached,
             "fetch_failed": fetch_failed,
+            "gone": gone,
         },
     )
 
