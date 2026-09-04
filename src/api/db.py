@@ -48,6 +48,10 @@ _APP_CONFIG_SEED = [
     # Pending ingests older than this many ingest cycles mean the fleet is
     # behind the hour; one cycle is the normal wait.
     ("ingest_backlog_cycles", 2),
+    # How long a posting a title pattern screened out stays on record after
+    # its board stops listing it. Long enough to evaluate a new pattern
+    # against a month of what the boards actually posted.
+    ("screened_retention_days", 30),
 ]
 # One source of truth for a seeded key's value: the seed writes it, and
 # get_config falls back to it when the row is missing.

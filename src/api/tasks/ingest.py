@@ -32,7 +32,17 @@ async def handle_ingest_source(task_id: int, payload: dict[str, Any]) -> None:
     fetched = len(postings)
     if source["title_pattern"]:
         keep = re.compile(source["title_pattern"], re.IGNORECASE)
-        postings = [p for p in postings if keep.search(p.title)]
+        admitted = [p for p in postings if keep.search(p.title)]
+        # What the pattern dropped stays on record, so a candidate pattern can
+        # be judged against the titles the board actually listed, and a
+        # posting a better pattern admits arrives here on the next pull.
+        catalog.record_screened(
+            [p for p in postings if not keep.search(p.title)],
+            source["name"],
+            source["title_pattern"],
+            int(db.get_config("screened_retention_days")),
+        )
+        postings = admitted
     upserted = catalog.upsert_postings(postings, source["name"])
     metrics.INGEST_JOBS.labels(source["name"], "fetched").inc(fetched)
     metrics.INGEST_JOBS.labels(source["name"], "title_excluded").inc(fetched - len(postings))
