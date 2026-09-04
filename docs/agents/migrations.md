@@ -36,12 +36,19 @@ container start behind the schema lock, so a long one stalls every deploy.
 Register it as a task instead, and make it idempotent by predicate so a
 partial run resumes rather than restarting.
 
-## Tables the migration system does not own
+## Every table is a model
 
-Some tables are created outside alembic and initialised after it. A migration
-touching one must guard on the table existing, and the creating code must carry
-the same column, because its `ALTER ... IF NOT EXISTS` statements do not run on
-an existing database.
+No table is created outside alembic. `ai_queries` was the last one, created
+by `core/store.py` at import and hidden from the drift check; f3a4b5c6d7e8
+adopted it with an `IF NOT EXISTS` migration mirroring what production held,
+and the model has described it since. A table without a model has no
+autogenerate, needs every column added in two places, and makes a clean drift
+check a lie about the largest table in the database. When a table exists that
+the models do not know, adopt it the same way rather than excluding it.
+
+Per-table storage settings (autovacuum thresholds, fillfactor) live in the
+migration that needs them, with the measurement that chose the value, because
+autogenerate does not see them.
 
 ## Derived state is not schema
 

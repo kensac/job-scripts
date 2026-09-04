@@ -10,22 +10,12 @@ from api.orm import Base
 
 dotenv.load_dotenv()
 
-# Tables owned elsewhere: ai_queries belongs to core/store.py (the tracker CLI
-# creates it standalone); alembic must neither create nor drop it.
-_FOREIGN_TABLES = {"ai_queries"}
-
-
-def _include_object(obj, name, type_, reflected, compare_to):
-    if type_ == "table" and name in _FOREIGN_TABLES:
-        return False
-    return True
-
 
 def _url() -> str:
     url = os.environ["DATABASE_URL"]
     for prefix in ("postgresql://", "postgres://"):
         if url.startswith(prefix):
-            return "postgresql+psycopg://" + url[len(prefix):]
+            return "postgresql+psycopg://" + url[len(prefix) :]
     return url
 
 
@@ -34,7 +24,6 @@ def run_migrations_offline() -> None:
         url=_url(),
         target_metadata=Base.metadata,
         literal_binds=True,
-        include_object=_include_object,
     )
     with context.begin_transaction():
         context.run_migrations()
@@ -46,7 +35,6 @@ def run_migrations_online() -> None:
         context.configure(
             connection=connection,
             target_metadata=Base.metadata,
-            include_object=_include_object,
         )
         with context.begin_transaction():
             context.run_migrations()

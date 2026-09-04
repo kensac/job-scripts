@@ -441,6 +441,94 @@ class TaskModelOverride(Base):
     created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
 
 
+class AiQuery(Base):
+    """Every AI verdict and every stored page text, one row per call.
+
+    The oldest table here: created by core/store.py's own DDL from the first
+    commit and adopted by alembic in f3a4b5c6d7e8, so this class mirrors what
+    production holds rather than what a fresh design would choose. Keyed by
+    url, not job id, because a cache of paid AI work outlives the job row.
+
+    The two INCLUDE indexes serve the board's "latest verdict per url" reads
+    as index-only scans: the DISTINCT ON over closed/clearance rows went from
+    a 1.2 s seq scan and sort to 50 ms on a copy of production. They only do
+    that while the visibility map is warm, which the per-table autovacuum
+    settings in the migration keep true; the table takes 44% updates, and
+    the stock thresholds let 20% of it go dead before acting.
+    """
+
+    __tablename__ = "ai_queries"
+    __table_args__ = (
+        Index("idx_ai_queries_batch", "batch_id"),
+        Index("idx_ai_queries_url", "url"),
+        Index("idx_ai_queries_url_check", "url", "check_type"),
+        Index("idx_ai_queries_status", "status"),
+        Index("idx_ai_queries_check_type", "check_type"),
+        Index("idx_ai_queries_created_at", "created_at"),
+        Index("idx_ai_queries_prompt_hash", "check_type", "prompt_hash"),
+        Index(
+            "idx_ai_queries_cost_created",
+            "created_at",
+            postgresql_where=text("cost_usd IS NOT NULL"),
+        ),
+        Index(
+            "idx_ai_queries_latest_verdict",
+            "url",
+            "check_type",
+            text("id DESC"),
+            postgresql_include=["status"],
+            postgresql_where=text(
+                "check_type IN ('closed', 'clearance') AND status IN ('passed', 'rejected')"
+            ),
+        ),
+        Index(
+            "idx_ai_queries_latest_custom",
+            "url",
+            "prompt_hash",
+            text("id DESC"),
+            postgresql_include=["status"],
+            postgresql_where=text("check_type = 'custom' AND status IN ('passed', 'rejected')"),
+        ),
+        # Admin search is ILIKE %q%; trigram indexes make it index-backed.
+        *(
+            Index(
+                f"idx_ai_queries_{col}_trgm",
+                col,
+                postgresql_using="gin",
+                postgresql_ops={col: "gin_trgm_ops"},
+            )
+            for col in ("url", "company", "job_title", "reason")
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+    config_name: Mapped[str | None] = mapped_column(Text)
+    url: Mapped[str | None] = mapped_column(Text)
+    check_type: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str | None] = mapped_column(Text)
+    reason: Mapped[str | None] = mapped_column(Text)
+    model: Mapped[str | None] = mapped_column(Text)
+    reasoning_effort: Mapped[str | None] = mapped_column(Text)
+    filter_name: Mapped[str | None] = mapped_column(Text)
+    prompt_hash: Mapped[str | None] = mapped_column(Text)
+    company: Mapped[str | None] = mapped_column(Text)
+    job_title: Mapped[str | None] = mapped_column(Text)
+    instructions: Mapped[str | None] = mapped_column(Text)
+    input_content: Mapped[str | None] = mapped_column(Text)
+    parsed_json: Mapped[str | None] = mapped_column(Text)
+    prompt_tokens: Mapped[int | None] = mapped_column(BigInteger)
+    completion_tokens: Mapped[int | None] = mapped_column(BigInteger)
+    total_tokens: Mapped[int | None] = mapped_column(BigInteger)
+    cached_tokens: Mapped[int | None] = mapped_column(BigInteger)
+    reasoning_tokens: Mapped[int | None] = mapped_column(BigInteger)
+    duration_ms: Mapped[int | None] = mapped_column(BigInteger)
+    error: Mapped[str | None] = mapped_column(Text)
+    worker: Mapped[str | None] = mapped_column(Text)
+    batch_id: Mapped[str | None] = mapped_column(Text)
+    cost_usd: Mapped[float | None] = mapped_column(Numeric(12, 6))
+
+
 class AiPrompt(Base):
     """One row per distinct instruction text, whatever sends it.
 

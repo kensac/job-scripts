@@ -234,7 +234,6 @@ def _causes(exc: BaseException) -> list[BaseException]:
 
 if not _schema_already_provisioned():
     _provision()
-import core.store  # noqa: E402,F401  (import triggers ai_queries creation)
 
 
 def pytest_sessionfinish(session, exitstatus) -> None:
