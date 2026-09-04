@@ -59,7 +59,6 @@ class AtsResolver(ABC):
     name: ClassVar[str]
     markers: ClassVar[tuple[str, ...]]
     enabled: ClassVar[bool] = True
-    deprecated: ClassVar[bool] = False
 
     def matches(self, url: str) -> bool:
         return any(m in url for m in self.markers)
@@ -152,8 +151,6 @@ class Greenhouse(AtsResolver):
 class Lever(AtsResolver):
     name = "lever"
     markers = ("lever.co",)
-    enabled = False
-    deprecated = True
 
     def canonical(self, url: str) -> str | None:
         match = re.search(r"(jobs(?:\.eu)?\.lever\.co)/([^/?]+)/([0-9a-f-]{36})", url)
@@ -189,8 +186,6 @@ class Lever(AtsResolver):
 class Ashby(AtsResolver):
     name = "ashby"
     markers = ("ashbyhq.com",)
-    enabled = False
-    deprecated = True
 
     def canonical(self, url: str) -> str | None:
         match = re.search(r"ashbyhq\.com/([^/?]+)/([0-9a-f-]{36})", url)
@@ -225,8 +220,6 @@ class Ashby(AtsResolver):
 class SmartRecruiters(AtsResolver):
     name = "smartrecruiters"
     markers = ("smartrecruiters.com",)
-    enabled = False
-    deprecated = True
 
     _SECTIONS = ("companyDescription", "jobDescription", "qualifications", "additionalInformation")
 
@@ -263,8 +256,6 @@ class SmartRecruiters(AtsResolver):
 class Workday(AtsResolver):
     name = "workday"
     markers = ("myworkdayjobs.com",)
-    enabled = False
-    deprecated = True
 
     def canonical(self, url: str) -> str | None:
         parsed = urlparse(url)
