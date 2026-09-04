@@ -344,7 +344,8 @@ def put_settings(body: SettingsPut, user: AuthedUser = Depends(require_user)):
     return {"ok": True}
 
 
-@router.api_route("/digest/unsubscribe", methods=["GET", "POST"])
+@router.get("/digest/unsubscribe")
+@router.post("/digest/unsubscribe")
 def digest_unsubscribe(token: str, _: None = Depends(require_service)):
     """Unsubscribe from digest emails, identified purely by the emailed token,
     no user session required. POST is the write the page should make: the

@@ -457,7 +457,7 @@
       "get": {
         "summary": "Digest Unsubscribe",
         "description": "Unsubscribe from digest emails, identified purely by the emailed token,\nno user session required. POST is the write the page should make: the\nemailed link is a GET that mail clients and link scanners prefetch, and\na page that wrote on render would unsubscribe people who never clicked.\nThe mail's List-Unsubscribe-Post header already makes one-click clients\nPOST. GET stays only until the page has moved its write behind POST.",
-        "operationId": "digest_unsubscribe_v1_digest_unsubscribe_post",
+        "operationId": "digest_unsubscribe_v1_digest_unsubscribe_get",
         "parameters": [
           {
             "name": "token",
