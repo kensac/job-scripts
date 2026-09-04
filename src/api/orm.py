@@ -247,6 +247,27 @@ class Source(Base):
     ingest_interval_hours: Mapped[int] = mapped_column(Integer, server_default=text("1"))
 
 
+class ScreenedPosting(Base):
+    """Superseded by Listing. Still declared because the table still exists:
+    workers on the previous image write to it from the ingest path until the
+    roll completes, and a drop while they run would fail every ingest on
+    them. The migration after this fleet roll drops the table and this
+    class together."""
+
+    __tablename__ = "screened_postings"
+    __table_args__ = (Index("idx_screened_postings_source", "source", "last_seen_at"),)
+
+    url: Mapped[str] = mapped_column(Text, primary_key=True)
+    source: Mapped[str] = mapped_column(Text)
+    company: Mapped[str] = mapped_column(Text, server_default=text("''"))
+    title: Mapped[str] = mapped_column(Text, server_default=text("''"))
+    locations: Mapped[list[str]] = mapped_column(ARRAY(Text), server_default=text("'{}'"))
+    date_posted: Mapped[datetime.datetime | None]
+    pattern: Mapped[str] = mapped_column(Text)
+    first_seen_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+    last_seen_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+
+
 class Listing(Base):
     """Every posting a board returned on its last pull, kept by the title
     pattern or not, with the text the listing call carried and the raw record

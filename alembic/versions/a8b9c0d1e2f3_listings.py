@@ -10,7 +10,15 @@ listing call already carried (Greenhouse with content=true, Lever, Ashby)
 and the raw record minus that text, so a backtest of a pattern or a backfill
 of content never has to re-fetch a board or scrape a page: scraping is the
 action that gets the fleet blocked, and the boards hand this over for free
-in the same call. Same table, renamed, plus a kept flag and the two columns.
+in the same call.
+
+Additive on purpose. A rename would make the old name vanish the instant the
+first container migrated, while every worker still on the previous image
+writes to it from the ingest hot path for the rest of the roll. So this
+creates listings beside screened_postings and copies the rows; the old table
+is dropped by a later migration once no image references it. Rows old
+workers write to screened_postings during the roll are not carried over;
+they are refreshed on the next pull.
 """
 
 import sqlalchemy as sa
@@ -24,30 +32,53 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.rename_table("screened_postings", "listings")
-    op.execute("ALTER INDEX idx_screened_postings_source RENAME TO idx_listings_source")
-    op.add_column(
+    op.create_table(
         "listings",
+        sa.Column("url", sa.Text(), nullable=False),
+        sa.Column("source", sa.Text(), nullable=False),
+        sa.Column("company", sa.Text(), server_default=sa.text("''"), nullable=False),
+        sa.Column("title", sa.Text(), server_default=sa.text("''"), nullable=False),
+        sa.Column(
+            "locations", postgresql.ARRAY(sa.Text()), server_default=sa.text("'{}'"), nullable=False
+        ),
+        sa.Column("date_posted", postgresql.TIMESTAMP(timezone=True), nullable=True),
+        sa.Column("pattern", sa.Text(), nullable=False),
         sa.Column("kept", sa.Boolean(), server_default=sa.text("false"), nullable=False),
-    )
-    op.add_column(
-        "listings",
         sa.Column("description", sa.Text(), server_default=sa.text("''"), nullable=False),
-    )
-    op.add_column(
-        "listings",
         sa.Column(
             "raw",
             postgresql.JSONB(astext_type=sa.Text()),
             server_default=sa.text("'{}'::jsonb"),
             nullable=False,
         ),
+        sa.Column(
+            "first_seen_at",
+            postgresql.TIMESTAMP(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
+        sa.Column(
+            "last_seen_at",
+            postgresql.TIMESTAMP(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
+        sa.PrimaryKeyConstraint("url"),
+    )
+    op.create_index("idx_listings_source", "listings", ["source", "last_seen_at"])
+    op.execute(
+        """
+        INSERT INTO listings
+            (url, source, company, title, locations, date_posted, pattern,
+             first_seen_at, last_seen_at)
+        SELECT url, source, company, title, locations, date_posted, pattern,
+               first_seen_at, last_seen_at
+        FROM screened_postings
+        ON CONFLICT (url) DO NOTHING
+        """
     )
 
 
 def downgrade() -> None:
-    op.drop_column("listings", "raw")
-    op.drop_column("listings", "description")
-    op.drop_column("listings", "kept")
-    op.execute("ALTER INDEX idx_listings_source RENAME TO idx_screened_postings_source")
-    op.rename_table("listings", "screened_postings")
+    op.drop_index("idx_listings_source", table_name="listings")
+    op.drop_table("listings")
