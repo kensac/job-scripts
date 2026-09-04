@@ -48,10 +48,20 @@ runs against one database truncate each other's rows between tests, and the
 failure surfaces in whichever test lost the race — so the reader debugs their
 own change.
 
+## Fixtures must state what they mean
+
+**Check a column's default before letting a fixture rely on it.** A fixture
+that leans on a default can create the opposite of what the test asserts and
+pass for the wrong reason. State the value the test depends on, even when it
+matches the default — especially then, because the default can change under a
+test that never mentioned it.
+
 ## Diagnosing a failure
 
 Reproduce before fixing. An intermittent failure needs a deterministic
 reproduction before it needs a fix, or you cannot know you fixed it.
+
+**A long-lived local test database goes stale against a moving main.** A missing column added by someone else's migration presents as a burst of unexplained failures that look like your own change. Recreate the test database before investigating a sudden cluster of failures.
 
 Check the environment before the code: which database the run used, whether
 anything else was running against it, and whether the container still exists.
