@@ -292,17 +292,6 @@ class UserSettings(Base):
     email_digest: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     digest_token: Mapped[str | None] = mapped_column(Text, unique=True)
     last_digest_at: Mapped[datetime.datetime | None]
-    # The addresses this mailbox's owner says are theirs. NOT a confirmation
-    # flag beside a derived set: this IS the confirmation, and "has the user
-    # confirmed" is `identities_confirmed_at IS NOT NULL`, derived from the
-    # same row rather than tracked separately where the two could disagree.
-    #
-    # It may differ from what core.identity derives in BOTH directions - a
-    # derived address the user drops, and an old address of theirs with no mail
-    # left in the corpus for us to have found. So it is stored rather than
-    # diffed against the derivation.
-    identities: Mapped[list | None] = mapped_column(JSONB)
-    identities_confirmed_at: Mapped[datetime.datetime | None]
     updated_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
 
 

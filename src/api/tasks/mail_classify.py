@@ -401,29 +401,22 @@ _SELF_SENT = """(
 
 
 def identities_for(user_id: int) -> list[str]:
-    """Every address this mailbox owns.
+    """Every address this mailbox owns, derived from the mailbox.
 
-    A CONFIRMED SET WINS OUTRIGHT over both the derivation and the fallback.
-    The person reading their own mailbox knows something the corpus cannot
-    show us - an address of theirs with no mail left in it, or an address we
-    derived that is a shared alias rather than them - and a confirmation that
-    only applied where it agreed with us would be theatre.
+    Falls back to the user's configured address when the corpus is too small
+    to have the property core.identity relies on - a mailbox of forty messages
+    says nothing about who owns it, and an empty set there would switch the
+    guard off entirely rather than merely leaving it as narrow as it was.
 
-    Otherwise derived from the mailbox, falling back to the user's configured
-    address when the corpus is too small to have the property core.identity
-    relies on - a mailbox of forty messages says nothing about who owns it, and
-    an empty set there would switch the guard off entirely rather than merely
-    leaving it as narrow as it was.
+    There was a confirmed set that overrode this, written by a settings screen
+    asking the user which addresses were theirs. Both are gone (#301): the
+    columns were NULL in production, so the override branch had never once been
+    taken and every correction this guard has ever made - 1,028 of them - came
+    from the derivation below. A screen that has produced no data is not a
+    safety net, and keeping the branch implied a fallback that was in fact the
+    only path.
     """
     from core.identity import AddressCount, derive_identities
-
-    confirmed = db.query_one(
-        "SELECT identities FROM user_settings "
-        "WHERE user_id = %s AND identities_confirmed_at IS NOT NULL",
-        (user_id,),
-    )
-    if confirmed and confirmed.get("identities"):
-        return sorted(confirmed["identities"])
 
     rows = db.query(
         """
@@ -585,37 +578,6 @@ def _spec_text(row: dict[str, Any]) -> str:
         f"Date: {row.get('sent_at') or ''}\n\n"
         f"{(row.get('body_text') or '')[:20000]}"
     )
-
-
-def count_would_heal(user_id: int, identities: list[str]) -> int:
-    """How many already-booked events a given identity set would supersede.
-
-    The same predicate _heal_self_sent acts on, counted instead of written, so
-    the confirmation surface can say what the click will do BEFORE it happens
-    rather than reporting it afterwards. Sharing the predicate is the point: a
-    second copy would drift and the number would stop describing the action.
-
-    ASYMMETRIC, and the number reflects that. Widening the set is retroactive
-    and this counts what it will reach. NARROWING is forward-only - the healer
-    only ever adds corrections for mail that IS currently self-sent, so
-    dropping an address leaves its old corrections standing and this correctly
-    returns nothing for that half.
-    """
-    if not identities:
-        return 0
-    row = db.query_one(
-        f"""
-        WITH latest AS (
-            SELECT DISTINCT ON (message_id) message_id, kind, detail
-            FROM email_events ORDER BY message_id, id DESC
-        )
-        SELECT COUNT(*) AS n FROM email_messages m JOIN latest l ON l.message_id = m.id
-        WHERE m.user_id = %(uid)s AND {_SELF_SENT}
-          AND NOT (l.kind = 'not_job_related' AND l.detail ->> 'reason' = 'self_sent')
-        """,
-        {"identities": identities, "uid": user_id},
-    )
-    return (row or {}).get("n") or 0
 
 
 def _heal_self_sent(identities: list[str]) -> int:
