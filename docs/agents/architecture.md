@@ -66,6 +66,14 @@ task's own work from it will make the task discard results it already paid for.
 **Collection must be reachable when there is nothing new to submit.** An early
 return on an empty selection, placed before collection, strands completed work.
 
+**A task waiting on several batches resumes only when every one of them is
+terminal.** One straggler therefore holds every finished batch beside it, and
+the results stay uncollected although they are already paid for. This is
+latency rather than loss — the overdue path collects whatever landed once the
+provider's window passes — but the wait is bounded by that window, not by the
+batches that finished. Size a batch knowing that its slowest request sets when
+any of it can be read.
+
 Dry-run a handful of live calls before committing to a large batch. A batch
 fails whole, and the dry run also measures real token counts.
 

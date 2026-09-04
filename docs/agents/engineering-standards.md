@@ -20,10 +20,28 @@ A derived threshold beats a tuned one because it adapts and needs no
 maintenance. Prefer a rule that falls out of how the system actually works:
 
 - A count that is bimodal gives you the threshold directly.
-- A timeout expressed as a multiple of that operation's own historical maximum
-  needs no per-operation tuning and stays correct as the operation changes.
 - A cap derived from a downstream consumer's limit cannot drift out of sync
   with it.
+- A bound taken from a value the system already declares — a provider's stated
+  completion window, an existing timeout — inherits that value's meaning
+  instead of inventing one.
+
+**A threshold must not be derived from a statistic the failure it detects can
+move.** A bound set from an operation's own historical maximum looks like the
+ideal derived threshold: it adapts, needs no tuning, and tracks the operation
+as it changes. It is a trap when the failure mode ends in a completed run,
+because each failure that survives enters the history and raises the bound.
+The detector then goes blind exactly as often as the problem occurs, while
+continuing to look like it works — which is worse than having none.
+
+Before deriving a bound from history, ask whether the thing being detected can
+end up inside that history. If it can, the statistic is contaminated and you
+need a signal the failure cannot contribute to.
+
+**A verification claim can have a shelf life.** Checking a threshold against
+live data proves it was right at that moment, not that it stays right. If the
+data behind a bound can move, say when it was measured, and prefer a bound that
+cannot drift out from under the claim.
 
 State the scale a constant depends on. A value derived from one user's data
 should say so.
