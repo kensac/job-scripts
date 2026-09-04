@@ -36,6 +36,28 @@ Not an ancestor and unmerged wants a rebase. Not an ancestor because it was
 squash-merged wants `git reset --hard origin/main`. Rebasing a squash-merged
 branch replays work already on main.
 
+## Your own worktree
+
+Several sessions run against this repository at once. Sharing one checkout
+means one session's branch switch lands in another session's working tree,
+silently. That has produced verification against a tree that did not contain
+the change being verified, which no test catches.
+
+Give each session its own worktree:
+
+```
+git worktree add ../job-scripts-<task> -b <branch> origin/main
+```
+
+Reading a file out of another session's checkout is the same failure in a
+quieter form. A stale file parses, contradicts nothing, and looks correct, so
+the conclusion drawn from it is confidently wrong. Read across checkouts by
+revision rather than by path:
+
+```
+git fetch origin && git show origin/main:src/api/routers/resolve.py
+```
+
 ## Reporting
 
 Report conclusions, not narratives. State what you did, what you measured, and
