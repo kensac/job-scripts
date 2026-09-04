@@ -18,7 +18,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
+# The commit this image was built from, so every event and traceback the
+# service records names its release. The build workflow passes it; a local
+# build without it reads "unknown" rather than lying.
+ARG GIT_SHA=unknown
 ENV PATH="/usr/lib/chromium:${PATH}" \
-    PYTHONPATH="/app/src"
+    PYTHONPATH="/app/src" \
+    JOBTRACKER_REVISION=${GIT_SHA}
 
 CMD ["python", "-m", "trackers.run_tracker", "ft"]

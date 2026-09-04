@@ -81,3 +81,7 @@ merges rather than one per merge: each laptop restart is manual.
 Report the running digest per container, compared against the pin. A playbook
 that reports "no changes" is not evidence that nothing happened, and a green
 run is not evidence that the right image is live.
+
+## Error tracking
+
+Every api and worker container carries `POSTHOG_API_KEY` and `POSTHOG_HOST` (rendered from Infisical by the config repos; the key is PostHog's public ingest key for the project the frontend already reports to). Without the key the telemetry layer is a no-op, so a container missing it runs and merely reports nothing. `JOBTRACKER_REVISION` is baked into the image from the build arg `GIT_SHA` by the GHCR workflow; nothing sets it at deploy time, and a local build without the arg reads `unknown`.

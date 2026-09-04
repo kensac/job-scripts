@@ -10,8 +10,9 @@ import asyncio
 import logging
 import re
 from typing import Any
+from urllib.parse import urlparse
 
-from api import db, metrics, verdicts
+from api import db, metrics, telemetry, verdicts
 from api.tasks.board import _content_attempted_urls, _content_ready_urls
 from api.tasks.runtime import _cancelled, _set_progress, enqueue
 from core.store import add_ai_result
@@ -27,9 +28,26 @@ async def handle_ingest_source(task_id: int, payload: dict[str, Any]) -> None:
     if not source:
         raise LookupError("unknown or inactive source")
 
-    postings = await asyncio.to_thread(
-        boards.fetch_listings, source["listings_url"], source["company"]
-    )
+    try:
+        postings = await asyncio.to_thread(
+            boards.fetch_listings, source["listings_url"], source["company"]
+        )
+    except Exception as exc:
+        # The board itself failed to answer: the source, the host and the
+        # HTTP status when there was one, so a board going dark is a query
+        # rather than a traceback search.
+        response = getattr(exc, "response", None)
+        telemetry.capture(
+            "ingest_pull_failed",
+            properties={
+                "source": source["name"],
+                "fetch_host": urlparse(source["listings_url"]).netloc.lower(),
+                "status": getattr(response, "status_code", None),
+                "error_class": type(exc).__name__,
+                "error": str(exc)[:500],
+            },
+        )
+        raise
     fetched = len(postings)
     listed = postings
     if source["title_pattern"]:
@@ -119,9 +137,14 @@ async def handle_ingest_source(task_id: int, payload: dict[str, Any]) -> None:
             content, closure = await verdicts.refresh_content(
                 p.url, company=p.company, job_title=p.title, context="ingest"
             )
-        except Exception:
+        except Exception as exc:
             fetch_failed += 1
             logger.warning(f"Ingest {source['name']}: content fetch failed for {p.url}")
+            # Swallowed on purpose so one page cannot fail the pull, which is
+            # exactly why it must be recorded somewhere else.
+            telemetry.capture_exception(
+                exc, properties={"source": source["name"], "url": p.url, "context": "ingest"}
+            )
             continue
         if closure:
             gone += 1

@@ -111,6 +111,33 @@ what arrived since. Only a run that has not split yet blocks another.
 Dry-run a handful of live calls before committing to a large batch. A batch
 fails whole, and the dry run also measures real token counts.
 
+## Observability
+
+Three layers, each answering a different question, none standing in for
+another.
+
+- **Metrics** (`api/metrics.py`, Prometheus) answer "how much, how fast":
+  counters and gauges, no identity.
+- **Conditions** (`api/health.py`, `health_alerts`) answer "is something
+  wrong": app-aware detectors comparing a window against a baseline, opening
+  and resolving alerts, mailing once. A new detector is written when a
+  pattern emerges, never one per traceback.
+- **Errors and events** (`api/telemetry.py`, PostHog) answer "what failed,
+  where, on which release": every unhandled exception in a request handler or
+  a worker's handler, and a queryable event wherever the service swallows or
+  retries a failure that would otherwise leave no trace (`task_failed`,
+  `task_requeued`, `tasks_reaped`, `tasks_lost`, `ingest_pull_failed`,
+  `fetch_failed`, `fetch_deferred`, `ai_call_failed`, `alert_opened`,
+  `alert_resolved`, `worker_started`). Every event carries `host` and
+  `release` (the image's commit, from the build arg), and the user's subject
+  where a request has one.
+
+`telemetry` is a no-op without `POSTHOG_API_KEY`, so tests and a bare checkout
+need no destination. It never raises: a telemetry failure must not become the
+second failure of the thing it was recording. The frontend captures its own
+exceptions and records upstream API failures on its side; this layer is for
+failures inside the service that never surface as a bad HTTP answer.
+
 ## The worker fleet
 
 Tasks are claimed with row-level locking and skip-locked selection. A worker
