@@ -31,6 +31,7 @@ from api.tasks.runtime import (
     _maybe_finalize_parent,
     _reconcile_chunks,
     enqueue,
+    repark_if_unfinished,
     set_current_claim,
 )
 
@@ -416,9 +417,15 @@ async def run_once() -> bool:
     hb.start()
     try:
         await handler(task["id"], task["payload"])
-        _finish(task["id"], "done")
-        metrics.TASKS_PROCESSED.labels(task["kind"], "done").inc()
-        logger.info(f"Task {task['id']} done")
+        if repark_if_unfinished(task["id"]):
+            # The handler collected the batches that had finished and left
+            # the rest on its payload: it waits on those, it is not done.
+            metrics.TASKS_PROCESSED.labels(task["kind"], "awaiting_batch").inc()
+            logger.info(f"Task {task['id']} parked again on unfinished batches")
+        else:
+            _finish(task["id"], "done")
+            metrics.TASKS_PROCESSED.labels(task["kind"], "done").inc()
+            logger.info(f"Task {task['id']} done")
     except AwaitingBatch:
         # Parked, not finished and not failed: the slot is free and the task
         # resumes when its batches land.

@@ -55,6 +55,12 @@ _APP_CONFIG_SEED = [
     # its board stops listing it. Long enough to evaluate a new pattern
     # against a month of what the boards actually posted.
     ("screened_retention_days", 30),
+    # A parked task resumes once every batch is terminal, or once the ones
+    # still running are older than this while others have finished: the
+    # finished ones are collected and the task parks again on the rest.
+    # Provider batches normally land within the hour; the stragglers seen
+    # on 2026-09-04 sat 14 hours at a few requests short.
+    ("batch_straggler_hours", 4),
 ]
 # One source of truth for a seeded key's value: the seed writes it, and
 # get_config falls back to it when the row is missing.

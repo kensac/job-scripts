@@ -77,7 +77,12 @@ async def handle_poll_batches(task_id: int, payload: dict[str, Any]) -> None:
     # so that window IS the deadline - no invented timeout, and it moves
     # automatically if BATCH_COMPLETION_WINDOW ever changes.
     window = completion_window_seconds()
-    resumed = expired = 0
+    # A task on several batches resumes early once some have finished and the
+    # rest have run past this many hours: the resumed handler collects the
+    # finished ones and parks again on the rest (collect_pending). Without it
+    # one straggler held every finished batch beside it for the whole window.
+    straggler_seconds = int(db.get_config("batch_straggler_hours")) * 3600
+    resumed = partial = expired = 0
     for t in parked:
         ids = list((t["payload"] or {}).get("batch_ids") or [])
         if not ids:
@@ -90,9 +95,14 @@ async def handle_poll_batches(task_id: int, payload: dict[str, Any]) -> None:
         states = {k: v.status for k, v in progress.items()}
         # A batch we cannot read a status for is treated as unfinished, so a
         # transient provider error delays a resume instead of dropping results.
-        if all(is_terminal(states.get(b, "")) for b in ids):
+        finished = [b for b in ids if is_terminal(states.get(b, ""))]
+        if len(finished) == len(ids):
             _resume_parked(t["id"])
             resumed += 1
+            continue
+        if finished and not _younger_than([b for b in ids if b not in finished], straggler_seconds):
+            _resume_parked(t["id"])
+            partial += 1
             continue
         overdue = db.query_one(
             "SELECT 1 FROM ai_batches WHERE provider_batch_id = ANY(%s) "
@@ -110,7 +120,18 @@ async def handle_poll_batches(task_id: int, payload: dict[str, Any]) -> None:
             expired += 1
     _set_progress(
         task_id,
-        resumed + expired,
+        resumed + partial + expired,
         len(parked),
-        f"{resumed} resumed, {expired} past the completion window",
+        f"{resumed} resumed, {partial} resumed on stragglers, {expired} past the completion window",
+    )
+
+
+def _younger_than(batch_ids: list[str], seconds: int) -> bool:
+    """True while any of these batches was submitted less than `seconds` ago."""
+    return bool(
+        db.query_one(
+            "SELECT 1 FROM ai_batches WHERE provider_batch_id = ANY(%s) "
+            "AND submitted_at > now() - make_interval(secs => %s) LIMIT 1",
+            (batch_ids, seconds),
+        )
     )

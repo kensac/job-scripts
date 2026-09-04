@@ -618,10 +618,8 @@ async def run_batched(
     prompt_id = _record_prompt(purpose, specs[0].instructions) if specs else None
     hook = _batch_event_hook(task_id, purpose, chosen.model, prompt_id=prompt_id)
     if existing:
-        from core.batch import collect_batches
-
         logger.info(f"Task {task_id}: reattaching to {len(existing)} in-flight batch(es)")
-        results = await collect_batches(existing, hook)
+        results = await collect_pending(task_id, hook)
     else:
         results = await submit_or_collect(
             task_id,
@@ -660,12 +658,12 @@ async def submit_or_collect(
     the top, which they already are - every batched sweep was written to be
     idempotent by re-sweep.
     """
-    from core.batch import collect_batches, submit_responses_batches
+    from core.batch import submit_responses_batches
 
     existing = _pending_batch_ids(task_id)
     if existing:
-        logger.info(f"Task {task_id}: collecting {len(existing)} finished batch(es)")
-        return await collect_batches(existing, hook)
+        logger.info(f"Task {task_id}: collecting {len(existing)} batch(es)")
+        return await collect_pending(task_id, hook)
 
     if not specs:
         return {}
@@ -699,6 +697,52 @@ def _resume_parked(task_id: int) -> None:
         (task_id,),
     )
     events.publish_task(task_id)
+
+
+def _set_batch_ids(task_id: int, batch_ids: list[str]) -> None:
+    """Replaces the batches a task still waits on. _record_batch_ids only ever
+    adds; after a partial collection the collected ids must go, or the next
+    resume would download and re-record them."""
+    db.execute(
+        "UPDATE tasks SET payload = jsonb_set(COALESCE(payload, '{}'::jsonb), '{batch_ids}', %s) "
+        "WHERE id = %s",
+        (db.jsonb(batch_ids), task_id),
+    )
+
+
+async def collect_pending(task_id: int, hook) -> dict[str, Any]:
+    """The one way a resumed handler collects the batches it parked on.
+
+    Takes what has finished and leaves the rest on the payload, so a handler
+    that returns while its payload still names batches is parked again by the
+    worker (repark_if_unfinished) rather than finished. One straggler no
+    longer holds every finished batch beside it, and it no longer holds a
+    worker: the previous collector waited each id out in turn.
+    """
+    from core.batch import collect_finished_batches
+
+    existing = _pending_batch_ids(task_id)
+    if not existing:
+        return {}
+    results, unfinished = await collect_finished_batches(existing, hook)
+    if unfinished != existing:
+        _set_batch_ids(task_id, unfinished)
+    if unfinished:
+        logger.info(
+            f"Task {task_id}: collected {len(existing) - len(unfinished)} batch(es), "
+            f"{len(unfinished)} still running; will park again"
+        )
+    return results
+
+
+def repark_if_unfinished(task_id: int) -> bool:
+    """After a handler returns: if its payload still names batches, the run
+    collected only part of its work and the task waits on the rest. True when
+    it was parked again; the caller must then not finish it."""
+    remaining = _pending_batch_ids(task_id)
+    if not remaining:
+        return False
+    return _park_awaiting_batch(task_id, remaining)
 
 
 def _load_config(user_id: int) -> tuple[Entitlement, ai.AIConfig]:

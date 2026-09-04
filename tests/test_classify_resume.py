@@ -26,6 +26,7 @@ import pytest
 from api import db, mail_store
 from api.mail_store import ImportedMessage
 from api.tasks import mail_classify
+from tests.factories import finished
 
 
 def _msg(f, mid: str = "<r1@x>") -> tuple[int, int]:
@@ -166,7 +167,7 @@ class TestTheCeilingDoesNotStrandPaidWork:
         async def fake_collect(ids, hook):
             return {}
 
-        monkeypatch.setattr("core.batch.collect_batches", fake_collect)
+        monkeypatch.setattr("core.batch.collect_finished_batches", finished(fake_collect))
         shape = mail_classify.ONGOING_TASK
         results, _ = await runtime.run_batched(tid, shape, [])
         assert results == {}

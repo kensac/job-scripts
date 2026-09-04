@@ -21,6 +21,7 @@ from api.tasks.runtime import (
     _pending_batch_ids,
     _set_progress,
     _update_parent_progress,
+    collect_pending,
     enqueue,
     submit_or_collect,
 )
@@ -280,10 +281,8 @@ async def handle_run_filter_batch_chunk(task_id: int, payload: dict[str, Any]) -
     try:
         existing = _pending_batch_ids(task_id)
         if existing:
-            from core.batch import collect_batches
-
             logger.info(f"Task {task_id}: reattaching to {len(existing)} in-flight batch(es)")
-            results = await collect_batches(existing, hook)
+            results = await collect_pending(task_id, hook)
         else:
             results = await submit_or_collect(
                 task_id,

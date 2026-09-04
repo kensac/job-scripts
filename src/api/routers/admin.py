@@ -1562,6 +1562,9 @@ _CONFIG_KEYS: dict[str, type] = {
     # Days a title-pattern-screened posting stays on record after its board
     # stops listing it. Read by core.catalog.record_screened.
     "screened_retention_days": int,
+    # Hours a still-running batch may lag its finished siblings before the
+    # task collects those and parks again on it. Read by api.tasks.batches.
+    "batch_straggler_hours": int,
 }
 
 

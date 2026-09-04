@@ -296,7 +296,7 @@ async def _run_chunk(
     on_event: BatchEventHook = None,
 ) -> dict[str, BatchResult]:
     """Submit-and-wait, retained for callers that genuinely need a result in
-    hand. The scheduled paths use submit_responses_batches + collect_batches
+    hand. The scheduled paths use submit_responses_batches + collect_finished_batches
     instead so they do not hold a worker while the provider queues."""
     results: dict[str, BatchResult] = {
         spec.custom_id: BatchResult(spec.custom_id) for spec in specs
@@ -308,33 +308,6 @@ async def _run_chunk(
     collected = await _collect_batch(client, batch, results)
     _emit_usage(on_event, batch.id, batch.status, collected)
     return collected
-
-
-async def collect_batches(
-    batch_ids: list[str], on_event: BatchEventHook = None
-) -> dict[str, BatchResult]:
-    """Reattach to already-submitted batches (e.g. after a worker died mid-wait)
-    and wait them out instead of resubmitting; results are keyed by whatever
-    custom_ids the batches carry."""
-    client = _client()
-    if not client:
-        return {}
-    results: dict[str, BatchResult] = {}
-    for batch_id in batch_ids:
-        try:
-            batch = await _wait_for_batch(client, batch_id, on_event)
-        except Exception as exc:
-            logger.warning(f"Batch {batch_id} reattach failed: {exc}")
-            continue
-        before = set(results)
-        await _collect_batch(client, batch, results, create_missing=True)
-        _emit_usage(
-            on_event,
-            batch.id,
-            batch.status,
-            {k: v for k, v in results.items() if k not in before},
-        )
-    return results
 
 
 async def submit_responses_batches(
@@ -469,3 +442,46 @@ async def run_responses_batch(
             continue
         results.update(wave)
     return results
+
+
+async def collect_finished_batches(
+    batch_ids: list[str], on_event: BatchEventHook = None
+) -> tuple[dict[str, BatchResult], list[str]]:
+    """Collect the batches that have reached a terminal state and report the
+    ones that have not, without waiting on any of them.
+
+    Waiting each id out in turn meant one straggler held a worker
+    and every finished batch beside it: on 2026-09-04 fourteen filter chunks
+    sat 14 hours on batches at 207 of 211 and 76 of 81 requests, with ~2,900
+    already-paid verdicts uncollectable behind them. A provider batch yields
+    nothing until it is terminal, so the unit of partial collection is the
+    batch, not the request: take what finished, hand the rest back to be
+    parked on again.
+    """
+    client = _client()
+    if not client:
+        return {}, list(batch_ids)
+    results: dict[str, BatchResult] = {}
+    unfinished: list[str] = []
+    for batch_id in batch_ids:
+        try:
+            batch = await client.batches.retrieve(batch_id)
+        except Exception as exc:
+            # Unreadable is unfinished: a transient provider error delays the
+            # collection of this batch rather than dropping it.
+            logger.warning(f"Batch {batch_id} status check failed: {exc}")
+            unfinished.append(batch_id)
+            continue
+        _emit(on_event, batch)
+        if batch.status not in _TERMINAL_STATES:
+            unfinished.append(batch_id)
+            continue
+        before = set(results)
+        await _collect_batch(client, batch, results, create_missing=True)
+        _emit_usage(
+            on_event,
+            batch.id,
+            batch.status,
+            {k: v for k, v in results.items() if k not in before},
+        )
+    return results, unfinished
