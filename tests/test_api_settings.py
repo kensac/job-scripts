@@ -134,8 +134,13 @@ def test_models_no_byo_key_reflects_owner_allowlist(client, admin_headers, monke
     assert resp.status_code == 200
     data = resp.json()
     assert data["providers"], "expected at least one provider from the owner allowlist"
+    # Every provider is present; only the server-keyed allowlist is eligible,
+    # and everything else says why in words a person reads on the page.
     providers = {p["provider"] for p in data["providers"]}
-    assert providers == {"openai"}
+    assert {"openai", "anthropic"} <= providers
+    eligible = {p["provider"] for p in data["providers"] if any(m["eligible"] for m in p["models"])}
+    assert eligible == {"openai"}
+    assert all(m["eligible"] or m["reason"] for p in data["providers"] for m in p["models"])
     assert data["key_source"] == "owner"
     assert "gpt-5-nano" in data["owner_key_models"]
 

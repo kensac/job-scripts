@@ -102,6 +102,11 @@ class ModelEntry(BaseModel):
     batch_discount: float | None = None
     structured_output: str | None = None
     reasoning_accepts: list[str] = []
+    # Whether THIS caller can run it right now, and if not, why, in words the
+    # page can print. A model the caller cannot run is listed rather than
+    # hidden, so the page can show what exists and what would unlock it.
+    eligible: bool = True
+    reason: str | None = None
 
 
 class ProviderEntry(BaseModel):
@@ -161,11 +166,20 @@ def _provider_entry(provider: str, models: list) -> dict:
     }
 
 
+NEEDS_OWN_KEY = "needs your own key"
+NOT_ON_ALLOWLIST = "not on the shared-key allowlist"
+
+
 @router.get("/models", response_model=ModelsResponse)
 def models(user: AuthedUser = Depends(require_user)):
-    """Only the options valid for this user right now: their BYO provider's
-    catalog if they have a key (it takes precedence), else the owner-key
-    allowlist if granted, else nothing runnable."""
+    """Every model the fleet knows, each marked with whether THIS user can run
+    it right now and, if not, why. A BYO key makes its provider's whole
+    catalog eligible and takes precedence; on the owner key a model is
+    eligible when it is on the user's allowlist and the server holds that
+    provider's key; with neither, everything is listed and nothing is
+    eligible. Listing the ineligible ones is the point: the page shows what
+    exists and what would unlock it instead of a list that silently shrank.
+    """
     ent = budget.get_entitlement(user)
     settings = db.query_one(
         "SELECT ai_provider, api_key_enc IS NOT NULL AS has_key "
@@ -177,16 +191,24 @@ def models(user: AuthedUser = Depends(require_user)):
     if settings and settings["has_key"]:
         provider = settings["ai_provider"] or "openai"
         providers.append(_provider_entry(provider, _catalog(provider)))
-    elif ent.owner_key:
-        owner_allowed = budget.owner_allowed_models(user.groups)
+    else:
         # Every provider the fleet models, not a hardcoded pair. This said
         # ("openai", "anthropic") from before xAI and DeepSeek existed, so two
         # fully modelled and fully priced providers were invisible here while
         # being selectable everywhere else. owner_allowed_models already
-        # intersects with the keys the server actually holds, so listing them
-        # all cannot offer something unrunnable.
+        # intersects with the keys the server actually holds.
+        if ent.owner_key:
+            owner_allowed = budget.owner_allowed_models(user.groups)
         for provider in ai.MODEL_CATALOG:
-            models_list = [m for m in _catalog(provider) if m["model"] in owner_allowed]
+            keyed = bool(ai.server_key(provider))
+            models_list = []
+            for m in _catalog(provider):
+                if m["model"] in owner_allowed:
+                    models_list.append(m)
+                elif ent.owner_key and keyed:
+                    models_list.append({**m, "eligible": False, "reason": NOT_ON_ALLOWLIST})
+                else:
+                    models_list.append({**m, "eligible": False, "reason": NEEDS_OWN_KEY})
             if models_list:
                 providers.append(_provider_entry(provider, models_list))
     return {

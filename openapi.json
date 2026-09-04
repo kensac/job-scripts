@@ -165,7 +165,7 @@
     "/v1/models": {
       "get": {
         "summary": "Models",
-        "description": "Only the options valid for this user right now: their BYO provider's\ncatalog if they have a key (it takes precedence), else the owner-key\nallowlist if granted, else nothing runnable.",
+        "description": "Every model the fleet knows, each marked with whether THIS user can run\nit right now and, if not, why. A BYO key makes its provider's whole\ncatalog eligible and takes precedence; on the owner key a model is\neligible when it is on the user's allowlist and the server holds that\nprovider's key; with neither, everything is listed and nothing is\neligible. Listing the ineligible ones is the point: the page shows what\nexists and what would unlock it instead of a list that silently shrank.",
         "operationId": "models_v1_models_get",
         "parameters": [
           {
@@ -14723,6 +14723,22 @@
             "type": "array",
             "title": "Reasoning Accepts",
             "default": []
+          },
+          "eligible": {
+            "type": "boolean",
+            "title": "Eligible",
+            "default": true
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
           }
         },
         "type": "object",
