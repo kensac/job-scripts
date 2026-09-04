@@ -142,3 +142,42 @@ def instrument(app: FastAPI) -> None:
         HTTP_REQUESTS.labels(request.method, path, str(response.status_code)).inc()
         HTTP_DURATION.labels(request.method, path).observe(time.monotonic() - start)
         return response
+
+
+# The queue by kind. The two gauges above are fleet totals, which at 750
+# boards are dominated by ingest and hide a stuck classify or a growing
+# verify. Refreshed from the worker housekeeping tick rather than on scrape,
+# so a gauge read never runs a query on the request path.
+TASK_QUEUE_BY_KIND = Gauge(
+    "jobtracker_task_queue_by_kind",
+    "Tasks by kind and status (pending, running, waiting, awaiting_batch)",
+    ["kind", "status"],
+)
+OLDEST_PENDING_AGE_BY_KIND = Gauge(
+    "jobtracker_oldest_pending_task_age_by_kind_seconds",
+    "Age of the oldest pending task, per kind",
+    ["kind"],
+)
+
+_LIVE_STATUSES = ("pending", "running", "waiting", "awaiting_batch")
+
+
+def refresh_queue_gauges() -> None:
+    rows = db.query(
+        "SELECT kind, status, COUNT(*) AS c, "
+        "EXTRACT(EPOCH FROM now() - MIN(created_at) FILTER (WHERE status = 'pending')) AS oldest "
+        "FROM tasks WHERE status = ANY(%s) GROUP BY kind, status",
+        (list(_LIVE_STATUSES),),
+    )
+    # A kind that drained must read zero, not keep its last value.
+    seen = {(r["kind"], r["status"]) for r in rows}
+    for kind, status in list(TASK_QUEUE_BY_KIND._metrics):
+        if (kind, status) not in seen:
+            TASK_QUEUE_BY_KIND.labels(kind, status).set(0)
+    for kind in list(OLDEST_PENDING_AGE_BY_KIND._metrics):
+        if (kind[0], "pending") not in seen:
+            OLDEST_PENDING_AGE_BY_KIND.labels(kind[0]).set(0)
+    for r in rows:
+        TASK_QUEUE_BY_KIND.labels(r["kind"], r["status"]).set(float(r["c"]))
+        if r["status"] == "pending":
+            OLDEST_PENDING_AGE_BY_KIND.labels(r["kind"]).set(float(r["oldest"] or 0))

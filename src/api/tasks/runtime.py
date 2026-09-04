@@ -26,6 +26,12 @@ logger = logging.getLogger("jobtracker_worker")
 
 MAX_CONCURRENCY = int(os.environ.get("JOBTRACKER_MAX_CONCURRENCY", "6"))
 
+# How often every active source is queued for ingest. The scheduler in
+# api/worker.py buckets time by it; the ingest_backlog detector in
+# api/health.py measures lateness in multiples of it. Lives here so health
+# never imports the worker.
+INGEST_INTERVAL_MINUTES = int(os.environ.get("JOBTRACKER_INGEST_INTERVAL_MINUTES", "60"))
+
 
 class AdaptiveLimiter:
     """AIMD concurrency control on a rolling throughput window: grow while the

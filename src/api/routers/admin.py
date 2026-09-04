@@ -705,6 +705,108 @@ def list_workers(user: AuthedUser = Depends(require_admin)):
     return {"rows": rows}
 
 
+# The longest window the queue and ingest summaries will aggregate. A week is
+# what the health detectors baseline against; anything longer is a report,
+# not monitoring, and the per-hour series would stop fitting a screen.
+SUMMARY_MAX_HOURS = 24 * 7
+
+
+@router.get("/queue")
+def queue_summary(hours: int = 6, user: AuthedUser = Depends(require_admin)):
+    """The queue as numbers a person can act on: what is waiting, for how
+    long, per kind; who is doing what; and the fleet's throughput per hour,
+    which is what turns a pending count into an ETA."""
+    hours = max(1, min(hours, SUMMARY_MAX_HOURS))
+    return {
+        "hours": hours,
+        "pending": db.query(
+            """
+            SELECT kind, COUNT(*) AS pending,
+                   round(EXTRACT(EPOCH FROM now() - MIN(created_at)) / 60) AS oldest_minutes
+            FROM tasks WHERE status = 'pending' GROUP BY kind ORDER BY pending DESC
+            """
+        ),
+        "in_flight": db.query(
+            """
+            SELECT id, kind, worker, status, started_at, progress,
+                   payload->>'source' AS source
+            FROM tasks WHERE status IN ('running', 'waiting', 'awaiting_batch')
+            ORDER BY started_at
+            """
+        ),
+        "throughput": db.query(
+            """
+            SELECT date_trunc('hour', finished_at) AS hour, worker, kind,
+                   COUNT(*) FILTER (WHERE status = 'done') AS done,
+                   COUNT(*) FILTER (WHERE status = 'failed') AS failed,
+                   round(avg(EXTRACT(EPOCH FROM finished_at - started_at))) AS avg_seconds
+            FROM tasks
+            WHERE finished_at > now() - make_interval(hours => %(hours)s)
+              AND started_at IS NOT NULL
+            GROUP BY 1, 2, 3 ORDER BY 1 DESC, 2, 3
+            """,
+            {"hours": hours},
+        ),
+        "workers": db.query(
+            """
+            SELECT name, started_at, last_seen, current_task_id,
+                   last_seen > now() - %(fresh)s::interval AS fresh
+            FROM worker_status ORDER BY name
+            """,
+            {"fresh": health.WORKER_FRESH},
+        ),
+    }
+
+
+@router.get("/ingest")
+def ingest_summary(hours: int = 24, user: AuthedUser = Depends(require_admin)):
+    """What the boards delivered: per source over the window, from the counts
+    each ingest leaves on its task (fetched, kept by the title pattern, pages
+    cached, fetches that failed, postings the board reports gone) and the
+    catalog rows that were new. A source that pulls fine and delivers nothing
+    is visible here, which last_new_posting_at alone cannot show for a
+    mirror."""
+    hours = max(1, min(hours, SUMMARY_MAX_HOURS))
+    rows = db.query(
+        """
+        SELECT s.name, s.active, s.company, s.ingest_interval_hours,
+               COALESCE((SELECT array_agg(g.name ORDER BY g.name) FROM source_groups g
+                         WHERE s.name = ANY(g.members)), '{}') AS groups,
+               COUNT(t.id) AS pulls,
+               COUNT(t.id) FILTER (WHERE t.status = 'failed') AS failed_pulls,
+               COALESCE(SUM((t.progress->>'fetched')::int), 0) AS fetched,
+               COALESCE(SUM((t.progress->>'kept')::int), 0) AS kept,
+               COALESCE(SUM((t.progress->>'cached')::int), 0) AS cached,
+               COALESCE(SUM((t.progress->>'fetch_failed')::int), 0) AS fetch_failed,
+               COALESCE(SUM((t.progress->>'gone')::int), 0) AS gone,
+               MAX(t.finished_at) AS last_pull_at,
+               (SELECT COUNT(*) FROM jobs j WHERE j.source = s.name
+               AND j.created_at > now() - make_interval(hours => %(hours)s)) AS new_jobs
+        FROM sources s
+        LEFT JOIN tasks t ON t.kind = 'ingest_source' AND t.payload->>'source' = s.name
+             AND t.status IN ('done', 'failed')
+             AND t.finished_at > now() - make_interval(hours => %(hours)s)
+        GROUP BY s.name, s.active, s.company, s.ingest_interval_hours
+        ORDER BY new_jobs DESC, s.name
+        """,
+        {"hours": hours},
+    )
+    totals = {
+        k: sum(r[k] or 0 for r in rows)
+        for k in (
+            "pulls",
+            "failed_pulls",
+            "fetched",
+            "kept",
+            "cached",
+            "fetch_failed",
+            "gone",
+            "new_jobs",
+        )
+    }
+    return {"hours": hours, "rows": rows, "totals": totals}
+
+
 @router.get("/queries/options")
 def query_options(user: AuthedUser = Depends(require_admin)):
     """Filter vocabularies generated from live data, so the admin dropdowns
@@ -1241,6 +1343,9 @@ _CONFIG_KEYS: dict[str, type] = {
     # Hours a posting whose page fetch came back empty waits before any ingest
     # or backfill tries it again. Read by api.tasks.board.fetch_retry_interval.
     "fetch_retry_after_hours": int,
+    # Read by the queue detectors in api.health; seeded in api.db.
+    "queue_stall_minutes": int,
+    "ingest_backlog_cycles": int,
 }
 
 

@@ -40,7 +40,7 @@ logger = logging.getLogger("jobtracker_worker")
 POLL_SECONDS = float(os.environ.get("JOBTRACKER_WORKER_POLL", "5"))
 
 
-INGEST_INTERVAL_MINUTES = int(os.environ.get("JOBTRACKER_INGEST_INTERVAL_MINUTES", "60"))
+from api.tasks.runtime import INGEST_INTERVAL_MINUTES  # noqa: E402
 
 # How often to ask the provider whether parked batches have landed. One
 # minute, matching the housekeeping tick, which is the floor: a finer bucket
@@ -487,6 +487,7 @@ def main() -> None:
             try:
                 reap_stale_tasks()
                 _reconcile_chunks()
+                metrics.refresh_queue_gauges()
                 if ingest_enabled:
                     schedule_ingest_cycle()
             except Exception:
