@@ -380,13 +380,23 @@ def _report_worker_status(current_task_id: int | None) -> None:
     try:
         db.execute(
             """
-            INSERT INTO worker_status (name, started_at, current_task_id, last_seen)
-            VALUES (%(name)s, %(started)s, %(tid)s, now())
+            INSERT INTO worker_status
+                (name, started_at, current_task_id, last_seen, kinds, excluded_kinds)
+            VALUES (%(name)s, %(started)s, %(tid)s, now(), %(kinds)s, %(excluded)s)
             ON CONFLICT (name) DO UPDATE SET
                 started_at = EXCLUDED.started_at,
-                current_task_id = %(tid)s, last_seen = now()
+                current_task_id = %(tid)s, last_seen = now(),
+                kinds = EXCLUDED.kinds, excluded_kinds = EXCLUDED.excluded_kinds
             """,
-            {"name": WORKER_NAME, "started": _PROCESS_STARTED_AT, "tid": current_task_id},
+            {
+                "name": WORKER_NAME,
+                "started": _PROCESS_STARTED_AT,
+                "tid": current_task_id,
+                # Reported rather than inferred: the filters live in this host's
+                # environment, so nothing else can know what this worker refuses.
+                "kinds": WORKER_KINDS,
+                "excluded": EXCLUDE_KINDS,
+            },
         )
     except Exception:
         logger.exception("worker status report failed")
