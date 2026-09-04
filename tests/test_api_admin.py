@@ -721,3 +721,38 @@ def test_a_bundle_moves_to_a_daily_pull_in_one_write(client, admin_headers, f):
         "/v1/admin/sources/gh_new", json={"ingest_interval_hours": 6}, headers=admin_headers
     )
     assert r.status_code == 200 and r.json()["ingest_interval_hours"] == 6
+
+
+def test_a_selection_cancels_everything_that_matches_not_one_page_of_it(client, admin_headers, f):
+    """Select-all on the queue used to cancel the 200 ids the page held and
+    say nothing about the rest. A selection by kind, source or status is one
+    write over whatever matches, intersected with ids when both are given."""
+    from api import db
+
+    ingest = [f.make_task("ingest_source", {"source": "acme"}) for _ in range(3)]
+    other_source = f.make_task("ingest_source", {"source": "other"})
+    verify = f.make_task("verify_new", {})
+    finished = f.make_task("ingest_source", {"source": "acme"}, status="done")
+
+    r = client.post(
+        "/v1/admin/tasks/cancel",
+        json={"kind": "ingest_source", "source": "acme"},
+        headers=admin_headers,
+    )
+    assert r.status_code == 200, r.text
+    assert sorted(r.json()["cancelled"]) == sorted(ingest)
+    statuses = {r["id"]: r["status"] for r in db.query("SELECT id, status FROM tasks")}
+    assert statuses[other_source] == "pending" and statuses[verify] == "pending"
+    assert statuses[finished] == "done"
+
+    # ids and a selection intersect; a finished id is skipped, not cancelled.
+    r = client.post(
+        "/v1/admin/tasks/cancel",
+        json={"ids": [other_source, verify, finished], "kind": "ingest_source"},
+        headers=admin_headers,
+    )
+    assert r.json() == {"cancelled": [other_source], "skipped": [verify, finished]}
+
+    assert client.post("/v1/admin/tasks/cancel", json={}, headers=admin_headers).status_code == 400
+    r = client.post("/v1/admin/tasks/cancel", json={"status": "done"}, headers=admin_headers)
+    assert r.status_code == 400 and r.json()["detail"]["code"] == "NOT_CANCELLABLE"

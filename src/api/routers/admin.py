@@ -630,8 +630,19 @@ def revoke_invite(pk: str, user: AuthedUser = Depends(require_admin)):
     return {"ok": True}
 
 
+# The statuses a task can be cancelled from: it holds a worker, a parent's
+# slot, or a parked batch. Anything else is already over.
+CANCELLABLE = ("pending", "waiting", "running", "awaiting_batch")
+
+
 class CancelTasksBody(BaseModel):
-    ids: list[int] = Field(min_length=1, max_length=200)
+    # Either specific ids, or a selection by kind / source / status, or both
+    # (intersected). A selection cancels everything that matches, however
+    # many: "cancel every pending ingest" is one write, not one page of it.
+    ids: list[int] | None = Field(default=None, max_length=500)
+    kind: str | None = None
+    source: str | None = None
+    status: str | None = None
 
 
 @router.post("/tasks/cancel")
@@ -641,20 +652,44 @@ def cancel_tasks(body: CancelTasksBody, user: AuthedUser = Depends(require_admin
     swept by the worker's reconciler. A task parked on provider batches
     (awaiting_batch) is cancellable too - it holds no worker, so nothing
     notices otherwise and it would sit until its batches landed."""
+    if body.ids is None and body.kind is None and body.source is None and body.status is None:
+        raise HTTPException(
+            400,
+            detail={"code": "NO_SELECTION", "message": "give ids, a kind, a source, or a status"},
+        )
+    if body.status is not None and body.status not in CANCELLABLE:
+        raise HTTPException(
+            400,
+            detail={
+                "code": "NOT_CANCELLABLE",
+                "message": f"status must be one of {', '.join(CANCELLABLE)}",
+            },
+        )
+    clauses = ["status = ANY(%(cancellable)s)"]
+    params: dict[str, Any] = {"cancellable": list(CANCELLABLE)}
+    for key, value in (("id", body.ids), ("kind", body.kind), ("status", body.status)):
+        if value is not None:
+            clauses.append(f"{key} = ANY(%({key})s)" if key == "id" else f"{key} = %({key})s")
+            params[key] = value
+    if body.source is not None:
+        clauses.append("payload->>'source' = %(source)s")
+        params["source"] = body.source
     rows = db.query(
-        """
+        f"""
         UPDATE tasks SET status = 'cancelled', error = 'cancelled by admin',
                          finished_at = now()
-        WHERE id = ANY(%s)
-          AND status IN ('pending', 'waiting', 'running', 'awaiting_batch')
+        WHERE {" AND ".join(clauses)}
         RETURNING id
         """,
-        (body.ids,),
+        params,
     )
     cancelled = [r["id"] for r in rows]
     for task_id in cancelled:
         events.publish_task(task_id)
-    return {"cancelled": cancelled, "skipped": [i for i in body.ids if i not in cancelled]}
+    return {
+        "cancelled": cancelled,
+        "skipped": [i for i in (body.ids or []) if i not in cancelled],
+    }
 
 
 @router.get("/batches")
