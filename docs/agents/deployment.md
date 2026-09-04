@@ -58,6 +58,24 @@ Work that holds progress in the database survives arbitrarily many restarts.
 Work that holds progress in memory discards it every time. Prefer the former
 for anything long.
 
+## Rolling order
+
+The application runs `alembic upgrade head` at startup, so whichever member
+of the fleet starts first on a new commit migrates production for all of
+them. Containers first, then the laptop, is the order that keeps an old
+worker from meeting a schema it does not know: an additive migration is
+harmless in either direction, a column drop is not.
+
+**That ordering assumes the laptop is on the same commit as the containers,
+and nothing enforces it.** The laptop worker is a bare process on a source
+checkout: no pin, no supervisor, no CD, no metrics. If it is updated by
+`git pull` onto main it can run a migration the fleet has not rolled yet,
+which is exactly what happened on 2026-09-04 (harmless only because the
+migration created a table nothing older read). Update it with
+`git checkout <the fleet's commit>`, never with `git pull`, so it matches
+the container digest by construction. And ask for one roll per batch of
+merges rather than one per merge: each laptop restart is manual.
+
 ## After a roll
 
 Report the running digest per container, compared against the pin. A playbook
