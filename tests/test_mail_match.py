@@ -146,3 +146,66 @@ def test_canonical_urls_ignores_non_ats_links(f):
     )
     assert any("greenhouse" in u for u in found)
     assert not any("example.com" in u for u in found)
+
+
+def test_an_internship_rejection_does_not_attach_to_a_full_time_application(f):
+    """The company tier matched on employer alone and never consulted the role
+    it already had, so an internship rejection attached itself to a full-time
+    application whenever that was the only one on file - a Data Science
+    internship onto "Software Development Engineer I"."""
+    uid = f.make_user()
+    _application(
+        uid,
+        company="Acme",
+        title="Software Development Engineer I",
+        applied_at=datetime.datetime(2026, 1, 1, tzinfo=datetime.UTC),
+    )
+    match = mail_match.match_message(
+        uid,
+        body=None,
+        company="Acme",
+        title="Data Science Intern",
+        sent_at=datetime.datetime(2026, 3, 1, tzinfo=datetime.UTC),
+    )
+    assert match.application_id is None
+    assert match.method == mail_match.UNMATCHED
+
+
+def test_the_veto_is_silent_when_either_title_is_missing(f):
+    """A veto, not a requirement. 330 of this tier's matches have no title on
+    one side, and those were never the problem."""
+    uid = f.make_user()
+    app = _application(
+        uid,
+        company="Acme",
+        title="Software Development Engineer I",
+        applied_at=datetime.datetime(2026, 1, 1, tzinfo=datetime.UTC),
+    )
+    match = mail_match.match_message(
+        uid,
+        body=None,
+        company="Acme",
+        title=None,
+        sent_at=datetime.datetime(2026, 3, 1, tzinfo=datetime.UTC),
+    )
+    assert match.application_id == app
+
+
+def test_two_internships_still_match_each_other(f):
+    """It tests a categorical contradiction, not similarity. Both sides being
+    internships is agreement, however differently they are worded."""
+    uid = f.make_user()
+    app = _application(
+        uid,
+        company="Acme",
+        title="Software Engineering Intern, Summer 2026",
+        applied_at=datetime.datetime(2026, 1, 1, tzinfo=datetime.UTC),
+    )
+    match = mail_match.match_message(
+        uid,
+        body=None,
+        company="Acme",
+        title="SWE Internship (Backend)",
+        sent_at=datetime.datetime(2026, 3, 1, tzinfo=datetime.UTC),
+    )
+    assert match.application_id == app
