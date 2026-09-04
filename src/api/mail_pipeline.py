@@ -196,7 +196,7 @@ def proposals_for(user_id: int) -> list[dict[str, Any]]:
             "suggested_status": STATUS_FROM_EVENT[row["kind"]],
             "board_reason": None
             if row["board_updatable"]
-            else "this application is not on your board, so there is no status to move",
+            else "This application is not on your board, so there is no status to move.",
         }
         for row in rows
     ]
@@ -271,12 +271,16 @@ def answer_proposal(
         # Present only when a row actually moved. The proposed status is still
         # readable from `suggested_status` on the item that offered it.
         "board_status": status if updated else None,
+        # WHOLE SENTENCES, capitalised and stopped. These are shown to a person
+        # verbatim - the client is told never to claim a move that did not
+        # happen, so it renders this instead of composing its own line, and a
+        # lowercase fragment lands mid-paragraph looking like a bug.
         "reason": None
         if updated
         else (
-            "recorded; this application is not on your board, so no status moved"
+            "Recorded. This application is not on your board, so no status moved."
             if response == ACCEPTED
-            else "recorded; declining moves nothing by design"
+            else "Recorded. Declining moves nothing, by design."
         ),
     }
 

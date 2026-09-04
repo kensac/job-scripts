@@ -236,7 +236,9 @@ def test_accepting_a_proposal_reports_what_it_actually_touched(client, me):
     body = resp.json()
     assert body["board_updated"] is False
     assert "board_status" not in body, "it must not name a status it did not write"
-    assert "not on your board" in body["reason"]
+    # A whole sentence, because the client renders it verbatim rather than
+    # composing its own line about what happened.
+    assert body["reason"] == "Recorded. This application is not on your board, so no status moved."
     # Recorded either way: a proposal that cannot move the board is still an
     # answer, and it is the only evidence the mapping was right.
     assert (
