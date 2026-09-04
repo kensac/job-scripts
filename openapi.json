@@ -13827,19 +13827,55 @@
       "CancelTasksBody": {
         "properties": {
           "ids": {
-            "items": {
-              "type": "integer"
-            },
-            "type": "array",
-            "maxItems": 200,
-            "minItems": 1,
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array",
+                "maxItems": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Ids"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kind"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
           }
         },
         "type": "object",
-        "required": [
-          "ids"
-        ],
         "title": "CancelTasksBody"
       },
       "ConfigPut": {
