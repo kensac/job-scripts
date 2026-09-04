@@ -121,3 +121,12 @@ it, and correct it when you find it stale.
 ## Migrations are generated from the models
 
 The ORM models in `src/api/orm.py` are the schema. A schema change is a model change followed by `make revision m="..."`, which autogenerates the migration; the generated file is then read and, where the change moves data (a copy, a backfill, a seed of both halves of a rename), the data step is added to it by hand. Nobody writes a schema migration from scratch: the two copies drifted every time someone did, and CI's autogenerate drift check exists to catch exactly that. Non-additive changes (drops, renames) still go through the expand-then-contract shape and the before-merge conversation with homelab; generation does not change what is safe to roll, only who writes it.
+
+## Dependencies
+
+Dependencies are declared in `pyproject.toml` and resolved into `uv.lock`; both
+are committed and every install is `uv sync --frozen` (`make sync`), locally,
+in CI and in the image. To add or move a pin, edit `pyproject.toml` and run
+`uv lock`, then commit both files in the same change. A lockfile that does not
+match the declaration fails the install rather than resolving something new,
+which is the point: what ran in CI is what the image carries.

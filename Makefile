@@ -1,6 +1,9 @@
 export PYTHONPATH := src
 
-.PHONY: api worker check lint fmt types test dev-api dev-headers testdb-up testdb-down testdb-url testdb-sync testdb-sync-fast integration corpus profile profile-check schema migrate revision db-up db-down
+.PHONY: sync api worker check lint fmt types test dev-api dev-headers testdb-up testdb-down testdb-url testdb-sync testdb-sync-fast integration corpus profile profile-check schema migrate revision db-up db-down
+
+sync:           ## install exactly the lockfile into .venv (then activate it)
+	uv sync --frozen
 
 api:            ## run the API locally
 	uvicorn api.app:app --port 8000 --reload
