@@ -1,5 +1,5 @@
 {
- "measured_at": "2026-09-04T02:07:50.801674+00:00",
+ "measured_at": "2026-09-04T03:21:35.365029+00:00",
  "tables": {
   "action_items": {
    "columns": {
@@ -9,13 +9,13 @@
     },
     "created_at": {
      "age_days": [
-      0.043,
-      0.059,
-      0.823,
-      1.504,
-      1.505,
-      1.505,
-      1.505
+      0.094,
+      0.111,
+      0.874,
+      1.556,
+      1.556,
+      1.556,
+      1.557
      ],
      "kind": "timestamp",
      "naive_rate": 0.0,
@@ -23,13 +23,13 @@
     },
     "due_at": {
      "age_days": [
-      37.089,
-      170.089,
-      359.089,
-      557.089,
-      1049.089,
-      1612.089,
-      2232.089
+      37.14,
+      170.14,
+      359.14,
+      557.14,
+      1049.14,
+      1612.14,
+      2232.14
      ],
      "kind": "timestamp",
      "naive_rate": 0.0,
@@ -68,13 +68,13 @@
     },
     "resolved_at": {
      "age_days": [
-      0.043,
-      0.063,
-      0.686,
-      0.688,
-      1.415,
-      1.505,
-      1.505
+      0.094,
+      0.114,
+      0.738,
+      0.739,
+      1.467,
+      1.556,
+      1.557
      ],
      "kind": "timestamp",
      "naive_rate": 0.0,
@@ -99,37 +99,37 @@
      "null_rate": 0.0,
      "quantiles": [
       0.0,
-      1.0,
-      6.0,
+      0.0,
+      4.0,
       66.0,
-      445.0,
+      394.0,
       1200.0,
       1636.0
      ]
     },
     "completed_at": {
      "age_days": [
-      0.034,
-      0.311,
-      1.354,
-      1.782,
-      3.809,
-      7.927,
-      9.817
+      0.006,
+      0.037,
+      1.299,
+      1.812,
+      3.848,
+      7.772,
+      9.868
      ],
      "kind": "timestamp",
      "naive_rate": 0.0,
-     "null_rate": 0.011811
+     "null_rate": 0.055062
     },
     "est_cost_usd": {
      "kind": "numeric",
-     "null_rate": 0.055118,
+     "null_rate": 0.134991,
      "quantiles": [
       0.0,
       9e-05,
-      0.000863,
-      0.007227,
-      0.179123,
+      0.000868,
+      0.007334,
+      0.176255,
       0.258221,
       0.332224
      ]
@@ -139,11 +139,11 @@
      "null_rate": 0.0,
      "quantiles": [
       0.0,
-      1874.0,
-      19689.0,
-      215875.0,
-      1551298.0,
-      1799610.0,
+      1977.0,
+      26053.0,
+      255314.0,
+      1792103.0,
+      1799620.0,
       1799999.0
      ]
     },
@@ -151,8 +151,8 @@
      "kind": "categorical",
      "null_rate": 0.0,
      "values": {
-      "0": 0.998031,
-      "499": 0.001969
+      "0": 0.998224,
+      "499": 0.001776
      }
     },
     "id": {
@@ -165,10 +165,10 @@
      "quantiles": [
       0.0,
       0.0,
-      7049.0,
-      91970.0,
-      802419.0,
-      2298426.0,
+      2958.0,
+      54231.0,
+      593721.0,
+      2269929.0,
       2600364.0
      ]
     },
@@ -176,9 +176,9 @@
      "kind": "categorical",
      "null_rate": 0.0,
      "values": {
-      "gpt-5-mini": 0.108268,
-      "gpt-5-nano": 0.67126,
-      "gpt-5.6-luna": 0.220472
+      "gpt-5-mini": 0.097691,
+      "gpt-5-nano": 0.612789,
+      "gpt-5.6-luna": 0.28952
      }
     },
     "output_tokens": {
@@ -187,16 +187,16 @@
      "quantiles": [
       0.0,
       0.0,
-      1743.0,
-      16416.0,
-      45588.0,
-      134239.0,
+      917.0,
+      12397.0,
+      38023.0,
+      126428.0,
       411469.0
      ]
     },
     "prompt_id": {
      "kind": "key",
-     "null_rate": 0.86811
+     "null_rate": 0.875666
     },
     "provider_batch_id": {
      "kind": "key",
@@ -206,12 +206,12 @@
      "kind": "categorical",
      "null_rate": 0.0,
      "values": {
-      "comp": 0.129921,
-      "filter": 0.224409,
-      "mail_classify": 0.273622,
-      "requirements": 0.055118,
-      "reverify": 0.151575,
-      "verify": 0.165354
+      "comp": 0.120782,
+      "filter": 0.291297,
+      "mail_classify": 0.248668,
+      "requirements": 0.049734,
+      "reverify": 0.136767,
+      "verify": 0.152753
      }
     },
     "requests": {
@@ -220,9 +220,9 @@
      "quantiles": [
       1.0,
       1.0,
-      7.0,
-      74.0,
-      453.0,
+      8.0,
+      85.0,
+      430.0,
       1200.0,
       1637.0
      ]
@@ -231,21 +231,21 @@
      "kind": "categorical",
      "null_rate": 0.0,
      "values": {
-      "cancelled": 0.047244,
-      "completed": 0.940945,
-      "in_progress": 0.009843,
-      "validating": 0.001969
+      "cancelled": 0.042629,
+      "completed": 0.902309,
+      "in_progress": 0.053286,
+      "validating": 0.001776
      }
     },
     "submitted_at": {
      "age_days": [
-      0.036,
-      0.359,
-      1.455,
-      1.792,
-      3.806,
-      8.045,
-      9.818
+      0.007,
+      0.038,
+      1.171,
+      1.8,
+      3.834,
+      7.763,
+      9.87
      ],
      "kind": "timestamp",
      "naive_rate": 0.0,
@@ -257,33 +257,33 @@
     },
     "updated_at": {
      "age_days": [
-      0.006,
-      0.262,
-      1.353,
-      1.782,
-      3.805,
-      7.927,
-      9.817
+      0.001,
+      0.001,
+      1.079,
+      1.795,
+      3.832,
+      7.616,
+      9.868
      ],
      "kind": "timestamp",
      "naive_rate": 0.0,
      "null_rate": 0.0
     }
    },
-   "rows": 508,
-   "sampled": 508
+   "rows": 563,
+   "sampled": 563
   },
   "ai_prompt_samples": {
    "columns": {
     "created_at": {
      "age_days": [
-      1.354,
-      1.354,
-      1.354,
-      1.354,
-      1.406,
-      1.406,
-      1.406
+      1.405,
+      1.405,
+      1.405,
+      1.405,
+      1.457,
+      1.457,
+      1.457
      ],
      "kind": "timestamp",
      "naive_rate": 0.0,
@@ -343,19 +343,19 @@
      "null_rate": 0.0,
      "values": {
       "4": 0.333333,
-      "49": 0.333333,
-      "58": 0.333333
+      "50": 0.333333,
+      "62": 0.333333
      }
     },
     "first_seen_at": {
      "age_days": [
-      1.354,
-      1.354,
-      1.398,
-      1.398,
-      1.41,
-      1.41,
-      1.41
+      1.405,
+      1.405,
+      1.45,
+      1.45,
+      1.461,
+      1.461,
+      1.461
      ],
      "kind": "timestamp",
      "naive_rate": 0.0,
@@ -381,13 +381,13 @@
     },
     "last_seen_at": {
      "age_days": [
-      0.035,
-      0.035,
-      0.036,
-      0.036,
-      0.635,
-      0.635,
-      0.635
+      0.006,
+      0.006,
+      0.007,
+      0.007,
+      0.687,
+      0.687,
+      0.687
      ],
      "kind": "timestamp",
      "naive_rate": 0.0,
@@ -414,11 +414,11 @@
    "columns": {
     "batch_id": {
      "kind": "key",
-     "null_rate": 0.822822
+     "null_rate": 0.818713
     },
     "cached_tokens": {
      "kind": "categorical",
-     "null_rate": 0.404537,
+     "null_rate": 0.408706,
      "values": {
       "0": 0.958585,
       "1024": 0.000342,
@@ -447,11 +447,11 @@
      "kind": "categorical",
      "null_rate": 0.0,
      "values": {
-      "clearance": 0.277948,
-      "closed": 0.309434,
-      "content": 0.157218,
-      "custom": 0.238842,
-      "extraction": 0.016559
+      "clearance": 0.278176,
+      "closed": 0.309442,
+      "content": 0.157769,
+      "custom": 0.238171,
+      "extraction": 0.016443
      }
     },
     "company": {
@@ -460,13 +460,15 @@
       " -9Aa",
       " -A",
       " -Aa",
+      " -a",
       " 9Aa",
       " A",
       " Aa",
-      "-9",
+      "-9Aa",
       "-A",
       "-Aa",
       "-a",
+      "9",
       "9A",
       "9Aa",
       "A",
@@ -476,73 +478,73 @@
      "kind": "text",
      "lengths": [
       2,
-      4,
+      3,
       7,
-      13,
-      20,
+      14,
+      19,
       34,
-      71
+      96
      ],
-     "null_rate": 0.175772
+     "null_rate": 0.176194
     },
     "completion_tokens": {
      "kind": "numeric",
-     "null_rate": 0.17471,
+     "null_rate": 0.175139,
      "quantiles": [
       0.0,
       0.0,
-      149.0,
-      289.0,
-      815.0,
-      1922.0,
+      135.0,
+      251.0,
+      549.0,
+      1863.0,
       4680.0
      ]
     },
     "config_name": {
      "kind": "categorical",
-     "null_rate": 0.267366,
+     "null_rate": 0.265494,
      "values": {
-      "airtable1": 0.013095,
-      "airtable2": 0.006914,
-      "airtable3": 0.001274,
-      "airtable4": 0.019218,
-      "airtable5": 0.151665,
-      "content-backfill": 0.000161,
-      "content-cache": 0.124127,
-      "filter-batch": 0.052762,
-      "fulltime": 0.374313,
-      "fulltime_dixon": 0.003193,
-      "fulltime_ouckah": 0.001406,
-      "fulltime_ouckah_2027": 0.001011,
-      "ingest": 0.000732,
+      "airtable1": 0.01297,
+      "airtable2": 0.006848,
+      "airtable3": 0.001262,
+      "airtable4": 0.019035,
+      "airtable5": 0.150219,
+      "content-backfill": 0.00016,
+      "content-cache": 0.125192,
+      "filter-batch": 0.053623,
+      "fulltime": 0.370745,
+      "fulltime_dixon": 0.003163,
+      "fulltime_ouckah": 0.001393,
+      "fulltime_ouckah_2027": 0.001001,
+      "ingest": 0.000725,
       "manual": 2.9e-05,
-      "reverify": 0.036693,
-      "speedyapply_ng": 0.051063,
-      "verify-batch": 0.162343
+      "reverify": 0.036343,
+      "speedyapply_ng": 0.050576,
+      "verify-batch": 0.166715
      }
     },
     "cost_usd": {
      "kind": "numeric",
-     "null_rate": 0.174431,
+     "null_rate": 0.174861,
      "quantiles": [
       0.0,
       0.0,
-      9.3e-05,
-      0.000157,
-      0.000343,
-      0.000696,
-      0.002138
+      8.4e-05,
+      0.000133,
+      0.000257,
+      0.000618,
+      0.002485
      ]
     },
     "created_at": {
      "age_days": [
-      0.034,
-      0.323,
-      2.122,
-      8.136,
-      61.794,
-      81.979,
-      86.882
+      0.028,
+      0.41,
+      1.631,
+      6.952,
+      81.006,
+      82.026,
+      86.929
      ],
      "kind": "timestamp",
      "naive_rate": 0.0,
@@ -550,14 +552,14 @@
     },
     "duration_ms": {
      "kind": "numeric",
-     "null_rate": 0.358402,
+     "null_rate": 0.362894,
      "quantiles": [
       781.0,
-      1227.0,
-      1856.0,
-      3080.0,
-      6338.0,
-      13922.0,
+      1180.0,
+      1734.0,
+      2569.0,
+      4763.0,
+      11344.0,
       224744.0
      ]
     },
@@ -569,24 +571,24 @@
      "null_rate": 0.999968
     },
     "filter_name": {
-     "binary": false,
-     "charclasses": [
-      " -9Aa",
-      "-9a",
-      "-a",
-      "a"
-     ],
-     "kind": "text",
-     "lengths": [
-      7,
-      7,
-      8,
-      21,
-      31,
-      31,
-      39
-     ],
-     "null_rate": 0.761158
+     "kind": "categorical",
+     "null_rate": 0.761829,
+     "values": {
+      "default": 0.173289,
+      "empty": 0.020045,
+      "general": 0.010515,
+      "pay_tier": 0.041074,
+      "pay_tier_150": 0.044564,
+      "pay_tier_200": 0.1434,
+      "pay_tier_200_resume_match": 0.090157,
+      "pay_tier_and_new_york": 0.000761,
+      "resume_match": 0.048054,
+      "resume_match_new_grad": 0.036823,
+      "top_tier": 0.044116,
+      "user1:Pay: $200k+ total comp (new grad)": 0.142908,
+      "user1:default": 0.022729,
+      "user1:pay_tier_200_resume_match": 0.181566
+     }
     },
     "id": {
      "kind": "key",
@@ -598,13 +600,13 @@
      "lengths": [
       0,
       0,
-      2782,
-      4219,
-      5869,
-      9077,
-      21679
+      0,
+      4048,
+      5521,
+      8638,
+      85551
      ],
-     "null_rate": 0.017213
+     "null_rate": 0.017093
     },
     "instructions": {
      "binary": false,
@@ -613,12 +615,12 @@
       0,
       0,
       0,
-      669,
+      508,
       1550,
       4859,
       4859
      ],
-     "null_rate": 0.176427
+     "null_rate": 0.176844
     },
     "job_title": {
      "binary": false,
@@ -631,25 +633,29 @@
       " 9Aa",
       " A",
       " Aa",
+      " a",
+      "-Aa",
+      "A",
       "Aa"
      ],
      "kind": "text",
      "lengths": [
-      7,
-      14,
+      3,
+      15,
       22,
       31,
-      42,
-      63,
-      183
+      43,
+      66,
+      127
      ],
-     "null_rate": 0.175772
+     "null_rate": 0.176194
     },
     "model": {
      "kind": "categorical",
-     "null_rate": 0.174431,
+     "null_rate": 0.174861,
      "values": {
-      "gpt-5-nano": 1.0
+      "gpt-5-nano": 0.998786,
+      "gpt-5.6-luna": 0.001214
      }
     },
     "parsed_json": {
@@ -659,28 +665,28 @@
       18,
       23,
       61,
-      99,
-      126,
-      177,
-      284
+      103,
+      123,
+      178,
+      258
      ],
-     "null_rate": 0.176706
+     "null_rate": 0.177121
     },
     "prompt_hash": {
      "kind": "key",
-     "null_rate": 0.761158
+     "null_rate": 0.761829
     },
     "prompt_tokens": {
      "kind": "numeric",
-     "null_rate": 0.17471,
+     "null_rate": 0.175139,
      "quantiles": [
       0.0,
       0.0,
-      961.0,
-      1285.0,
-      1781.0,
-      2521.0,
-      24400.0
+      958.0,
+      1256.0,
+      1651.0,
+      2476.0,
+      24565.0
      ]
     },
     "reason": {
@@ -705,11 +711,11 @@
        "lengths": [
         0,
         0,
-        7,
+        6,
         8,
-        25,
-        115,
-        200
+        19,
+        116,
+        199
        ],
        "null_rate": 0.0
       },
@@ -730,11 +736,11 @@
        "lengths": [
         0,
         0,
-        7,
+        6,
         8,
-        25,
-        115,
-        200
+        19,
+        116,
+        199
        ],
        "null_rate": 0.0
       },
@@ -742,9 +748,9 @@
        "kind": "categorical",
        "null_rate": 0.0,
        "values": {
-        "ats text": 0.061024,
-        "content cached": 0.422389,
-        "scraped": 0.516587
+        "ats text": 0.060453,
+        "content cached": 0.417967,
+        "scraped": 0.521581
        }
       },
       "custom": {
@@ -764,11 +770,11 @@
        "lengths": [
         0,
         0,
-        7,
+        6,
         8,
-        25,
-        115,
-        200
+        19,
+        116,
+        199
        ],
        "null_rate": 0.0
       },
@@ -783,7 +789,7 @@
     },
     "reasoning_effort": {
      "kind": "categorical",
-     "null_rate": 0.404505,
+     "null_rate": 0.408674,
      "values": {
       "low": 0.435754,
       "medium": 0.564246
@@ -791,7 +797,7 @@
     },
     "reasoning_tokens": {
      "kind": "categorical",
-     "null_rate": 0.404537,
+     "null_rate": 0.408706,
      "values": {
       "0": 0.000667,
       "1024": 0.017337,
@@ -840,21 +846,21 @@
      "kind": "categorical",
      "null_rate": 0.0,
      "values": {
-      "failed": 0.016838,
-      "passed": 0.682378,
-      "rejected": 0.300784
+      "failed": 0.01672,
+      "passed": 0.682641,
+      "rejected": 0.300639
      }
     },
     "total_tokens": {
      "kind": "numeric",
-     "null_rate": 0.17471,
+     "null_rate": 0.175139,
      "quantiles": [
       0.0,
       0.0,
-      1177.0,
-      1591.0,
-      2572.0,
-      4271.0,
+      1169.0,
+      1553.0,
+      2141.0,
+      4182.0,
       26633.0
      ]
     },
@@ -865,7 +871,6 @@
     "worker": {
      "binary": false,
      "charclasses": [
-      "-Aa",
       "a"
      ],
      "kind": "text",
@@ -876,12 +881,12 @@
       7,
       7,
       7,
-      26
+      7
      ],
-     "null_rate": 0.513871
+     "null_rate": 0.510273
     }
    },
-   "rows": 93183,
+   "rows": 93840,
    "sampled": 4000
   },
   "api_usage": {
@@ -913,18 +918,18 @@
     },
     "cost_usd": {
      "kind": "numeric",
-     "null_rate": 0.729354,
+     "null_rate": 0.720486,
      "quantiles": []
     },
     "created_at": {
      "age_days": [
-      10.311,
-      10.348,
-      10.648,
-      10.71,
-      10.775,
-      10.857,
-      10.901
+      10.363,
+      10.399,
+      10.7,
+      10.762,
+      10.826,
+      10.909,
+      10.953
      ],
      "kind": "timestamp",
      "naive_rate": 0.0,
@@ -938,17 +943,17 @@
      "kind": "categorical",
      "null_rate": 0.0,
      "values": {
-      "owner": 0.943015,
-      "server": 0.056985
+      "owner": 0.942979,
+      "server": 0.057021
      }
     },
     "model": {
      "kind": "categorical",
      "null_rate": 0.0,
      "values": {
-      "gpt-5-mini": 0.005662,
-      "gpt-5-nano": 0.980185,
-      "gpt-5.6-luna": 0.014154
+      "gpt-5-mini": 0.005593,
+      "gpt-5-nano": 0.968754,
+      "gpt-5.6-luna": 0.025653
      }
     },
     "prompt_tokens": {
@@ -968,14 +973,14 @@
      "kind": "categorical",
      "null_rate": 0.0,
      "values": {
-      "comp": 0.006769,
-      "extract": 0.000123,
-      "filter": 0.953477,
-      "improve_prompt": 0.000123,
-      "mail_classify": 0.016369,
-      "requirements": 0.003323,
-      "reverify": 0.009477,
-      "verify": 0.010338
+      "comp": 0.00693,
+      "extract": 0.000122,
+      "filter": 0.953313,
+      "improve_prompt": 0.000122,
+      "mail_classify": 0.016413,
+      "requirements": 0.003283,
+      "reverify": 0.009362,
+      "verify": 0.010456
      }
     },
     "total_tokens": {
@@ -993,10 +998,10 @@
     },
     "user_id": {
      "kind": "key",
-     "null_rate": 0.056985
+     "null_rate": 0.057021
     }
    },
-   "rows": 8125,
+   "rows": 8225,
    "sampled": 4000
   },
   "app_config": {
@@ -1046,13 +1051,13 @@
     },
     "created_at": {
      "age_days": [
-      1.506,
-      1.506,
-      1.507,
-      1.507,
-      1.507,
-      1.507,
-      1.508
+      1.558,
+      1.558,
+      1.558,
+      1.559,
+      1.559,
+      1.559,
+      1.559
      ],
      "kind": "timestamp",
      "naive_rate": 0.0,
@@ -1095,7 +1100,7 @@
       20,
       20,
       20,
-      80
+      92
      ],
      "null_rate": 0.0
     }
@@ -1107,13 +1112,13 @@
    "columns": {
     "applied_at": {
      "age_days": [
-      0.089,
-      84.089,
-      359.089,
-      486.863,
-      940.268,
-      1392.275,
-      2250.911
+      0.141,
+      84.141,
+      359.141,
+      486.915,
+      940.32,
+      1392.326,
+      2250.963
      ],
      "kind": "timestamp",
      "naive_rate": 0.0,
@@ -1156,13 +1161,13 @@
     },
     "created_at": {
      "age_days": [
-      0.054,
-      1.506,
-      1.506,
-      1.506,
-      1.508,
-      1.508,
-      1.508
+      0.106,
+      1.557,
+      1.557,
+      1.557,
+      1.559,
+      1.559,
+      1.559
      ],
      "kind": "timestamp",
      "naive_rate": 0.0,
@@ -1229,13 +1234,13 @@
     },
     "updated_at": {
      "age_days": [
-      0.054,
-      1.506,
-      1.506,
-      1.506,
-      1.508,
-      1.508,
-      1.508
+      0.106,
+      1.557,
+      1.557,
+      1.557,
+      1.559,
+      1.559,
+      1.559
      ],
      "kind": "timestamp",
      "naive_rate": 0.0,
@@ -1266,13 +1271,13 @@
     },
     "created_at": {
      "age_days": [
-      1.56,
-      1.594,
-      1.68,
-      1.727,
-      1.761,
-      1.782,
-      1.785
+      1.57,
+      1.644,
+      1.726,
+      1.778,
+      1.812,
+      1.834,
+      1.834
      ],
      "kind": "timestamp",
      "naive_rate": 0.0,
@@ -1280,30 +1285,30 @@
     },
     "deadline_at": {
      "age_days": [
-      37.089,
-      93.089,
-      306.089,
-      787.089,
-      1360.089,
-      2158.089,
-      3689.089
+      35.141,
+      162.141,
+      230.141,
+      364.141,
+      1046.141,
+      2050.141,
+      2311.141
      ],
      "kind": "timestamp",
      "naive_rate": 0.0,
-     "null_rate": 0.962007
+     "null_rate": 0.962012
     },
     "deadline_inferred": {
      "kind": "boolean",
      "null_rate": 0.0,
-     "true_rate": 0.012
+     "true_rate": 0.01425
     },
     "detail": {
      "keysets": {
-      "company,role_title": 0.961694,
-      "company,role_title,when_dropped_as_not_job_related,when_precision,when_raw": 0.006983,
-      "company,role_title,when_precision,when_raw": 0.018967,
+      "company,role_title": 0.9617,
+      "company,role_title,when_dropped_as_not_job_related,when_precision,when_raw": 0.006982,
+      "company,role_title,when_precision,when_raw": 0.018964,
       "reason": 0.002392,
-      "reason,superseded": 0.009964
+      "reason,superseded": 0.009963
      },
      "kind": "json",
      "null_rate": 0.0
@@ -1316,16 +1321,16 @@
      "kind": "categorical",
      "null_rate": 0.0,
      "values": {
-      "acknowledgement": 0.051275,
-      "assessment_invite": 0.006779,
-      "info_request": 0.011527,
-      "interview_invite": 0.004712,
-      "interview_scheduled": 0.009844,
-      "not_job_related": 0.862054,
+      "acknowledgement": 0.051267,
+      "assessment_invite": 0.006778,
+      "info_request": 0.011525,
+      "interview_invite": 0.004711,
+      "interview_scheduled": 0.009842,
+      "not_job_related": 0.862074,
       "offer": 0.003762,
-      "position_closed": 0.003666,
-      "recruiter_outreach": 0.022248,
-      "rejection": 0.024135
+      "position_closed": 0.003665,
+      "recruiter_outreach": 0.022245,
+      "rejection": 0.024131
      }
     },
     "message_id": {
@@ -1334,10 +1339,10 @@
     },
     "model": {
      "kind": "categorical",
-     "null_rate": 0.012356,
+     "null_rate": 0.012354,
      "values": {
-      "gpt-5-mini": 0.083606,
-      "gpt-5.6-luna": 0.916394
+      "gpt-5-mini": 0.083594,
+      "gpt-5.6-luna": 0.916406
      }
     },
     "occurred_at": {
@@ -1347,7 +1352,7 @@
      "null_rate": 0.999615
     }
    },
-   "rows": 83199,
+   "rows": 83211,
    "sampled": 4000
   },
   "email_messages": {
@@ -1356,29 +1361,29 @@
      "binary": false,
      "kind": "text",
      "lengths": [
-      100,
-      1220,
-      4027,
-      8967,
+      129,
+      928,
+      4139,
+      9866,
       20000,
       20000,
       20000
      ],
-     "null_rate": 0.576221
+     "null_rate": 0.576178
     },
     "body_text": {
      "binary": false,
      "kind": "text",
      "lengths": [
-      2,
-      152,
-      470,
-      1097,
-      2266,
-      6811,
+      4,
+      140,
+      500,
+      1169,
+      2340,
+      7207,
       20000
      ],
-     "null_rate": 0.0173
+     "null_rate": 0.017299
     },
     "from_email": {
      "binary": false,
@@ -1387,27 +1392,24 @@
       "-9a",
       "-A",
       "-Aa",
-      "-a",
-      "Aa"
+      "-a"
      ],
      "kind": "text",
      "lengths": [
-      6,
+      11,
       15,
-      19,
-      24,
+      18,
+      23,
       27,
       34,
       84
      ],
-     "null_rate": 0.003749
+     "null_rate": 0.003748
     },
     "from_name": {
      "binary": false,
      "charclasses": [
-      " -9A",
       " -9Aa",
-      " -9a",
       " -A",
       " -Aa",
       " -a",
@@ -1419,23 +1421,23 @@
       "-A",
       "-Aa",
       "-a",
-      "9A",
       "9Aa",
+      "9a",
       "A",
       "Aa",
       "a"
      ],
      "kind": "text",
      "lengths": [
-      2,
+      1,
       5,
       8,
       13,
       18,
-      31,
+      32,
       59
      ],
-     "null_rate": 0.476021
+     "null_rate": 0.475986
     },
     "headers": {
      "keysets": {
@@ -1445,7 +1447,7 @@
       "message-id,references": 0.014478
      },
      "kind": "json",
-     "null_rate": 0.424642
+     "null_rate": 0.424685
     },
     "id": {
      "kind": "key",
@@ -1453,13 +1455,13 @@
     },
     "imported_at": {
      "age_days": [
-      0.786,
-      1.793,
-      1.825,
-      1.833,
-      1.837,
-      1.838,
-      1.846
+      1.842,
+      1.845,
+      1.877,
+      1.885,
+      1.889,
+      1.89,
+      1.898
      ],
      "kind": "timestamp",
      "naive_rate": 0.0,
@@ -1468,7 +1470,7 @@
     "prefilter_hit": {
      "kind": "boolean",
      "null_rate": 0.0,
-     "true_rate": 0.11875
+     "true_rate": 0.117
     },
     "prefilter_reason": {
      "kind": "categorical",
@@ -1478,29 +1480,29 @@
       "ats_domain:avature.net": 0.000476,
       "ats_domain:bamboohr.com": 7.4e-05,
       "ats_domain:eightfold.ai": 7.4e-05,
-      "ats_domain:greenhouse-mail.io": 0.014012,
+      "ats_domain:greenhouse-mail.io": 0.014011,
       "ats_domain:greenhouse.io": 0.000223,
       "ats_domain:icims.com": 0.002127,
       "ats_domain:jobvite.com": 0.000521,
       "ats_domain:lever.co": 0.006292,
-      "ats_domain:myworkday.com": 0.015113,
+      "ats_domain:myworkday.com": 0.015112,
       "ats_domain:rippling.com": 0.000714,
-      "ats_domain:smartrecruiters.com": 0.001726,
-      "ats_domain:successfactors.com": 0.000298,
+      "ats_domain:smartrecruiters.com": 0.001725,
+      "ats_domain:successfactors.com": 0.000297,
       "ats_domain:workablemail.com": 0.000283,
-      "no_signal": 0.857079,
+      "no_signal": 0.85709,
       "phrase:application for": 0.002454,
       "phrase:application received": 0.000521,
-      "phrase:application status": 0.000774,
+      "phrase:application status": 0.000773,
       "phrase:applied for": 0.00241,
       "phrase:availability": 0.003719,
-      "phrase:candidate": 0.007795,
+      "phrase:candidate": 0.007794,
       "phrase:codesignal": 0.00055,
       "phrase:codility": 4.5e-05,
       "phrase:coding challenge": 0.000342,
       "phrase:hackerrank": 0.000387,
       "phrase:hiring manager": 0.000312,
-      "phrase:interview": 0.029185,
+      "phrase:interview": 0.029183,
       "phrase:job opportunity": 0.000312,
       "phrase:karat": 1.5e-05,
       "phrase:move forward with other candidates": 0.000104,
@@ -1508,8 +1510,8 @@
       "phrase:next steps": 0.002856,
       "phrase:offer letter": 0.001116,
       "phrase:online assessment": 0.000119,
-      "phrase:phone screen": 6e-05,
-      "phrase:position at": 0.000179,
+      "phrase:phone screen": 5.9e-05,
+      "phrase:position at": 0.000178,
       "phrase:recruiting team": 0.000491,
       "phrase:regret to inform": 1.5e-05,
       "phrase:role at": 0.000253,
@@ -1522,8 +1524,8 @@
       "phrase:unfortunately": 0.004165,
       "phrase:we regret": 0.000164,
       "phrase:we would like to invite": 7.4e-05,
-      "phrase:your application": 0.022015,
-      "url:/careers": 0.001369,
+      "phrase:your application": 0.022014,
+      "url:/careers": 0.001368,
       "url:/jobs/": 0.000327,
       "url:apply.": 0.000149,
       "url:boards.": 7.4e-05,
@@ -1538,17 +1540,17 @@
     },
     "provider_thread_id": {
      "kind": "key",
-     "null_rate": 0.904516
+     "null_rate": 0.904449
     },
     "sent_at": {
      "age_days": [
-      0.825,
-      155.357,
-      313.607,
-      754.85,
-      1432.963,
-      2290.892,
-      7229.288
+      10.074,
+      155.303,
+      314.325,
+      920.599,
+      1448.909,
+      2315.901,
+      7229.34
      ],
      "kind": "timestamp",
      "naive_rate": 0.0,
@@ -1558,9 +1560,9 @@
      "kind": "categorical",
      "null_rate": 0.0,
      "values": {
-      "gmail": 0.008702,
-      "olm": 0.423214,
-      "takeout": 0.568084
+      "gmail": 0.008776,
+      "olm": 0.423183,
+      "takeout": 0.568042
      }
     },
     "subject": {
@@ -1571,14 +1573,11 @@
       " -9a",
       " -A",
       " -Aa",
-      " -a",
-      " 9A",
       " 9Aa",
       " 9a",
       " A",
       " Aa",
       " a",
-      "-9Aa",
       "-Aa",
       "9Aa",
       "A",
@@ -1587,13 +1586,13 @@
      ],
      "kind": "text",
      "lengths": [
-      3,
-      19,
+      2,
+      18,
       32,
       43,
-      65,
-      99,
-      171
+      62,
+      96,
+      197
      ],
      "null_rate": 0.005712
     },
@@ -1602,29 +1601,27 @@
      "charclasses": [
       " -9A",
       " -9Aa",
-      " -9a",
       " -A",
       " -Aa",
       " 9Aa",
-      " 9a",
       " A",
       " Aa",
       " a",
-      "A",
+      "9Aa",
       "Aa",
       "a"
      ],
      "kind": "text",
      "lengths": [
-      4,
-      19,
-      30,
-      46,
-      67,
+      3,
+      18,
+      31,
+      45,
+      64,
       110,
-      171
+      197
      ],
-     "null_rate": 0.579791
+     "null_rate": 0.579822
     },
     "to_emails": {
      "kind": "array",
@@ -1634,8 +1631,8 @@
       1,
       1,
       2,
-      3,
-      592
+      2,
+      382
      ],
      "null_rate": 0.0
     },
@@ -1644,7 +1641,7 @@
      "null_rate": 0.0
     }
    },
-   "rows": 67226,
+   "rows": 67231,
    "sampled": 4000
   },
   "filter_presets": {
@@ -1656,13 +1653,13 @@
     },
     "created_at": {
      "age_days": [
-      10.284,
-      10.284,
-      10.929,
-      10.929,
-      10.929,
-      10.929,
-      10.929
+      10.335,
+      10.335,
+      10.981,
+      10.981,
+      10.981,
+      10.981,
+      10.981
      ],
      "kind": "timestamp",
      "naive_rate": 0.0,
@@ -1736,13 +1733,13 @@
     },
     "updated_at": {
      "age_days": [
-      10.284,
-      10.284,
-      10.929,
-      10.929,
-      10.929,
-      10.929,
-      10.929
+      10.335,
+      10.335,
+      10.981,
+      10.981,
+      10.981,
+      10.981,
+      10.981
      ],
      "kind": "timestamp",
      "naive_rate": 0.0,
@@ -1760,21 +1757,12 @@
      "null_rate": 1.0
     },
     "group_name": {
-     "binary": false,
-     "charclasses": [
-      "-a"
-     ],
-     "kind": "text",
-     "lengths": [
-      12,
-      12,
-      12,
-      25,
-      25,
-      25,
-      25
-     ],
-     "null_rate": 0.0
+     "kind": "categorical",
+     "null_rate": 0.0,
+     "values": {
+      "infra-admins": 0.5,
+      "jobtracker-users-internal": 0.5
+     }
     },
     "weekly_token_budget": {
      "kind": "categorical",
@@ -1803,13 +1791,13 @@
     },
     "first_seen": {
      "age_days": [
-      2.921,
-      2.921,
-      3.711,
-      3.711,
-      3.919,
-      3.919,
-      3.919
+      2.972,
+      2.972,
+      3.763,
+      3.763,
+      3.971,
+      3.971,
+      3.971
      ],
      "kind": "timestamp",
      "naive_rate": 0.0,
@@ -1829,13 +1817,13 @@
     },
     "last_seen": {
      "age_days": [
-      2.837,
-      2.837,
-      2.921,
-      2.921,
-      3.919,
-      3.919,
-      3.919
+      2.889,
+      2.889,
+      2.972,
+      2.972,
+      3.971,
+      3.971,
+      3.971
      ],
      "kind": "timestamp",
      "naive_rate": 0.0,
@@ -1866,13 +1854,13 @@
     },
     "resolved_at": {
      "age_days": [
-      2.71,
-      2.71,
-      2.877,
-      2.877,
-      3.752,
-      3.752,
-      3.752
+      2.762,
+      2.762,
+      2.929,
+      2.929,
+      3.804,
+      3.804,
+      3.804
      ],
      "kind": "timestamp",
      "naive_rate": 0.0,
@@ -1913,23 +1901,23 @@
      "null_rate": 0.0,
      "quantiles": [
       1.13e-05,
-      1.718e-05,
-      1.866e-05,
-      1.946e-05,
+      1.712e-05,
+      1.834e-05,
+      1.896e-05,
+      1.976e-05,
       2.254e-05,
-      2.77e-05,
       4.002e-05
      ]
     },
     "created_at": {
      "age_days": [
-      0.151,
-      0.833,
-      1.541,
-      1.583,
-      1.667,
-      1.75,
-      1.841
+      0.885,
+      0.885,
+      1.634,
+      1.719,
+      1.758,
+      1.802,
+      1.893
      ],
      "kind": "timestamp",
      "naive_rate": 0.0,
@@ -1944,11 +1932,11 @@
      "null_rate": 0.0,
      "quantiles": [
       565.0,
-      859.0,
-      933.0,
-      973.0,
+      856.0,
+      917.0,
+      948.0,
+      988.0,
       1127.0,
-      1385.0,
       2001.0
      ]
     },
@@ -1964,7 +1952,7 @@
      "null_rate": 0.0
     }
    },
-   "rows": 24548,
+   "rows": 24750,
    "sampled": 4000
   },
   "job_requirements": {
@@ -1972,7 +1960,7 @@
     "citizenship_required": {
      "kind": "boolean",
      "null_rate": 0.0,
-     "true_rate": 0.18175
+     "true_rate": 0.184
     },
     "clearance": {
      "kind": "categorical",
@@ -2003,7 +1991,7 @@
       1,
       3,
       6,
-      13
+      17
      ],
      "null_rate": 0.0
     },
@@ -2022,7 +2010,7 @@
     "degree_required": {
      "kind": "boolean",
      "null_rate": 0.0,
-     "true_rate": 0.656
+     "true_rate": 0.667
     },
     "employment_type": {
      "kind": "categorical",
@@ -2038,17 +2026,17 @@
     "enrollment_required": {
      "kind": "boolean",
      "null_rate": 0.0,
-     "true_rate": 0.11075
+     "true_rate": 0.116
     },
     "extracted_at": {
      "age_days": [
-      1.354,
-      1.354,
-      1.744,
-      1.744,
-      1.775,
-      1.782,
-      1.835
+      1.406,
+      1.406,
+      1.796,
+      1.82,
+      1.828,
+      1.85,
+      1.886
      ],
      "kind": "timestamp",
      "naive_rate": 0.0,
@@ -2057,7 +2045,7 @@
     "has_requirements": {
      "kind": "boolean",
      "null_rate": 0.0,
-     "true_rate": 0.985
+     "true_rate": 0.9825
     },
     "model": {
      "kind": "categorical",
@@ -2174,7 +2162,6 @@
     "skill_raw": {
      "binary": false,
      "charclasses": [
-      " -9A",
       " -9Aa",
       " -9a",
       " -A",
@@ -2187,7 +2174,7 @@
       " Aa",
       " a",
       "-9A",
-      "-9a",
+      "-9Aa",
       "-A",
       "-Aa",
       "-a",
@@ -2205,7 +2192,7 @@
       13,
       20,
       31,
-      95
+      71
      ],
      "null_rate": 0.0
     },
@@ -2222,68 +2209,68 @@
     "active": {
      "kind": "boolean",
      "null_rate": 0.0,
-     "true_rate": 0.569
+     "true_rate": 0.57425
     },
     "comp_basis": {
      "kind": "categorical",
-     "null_rate": 0.933155,
+     "null_rate": 0.929763,
      "values": {
-      "base": 0.993193,
-      "stipend": 0.002836,
-      "total": 0.003403,
-      "unspecified": 0.000567
+      "base": 0.993538,
+      "stipend": 0.002693,
+      "total": 0.003231,
+      "unspecified": 0.000539
      }
     },
     "comp_currency": {
      "kind": "categorical",
-     "null_rate": 0.933003,
+     "null_rate": 0.929574,
      "values": {
-      "CAD": 0.024335,
-      "GBP": 0.002547,
-      "USD": 0.973118
+      "CAD": 0.023093,
+      "GBP": 0.002417,
+      "USD": 0.97449
      }
     },
     "comp_extracted": {
      "kind": "boolean",
      "null_rate": 0.0,
-     "true_rate": 0.3
+     "true_rate": 0.36275
     },
     "comp_max": {
      "kind": "numeric",
-     "null_rate": 0.7821,
+     "null_rate": 0.779057,
      "quantiles": [
       5000.0,
       34320.0,
-      47840.0,
+      47008.0,
       70000.0,
-      101000.0,
-      179000.0,
+      102000.0,
+      176800.0,
       4160000.0
      ]
     },
     "comp_min": {
      "kind": "numeric",
-     "null_rate": 0.783749,
+     "null_rate": 0.780741,
      "quantiles": [
       5000.0,
       31200.0,
-      40000.0,
-      52100.0,
-      73342.0,
-      114400.0,
+      39520.0,
+      54000.0,
+      72000.0,
+      110000.0,
       4160000.0
      ]
     },
     "comp_period": {
      "kind": "categorical",
-     "null_rate": 0.933022,
+     "null_rate": 0.929593,
      "values": {
-      "biweekly": 0.001698,
-      "hourly": 0.522785,
-      "monthly": 0.007359,
-      "one_time": 0.001415,
-      "weekly": 0.001981,
-      "yearly": 0.464761
+      "biweekly": 0.001612,
+      "hourly": 0.525651,
+      "monthly": 0.007252,
+      "one_time": 0.001612,
+      "weekly": 0.00188,
+      "yearly": 0.461993
      }
     },
     "comp_text": {
@@ -2300,32 +2287,33 @@
      ],
      "kind": "text",
      "lengths": [
+      3,
       6,
-      6,
-      10,
-      15,
+      11,
+      16,
       18,
       22,
-      59
+      53
      ],
-     "null_rate": 0.779977
+     "null_rate": 0.77692
     },
     "company": {
      "binary": false,
      "charclasses": [
       " -9Aa",
+      " -A",
       " -Aa",
       " 9Aa",
       " A",
       " Aa",
       " a",
       "-9Aa",
+      "-9a",
       "-A",
       "-Aa",
       "-a",
       "9A",
       "9Aa",
-      "9a",
       "A",
       "Aa",
       "a"
@@ -2333,24 +2321,24 @@
      "kind": "text",
      "lengths": [
       2,
-      4,
+      3,
       6,
-      10,
+      11,
       18,
-      29,
-      62
+      30,
+      72
      ],
      "null_rate": 0.0
     },
     "created_at": {
      "age_days": [
-      0.002,
-      1.63,
-      9.518,
-      10.812,
-      10.816,
-      10.915,
-      10.934
+      0.012,
+      1.099,
+      8.891,
+      10.864,
+      10.868,
+      10.965,
+      10.986
      ],
      "kind": "timestamp",
      "naive_rate": 0.0,
@@ -2358,21 +2346,21 @@
     },
     "date_posted": {
      "age_days": [
-      0.34,
-      2.189,
-      9.21,
-      53.089,
-      176.484,
-      247.413,
-      521.663
+      0.394,
+      1.819,
+      8.831,
+      29.087,
+      154.219,
+      238.066,
+      510.974
      ],
      "kind": "timestamp",
      "naive_rate": 0.0,
-     "null_rate": 0.083186
+     "null_rate": 0.082983
     },
     "extraction_status": {
      "kind": "categorical",
-     "null_rate": 0.885837,
+     "null_rate": 0.886115,
      "values": {
       "done": 1.0
      }
@@ -2384,13 +2372,13 @@
     "locations": {
      "kind": "array",
      "lengths": [
-      1,
+      0,
       1,
       1,
       1,
       2,
       4,
-      80
+      62
      ],
      "null_rate": 0.0
     },
@@ -2402,80 +2390,80 @@
      "kind": "categorical",
      "null_rate": 0.0,
      "values": {
-      "airtable1": 0.025801,
-      "fulltime": 0.3725,
-      "fulltime_ouckah": 0.009649,
-      "internships": 0.301333,
-      "internships_ouckah": 0.004019,
-      "jobright_ba": 0.011375,
-      "jobright_eng": 0.093405,
-      "jobright_supply_chain": 0.052968,
-      "sheet_import": 0.114144,
-      "speedyapply_intern": 0.002976,
-      "speedyapply_ng": 0.011811,
+      "airtable1": 0.025738,
+      "fulltime": 0.371856,
+      "fulltime_ouckah": 0.009626,
+      "internships": 0.302111,
+      "internships_ouckah": 0.004009,
+      "jobright_ba": 0.011404,
+      "jobright_eng": 0.093593,
+      "jobright_supply_chain": 0.053028,
+      "sheet_import": 0.113866,
+      "speedyapply_intern": 0.002969,
+      "speedyapply_ng": 0.011782,
       "upload": 1.9e-05
      }
     },
     "terms": {
      "elements": {
-      "Fall": 0.002109,
-      "Fall 2016": 9.4e-05,
-      "Fall 2017": 9.4e-05,
-      "Fall 2023": 4.7e-05,
-      "Fall 2024": 9.4e-05,
-      "Fall 2024 Spring 2025 Summer 2025": 4.7e-05,
-      "Fall 2025": 0.017202,
-      "Fall 2025 Spring 2025": 9.4e-05,
-      "Fall 2025 Spring 2026": 4.7e-05,
-      "Fall 2025 Summer 2026 Spring 2027": 4.7e-05,
-      "Fall 2025 Winter 2025": 0.000141,
-      "Fall 2025 Winter 2025 Spring 2026": 4.7e-05,
-      "Fall 2025 Winter 2026 Spring 2026": 0.001078,
-      "Fall 2026": 0.138083,
-      "Fall 2027": 0.005906,
-      "Fall 2028": 0.000328,
-      "Fall 2029": 9.4e-05,
-      "N/A": 0.067588,
-      "Spring": 9.4e-05,
-      "Spring 2016": 9.4e-05,
-      "Spring 2017": 9.4e-05,
-      "Spring 2024": 4.7e-05,
-      "Spring 2025": 0.001875,
-      "Spring 2025 Fall 2025": 4.7e-05,
-      "Spring 2025 Summer 2025": 4.7e-05,
-      "Spring 2025 Summer 2025 Fall 2025": 0.000141,
-      "Spring 2025 Summer 2025 Fall 2025 Winter 2026": 4.7e-05,
-      "Spring 2026": 0.059948,
-      "Spring 2026 Summer 2026": 9.4e-05,
-      "Spring 2027": 0.017202,
-      "Spring 2027 Summer 2027": 0.000141,
-      "Spring 2028": 0.001687,
-      "Spring 2029": 0.000328,
-      "Summer": 0.001078,
-      "Summer 2016": 9.4e-05,
-      "Summer 2017": 9.4e-05,
-      "Summer 2022": 4.7e-05,
-      "Summer 2023": 4.7e-05,
-      "Summer 2024": 0.000234,
-      "Summer 2024 Summer 2025": 4.7e-05,
-      "Summer 2025": 0.043169,
-      "Summer 2025 Fall 2025": 0.000844,
-      "Summer 2025 Fall 2025 Winter 2025": 4.7e-05,
-      "Summer 2025 Fall 2025 Winter 2025 Spring 2025": 0.000141,
-      "Summer 2025 Fall 2025 Winter 2026": 0.000187,
-      "Summer 2025 Spring 2025": 9.4e-05,
-      "Summer 2026": 0.484134,
-      "Summer 2027": 0.068807,
-      "Summer 2028": 0.002015,
-      "Summer 2029": 0.000281,
-      "Winter 2016": 9.4e-05,
-      "Winter 2017": 9.4e-05,
-      "Winter 2024": 9.4e-05,
-      "Winter 2025": 0.022123,
-      "Winter 2026": 0.036981,
-      "Winter 2027": 0.022592,
-      "Winter 2028": 0.001359,
-      "Winter 2029": 0.000281
+      "Fall": 0.002056,
+      "Fall 2016": 9.1e-05,
+      "Fall 2017": 9.1e-05,
+      "Fall 2023": 4.6e-05,
+      "Fall 2024": 9.1e-05,
+      "Fall 2024 Spring 2025 Summer 2025": 4.6e-05,
+      "Fall 2025": 0.016771,
+      "Fall 2025 Spring 2025": 9.1e-05,
+      "Fall 2025 Spring 2026": 4.6e-05,
+      "Fall 2025 Summer 2026 Spring 2027": 4.6e-05,
+      "Fall 2025 Winter 2025": 0.000137,
+      "Fall 2025 Winter 2025 Spring 2026": 4.6e-05,
+      "Fall 2025 Winter 2026 Spring 2026": 0.001051,
+      "Fall 2026": 0.137138,
+      "Fall 2027": 0.005758,
+      "Fall 2028": 0.000366,
+      "Fall 2029": 9.1e-05,
+      "N/A": 0.076452,
+      "Spring": 9.1e-05,
+      "Spring 2016": 0.000137,
+      "Spring 2017": 9.1e-05,
+      "Spring 2024": 4.6e-05,
+      "Spring 2025": 0.001828,
+      "Spring 2025 Fall 2025": 4.6e-05,
+      "Spring 2025 Summer 2025": 4.6e-05,
+      "Spring 2025 Summer 2025 Fall 2025": 0.000137,
+      "Spring 2025 Summer 2025 Fall 2025 Winter 2026": 4.6e-05,
+      "Spring 2026": 0.058584,
+      "Spring 2026 Summer 2026": 9.1e-05,
+      "Spring 2027": 0.017456,
+      "Spring 2027 Summer 2027": 0.000137,
+      "Spring 2028": 0.002239,
+      "Spring 2029": 0.00032,
+      "Summer": 0.001051,
+      "Summer 2016": 9.1e-05,
+      "Summer 2017": 9.1e-05,
+      "Summer 2022": 4.6e-05,
+      "Summer 2023": 4.6e-05,
+      "Summer 2024": 0.000228,
+      "Summer 2024 Summer 2025": 4.6e-05,
+      "Summer 2025": 0.042087,
+      "Summer 2025 Fall 2025": 0.000823,
+      "Summer 2025 Fall 2025 Winter 2025": 4.6e-05,
+      "Summer 2025 Fall 2025 Winter 2025 Spring 2025": 0.000137,
+      "Summer 2025 Fall 2025 Winter 2026": 0.000183,
+      "Summer 2025 Spring 2025": 9.1e-05,
+      "Summer 2026": 0.474341,
+      "Summer 2027": 0.072294,
+      "Summer 2028": 0.002559,
+      "Summer 2029": 0.000274,
+      "Winter 2016": 9.1e-05,
+      "Winter 2017": 9.1e-05,
+      "Winter 2024": 9.1e-05,
+      "Winter 2025": 0.021569,
+      "Winter 2026": 0.036969,
+      "Winter 2027": 0.022894,
+      "Winter 2028": 0.001828,
+      "Winter 2029": 0.00032
      },
      "kind": "array",
      "lengths": [
@@ -2485,31 +2473,34 @@
       0,
       1,
       1,
-      8
+      7
      ],
      "null_rate": 0.0
     },
     "title": {
      "binary": false,
      "charclasses": [
+      "",
+      " -9A",
       " -9Aa",
+      " -A",
       " -Aa",
-      " 9A",
       " 9Aa",
       " A",
       " Aa",
+      " a",
       "-Aa",
       "Aa"
      ],
      "kind": "text",
      "lengths": [
-      5,
-      16,
-      23,
-      31,
-      43,
-      67,
-      132
+      0,
+      15,
+      22,
+      30,
+      41,
+      68,
+      143
      ],
      "null_rate": 0.0
     },
@@ -2522,7 +2513,7 @@
      "null_rate": 0.0
     }
    },
-   "rows": 52749,
+   "rows": 52878,
    "sampled": 4000
   },
   "reports": {
@@ -2536,13 +2527,13 @@
     },
     "created_at": {
      "age_days": [
-      0.064,
-      0.064,
-      0.064,
-      9.978,
-      9.978,
-      9.978,
-      9.978
+      0.116,
+      0.116,
+      0.116,
+      10.03,
+      10.03,
+      10.03,
+      10.03
      ],
      "kind": "timestamp",
      "naive_rate": 0.0,
@@ -2589,13 +2580,13 @@
     },
     "resolved_at": {
      "age_days": [
-      9.933,
-      9.933,
-      9.933,
-      9.933,
-      9.933,
-      9.933,
-      9.933
+      9.985,
+      9.985,
+      9.985,
+      9.985,
+      9.985,
+      9.985,
+      9.985
      ],
      "kind": "timestamp",
      "naive_rate": 0.0,
@@ -2626,13 +2617,13 @@
     },
     "created_at": {
      "age_days": [
-      10.936,
-      10.936,
-      10.936,
-      10.936,
-      10.936,
-      10.936,
-      10.936
+      10.988,
+      10.988,
+      10.988,
+      10.988,
+      10.988,
+      10.988,
+      10.988
      ],
      "kind": "timestamp",
      "naive_rate": 0.0,
@@ -2688,13 +2679,13 @@
    "columns": {
     "created_at": {
      "age_days": [
-      9.977,
-      9.977,
-      9.977,
-      9.977,
-      9.977,
-      9.977,
-      9.977
+      10.029,
+      10.029,
+      10.029,
+      10.029,
+      10.029,
+      10.029,
+      10.029
      ],
      "kind": "timestamp",
      "naive_rate": 0.0,
@@ -2730,13 +2721,13 @@
     },
     "resolved_at": {
      "age_days": [
-      9.933,
-      9.933,
-      9.933,
-      9.933,
-      9.933,
-      9.933,
-      9.933
+      9.985,
+      9.985,
+      9.985,
+      9.985,
+      9.985,
+      9.985,
+      9.985
      ],
      "kind": "timestamp",
      "naive_rate": 0.0,
@@ -2783,13 +2774,13 @@
     },
     "created_at": {
      "age_days": [
-      10.293,
-      10.293,
-      10.936,
-      10.936,
-      10.936,
-      10.936,
-      10.936
+      10.345,
+      10.345,
+      10.988,
+      10.988,
+      10.988,
+      10.988,
+      10.988
      ],
      "kind": "timestamp",
      "naive_rate": 0.0,
@@ -2950,21 +2941,21 @@
      "kind": "categorical",
      "null_rate": 0.0,
      "values": {
-      "0": 0.003622,
-      "1": 0.955013,
-      "2": 0.03984,
-      "3": 0.001525
+      "0": 0.000752,
+      "1": 0.957159,
+      "2": 0.040586,
+      "3": 0.001503
      }
     },
     "created_at": {
      "age_days": [
-      0.004,
-      1.173,
-      1.666,
-      3.907,
-      6.879,
-      9.839,
-      10.902
+      0.141,
+      1.225,
+      1.719,
+      3.96,
+      6.931,
+      9.892,
+      10.955
      ],
      "kind": "timestamp",
      "naive_rate": 0.0,
@@ -2972,7 +2963,7 @@
     },
     "dedupe_key": {
      "kind": "key",
-     "null_rate": 0.058902
+     "null_rate": 0.061631
     },
     "error": {
      "binary": false,
@@ -2993,21 +2984,21 @@
       200,
       200
      ],
-     "null_rate": 0.993519
+     "null_rate": 0.993236
     },
     "finished_at": {
      "age_days": [
-      0.066,
-      1.169,
-      1.663,
-      3.755,
-      6.871,
-      9.835,
-      10.837
+      0.118,
+      1.221,
+      1.715,
+      3.807,
+      6.923,
+      9.887,
+      10.889
      ],
      "kind": "timestamp",
      "naive_rate": 0.0,
-     "null_rate": 0.004384
+     "null_rate": 0.004697
     },
     "id": {
      "kind": "key",
@@ -3017,69 +3008,69 @@
      "kind": "categorical",
      "null_rate": 0.0,
      "values": {
-      "backfill_message_html": 0.000191,
-      "classify_mail": 0.011628,
-      "data_health": 0.019825,
-      "embed_postings": 0.008769,
-      "extract_comp": 0.011437,
-      "extract_requirements": 0.001334,
-      "extract_upload": 0.000191,
-      "fetch_missing_content": 0.019825,
-      "ingest_source": 0.475029,
-      "match_mail": 0.004766,
-      "poll_batches": 0.302135,
-      "probe_credentials": 0.008769,
-      "reverify_chunk": 0.0183,
-      "reverify_open": 0.002478,
-      "run_all_filters": 0.045368,
-      "run_filter": 0.000953,
-      "run_filter_batch_chunk": 0.022493,
-      "run_filter_chunk": 0.000572,
-      "send_digests": 0.002287,
-      "sync_gmail": 0.008769,
-      "verify_new": 0.034884
+      "backfill_message_html": 0.000188,
+      "classify_mail": 0.01165,
+      "data_health": 0.019729,
+      "embed_postings": 0.008831,
+      "extract_comp": 0.011462,
+      "extract_requirements": 0.001315,
+      "extract_upload": 0.000188,
+      "fetch_missing_content": 0.019729,
+      "ingest_source": 0.470124,
+      "match_mail": 0.004885,
+      "poll_batches": 0.305148,
+      "probe_credentials": 0.008831,
+      "reverify_chunk": 0.018038,
+      "reverify_open": 0.002443,
+      "run_all_filters": 0.04472,
+      "run_filter": 0.000939,
+      "run_filter_batch_chunk": 0.025554,
+      "run_filter_chunk": 0.000564,
+      "send_digests": 0.002255,
+      "sync_gmail": 0.008831,
+      "verify_new": 0.034573
      }
     },
     "last_heartbeat": {
      "age_days": [
-      0.066,
-      1.169,
-      1.662,
-      3.755,
-      6.87,
-      9.798,
-      10.804
+      0.118,
+      1.221,
+      1.714,
+      3.807,
+      6.921,
+      9.85,
+      10.856
      ],
      "kind": "timestamp",
      "naive_rate": 0.0,
-     "null_rate": 0.004575
+     "null_rate": 0.004697
     },
     "parent_id": {
      "kind": "key",
-     "null_rate": 0.958635
+     "null_rate": 0.955844
     },
     "payload": {
      "keysets": {
-      "": 0.004003,
-      "backfill,cap": 0.002287,
-      "batch_ids,claimed_message_ids": 0.000762,
-      "batch_ids,cycle": 0.011819,
-      "batch_ids,filter,jobs,parent_id,user_id": 0.014106,
-      "batch_ids,force,parent_id,rows": 0.013725,
-      "batched,user_id": 0.041937,
-      "cap,claimed_message_ids,message_ids": 0.000191,
-      "claimed_message_ids": 0.004384,
-      "cycle": 0.412695,
-      "cycle,force,user_id": 0.000191,
-      "cycle,full": 0.000191,
-      "cycle,source": 0.475029,
-      "filter,jobs,parent_id,user_id": 0.008959,
-      "filter_id,user_id": 0.000953,
-      "force,parent_id,rows": 0.003241,
-      "job_id,user_id": 0.000191,
-      "message_ids": 0.000572,
-      "parent_id,rows": 0.001334,
-      "user_id": 0.003431
+      "": 0.003946,
+      "backfill,cap": 0.002255,
+      "batch_ids,claimed_message_ids": 0.000564,
+      "batch_ids,cycle": 0.01165,
+      "batch_ids,filter,jobs,parent_id,user_id": 0.017099,
+      "batch_ids,force,parent_id,rows": 0.013529,
+      "batched,user_id": 0.041338,
+      "cap,claimed_message_ids,message_ids": 0.000188,
+      "claimed_message_ids": 0.004697,
+      "cycle": 0.415633,
+      "cycle,force,user_id": 0.000188,
+      "cycle,full": 0.000188,
+      "cycle,source": 0.470124,
+      "filter,jobs,parent_id,user_id": 0.009019,
+      "filter_id,user_id": 0.000939,
+      "force,parent_id,rows": 0.003194,
+      "job_id,user_id": 0.000188,
+      "message_ids": 0.000564,
+      "parent_id,rows": 0.001315,
+      "user_id": 0.003382
      },
      "kind": "json",
      "null_rate": 0.0
@@ -3089,38 +3080,38 @@
       "done,label,total": 1.0
      },
      "kind": "json",
-     "null_rate": 0.006291
+     "null_rate": 0.00357
     },
     "progress_at": {
      "age_days": [],
      "kind": "timestamp",
      "naive_rate": 0.0,
-     "null_rate": 0.985894
+     "null_rate": 0.969372
     },
     "started_at": {
      "age_days": [
-      0.066,
-      1.172,
-      1.664,
-      3.76,
-      6.871,
-      9.838,
-      10.867
+      0.118,
+      1.224,
+      1.715,
+      3.812,
+      6.923,
+      9.89,
+      10.92
      ],
      "kind": "timestamp",
      "naive_rate": 0.0,
-     "null_rate": 0.003812
+     "null_rate": 0.003946
     },
     "status": {
      "kind": "categorical",
      "null_rate": 0.0,
      "values": {
-      "awaiting_batch": 0.000953,
-      "cancelled": 0.000953,
-      "done": 0.989135,
-      "failed": 0.005528,
-      "pending": 0.002859,
-      "running": 0.000572
+      "awaiting_batch": 0.003946,
+      "cancelled": 0.000939,
+      "done": 0.988538,
+      "failed": 0.005825,
+      "running": 0.000376,
+      "waiting": 0.000376
      }
     },
     "worker": {
@@ -3138,23 +3129,23 @@
       7,
       7
      ],
-     "null_rate": 0.025543
+     "null_rate": 0.02236
     }
    },
-   "rows": 5246,
+   "rows": 5322,
    "sampled": 4000
   },
   "user_filters": {
    "columns": {
     "created_at": {
      "age_days": [
-      10.935,
-      10.935,
-      10.935,
-      10.935,
-      10.935,
-      10.936,
-      10.936
+      10.988,
+      10.988,
+      10.988,
+      10.988,
+      10.988,
+      10.988,
+      10.988
      ],
      "kind": "timestamp",
      "naive_rate": 0.0,
@@ -3221,13 +3212,13 @@
     },
     "updated_at": {
      "age_days": [
-      10.42,
-      10.42,
-      10.89,
-      10.935,
-      10.935,
-      10.935,
-      10.935
+      10.472,
+      10.472,
+      10.942,
+      10.988,
+      10.988,
+      10.988,
+      10.988
      ],
      "kind": "timestamp",
      "naive_rate": 0.0,
@@ -3245,13 +3236,13 @@
    "columns": {
     "created_at": {
      "age_days": [
-      0.062,
-      0.063,
-      0.067,
-      0.073,
-      0.876,
-      5.22,
-      8.915
+      0.114,
+      0.115,
+      0.119,
+      0.126,
+      0.928,
+      5.272,
+      8.967
      ],
      "kind": "timestamp",
      "naive_rate": 0.0,
@@ -3305,13 +3296,13 @@
     },
     "created_at": {
      "age_days": [
-      0.035,
-      4.249,
-      10.925,
-      10.928,
-      10.931,
-      10.934,
-      10.935
+      0.087,
+      4.301,
+      10.977,
+      10.98,
+      10.984,
+      10.986,
+      10.987
      ],
      "kind": "timestamp",
      "naive_rate": 0.0,
@@ -3319,13 +3310,13 @@
     },
     "date_applied": {
      "age_days": [
-      0.09,
-      26.09,
-      101.09,
-      347.09,
-      385.09,
-      416.09,
-      467.09
+      0.142,
+      26.142,
+      101.142,
+      347.142,
+      385.142,
+      416.142,
+      467.142
      ],
      "kind": "timestamp",
      "naive_rate": 0.0,
@@ -3379,13 +3370,13 @@
     },
     "updated_at": {
      "age_days": [
-      0.035,
-      4.249,
-      10.925,
-      10.928,
-      10.931,
-      10.934,
-      10.935
+      0.087,
+      4.301,
+      10.977,
+      10.98,
+      10.984,
+      10.986,
+      10.987
      ],
      "kind": "timestamp",
      "naive_rate": 0.0,
@@ -3417,13 +3408,13 @@
     },
     "access_token_expires_at": {
      "age_days": [
-      -0.002,
-      -0.002,
-      -0.002,
-      -0.002,
-      -0.002,
-      -0.002,
-      -0.002
+      -0.03,
+      -0.03,
+      -0.03,
+      -0.03,
+      -0.03,
+      -0.03,
+      -0.03
      ],
      "kind": "timestamp",
      "naive_rate": 0.0,
@@ -3448,13 +3439,13 @@
     },
     "connected_at": {
      "age_days": [
-      1.897,
-      1.897,
-      1.897,
-      1.897,
-      1.897,
-      1.897,
-      1.897
+      1.949,
+      1.949,
+      1.949,
+      1.949,
+      1.949,
+      1.949,
+      1.949
      ],
      "kind": "timestamp",
      "naive_rate": 0.0,
@@ -3509,13 +3500,13 @@
     },
     "updated_at": {
      "age_days": [
-      0.039,
-      0.039,
-      0.039,
-      0.039,
-      0.039,
-      0.039,
-      0.039
+      0.012,
+      0.012,
+      0.012,
+      0.012,
+      0.012,
+      0.012,
+      0.012
      ],
      "kind": "timestamp",
      "naive_rate": 0.0,
@@ -3632,13 +3623,13 @@
     },
     "last_digest_at": {
      "age_days": [
-      0.066,
-      0.066,
-      0.066,
-      0.066,
-      0.066,
-      0.066,
-      0.066
+      0.118,
+      0.118,
+      0.118,
+      0.118,
+      0.118,
+      0.118,
+      0.118
      ],
      "kind": "timestamp",
      "naive_rate": 0.0,
@@ -3653,13 +3644,13 @@
     },
     "updated_at": {
      "age_days": [
-      0.004,
-      0.004,
-      0.004,
-      0.004,
-      0.004,
-      0.004,
-      0.004
+      0.056,
+      0.056,
+      0.056,
+      0.056,
+      0.056,
+      0.056,
+      0.056
      ],
      "kind": "timestamp",
      "naive_rate": 0.0,
@@ -3691,13 +3682,13 @@
    "columns": {
     "created_at": {
      "age_days": [
-      10.936,
-      10.936,
-      10.936,
-      10.936,
-      10.936,
-      10.936,
-      10.936
+      10.988,
+      10.988,
+      10.988,
+      10.988,
+      10.988,
+      10.988,
+      10.988
      ],
      "kind": "timestamp",
      "naive_rate": 0.0,
@@ -3746,13 +3737,13 @@
     },
     "last_seen_at": {
      "age_days": [
-      0.0,
-      0.0,
-      0.0,
-      0.0,
-      0.0,
-      0.0,
-      0.0
+      0.037,
+      0.037,
+      0.037,
+      0.037,
+      0.037,
+      0.037,
+      0.037
      ],
      "kind": "timestamp",
      "naive_rate": 0.0,
@@ -3790,17 +3781,17 @@
    "columns": {
     "current_task_id": {
      "kind": "key",
-     "null_rate": 0.0
+     "null_rate": 0.5
     },
     "last_seen": {
      "age_days": [
-      0.0,
-      0.0,
-      0.001,
-      0.001,
-      0.001,
-      0.001,
-      0.001
+      0.002,
+      0.002,
+      0.002,
+      0.002,
+      0.002,
+      0.003,
+      0.003
      ],
      "kind": "timestamp",
      "naive_rate": 0.0,
@@ -3815,7 +3806,7 @@
      "lengths": [
       3,
       3,
-      7,
+      6,
       7,
       7,
       7,
@@ -3825,21 +3816,21 @@
     },
     "started_at": {
      "age_days": [
-      0.055,
-      0.055,
-      0.055,
-      0.055,
-      0.055,
-      0.055,
-      0.055
+      0.042,
+      0.042,
+      0.107,
+      0.107,
+      0.107,
+      0.107,
+      0.107
      ],
      "kind": "timestamp",
      "naive_rate": 0.0,
      "null_rate": 0.0
     }
    },
-   "rows": 3,
-   "sampled": 3
+   "rows": 4,
+   "sampled": 4
   }
  }
 }

@@ -262,6 +262,23 @@ def _mutable_tables() -> list[str]:
     return [r["tablename"] for r in rows if r["tablename"] not in _PERSISTENT_TABLES]
 
 
+# Whether this database was a synced copy of production when the run started.
+#
+# Read ONCE, at import, because the answer must not depend on what the run has
+# already done to the database. `_mutable_tables()` excludes only
+# alembic_version, so app_config - where sync_testdb.py stamps
+# `testdb_synced_at` - is emptied by the first unmarked test, and `_reseed()`
+# does not put it back.
+#
+# Asked live, that made the whole arrangement fail silently. On a machine whose
+# TEST_DATABASE_URL held a synced copy, `pytest tests` truncated the copy in its
+# first test file, and from then on every `integration` test skipped with "this
+# database holds the generated corpus or nothing": a green run that checked
+# nothing, which is precisely the false negative _clean_db exists to prevent.
+# The guard in corpus.build() reads the same stamp, so it could not fire either.
+_SYNCED_AT = db.query_one("SELECT value FROM app_config WHERE key = 'testdb_synced_at'")
+
+
 def _reseed() -> None:
     db._seed_sources()
     for group, tokens in db._GROUP_BUDGET_SEED:
@@ -275,20 +292,6 @@ def _reseed() -> None:
             "INSERT INTO app_config (key, value) VALUES (%s, %s) ON CONFLICT (key) DO NOTHING",
             (key, db.jsonb(value)),
         )
-
-
-def _real_production_data() -> bool:
-    """True when this database is a synced copy of production.
-
-    `sync_testdb.py` stamps `testdb_synced_at` into the copy it cuts, and
-    `corpus.build()` stamps its own key. Asking the data rather than reading
-    an environment variable means a run cannot be told it has production data
-    when it does not - which is the failure that would make an `integration`
-    test pass vacuously against an empty scratch database.
-    """
-    from tests import corpus
-
-    return corpus.holds_real_data()
 
 
 @pytest.fixture(autouse=True)
@@ -308,7 +311,7 @@ def _clean_db(request):
               rather than failing or, worse, passing against empty tables.
     """
     if request.node.get_closest_marker("integration"):
-        if not _real_production_data():
+        if not _SYNCED_AT:
             pytest.skip(
                 "needs a synced copy of production (make testdb-sync); "
                 "this database holds the generated corpus or nothing"
@@ -324,6 +327,18 @@ def _clean_db(request):
         yield
         return
 
+    if _SYNCED_AT:
+        # An unmarked test truncates, and this database is a copy of
+        # production. Refuse rather than delete it: the copy takes minutes to
+        # cut, and the run that destroyed it would go green while every test
+        # that wanted it skipped.
+        raise RuntimeError(
+            f"{urlparse(os.environ['DATABASE_URL']).path.lstrip('/')!r} holds a synced "
+            "copy of production, and this test truncates every table.\n"
+            "Run only the tests that want the copy:\n"
+            "    make integration\n"
+            "or point TEST_DATABASE_URL at a scratch database for the rest."
+        )
     db.execute(f"TRUNCATE TABLE {', '.join(_mutable_tables())} RESTART IDENTITY CASCADE")
     _reseed()
     yield

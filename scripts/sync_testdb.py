@@ -35,6 +35,7 @@ import argparse
 import os
 import subprocess
 import sys
+from pathlib import Path
 from urllib.parse import urlparse, urlunparse
 
 import psycopg
@@ -104,10 +105,80 @@ ANONYMISE = {
     "source_requests.note": "'request ' || id",
     "source_requests.resolution_note": "NULL",
     "application_matches.rationale": "NULL",
+    # Where this person applied, and what was extracted from their mail about
+    # it. As personal as the mailbox it came from.
+    "applications.company_name": "'Company ' || id",
+    "applications.title": "'Role ' || id",
+    "email_events.detail": "NULL",
+    "ai_prompt_samples.output": "NULL",
+    "reports.corrections": "NULL",
+    # Opaque, but they are handles on a real Gmail mailbox.
+    "email_messages.provider_message_id": "'copied-msg-' || id",
+    "email_messages.provider_thread_id": "NULL",
+    # A background image URL is a link to something the person chose.
+    "user_settings.background": "'{}'::jsonb",
+    # Machine hostnames, one of which is a laptop named after its owner.
+    # md5, not hashtext: hashtext is an undocumented internal. Deterministic,
+    # so the same host keeps the same pseudonym and "which worker holds this"
+    # still means something.
+    "ai_queries.worker": "'worker-' || substr(md5(worker), 1, 6)",
+    "tasks.worker": "'worker-' || substr(md5(worker), 1, 6)",
+    "worker_status.name": "'worker-' || substr(md5(name), 1, 6)",
+}
+
+# Identifying in the PROFILE, deliberately copied verbatim here, with why.
+#
+# The two lists answer different questions. IDENTIFYING is "never write this
+# value into a file committed to the repository". ANONYMISE is "never put this
+# value on a laptop". They overlap and are not the same, and the difference is
+# spelled out rather than left as a gap, because a gap reads identically to an
+# oversight - which is how ANONYMISE came to be missing seventeen of these.
+COPIED_VERBATIM = {
+    # test_no_stored_filter_hash_would_move_under_the_current_template
+    # recomputes the hash FROM this prompt and compares it to the stored one.
+    # Rewriting the prompt without rewriting the hash would make every filter
+    # in the copy report as about to fork its verdict history.
+    "user_filters.prompt": "a real-data test recomputes prompt_hash from it",
+    "user_filters.name": "names the filter in that test's failure message",
+    # Application content, authored by whoever runs the deployment, not by a
+    # user. It is in IDENTIFYING because the profile is committed and there is
+    # no reason to publish prompt text, not because it is anyone's data.
+    "filter_presets.prompt": "application content, not user data",
+    "ai_prompts.instructions": "application content, not user data",
+    # The dev API renders a board from these. Emptying them turns the whole
+    # point of a copy - clicking around real shapes - into an empty grid.
+    "user_settings.prefs": "the dev API renders the board from it",
+    "user_settings.column_layout": "the dev API renders the board from it",
 }
 
 # input_content is ~80% of the database and almost no test needs page text.
 FAST_SKIP = {"ai_queries": ["input_content", "instructions", "parsed_json"]}
+
+
+def _check_the_two_lists_agree() -> None:
+    """Every column the profile calls identifying is either rewritten here or
+    listed with a reason for not being.
+
+    Without this the docstring's "every identifying column is rewritten" is a
+    claim nobody checks, and it was false for seventeen columns on the day it
+    was written. Adding to measure_profile.IDENTIFYING now forces a decision
+    about the copy rather than silently defaulting to "copied verbatim".
+    """
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from measure_profile import IDENTIFYING
+
+    undecided = sorted(IDENTIFYING - set(ANONYMISE) - set(COPIED_VERBATIM))
+    if undecided:
+        raise SystemExit(
+            f"{len(undecided)} column(s) are identifying in the profile and this "
+            "script has no decision for them:\n  "
+            + "\n  ".join(undecided)
+            + "\n\nAdd a rewrite to ANONYMISE, or add it to COPIED_VERBATIM with "
+            "the reason it is safe to copy."
+        )
+    stale = sorted(set(COPIED_VERBATIM) & set(ANONYMISE))
+    if stale:
+        raise SystemExit(f"listed as both rewritten and copied verbatim: {stale}")
 
 
 def _swap_db(url: str, name: str) -> str:
@@ -145,6 +216,8 @@ def main() -> int:
     )
     args = ap.parse_args()
 
+    _check_the_two_lists_agree()
+
     src_url = os.environ.get("DATABASE_URL")
     if not src_url:
         print("DATABASE_URL is not set", file=sys.stderr)
@@ -170,6 +243,25 @@ def main() -> int:
     )  # creates ai_queries, which alembic does not own
     print("schema built from migrations")
 
+    # Which BASE TABLES the source has, asked of the source directly.
+    #
+    # Not derived from the foreign schema after the import: postgres_fdw turns
+    # views and materialized views into foreign tables too, so they arrive
+    # indistinguishable from real ones, and the "the migrations did not create
+    # this" check below would abort the whole sync the first time anyone adds
+    # a view - telling them to write a migration, which is not the fix. One
+    # metadata query over the WAN costs nothing; it is rows this script keeps
+    # off the wire, not names.
+    with psycopg.connect(src_url) as src:
+        src.read_only = True
+        source_tables = {
+            r[0]
+            for r in src.execute(
+                "SELECT table_name FROM information_schema.tables "
+                "WHERE table_schema = 'public' AND table_type = 'BASE TABLE'"
+            ).fetchall()
+        } - EXCLUDE_TABLES
+
     total = 0
     src_db = urlparse(src_url).path.lstrip("/")
     with psycopg.connect(dst_url) as dst:
@@ -191,19 +283,17 @@ def main() -> int:
         )
         dst.execute("CREATE SCHEMA src_remote")
         dst.commit()
-        # Pull EVERY source table in as a foreign table, then INSERT..SELECT.
-        # Postgres performs the read and the write inside the server; nothing
-        # travels to this machine. No LIMIT TO: what exists in production is
-        # what gets copied, so the list cannot fall behind it.
-        dst.execute("IMPORT FOREIGN SCHEMA public FROM SERVER src_srv INTO src_remote")
+        # Pull every source BASE TABLE in as a foreign table, then
+        # INSERT..SELECT. Postgres performs the read and the write inside the
+        # server; nothing travels to this machine. The LIMIT TO list is what
+        # production has right now, not a constant, so it cannot fall behind.
+        dst.execute(
+            "IMPORT FOREIGN SCHEMA public LIMIT TO ({}) FROM SERVER src_srv INTO src_remote".format(
+                ", ".join(f'"{t}"' for t in sorted(source_tables))
+            )
+        )
         dst.commit()
 
-        source_tables = {
-            r[0]
-            for r in dst.execute(
-                "SELECT table_name FROM information_schema.tables WHERE table_schema = 'src_remote'"
-            ).fetchall()
-        }
         local_tables = {
             r[0]
             for r in dst.execute(
@@ -222,8 +312,13 @@ def main() -> int:
                 file=sys.stderr,
             )
             return 1
-        tables = sorted((source_tables & local_tables) - EXCLUDE_TABLES)
+        tables = sorted(source_tables & local_tables)
         print(f"copying {len(tables)} tables")
+        # Every rewrite rule that actually landed on a column. A rule naming a
+        # column that has been renamed does nothing and says nothing, which is
+        # the same silent drift the derived table list just removed - except
+        # here the thing that silently stops happening is the redaction.
+        applied: set[str] = set()
 
         # FK order is not enough on its own - rows can reference others in the
         # same table. Disabling the triggers makes the copy order-independent.
@@ -245,6 +340,7 @@ def main() -> int:
             cols = [c for c in dst_cols if c in src_cols and c not in skip]
             collist = ", ".join(f'"{c}"' for c in cols)
             redacted = [c for c in cols if f"{table}.{c}" in ANONYMISE]
+            applied.update(f"{table}.{c}" for c in redacted)
             selects = ", ".join(
                 ANONYMISE.get(f"{table}.{c}", f'"{c}"') + f' AS "{c}"' for c in cols
             )
@@ -263,6 +359,17 @@ def main() -> int:
                 + (f" (skipped {', '.join(sorted(skip))})" if skip else "")
                 + (f" (anonymised {', '.join(redacted)})" if redacted else "")
             )
+
+        never_applied = sorted(set(ANONYMISE) - applied)
+        if never_applied:
+            print(
+                f"\nERROR: {len(never_applied)} rewrite rule(s) matched no column, so "
+                f"those values were copied verbatim: {', '.join(never_applied)}\n"
+                "A renamed column silently disables its redaction. Fix ANONYMISE and "
+                "drop this copy.",
+                file=sys.stderr,
+            )
+            return 1
 
         # Sequences do not follow the rows; without this the first insert in a
         # test collides with a synced row.

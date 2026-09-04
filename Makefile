@@ -175,11 +175,22 @@ integration:    ## the tests that need a synced copy of REAL production
 # It is a target because a dev API over generated data needs no secret at all,
 # which the synced copy will always need.
 
+# One line of python, not a backslash-continued block: make passes the
+# continuation lines' leading TAB to the shell, and /bin/sh hands it to python
+# as an unexpected indent.
 corpus:         ## fill TEST_DATABASE_URL with the generated corpus
-	@test -n "$$TEST_DATABASE_URL" || { echo 'eval "$$(make testdb-url)"' >&2; exit 1; }
-	DATABASE_URL="$$TEST_DATABASE_URL" python -c "\
-	import tests.corpus as c; \
-	print('\n'.join(f'  {k}: {v}' for k, v in sorted(c.build().items())))"
+	@test -n "$$TEST_DATABASE_URL" || { \
+	  echo 'TEST_DATABASE_URL is not set. Start a database and export it:'; \
+	  echo '  make testdb-up && eval "$$(make testdb-url)"'; exit 1; }
+	@test -n "$$APP_ENCRYPTION_KEY" || { \
+	  echo 'APP_ENCRYPTION_KEY is not set. The corpus writes REAL ciphertext for'; \
+	  echo 'user_oauth_tokens and user_settings, so the paths that decrypt a token'; \
+	  echo 'are exercised rather than mocked - which means the API you point at'; \
+	  echo 'this database afterwards must hold the same key. Generate one and keep'; \
+	  echo 'it for both:'; \
+	  echo '  export APP_ENCRYPTION_KEY=$$(python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")'; \
+	  exit 1; }
+	@DATABASE_URL="$$TEST_DATABASE_URL" JOBTRACKER_SERVICE_TOKEN=corpus python -c "import tests.corpus as c; [print(f'  {k}: {v}') for k, v in sorted(c.build().items())]"
 
 profile:        ## re-measure production into tests/production_profile.json
 	python scripts/measure_profile.py

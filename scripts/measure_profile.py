@@ -35,6 +35,7 @@ from typing import Any
 
 import dotenv
 import psycopg
+from psycopg import IsolationLevel
 from psycopg.rows import dict_row
 
 PROFILE_PATH = Path(__file__).resolve().parents[1] / "tests" / "production_profile.json"
@@ -319,8 +320,8 @@ def _categorical(
 
 
 def _exact(
-    conn: psycopg.Connection, table: str, columns: list[tuple[str, str]], rows_total: int
-) -> dict[str, dict[str, Any]]:
+    conn: psycopg.Connection, table: str, columns: list[tuple[str, str]]
+) -> tuple[int, dict[str, dict[str, Any]]]:
     """Null counts and numeric extremes over the WHOLE table, in one query.
 
     Everything `drift()` compares has to be exact. Measured from the sample,
@@ -334,7 +335,10 @@ def _exact(
     The sample is still what describes shape - lengths, alphabets, the middle
     of a distribution. It is no longer what decides whether anything changed.
     """
-    parts: list[str] = []
+    # count(*) is in THIS aggregate, not its own statement. Taken separately it
+    # is a different snapshot of a live database, and a row deleted in between
+    # makes a never-null column report nulls it does not have.
+    parts: list[str] = ["count(*) AS n_rows"]
     for name, kind in columns:
         if kind == "opaque":
             continue
@@ -342,11 +346,12 @@ def _exact(
         if kind == "numeric":
             parts.append(f'min("{name}")::float8 AS "lo_{name}"')
             parts.append(f'max("{name}")::float8 AS "hi_{name}"')
-    if not parts or not rows_total:
-        return {}
     row = conn.execute(f'SELECT {", ".join(parts)} FROM "{table}"').fetchone()
     assert row is not None
+    rows_total = int(row["n_rows"])
     out: dict[str, dict[str, Any]] = {}
+    if not rows_total:
+        return 0, out
     for name, kind in columns:
         if kind == "opaque":
             continue
@@ -354,7 +359,7 @@ def _exact(
         if kind == "numeric" and row[f"n_{name}"]:
             stats["lo"], stats["hi"] = row[f"lo_{name}"], row[f"hi_{name}"]
         out[name] = stats
-    return out
+    return rows_total, out
 
 
 def _array_elements(conn: psycopg.Connection, table: str, column: str) -> dict[str, float] | None:
@@ -527,7 +532,22 @@ def measure(url: str) -> dict[str, Any]:
         "tables": {},
     }
     with psycopg.connect(url, row_factory=dict_row) as conn:
-        conn.execute("SET default_transaction_read_only = on")
+        # READ ONLY on the CONNECTION, not `SET default_transaction_read_only`.
+        # That was the first spelling and it does nothing at all: the SET is
+        # itself the first statement of an already-open transaction, and the
+        # setting only applies to transactions begun afterwards. Verified -
+        # `SHOW transaction_read_only` said `off` and an INSERT went through.
+        # This script is handed a production credential by a scheduled
+        # workflow, and AGENTS.md says that database is SELECT and EXPLAIN
+        # only, so the guarantee has to be real rather than commented.
+        conn.read_only = True
+        # REPEATABLE READ so every statement sees ONE snapshot. null_rate is
+        # count(*) compared against count(col) from a different statement; on
+        # a live database under READ COMMITTED, rows deleted in between make a
+        # never-null column look like it holds nulls, which is a spurious
+        # nightly drift alarm - and, if committed, a corpus that writes NULL
+        # into a NOT NULL column.
+        conn.isolation_level = IsolationLevel.REPEATABLE_READ
         tables = [
             r["table_name"]
             for r in conn.execute(
@@ -545,8 +565,7 @@ def measure(url: str) -> dict[str, Any]:
                     (table,),
                 ).fetchall()
             ]
-            count = conn.execute(f'SELECT count(*) AS n FROM "{table}"').fetchone()
-            rows_total = int(count["n"]) if count else 0
+            rows_total, exact = _exact(conn, table, columns)
             selects = ", ".join(_select_expr(c, k) for c, k in columns)
             # TABLESAMPLE rather than LIMIT once the table is big: a plain
             # LIMIT returns one physical page, which is whatever was written
@@ -563,7 +582,6 @@ def measure(url: str) -> dict[str, Any]:
                 query = f'SELECT {selects} FROM "{table}" LIMIT {SAMPLE_ROWS}'
             sample = conn.execute(query).fetchall()
             keys = _key_columns(conn, table)
-            exact = _exact(conn, table, columns, rows_total)
             profile["tables"][table] = {
                 "rows": rows_total,
                 "sampled": len(sample),
@@ -625,10 +643,14 @@ def _shape_drift(where: str, before: dict[str, Any], shape: dict[str, Any]) -> l
     out: list[str] = []
     if before["kind"] != shape["kind"]:
         return [f"{where}: was {before['kind']}, is now {shape['kind']}"]
-    if shape["kind"] == "key":
-        return out
+    # null_rate BEFORE the key early-return. A key column records nothing else,
+    # but corpus.rows() reads exactly this number to decide how often it leaves
+    # a foreign key null - and returning first meant the check could not fail
+    # for the only property it stores about 74 of the 251 profiled columns.
     if shape["null_rate"] > 0 and before["null_rate"] == 0:
         out.append(f"{where}: now holds nulls; the corpus never generates one")
+    if shape["kind"] == "key":
+        return out
     if shape["kind"] == "categorical":
         new = set(shape["values"]) - set(before["values"])
         if new:
@@ -644,9 +666,7 @@ def _shape_drift(where: str, before: dict[str, Any], shape: dict[str, Any]) -> l
         lo, hi = before["quantiles"][0], before["quantiles"][-1]
         now_lo, now_hi = shape["quantiles"][0], shape["quantiles"][-1]
         if _outside(now_lo, lo, upper=False) or _outside(now_hi, hi, upper=True):
-            out.append(
-                f"{where}: range moved to [{now_lo}, {now_hi}], profile has [{lo}, {hi}]"
-            )
+            out.append(f"{where}: range moved to [{now_lo}, {now_hi}], profile has [{lo}, {hi}]")
     elif shape["kind"] == "timestamp" and shape.get("naive_rate", 0) > before.get("naive_rate", 0):
         out.append(
             f"{where}: {shape['naive_rate']:.1%} of values are naive local time; "

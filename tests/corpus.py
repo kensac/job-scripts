@@ -400,21 +400,28 @@ class _Generator:
                 for row in rows:
                     row[name] = self._unique_fallback(table, name, column)
                 continue
+            # A measured null_rate is production's, and the LOCAL schema is
+            # what the insert has to satisfy. They can disagree - a migration
+            # that added NOT NULL after the profile was taken, or a null_rate
+            # measured a hair above zero - and the corpus must not put a NULL
+            # into a NOT NULL column and die mid-build.
+            nullable = column["is_nullable"] == "YES"
+            null_rate = shape["null_rate"] if nullable else 0.0
             # Categoricals get quotas rather than draws, so no measured value
             # is lost to chance.
             if shape["kind"] == "categorical":
-                nulls = [self.rng.random() < shape["null_rate"] for _ in rows]
+                nulls = [self.rng.random() < null_rate for _ in rows]
                 picks = self._weighted(shape["values"], max(1, sum(1 for x in nulls if not x)))
                 it = iter(picks)
                 for row, is_null in zip(rows, nulls, strict=True):
                     row[name] = None if is_null else self._cast(next(it, picks[0]), column)
                 continue
             for row in rows:
-                if shape["kind"] != "partitioned" and self.rng.random() < shape["null_rate"]:
+                if shape["kind"] != "partitioned" and self.rng.random() < null_rate:
                     row[name] = None
                 else:
                     row[name] = self._scalar(shape, column, row)
-            if column["is_nullable"] == "NO":
+            if not nullable:
                 for row in rows:
                     if row[name] is None:
                         row[name] = self._scalar(shape, column, row)
