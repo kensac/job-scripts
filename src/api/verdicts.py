@@ -248,6 +248,13 @@ async def refresh_content(
             input_content=ats_res.text,
             config_name="content-cache",
         )
+        if ats_res.posted:
+            # Only where the board's listing left it empty: a date the listing
+            # stated is the same fact from the same board, and never worse.
+            db.execute(
+                "UPDATE jobs SET date_posted = %s WHERE url = %s AND date_posted IS NULL",
+                (ats_res.posted, url),
+            )
         return ats_res.text, None
 
     if host_paced(url):
