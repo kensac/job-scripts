@@ -197,6 +197,32 @@ def models(user: AuthedUser = Depends(require_user)):
     }
 
 
+def _effective_model(user: AuthedUser) -> dict:
+    """What will actually run, beside what was chosen.
+
+    The stored ai_model is not the model on shared credits: one outside the
+    user's allowlist is replaced at call time. Reading the setting back showed
+    the choice and never the substitution, so the screen agreed with the
+    database and both disagreed with what ran.
+
+    Resolved through the same call the work uses rather than re-deriving the
+    rule here - a second copy would drift and start describing a substitution
+    that does not happen.
+    """
+    try:
+        cfg = budget.resolve_ai_config(user.id, budget.get_entitlement(user))
+    except (LookupError, PermissionError) as exc:
+        # No model, or out of budget. Both are real answers about what will
+        # run - nothing - and neither is a substitution.
+        return {"effective_model": None, "unavailable_reason": type(exc).__name__}
+    return {
+        "effective_model": cfg.model,
+        "substituted_from": cfg.substituted_from,
+        "substitution_reason": cfg.substitution_reason,
+        "unavailable_reason": None,
+    }
+
+
 @router.get("/user/settings")
 def get_settings(user: AuthedUser = Depends(require_user)):
     row = db.query_one(
@@ -206,19 +232,22 @@ def get_settings(user: AuthedUser = Depends(require_user)):
         "FROM user_settings WHERE user_id = %s",
         (user.id,),
     )
-    return row or {
-        "column_layout": None,
-        "prefs": {},
-        "ai_provider": "openai",
-        "ai_base_url": None,
-        "ai_model": None,
-        "ai_params": {},
-        "bypass_sponsorship_filter": True,
-        "criteria": {},
-        "background": {},
-        "email_digest": False,
-        "has_byo_key": False,
-    }
+    return {**(row or _SETTINGS_DEFAULTS), **_effective_model(user)}
+
+
+_SETTINGS_DEFAULTS = {
+    "column_layout": None,
+    "prefs": {},
+    "ai_provider": "openai",
+    "ai_base_url": None,
+    "ai_model": None,
+    "ai_params": {},
+    "bypass_sponsorship_filter": True,
+    "criteria": {},
+    "background": {},
+    "email_digest": False,
+    "has_byo_key": False,
+}
 
 
 @router.put("/user/settings")

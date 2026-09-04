@@ -114,6 +114,18 @@ class AIConfig:
     model: str
     base_url: str | None = None
     params: dict[str, Any] = field(default_factory=dict)
+    # WHAT THE USER ASKED FOR, when it is not what they are getting.
+    #
+    # An owner-credit user whose stored ai_model is outside their allowlist has
+    # it replaced at call time. The setting saves, renders back on Preferences,
+    # and does not describe the model that runs - a stored value and an
+    # effective value that disagree with nothing saying so.
+    #
+    # None when the two agree, so `substituted_from` being set IS the fact that
+    # a substitution happened; there is no separate flag to fall out of step
+    # with it.
+    substituted_from: str | None = None
+    substitution_reason: str | None = None
 
 
 def validate_params(provider: str, params: dict[str, Any], model: str | None = None) -> str | None:

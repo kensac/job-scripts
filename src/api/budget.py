@@ -132,13 +132,24 @@ def resolve_ai_config(user_id: int, entitlement: Entitlement):
         ):
             raise PermissionError("BUDGET_EXCEEDED")
         allowed = owner_allowed_models(entitlement.groups or [])
-        model = settings.get("ai_model")
+        chosen = settings.get("ai_model")
+        model = chosen
+        substituted_from = reason = None
         if model not in allowed:
             model = (
                 ai.DEFAULT_MODELS["openai"]
                 if ai.DEFAULT_MODELS["openai"] in allowed
                 else (allowed[0] if allowed else None)
             )
+            # Only a real substitution is reported. A user who never chose a
+            # model has not had one taken away, and saying so would put a
+            # correction on a screen where nothing was corrected.
+            if chosen:
+                substituted_from = chosen
+                reason = (
+                    f"{chosen} is not available on shared credits; "
+                    f"{model} was used instead. Add your own API key to choose freely."
+                )
         if model:
             provider = ai.provider_of_model(model) or "openai"
             return ai.AIConfig(
@@ -147,6 +158,8 @@ def resolve_ai_config(user_id: int, entitlement: Entitlement):
                 key_source="owner",
                 model=model,
                 params={k: v for k, v in params.items() if k != "temperature"},
+                substituted_from=substituted_from,
+                substitution_reason=reason,
             )
     raise LookupError("NO_API_KEY")
 
