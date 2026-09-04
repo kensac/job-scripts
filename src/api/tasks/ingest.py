@@ -14,6 +14,7 @@ from typing import Any
 from api import db, metrics, verdicts
 from api.tasks.board import _content_attempted_urls, _content_ready_urls
 from api.tasks.runtime import _cancelled, _set_progress, enqueue
+from core.store import add_ai_result
 
 logger = logging.getLogger("jobtracker_worker")
 
@@ -30,19 +31,22 @@ async def handle_ingest_source(task_id: int, payload: dict[str, Any]) -> None:
         boards.fetch_listings, source["listings_url"], source["company"]
     )
     fetched = len(postings)
+    listed = postings
     if source["title_pattern"]:
         keep = re.compile(source["title_pattern"], re.IGNORECASE)
-        admitted = [p for p in postings if keep.search(p.title)]
-        # What the pattern dropped stays on record, so a candidate pattern can
-        # be judged against the titles the board actually listed, and a
-        # posting a better pattern admits arrives here on the next pull.
-        catalog.record_screened(
-            [p for p in postings if not keep.search(p.title)],
-            source["name"],
-            source["title_pattern"],
-            int(db.get_config("screened_retention_days")),
-        )
-        postings = admitted
+        postings = [p for p in postings if keep.search(p.title)]
+    # Everything the board returned stays on record, admitted or not, with
+    # the text the listing carried: a candidate pattern is judged against the
+    # titles the board actually listed, a posting a better pattern admits
+    # arrives here on the next pull, and a backfill reads the text from here
+    # instead of scraping the page again.
+    catalog.record_listings(
+        listed,
+        source["name"],
+        source["title_pattern"] or "",
+        {p.url for p in postings},
+        int(db.get_config("screened_retention_days")),
+    )
     upserted = catalog.upsert_postings(postings, source["name"])
     metrics.INGEST_JOBS.labels(source["name"], "fetched").inc(fetched)
     metrics.INGEST_JOBS.labels(source["name"], "title_excluded").inc(fetched - len(postings))
@@ -80,6 +84,22 @@ async def handle_ingest_source(task_id: int, payload: dict[str, Any]) -> None:
             logger.info(f"Task {task_id} cancelled mid-ingest")
             return
         if p.url in have_content or p.url in tried_recently:
+            continue
+        if p.description:
+            # The listing call already carried the posting's text, in the
+            # same shape the ATS resolver would have fetched it. Storing it
+            # is one insert; fetching it again is the request that gets a
+            # worker blocked.
+            add_ai_result(
+                p.url,
+                "passed",
+                "listing text",
+                "content",
+                input_content=p.description,
+                config_name="content-cache",
+            )
+            cached += 1
+            metrics.INGEST_JOBS.labels(source["name"], "cached").inc()
             continue
         try:
             content, closure = await verdicts.refresh_content(

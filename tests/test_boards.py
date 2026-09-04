@@ -143,13 +143,25 @@ def test_greenhouse_names_the_company_from_the_board(monkeypatch):
                 },
                 "title": "2026 Early Career Electrical Engineer",
                 "updated_at": "2026-09-02T20:46:09-04:00",
+                "content": "&lt;p&gt;Build &amp;amp; test avionics.&lt;/p&gt;",
             }
         ]
     }
-    monkeypatch.setattr(boards._session, "get", lambda url, **kw: _Resp(body))
+    asked: list[str] = []
+    monkeypatch.setattr(boards._session, "get", lambda url, **kw: asked.append(url) or _Resp(body))
     (p,) = boards.fetch_listings(
         "https://boards-api.greenhouse.io/v1/boards/andurilindustries/jobs", company="ignored"
     )
+    # One call, with the text: nothing downstream needs to fetch the posting.
+    assert asked == [
+        "https://boards-api.greenhouse.io/v1/boards/andurilindustries/jobs?content=true"
+    ]
+    assert p.description == (
+        "2026 Early Career Electrical Engineer\n\n"
+        "Costa Mesa, California, United States; Fort Collins, Colorado, United States\n\n"
+        "Build & test avionics."
+    )
+    assert p.raw is not None and p.raw["id"] == 4802172007 and "content" not in p.raw
     assert p.company == "Anduril Industries"
     assert p.locations == [
         "Costa Mesa, California, United States",
@@ -171,6 +183,9 @@ def test_lever_and_ashby_take_the_company_from_the_source(monkeypatch):
             "createdAt": 1711403416463,
             "hostedUrl": "https://jobs.lever.co/palantir/ac978161-6f46-4f6b-ad9e-a258e642751c",
             "text": "Administrative Business Partner",
+            "description": "<p>Support the team.</p>",
+            "lists": [{"text": "What you bring", "content": "<li>Calm</li>"}],
+            "additional": "",
         }
     ]
     ashby = {
@@ -183,21 +198,41 @@ def test_lever_and_ashby_take_the_company_from_the_source(monkeypatch):
                 "publishedAt": "2026-05-18T21:03:00.213+00:00",
                 "secondaryLocations": [{"location": "United States"}, {"location": "Canada"}],
                 "title": "Detection & CorpSec Engineer (Remote)",
+                "descriptionHtml": "<p>Hunt threats.</p>",
+                "compensation": {"compensationTierSummary": "$150K to $200K"},
             },
             {"isListed": False, "jobUrl": "https://jobs.ashbyhq.com/quora/x", "title": "Hidden"},
         ],
     }
     bodies = {"api.lever.co": lever, "api.ashbyhq.com": ashby}
-    monkeypatch.setattr(boards._session, "get", lambda url, **kw: _Resp(bodies[url.split("/")[2]]))
+    asked: list[str] = []
+    monkeypatch.setattr(
+        boards._session,
+        "get",
+        lambda url, **kw: asked.append(url) or _Resp(bodies[url.split("/")[2]]),
+    )
     (p,) = boards.fetch_listings("https://api.lever.co/v0/postings/palantir?mode=json", "Palantir")
     assert (p.company, p.title, p.date_posted) == (
         "Palantir",
         "Administrative Business Partner",
         1711403416,
     )
+    # The same text the Lever resolver assembles: title, location, body, lists.
+    assert p.description == (
+        "Administrative Business Partner\n\nLondon, United Kingdom\n\n"
+        "Support the team.\n\nWhat you bring\n\nCalm"
+    )
+    assert p.raw is not None and "description" not in p.raw and "lists" not in p.raw
     (q,) = boards.fetch_listings("https://api.ashbyhq.com/posting-api/job-board/quora", "Quora")
     assert q.company == "Quora"
     assert q.locations == ["Remote - Multiple Locations", "United States", "Canada"]
+    assert (
+        asked[-1] == "https://api.ashbyhq.com/posting-api/job-board/quora?includeCompensation=true"
+    )
+    assert q.description == (
+        "Detection & CorpSec Engineer (Remote)\n\nRemote - Multiple Locations\n\n"
+        "$150K to $200K\n\nHunt threats."
+    )
 
 
 def test_workday_pages_until_the_total_and_builds_the_public_url(monkeypatch):

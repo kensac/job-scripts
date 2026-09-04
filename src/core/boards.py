@@ -19,13 +19,14 @@ from __future__ import annotations
 import datetime
 import logging
 import re
-from urllib.parse import parse_qs, urlparse, urlunparse
+from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 import ftfy
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
+from core.ats import ashby_text, greenhouse_text, lever_text
 from core.pittcsc_simplify import JobPosting, fetch_job_postings
 from core.urls import normalize_url
 
@@ -84,7 +85,34 @@ def fetch_listings(url: str, company: str | None = None) -> list[JobPosting]:
     return postings
 
 
-def _posting(company: str, title: str | None, locations: list, url: str | None, posted: int):
+# The listing fields that are the posting's text, or bulk that duplicates it.
+# They go into JobPosting.description (as text) rather than into raw.
+_TEXT_FIELDS = frozenset(
+    {
+        "content",
+        "description",
+        "descriptionPlain",
+        "descriptionHtml",
+        "descriptionBody",
+        "descriptionBodyPlain",
+        "lists",
+        "additional",
+        "additionalPlain",
+        "opening",
+        "openingPlain",
+    }
+)
+
+
+def _posting(
+    company: str,
+    title: str | None,
+    locations: list,
+    url: str | None,
+    posted: int,
+    raw: dict | None = None,
+    description: str = "",
+):
     if not title or not url:
         return None
     return JobPosting(
@@ -96,11 +124,22 @@ def _posting(company: str, title: str | None, locations: list, url: str | None, 
         active=True,
         date_posted=posted,
         raw_url=url,
+        description=description,
+        raw={k: v for k, v in (raw or {}).items() if k not in _TEXT_FIELDS},
     )
 
 
+def _with_query(url: str, **params: str) -> str:
+    """The listings URL with these query parameters added, existing ones kept."""
+    parsed = urlparse(url)
+    query = {k: v[0] for k, v in parse_qs(parsed.query).items()} | params
+    return urlunparse(parsed._replace(query=urlencode(query)))
+
+
 def _greenhouse(url: str, company: str) -> list[JobPosting]:
-    resp = _session.get(url, timeout=TIMEOUT)
+    # content=true returns every posting's text in the one call, so nothing
+    # downstream has to fetch the posting to read it.
+    resp = _session.get(_with_query(url, content="true"), timeout=TIMEOUT)
     resp.raise_for_status()
     out = []
     for j in resp.json().get("jobs", []):
@@ -111,6 +150,8 @@ def _greenhouse(url: str, company: str) -> list[JobPosting]:
             location.split(";"),
             j.get("absolute_url"),
             _iso_ts(j.get("first_published")),
+            raw=j,
+            description=greenhouse_text(j) if j.get("content") else "",
         )
         if p:
             out.append(p)
@@ -129,6 +170,8 @@ def _lever(url: str, company: str) -> list[JobPosting]:
             cats.get("allLocations") or [cats.get("location")],
             j.get("hostedUrl"),
             int(j.get("createdAt") or 0) // 1000,
+            raw=j,
+            description=lever_text(j) if j.get("description") or j.get("lists") else "",
         )
         if p:
             out.append(p)
@@ -136,7 +179,9 @@ def _lever(url: str, company: str) -> list[JobPosting]:
 
 
 def _ashby(url: str, company: str) -> list[JobPosting]:
-    resp = _session.get(url, timeout=TIMEOUT)
+    # The board call already carries every posting's description; asking for
+    # compensation too makes it the same text the resolver assembles.
+    resp = _session.get(_with_query(url, includeCompensation="true"), timeout=TIMEOUT)
     resp.raise_for_status()
     out = []
     for j in resp.json().get("jobs", []):
@@ -148,6 +193,8 @@ def _ashby(url: str, company: str) -> list[JobPosting]:
             [j.get("location"), *[s.get("location") for s in j.get("secondaryLocations") or []]],
             j.get("jobUrl"),
             _iso_ts(j.get("publishedAt")),
+            raw=j,
+            description=ashby_text(j) if j.get("descriptionHtml") else "",
         )
         if p:
             out.append(p)
