@@ -235,7 +235,7 @@ def admin_list_sources(user: AuthedUser = Depends(require_admin)):
     rows = db.query(
         """
             SELECT s.name, s.listings_url, s.description, s.active, s.created_at,
-                   s.company, s.title_pattern,
+                   s.company, s.title_pattern, s.ingest_interval_hours,
                    (SELECT COUNT(*) FROM jobs j WHERE j.source = s.name) AS jobs,
                    (SELECT COUNT(*) FROM user_sources us WHERE us.source = s.name) AS subscribers,
                    li.status AS last_ingest_status,
@@ -275,6 +275,9 @@ class SourceBody(BaseModel):
     active: bool | None = None
     company: str | None = Field(default=None, max_length=200)
     title_pattern: str | None = Field(default=None, max_length=500)
+    # Hours between pulls; 1 is the hourly cycle. Bounded above by a week so a
+    # typo cannot park a board for a year while it reads as active.
+    ingest_interval_hours: int | None = Field(default=None, ge=1, le=168)
 
 
 def _check_source(listings_url: str, company: str | None, title_pattern: str | None) -> None:
@@ -312,8 +315,8 @@ def create_source(body: SourceBody, user: AuthedUser = Depends(require_admin)):
     if db.query_one("SELECT name FROM sources WHERE name = %s", (body.name,)):
         raise HTTPException(409, detail={"code": "DUPLICATE_NAME", "message": "source name exists"})
     return db.query_one(
-        "INSERT INTO sources (name, listings_url, description, active, company, title_pattern) "
-        "VALUES (%s, %s, %s, %s, %s, %s) RETURNING *",
+        "INSERT INTO sources (name, listings_url, description, active, company, title_pattern, "
+        "ingest_interval_hours) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING *",
         (
             body.name,
             body.listings_url,
@@ -321,6 +324,7 @@ def create_source(body: SourceBody, user: AuthedUser = Depends(require_admin)):
             body.active if body.active is not None else True,
             (body.company or "").strip() or None,
             (body.title_pattern or "").strip() or None,
+            body.ingest_interval_hours or 1,
         ),
     )
 
@@ -1126,7 +1130,10 @@ def patch_source(name: str, body: SourceBody, user: AuthedUser = Depends(require
 
 
 class SourceSwitchBody(BaseModel):
-    active: bool
+    # What to set on the selection: the on/off flag, the pull interval, or
+    # both. At least one.
+    active: bool | None = None
+    ingest_interval_hours: int | None = Field(default=None, ge=1, le=168)
     # Any combination; the selection is their union. A kind is the board format
     # read off the listings URL (core/boards.kind), a group is a source bundle.
     kind: str | None = None
@@ -1136,20 +1143,30 @@ class SourceSwitchBody(BaseModel):
 
 @router.post("/sources/switch")
 def switch_sources(body: SourceSwitchBody, user: AuthedUser = Depends(require_admin)):
-    """One write flips a whole category of boards.
+    """One write sets a whole category of boards: on or off, and how often
+    they are pulled.
 
     sources.active is already the switch that stops both the scrape and the AI
-    spend on a board's postings (SUBSCRIBED_SOURCE in core/store.py), so a
-    category is a way of SELECTING rows for that write, not a second layer of
-    state. Every row shows its own flag afterwards, and nothing is overridden
-    silently. The top level is the format (all Workday boards), the level below
-    is a bundle (the quant firms), and names catch the rest.
+    spend on a board's postings (SUBSCRIBED_SOURCE in core/store.py), and
+    ingest_interval_hours is what the scheduler reads, so a category is a way
+    of SELECTING rows for those writes, not a second layer of state. Every row
+    shows its own values afterwards, and nothing is overridden silently. The
+    top level is the format (all Workday boards), the level below is a bundle
+    (the quant firms), and names catch the rest.
     """
     from core import boards
 
     if body.kind is None and body.group is None and not body.names:
         raise HTTPException(
             400, detail={"code": "NO_SELECTION", "message": "give a kind, a group, or names"}
+        )
+    if body.active is None and body.ingest_interval_hours is None:
+        raise HTTPException(
+            400,
+            detail={
+                "code": "NOTHING_TO_SET",
+                "message": "give active, ingest_interval_hours, or both",
+            },
         )
     selected: set[str] = set(body.names or [])
     if body.group is not None:
@@ -1163,13 +1180,22 @@ def switch_sources(body: SourceSwitchBody, user: AuthedUser = Depends(require_ad
             for r in db.query("SELECT name, listings_url FROM sources")
             if boards.kind(r["listings_url"]) == body.kind
         }
+    sets = {
+        k: v
+        for k, v in (("active", body.active), ("ingest_interval_hours", body.ingest_interval_hours))
+        if v is not None
+    }
     changed = db.query(
-        "UPDATE sources SET active = %(active)s "
-        "WHERE name = ANY(%(names)s) AND active IS DISTINCT FROM %(active)s RETURNING name",
-        {"active": body.active, "names": sorted(selected)},
+        "UPDATE sources SET "
+        + ", ".join(f"{k} = %({k})s" for k in sets)
+        + " WHERE name = ANY(%(names)s) AND ("
+        + " OR ".join(f"{k} IS DISTINCT FROM %({k})s" for k in sets)
+        + ") RETURNING name",
+        {**sets, "names": sorted(selected)},
     )
     return {
         "active": body.active,
+        "ingest_interval_hours": body.ingest_interval_hours,
         "selected": sorted(selected),
         "changed": sorted(r["name"] for r in changed),
     }

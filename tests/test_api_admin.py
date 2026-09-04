@@ -588,6 +588,7 @@ def test_sources_carry_their_format_and_a_switch_flips_a_whole_category(client, 
     # wd_ngc was already off: selected, not changed.
     assert r.json() == {
         "active": False,
+        "ingest_interval_hours": None,
         "selected": ["wd_boeing", "wd_ngc"],
         "changed": ["wd_boeing"],
     }
@@ -661,3 +662,62 @@ def test_the_fetch_retry_window_is_persisted_config_with_a_floor(client, admin_h
         )
         assert r.status_code in (400, 422), (bad, r.text)
     assert db.get_config("fetch_retry_after_hours") == 6
+
+
+def test_a_bundle_moves_to_a_daily_pull_in_one_write(client, admin_headers, f):
+    """The interval is a column the scheduler reads, set in bulk through the
+    same switch as the on/off flag, so a few hundred boards that post a new
+    entry-level role a few times a month stop costing 24 pulls a day."""
+    from api import db
+
+    for name in ("ashby_a", "ashby_b", "gh_hourly"):
+        f.make_source(name)
+    db.execute(
+        "INSERT INTO source_groups (name, members) VALUES ('startups', ARRAY['ashby_a', 'ashby_b'])"
+    )
+    db.execute("UPDATE sources SET ingest_interval_hours = 24 WHERE name = 'ashby_b'")
+
+    r = client.post(
+        "/v1/admin/sources/switch",
+        json={"ingest_interval_hours": 24, "group": "startups"},
+        headers=admin_headers,
+    )
+    assert r.status_code == 200, r.text
+    # ashby_b was already daily: selected, not changed; active untouched.
+    assert r.json() == {
+        "active": None,
+        "ingest_interval_hours": 24,
+        "selected": ["ashby_a", "ashby_b"],
+        "changed": ["ashby_a"],
+    }
+    rows = {
+        s["name"]: (s["active"], s["ingest_interval_hours"])
+        for s in client.get("/v1/admin/sources", headers=admin_headers).json()["sources"]
+    }
+    assert rows == {"ashby_a": (True, 24), "ashby_b": (True, 24), "gh_hourly": (True, 1)}
+
+    # Both at once, and the bounds: a week is the ceiling, zero is refused.
+    r = client.post(
+        "/v1/admin/sources/switch",
+        json={"active": False, "ingest_interval_hours": 168, "names": ["gh_hourly"]},
+        headers=admin_headers,
+    )
+    assert r.json()["changed"] == ["gh_hourly"]
+    for bad in ({"names": ["gh_hourly"]}, {"names": ["gh_hourly"], "ingest_interval_hours": 0}):
+        assert client.post(
+            "/v1/admin/sources/switch", json=bad, headers=admin_headers
+        ).status_code in (400, 422)
+    r = client.post(
+        "/v1/admin/sources",
+        json={
+            "name": "gh_new",
+            "listings_url": "https://boards-api.greenhouse.io/v1/boards/new/jobs",
+            "ingest_interval_hours": 12,
+        },
+        headers=admin_headers,
+    )
+    assert r.status_code == 200 and r.json()["ingest_interval_hours"] == 12
+    r = client.patch(
+        "/v1/admin/sources/gh_new", json={"ingest_interval_hours": 6}, headers=admin_headers
+    )
+    assert r.status_code == 200 and r.json()["ingest_interval_hours"] == 6
