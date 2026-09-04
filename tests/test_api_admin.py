@@ -545,3 +545,88 @@ def test_a_title_pattern_that_cannot_compile_is_refused_up_front(client, admin_h
         "/v1/admin/sources/spacex", json={"title_pattern": "early career"}, headers=admin_headers
     )
     assert r.status_code == 200 and r.json()["title_pattern"] == "early career"
+
+
+def test_sources_carry_their_format_and_a_switch_flips_a_whole_category(client, admin_headers, f):
+    """A category is a way of selecting rows for the one flag that already
+    stops scraping and AI spend. The top level is the format read off the URL,
+    the level below is a bundle; the response says what it selected and what it
+    actually changed, so an already-off board is not reported as switched."""
+    from api import db
+
+    for name, url in (
+        ("wd_boeing", "https://boeing.wd1.myworkdayjobs.com/wday/cxs/boeing/EXTERNAL_CAREERS/jobs"),
+        (
+            "wd_ngc",
+            "https://ngc.wd1.myworkdayjobs.com/wday/cxs/ngc/Northrop_Grumman_External_Site/jobs",
+        ),
+        ("gh_stripe", "https://boards-api.greenhouse.io/v1/boards/stripe/jobs"),
+        ("gh_janestreet", "https://boards-api.greenhouse.io/v1/boards/janestreet/jobs"),
+    ):
+        f.make_source(name)
+        db.execute("UPDATE sources SET listings_url = %s WHERE name = %s", (url, name))
+    db.execute("UPDATE sources SET active = false WHERE name = 'wd_ngc'")
+    db.execute("INSERT INTO source_groups (name, members) VALUES ('quant', ARRAY['gh_janestreet'])")
+
+    kinds = {
+        s["name"]: s["kind"]
+        for s in client.get("/v1/admin/sources", headers=admin_headers).json()["sources"]
+    }
+    assert kinds == {
+        "wd_boeing": "workday",
+        "wd_ngc": "workday",
+        "gh_stripe": "greenhouse",
+        "gh_janestreet": "greenhouse",
+    }
+
+    r = client.post(
+        "/v1/admin/sources/switch",
+        json={"active": False, "kind": "workday"},
+        headers=admin_headers,
+    )
+    assert r.status_code == 200, r.text
+    # wd_ngc was already off: selected, not changed.
+    assert r.json() == {
+        "active": False,
+        "selected": ["wd_boeing", "wd_ngc"],
+        "changed": ["wd_boeing"],
+    }
+    active = {
+        r["name"]: r["active"] for r in db.query("SELECT name, active FROM sources ORDER BY name")
+    }
+    assert active == {
+        "gh_janestreet": True,
+        "gh_stripe": True,
+        "wd_boeing": False,
+        "wd_ngc": False,
+    }
+
+    r = client.post(
+        "/v1/admin/sources/switch",
+        json={"active": False, "group": "quant", "names": ["wd_ngc"]},
+        headers=admin_headers,
+    )
+    assert r.json()["changed"] == ["gh_janestreet"]
+    assert r.json()["selected"] == ["gh_janestreet", "wd_ngc"]
+
+    r = client.post(
+        "/v1/admin/sources/switch",
+        json={"active": True, "kind": "workday", "group": "quant"},
+        headers=admin_headers,
+    )
+    assert r.json()["changed"] == ["gh_janestreet", "wd_boeing", "wd_ngc"]
+
+    assert (
+        client.post(
+            "/v1/admin/sources/switch", json={"active": True}, headers=admin_headers
+        ).status_code
+        == 400
+    )
+    assert (
+        client.post(
+            "/v1/admin/sources/switch",
+            json={"active": True, "group": "nope"},
+            headers=admin_headers,
+        ).status_code
+        == 404
+    )

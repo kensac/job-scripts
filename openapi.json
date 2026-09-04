@@ -5717,6 +5717,95 @@
         }
       }
     },
+    "/v1/admin/sources/switch": {
+      "post": {
+        "summary": "Switch Sources",
+        "description": "One write flips a whole category of boards.\n\nsources.active is already the switch that stops both the scrape and the AI\nspend on a board's postings (SUBSCRIBED_SOURCE in core/store.py), so a\ncategory is a way of SELECTING rows for that write, not a second layer of\nstate. Every row shows its own flag afterwards, and nothing is overridden\nsilently. The top level is the format (all Workday boards), the level below\nis a bundle (the quant firms), and names catch the rest.",
+        "operationId": "switch_sources_v1_admin_sources_switch_post",
+        "parameters": [
+          {
+            "name": "x-service-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-Service-Token"
+            }
+          },
+          {
+            "name": "x-user-sub",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Sub"
+            }
+          },
+          {
+            "name": "x-user-email",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Email"
+            }
+          },
+          {
+            "name": "x-user-name",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Name"
+            }
+          },
+          {
+            "name": "x-user-groups",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Groups"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SourceSwitchBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/admin/config": {
       "get": {
         "summary": "Get Config",
@@ -15300,6 +15389,55 @@
           "url"
         ],
         "title": "SourceRequestBody"
+      },
+      "SourceSwitchBody": {
+        "properties": {
+          "active": {
+            "type": "boolean",
+            "title": "Active"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kind"
+          },
+          "group": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group"
+          },
+          "names": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Names"
+          }
+        },
+        "type": "object",
+        "required": [
+          "active"
+        ],
+        "title": "SourceSwitchBody"
       },
       "SourcesPut": {
         "properties": {
