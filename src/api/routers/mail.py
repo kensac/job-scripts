@@ -28,19 +28,6 @@ from core.mail_html import sanitise
 router = APIRouter()
 
 
-def _with_settling(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Tags each action item with what could ever close it.
-
-    An unresolved item means two different things and a caller cannot tell
-    them apart from resolved_at alone: an assessment invite from last week is
-    awaiting an event that may still arrive, while an offer from 2020 was
-    never going to be closed by anything, because no email says "you
-    accepted". An empty `settles_on` says the second, and such an item must
-    not be rendered as a live obligation.
-    """
-    return [{**row, "settles_on": mail_pipeline.settles_on(row["kind"])} for row in rows]
-
-
 _SORTABLE = {
     "sent_at": "m.sent_at",
     "imported_at": "m.imported_at",
@@ -666,7 +653,7 @@ def override_match(message_id: int, body: MatchOverride, user: AuthedUser = Depe
     if body.application_id is None and body.outcome == "not_an_application":
         method, confidence = mail_match.NOT_AN_APPLICATION, "high"
     else:
-        method = MANUAL
+        method = mail_match.MANUAL
         confidence = "high" if body.application_id is not None else "none"
     mail_match.record(
         message_id,
@@ -894,7 +881,7 @@ def pipeline(
         "applications": page,
         "total": len(rows),
         "has_more": offset + len(page) < len(rows),
-        "actions": _with_settling(
+        "actions": mail_pipeline.with_settling(
             db.query(
                 """
             SELECT ai.*, a.company_name, a.title
@@ -973,7 +960,7 @@ def pipeline_detail(application_id: int, user: AuthedUser = Depends(require_user
                     # A match has no `model` column. The matcher's own rows
                     # carry its tier as the method; only a person writes
                     # 'manual' or 'detached'.
-                    model=None if m["method"] in _HUMAN_MATCH_METHODS else m["method"],
+                    model=None if m["method"] in mail_match.HUMAN_METHODS else m["method"],
                 ),
             }
             for m in matches
@@ -981,7 +968,7 @@ def pipeline_detail(application_id: int, user: AuthedUser = Depends(require_user
         # Both additions kept: #227 wraps actions in their settling state,
         # this branch adds who corrected each match. Independent answers to
         # the same question - what does this row let a person question.
-        "actions": _with_settling(
+        "actions": mail_pipeline.with_settling(
             db.query(
                 "SELECT * FROM action_items WHERE application_id = %s "
                 "ORDER BY due_at NULLS LAST, id",
@@ -989,9 +976,6 @@ def pipeline_detail(application_id: int, user: AuthedUser = Depends(require_user
             )
         ),
     }
-
-
-DETACHED = "detached"
 
 
 class Correction(BaseModel):
@@ -1023,6 +1007,11 @@ def detach_match(
     contributing, and the stage recomputes on its own - nobody restates it.
     The wrong match stays visible in the history, which is the point: a
     correction that erases its own cause cannot be reviewed.
+
+    The same append as rejecting from the review queue, through the same
+    function. Three endpoints wrote this table with a raw INSERT and none of
+    them set `actor_user_id`, which is why 37 `manual` rows in production carry
+    no actor and why "a person decided this" was unanswerable by query.
     """
     _owned_application(application_id, user.id)
     match = db.query_one(
@@ -1031,10 +1020,8 @@ def detach_match(
     )
     if match is None:
         raise HTTPException(status_code=404, detail="match not found on this application")
-    db.execute(
-        "INSERT INTO application_matches (message_id, application_id, method, confidence, "
-        "rationale) VALUES (%s, NULL, %s, 'none', %s)",
-        (match["message_id"], DETACHED, body.note or "detached by the user"),
+    mail_match.reject(
+        match["message_id"], actor_user_id=user.id, note=body.note or "detached by the user"
     )
     mail_pipeline.sync_action_items(application_id)
     return {"ok": True, "message_id": match["message_id"]}
@@ -1060,10 +1047,12 @@ def reattach_match(
     )
     if match is None:
         raise HTTPException(status_code=404, detail="match not found on this application")
-    db.execute(
-        "INSERT INTO application_matches (message_id, application_id, method, confidence, "
-        "rationale) VALUES (%s, %s, 'manual', 'high', %s)",
-        (match["message_id"], application_id, body.note or "reattached by the user"),
+    mail_match.record(
+        match["message_id"],
+        mail_match.Match(
+            application_id, mail_match.MANUAL, "high", body.note or "reattached by the user"
+        ),
+        actor_user_id=user.id,
     )
     mail_pipeline.sync_action_items(application_id)
     return {"ok": True, "message_id": match["message_id"]}
@@ -1109,14 +1098,6 @@ def restore_application(
         (application_id,),
     )
     return {"ok": True}
-
-
-MANUAL = "manual"
-
-# Methods only a person writes. Every other method is one of the matcher's
-# tiers, so the method column is what tells a human match from a machine one -
-# `application_matches` has no `model` column to ask instead.
-_HUMAN_MATCH_METHODS = frozenset({MANUAL, DETACHED})
 
 
 # How many messages one assignment may carry. A conversation is a handful of
@@ -1408,7 +1389,13 @@ def _candidates_payload(
         # queue page - so it needs the same declared choices the queue rows
         # carry, or its eligibility is a client-side guess.
         "choices": resolve.choices_for_message(
-            owner_id, message_id, company, message.get("provider_thread_id")
+            # Only the undismissed ones decide eligibility. This list carries
+            # dismissed applications so the picker can show them; assigning to
+            # one is not a verb the queue offers, so they must not make
+            # "belongs to an application" look available.
+            resolve.by_company([a for a in apps if a["dismissed_at"] is None]),
+            company,
+            resolve.thread_size(owner_id, message.get("provider_thread_id")),
         ),
         "total_applications": len(scored),
         # The count the matcher choked on. Two or more means it refused on
@@ -1507,15 +1494,15 @@ def assign_message(message_id: int, body: Assignment, user: AuthedUser = Depends
 
     rationale = body.note or "assigned by the user"
     for index, target in enumerate(targets):
-        db.execute(
-            "INSERT INTO application_matches (message_id, application_id, method, confidence, "
-            "rationale) VALUES (%s, %s, %s, 'high', %s)",
-            (
-                target,
+        mail_match.record(
+            target,
+            mail_match.Match(
                 application_id,
-                MANUAL,
+                mail_match.MANUAL,
+                "high",
                 rationale if index == 0 else f"{rationale} (same conversation)",
             ),
+            actor_user_id=user.id,
         )
     mail_pipeline.sync_action_items(application_id)
     return {
@@ -1641,26 +1628,6 @@ def message_detail(message_id: int, user: AuthedUser = Depends(require_user)):
     }
 
 
-# What the mail implies the board should say. Only kinds where the evidence is
-# unambiguous about the OUTCOME - an acknowledgement means the application is
-# alive, which the board already says, so it suggests nothing.
-_STATUS_FROM_EVENT = {
-    "rejection": "Rejected",
-    "position_closed": "No Longer Available",
-    "offer": "Offer",
-    "interview_invite": "Interviewing",
-    "interview_scheduled": "Interviewing",
-}
-
-# Board statuses that mean "still waiting". A suggestion is only worth making
-# against one of these: if he has already moved it on, the mail is confirming
-# what he knows rather than telling him something.
-_UNRESOLVED_STATUSES = ("Application Submitted", "Follow-up")
-
-ACCEPTED = "accepted"
-DISMISSED = "dismissed"
-
-
 class SuggestionAnswer(BaseModel):
     response: str
     note: str | None = None
@@ -1670,62 +1637,17 @@ class SuggestionAnswer(BaseModel):
 def suggestions(user: AuthedUser = Depends(require_user)):
     """Where the mail and the board disagree, as things to confirm.
 
-    Never an overwrite. `user_jobs.status` is what the user typed, and a system
-    that silently rewrites it stops being trustworthy at exactly the moment it
-    is most confident. So this says "we think you were rejected" and waits.
-
-    Derived at read time rather than stored, so a suggestion disappears on its
-    own once he acts on the board directly, or once a reclassification retracts
-    the evidence. Only his ANSWER is a fact worth keeping.
-
-    Every row carries the evidence - the message, the sender, and an excerpt -
-    because a suggestion he cannot check is one he has to take on faith.
+    The derivation lives in `mail_pipeline.proposals_for`, because the review
+    queue asks the same question and one of the two spellings would drift. What
+    this route adds is EVIDENCE - the message, the sender, and where the
+    company appears in the body - because a proposal a person cannot check is
+    one they have to take on faith. The queue carries the summary instead; the
+    body is a detail view's worth of payload and there are 1,159 of these.
     """
-    rows = db.query(
-        """
-        WITH current_match AS (
-            SELECT DISTINCT ON (message_id) message_id, application_id
-            FROM application_matches ORDER BY message_id, id DESC
-        ),
-        current_event AS (
-            SELECT DISTINCT ON (message_id) message_id, id, kind, detail
-            FROM email_events ORDER BY message_id, id DESC
-        )
-        SELECT DISTINCT ON (a.id, e.kind)
-               a.id AS application_id, a.company_name, a.title, a.job_id,
-               uj.status AS board_status, uj.date_applied,
-               e.id AS event_id, e.kind, m.id AS message_id, m.sent_at
-        FROM applications a
-        JOIN user_jobs uj ON uj.job_id = a.job_id AND uj.user_id = a.user_id
-        JOIN current_match cm ON cm.application_id = a.id
-        JOIN current_event e ON e.message_id = cm.message_id
-        JOIN email_messages m ON m.id = cm.message_id
-        WHERE a.user_id = %(user)s
-          AND a.dismissed_at IS NULL
-          AND uj.status = ANY(%(unresolved)s)
-          AND e.kind = ANY(%(kinds)s)
-          AND NOT EXISTS (
-              SELECT 1 FROM suggestion_responses sr
-              WHERE sr.application_id = a.id AND sr.event_id = e.id
-          )
-        ORDER BY a.id, e.kind, e.id DESC
-        """,
-        {
-            "user": user.id,
-            "unresolved": list(_UNRESOLVED_STATUSES),
-            "kinds": sorted(_STATUS_FROM_EVENT),
-        },
-    )
+    rows = mail_pipeline.proposals_for(user.id)
     evidence = _evidence_for(sorted({r["message_id"] for r in rows}))
     return {
-        "suggestions": [
-            {
-                **row,
-                "suggested_status": _STATUS_FROM_EVENT[row["kind"]],
-                "evidence": evidence.get(row["message_id"]),
-            }
-            for row in rows
-        ],
+        "suggestions": [{**row, "evidence": evidence.get(row["message_id"])} for row in rows],
         "total": len(rows),
     }
 
@@ -1737,55 +1659,22 @@ def answer_suggestion(
     body: SuggestionAnswer,
     user: AuthedUser = Depends(require_user),
 ):
-    """Accept a suggestion and the board moves; dismiss it and it stays put.
+    """Accept a proposal and the board moves; dismiss it and it stays put.
 
-    Both are recorded against the EVENT, so a dismissal silences this piece of
-    evidence rather than the question. A later rejection from the same company
-    is new evidence and gets asked again - which is what makes dismissing safe
-    rather than a decision he can never revisit.
+    Reports what it actually wrote. It used to return the proposed status
+    whenever the answer was `accepted`, including for the 1,817 applications
+    with no board row, where the UPDATE matched nothing - so the caller was
+    told a status had moved that no SELECT could find.
     """
-    if body.response not in (ACCEPTED, DISMISSED):
-        raise HTTPException(status_code=400, detail=f"response must be {ACCEPTED} or {DISMISSED}")
-    app = db.query_one(
-        "SELECT id, job_id FROM applications WHERE id = %s AND user_id = %s",
-        (application_id, user.id),
-    )
-    if app is None:
-        raise HTTPException(status_code=404, detail="application not found")
-    # The event has to belong to a message currently matched to THIS
-    # application - the same join the suggestion list is built from. Checking
-    # only that the application is owned left event_id taken from the request
-    # and trusted, so another user's event could decide which status this
-    # application moved to.
-    event = db.query_one(
-        """
-        WITH current_match AS (
-            SELECT DISTINCT ON (message_id) message_id, application_id
-            FROM application_matches ORDER BY message_id, id DESC
+    if body.response not in (mail_pipeline.ACCEPTED, mail_pipeline.DISMISSED):
+        raise HTTPException(
+            status_code=400,
+            detail=f"response must be {mail_pipeline.ACCEPTED} or {mail_pipeline.DISMISSED}",
         )
-        SELECT e.id, e.kind
-        FROM email_events e
-        JOIN current_match cm ON cm.message_id = e.message_id
-        WHERE e.id = %s AND cm.application_id = %s
-        """,
-        (event_id, application_id),
-    )
-    if event is None or event["kind"] not in _STATUS_FROM_EVENT:
+    answered = mail_pipeline.answer_proposal(user.id, application_id, event_id, body.response)
+    if answered is None:
         raise HTTPException(status_code=404, detail="no suggestion for that event")
-
-    status = _STATUS_FROM_EVENT[event["kind"]]
-    db.execute(
-        "INSERT INTO suggestion_responses (user_id, application_id, event_id, "
-        "suggested_status, response) VALUES (%s, %s, %s, %s, %s)",
-        (user.id, application_id, event_id, status, body.response),
-    )
-    if body.response == ACCEPTED and app["job_id"] is not None:
-        db.execute(
-            "UPDATE user_jobs SET status = %s, updated_at = now() "
-            "WHERE user_id = %s AND job_id = %s",
-            (status, user.id, app["job_id"]),
-        )
-    return {"ok": True, "status": status if body.response == ACCEPTED else None}
+    return answered
 
 
 class ActionAnswer(BaseModel):

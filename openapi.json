@@ -10057,7 +10057,7 @@
     "/v1/user/pipeline/{application_id}/matches/{match_id}/detach": {
       "post": {
         "summary": "Detach Match",
-        "description": "This message does not belong to this application.\n\nAppends a match with a NULL application rather than deleting the old row.\nLatest-wins then takes the message out of the application, its events stop\ncontributing, and the stage recomputes on its own - nobody restates it.\nThe wrong match stays visible in the history, which is the point: a\ncorrection that erases its own cause cannot be reviewed.",
+        "description": "This message does not belong to this application.\n\nAppends a match with a NULL application rather than deleting the old row.\nLatest-wins then takes the message out of the application, its events stop\ncontributing, and the stage recomputes on its own - nobody restates it.\nThe wrong match stays visible in the history, which is the point: a\ncorrection that erases its own cause cannot be reviewed.\n\nThe same append as rejecting from the review queue, through the same\nfunction. Three endpoints wrote this table with a raw INSERT and none of\nthem set `actor_user_id`, which is why 37 `manual` rows in production carry\nno actor and why \"a person decided this\" was unanswerable by query.",
         "operationId": "detach_match_v1_user_pipeline__application_id__matches__match_id__detach_post",
         "parameters": [
           {
@@ -10970,7 +10970,7 @@
     "/v1/user/suggestions": {
       "get": {
         "summary": "Suggestions",
-        "description": "Where the mail and the board disagree, as things to confirm.\n\nNever an overwrite. `user_jobs.status` is what the user typed, and a system\nthat silently rewrites it stops being trustworthy at exactly the moment it\nis most confident. So this says \"we think you were rejected\" and waits.\n\nDerived at read time rather than stored, so a suggestion disappears on its\nown once he acts on the board directly, or once a reclassification retracts\nthe evidence. Only his ANSWER is a fact worth keeping.\n\nEvery row carries the evidence - the message, the sender, and an excerpt -\nbecause a suggestion he cannot check is one he has to take on faith.",
+        "description": "Where the mail and the board disagree, as things to confirm.\n\nThe derivation lives in `mail_pipeline.proposals_for`, because the review\nqueue asks the same question and one of the two spellings would drift. What\nthis route adds is EVIDENCE - the message, the sender, and where the\ncompany appears in the body - because a proposal a person cannot check is\none they have to take on faith. The queue carries the summary instead; the\nbody is a detail view's worth of payload and there are 1,159 of these.",
         "operationId": "suggestions_v1_user_suggestions_get",
         "parameters": [
           {
@@ -11049,7 +11049,7 @@
     "/v1/user/suggestions/{application_id}/{event_id}": {
       "post": {
         "summary": "Answer Suggestion",
-        "description": "Accept a suggestion and the board moves; dismiss it and it stays put.\n\nBoth are recorded against the EVENT, so a dismissal silences this piece of\nevidence rather than the question. A later rejection from the same company\nis new evidence and gets asked again - which is what makes dismissing safe\nrather than a decision he can never revisit.",
+        "description": "Accept a proposal and the board moves; dismiss it and it stays put.\n\nReports what it actually wrote. It used to return the proposed status\nwhenever the answer was `accepted`, including for the 1,817 applications\nwith no board row, where the UPDATE matched nothing - so the caller was\ntold a status had moved that no SELECT could find.",
         "operationId": "answer_suggestion_v1_user_suggestions__application_id___event_id__post",
         "parameters": [
           {
@@ -11871,8 +11871,131 @@
     "/v1/user/resolve/queue": {
       "get": {
         "summary": "Resolve Queue",
-        "description": "Everything of the user's own awaiting a decision.",
+        "description": "Everything of the user's own awaiting a decision, of every kind.\n\n`kind` narrows it, repeated for several. Unfiltered is the default because\n\"what is waiting on me\" is the question this answers, and four separate\nanswers to it is the shape it replaced.",
         "operationId": "resolve_queue_v1_user_resolve_queue_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kind"
+            }
+          },
+          {
+            "name": "x-service-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-Service-Token"
+            }
+          },
+          {
+            "name": "x-user-sub",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Sub"
+            }
+          },
+          {
+            "name": "x-user-email",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Email"
+            }
+          },
+          {
+            "name": "x-user-name",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Name"
+            }
+          },
+          {
+            "name": "x-user-groups",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Groups"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResolveQueue"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/user/resolve/history": {
+      "get": {
+        "summary": "Resolve History",
+        "description": "What the user has decided, newest first, overturned answers included.",
+        "operationId": "resolve_history_v1_user_resolve_history_get",
         "parameters": [
           {
             "name": "limit",
@@ -11954,7 +12077,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ResolveQueue"
+                  "$ref": "#/components/schemas/DecisionHistory"
                 }
               }
             }
@@ -12110,6 +12233,25 @@
             }
           },
           {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kind"
+            }
+          },
+          {
             "name": "x-service-token",
             "in": "header",
             "required": false,
@@ -12167,6 +12309,119 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ResolveQueue"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/resolve/history": {
+      "get": {
+        "summary": "Admin Resolve History",
+        "description": "One user's decisions, as an administrator sees them.\n\n`by` is computed against the CALLER, so the administrator's own\ncorrections read as \"you\" and the owner's read as somebody else - the\nopposite of what the owner sees for the same rows, and correct for both.",
+        "operationId": "admin_resolve_history_v1_admin_resolve_history_get",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "User Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "x-service-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-Service-Token"
+            }
+          },
+          {
+            "name": "x-user-sub",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Sub"
+            }
+          },
+          {
+            "name": "x-user-email",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Email"
+            }
+          },
+          {
+            "name": "x-user-name",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Name"
+            }
+          },
+          {
+            "name": "x-user-groups",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Groups"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DecisionHistory"
                 }
               }
             }
@@ -12275,6 +12530,96 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ResolveResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/resolve/rates": {
+      "get": {
+        "summary": "Admin Review Rates",
+        "description": "How often a person agrees with each tier, and how much nobody has read.\n\nRead-only, and deliberately without the verbs. An administrator answering\nsomebody else's match is a different act from the owner answering it, and\nit already has a home on the resolve routes above where `actor_user_id`\nrecords which of the two happened. What this surface is for is deciding\nwhether a tier should keep writing unattended, which is a question about\nthe aggregate rather than about any row.",
+        "operationId": "admin_review_rates_v1_admin_resolve_rates_get",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "User Id"
+            }
+          },
+          {
+            "name": "x-service-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-Service-Token"
+            }
+          },
+          {
+            "name": "x-user-sub",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Sub"
+            }
+          },
+          {
+            "name": "x-user-email",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Email"
+            }
+          },
+          {
+            "name": "x-user-name",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Name"
+            }
+          },
+          {
+            "name": "x-user-groups",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Groups"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewRates"
                 }
               }
             }
@@ -13559,6 +13904,99 @@
         "type": "object",
         "title": "Criteria"
       },
+      "DecisionHistory": {
+        "properties": {
+          "decisions": {
+            "items": {
+              "$ref": "#/components/schemas/DecisionRow"
+            },
+            "type": "array",
+            "title": "Decisions"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "decisions",
+          "total"
+        ],
+        "title": "DecisionHistory"
+      },
+      "DecisionRow": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "At"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "decision": {
+            "type": "string",
+            "title": "Decision"
+          },
+          "by": {
+            "type": "string",
+            "title": "By"
+          },
+          "summary": {
+            "type": "string",
+            "title": "Summary"
+          },
+          "application_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Application Id"
+          },
+          "superseded_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Superseded By"
+          },
+          "supersedes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supersedes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "at",
+          "kind",
+          "decision",
+          "by",
+          "summary"
+        ],
+        "title": "DecisionRow"
+      },
       "DeleteQueries": {
         "properties": {
           "ids": {
@@ -14220,6 +14658,96 @@
         ],
         "title": "ReportBody"
       },
+      "ResolveAction": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "due_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Due At"
+          },
+          "settles_on": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Settles On"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "settles_on"
+        ],
+        "title": "ResolveAction"
+      },
+      "ResolveApplication": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "company_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company Name"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "stage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stage"
+          },
+          "on_board": {
+            "type": "boolean",
+            "title": "On Board",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "title": "ResolveApplication",
+        "description": "The application a row is about, with the stage the board would show.\n\n`stage` is `mail_pipeline.stage_for` over that application's real events,\nnot a second reading of them, so the queue and the board cannot disagree\nabout what an application is doing while asking about it."
+      },
       "ResolveCandidate": {
         "properties": {
           "id": {
@@ -14324,6 +14852,47 @@
         ],
         "title": "ResolveChoiceAffects"
       },
+      "ResolveImplication": {
+        "properties": {
+          "board_status": {
+            "type": "string",
+            "title": "Board Status"
+          },
+          "from_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From Status"
+          },
+          "board_updated": {
+            "type": "boolean",
+            "title": "Board Updated"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "board_status",
+          "board_updated"
+        ],
+        "title": "ResolveImplication",
+        "description": "What answering would change beyond the row itself.\n\nPresent only where there is something to say. A control whose effect\nreaches past the row states that before the click rather than reporting it\nafterwards, and `board_updated` is the honest half of that: an application\nwith no board row has a status to propose and nothing to move."
+      },
       "ResolveItem": {
         "properties": {
           "id": {
@@ -14342,22 +14911,76 @@
             "type": "string",
             "title": "Rank Reason"
           },
-          "message": {
-            "$ref": "#/components/schemas/ResolveMessage"
-          },
-          "candidates": {
-            "items": {
-              "$ref": "#/components/schemas/ResolveCandidate"
-            },
-            "type": "array",
-            "title": "Candidates"
-          },
           "choices": {
             "items": {
               "$ref": "#/components/schemas/ResolveChoice"
             },
             "type": "array",
             "title": "Choices"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResolveMessage"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "candidates": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ResolveCandidate"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Candidates"
+          },
+          "application": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResolveApplication"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "implies": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResolveImplication"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "match": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResolveMatch"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "action": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResolveAction"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -14366,11 +14989,61 @@
           "kind",
           "rank",
           "rank_reason",
-          "message",
-          "candidates",
           "choices"
         ],
         "title": "ResolveItem"
+      },
+      "ResolveMatch": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "method": {
+            "type": "string",
+            "title": "Method"
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "rationale": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rationale"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "method"
+        ],
+        "title": "ResolveMatch"
       },
       "ResolveMessage": {
         "properties": {
@@ -14471,13 +15144,21 @@
             },
             "type": "object",
             "title": "By Rank"
+          },
+          "by_kind": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "By Kind"
           }
         },
         "type": "object",
         "required": [
           "items",
           "total",
-          "by_rank"
+          "by_rank",
+          "by_kind"
         ],
         "title": "ResolveQueue"
       },
@@ -14506,7 +15187,12 @@
             "enum": [
               "assign_application",
               "not_an_application",
-              "not_job_related"
+              "not_job_related",
+              "confirm_match",
+              "reject_match",
+              "accept_status",
+              "decline_status",
+              "mark_done"
             ],
             "title": "Choice"
           },
@@ -14559,6 +15245,39 @@
               }
             ],
             "title": "Application Id"
+          },
+          "board_updated": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Board Updated"
+          },
+          "board_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Board Status"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
           }
         },
         "type": "object",
@@ -14585,6 +15304,98 @@
           "action"
         ],
         "title": "ResolveSourceRequest"
+      },
+      "ReviewRate": {
+        "properties": {
+          "method": {
+            "type": "string",
+            "title": "Method"
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "attached": {
+            "type": "integer",
+            "title": "Attached"
+          },
+          "reviewed": {
+            "type": "integer",
+            "title": "Reviewed"
+          },
+          "confirmed": {
+            "type": "integer",
+            "title": "Confirmed"
+          },
+          "rejected": {
+            "type": "integer",
+            "title": "Rejected"
+          },
+          "confirm_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirm Rate"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "method",
+          "attached",
+          "reviewed",
+          "confirmed",
+          "rejected"
+        ],
+        "title": "ReviewRate"
+      },
+      "ReviewRates": {
+        "properties": {
+          "by_method": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewRate"
+            },
+            "type": "array",
+            "title": "By Method"
+          },
+          "never_reviewed": {
+            "type": "integer",
+            "title": "Never Reviewed"
+          },
+          "reviewed": {
+            "type": "integer",
+            "title": "Reviewed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "by_method",
+          "never_reviewed",
+          "reviewed"
+        ],
+        "title": "ReviewRates"
       },
       "RunCheckBody": {
         "properties": {
