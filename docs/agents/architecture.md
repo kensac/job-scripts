@@ -94,6 +94,12 @@ again from the top with a subset of its results, which every batched sweep
 already is: they iterate the results they were given and re-select on the
 next run.
 
+**A parked chunk must not hold what its siblings decided, nor the next run.**
+Each filter chunk materializes its own passes when it finishes, and a split
+run does not block the next cycle's run: the splitter excludes every url a
+live chunk still holds (`board._in_flight_urls`), so the new run judges only
+what arrived since. Only a run that has not split yet blocks another.
+
 Dry-run a handful of live calls before committing to a large batch. A batch
 fails whole, and the dry run also measures real token counts.
 

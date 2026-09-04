@@ -7,7 +7,13 @@ import logging
 from typing import Any
 
 from api import ai, budget, db, events, metrics, verdicts
-from api.tasks.board import _candidates, _content_ready_urls, _decided_urls, _materialize_passing
+from api.tasks.board import (
+    _candidates,
+    _content_ready_urls,
+    _decided_urls,
+    _in_flight_urls,
+    _materialize_passing,
+)
 from api.tasks.models import FilterVerdict
 from api.tasks.runtime import (
     BATCH_CHUNK_SIZE,
@@ -155,6 +161,11 @@ async def _process_jobs(
             raise PermissionError(f"BUDGET_EXCEEDED after {done}/{total} checks")
     _set_progress(task_id, total, total, flt["name"])
     if parent_id:
+        # Each chunk publishes what it decided. The parent materializes again
+        # when it finalizes, but a parent waits on its slowest chunk, and a
+        # chunk parked on a straggler batch holds every other chunk's passes
+        # off the board for as long as the provider takes.
+        _materialize_passing(user_id)
         _update_parent_progress(parent_id)
 
 
@@ -166,7 +177,8 @@ async def _run_filters(
     centralized chunks; jobs still needing a scrape go through live fleet
     chunks as usual (sharded parsing, centralized batching)."""
     ent, cfg = _load_config(user_id)
-    candidates = _candidates(user_id)
+    held = _in_flight_urls(user_id)
+    candidates = [j for j in _candidates(user_id) if j["url"] not in held]
     urls = [j["url"] for j in candidates]
     use_batch = batched and cfg.key_source == "owner" and cfg.provider == "openai"
     units: list[tuple] = []
@@ -374,6 +386,9 @@ async def handle_run_filter_batch_chunk(task_id: int, payload: dict[str, Any]) -
                 _update_parent_progress(parent_id)
     _set_progress(task_id, total, total, flt["name"])
     if parent_id:
+        # See _process_jobs: publish this chunk's passes without waiting on
+        # the siblings still parked at the provider.
+        _materialize_passing(user_id)
         _update_parent_progress(parent_id)
 
 
