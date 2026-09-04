@@ -238,8 +238,49 @@ def resolve_source_request(
 
 
 @router.get("/sources")
-def admin_list_sources(user: AuthedUser = Depends(require_admin)):
+def admin_list_sources(shape: str = "full", user: AuthedUser = Depends(require_admin)):
+    """shape=full is the ledger. shape=names is the vocabulary (name, active,
+    kind, bundles) for pickers and filters; shape=counts is what a dashboard
+    tile needs. Both skip the per-source aggregation over jobs, tasks and
+    subscribers, which the dashboard was paying for on every live tick."""
     from core import boards
+
+    if shape == "names":
+        rows = db.query(
+            """
+            SELECT s.name, s.listings_url, s.active,
+                   COALESCE((SELECT array_agg(g.name ORDER BY g.name) FROM source_groups g
+                             WHERE s.name = ANY(g.members)), '{}') AS groups
+            FROM sources s ORDER BY s.active DESC, s.name
+            """
+        )
+        for r in rows:
+            r["kind"] = boards.kind(r.pop("listings_url"))
+        return {"sources": rows}
+    if shape == "counts":
+        total = db.query_one(
+            "SELECT COUNT(*) AS sources, COUNT(*) FILTER (WHERE active) AS active FROM sources"
+        )
+        by_kind: dict[str, int] = {}
+        for r in db.query("SELECT listings_url FROM sources WHERE active"):
+            k = boards.kind(r["listings_url"])
+            by_kind[k] = by_kind.get(k, 0) + 1
+        last_ingest = db.query(
+            """
+            SELECT status, COUNT(*) AS n FROM (
+                SELECT DISTINCT ON (payload->>'source') status
+                FROM tasks WHERE kind = 'ingest_source'
+                ORDER BY payload->>'source', id DESC
+            ) t GROUP BY status
+            """
+        )
+        return {
+            "sources": total["sources"] if total else 0,
+            "active": total["active"] if total else 0,
+            "by_kind": by_kind,
+            "last_ingest": {r["status"]: r["n"] for r in last_ingest},
+            "bundles": (db.query_one("SELECT COUNT(*) AS n FROM source_groups") or {}).get("n", 0),
+        }
 
     # Each fact is aggregated once over its table and joined, rather than
     # computed per source in a correlated subquery. At 751 sources the
@@ -381,11 +422,18 @@ def list_users(
     offset: int = 0,
     sort: str = "last_seen_at",
     dir: str = "desc",
+    ids: str | None = None,
     user: AuthedUser = Depends(require_admin),
 ):
     limit = max(1, min(limit, 200))
     sort_col = _USERS_SORTABLE.get(sort, "u.last_seen_at")
     direction = "ASC" if dir == "asc" else "DESC"
+    # ids= is a bulk lookup: the queue page names workers' tasks by user and
+    # was walking up to 40 pages to build that map. Ids that are not integers
+    # are ignored rather than refused, so a malformed selection returns what
+    # it can.
+    wanted = [int(x) for x in (ids or "").split(",") if x.strip().lstrip("-").isdigit()]
+    scope = "WHERE u.id = ANY(%(ids)s)" if ids is not None else ""
     rows = db.query(
         f"""
         SELECT u.id, u.sub, u.email, u.name, u.groups, u.created_at, u.last_seen_at,
@@ -399,9 +447,10 @@ def list_users(
                          WHERE a.user_id = u.id AND a.key_source = 'owner'
                            AND a.created_at > now() - interval '7 days'), 0) AS owner_tokens_week
         FROM users u LEFT JOIN user_settings s ON s.user_id = u.id
+        {scope}
         ORDER BY {sort_col} {direction} NULLS LAST, u.id LIMIT %(limit)s OFFSET %(offset)s
         """,
-        {"limit": limit + 1, "offset": max(0, offset)},
+        {"limit": limit + 1, "offset": max(0, offset), "ids": wanted},
     )
     return {
         "users": rows[:limit],
