@@ -14372,6 +14372,12 @@
                   "type": "string"
                 },
                 "type": "array"
+              },
+              {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "type": "object"
               }
             ],
             "title": "Value"

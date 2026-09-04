@@ -273,8 +273,9 @@ def _record_errors(batch: Batch, results: dict[str, BatchResult]) -> None:
     """
     batch_errors = getattr(getattr(batch, "errors", None), "data", None) or []
     messages = [getattr(e, "message", None) or str(e) for e in batch_errors]
+    placeholder = f"batch {batch.status}"
     for result in results.values():
-        if result.text is None and not result.error and messages:
+        if result.text is None and messages and result.error in (None, "", placeholder):
             result.error = "; ".join(messages)
     errors = {cid: r.error for cid, r in results.items() if r.error and r.batch_id == batch.id}
     if messages and not errors:

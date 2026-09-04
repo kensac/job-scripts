@@ -516,6 +516,7 @@ class AiBatch(Base):
     est_cost_usd: Mapped[Any | None] = mapped_column(Numeric(12, 6))
     submitted_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
     updated_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+    completed_at: Mapped[datetime.datetime | None]
 
 
 class AiBatchError(Base):
@@ -532,7 +533,6 @@ class AiBatchError(Base):
     custom_id: Mapped[str] = mapped_column(Text, server_default=text("''"))
     error: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
-    completed_at: Mapped[datetime.datetime | None]
 
 
 class WorkerStatus(Base):

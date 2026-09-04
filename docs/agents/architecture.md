@@ -74,6 +74,14 @@ submission was rejected on grounds that applied to every one of them; some
 failing means bad inputs. Different causes, and only the first is certainly a
 defect.
 
+**Every error a batch returns is stored as the provider wrote it**
+(`ai_batch_errors`, one row per failed request, or one row under an empty
+custom_id for a batch rejected before any request ran). The batch row counts
+failures; only the text says why, and a handler that skips errored results
+must not be the only reader of it. The whole-failure alert carries the most
+frequent stored reason and resolves once a later batch for the same purpose
+succeeds, whatever fixed it.
+
 **Selection must exclude work already in flight**, and a task's own in-flight
 claim must not exclude the task itself when it resumes. A guard that hides a
 task's own work from it will make the task discard results it already paid for.
@@ -156,6 +164,13 @@ excluded from every sweep and leave boards through `_demote_closed`; listed
 and admitted again, the upsert reactivates them. An aggregator list is not
 such a signal, and an empty pull is a broken fetch rather than an empty
 board, so neither retires anything.
+
+**A host that blocks bursts is drip-fed, not pulled off.** `fetch_host_limits`
+(persisted config, host to page fetches per hour) paces the browser fetch
+fleet-wide: `verdicts.host_paced` counts the hour's content rows for the host
+and defers the fetch, writing nothing, so the next cycle tries again. The
+fetch-failure alert names the host, and adding it to the map is the way to
+resolve that alert; no host is written into code.
 
 **A page fetch that returns nothing leaves a record.** It is a `content` row
 with `status = 'failed'` and no text, and nothing retries that URL inside

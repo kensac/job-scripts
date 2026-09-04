@@ -1636,11 +1636,10 @@ def put_config(key: str, body: ConfigPut, user: AuthedUser = Depends(require_adm
         # Host -> whole number per hour. A host is the netloc as the posting
         # URL carries it; an empty host or a rate below 1 would mean "never
         # fetch", which is a source switch, not a pace.
-        value = body.value
-        bad = not isinstance(value, dict) or any(
-            not k.strip() or type(v) is not int or v < 1 for k, v in value.items()
-        )
-        if bad:
+        hosts = body.value if isinstance(body.value, dict) else None
+        if hosts is None or any(
+            not k.strip() or type(v) is not int or v < 1 for k, v in hosts.items()
+        ):
             raise HTTPException(
                 400,
                 detail={
@@ -1648,7 +1647,7 @@ def put_config(key: str, body: ConfigPut, user: AuthedUser = Depends(require_adm
                     "message": f"{key} takes host names mapped to whole numbers of 1 or more",
                 },
             )
-        body.value = {k.strip().lower(): v for k, v in value.items()}
+        body.value = {k.strip().lower(): v for k, v in hosts.items()}
     elif not isinstance(body.value, expected):
         raise HTTPException(
             400,
