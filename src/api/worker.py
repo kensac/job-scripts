@@ -56,11 +56,40 @@ from api.tasks.runtime import INGEST_INTERVAL_MINUTES  # noqa: E402
 BATCH_POLL_MINUTES = int(os.environ.get("JOBTRACKER_BATCH_POLL_MINUTES", "1"))
 
 
-# Which task kinds this worker claims; lets small fleet hosts (e.g. an rpi)
-# opt out of scrape-heavy work. Default: all kinds.
-WORKER_KINDS = [
-    k.strip() for k in os.environ.get("JOBTRACKER_WORKER_KINDS", "").split(",") if k.strip()
-]
+# Which task kinds this worker claims; lets small fleet hosts (e.g. an rpi, or
+# a 1GB free-tier VM that cannot run chromium) opt out of scrape-heavy work.
+#
+# Two knobs, because they fail in opposite directions and the right one depends
+# on WHY a host is limited:
+#
+#   JOBTRACKER_WORKER_KINDS         allowlist - claim ONLY these
+#   JOBTRACKER_WORKER_EXCLUDE_KINDS denylist  - claim everything EXCEPT these
+#
+# An allowlist fails closed: add a kind next month and a host pinned to an
+# allowlist silently never runs it. That has bitten this fleet twice, which is
+# why kanishk-desktop was capped with concurrency limits instead. A denylist
+# fails open: a new kind runs everywhere by default and only the named ones are
+# excluded. Prefer the denylist for a host limited by hardware, the allowlist
+# for a host deliberately pinned to one job.
+#
+# Both set is not an error and not a precedence fight: the allowlist restricts
+# and the denylist then subtracts, so the result is what both agree on. Order
+# of evaluation cannot change the answer, which is the property that makes it
+# safe to set both without reasoning about which wins.
+def _env_list(name: str) -> list[str]:
+    return [k.strip() for k in os.environ.get(name, "").split(",") if k.strip()]
+
+
+def _kinds_clause(kinds: list[str], exclude: list[str]) -> str:
+    """The WHERE fragment that narrows what this worker will claim."""
+    clause = "AND kind = ANY(%(kinds)s)" if kinds else ""
+    if exclude:
+        clause += " AND NOT (kind = ANY(%(exclude)s))"
+    return clause
+
+
+WORKER_KINDS = _env_list("JOBTRACKER_WORKER_KINDS")
+EXCLUDE_KINDS = _env_list("JOBTRACKER_WORKER_EXCLUDE_KINDS")
 
 
 # Stamped on every claimed task so the admin UI can attribute work (and
@@ -70,7 +99,7 @@ WORKER_NAME = os.environ.get("JOBTRACKER_WORKER_NAME") or socket.gethostname()
 
 
 def _claim_task() -> dict[str, Any] | None:
-    kinds_clause = "AND kind = ANY(%(kinds)s)" if WORKER_KINDS else ""
+    kinds_clause = _kinds_clause(WORKER_KINDS, EXCLUDE_KINDS)
     return db.query_one(
         f"""
         UPDATE tasks SET status = 'running', started_at = now(),
@@ -80,7 +109,7 @@ def _claim_task() -> dict[str, Any] | None:
                     ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED)
         RETURNING id, kind, payload, attempts, worker
         """,
-        {"kinds": WORKER_KINDS, "worker": WORKER_NAME},
+        {"kinds": WORKER_KINDS, "exclude": EXCLUDE_KINDS, "worker": WORKER_NAME},
     )
 
 
@@ -485,7 +514,9 @@ def main() -> None:
     metrics.serve()
     ingest_enabled = os.environ.get("JOBTRACKER_INGEST_SCHEDULER", "1") == "1"
     logger.info(
-        f"Worker started (kinds={WORKER_KINDS or 'all'}, scheduler={'on' if ingest_enabled else 'off'})"
+        f"Worker started (kinds={WORKER_KINDS or 'all'}, "
+        f"excluding={EXCLUDE_KINDS or 'nothing'}, "
+        f"scheduler={'on' if ingest_enabled else 'off'})"
     )
     last_housekeeping = 0.0
     while True:

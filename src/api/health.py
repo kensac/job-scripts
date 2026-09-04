@@ -444,8 +444,9 @@ def _detect_queue() -> list[dict[str, Any]]:
                 "message": (
                     f"{r['name']} has reported idle while {r['pending']} tasks sit pending, the "
                     f"oldest for {r['oldest_minutes']:.0f} minutes ({', '.join(r['kinds'])}). A "
-                    f"claim takes one poll. Either the worker cannot claim, or its kinds "
-                    "allowlist (JOBTRACKER_WORKER_KINDS) excludes everything that is queued."
+                    f"claim takes one poll. Either the worker cannot claim, or its kind "
+                    "filters (JOBTRACKER_WORKER_KINDS allowlist, "
+                    "JOBTRACKER_WORKER_EXCLUDE_KINDS denylist) leave nothing that is queued."
                 ),
                 "detail": {
                     "worker": r["name"],
