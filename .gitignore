@@ -256,3 +256,10 @@ scripts/run_tracker_launch.sh
 *.mbox
 takeout-*.zip
 Takeout/
+
+# Per-machine Claude Code state. The skills under .claude/skills/ are checked
+# in deliberately - they are repository instructions - but these two are
+# machine-local: one holds this checkout's enabled plugins, the other is a
+# scheduler lock.
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
