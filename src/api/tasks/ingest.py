@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from typing import Any
 
 from api import db, metrics, verdicts
@@ -18,18 +19,28 @@ logger = logging.getLogger("jobtracker_worker")
 
 
 async def handle_ingest_source(task_id: int, payload: dict[str, Any]) -> None:
-    from core import catalog
-    from core.pittcsc_simplify import FALLBACK_CUTOFF_TS, fetch_job_postings
+    from core import boards, catalog
+    from core.pittcsc_simplify import FALLBACK_CUTOFF_TS
 
     source = db.query_one("SELECT * FROM sources WHERE name = %s AND active", (payload["source"],))
     if not source:
         raise LookupError("unknown or inactive source")
 
-    postings = await asyncio.to_thread(fetch_job_postings, source["listings_url"])
+    postings = await asyncio.to_thread(
+        boards.fetch_listings, source["listings_url"], source["company"]
+    )
+    fetched = len(postings)
+    if source["title_pattern"]:
+        keep = re.compile(source["title_pattern"], re.IGNORECASE)
+        postings = [p for p in postings if keep.search(p.title)]
     upserted = catalog.upsert_postings(postings, source["name"])
-    metrics.INGEST_JOBS.labels(source["name"], "fetched").inc(len(postings))
+    metrics.INGEST_JOBS.labels(source["name"], "fetched").inc(fetched)
+    metrics.INGEST_JOBS.labels(source["name"], "title_excluded").inc(fetched - len(postings))
     metrics.INGEST_JOBS.labels(source["name"], "upserted").inc(upserted)
-    logger.info(f"Ingest {source['name']}: fetched {len(postings)}, upserted {upserted}")
+    logger.info(
+        f"Ingest {source['name']}: fetched {fetched}, "
+        f"title excluded {fetched - len(postings)}, upserted {upserted}"
+    )
 
     # Ingest caches pages but runs NO AI. It reached here through the task
     # queue, which makes it scheduled work, and the rule for scheduled work is

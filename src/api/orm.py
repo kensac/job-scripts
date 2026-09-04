@@ -237,6 +237,11 @@ class Source(Base):
     description: Mapped[str] = mapped_column(Text, server_default=text("''"))
     active: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
     created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+    # The employer a company board belongs to; NULL for an aggregator, whose
+    # rows name it. Required for the boards that never say (core/boards.py).
+    company: Mapped[str | None] = mapped_column(Text)
+    # Case-insensitive regex a title must match to be ingested; NULL takes all.
+    title_pattern: Mapped[str | None] = mapped_column(Text)
 
 
 class SourceGroup(Base):

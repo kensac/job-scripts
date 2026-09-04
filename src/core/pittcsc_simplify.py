@@ -3,7 +3,7 @@
 The multi-user API in src/api/ replaced everything here except a small set of
 symbols it still imports, which are NOT deprecated and must keep working:
 
-    FALLBACK_CUTOFF_TS, fetch_job_postings   -- ingest (api/worker.py)
+    FALLBACK_CUTOFF_TS, fetch_job_postings   -- ingest, via core/boards.py
     extract_url_content_ex                   -- page fetching (api/fetching.py)
     CLOSED_INSTRUCTIONS, CLEARANCE_INSTRUCTIONS,
     JobClosedResponse, ClearanceRequirementResponse
@@ -1155,79 +1155,6 @@ def fetch_airtable_postings(
     return postings
 
 
-def _strip_html(text: str) -> str:
-    return ftfy.fix_text(re.sub(r"<[^>]+>", "", text)).strip()
-
-
-def _parse_age_to_timestamp(age: str) -> int:
-    match = re.match(r"(\d+)\s*(mo|[hdwy])", age.strip())
-    if not match:
-        return 0
-    amount, unit = int(match.group(1)), match.group(2)
-    days = {"h": amount / 24, "d": amount, "w": amount * 7, "mo": amount * 30, "y": amount * 365}[
-        unit
-    ]
-    return int((datetime.datetime.now() - datetime.timedelta(days=days)).timestamp())
-
-
-def fetch_markdown_postings(
-    url: str, timeout: float = 30.0, max_retries: int = 3
-) -> List[JobPosting]:
-    backoff = ExponentialBackoff()
-    text = ""
-
-    for attempt in range(max_retries + 1):
-        try:
-            response = requests.get(url, timeout=timeout)
-            response.raise_for_status()
-            text = response.text
-            backoff.reset()
-            break
-        except requests.RequestException as exc:
-            if attempt == max_retries:
-                logger.error(
-                    f"Failed to fetch markdown postings after {max_retries + 1} attempts: {exc}"
-                )
-                return []
-            logger.warning(
-                f"Markdown attempt {attempt + 1} failed: {exc}, retrying with backoff..."
-            )
-            backoff.wait()
-
-    postings: List[JobPosting] = []
-    for line in text.splitlines():
-        line = line.strip()
-        if not line.startswith("|"):
-            continue
-        cells = [c.strip() for c in line.strip("|").split("|")]
-        if len(cells) < 5 or set(cells[0]) <= {"-", ":"} or cells[0] == "Company":
-            continue
-
-        posting_match = re.search(r'href="([^"]+)"', cells[-2])
-        if not posting_match:
-            continue
-        raw_url = posting_match.group(1)
-
-        company = _strip_html(cells[0])
-        location = re.sub(r"\s*\+\d+\s*$", "", _strip_html(cells[2]))
-
-        postings.append(
-            JobPosting(
-                company=company,
-                locations=[location] if location else [],
-                title=_strip_html(cells[1]),
-                url=normalize_url(raw_url),
-                terms=[],
-                active=True,
-                date_posted=_parse_age_to_timestamp(cells[-1]),
-                raw_url=raw_url,
-            )
-        )
-
-    logger.info(f"Fetched {len(postings)} job postings from markdown.")
-    return postings
-
-
 def fetch_jobright_postings(url: str, max_retries: int = 3) -> List[JobPosting]:
     """Jobright minisites (jobright.ai/minisites-jobs/...) render their newest
     ~50 jobs server-side in __NEXT_DATA__; hourly cycles accumulate coverage.
@@ -1282,9 +1209,6 @@ def fetch_job_postings(url: str, timeout: float = 10.0, max_retries: int = 3) ->
 
     if "jobright.ai" in urlparse(url).netloc:
         return fetch_jobright_postings(url, max_retries=max_retries)
-
-    if urlparse(url).path.endswith(".md"):
-        return fetch_markdown_postings(url, max_retries=max_retries)
 
     backoff = ExponentialBackoff()
 

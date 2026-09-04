@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from decimal import Decimal
 from typing import Any
 
@@ -233,6 +234,7 @@ def admin_list_sources(user: AuthedUser = Depends(require_admin)):
         "sources": db.query(
             """
             SELECT s.name, s.listings_url, s.description, s.active, s.created_at,
+                   s.company, s.title_pattern,
                    (SELECT COUNT(*) FROM jobs j WHERE j.source = s.name) AS jobs,
                    (SELECT COUNT(*) FROM user_sources us WHERE us.source = s.name) AS subscribers,
                    li.status AS last_ingest_status,
@@ -265,6 +267,33 @@ class SourceBody(BaseModel):
     listings_url: str | None = Field(default=None, max_length=1000)
     description: str | None = Field(default=None, max_length=500)
     active: bool | None = None
+    company: str | None = Field(default=None, max_length=200)
+    title_pattern: str | None = Field(default=None, max_length=500)
+
+
+def _check_source(listings_url: str, company: str | None, title_pattern: str | None) -> None:
+    """The two facts a source row can get wrong silently: a company board on a
+    system that never names the company, and a pattern that ingest cannot
+    compile. Both would surface only as a failed ingest an hour later."""
+    from core import boards
+
+    if boards.kind(listings_url) in boards.NEEDS_COMPANY and not (company or "").strip():
+        raise HTTPException(
+            400,
+            detail={
+                "code": "COMPANY_REQUIRED",
+                "message": f"a {boards.kind(listings_url)} board never names its company; "
+                "set company to the employer it belongs to",
+            },
+        )
+    if title_pattern:
+        try:
+            re.compile(title_pattern, re.IGNORECASE)
+        except re.error as exc:
+            raise HTTPException(
+                400,
+                detail={"code": "BAD_TITLE_PATTERN", "message": f"title_pattern: {exc}"},
+            ) from exc
 
 
 @router.post("/sources")
@@ -273,16 +302,19 @@ def create_source(body: SourceBody, user: AuthedUser = Depends(require_admin)):
         raise HTTPException(
             400, detail={"code": "MISSING_FIELDS", "message": "name and listings_url are required"}
         )
+    _check_source(body.listings_url, body.company, body.title_pattern)
     if db.query_one("SELECT name FROM sources WHERE name = %s", (body.name,)):
         raise HTTPException(409, detail={"code": "DUPLICATE_NAME", "message": "source name exists"})
     return db.query_one(
-        "INSERT INTO sources (name, listings_url, description, active) "
-        "VALUES (%s, %s, %s, %s) RETURNING *",
+        "INSERT INTO sources (name, listings_url, description, active, company, title_pattern) "
+        "VALUES (%s, %s, %s, %s, %s, %s) RETURNING *",
         (
             body.name,
             body.listings_url,
             body.description or "",
             body.active if body.active is not None else True,
+            (body.company or "").strip() or None,
+            (body.title_pattern or "").strip() or None,
         ),
     )
 
@@ -1069,6 +1101,14 @@ def patch_source(name: str, body: SourceBody, user: AuthedUser = Depends(require
     fields = body.model_dump(exclude_unset=True, exclude={"name"})
     if not fields:
         raise HTTPException(400, detail={"code": "EMPTY_PATCH", "message": "no fields to update"})
+    for k in ("company", "title_pattern"):
+        if k in fields:
+            fields[k] = (fields[k] or "").strip() or None
+    current = db.query_one("SELECT * FROM sources WHERE name = %s", (name,))
+    if not current:
+        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown source"})
+    merged = {**current, **fields}
+    _check_source(merged["listings_url"], merged["company"], merged["title_pattern"])
     cols = ", ".join(f"{k} = %({k})s" for k in fields)
     row = db.query_one(
         f"UPDATE sources SET {cols} WHERE name = %(name)s RETURNING *",

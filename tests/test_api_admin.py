@@ -484,3 +484,64 @@ def test_sources_report_when_they_last_produced_a_new_posting(client, admin_head
     # Ingested successfully, produced nothing. Previously indistinguishable.
     assert rows["green-but-dead"]["last_ingest_at"] is not None
     assert rows["green-but-dead"]["last_new_posting_at"] is None
+
+
+def test_a_board_that_never_names_its_company_needs_one_on_the_source(client, admin_headers):
+    """Lever, Ashby and Workday list a company's own openings and never say
+    whose. Without a company on the row every posting would land with an
+    empty company, and the mail matcher has nothing to match against."""
+    lever = {
+        "name": "palantir",
+        "listings_url": "https://api.lever.co/v0/postings/palantir?mode=json",
+    }
+    r = client.post("/v1/admin/sources", json=lever, headers=admin_headers)
+    assert r.status_code == 400
+    assert r.json()["detail"]["code"] == "COMPANY_REQUIRED"
+
+    r = client.post(
+        "/v1/admin/sources",
+        json={**lever, "company": "Palantir", "title_pattern": r"new grad|intern"},
+        headers=admin_headers,
+    )
+    assert r.status_code == 200, r.text
+    row = next(
+        s
+        for s in client.get("/v1/admin/sources", headers=admin_headers).json()["sources"]
+        if s["name"] == "palantir"
+    )
+    assert (row["company"], row["title_pattern"]) == ("Palantir", "new grad|intern")
+
+    # A patch is checked against the merged row: blanking the company on a
+    # Lever board is refused, and an aggregator never needed one.
+    r = client.patch("/v1/admin/sources/palantir", json={"company": " "}, headers=admin_headers)
+    assert r.status_code == 400
+    r = client.post(
+        "/v1/admin/sources",
+        json={
+            "name": "speedy",
+            "listings_url": "https://raw.githubusercontent.com/x/y/main/README.md",
+        },
+        headers=admin_headers,
+    )
+    assert r.status_code == 200, r.text
+
+
+def test_a_title_pattern_that_cannot_compile_is_refused_up_front(client, admin_headers):
+    """Ingest compiles the pattern an hour later; a bad one would surface only
+    as a failed ingest, so the route refuses it while the admin is looking."""
+    body = {
+        "name": "spacex",
+        "listings_url": "https://boards-api.greenhouse.io/v1/boards/spacex/jobs",
+        "title_pattern": "(",
+    }
+    r = client.post("/v1/admin/sources", json=body, headers=admin_headers)
+    assert r.status_code == 400
+    assert r.json()["detail"]["code"] == "BAD_TITLE_PATTERN"
+    r = client.post("/v1/admin/sources", json={**body, "title_pattern": ""}, headers=admin_headers)
+    assert r.status_code == 200, r.text
+    r = client.patch("/v1/admin/sources/spacex", json={"title_pattern": "["}, headers=admin_headers)
+    assert r.status_code == 400
+    r = client.patch(
+        "/v1/admin/sources/spacex", json={"title_pattern": "early career"}, headers=admin_headers
+    )
+    assert r.status_code == 200 and r.json()["title_pattern"] == "early career"
