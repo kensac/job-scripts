@@ -5,7 +5,7 @@ import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from api import criteria, db, events, signals
+from api import criteria, db, events, signals, sorting
 from api.auth import AuthedUser, require_user
 from api.models import UploadRequest, UserJobPatch, UserJobsBulkIds, UserJobsBulkPatch
 from core.urls import normalize_url
@@ -190,6 +190,7 @@ def list_jobs(
 ):
     limit = max(1, min(limit, 1000))
     offset = max(0, offset)
+    sorts = sorting.parse(sort, dir, _SORTABLE, "added_at")
     settings = db.query_one(
         "SELECT bypass_sponsorship_filter, criteria FROM user_settings WHERE user_id = %s",
         (user.id,),
@@ -239,10 +240,8 @@ def list_jobs(
         order = "AND j.id < %(cursor)s\nORDER BY j.id DESC LIMIT %(limit)s"
         params["cursor"] = cursor
     else:
-        sort_col = _SORTABLE.get(sort, "j.created_at")
-        direction = "ASC" if dir == "asc" else "DESC"
         order = (
-            f"ORDER BY {sort_col} {direction} NULLS LAST, j.id DESC "
+            f"ORDER BY {sorting.clause(sorts, _SORTABLE)}, j.id DESC "
             "LIMIT %(limit)s OFFSET %(offset)s"
         )
     sql = _VISIBILITY.format(
@@ -257,6 +256,10 @@ def list_jobs(
         "has_more": has_more,
         "offset": offset,
         "total": total,
+        # The active sort as applied, so the UI renders it without duplicating
+        # the default, and the keys it may ask for.
+        "sorts": sorts,
+        "sortable": sorted(_SORTABLE),
     }
 
 

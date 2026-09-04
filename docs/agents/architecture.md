@@ -332,6 +332,12 @@ Job visibility is a read-time conjunctive predicate, spelled in one place and
 formatted into per-object routes. Never write a fresh "can this user see this"
 predicate.
 
+List endpoints sort through `api.sorting` against a per-endpoint whitelist of
+column expressions: `sort=a,b&dir=asc,desc` is several columns at once, a
+`dir` shorter than `sort` repeats its last value, unknown keys drop rather
+than refuse, and the response echoes `sorts` as applied and `sortable`. A
+sort parameter never reaches SQL as text.
+
 **Route-level authorisation says nothing about object-level authorisation.**
 Owning a parent does not imply owning a child: a nested identifier must be
 checked against the caller, not assumed from the path.
