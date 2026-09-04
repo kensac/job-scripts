@@ -127,6 +127,10 @@ fresh copy:
 - **Provider facts** — one datasheet per provider under `core/providers/`.
 - **Task handlers** — `api/tasks/`, one module per family. The task runtime
   imports nothing from the worker; the worker imports only the handler table.
+- **Listing formats** — `core/boards.py`, one fetcher per board format,
+  chosen by the listings URL. A source is a row, never a code path: a new
+  board in a known format is added on the Sources page, and a new format is
+  one fetcher returning the same `JobPosting` as the rest.
 - **What the mail implies the board should say** — `mail_pipeline.proposals_for`
   and `answer_proposal`. The route that lists proposals and the queue that
   merges them into everything else read the same function; a second spelling
