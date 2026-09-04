@@ -41,6 +41,29 @@ Before concluding from an aggregate, check that the filter producing it does
 not exclude the population in question. A check scoped by the thing it is
 checking can never fail.
 
+## A fix must reach its own population
+
+**Measure after shipping, not only before.** A fix that corrects a rule but
+cannot reach the data the rule already produced reads as done and is not.
+
+Three shapes of this, each invisible from the code alone and each needing a
+production count to see:
+
+- **The rule is fixed for new data only.** A derivation corrected at write time
+  leaves every existing row computed the old way, and nothing recomputes them.
+  Prefer a correction that runs every cycle, only ever moves in the safe
+  direction, and becomes a no-op once the data is right — then the next change
+  to that rule reaches everything automatically.
+- **Two predicates in one module mean different things.** One reads "nothing
+  has looked", its sibling reads "looked and found nothing". Both look correct
+  in isolation, and the docstrings can describe behaviour neither implements.
+- **A field's name and its value disagree.** A counter named for successes may
+  be summing every outcome. Read the assignment, not the name.
+
+After a change lands, count the population it was supposed to affect. If the
+number did not move, the fix did not reach it — regardless of what the tests
+say, because the tests exercise the new path and the old data is not on it.
+
 ## Trusting a signal
 
 **The summary line is not the measurement.** A process's report of itself is
