@@ -403,16 +403,18 @@ def _report_worker_status(current_task_id: int | None) -> None:
         db.execute(
             """
             INSERT INTO worker_status
-                (name, started_at, current_task_id, last_seen, kinds, excluded_kinds)
-            VALUES (%(name)s, %(started)s, %(tid)s, now(), %(kinds)s, %(excluded)s)
+                (name, started_at, current_task_id, last_seen, kinds, excluded_kinds, release)
+            VALUES (%(name)s, %(started)s, %(tid)s, now(), %(kinds)s, %(excluded)s, %(release)s)
             ON CONFLICT (name) DO UPDATE SET
                 started_at = EXCLUDED.started_at,
                 current_task_id = %(tid)s, last_seen = now(),
-                kinds = EXCLUDED.kinds, excluded_kinds = EXCLUDED.excluded_kinds
+                kinds = EXCLUDED.kinds, excluded_kinds = EXCLUDED.excluded_kinds,
+                release = EXCLUDED.release
             """,
             {
                 "name": WORKER_NAME,
                 "started": _PROCESS_STARTED_AT,
+                "release": telemetry.RELEASE,
                 "tid": current_task_id,
                 # Reported rather than inferred: the filters live in this host's
                 # environment, so nothing else can know what this worker refuses.

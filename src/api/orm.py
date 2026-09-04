@@ -636,6 +636,10 @@ class WorkerStatus(Base):
     # it is configured to refuse.
     kinds: Mapped[list[str]] = mapped_column(server_default=text("'{}'"))
     excluded_kinds: Mapped[list[str]] = mapped_column(server_default=text("'{}'"))
+    # The image commit this worker runs (JOBTRACKER_REVISION), so a host that
+    # missed a roll is a query, not a sweep of seven containers. gcp-vps sat
+    # two rolls behind for an hour on 2026-09-04 and nothing said so.
+    release: Mapped[str | None] = mapped_column(Text)
 
 
 class HealthAlert(Base):

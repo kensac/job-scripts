@@ -817,7 +817,7 @@ def list_workers(user: AuthedUser = Depends(require_admin)):
     and its last-24h throughput."""
     rows = db.query(
         """
-        SELECT w.name, w.started_at, w.last_seen, w.current_task_id,
+        SELECT w.name, w.started_at, w.last_seen, w.current_task_id, w.release,
                now() - w.last_seen < interval '90 seconds' AS alive,
                t.kind AS task_kind, t.status AS task_status, t.progress AS task_progress,
                t.started_at AS task_started_at,
@@ -1688,6 +1688,12 @@ _CONFIG_KEYS: dict[str, _Key] = {
     ),
     # Seeded in api.db.
     "admin_stats_cache_seconds": _Key(int, "Seconds GET /admin/stats serves the same answer."),
+    # Read by api.health._detect_fleet.
+    "fleet_roll_minutes": _Key(
+        int,
+        "Minutes a worker may run a different release from the api before it counts as a "
+        "host that did not deploy.",
+    ),
 }
 
 
