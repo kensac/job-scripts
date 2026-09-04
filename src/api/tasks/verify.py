@@ -25,7 +25,7 @@ from api.tasks.runtime import (
 )
 from core.providers.spec import StructuredOutput
 from core.routing import TaskShape, resolve
-from core.store import CONTENT_LATERAL
+from core.store import AI_ELIGIBLE_JOB, CONTENT_LATERAL
 
 logger = logging.getLogger("jobtracker_worker")
 
@@ -292,10 +292,14 @@ async def handle_reverify_open(task_id: int, payload: dict[str, Any]) -> None:
     behind existing verdicts is itself suspect (e.g. verdicts taken before the
     fetcher could tell a redirect from a live page)."""
     if payload.get("full"):
+        # Source-gated like every other sweep. The staleness path below reads
+        # user_jobs and is reachable by construction; this one reads `jobs`
+        # directly, so a full run was the last way an unreachable posting could
+        # still cost money - 504 calls against `internships` in one day.
         rows = db.query(
-            """
+            f"""
             SELECT j.url, j.company, j.title FROM jobs j
-            WHERE j.active AND EXISTS (
+            WHERE j.active AND {AI_ELIGIBLE_JOB.format(job="j")} AND EXISTS (
                 SELECT 1 FROM ai_queries q WHERE q.url = j.url
                   AND q.check_type = 'closed' AND q.status = 'passed')
             ORDER BY j.id
@@ -376,7 +380,7 @@ async def handle_verify_new(task_id: int, payload: dict[str, Any]) -> None:
                      AND c.status IN ('passed', 'rejected')) AS needs_clearance
         FROM jobs j
         {CONTENT_LATERAL.format(url="j.url", columns="input_content")}
-        WHERE j.active AND (
+        WHERE j.active AND {AI_ELIGIBLE_JOB.format(job="j")} AND (
             NOT EXISTS (
                 SELECT 1 FROM ai_queries c WHERE c.url = j.url
                   AND c.check_type = 'closed' AND c.status IN ('passed', 'rejected'))

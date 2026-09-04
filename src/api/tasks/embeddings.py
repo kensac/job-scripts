@@ -16,7 +16,7 @@ from core.embeddings import (
     EMBEDDING_MODEL,
 )
 from core.pricing import estimate_cost_usd
-from core.store import CONTENT_LATERAL
+from core.store import AI_ELIGIBLE_JOB, CONTENT_LATERAL
 
 logger = logging.getLogger("jobtracker_worker")
 
@@ -41,6 +41,16 @@ EMBED_POSTINGS_PER_CYCLE = int(os.environ.get("JOBTRACKER_EMBED_POSTINGS_PER_CYC
 # Postings never embedded, plus postings whose page has been scraped again
 # since they were. Same shape as the requirements sweep, for the same reason.
 #
+# Scoped to postings a person can reach. This sweep started from every url
+# with an ai_queries row, so a job kept being re-read for as long as it
+# existed, whether or not anyone had enabled its board.
+#
+# A url with NO job row stays in, and the LEFT JOIN is what keeps it. This
+# sweep is url-keyed on purpose: a fifth of the corpus is postings whose job
+# row is gone and whose page can never be scraped again, and joining `jobs`
+# to reach the gate would have dropped every one of them silently. An orphan
+# has no source to judge, so the gate has nothing to say about it.
+#
 # The change check runs over the whole corpus every cycle, so it must not
 # detoast it: the first stage takes only the id of each url's current content
 # row, which is an index read, and compares it to the id the stored answer came
@@ -54,7 +64,11 @@ EMBED_POSTINGS_PER_CYCLE = int(os.environ.get("JOBTRACKER_EMBED_POSTINGS_PER_CYC
 _CANDIDATES = f"""
     WITH current_row AS (
         SELECT c.url, q.content_row_id
-        FROM (SELECT DISTINCT a.url FROM ai_queries a) c
+        FROM (
+            SELECT DISTINCT a.url FROM ai_queries a
+            LEFT JOIN jobs j ON j.url = a.url
+            WHERE j.url IS NULL OR {AI_ELIGIBLE_JOB.format(job="j")}
+        ) c
         {CONTENT_LATERAL.format(url="c.url", columns="id AS content_row_id")}
     ),
     todo AS (
