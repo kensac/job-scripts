@@ -1334,6 +1334,73 @@ def switch_sources(body: SourceSwitchBody, user: AuthedUser = Depends(require_ad
     }
 
 
+class PatternPreviewBody(BaseModel):
+    title_pattern: str = Field(max_length=500)
+    # How many example titles to return on each side.
+    samples: int = Field(default=25, ge=0, le=200)
+
+
+@router.post("/sources/{name}/pattern-preview")
+def pattern_preview(name: str, body: PatternPreviewBody, user: AuthedUser = Depends(require_admin)):
+    """What a candidate title pattern would admit, judged against every
+    title this board has listed: the ones in the catalog and the ones the
+    current pattern screened out. Nothing is written. The pattern that goes
+    live is whichever one the admin chooses after seeing both sides."""
+    if not db.query_one("SELECT 1 FROM sources WHERE name = %s", (name,)):
+        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown source"})
+    try:
+        candidate = re.compile(body.title_pattern, re.IGNORECASE)
+    except re.error as exc:
+        raise HTTPException(
+            400, detail={"code": "BAD_TITLE_PATTERN", "message": f"title_pattern: {exc}"}
+        ) from exc
+    titles = db.query(
+        """
+        SELECT url, title, 'catalog' AS held_in FROM jobs WHERE source = %(name)s
+        UNION ALL
+        SELECT url, title, 'screened' FROM screened_postings WHERE source = %(name)s
+        ORDER BY title
+        """,
+        {"name": name},
+    )
+    admitted = [t for t in titles if candidate.search(t["title"])]
+    excluded = [t for t in titles if not candidate.search(t["title"])]
+    # The catalog side is what the LIVE pattern admitted; a candidate that
+    # excludes some of it is narrowing, one that admits screened rows is
+    # widening. Both counts, so the change reads as what it is.
+    return {
+        "source": name,
+        "title_pattern": body.title_pattern,
+        "titles": len(titles),
+        "admitted": len(admitted),
+        "excluded": len(excluded),
+        "would_add": sum(1 for t in admitted if t["held_in"] == "screened"),
+        "would_drop": sum(1 for t in excluded if t["held_in"] == "catalog"),
+        "samples": {
+            "admitted": [t["title"] for t in admitted[: body.samples]],
+            "excluded": [t["title"] for t in excluded[: body.samples]],
+        },
+    }
+
+
+@router.get("/sources/{name}/screened")
+def screened_postings(
+    name: str, limit: int = 100, offset: int = 0, user: AuthedUser = Depends(require_admin)
+):
+    """The postings this board lists that its title pattern did not admit,
+    newest listing first, so an admin can see what a pattern is costing."""
+    limit = max(1, min(limit, 500))
+    total = db.query_one("SELECT count(*) AS n FROM screened_postings WHERE source = %s", (name,))
+    rows = db.query(
+        "SELECT url, company, title, locations, date_posted, pattern, first_seen_at, last_seen_at "
+        "FROM screened_postings WHERE source = %s "
+        "ORDER BY date_posted DESC NULLS LAST, title LIMIT %s OFFSET %s",
+        (name, limit, max(0, offset)),
+    )
+    n = total["n"] if total else 0
+    return {"source": name, "rows": rows, "total": n, "has_more": offset + len(rows) < n}
+
+
 # key -> the type its value must have. Was a bare set of names back when
 # every config value was a bool; the mailbox gate is a list of group names, so
 # the endpoint validates per key rather than assuming one shape for all.
@@ -1346,6 +1413,9 @@ _CONFIG_KEYS: dict[str, type] = {
     # Read by the queue detectors in api.health; seeded in api.db.
     "queue_stall_minutes": int,
     "ingest_backlog_cycles": int,
+    # Days a title-pattern-screened posting stays on record after its board
+    # stops listing it. Read by core.catalog.record_screened.
+    "screened_retention_days": int,
 }
 
 

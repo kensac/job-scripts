@@ -247,6 +247,25 @@ class Source(Base):
     ingest_interval_hours: Mapped[int] = mapped_column(Integer, server_default=text("1"))
 
 
+class ScreenedPosting(Base):
+    """A posting a board listed that the source's title pattern did not admit.
+    Refreshed on every pull, so the record is what the board lists now and
+    for the retention window after; never read by visibility or the checks."""
+
+    __tablename__ = "screened_postings"
+    __table_args__ = (Index("idx_screened_postings_source", "source", "last_seen_at"),)
+
+    url: Mapped[str] = mapped_column(Text, primary_key=True)
+    source: Mapped[str] = mapped_column(Text)
+    company: Mapped[str] = mapped_column(Text, server_default=text("''"))
+    title: Mapped[str] = mapped_column(Text, server_default=text("''"))
+    locations: Mapped[list[str]] = mapped_column(ARRAY(Text), server_default=text("'{}'"))
+    date_posted: Mapped[datetime.datetime | None]
+    pattern: Mapped[str] = mapped_column(Text)
+    first_seen_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+    last_seen_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+
+
 class SourceGroup(Base):
     __tablename__ = "source_groups"
 
