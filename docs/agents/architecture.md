@@ -332,6 +332,18 @@ Job visibility is a read-time conjunctive predicate, spelled in one place and
 formatted into per-object routes. Never write a fresh "can this user see this"
 predicate.
 
+**Location criteria match places, not words.** Every distinct location
+string a board writes is one row of `locations`, classified once by a model
+into country, region, city and remote (`api.tasks.locations`), and a user's
+excluded and included locations are rows of the same table: a country
+criterion takes every city in it, a city criterion that city, a bare Remote
+criterion remote postings. Excluded hides a posting with any matching
+location; included shows only a posting with one, a posting with no location
+staying. There is no word match: a string not yet classified excludes
+nothing for at most the one cycle that classifies it. A wrong row is a PUT to
+/admin/locations, never a deploy; the sweep never re-asks about a string that
+has a row.
+
 List endpoints sort through `api.sorting` against a per-endpoint whitelist of
 column expressions: `sort=a,b&dir=asc,desc` is several columns at once, a
 `dir` shorter than `sort` repeats its last value, unknown keys drop rather

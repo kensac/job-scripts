@@ -7,7 +7,7 @@ and keeps handlers from importing the loop.
 
 from __future__ import annotations
 
-from api.tasks import comp, mail_classify, requirements, verify
+from api.tasks import comp, locations, mail_classify, requirements, verify
 from api.tasks.batches import handle_poll_batches
 from api.tasks.comp import handle_extract_comp
 from api.tasks.content import handle_fetch_missing_content
@@ -21,6 +21,7 @@ from api.tasks.filters import (
 )
 from api.tasks.health import handle_data_health
 from api.tasks.ingest import handle_ingest_source
+from api.tasks.locations import handle_classify_locations
 from api.tasks.mail_classify import handle_classify_mail
 from api.tasks.mail_match import handle_match_mail
 from api.tasks.mail_sync import (
@@ -46,6 +47,7 @@ SHAPES = {
     for shape in (
         comp.COMP_TASK,
         requirements.REQUIREMENTS_TASK,
+        locations.LOCATIONS_TASK,
         verify.VERIFY_TASK,
         mail_classify.BACKFILL_TASK,
         mail_classify.ONGOING_TASK,
@@ -70,6 +72,7 @@ HANDLERS = {
     "reverify_chunk": handle_reverify_chunk,
     "extract_comp": handle_extract_comp,
     "extract_requirements": handle_extract_requirements,
+    "classify_locations": handle_classify_locations,
     "embed_postings": handle_embed_postings,
     "send_digests": handle_send_digests,
     "data_health": handle_data_health,

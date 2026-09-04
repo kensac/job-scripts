@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import hashlib
-import re
 
-from api import ai, db, fetching, ssrf, worker
+from api import ai, fetching, ssrf, worker
 from api import criteria as crit
 from api.tasks import runtime as tasks_runtime
 from core import filters, pricing
@@ -20,41 +19,20 @@ def test_criteria_params_collapses_unset():
     assert params["crit_excl"] == []
 
 
-def test_criteria_params_excludes_lowercased_and_escaped():
-    params = crit.params({"criteria": {"excluded_locations": ["New York (NY)", "  UK  "]}})
+def test_criteria_params_carries_the_strings_as_written():
+    """Places, not patterns: a criterion is looked up as a row of locations by
+    its own text, so it travels trimmed and otherwise untouched."""
+    params = crit.params(
+        {
+            "criteria": {
+                "excluded_locations": ["New York (NY)", "  UK  "],
+                "included_locations": [""],
+            }
+        }
+    )
     assert params["crit_has_excl"] is True
-    assert params["crit_excl"] == [re.escape("new york (ny)"), re.escape("uk")]
-
-
-def test_criteria_word_boundary_matching_through_postgres():
-    params = crit.params({"criteria": {"excluded_locations": ["UK"]}})
-    pattern = params["crit_excl"][0]
-
-    def matches(location: str) -> bool:
-        row = db.query_one(
-            "SELECT lower(%(loc)s) ~ ('\\m' || %(pattern)s || '\\M') AS matched",
-            {"loc": location, "pattern": pattern},
-        )
-        return bool(row["matched"])
-
-    assert matches("London, UK") is True
-    assert matches("Newcastle upon Tyne, UK") is True
-    assert matches("Tukwila, WA") is False
-
-
-def test_criteria_word_boundary_matching_canada():
-    params = crit.params({"criteria": {"excluded_locations": ["Canada"]}})
-    pattern = params["crit_excl"][0]
-
-    def matches(location: str) -> bool:
-        row = db.query_one(
-            "SELECT lower(%(loc)s) ~ ('\\m' || %(pattern)s || '\\M') AS matched",
-            {"loc": location, "pattern": pattern},
-        )
-        return bool(row["matched"])
-
-    assert matches("Toronto, Canada") is True
-    assert matches("Vancouver, BC") is False
+    assert params["crit_excl"] == ["New York (NY)", "UK"]
+    assert params["crit_has_incl"] is False and params["crit_incl"] == []
 
 
 # ---------------------------------------------------------------------------

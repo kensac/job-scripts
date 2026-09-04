@@ -156,13 +156,18 @@ def test_enabled_filter_gates_visibility_disabled_bypasses(client, user_headers)
     assert jid in _job_ids(resp.json())
 
 
-def test_criteria_excluded_locations_word_boundary(client, user_headers):
+def test_criteria_excluded_locations_match_places(client, user_headers):
+    from api.tasks import locations
+
     uid = _uid(user_headers)
     jid_uk = _insert_job("src-d", "https://x.test/d1", locations=["London, UK"])
     jid_wa = _insert_job("src-d", "https://x.test/d2", locations=["Tukwila, WA"])
     _subscribe(uid, "src-d")
     _pass_closed("https://x.test/d1")
     _pass_closed("https://x.test/d2")
+    locations.store("London, UK", locations.LocationExtract(country="GB", city="London"), "t")
+    locations.store("Tukwila, WA", locations.LocationExtract(country="US", region="WA"), "t")
+    locations.store("UK", locations.LocationExtract(country="GB"), "t")
 
     put = client.put(
         "/v1/user/settings", json={"criteria": {"excluded_locations": ["UK"]}}, headers=user_headers

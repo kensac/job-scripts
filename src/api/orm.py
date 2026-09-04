@@ -623,6 +623,34 @@ class AiBatchError(Base):
     created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
 
 
+class Location(Base):
+    """One row per distinct location string a board has written, classified
+    once into a place, so exclusions match places rather than text.
+
+    71,574 location values on active postings collapse to 8,735 distinct
+    strings (2026-09-04), so nearly every posting's location is a lookup here
+    and only a never-seen string costs a model call. A word match on the raw
+    text cannot know that "London" is the UK or "Bengaluru" is India; this
+    can. Rows are data: a wrong classification is fixed by PUT
+    /admin/locations/{text}, not a deploy. country is ISO 3166-1 alpha-2,
+    region the US state or Canadian province code, city in English; all NULL
+    when the string names no single place ("Multiple locations", "US or
+    Canada"), which excludes nothing.
+    """
+
+    __tablename__ = "locations"
+
+    # The column is named text; the attribute is not, because a class attribute
+    # called text would shadow sqlalchemy.text for the columns after it.
+    string: Mapped[str] = mapped_column("text", Text, primary_key=True)
+    country: Mapped[str | None] = mapped_column(Text)
+    region: Mapped[str | None] = mapped_column(Text)
+    city: Mapped[str | None] = mapped_column(Text)
+    remote: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    model: Mapped[str | None] = mapped_column(Text)
+    classified_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+
+
 class WorkerStatus(Base):
     __tablename__ = "worker_status"
 
