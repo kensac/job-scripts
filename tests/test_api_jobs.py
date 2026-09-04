@@ -23,11 +23,12 @@ def _insert_job(
     date_posted=None,
     company: str = "Acme",
     title: str = "Engineer",
+    comp_min=None,
 ) -> int:
     row = db.query_one(
         """
-        INSERT INTO jobs (url, raw_url, company, title, locations, terms, source, active, date_posted, uploaded_by)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        INSERT INTO jobs (url, raw_url, company, title, locations, terms, source, active, date_posted, uploaded_by, comp_min)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING id
         """,
         (
@@ -41,6 +42,7 @@ def _insert_job(
             active,
             date_posted,
             uploaded_by,
+            comp_min,
         ),
     )
     return row["id"]
@@ -173,6 +175,60 @@ def test_criteria_excluded_locations_word_boundary(client, user_headers):
     ids = _job_ids(resp.json())
     assert jid_uk not in ids
     assert jid_wa in ids
+
+
+def test_criteria_comp_min_hides_underpaid_but_keeps_unpriced(client, user_headers):
+    """The 54% of jobs that publish no salary must survive a pay floor.
+
+    A bare `comp_min >= bar` would hide them along with the underpaid ones,
+    which silently removes most of the board rather than filtering it.
+    """
+    uid = _uid(user_headers)
+    low = _insert_job("src-comp", "https://x.test/p1", comp_min=90_000)
+    high = _insert_job("src-comp", "https://x.test/p2", comp_min=200_000)
+    unpriced = _insert_job("src-comp", "https://x.test/p3", comp_min=None)
+    _subscribe(uid, "src-comp")
+    for url in ("https://x.test/p1", "https://x.test/p2", "https://x.test/p3"):
+        _pass_closed(url)
+
+    put = client.put(
+        "/v1/user/settings", json={"criteria": {"comp_min": 150_000}}, headers=user_headers
+    )
+    assert put.status_code == 200
+
+    ids = _job_ids(client.get("/v1/user/jobs", headers=user_headers).json())
+    assert low not in ids
+    assert high in ids
+    assert unpriced in ids
+
+
+def test_criteria_included_locations_is_an_allowlist(client, user_headers):
+    uid = _uid(user_headers)
+    ny = _insert_job("src-incl", "https://x.test/i1", locations=["New York, NY"])
+    austin = _insert_job("src-incl", "https://x.test/i2", locations=["Austin, TX"])
+    _subscribe(uid, "src-incl")
+    _pass_closed("https://x.test/i1")
+    _pass_closed("https://x.test/i2")
+
+    put = client.put(
+        "/v1/user/settings",
+        json={"criteria": {"included_locations": ["NY"]}},
+        headers=user_headers,
+    )
+    assert put.status_code == 200
+
+    ids = _job_ids(client.get("/v1/user/jobs", headers=user_headers).json())
+    assert ny in ids
+    assert austin not in ids
+
+
+def test_criteria_comp_min_rejects_an_extra_digit(client, user_headers):
+    resp = client.put(
+        "/v1/user/settings",
+        json={"criteria": {"comp_min": 150_000_000}},
+        headers=user_headers,
+    )
+    assert resp.status_code == 422
 
 
 def test_criteria_date_posted_after_hides_older(client, user_headers):

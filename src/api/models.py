@@ -5,6 +5,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
+from api.criteria import MAX_PLAUSIBLE_COMP
 from core.requirements import CLEARANCE_LEVELS, DEGREE_LEVELS, MAX_PLAUSIBLE_YOE, in_vocabulary
 
 
@@ -51,6 +52,8 @@ class SourcesPut(BaseModel):
 class Criteria(BaseModel):
     date_posted_after: datetime.date | None = None
     excluded_locations: list[str] = Field(default_factory=list, max_length=100)
+    included_locations: list[str] = Field(default_factory=list, max_length=100)
+    comp_min: int | None = Field(default=None, ge=0, le=MAX_PLAUSIBLE_COMP)
 
 
 def _checked(value: str | None, allowed: tuple[str, ...], field: str) -> str | None:
