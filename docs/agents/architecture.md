@@ -158,6 +158,15 @@ bad HTTP answer.
 Tasks are claimed with row-level locking and skip-locked selection. A worker
 heartbeats while it holds a task.
 
+**A worker claims only kinds its own image has a handler for.** A roll goes
+host by host, so for a minute an old image and a new one share the queue; a
+kind the new image added must wait for a host that can run it rather than be
+claimed and failed as unknown by one that cannot. That happened to the first
+classify_locations task on 2026-09-05, in the seconds before the claiming
+host's own deploy. The registry in `api/tasks/__init__.py` is what the worker
+can do, and the claim reads it; the kind allow and exclude lists narrow from
+there.
+
 **Process alive and handler progressing are different facts.** A liveness
 signal decoupled from the work cannot observe the work stopping; a liveness
 signal coupled to the work stops when the work stops. Neither alone is

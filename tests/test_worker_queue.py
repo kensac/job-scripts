@@ -54,6 +54,18 @@ def test_claim_task_claims_in_id_order():
     assert worker._claim_task()["id"] == second_id
 
 
+def test_claim_task_leaves_a_kind_this_image_cannot_run_for_one_that_can():
+    """A host still on the old image sees the kind a rolled host enqueued.
+    gcp-vps claimed the first classify_locations task on 2026-09-05 and
+    failed it as unknown, seconds before its own deploy."""
+    unknown_id = tasks_runtime.enqueue("kind_from_a_newer_image", {})
+    known_id = tasks_runtime.enqueue("run_filter", {"a": 1})
+    assert worker._claim_task()["id"] == known_id
+    assert worker._claim_task() is None
+    row = db.query_one("SELECT status, attempts FROM tasks WHERE id = %s", (unknown_id,))
+    assert (row["status"], row["attempts"]) == ("pending", 0)
+
+
 # ---------------------------------------------------------------------------
 # reap_stale_tasks
 # ---------------------------------------------------------------------------
@@ -374,12 +386,11 @@ async def test_run_once_marks_failed_when_handler_raises(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_run_once_unknown_kind_fails_with_message():
+async def test_run_once_leaves_an_unknown_kind_pending():
     task_id = tasks_runtime.enqueue("no_such_kind", {})
-    await worker.run_once()
+    assert await worker.run_once() is False
     row = db.query_one("SELECT status, error FROM tasks WHERE id = %s", (task_id,))
-    assert row["status"] == "failed"
-    assert "unknown task kind" in row["error"]
+    assert row["status"] == "pending" and row["error"] is None
 
 
 # ---------------------------------------------------------------------------
