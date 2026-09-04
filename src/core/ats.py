@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import datetime
 import enum
 import html
 import logging
 import re
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import ClassVar
 from urllib.parse import parse_qs, unquote, urlparse
 
@@ -37,6 +38,11 @@ class AtsResult:
     status: Status
     text: str | None = None
     source: str | None = None
+    # The day the board says the posting went up, when the API states one.
+    # Workday's list endpoint says only "Posted 30+ Days Ago" past its window,
+    # but the posting's own JSON carries the start date, so 1,154 undated rows
+    # on 2026-09-04 could be dated from the fetch they were about to get.
+    posted: datetime.date | None = None
 
     @property
     def ok(self) -> bool:
@@ -49,6 +55,13 @@ UNSUPPORTED = AtsResult(Status.UNSUPPORTED)
 def clean_html(raw: str) -> str:
     text = BeautifulSoup(html.unescape(raw or ""), "html.parser").get_text("\n")
     return ftfy.fix_text(re.sub(r"\n{3,}", "\n\n", text)).strip()
+
+
+def _iso_date(text: str | None) -> datetime.date | None:
+    try:
+        return datetime.date.fromisoformat((text or "")[:10])
+    except ValueError:
+        return None
 
 
 def join(*parts: str | None) -> str:
@@ -291,7 +304,7 @@ class Workday(AtsResolver):
             return early
         assert resp is not None
         info = resp.json().get("jobPostingInfo") or {}
-        return self.result(
+        result = self.result(
             join(
                 info.get("title"),
                 info.get("location"),
@@ -299,6 +312,7 @@ class Workday(AtsResolver):
                 clean_html(info.get("jobDescription", "")),
             )
         )
+        return replace(result, posted=_iso_date(info.get("startDate")))
 
 
 class ICims(AtsResolver):
