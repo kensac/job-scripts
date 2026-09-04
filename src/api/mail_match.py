@@ -134,7 +134,31 @@ _NOT_BEFORE_APPLYING = """
 """
 
 
-def _by_company(user_id: int, company: str | None, sent_at) -> Match | None:
+# Employment type as an ATS spells it. This is not a keyword list anyone
+# tuned - it is the vocabulary a job board uses to say "this is an
+# internship", and it is the one attribute of a role that is almost always
+# written out rather than implied.
+_INTERNSHIP_WORDS = frozenset({"intern", "interns", "internship", "internships", "coop"})
+
+
+def _employment_type_contradicts(mail_title: str | None, app_title: str | None) -> bool:
+    """True when one title is an internship and the other plainly is not.
+
+    A veto, not a requirement: it only speaks when BOTH sides carry a title, so
+    the 330 matches where one side is silent are untouched. And it tests a
+    categorical fact rather than similarity - no overlap fraction, no
+    threshold, nothing to tune. Either the word is there or it is not.
+    """
+    if not mail_title or not app_title:
+        return False
+    mail_words = set(re.findall(r"[a-z0-9]+", mail_title.lower()))
+    app_words = set(re.findall(r"[a-z0-9]+", app_title.lower()))
+    return bool(mail_words & _INTERNSHIP_WORDS) != bool(app_words & _INTERNSHIP_WORDS)
+
+
+def _by_company(
+    user_id: int, company: str | None, sent_at, title: str | None = None
+) -> Match | None:
     """One application at that company inside the window, or nothing.
 
     Ambiguity is not resolved here on purpose. Two open applications at the
@@ -175,6 +199,21 @@ def _by_company(user_id: int, company: str | None, sent_at) -> Match | None:
         (user_id, sent_at, sent_at),
     )
     candidates = [r for r in rows if norm_company(r["company_name"]) == key]
+    if len(candidates) == 1 and _employment_type_contradicts(title, candidates[0]["title"]):
+        # This tier matches on the employer alone and never consulted the role
+        # it already had, so an internship rejection attached itself to a
+        # full-time application whenever that was the only one on file.
+        # Measured over the matches this tier produced: 26 of the 429 that
+        # carry a title on both sides contradict this way - a Data Science
+        # internship attached to "Software Development Engineer I", a Business
+        # Intelligence internship to "Data Engineer I".
+        #
+        # Refusing costs the handful where the user recorded an internship
+        # under a shortened title, and this module's own rule is that a wrong
+        # match is worse than no match. A refusal is `unmatched`, which is
+        # re-runnable and visible for adjudication; a wrong attachment is
+        # neither.
+        return None
     if len(candidates) == 1:
         return Match(
             candidates[0]["id"],
@@ -243,7 +282,7 @@ def match_message(
     """
     for finder in (
         lambda: _by_exact_link(user_id, body),
-        lambda: _by_company(user_id, company, sent_at),
+        lambda: _by_company(user_id, company, sent_at, title),
         lambda: _by_company_and_title(user_id, company, title, sent_at),
     ):
         found = finder()
