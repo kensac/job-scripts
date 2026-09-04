@@ -152,6 +152,10 @@ class ResolveApplication(BaseModel):
     title: str | None = None
     stage: str | None = None
     on_board: bool = False
+    # The posting on the board, when there is one. Omitted means the
+    # application has no posting - mail predating the catalog is the normal
+    # case - and a client that wants to open the posting reads presence.
+    job_id: int | None = None
 
 
 class ResolveImplication(BaseModel):
@@ -335,7 +339,7 @@ current_event AS (
 SELECT cm.id AS match_id, cm.application_id, cm.method, cm.confidence, cm.rationale,
        cm.created_at, m.id AS message_id, m.subject, m.from_email, m.sent_at,
        e.kind, e.detail->>'company' AS company, e.detail->>'role_title' AS role_title,
-       a.company_name, a.title, uj.user_id IS NOT NULL AS on_board
+       a.company_name, a.title, a.job_id, uj.user_id IS NOT NULL AS on_board
 FROM current_match cm
 JOIN email_messages m ON m.id = cm.message_id
 JOIN applications a ON a.id = cm.application_id
@@ -350,7 +354,8 @@ ORDER BY m.sent_at DESC NULLS LAST
 
 _ACTIONS_SQL = """
 SELECT ai.id, ai.kind, ai.due_at, ai.application_id, ai.event_id,
-       a.company_name, a.title, uj.user_id IS NOT NULL AS on_board,
+       a.company_name, a.title, a.job_id, uj.status AS board_status,
+       uj.user_id IS NOT NULL AS on_board,
        m.id AS message_id, m.subject, m.from_email, m.sent_at
 FROM action_items ai
 LEFT JOIN applications a ON a.id = ai.application_id
@@ -661,6 +666,7 @@ def _match_items(owner_id: int, events: dict[int, list[dict[str, Any]]]) -> list
                     "title": row["title"],
                     "stage": mail_pipeline.stage_for(own),
                     "on_board": bool(row["on_board"]),
+                    "job_id": row["job_id"],
                 },
                 "match": {
                     "id": row["match_id"],
@@ -681,13 +687,22 @@ def _match_items(owner_id: int, events: dict[int, list[dict[str, Any]]]) -> list
     return items
 
 
-def _proposal_items(owner_id: int) -> list[dict[str, Any]]:
+def _proposal_items(owner_id: int, events: dict[int, list[dict[str, Any]]]) -> list[dict[str, Any]]:
     """Where the mail and the board disagree.
 
     Every one of these moves what the product says, by construction - a
     proposal is only made where the board still says the application is live
     and the mail says it is not. So they all rank at the top, and the reason
     says which way.
+
+    The row carries the SAME message block the other kinds carry - subject,
+    sender, what it was read as - and the stage the application's mail puts
+    it at. It shipped with a bare message id and a null stage, so a person
+    deciding whether an application was rejected saw the company name, the
+    proposed status, and nothing to check either against. Measured
+    2026-09-04: 664 of 1,159 waiting proposals sit on an application with
+    two or more matched messages, and none of that history was reachable
+    from the row.
     """
     items = []
     for row in mail_pipeline.proposals_for(owner_id):
@@ -697,13 +712,24 @@ def _proposal_items(owner_id: int) -> list[dict[str, Any]]:
                 "kind": STATUS_PROPOSAL,
                 "rank": _RANK_MOVES_STAGE,
                 "rank_reason": "the mail and your board disagree about this application",
-                "message": {"id": row["message_id"], "sent_at": row["sent_at"]},
+                "message": {
+                    "id": row["message_id"],
+                    "subject": row["subject"],
+                    "from_email": row["from_email"],
+                    "sent_at": row["sent_at"],
+                    "classified_as": row["kind"],
+                    "extracted_company": row["company"],
+                    "extracted_title": row["role_title"],
+                },
                 "application": {
                     "id": row["application_id"],
                     "company_name": row["company_name"],
                     "title": row["title"],
-                    "stage": None,
+                    "stage": mail_pipeline.stage_for(
+                        events.get(row["application_id"], []), row["board_status"]
+                    ),
                     "on_board": bool(row["board_updatable"]),
+                    "job_id": row["job_id"],
                 },
                 "implies": {
                     "board_status": row["suggested_status"],
@@ -720,7 +746,7 @@ def _proposal_items(owner_id: int) -> list[dict[str, Any]]:
     return items
 
 
-def _action_items(owner_id: int) -> list[dict[str, Any]]:
+def _action_items(owner_id: int, events: dict[int, list[dict[str, Any]]]) -> list[dict[str, Any]]:
     """Open asks, each saying what could ever close it without a person.
 
     All at one rank, deliberately. Marking an ask done closes the ask and moves
@@ -759,8 +785,11 @@ def _action_items(owner_id: int) -> list[dict[str, Any]]:
                     "id": row["application_id"],
                     "company_name": row["company_name"],
                     "title": row["title"],
-                    "stage": None,
+                    "stage": mail_pipeline.stage_for(
+                        events.get(row["application_id"], []), row["board_status"]
+                    ),
                     "on_board": bool(row["on_board"]),
+                    "job_id": row["job_id"],
                 }
                 if row["application_id"]
                 else None,
@@ -793,9 +822,9 @@ def _queue_for(
     if UNCONFIRMED_MATCH in wanted:
         items += _match_items(owner_id, events)
     if STATUS_PROPOSAL in wanted:
-        items += _proposal_items(owner_id)
+        items += _proposal_items(owner_id, events)
     if ACTION_ITEM in wanted:
-        items += _action_items(owner_id)
+        items += _action_items(owner_id, events)
 
     # RANKED BEFORE PAGED. Sorting inside a page would reorder fifty rows and
     # call it a ranking of three and a half thousand - the page would look

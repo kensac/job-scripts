@@ -168,7 +168,9 @@ def proposals_for(user_id: int) -> list[dict[str, Any]]:
                a.id AS application_id, a.company_name, a.title, a.job_id,
                uj.status AS board_status, uj.date_applied,
                uj.user_id IS NOT NULL AS board_updatable,
-               e.id AS event_id, e.kind, m.id AS message_id, m.sent_at
+               e.id AS event_id, e.kind,
+               e.detail->>'company' AS company, e.detail->>'role_title' AS role_title,
+               m.id AS message_id, m.subject, m.from_email, m.sent_at
         FROM applications a
         LEFT JOIN user_jobs uj ON uj.job_id = a.job_id AND uj.user_id = a.user_id
         JOIN current_match cm ON cm.application_id = a.id
