@@ -46,6 +46,17 @@ cannot drift out from under the claim.
 State the scale a constant depends on. A value derived from one user's data
 should say so.
 
+**A value an administrator might want to change lives in `app_config`, not
+in code.** Retry windows, caps, cycle sizes: seed the default in
+`api/db.py` (`_APP_CONFIG_SEED`), declare its type in the admin config route
+(`_CONFIG_KEYS`), read it at the point of use with `db.get_config`, and give
+it a field on the admin config page. A constant in code needs a deploy to
+change; a row changes on the next cycle. The seed is the default, so the
+comment explaining the number goes beside the seed, not beside a literal
+somewhere else. Values that are facts about a system (a provider's page size,
+a word-boundary regex) stay in code; values that are a person's judgment
+about how this deployment should behave do not.
+
 ## Measuring
 
 Price an optimisation before defending it. Count the population before

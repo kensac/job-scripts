@@ -12,6 +12,7 @@ import os
 from typing import Any
 
 from api import db, verdicts
+from api.tasks.board import fetch_retry_interval
 from api.tasks.runtime import SCRAPE_CONCURRENCY, AdaptiveLimiter, _cancelled, _set_progress
 from core.store import SUBSCRIBED_SOURCE
 
@@ -36,10 +37,15 @@ async def handle_fetch_missing_content(task_id: int, payload: dict[str, Any]) ->
           AND NOT EXISTS (
             SELECT 1 FROM ai_queries q WHERE q.url = j.url
               AND q.input_content IS NOT NULL AND length(q.input_content) > 200)
+          -- A fetch that came back empty is not retried inside the window;
+          -- without this the backlog was the same dead postings every cycle.
+          AND NOT EXISTS (
+            SELECT 1 FROM ai_queries q WHERE q.url = j.url AND q.check_type = 'content'
+              AND q.created_at > now() - %s::interval)
         ORDER BY j.date_posted DESC NULLS LAST
         LIMIT %s
         """,
-        (cap,),
+        (fetch_retry_interval(), cap),
     )
     if not rows:
         _set_progress(task_id, 0, 0, "no content gaps")
