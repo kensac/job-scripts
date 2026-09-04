@@ -6,8 +6,6 @@ workers passed. probe_credentials exists only to notice a dead token, so the
 one signal that must stay unambiguous was the one being muddied.
 """
 
-import os
-
 import pytest
 
 from api import oauth
