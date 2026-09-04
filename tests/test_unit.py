@@ -20,19 +20,6 @@ def test_criteria_params_collapses_unset():
     assert params["crit_excl"] == []
 
 
-def test_criteria_params_collapses_new_criteria_unset():
-    params = crit.params(None)
-    assert params["crit_has_incl"] is False
-    assert params["crit_incl"] == []
-    assert params["crit_comp_min"] is None
-
-
-def test_criteria_params_includes_lowercased_and_escaped():
-    params = crit.params({"criteria": {"included_locations": ["New York (NY)", "  Remote  "]}})
-    assert params["crit_has_incl"] is True
-    assert params["crit_incl"] == [re.escape("new york (ny)"), re.escape("remote")]
-
-
 def test_criteria_params_excludes_lowercased_and_escaped():
     params = crit.params({"criteria": {"excluded_locations": ["New York (NY)", "  UK  "]}})
     assert params["crit_has_excl"] is True

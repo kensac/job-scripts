@@ -14227,27 +14227,6 @@
             "type": "array",
             "maxItems": 100,
             "title": "Excluded Locations"
-          },
-          "included_locations": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "maxItems": 100,
-            "title": "Included Locations"
-          },
-          "comp_min": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "maximum": 9.223372036854776e+18,
-                "minimum": 0.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Comp Min"
           }
         },
         "type": "object",
