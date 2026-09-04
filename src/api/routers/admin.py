@@ -241,37 +241,55 @@ def resolve_source_request(
 def admin_list_sources(user: AuthedUser = Depends(require_admin)):
     from core import boards
 
+    # Each fact is aggregated once over its table and joined, rather than
+    # computed per source in a correlated subquery. At 751 sources the
+    # per-row form ran five subplans and a lateral per row and took 890 ms
+    # on production (EXPLAIN ANALYZE, 2026-09-04); this shape is one pass
+    # over jobs, one over user_sources, one over source_groups and one
+    # DISTINCT ON over the ingest tasks.
     rows = db.query(
         """
-            SELECT s.name, s.listings_url, s.description, s.active, s.created_at,
-                   s.company, s.title_pattern, s.ingest_interval_hours,
-                   -- Bundle membership per row, so grouping the list needs no
-                   -- client-side join of 389 rows against every bundle.
-                   COALESCE((SELECT array_agg(g.name ORDER BY g.name) FROM source_groups g
-                             WHERE s.name = ANY(g.members)), '{}') AS groups,
-                   (SELECT COUNT(*) FROM jobs j WHERE j.source = s.name) AS jobs,
-                   (SELECT COUNT(*) FROM user_sources us WHERE us.source = s.name) AS subscribers,
-                   li.status AS last_ingest_status,
-                   li.finished_at AS last_ingest_at,
-                   li.error AS last_ingest_error,
-                   -- The number that retires a source, and the only one that
-                   -- can. last_ingest_at says the fetch worked; this says the
-                   -- fetch found anything we had not already seen. They
-                   -- diverge, and the gap IS the signal: fulltime_ouckah has
-                   -- 215 successful ingests and has produced no new posting
-                   -- since the catalog was reseeded, reporting green every
-                   -- hour. Six configured sources have never produced one at
-                   -- all. Nothing in this response could previously say so.
-                   (SELECT MAX(j.created_at) FROM jobs j WHERE j.source = s.name)
-                       AS last_new_posting_at
-            FROM sources s
-            LEFT JOIN LATERAL (
-                SELECT status, finished_at, error FROM tasks
-                WHERE kind = 'ingest_source' AND payload->>'source' = s.name
-                ORDER BY id DESC LIMIT 1
-            ) li ON TRUE
-            ORDER BY s.active DESC, s.name
-            """
+        WITH catalog AS (
+            SELECT source, COUNT(*) AS jobs, MAX(created_at) AS last_new_posting_at
+            FROM jobs GROUP BY source
+        ),
+        subscribers AS (
+            SELECT source, COUNT(*) AS subscribers FROM user_sources GROUP BY source
+        ),
+        bundles AS (
+            SELECT m AS source, array_agg(g.name ORDER BY g.name) AS groups
+            FROM source_groups g, unnest(g.members) AS m GROUP BY m
+        ),
+        last_ingest AS (
+            SELECT DISTINCT ON (payload->>'source')
+                   payload->>'source' AS source, status, finished_at, error
+            FROM tasks WHERE kind = 'ingest_source'
+            ORDER BY payload->>'source', id DESC
+        )
+        SELECT s.name, s.listings_url, s.description, s.active, s.created_at,
+               s.company, s.title_pattern, s.ingest_interval_hours,
+               -- Bundle membership per row, so grouping the list needs no
+               -- client-side join of every row against every bundle.
+               COALESCE(b.groups, '{}') AS groups,
+               COALESCE(c.jobs, 0) AS jobs,
+               COALESCE(u.subscribers, 0) AS subscribers,
+               li.status AS last_ingest_status,
+               li.finished_at AS last_ingest_at,
+               li.error AS last_ingest_error,
+               -- The number that retires a source, and the only one that
+               -- can. last_ingest_at says the fetch worked; this says the
+               -- fetch found anything we had not already seen. They
+               -- diverge, and the gap IS the signal: fulltime_ouckah had
+               -- 215 successful ingests and no new posting since the catalog
+               -- was reseeded, reporting green every hour.
+               c.last_new_posting_at
+        FROM sources s
+        LEFT JOIN catalog c ON c.source = s.name
+        LEFT JOIN subscribers u ON u.source = s.name
+        LEFT JOIN bundles b ON b.source = s.name
+        LEFT JOIN last_ingest li ON li.source = s.name
+        ORDER BY s.active DESC, s.name
+        """
     )
     # The format is read off the URL, never stored, so it cannot drift from
     # what ingest will actually do with the row. This is the top-level
@@ -802,26 +820,49 @@ def ingest_summary(hours: int = 24, user: AuthedUser = Depends(require_admin)):
     is visible here, which last_new_posting_at alone cannot show for a
     mirror."""
     hours = max(1, min(hours, SUMMARY_MAX_HOURS))
+    # Same shape as the sources list: one pass per table, joined, instead of
+    # a subquery per source (642 ms on production at 751 sources before).
     rows = db.query(
         """
+        WITH pulls AS (
+            SELECT payload->>'source' AS source,
+                   COUNT(*) AS pulls,
+                   COUNT(*) FILTER (WHERE status = 'failed') AS failed_pulls,
+                   COALESCE(SUM((progress->>'fetched')::int), 0) AS fetched,
+                   COALESCE(SUM((progress->>'kept')::int), 0) AS kept,
+                   COALESCE(SUM((progress->>'cached')::int), 0) AS cached,
+                   COALESCE(SUM((progress->>'fetch_failed')::int), 0) AS fetch_failed,
+                   COALESCE(SUM((progress->>'gone')::int), 0) AS gone,
+                   MAX(finished_at) AS last_pull_at
+            FROM tasks
+            WHERE kind = 'ingest_source' AND status IN ('done', 'failed')
+              AND finished_at > now() - make_interval(hours => %(hours)s)
+            GROUP BY 1
+        ),
+        fresh AS (
+            SELECT source, COUNT(*) AS new_jobs FROM jobs
+            WHERE created_at > now() - make_interval(hours => %(hours)s)
+            GROUP BY source
+        ),
+        bundles AS (
+            SELECT m AS source, array_agg(g.name ORDER BY g.name) AS groups
+            FROM source_groups g, unnest(g.members) AS m GROUP BY m
+        )
         SELECT s.name, s.active, s.company, s.ingest_interval_hours,
-               COALESCE((SELECT array_agg(g.name ORDER BY g.name) FROM source_groups g
-                         WHERE s.name = ANY(g.members)), '{}') AS groups,
-               COUNT(t.id) AS pulls,
-               COUNT(t.id) FILTER (WHERE t.status = 'failed') AS failed_pulls,
-               COALESCE(SUM((t.progress->>'fetched')::int), 0) AS fetched,
-               COALESCE(SUM((t.progress->>'kept')::int), 0) AS kept,
-               COALESCE(SUM((t.progress->>'cached')::int), 0) AS cached,
-               COALESCE(SUM((t.progress->>'fetch_failed')::int), 0) AS fetch_failed,
-               COALESCE(SUM((t.progress->>'gone')::int), 0) AS gone,
-               MAX(t.finished_at) AS last_pull_at,
-               (SELECT COUNT(*) FROM jobs j WHERE j.source = s.name
-               AND j.created_at > now() - make_interval(hours => %(hours)s)) AS new_jobs
+               COALESCE(b.groups, '{}') AS groups,
+               COALESCE(p.pulls, 0) AS pulls,
+               COALESCE(p.failed_pulls, 0) AS failed_pulls,
+               COALESCE(p.fetched, 0) AS fetched,
+               COALESCE(p.kept, 0) AS kept,
+               COALESCE(p.cached, 0) AS cached,
+               COALESCE(p.fetch_failed, 0) AS fetch_failed,
+               COALESCE(p.gone, 0) AS gone,
+               p.last_pull_at,
+               COALESCE(f.new_jobs, 0) AS new_jobs
         FROM sources s
-        LEFT JOIN tasks t ON t.kind = 'ingest_source' AND t.payload->>'source' = s.name
-             AND t.status IN ('done', 'failed')
-             AND t.finished_at > now() - make_interval(hours => %(hours)s)
-        GROUP BY s.name, s.active, s.company, s.ingest_interval_hours
+        LEFT JOIN pulls p ON p.source = s.name
+        LEFT JOIN fresh f ON f.source = s.name
+        LEFT JOIN bundles b ON b.source = s.name
         ORDER BY new_jobs DESC, s.name
         """,
         {"hours": hours},
