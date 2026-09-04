@@ -25,7 +25,6 @@ from api.routers import (
     users,
 )
 
-
 # uvicorn configures its own loggers and leaves the root at WARNING, so the
 # service's INFO records, the telemetry startup line among them, were dropped
 # before any handler saw them; the api looked uninstrumented in its own logs
