@@ -5,7 +5,7 @@ import os
 import re
 import time
 from decimal import Decimal
-from typing import Any
+from typing import Any, NamedTuple
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -1626,48 +1626,81 @@ def screened_postings(
     return {"source": name, "rows": rows, "total": n, "has_more": offset + len(rows) < n}
 
 
-# key -> the type its value must have. Was a bare set of names back when
-# every config value was a bool; the mailbox gate is a list of group names, so
-# the endpoint validates per key rather than assuming one shape for all.
-_CONFIG_KEYS: dict[str, type] = {
-    "signups_enabled": bool,
-    "gmail_connect_groups": list,
-    # Hours a posting whose page fetch came back empty waits before any ingest
-    # or backfill tries it again. Read by api.tasks.board.fetch_retry_interval.
-    "fetch_retry_after_hours": int,
-    # Read by the queue detectors in api.health; seeded in api.db.
-    "queue_stall_minutes": int,
-    "ingest_backlog_cycles": int,
-    # Days a title-pattern-screened posting stays on record after its board
-    # stops listing it. Read by core.catalog.record_listings.
-    "screened_retention_days": int,
-    # Hours a still-running batch may lag its finished siblings before the
-    # task collects those and parks again on it. Read by api.tasks.batches.
-    "batch_straggler_hours": int,
-    # Host -> page fetches per hour, fleet-wide. A host that blocks bursts is
-    # drip-fed at this rate instead of being pulled off; the fetch-failure
-    # alert names the host so an admin can add it from there. Read by
-    # api.verdicts.host_paced.
-    "fetch_host_limits": dict,
-    # Which engine fetches a posting page after the ATS resolvers decline;
-    # one of _CONFIG_CHOICES. Read by api.verdicts.refresh_content.
-    "fetch_engine": str,
-    # Text-length gate for the browserless engine; api.fetching.fetch_static.
-    "static_fetch_min_chars": int,
-    # Seconds GET /admin/stats serves a cached answer. Seeded in api.db.
-    "admin_stats_cache_seconds": int,
-}
+class _Key(NamedTuple):
+    """One tunable: the type its value must have, what it means, and the
+    values a string key accepts. Served by GET /admin/config, so the admin
+    page renders any key from here and a new tunable is one entry, not one
+    entry here and one in the frontend. The comments name who reads it."""
 
-# A string key takes exactly one of these; the message names them.
-_CONFIG_CHOICES: dict[str, tuple[str, ...]] = {
-    "fetch_engine": ("chromium", "static_first"),
+    type: type
+    help: str
+    choices: tuple[str, ...] = ()
+
+
+_CONFIG_KEYS: dict[str, _Key] = {
+    "signups_enabled": _Key(bool, "Whether new accounts can be created."),
+    "gmail_connect_groups": _Key(list, "Authentik groups whose members may connect a mailbox."),
+    # Read by api.tasks.board.fetch_retry_interval.
+    "fetch_retry_after_hours": _Key(
+        int,
+        "Hours a posting whose page fetch came back empty waits before any "
+        "ingest or backfill tries it again.",
+    ),
+    # Read by the queue detectors in api.health; seeded in api.db.
+    "queue_stall_minutes": _Key(
+        int,
+        "Minutes an idle worker may sit beside pending work before the queue counts as stalled.",
+    ),
+    "ingest_backlog_cycles": _Key(
+        int, "Pending ingests older than this many hourly cycles mean the fleet is behind."
+    ),
+    # Read by core.catalog.record_listings.
+    "screened_retention_days": _Key(
+        int,
+        "Days a posting a title pattern screened out stays on record after its "
+        "board stops listing it.",
+    ),
+    # Read by api.tasks.batches.
+    "batch_straggler_hours": _Key(
+        int,
+        "Hours a still-running provider batch may lag its finished siblings "
+        "before the task collects those and parks again on it.",
+    ),
+    # Read by api.verdicts.host_paced.
+    "fetch_host_limits": _Key(
+        dict,
+        "Host to page fetches per hour, fleet-wide. A host that blocks bursts is "
+        "drip-fed at this rate instead of being pulled off; the fetch-failure "
+        "alert names the host.",
+    ),
+    # Read by api.verdicts.refresh_content.
+    "fetch_engine": _Key(
+        str,
+        "Which engine fetches a posting page after the ATS resolvers decline. "
+        "static_first tries a browserless fetch and falls back to the browser "
+        "unless the page came back whole; chromium goes straight to the browser.",
+        ("chromium", "static_first"),
+    ),
+    # Read by api.fetching.fetch_static.
+    "static_fetch_min_chars": _Key(
+        int,
+        "Characters of text a browserless fetch must return to be served instead of the browser.",
+    ),
+    # Seeded in api.db.
+    "admin_stats_cache_seconds": _Key(int, "Seconds GET /admin/stats serves the same answer."),
 }
 
 
 @router.get("/config")
 def get_config(user: AuthedUser = Depends(require_admin)):
     rows = db.query("SELECT key, value FROM app_config ORDER BY key")
-    return {"config": {r["key"]: r["value"] for r in rows}}
+    return {
+        "config": {r["key"]: r["value"] for r in rows},
+        "keys": {
+            key: {"type": spec.type.__name__, "help": spec.help, "choices": list(spec.choices)}
+            for key, spec in _CONFIG_KEYS.items()
+        },
+    }
 
 
 class ConfigPut(BaseModel):
@@ -1676,8 +1709,8 @@ class ConfigPut(BaseModel):
 
 @router.put("/config/{key}")
 def put_config(key: str, body: ConfigPut, user: AuthedUser = Depends(require_admin)):
-    expected = _CONFIG_KEYS.get(key)
-    if expected is None:
+    spec = _CONFIG_KEYS.get(key)
+    if spec is None:
         raise HTTPException(
             400,
             detail={"code": "UNKNOWN_KEY", "message": f"key must be one of {sorted(_CONFIG_KEYS)}"},
@@ -1685,6 +1718,7 @@ def put_config(key: str, body: ConfigPut, user: AuthedUser = Depends(require_adm
     # bool is an int to isinstance, so an int key checks the exact type and
     # refuses zero and below: a retry window of 0 hours is the hourly
     # hammering this key exists to stop.
+    expected = spec.type
     if expected is int:
         if type(body.value) is not int or body.value < 1:
             raise HTTPException(
@@ -1695,7 +1729,7 @@ def put_config(key: str, body: ConfigPut, user: AuthedUser = Depends(require_adm
                 },
             )
     elif expected is str:
-        choices = _CONFIG_CHOICES.get(key, ())
+        choices = spec.choices
         if not isinstance(body.value, str) or body.value not in choices:
             raise HTTPException(
                 400,
