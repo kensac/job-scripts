@@ -53,6 +53,22 @@ what you did not verify.
 A caveat that lives only in a side conversation does not exist. Put it in the
 report, because the report is the record.
 
+## Attribution
+
+**Nothing in this repository names an AI assistant.** No model or tool name, no
+"generated with", no `Co-Authored-By` trailer, no "as an AI" aside — not in
+commit messages, PR titles or bodies, code comments, or documentation. The work
+is the author's; the tooling is not part of the record.
+
+**This needs checking, not remembering, because of how it reaches history.** A
+squash merge uses the PR BODY as the commit message, so anything written in a
+description ships permanently even though nobody typed it into a commit. Scrub
+the body before merging, not after — a merged commit message is not
+straightforward to change, and rewriting shared history to remove it is worse
+than the problem.
+
+Check it on any PR you did not write yourself before you merge it.
+
 ## Correcting yourself
 
 When a measurement contradicts something you said, say so plainly and continue.

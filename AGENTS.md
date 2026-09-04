@@ -15,7 +15,12 @@ These are instructions, not history. Follow them.
 3. **Before asserting what a system does, open the thing that does it.** Not
    the documentation about it, not your own earlier finding, not a summary.
    This applies hardest when the description is yours.
-4. **Never attribute an AI assistant in commits, PR bodies, or code comments.**
+4. **Never attribute an AI assistant anywhere it is written down.** No tool or
+   model name, no "generated with", no `Co-Authored-By` trailer, no "as an AI"
+   aside — in commit messages, PR titles and bodies, code comments, docs, or
+   anything else that lands in the repository. See
+   [working-agreement.md](docs/agents/working-agreement.md) for why this needs
+   checking rather than remembering.
 5. **The production database is read-only.** SELECT and EXPLAIN only, unless
    explicitly authorised for a specific operation.
 6. **Never send an authenticated request to the production API.** Any
