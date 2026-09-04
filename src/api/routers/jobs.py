@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 from api import criteria, db, events, signals
 from api.auth import AuthedUser, require_user
-from api.models import UploadRequest, UserJobPatch
+from api.models import UploadRequest, UserJobPatch, UserJobsBulkIds, UserJobsBulkPatch
 from core.urls import normalize_url
 
 router = APIRouter()
@@ -260,26 +260,32 @@ def list_jobs(
     }
 
 
-@router.patch("/user/jobs/{job_id}")
-def patch_job(job_id: int, body: UserJobPatch, user: AuthedUser = Depends(require_user)):
-    # Pinning an unsubscribed job by patching it is a deliberate feature (the
-    # "watching" case). But a user_jobs row IS a visibility grant - _VISIBILITY
-    # trusts `uj.user_id IS NOT NULL` unconditionally - so an unrestricted pin
-    # launders around every other gate: pin, then read the job's cached page
-    # through /detail. The public catalog is fine to pin; another user's
-    # private upload is not, and that is the only distinction that matters.
-    owner = db.query_one("SELECT uploaded_by FROM jobs WHERE id = %s", (job_id,))
-    if not owner or (owner["uploaded_by"] is not None and owner["uploaded_by"] != user.id):
-        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown job"})
-    fields = body.model_dump(exclude_unset=True)
-    if not fields:
-        raise HTTPException(400, detail={"code": "EMPTY_PATCH", "message": "no fields to update"})
+def _touchable(user: AuthedUser, job_ids: list[int]) -> set[int]:
+    """The ids this user may write a board row for.
+
+    Pinning an unsubscribed job by patching it is a deliberate feature (the
+    "watching" case). But a user_jobs row IS a visibility grant - _VISIBILITY
+    trusts `uj.user_id IS NOT NULL` unconditionally - so an unrestricted pin
+    launders around every other gate: pin, then read the job's cached page
+    through /detail. The public catalog is fine to pin; another user's
+    private upload is not, and that is the only distinction that matters.
+    """
+    rows = db.query(
+        "SELECT id FROM jobs WHERE id = ANY(%s) AND (uploaded_by IS NULL OR uploaded_by = %s)",
+        (job_ids, user.id),
+    )
+    return {r["id"] for r in rows}
+
+
+def _write_board_row(user_id: int, job_id: int, patch: dict) -> dict:
+    """Applies one patch to one board row; returns what it filled in itself."""
+    fields = dict(patch)
     autofilled = {}
     existing = None
     if "status" in fields or "date_applied" not in fields:
         existing = db.query_one(
             "SELECT status, date_applied FROM user_jobs WHERE user_id = %s AND job_id = %s",
-            (user.id, job_id),
+            (user_id, job_id),
         )
     # Setting any real status implies the user acted on the job; stamp
     # date_applied once so they never have to fill it by hand.
@@ -296,7 +302,7 @@ def patch_job(job_id: int, body: UserJobPatch, user: AuthedUser = Depends(requir
             db.execute(
                 "INSERT INTO user_job_history (user_id, job_id, old_status, new_status) "
                 "VALUES (%s, %s, %s, %s)",
-                (user.id, job_id, old_status, fields["status"]),
+                (user_id, job_id, old_status, fields["status"]),
             )
     cols = ", ".join(f"{k} = %({k})s" for k in fields)
     insert_cols = ", ".join(fields)
@@ -307,9 +313,45 @@ def patch_job(job_id: int, body: UserJobPatch, user: AuthedUser = Depends(requir
         VALUES (%(uid)s, %(jid)s, {insert_vals})
         ON CONFLICT (user_id, job_id) DO UPDATE SET {cols}, updated_at = now()
         """,
-        {"uid": user.id, "jid": job_id, **fields},
+        {"uid": user_id, "jid": job_id, **fields},
     )
-    return {"ok": True, "autofilled": autofilled}
+    return autofilled
+
+
+def _patch_fields(body: UserJobPatch) -> dict:
+    fields = body.model_dump(exclude_unset=True)
+    if not fields:
+        raise HTTPException(400, detail={"code": "EMPTY_PATCH", "message": "no fields to update"})
+    return fields
+
+
+@router.patch("/user/jobs/{job_id}")
+def patch_job(job_id: int, body: UserJobPatch, user: AuthedUser = Depends(require_user)):
+    if job_id not in _touchable(user, [job_id]):
+        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown job"})
+    fields = _patch_fields(body)
+    return {"ok": True, "autofilled": _write_board_row(user.id, job_id, fields)}
+
+
+@router.patch("/user/jobs")
+def patch_jobs(body: UserJobsBulkPatch, user: AuthedUser = Depends(require_user)):
+    """One patch across a selection, so a 6,000-row selection is one request
+    rather than 6,000. Ids the caller may not touch are skipped and named,
+    not refused whole: a selection made from the board can include a row that
+    vanished or was never theirs, and failing everything for it would send
+    the page back to one request per row."""
+    fields = _patch_fields(body.patch)
+    allowed = _touchable(user, body.job_ids)
+    updated = 0
+    for job_id in body.job_ids:
+        if job_id in allowed:
+            _write_board_row(user.id, job_id, fields)
+            updated += 1
+    return {
+        "ok": True,
+        "updated": updated,
+        "skipped": [j for j in body.job_ids if j not in allowed],
+    }
 
 
 @router.get("/user/jobs/{job_id}/detail")
@@ -514,6 +556,16 @@ def delete_user_job(job_id: int, user: AuthedUser = Depends(require_user)):
     permanent alternative."""
     db.execute("DELETE FROM user_jobs WHERE user_id = %s AND job_id = %s", (user.id, job_id))
     return {"ok": True}
+
+
+@router.delete("/user/jobs")
+def delete_user_jobs(body: UserJobsBulkIds, user: AuthedUser = Depends(require_user)):
+    """The selection form of the delete above: the caller's own rows only,
+    one statement, count returned."""
+    deleted = db.execute_count(
+        "DELETE FROM user_jobs WHERE user_id = %s AND job_id = ANY(%s)", (user.id, body.job_ids)
+    )
+    return {"ok": True, "deleted": deleted}
 
 
 @router.post("/uploads")
