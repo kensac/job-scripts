@@ -18,6 +18,14 @@ HTTP_DURATION = Histogram(
     "HTTP request duration",
     ["method", "path"],
 )
+# A telemetry layer that never raises must count how often it silently
+# failed, or "no events from oci" cannot be told apart from "oci is fine".
+TELEMETRY_FAILURES = Counter(
+    "jobtracker_telemetry_failures_total",
+    "Telemetry records that could not be sent",
+    ["kind"],
+)
+
 TASKS_PROCESSED = Counter(
     "jobtracker_worker_tasks_total",
     "Worker tasks processed",

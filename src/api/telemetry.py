@@ -19,6 +19,8 @@ import os
 import socket
 from typing import Any
 
+from api import metrics
+
 logger = logging.getLogger("jobtracker_telemetry")
 
 SERVICE = "service"
@@ -36,18 +38,24 @@ def init() -> None:
     if _client is not None:
         return
     key = os.environ.get("POSTHOG_API_KEY")
+    # Said once at startup either way. A layer that never raises and is a
+    # no-op without a key has two silent modes that look identical from
+    # PostHog's side; the log line is what tells "not configured" from
+    # "configured and broken", and it is the line a diagnosis starts from.
     if not key:
+        logger.warning(f"telemetry: DISABLED (POSTHOG_API_KEY unset); release={RELEASE}")
         return
     from posthog import Posthog
 
+    host = os.environ.get("POSTHOG_HOST", "https://us.posthog.com")
     _client = Posthog(
         project_api_key=key,
-        host=os.environ.get("POSTHOG_HOST", "https://us.posthog.com"),
+        host=host,
         # Long-running processes: the default batching thread is right, and
         # shutdown() flushes what it holds.
         enable_exception_autocapture=False,
     )
-    logger.info("telemetry: PostHog client ready")
+    logger.info(f"telemetry: enabled host={host} release={RELEASE} process_host={HOST}")
 
 
 def shutdown() -> None:
@@ -72,6 +80,7 @@ def capture(
     try:
         _client.capture(distinct_id=distinct_id, event=event, properties=_props(properties))
     except Exception:
+        metrics.TELEMETRY_FAILURES.labels("event").inc()
         logger.exception(f"telemetry: capture({event}) failed")
 
 
@@ -83,4 +92,5 @@ def capture_exception(
     try:
         _client.capture_exception(exc, distinct_id=distinct_id, properties=_props(properties))
     except Exception:
+        metrics.TELEMETRY_FAILURES.labels("exception").inc()
         logger.exception("telemetry: capture_exception failed")
