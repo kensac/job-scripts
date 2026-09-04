@@ -139,6 +139,27 @@ def _decided_urls(urls: list[str], prompt_hash: str, model: str) -> set:
     return {r["url"] for r in rows}
 
 
+def _in_flight_urls(user_id: int) -> set:
+    """URLs a live filter chunk of an earlier run still holds for this user.
+
+    A run that splits while those chunks wait at the provider must not
+    submit them again. A batch yields nothing until it is terminal, so a
+    chunk parked on a straggler holds every url in it undecided for hours,
+    and _decided_urls cannot see them; re-selecting would pay twice for the
+    same verdicts. Excluding them is what lets a new run start while an old
+    one is still parked: it judges only what arrived since.
+    """
+    rows = db.query(
+        "SELECT DISTINCT j->>'url' AS url FROM tasks t, "
+        "jsonb_array_elements(t.payload->'jobs') AS j "
+        "WHERE t.kind IN ('run_filter_chunk', 'run_filter_batch_chunk') "
+        "AND t.status IN ('pending', 'running', 'awaiting_batch') "
+        "AND (t.payload->>'user_id')::bigint = %s",
+        (user_id,),
+    )
+    return {r["url"] for r in rows}
+
+
 def _content_ready_urls(urls: list[str]) -> set:
     if not urls:
         return set()

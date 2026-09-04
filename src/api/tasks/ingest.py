@@ -118,7 +118,21 @@ async def handle_ingest_source(task_id: int, payload: dict[str, Any]) -> None:
         },
     )
 
-    cycle = payload.get("cycle", "manual")
+    schedule_filter_runs(payload.get("cycle", "manual"))
+
+
+def schedule_filter_runs(cycle: str) -> None:
+    """One filter run per entitled user per ingest cycle.
+
+    A run that has not split yet (pending or running) blocks the next: two
+    splitters would select the same jobs. A run that HAS split and is waiting
+    on its chunks does not block, because the splitter excludes every url a
+    live chunk holds (board._in_flight_urls) and so judges only what arrived
+    since. Before that exclusion the guard covered 'waiting' too, and one
+    chunk parked on a straggler batch kept a user's new postings unjudged
+    until the provider finished it - 6,226 postings for 14 hours on
+    2026-09-04.
+    """
     users = db.query(
         """
         SELECT DISTINCT u.id FROM users u
@@ -130,13 +144,13 @@ async def handle_ingest_source(task_id: int, payload: dict[str, Any]) -> None:
         """
     )
     for u in users:
-        active = db.query_one(
+        splitting = db.query_one(
             "SELECT 1 AS x FROM tasks WHERE kind = 'run_all_filters' "
-            "AND status IN ('pending', 'running', 'waiting', 'awaiting_batch') "
+            "AND status IN ('pending', 'running') "
             "AND (payload->>'user_id')::bigint = %s LIMIT 1",
             (u["id"],),
         )
-        if active:
+        if splitting:
             continue
         enqueue(
             "run_all_filters",
