@@ -61,6 +61,8 @@ class SourcesPut(BaseModel):
 class Criteria(BaseModel):
     date_posted_after: datetime.date | None = None
     excluded_locations: list[str] = Field(default_factory=list, max_length=100)
+    # Places a posting must be in to be shown at all; empty means anywhere.
+    included_locations: list[str] = Field(default_factory=list, max_length=100)
 
 
 class SettingsPut(BaseModel):

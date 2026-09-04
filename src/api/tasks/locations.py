@@ -78,7 +78,10 @@ _CANDIDATES = """
         WHERE j.active AND btrim(loc) <> ''
         UNION
         SELECT DISTINCT btrim(e)
-        FROM user_settings s, jsonb_array_elements_text(s.criteria->'excluded_locations') AS e
+        FROM user_settings s,
+             jsonb_array_elements_text(
+                 COALESCE(s.criteria->'excluded_locations', '[]'::jsonb)
+                 || COALESCE(s.criteria->'included_locations', '[]'::jsonb)) AS e
         WHERE btrim(e) <> ''
     )
     SELECT r.text FROM raw r

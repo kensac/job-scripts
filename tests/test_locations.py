@@ -1,6 +1,5 @@
-"""Exclusions match places as well as words: "UK" hides "London" once London
-is a classified row, a never-seen string hides nothing, and the word match
-from before still works while a string waits for its row."""
+"""Exclusions match places: "UK" hides "London" once London is a classified
+row, and a never-seen string, on either side, hides nothing."""
 
 from __future__ import annotations
 
@@ -66,11 +65,45 @@ def test_a_country_criterion_hides_its_cities_and_an_unclassified_string_hides_n
     assert london not in visible and toronto not in visible and remote_uk not in visible
     assert unknown in visible and sf in visible
 
-    # The word match still stands on its own: "Zorbulon" is not a classified
-    # row, and the criterion is not either.
-    _criteria(client, user_headers, ["Zorbulon"])
+    # A criterion that is not a classified row excludes nothing, and neither
+    # does a word: places, not text.
+    _criteria(client, user_headers, ["Zorbulon", "London"])
     visible = _board(client, user_headers, "src-loc")
-    assert unknown not in visible and london in visible
+    assert unknown in visible and london not in visible and toronto in visible
+
+
+def test_an_include_list_keeps_only_those_places(client, user_headers, clean):
+    uid = _uid(user_headers)
+    us = _insert_job("src-inc", "https://x.test/i1", locations=["Austin, TX"])
+    remote = _insert_job("src-inc", "https://x.test/i2", locations=["Remote"])
+    india = _insert_job("src-inc", "https://x.test/i3", locations=["Bengaluru"])
+    both = _insert_job("src-inc", "https://x.test/i4", locations=["Bengaluru", "New York, NY"])
+    nowhere = _insert_job("src-inc", "https://x.test/i5", locations=[])
+    unknown = _insert_job("src-inc", "https://x.test/i6", locations=["Zorbulon Campus"])
+    for i in range(1, 7):
+        _pass_closed(f"https://x.test/i{i}")
+    _subscribe(uid, "src-inc")
+    for text, country, region, city, rem in (
+        ("Austin, TX", "US", "TX", "Austin", False),
+        ("Remote", "", "", "", True),
+        ("Bengaluru", "IN", "", "Bengaluru", False),
+        ("New York, NY", "US", "NY", "New York", False),
+        ("United States", "US", "", "", False),
+    ):
+        locations.store(
+            text,
+            locations.LocationExtract(country=country, region=region, city=city, remote=rem),
+            "t",
+        )
+    r = client.put(
+        "/v1/user/settings",
+        json={"criteria": {"included_locations": ["United States", "Remote"]}},
+        headers=user_headers,
+    )
+    assert r.status_code == 200, r.text
+    visible = _board(client, user_headers, "src-inc")
+    assert us in visible and remote in visible and both in visible and nowhere in visible
+    assert india not in visible and unknown not in visible
 
 
 def test_a_remote_criterion_hides_remote_postings_only(client, user_headers, clean):
