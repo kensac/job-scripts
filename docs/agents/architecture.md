@@ -135,12 +135,18 @@ every AI check on that board's postings; a bundle (`source_groups`) or a
 format is a way of selecting rows for that flag and the interval through
 `POST /admin/sources/switch`, not a second layer of state.
 
-**What a pattern excludes is not lost.** Every pull records the postings the
-pattern did not admit in `screened_postings`, refreshed per pull and aged out
-by `screened_retention_days`, so a candidate pattern is judged against what
-the board actually listed (`pattern-preview`) before it replaces the live one.
-A posting a wider pattern admits arrives in `jobs` on the next pull; nothing
-downstream reads the screened table.
+**Everything a board returns is stored, once.** Every pull records every
+listing in `listings`, kept by the pattern or not, with the posting text the
+listing call carried (Greenhouse with `content=true`, Lever, Ashby; the text
+is assembled by the same `core/ats.py` helpers the resolvers use, so it is
+what a per-posting fetch would have returned) and the raw record minus that
+text. Refreshed per pull and aged out by `screened_retention_days` after the
+board stops listing it. A candidate pattern is judged against it
+(`pattern-preview`) before it replaces the live one; a posting a wider
+pattern admits arrives in `jobs` on the next pull; ingest stores the carried
+text as the posting's content instead of fetching the page. Scraping is the
+action that gets the fleet blocked, so a backtest or a backfill reads this
+table rather than asking a board twice. Nothing downstream reads it.
 
 **A page fetch that returns nothing leaves a record.** It is a `content` row
 with `status = 'failed'` and no text, and nothing retries that URL inside

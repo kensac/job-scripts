@@ -168,6 +168,13 @@ class JobPosting:
     active: bool
     date_posted: int
     raw_url: str = ""
+    # The posting's own text when the board's listing call carries it
+    # (Greenhouse, Lever, Ashby); empty means fetch the page. Stored on the
+    # listing so nothing has to be scraped twice.
+    description: str = ""
+    # The listing record as the board returned it, minus the text fields
+    # above, for backtests that need a field nobody mapped yet.
+    raw: dict | None = None
 
 
 class ClearanceStats(TypedDict):

@@ -55,6 +55,42 @@ def join(*parts: str | None) -> str:
     return "\n\n".join(p.strip() for p in parts if p and p.strip()).strip()
 
 
+# The text of one posting from the JSON its board's API returns. One function
+# per format, shared by the resolver (which fetches a posting by URL) and the
+# listing fetcher in core/boards.py (which gets the same JSON for every
+# posting in one call), so the text a listing stores is exactly the text a
+# resolver would have fetched for it, and the per-posting fetch is not needed.
+
+
+def greenhouse_text(data: dict) -> str:
+    return join(
+        data.get("title"),
+        (data.get("location") or {}).get("name"),
+        clean_html(data.get("content", "")),
+    )
+
+
+def lever_text(data: dict) -> str:
+    lists = [join(s.get("text"), clean_html(s.get("content", ""))) for s in data.get("lists", [])]
+    return join(
+        data.get("text"),
+        (data.get("categories") or {}).get("location"),
+        clean_html(data.get("description", "")),
+        *lists,
+        clean_html(data.get("additional", "")),
+    )
+
+
+def ashby_text(job: dict) -> str:
+    comp = (job.get("compensation") or {}).get("compensationTierSummary")
+    return join(
+        job.get("title"),
+        job.get("location"),
+        comp,
+        clean_html(job.get("descriptionHtml", "")),
+    )
+
+
 class AtsResolver(ABC):
     name: ClassVar[str]
     markers: ClassVar[tuple[str, ...]]
@@ -137,14 +173,7 @@ class Greenhouse(AtsResolver):
                     last = early
                 continue
             assert resp is not None
-            data = resp.json()
-            return self.result(
-                join(
-                    data.get("title"),
-                    (data.get("location") or {}).get("name"),
-                    clean_html(data.get("content", "")),
-                )
-            )
+            return self.result(greenhouse_text(resp.json()))
         return last
 
 
@@ -168,19 +197,7 @@ class Lever(AtsResolver):
         if early is not None:
             return early
         assert resp is not None
-        data = resp.json()
-        lists = [
-            join(s.get("text"), clean_html(s.get("content", ""))) for s in data.get("lists", [])
-        ]
-        return self.result(
-            join(
-                data.get("text"),
-                (data.get("categories") or {}).get("location"),
-                clean_html(data.get("description", "")),
-                *lists,
-                clean_html(data.get("additional", "")),
-            )
-        )
+        return self.result(lever_text(resp.json()))
 
 
 class Ashby(AtsResolver):
@@ -205,15 +222,7 @@ class Ashby(AtsResolver):
         assert resp is not None
         for job in resp.json().get("jobs", []):
             if job.get("id") == job_id or job_id in str(job.get("jobUrl", "")):
-                comp = (job.get("compensation") or {}).get("compensationTierSummary")
-                return self.result(
-                    join(
-                        job.get("title"),
-                        job.get("location"),
-                        comp,
-                        clean_html(job.get("descriptionHtml", "")),
-                    )
-                )
+                return self.result(ashby_text(job))
         return AtsResult(Status.GONE, source=self.name)
 
 

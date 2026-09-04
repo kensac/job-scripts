@@ -1502,9 +1502,8 @@ def pattern_preview(name: str, body: PatternPreviewBody, user: AuthedUser = Depe
         ) from exc
     titles = db.query(
         """
-        SELECT url, title, 'catalog' AS held_in FROM jobs WHERE source = %(name)s
-        UNION ALL
-        SELECT url, title, 'screened' FROM screened_postings WHERE source = %(name)s
+        SELECT url, title, CASE WHEN kept THEN 'catalog' ELSE 'screened' END AS held_in
+        FROM listings WHERE source = %(name)s
         ORDER BY title
         """,
         {"name": name},
@@ -1536,10 +1535,12 @@ def screened_postings(
     """The postings this board lists that its title pattern did not admit,
     newest listing first, so an admin can see what a pattern is costing."""
     limit = max(1, min(limit, 500))
-    total = db.query_one("SELECT count(*) AS n FROM screened_postings WHERE source = %s", (name,))
+    total = db.query_one(
+        "SELECT count(*) AS n FROM listings WHERE source = %s AND NOT kept", (name,)
+    )
     rows = db.query(
         "SELECT url, company, title, locations, date_posted, pattern, first_seen_at, last_seen_at "
-        "FROM screened_postings WHERE source = %s "
+        "FROM listings WHERE source = %s AND NOT kept "
         "ORDER BY date_posted DESC NULLS LAST, title LIMIT %s OFFSET %s",
         (name, limit, max(0, offset)),
     )
@@ -1560,7 +1561,7 @@ _CONFIG_KEYS: dict[str, type] = {
     "queue_stall_minutes": int,
     "ingest_backlog_cycles": int,
     # Days a title-pattern-screened posting stays on record after its board
-    # stops listing it. Read by core.catalog.record_screened.
+    # stops listing it. Read by core.catalog.record_listings.
     "screened_retention_days": int,
     # Hours a still-running batch may lag its finished siblings before the
     # task collects those and parks again on it. Read by api.tasks.batches.

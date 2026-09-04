@@ -247,13 +247,16 @@ class Source(Base):
     ingest_interval_hours: Mapped[int] = mapped_column(Integer, server_default=text("1"))
 
 
-class ScreenedPosting(Base):
-    """A posting a board listed that the source's title pattern did not admit.
-    Refreshed on every pull, so the record is what the board lists now and
-    for the retention window after; never read by visibility or the checks."""
+class Listing(Base):
+    """Every posting a board returned on its last pull, kept by the title
+    pattern or not, with the text the listing call carried and the raw record
+    minus that text. Refreshed per pull and aged out by
+    screened_retention_days after the board stops listing it. Never read by
+    visibility or the checks: a backtest or a backfill reads it so that no
+    board is re-fetched and no page re-scraped for data already in hand."""
 
-    __tablename__ = "screened_postings"
-    __table_args__ = (Index("idx_screened_postings_source", "source", "last_seen_at"),)
+    __tablename__ = "listings"
+    __table_args__ = (Index("idx_listings_source", "source", "last_seen_at"),)
 
     url: Mapped[str] = mapped_column(Text, primary_key=True)
     source: Mapped[str] = mapped_column(Text)
@@ -262,6 +265,9 @@ class ScreenedPosting(Base):
     locations: Mapped[list[str]] = mapped_column(ARRAY(Text), server_default=text("'{}'"))
     date_posted: Mapped[datetime.datetime | None]
     pattern: Mapped[str] = mapped_column(Text)
+    kept: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    description: Mapped[str] = mapped_column(Text, server_default=text("''"))
+    raw: Mapped[dict] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
     first_seen_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
     last_seen_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
 

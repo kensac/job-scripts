@@ -7,6 +7,7 @@ import time
 from typing import TYPE_CHECKING
 
 from psycopg import errors
+from psycopg.types.json import Jsonb
 
 from core.store import _pool as pool
 
@@ -95,14 +96,16 @@ def _upsert_batch(batch: list[tuple], retries: int = 3) -> None:
             time.sleep(delay)
 
 
-def record_screened(
-    postings: list[JobPosting], source: str, pattern: str, retention_days: int
+def record_listings(
+    postings: list[JobPosting], source: str, pattern: str, kept: set[str], retention_days: int
 ) -> int:
-    """Keeps what a board listed that the source's title pattern did not
-    admit, refreshed on every pull, so a candidate pattern can be judged
-    against a month of real titles rather than the ones that happened to
-    survive. Rows the board has stopped listing age out after retention_days.
-    Nothing downstream reads this table."""
+    """Keeps everything a board listed, refreshed on every pull: the title
+    (so a candidate pattern is judged against a month of real titles), the
+    posting text when the listing call carried it (so a backfill never
+    scrapes a page the board already handed over), and the raw record minus
+    that text (so a backtest can read a field nobody mapped). `kept` names
+    the urls the title pattern admitted. Rows the board has stopped listing
+    age out after retention_days. Nothing downstream reads this table."""
     rows = [
         (
             p.url,
@@ -114,6 +117,9 @@ def record_screened(
             if p.date_posted
             else None,
             pattern,
+            p.url in kept,
+            p.description or "",
+            Jsonb(p.raw or {}),
         )
         for p in postings
         if p.url
@@ -122,19 +128,23 @@ def record_screened(
         if rows:
             cur.executemany(
                 """
-                INSERT INTO screened_postings
-                    (url, source, company, title, locations, date_posted, pattern)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                INSERT INTO listings
+                    (url, source, company, title, locations, date_posted, pattern,
+                     kept, description, raw)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (url) DO UPDATE SET
                     source = EXCLUDED.source, company = EXCLUDED.company,
                     title = EXCLUDED.title, locations = EXCLUDED.locations,
-                    date_posted = COALESCE(screened_postings.date_posted, EXCLUDED.date_posted),
-                    pattern = EXCLUDED.pattern, last_seen_at = now()
+                    date_posted = COALESCE(listings.date_posted, EXCLUDED.date_posted),
+                    pattern = EXCLUDED.pattern, kept = EXCLUDED.kept,
+                    description = CASE WHEN EXCLUDED.description = ''
+                                       THEN listings.description ELSE EXCLUDED.description END,
+                    raw = EXCLUDED.raw, last_seen_at = now()
                 """,
                 rows,
             )
         cur.execute(
-            "DELETE FROM screened_postings WHERE source = %s "
+            "DELETE FROM listings WHERE source = %s "
             "AND last_seen_at < now() - make_interval(days => %s)",
             (source, retention_days),
         )
