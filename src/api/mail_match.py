@@ -49,13 +49,6 @@ UNATTACHABLE_KINDS = frozenset({"recruiter_outreach"})
 
 _URL_RE = re.compile(r"https?://[^\s<>\"')\]]+", re.IGNORECASE)
 
-# How long after applying a message may still plausibly concern that
-# application. Rejections routinely arrive months later, and an ATS
-# occasionally mails about a role a year on, so this is deliberately generous:
-# the window exists to stop a 2019 application absorbing a 2026 email, not to
-# be a precise claim about hiring timelines.
-MATCH_WINDOW_DAYS = 400
-
 
 @dataclass(frozen=True)
 class Match:
