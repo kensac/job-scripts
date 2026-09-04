@@ -256,6 +256,19 @@ async def refresh_content(
         # park the posting for fetch_retry_after_hours, which is a day of
         # silence for a host that only asked to be fed slowly.
         return None, None
+    # The browserless tier, when the engine config asks for it: a fetch with
+    # a real Chrome fingerprint, accepted only when the page plainly came
+    # back whole (api.fetching.fetch_static). Anything short of that goes to
+    # the browser below, so the tier can save a browser fetch but never
+    # replace one with a shell. The row says 'static', so the share each
+    # engine serves is readable from the content rows.
+    if db.get_config("fetch_engine") == "static_first":
+        static = await fetching.fetch_static(url, int(db.get_config("static_fetch_min_chars")))
+        if static:
+            add_ai_result(
+                url, "passed", "static", "content", input_content=static, config_name="content-cache"
+            )
+            return static, None
     if scrape_sem is not None:
         async with scrape_sem:
             content, redirected = await fetching.fetch_page(url)

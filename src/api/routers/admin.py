@@ -1648,6 +1648,16 @@ _CONFIG_KEYS: dict[str, type] = {
     # alert names the host so an admin can add it from there. Read by
     # api.verdicts.host_paced.
     "fetch_host_limits": dict,
+    # Which engine fetches a posting page after the ATS resolvers decline;
+    # one of _CONFIG_CHOICES. Read by api.verdicts.refresh_content.
+    "fetch_engine": str,
+    # Text-length gate for the browserless engine; api.fetching.fetch_static.
+    "static_fetch_min_chars": int,
+}
+
+# A string key takes exactly one of these; the message names them.
+_CONFIG_CHOICES: dict[str, tuple[str, ...]] = {
+    "fetch_engine": ("chromium", "static_first"),
 }
 
 
@@ -1658,7 +1668,7 @@ def get_config(user: AuthedUser = Depends(require_admin)):
 
 
 class ConfigPut(BaseModel):
-    value: bool | int | list[str] | dict[str, int]
+    value: bool | int | str | list[str] | dict[str, int]
 
 
 @router.put("/config/{key}")
@@ -1679,6 +1689,16 @@ def put_config(key: str, body: ConfigPut, user: AuthedUser = Depends(require_adm
                 detail={
                     "code": "INVALID_VALUE",
                     "message": f"{key} takes a whole number of 1 or more",
+                },
+            )
+    elif expected is str:
+        choices = _CONFIG_CHOICES.get(key, ())
+        if not isinstance(body.value, str) or body.value not in choices:
+            raise HTTPException(
+                400,
+                detail={
+                    "code": "INVALID_VALUE",
+                    "message": f"{key} takes one of {', '.join(choices)}",
                 },
             )
     elif expected is dict:

@@ -148,3 +148,56 @@ async def fetch_page(url: str) -> tuple[str | None, bool]:
         return content, landed_elsewhere
     metrics.SCRAPES.labels("ok" if content else "empty").inc()
     return content, False
+
+
+# Text-length gate for a browserless fetch. Measured on 2026-09-04 over 431
+# pages a browser or resolver had served: every JavaScript shell came back
+# under 1,016 characters of text (median 0, p90 323) and every real page over
+# 767 (p10 3,828); at 1,500 no shell passed and 2 of 111 real pages fell
+# through to the browser, which is the safe direction. The number lives in
+# app_config (static_fetch_min_chars); this is what the seed says.
+
+
+async def fetch_static(url: str, min_chars: int) -> str | None:
+    """A page fetch without a browser, with a real Chrome TLS and HTTP/2
+    fingerprint (curl_cffi), accepted only when it plainly worked: an HTML
+    200 whose extracted text is at least min_chars and reads as a page rather
+    than a challenge. Anything else returns None and the caller goes to the
+    browser, so this tier can only save a browser fetch, never lose one.
+
+    On the pages the browser was serving this week, one in seven came back
+    whole this way in 0.3s; the rest were shells, which the gate rejects.
+    """
+    from api import ssrf
+    from core.ats import clean_html
+
+    error = await asyncio.to_thread(ssrf.public_url_error, url)
+    if error:
+        metrics.SCRAPES.labels("blocked_target").inc()
+        return None
+
+    def _get():
+        from curl_cffi import requests as cffi
+
+        return cffi.get(url, impersonate="chrome", timeout=25, allow_redirects=True)
+
+    try:
+        resp = await asyncio.wait_for(asyncio.to_thread(_get), 30)
+    except Exception as exc:
+        metrics.SCRAPES.labels("static_error").inc()
+        logger.info(f"static fetch failed for {url}: {type(exc).__name__}")
+        return None
+    final_url = str(getattr(resp, "url", "") or url)
+    if final_url != url and await asyncio.to_thread(ssrf.public_url_error, final_url):
+        metrics.SCRAPES.labels("blocked_target").inc()
+        return None
+    if resp.status_code != 200 or "html" not in (resp.headers.get("content-type") or ""):
+        metrics.SCRAPES.labels("static_rejected").inc()
+        return None
+    text = clean_html(resp.text)
+    if len(text) < min_chars or looks_blocked(text):
+        # A shell or a challenge page: the browser will render it.
+        metrics.SCRAPES.labels("static_shell" if len(text) < min_chars else "static_blocked").inc()
+        return None
+    metrics.SCRAPES.labels("static_ok").inc()
+    return text
