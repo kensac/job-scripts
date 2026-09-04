@@ -211,6 +211,11 @@ service_account_credentials.json
 !pyrightconfig.json
 !package.json
 !tsconfig.json
+# The measured shape of production, and the only thing that makes the test
+# corpus a measurement rather than a guess. CI has no production credential,
+# so if this is not in the repository the corpus cannot be built at all.
+# It carries distributions, never values: see scripts/measure_profile.py.
+!tests/production_profile.json
 
 # .python-version
 .python-version

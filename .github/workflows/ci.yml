@@ -60,6 +60,16 @@ jobs:
         run: python -m compileall -q src
       - name: Migrations apply cleanly
         run: python -m alembic upgrade head
+      # The WHOLE suite, with no marker filter. Three populations run here:
+      # the hermetic tests on a truncated database, the `corpus` tests against
+      # the generated catalog in tests/corpus.py - built from the committed
+      # measurement of production, so it needs no credential - and the
+      # `integration` tests, which skip because this database is not a copy of
+      # production and must never be one.
+      #
+      # NOTHING IN THIS FILE MAY READ A SECRET. That is the whole point: this
+      # workflow runs on pull_request, so anything it can reach is reachable
+      # from a branch an outside contributor can push.
       - name: Run tests
         env:
           TEST_DATABASE_URL: postgresql://ci:ci@localhost:5432/jobtracker_ci

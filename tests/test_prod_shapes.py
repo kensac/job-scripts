@@ -1,4 +1,4 @@
-"""Integration tests against a synced copy of production.
+"""Data-shape checks over a catalog, split by what each one actually needs.
 
 These exist because unit tests assert what we believe the data looks like,
 which is exactly the assumption that has been wrong most often here: the
@@ -6,13 +6,18 @@ ats_text_collapse detector was blind for its whole life because real rows had
 a `reason` value no fixture ever produced, and the comp column was unsortable
 because real postings advertise weekly pay that no test ever wrote.
 
-Run with:
-    set -a && . ./.env && set +a
-    make testdb-sync
-    TEST_DATABASE_URL=...jobtracker_test make integration
+`corpus` runs on every pull request, against the generated corpus in
+tests/corpus.py, whose shapes are measured out of production.
 
-They are read-mostly and assert invariants that must hold over real data
-rather than exact values, so they do not break every time the catalog moves.
+`integration` needs a synced copy of real production and is skipped without
+one. Every such test says in its own docstring why the corpus cannot falsify
+it - almost always because its subject is what a LIVE WRITER did, and the
+corpus has no writers. Building the corpus to satisfy those assertions would
+turn each of them into a tautology, which docs/agents/testing.md names as the
+first way a test stops being able to fail.
+
+    make test                        # everything; integration skips
+    make testdb-sync && make integration   # the real-data half
 """
 
 from __future__ import annotations
@@ -21,8 +26,6 @@ import pytest
 
 from api import db
 
-pytestmark = pytest.mark.integration
-
 
 def _count(sql: str, params=None) -> int:
     row = db.query_one(sql, params)
@@ -30,26 +33,40 @@ def _count(sql: str, params=None) -> int:
     return int(next(iter(row.values())))
 
 
-def test_synced_database_actually_has_production_data():
-    """Guards every other test in this file: if the sync silently produced an
-    empty database, the rest would pass vacuously."""
+@pytest.mark.corpus
+def test_the_catalog_is_big_enough_to_assert_anything_over():
+    """Guards every other corpus test here: if the build silently produced an
+    empty database, the rest would pass vacuously. The floors are the ones the
+    analytics assertions need a denominator for."""
     jobs = _count("SELECT count(*) FROM jobs")
     verdicts = _count("SELECT count(*) FROM ai_queries")
     assert jobs > 1000, f"only {jobs} jobs - did the sync run?"
     assert verdicts > 1000, f"only {verdicts} verdicts - did the sync run?"
 
 
+@pytest.mark.integration
 def test_created_at_is_stored_in_utc():
     """The column was naive local time for months, which shifted every window
     query by the container's offset. Nothing should be far in the future, and
-    recent rows should be recent."""
+    recent rows should be recent.
+
+    Real data only: the subject is what the WRITERS stamped. Corpus timestamps are
+    generated from a measured age distribution and are past by construction, so the
+    corpus cannot disagree with this.
+    """
     future = _count("SELECT count(*) FROM ai_queries WHERE created_at > now() + interval '1 hour'")
     assert future == 0, f"{future} verdicts are stamped in the future"
 
 
+@pytest.mark.integration
 def test_comp_is_always_a_yearly_figure():
     """comp_min/comp_max feed `sort=comp`. A weekly wage stored raw or
-    multiplied by 2080 made the column meaningless; both shapes were live."""
+    multiplied by 2080 made the column meaningless; both shapes were live.
+
+    Real data only: the subject is what the comp extractor wrote. Over the corpus this
+    asserts that the profile's measured comp range is plausible, which is a different
+    and much weaker claim.
+    """
     absurd = db.query(
         """
         SELECT url, comp_min, comp_max, comp_text FROM jobs
@@ -60,7 +77,12 @@ def test_comp_is_always_a_yearly_figure():
     assert not absurd, f"comp outside a plausible yearly range: {absurd}"
 
 
+@pytest.mark.integration
 def test_comp_min_never_exceeds_comp_max():
+    """
+    Real data only: the corpus swaps an inverted pair when it builds a row, so over
+    generated data this asserts the generator, not the extractor.
+    """
     inverted = _count(
         "SELECT count(*) FROM jobs WHERE comp_min IS NOT NULL "
         "AND comp_max IS NOT NULL AND comp_min > comp_max"
@@ -68,10 +90,16 @@ def test_comp_min_never_exceeds_comp_max():
     assert inverted == 0
 
 
+@pytest.mark.integration
 def test_content_rows_record_where_the_text_came_from():
     """The ats_text_collapse detector divides by rows tagged 'ats text' or
     'scraped'. If a writer starts emitting an untagged content row again, the
-    detector silently goes blind - as it did before."""
+    detector silently goes blind - as it did before.
+
+    Real data only: 'recent content rows are tagged' is a property of the live writers
+    over time. The corpus draws reason and created_at from independent marginals, so it
+    holds 'content cached' rows with recent timestamps that production does not have.
+    """
     recent_untagged = _count(
         """
         SELECT count(*) FROM ai_queries
@@ -86,6 +114,7 @@ def test_content_rows_record_where_the_text_came_from():
     )
 
 
+@pytest.mark.corpus
 def test_every_board_row_points_at_a_real_job():
     orphans = _count(
         "SELECT count(*) FROM user_jobs uj LEFT JOIN jobs j ON j.id = uj.job_id WHERE j.id IS NULL"
@@ -93,9 +122,14 @@ def test_every_board_row_points_at_a_real_job():
     assert orphans == 0
 
 
+@pytest.mark.integration
 def test_enabled_filters_have_unique_prompt_hashes_per_user():
     """Two enabled filters sharing a prompt_hash made the board's filter gate
-    unsatisfiable, so no new job could ever become visible."""
+    unsatisfiable, so no new job could ever become visible.
+
+    Real data only: the subject is what users' filter edits produced. The corpus gives
+    every generated filter a distinct prompt, so a duplicate hash cannot arise.
+    """
     dupes = db.query(
         """
         SELECT user_id, prompt_hash, count(*) AS n FROM user_filters
@@ -105,6 +139,7 @@ def test_enabled_filters_have_unique_prompt_hashes_per_user():
     assert not dupes, f"duplicate enabled prompt_hash would empty the board: {dupes}"
 
 
+@pytest.mark.corpus
 def test_no_verdict_claims_a_check_type_we_do_not_write():
     known = {"closed", "clearance", "custom", "content", "extraction", "comp"}
     seen = {
@@ -117,6 +152,7 @@ def test_no_verdict_claims_a_check_type_we_do_not_write():
     assert seen <= known, f"unexpected check types in recent data: {seen - known}"
 
 
+@pytest.mark.corpus
 def test_visibility_predicate_runs_against_real_volume():
     """Not a correctness assertion - a smoke test that the board query still
     executes over the real catalog, which is 100x the size of any fixture."""
@@ -135,6 +171,7 @@ def test_visibility_predicate_runs_against_real_volume():
     assert row is not None and row["c"] >= 0
 
 
+@pytest.mark.integration
 def test_no_stored_filter_hash_would_move_under_the_current_template():
     """The unit suite pins one hash for one prompt; this checks every filter
     a real user actually has.
@@ -149,6 +186,12 @@ def test_no_stored_filter_hash_would_move_under_the_current_template():
     A failure here means someone moved model guidance into the instruction
     text. Put it in the response schema instead: the schema is not part of the
     hash.
+
+
+    Real data only, and this is the clearest case in the file: the subject is hashes
+    STORED by older code. The corpus computes them with today's
+    build_custom_instructions, so it agrees with today's build_custom_instructions by
+    construction and could never fail.
     """
     from core.filters import build_custom_instructions, compute_prompt_hash
 

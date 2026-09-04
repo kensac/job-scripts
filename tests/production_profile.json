@@ -1,0 +1,3845 @@
+{
+ "measured_at": "2026-09-04T02:07:50.801674+00:00",
+ "tables": {
+  "action_items": {
+   "columns": {
+    "application_id": {
+     "kind": "key",
+     "null_rate": 0.0
+    },
+    "created_at": {
+     "age_days": [
+      0.043,
+      0.059,
+      0.823,
+      1.504,
+      1.505,
+      1.505,
+      1.505
+     ],
+     "kind": "timestamp",
+     "naive_rate": 0.0,
+     "null_rate": 0.0
+    },
+    "due_at": {
+     "age_days": [
+      37.089,
+      170.089,
+      359.089,
+      557.089,
+      1049.089,
+      1612.089,
+      2232.089
+     ],
+     "kind": "timestamp",
+     "naive_rate": 0.0,
+     "null_rate": 0.797677
+    },
+    "event_id": {
+     "kind": "key",
+     "null_rate": 0.0
+    },
+    "id": {
+     "kind": "key",
+     "null_rate": 0.0
+    },
+    "kind": {
+     "kind": "categorical",
+     "null_rate": 0.0,
+     "values": {
+      "complete_assessment": 0.206196,
+      "reply_to_recruiter": 0.070668,
+      "respond_to_offer": 0.187803,
+      "schedule_interview": 0.175218,
+      "send_information": 0.360116
+     }
+    },
+    "resolution": {
+     "kind": "categorical",
+     "null_rate": 0.508228,
+     "values": {
+      "superseded by acknowledgement": 0.230315,
+      "superseded by interview_invite": 0.021654,
+      "superseded by interview_scheduled": 0.212598,
+      "superseded by position_closed": 0.015748,
+      "superseded by rejection": 0.09252,
+      "the message this asked about is no longer part of this application": 0.427165
+     }
+    },
+    "resolved_at": {
+     "age_days": [
+      0.043,
+      0.063,
+      0.686,
+      0.688,
+      1.415,
+      1.505,
+      1.505
+     ],
+     "kind": "timestamp",
+     "naive_rate": 0.0,
+     "null_rate": 0.508228
+    },
+    "resolved_by_event_id": {
+     "kind": "key",
+     "null_rate": 0.718296
+    },
+    "user_id": {
+     "kind": "key",
+     "null_rate": 0.0
+    }
+   },
+   "rows": 1033,
+   "sampled": 1033
+  },
+  "ai_batches": {
+   "columns": {
+    "completed": {
+     "kind": "numeric",
+     "null_rate": 0.0,
+     "quantiles": [
+      0.0,
+      1.0,
+      6.0,
+      66.0,
+      445.0,
+      1200.0,
+      1636.0
+     ]
+    },
+    "completed_at": {
+     "age_days": [
+      0.034,
+      0.311,
+      1.354,
+      1.782,
+      3.809,
+      7.927,
+      9.817
+     ],
+     "kind": "timestamp",
+     "naive_rate": 0.0,
+     "null_rate": 0.011811
+    },
+    "est_cost_usd": {
+     "kind": "numeric",
+     "null_rate": 0.055118,
+     "quantiles": [
+      0.0,
+      9e-05,
+      0.000863,
+      0.007227,
+      0.179123,
+      0.258221,
+      0.332224
+     ]
+    },
+    "est_tokens": {
+     "kind": "numeric",
+     "null_rate": 0.0,
+     "quantiles": [
+      0.0,
+      1874.0,
+      19689.0,
+      215875.0,
+      1551298.0,
+      1799610.0,
+      1799999.0
+     ]
+    },
+    "failed_count": {
+     "kind": "categorical",
+     "null_rate": 0.0,
+     "values": {
+      "0": 0.998031,
+      "499": 0.001969
+     }
+    },
+    "id": {
+     "kind": "key",
+     "null_rate": 0.0
+    },
+    "input_tokens": {
+     "kind": "numeric",
+     "null_rate": 0.0,
+     "quantiles": [
+      0.0,
+      0.0,
+      7049.0,
+      91970.0,
+      802419.0,
+      2298426.0,
+      2600364.0
+     ]
+    },
+    "model": {
+     "kind": "categorical",
+     "null_rate": 0.0,
+     "values": {
+      "gpt-5-mini": 0.108268,
+      "gpt-5-nano": 0.67126,
+      "gpt-5.6-luna": 0.220472
+     }
+    },
+    "output_tokens": {
+     "kind": "numeric",
+     "null_rate": 0.0,
+     "quantiles": [
+      0.0,
+      0.0,
+      1743.0,
+      16416.0,
+      45588.0,
+      134239.0,
+      411469.0
+     ]
+    },
+    "prompt_id": {
+     "kind": "key",
+     "null_rate": 0.86811
+    },
+    "provider_batch_id": {
+     "kind": "key",
+     "null_rate": 0.0
+    },
+    "purpose": {
+     "kind": "categorical",
+     "null_rate": 0.0,
+     "values": {
+      "comp": 0.129921,
+      "filter": 0.224409,
+      "mail_classify": 0.273622,
+      "requirements": 0.055118,
+      "reverify": 0.151575,
+      "verify": 0.165354
+     }
+    },
+    "requests": {
+     "kind": "numeric",
+     "null_rate": 0.0,
+     "quantiles": [
+      1.0,
+      1.0,
+      7.0,
+      74.0,
+      453.0,
+      1200.0,
+      1637.0
+     ]
+    },
+    "status": {
+     "kind": "categorical",
+     "null_rate": 0.0,
+     "values": {
+      "cancelled": 0.047244,
+      "completed": 0.940945,
+      "in_progress": 0.009843,
+      "validating": 0.001969
+     }
+    },
+    "submitted_at": {
+     "age_days": [
+      0.036,
+      0.359,
+      1.455,
+      1.792,
+      3.806,
+      8.045,
+      9.818
+     ],
+     "kind": "timestamp",
+     "naive_rate": 0.0,
+     "null_rate": 0.0
+    },
+    "task_id": {
+     "kind": "key",
+     "null_rate": 0.0
+    },
+    "updated_at": {
+     "age_days": [
+      0.006,
+      0.262,
+      1.353,
+      1.782,
+      3.805,
+      7.927,
+      9.817
+     ],
+     "kind": "timestamp",
+     "naive_rate": 0.0,
+     "null_rate": 0.0
+    }
+   },
+   "rows": 508,
+   "sampled": 508
+  },
+  "ai_prompt_samples": {
+   "columns": {
+    "created_at": {
+     "age_days": [
+      1.354,
+      1.354,
+      1.354,
+      1.354,
+      1.406,
+      1.406,
+      1.406
+     ],
+     "kind": "timestamp",
+     "naive_rate": 0.0,
+     "null_rate": 0.0
+    },
+    "custom_id": {
+     "kind": "key",
+     "null_rate": 0.0
+    },
+    "error": {
+     "binary": false,
+     "charclasses": [],
+     "kind": "text",
+     "lengths": [],
+     "null_rate": 1.0
+    },
+    "id": {
+     "kind": "key",
+     "null_rate": 0.0
+    },
+    "output": {
+     "binary": false,
+     "charclasses": [
+      " -9Aa",
+      " -9a",
+      " -Aa",
+      " -a",
+      "-9Aa",
+      "-9a",
+      "-Aa",
+      "-a"
+     ],
+     "kind": "text",
+     "lengths": [
+      102,
+      121,
+      124,
+      131,
+      200,
+      200,
+      200
+     ],
+     "null_rate": 0.0
+    },
+    "prompt_id": {
+     "kind": "key",
+     "null_rate": 0.0
+    }
+   },
+   "rows": 300,
+   "sampled": 300
+  },
+  "ai_prompts": {
+   "columns": {
+    "batches": {
+     "kind": "categorical",
+     "null_rate": 0.0,
+     "values": {
+      "4": 0.333333,
+      "49": 0.333333,
+      "58": 0.333333
+     }
+    },
+    "first_seen_at": {
+     "age_days": [
+      1.354,
+      1.354,
+      1.398,
+      1.398,
+      1.41,
+      1.41,
+      1.41
+     ],
+     "kind": "timestamp",
+     "naive_rate": 0.0,
+     "null_rate": 0.0
+    },
+    "id": {
+     "kind": "key",
+     "null_rate": 0.0
+    },
+    "instructions": {
+     "binary": false,
+     "kind": "text",
+     "lengths": [
+      1008,
+      1008,
+      1550,
+      1550,
+      3611,
+      3611,
+      3611
+     ],
+     "null_rate": 0.0
+    },
+    "last_seen_at": {
+     "age_days": [
+      0.035,
+      0.035,
+      0.036,
+      0.036,
+      0.635,
+      0.635,
+      0.635
+     ],
+     "kind": "timestamp",
+     "naive_rate": 0.0,
+     "null_rate": 0.0
+    },
+    "prompt_hash": {
+     "kind": "key",
+     "null_rate": 0.0
+    },
+    "purpose": {
+     "kind": "categorical",
+     "null_rate": 0.0,
+     "values": {
+      "comp": 0.333333,
+      "mail_classify": 0.333333,
+      "requirements": 0.333333
+     }
+    }
+   },
+   "rows": 3,
+   "sampled": 3
+  },
+  "ai_queries": {
+   "columns": {
+    "batch_id": {
+     "kind": "key",
+     "null_rate": 0.822822
+    },
+    "cached_tokens": {
+     "kind": "categorical",
+     "null_rate": 0.404537,
+     "values": {
+      "0": 0.958585,
+      "1024": 0.000342,
+      "1152": 0.034837,
+      "1280": 0.000649,
+      "1408": 0.000955,
+      "1536": 0.000811,
+      "1664": 0.001045,
+      "1792": 0.000829,
+      "1920": 0.000342,
+      "2048": 0.00036,
+      "2176": 0.000162,
+      "2304": 0.000108,
+      "2432": 0.000108,
+      "2560": 0.000234,
+      "2688": 0.00027,
+      "2816": 7.2e-05,
+      "2944": 0.000216,
+      "3072": 1.8e-05,
+      "3200": 1.8e-05,
+      "3456": 1.8e-05,
+      "3584": 1.8e-05
+     }
+    },
+    "check_type": {
+     "kind": "categorical",
+     "null_rate": 0.0,
+     "values": {
+      "clearance": 0.277948,
+      "closed": 0.309434,
+      "content": 0.157218,
+      "custom": 0.238842,
+      "extraction": 0.016559
+     }
+    },
+    "company": {
+     "binary": false,
+     "charclasses": [
+      " -9Aa",
+      " -A",
+      " -Aa",
+      " 9Aa",
+      " A",
+      " Aa",
+      "-9",
+      "-A",
+      "-Aa",
+      "-a",
+      "9A",
+      "9Aa",
+      "A",
+      "Aa",
+      "a"
+     ],
+     "kind": "text",
+     "lengths": [
+      2,
+      4,
+      7,
+      13,
+      20,
+      34,
+      71
+     ],
+     "null_rate": 0.175772
+    },
+    "completion_tokens": {
+     "kind": "numeric",
+     "null_rate": 0.17471,
+     "quantiles": [
+      0.0,
+      0.0,
+      149.0,
+      289.0,
+      815.0,
+      1922.0,
+      4680.0
+     ]
+    },
+    "config_name": {
+     "kind": "categorical",
+     "null_rate": 0.267366,
+     "values": {
+      "airtable1": 0.013095,
+      "airtable2": 0.006914,
+      "airtable3": 0.001274,
+      "airtable4": 0.019218,
+      "airtable5": 0.151665,
+      "content-backfill": 0.000161,
+      "content-cache": 0.124127,
+      "filter-batch": 0.052762,
+      "fulltime": 0.374313,
+      "fulltime_dixon": 0.003193,
+      "fulltime_ouckah": 0.001406,
+      "fulltime_ouckah_2027": 0.001011,
+      "ingest": 0.000732,
+      "manual": 2.9e-05,
+      "reverify": 0.036693,
+      "speedyapply_ng": 0.051063,
+      "verify-batch": 0.162343
+     }
+    },
+    "cost_usd": {
+     "kind": "numeric",
+     "null_rate": 0.174431,
+     "quantiles": [
+      0.0,
+      0.0,
+      9.3e-05,
+      0.000157,
+      0.000343,
+      0.000696,
+      0.002138
+     ]
+    },
+    "created_at": {
+     "age_days": [
+      0.034,
+      0.323,
+      2.122,
+      8.136,
+      61.794,
+      81.979,
+      86.882
+     ],
+     "kind": "timestamp",
+     "naive_rate": 0.0,
+     "null_rate": 0.0
+    },
+    "duration_ms": {
+     "kind": "numeric",
+     "null_rate": 0.358402,
+     "quantiles": [
+      781.0,
+      1227.0,
+      1856.0,
+      3080.0,
+      6338.0,
+      13922.0,
+      224744.0
+     ]
+    },
+    "error": {
+     "binary": false,
+     "charclasses": [],
+     "kind": "text",
+     "lengths": [],
+     "null_rate": 0.999968
+    },
+    "filter_name": {
+     "binary": false,
+     "charclasses": [
+      " -9Aa",
+      "-9a",
+      "-a",
+      "a"
+     ],
+     "kind": "text",
+     "lengths": [
+      7,
+      7,
+      8,
+      21,
+      31,
+      31,
+      39
+     ],
+     "null_rate": 0.761158
+    },
+    "id": {
+     "kind": "key",
+     "null_rate": 0.0
+    },
+    "input_content": {
+     "binary": false,
+     "kind": "text",
+     "lengths": [
+      0,
+      0,
+      2782,
+      4219,
+      5869,
+      9077,
+      21679
+     ],
+     "null_rate": 0.017213
+    },
+    "instructions": {
+     "binary": false,
+     "kind": "text",
+     "lengths": [
+      0,
+      0,
+      0,
+      669,
+      1550,
+      4859,
+      4859
+     ],
+     "null_rate": 0.176427
+    },
+    "job_title": {
+     "binary": false,
+     "charclasses": [
+      " -9A",
+      " -9Aa",
+      " -A",
+      " -Aa",
+      " 9A",
+      " 9Aa",
+      " A",
+      " Aa",
+      "Aa"
+     ],
+     "kind": "text",
+     "lengths": [
+      7,
+      14,
+      22,
+      31,
+      42,
+      63,
+      183
+     ],
+     "null_rate": 0.175772
+    },
+    "model": {
+     "kind": "categorical",
+     "null_rate": 0.174431,
+     "values": {
+      "gpt-5-nano": 1.0
+     }
+    },
+    "parsed_json": {
+     "binary": false,
+     "kind": "text",
+     "lengths": [
+      18,
+      23,
+      61,
+      99,
+      126,
+      177,
+      284
+     ],
+     "null_rate": 0.176706
+    },
+    "prompt_hash": {
+     "kind": "key",
+     "null_rate": 0.761158
+    },
+    "prompt_tokens": {
+     "kind": "numeric",
+     "null_rate": 0.17471,
+     "quantiles": [
+      0.0,
+      0.0,
+      961.0,
+      1285.0,
+      1781.0,
+      2521.0,
+      24400.0
+     ]
+    },
+    "reason": {
+     "kind": "partitioned",
+     "null_rate": 0.0,
+     "on": "check_type",
+     "parts": {
+      "clearance": {
+       "binary": false,
+       "charclasses": [
+        "",
+        " -9Aa",
+        " -Aa",
+        " -a",
+        " 9Aa",
+        " Aa",
+        " a",
+        "-A",
+        "a"
+       ],
+       "kind": "text",
+       "lengths": [
+        0,
+        0,
+        7,
+        8,
+        25,
+        115,
+        200
+       ],
+       "null_rate": 0.0
+      },
+      "closed": {
+       "binary": false,
+       "charclasses": [
+        "",
+        " -9Aa",
+        " -Aa",
+        " -a",
+        " 9Aa",
+        " Aa",
+        " a",
+        "-A",
+        "a"
+       ],
+       "kind": "text",
+       "lengths": [
+        0,
+        0,
+        7,
+        8,
+        25,
+        115,
+        200
+       ],
+       "null_rate": 0.0
+      },
+      "content": {
+       "kind": "categorical",
+       "null_rate": 0.0,
+       "values": {
+        "ats text": 0.061024,
+        "content cached": 0.422389,
+        "scraped": 0.516587
+       }
+      },
+      "custom": {
+       "binary": false,
+       "charclasses": [
+        "",
+        " -9Aa",
+        " -Aa",
+        " -a",
+        " 9Aa",
+        " Aa",
+        " a",
+        "-A",
+        "a"
+       ],
+       "kind": "text",
+       "lengths": [
+        0,
+        0,
+        7,
+        8,
+        25,
+        115,
+        200
+       ],
+       "null_rate": 0.0
+      },
+      "extraction": {
+       "kind": "categorical",
+       "null_rate": 0.0,
+       "values": {
+        "failed to extract content": 1.0
+       }
+      }
+     }
+    },
+    "reasoning_effort": {
+     "kind": "categorical",
+     "null_rate": 0.404505,
+     "values": {
+      "low": 0.435754,
+      "medium": 0.564246
+     }
+    },
+    "reasoning_tokens": {
+     "kind": "categorical",
+     "null_rate": 0.404537,
+     "values": {
+      "0": 0.000667,
+      "1024": 0.017337,
+      "1088": 0.015697,
+      "1152": 0.014832,
+      "1216": 0.012003,
+      "128": 0.128354,
+      "1280": 0.010849,
+      "1344": 0.009516,
+      "1408": 0.008849,
+      "1472": 0.00775,
+      "1536": 0.007065,
+      "1600": 0.005623,
+      "1664": 0.005695,
+      "1728": 0.004415,
+      "1792": 0.004037,
+      "1856": 0.003965,
+      "192": 0.076396,
+      "1920": 0.00319,
+      "196": 1.8e-05,
+      "1984": 0.002631,
+      "2048": 0.002631,
+      "2112": 0.002018,
+      "2176": 0.001784,
+      "2240": 0.001388,
+      "2304": 0.001586,
+      "2368": 0.001189,
+      "2432": 0.000252,
+      "256": 0.053959,
+      "320": 0.065186,
+      "384": 0.072431,
+      "448": 0.069223,
+      "512": 0.056319,
+      "576": 0.044227,
+      "63": 1.8e-05,
+      "64": 0.15427,
+      "640": 0.031683,
+      "704": 0.026294,
+      "768": 0.021356,
+      "832": 0.019626,
+      "896": 0.018869,
+      "960": 0.016797
+     }
+    },
+    "status": {
+     "kind": "categorical",
+     "null_rate": 0.0,
+     "values": {
+      "failed": 0.016838,
+      "passed": 0.682378,
+      "rejected": 0.300784
+     }
+    },
+    "total_tokens": {
+     "kind": "numeric",
+     "null_rate": 0.17471,
+     "quantiles": [
+      0.0,
+      0.0,
+      1177.0,
+      1591.0,
+      2572.0,
+      4271.0,
+      26633.0
+     ]
+    },
+    "url": {
+     "kind": "key",
+     "null_rate": 0.0
+    },
+    "worker": {
+     "binary": false,
+     "charclasses": [
+      "-Aa",
+      "a"
+     ],
+     "kind": "text",
+     "lengths": [
+      3,
+      3,
+      7,
+      7,
+      7,
+      7,
+      26
+     ],
+     "null_rate": 0.513871
+    }
+   },
+   "rows": 93183,
+   "sampled": 4000
+  },
+  "api_usage": {
+   "columns": {
+    "batched": {
+     "kind": "boolean",
+     "null_rate": 0.0,
+     "true_rate": 0.0
+    },
+    "cached_tokens": {
+     "kind": "categorical",
+     "null_rate": 0.0,
+     "values": {
+      "0": 1.0
+     }
+    },
+    "completion_tokens": {
+     "kind": "numeric",
+     "null_rate": 0.0,
+     "quantiles": [
+      0.0,
+      628.0,
+      810.0,
+      979.0,
+      1216.0,
+      1798.0,
+      411469.0
+     ]
+    },
+    "cost_usd": {
+     "kind": "numeric",
+     "null_rate": 0.729354,
+     "quantiles": []
+    },
+    "created_at": {
+     "age_days": [
+      10.311,
+      10.348,
+      10.648,
+      10.71,
+      10.775,
+      10.857,
+      10.901
+     ],
+     "kind": "timestamp",
+     "naive_rate": 0.0,
+     "null_rate": 0.0
+    },
+    "id": {
+     "kind": "key",
+     "null_rate": 0.0
+    },
+    "key_source": {
+     "kind": "categorical",
+     "null_rate": 0.0,
+     "values": {
+      "owner": 0.943015,
+      "server": 0.056985
+     }
+    },
+    "model": {
+     "kind": "categorical",
+     "null_rate": 0.0,
+     "values": {
+      "gpt-5-mini": 0.005662,
+      "gpt-5-nano": 0.980185,
+      "gpt-5.6-luna": 0.014154
+     }
+    },
+    "prompt_tokens": {
+     "kind": "numeric",
+     "null_rate": 0.0,
+     "quantiles": [
+      0.0,
+      788.0,
+      1299.0,
+      1682.0,
+      2016.0,
+      2558.0,
+      2600364.0
+     ]
+    },
+    "purpose": {
+     "kind": "categorical",
+     "null_rate": 0.0,
+     "values": {
+      "comp": 0.006769,
+      "extract": 0.000123,
+      "filter": 0.953477,
+      "improve_prompt": 0.000123,
+      "mail_classify": 0.016369,
+      "requirements": 0.003323,
+      "reverify": 0.009477,
+      "verify": 0.010338
+     }
+    },
+    "total_tokens": {
+     "kind": "numeric",
+     "null_rate": 0.0,
+     "quantiles": [
+      0.0,
+      1677.0,
+      2250.0,
+      2682.0,
+      3132.0,
+      4025.0,
+      2613977.0
+     ]
+    },
+    "user_id": {
+     "kind": "key",
+     "null_rate": 0.056985
+    }
+   },
+   "rows": 8125,
+   "sampled": 4000
+  },
+  "app_config": {
+   "columns": {
+    "key": {
+     "kind": "categorical",
+     "null_rate": 0.0,
+     "values": {
+      "gmail_connect_groups": 0.5,
+      "signups_enabled": 0.5
+     }
+    },
+    "value": {
+     "documents": [
+      "[\"infra-admins\"]",
+      "true"
+     ],
+     "keysets": {
+      "<array>": 0.5,
+      "<boolean>": 0.5
+     },
+     "kind": "json",
+     "null_rate": 0.0
+    }
+   },
+   "rows": 2,
+   "sampled": 2
+  },
+  "application_matches": {
+   "columns": {
+    "actor_user_id": {
+     "kind": "key",
+     "null_rate": 0.999934
+    },
+    "application_id": {
+     "kind": "key",
+     "null_rate": 0.685156
+    },
+    "confidence": {
+     "kind": "categorical",
+     "null_rate": 0.0,
+     "values": {
+      "high": 0.238304,
+      "medium": 0.076541,
+      "none": 0.685156
+     }
+    },
+    "created_at": {
+     "age_days": [
+      1.506,
+      1.506,
+      1.507,
+      1.507,
+      1.507,
+      1.507,
+      1.508
+     ],
+     "kind": "timestamp",
+     "naive_rate": 0.0,
+     "null_rate": 0.0
+    },
+    "id": {
+     "kind": "key",
+     "null_rate": 0.0
+    },
+    "message_id": {
+     "kind": "key",
+     "null_rate": 0.0
+    },
+    "method": {
+     "kind": "categorical",
+     "null_rate": 0.0,
+     "values": {
+      "ats_company": 0.065871,
+      "company_title": 0.010669,
+      "derived": 0.235785,
+      "manual": 0.002518,
+      "not_an_application": 0.108085,
+      "unmatched": 0.577071
+     }
+    },
+    "rationale": {
+     "binary": false,
+     "charclasses": [
+      " -9Aa",
+      " -Aa",
+      " 9Aa",
+      " Aa",
+      " a"
+     ],
+     "kind": "text",
+     "lengths": [
+      20,
+      20,
+      20,
+      20,
+      20,
+      20,
+      80
+     ],
+     "null_rate": 0.0
+    }
+   },
+   "rows": 15090,
+   "sampled": 4000
+  },
+  "applications": {
+   "columns": {
+    "applied_at": {
+     "age_days": [
+      0.089,
+      84.089,
+      359.089,
+      486.863,
+      940.268,
+      1392.275,
+      2250.911
+     ],
+     "kind": "timestamp",
+     "naive_rate": 0.0,
+     "null_rate": 0.000393
+    },
+    "company_name": {
+     "binary": false,
+     "charclasses": [
+      " -9A",
+      " -9Aa",
+      " -A",
+      " -Aa",
+      " 9A",
+      " 9Aa",
+      " A",
+      " Aa",
+      " a",
+      "-9a",
+      "-A",
+      "-Aa",
+      "-a",
+      "9A",
+      "9Aa",
+      "9a",
+      "A",
+      "Aa",
+      "a"
+     ],
+     "kind": "text",
+     "lengths": [
+      2,
+      4,
+      6,
+      9,
+      14,
+      29,
+      72
+     ],
+     "null_rate": 0.0
+    },
+    "created_at": {
+     "age_days": [
+      0.054,
+      1.506,
+      1.506,
+      1.506,
+      1.508,
+      1.508,
+      1.508
+     ],
+     "kind": "timestamp",
+     "naive_rate": 0.0,
+     "null_rate": 0.0
+    },
+    "dismissed_at": {
+     "age_days": [],
+     "kind": "timestamp",
+     "naive_rate": 0.0,
+     "null_rate": 1.0
+    },
+    "dismissed_reason": {
+     "binary": false,
+     "charclasses": [],
+     "kind": "text",
+     "lengths": [],
+     "null_rate": 1.0
+    },
+    "id": {
+     "kind": "key",
+     "null_rate": 0.0
+    },
+    "job_id": {
+     "kind": "key",
+     "null_rate": 0.71451
+    },
+    "source_provenance": {
+     "kind": "categorical",
+     "null_rate": 0.0,
+     "values": {
+      "email": 0.71451,
+      "tracker": 0.28549
+     }
+    },
+    "title": {
+     "binary": false,
+     "charclasses": [
+      "",
+      " -9A",
+      " -9Aa",
+      " -Aa",
+      " -a",
+      " 9A",
+      " 9Aa",
+      " Aa",
+      " a",
+      "-A",
+      "-Aa",
+      "A",
+      "Aa",
+      "a"
+     ],
+     "kind": "text",
+     "lengths": [
+      0,
+      13,
+      24,
+      32,
+      43,
+      64,
+      135
+     ],
+     "null_rate": 0.0
+    },
+    "updated_at": {
+     "age_days": [
+      0.054,
+      1.506,
+      1.506,
+      1.506,
+      1.508,
+      1.508,
+      1.508
+     ],
+     "kind": "timestamp",
+     "naive_rate": 0.0,
+     "null_rate": 0.0
+    },
+    "user_id": {
+     "kind": "key",
+     "null_rate": 0.0
+    }
+   },
+   "rows": 2543,
+   "sampled": 2543
+  },
+  "email_events": {
+   "columns": {
+    "actor_user_id": {
+     "kind": "key",
+     "null_rate": 1.0
+    },
+    "confidence": {
+     "kind": "categorical",
+     "null_rate": 0.0,
+     "values": {
+      "high": 0.997969,
+      "low": 0.000276,
+      "medium": 0.001755
+     }
+    },
+    "created_at": {
+     "age_days": [
+      1.56,
+      1.594,
+      1.68,
+      1.727,
+      1.761,
+      1.782,
+      1.785
+     ],
+     "kind": "timestamp",
+     "naive_rate": 0.0,
+     "null_rate": 0.0
+    },
+    "deadline_at": {
+     "age_days": [
+      37.089,
+      93.089,
+      306.089,
+      787.089,
+      1360.089,
+      2158.089,
+      3689.089
+     ],
+     "kind": "timestamp",
+     "naive_rate": 0.0,
+     "null_rate": 0.962007
+    },
+    "deadline_inferred": {
+     "kind": "boolean",
+     "null_rate": 0.0,
+     "true_rate": 0.012
+    },
+    "detail": {
+     "keysets": {
+      "company,role_title": 0.961694,
+      "company,role_title,when_dropped_as_not_job_related,when_precision,when_raw": 0.006983,
+      "company,role_title,when_precision,when_raw": 0.018967,
+      "reason": 0.002392,
+      "reason,superseded": 0.009964
+     },
+     "kind": "json",
+     "null_rate": 0.0
+    },
+    "id": {
+     "kind": "key",
+     "null_rate": 0.0
+    },
+    "kind": {
+     "kind": "categorical",
+     "null_rate": 0.0,
+     "values": {
+      "acknowledgement": 0.051275,
+      "assessment_invite": 0.006779,
+      "info_request": 0.011527,
+      "interview_invite": 0.004712,
+      "interview_scheduled": 0.009844,
+      "not_job_related": 0.862054,
+      "offer": 0.003762,
+      "position_closed": 0.003666,
+      "recruiter_outreach": 0.022248,
+      "rejection": 0.024135
+     }
+    },
+    "message_id": {
+     "kind": "key",
+     "null_rate": 0.0
+    },
+    "model": {
+     "kind": "categorical",
+     "null_rate": 0.012356,
+     "values": {
+      "gpt-5-mini": 0.083606,
+      "gpt-5.6-luna": 0.916394
+     }
+    },
+    "occurred_at": {
+     "age_days": [],
+     "kind": "timestamp",
+     "naive_rate": 0.0,
+     "null_rate": 0.999615
+    }
+   },
+   "rows": 83199,
+   "sampled": 4000
+  },
+  "email_messages": {
+   "columns": {
+    "body_html": {
+     "binary": false,
+     "kind": "text",
+     "lengths": [
+      100,
+      1220,
+      4027,
+      8967,
+      20000,
+      20000,
+      20000
+     ],
+     "null_rate": 0.576221
+    },
+    "body_text": {
+     "binary": false,
+     "kind": "text",
+     "lengths": [
+      2,
+      152,
+      470,
+      1097,
+      2266,
+      6811,
+      20000
+     ],
+     "null_rate": 0.0173
+    },
+    "from_email": {
+     "binary": false,
+     "charclasses": [
+      "-9Aa",
+      "-9a",
+      "-A",
+      "-Aa",
+      "-a",
+      "Aa"
+     ],
+     "kind": "text",
+     "lengths": [
+      6,
+      15,
+      19,
+      24,
+      27,
+      34,
+      84
+     ],
+     "null_rate": 0.003749
+    },
+    "from_name": {
+     "binary": false,
+     "charclasses": [
+      " -9A",
+      " -9Aa",
+      " -9a",
+      " -A",
+      " -Aa",
+      " -a",
+      " 9A",
+      " 9Aa",
+      " A",
+      " Aa",
+      " a",
+      "-A",
+      "-Aa",
+      "-a",
+      "9A",
+      "9Aa",
+      "A",
+      "Aa",
+      "a"
+     ],
+     "kind": "text",
+     "lengths": [
+      2,
+      5,
+      8,
+      13,
+      18,
+      31,
+      59
+     ],
+     "null_rate": 0.476021
+    },
+    "headers": {
+     "keysets": {
+      "in-reply-to,message-id": 0.000827,
+      "in-reply-to,message-id,references": 0.13837,
+      "message-id": 0.846325,
+      "message-id,references": 0.014478
+     },
+     "kind": "json",
+     "null_rate": 0.424642
+    },
+    "id": {
+     "kind": "key",
+     "null_rate": 0.0
+    },
+    "imported_at": {
+     "age_days": [
+      0.786,
+      1.793,
+      1.825,
+      1.833,
+      1.837,
+      1.838,
+      1.846
+     ],
+     "kind": "timestamp",
+     "naive_rate": 0.0,
+     "null_rate": 0.0
+    },
+    "prefilter_hit": {
+     "kind": "boolean",
+     "null_rate": 0.0,
+     "true_rate": 0.11875
+    },
+    "prefilter_reason": {
+     "kind": "categorical",
+     "null_rate": 0.0,
+     "values": {
+      "ats_domain:ashbyhq.com": 0.003644,
+      "ats_domain:avature.net": 0.000476,
+      "ats_domain:bamboohr.com": 7.4e-05,
+      "ats_domain:eightfold.ai": 7.4e-05,
+      "ats_domain:greenhouse-mail.io": 0.014012,
+      "ats_domain:greenhouse.io": 0.000223,
+      "ats_domain:icims.com": 0.002127,
+      "ats_domain:jobvite.com": 0.000521,
+      "ats_domain:lever.co": 0.006292,
+      "ats_domain:myworkday.com": 0.015113,
+      "ats_domain:rippling.com": 0.000714,
+      "ats_domain:smartrecruiters.com": 0.001726,
+      "ats_domain:successfactors.com": 0.000298,
+      "ats_domain:workablemail.com": 0.000283,
+      "no_signal": 0.857079,
+      "phrase:application for": 0.002454,
+      "phrase:application received": 0.000521,
+      "phrase:application status": 0.000774,
+      "phrase:applied for": 0.00241,
+      "phrase:availability": 0.003719,
+      "phrase:candidate": 0.007795,
+      "phrase:codesignal": 0.00055,
+      "phrase:codility": 4.5e-05,
+      "phrase:coding challenge": 0.000342,
+      "phrase:hackerrank": 0.000387,
+      "phrase:hiring manager": 0.000312,
+      "phrase:interview": 0.029185,
+      "phrase:job opportunity": 0.000312,
+      "phrase:karat": 1.5e-05,
+      "phrase:move forward with other candidates": 0.000104,
+      "phrase:moving forward": 0.000461,
+      "phrase:next steps": 0.002856,
+      "phrase:offer letter": 0.001116,
+      "phrase:online assessment": 0.000119,
+      "phrase:phone screen": 6e-05,
+      "phrase:position at": 0.000179,
+      "phrase:recruiting team": 0.000491,
+      "phrase:regret to inform": 1.5e-05,
+      "phrase:role at": 0.000253,
+      "phrase:schedule a time": 8.9e-05,
+      "phrase:take home assessment": 1.5e-05,
+      "phrase:take-home": 3e-05,
+      "phrase:talent acquisition": 0.001874,
+      "phrase:thank you for applying": 0.005682,
+      "phrase:thanks for applying": 0.000699,
+      "phrase:unfortunately": 0.004165,
+      "phrase:we regret": 0.000164,
+      "phrase:we would like to invite": 7.4e-05,
+      "phrase:your application": 0.022015,
+      "url:/careers": 0.001369,
+      "url:/jobs/": 0.000327,
+      "url:apply.": 0.000149,
+      "url:boards.": 7.4e-05,
+      "url:careers.": 0.003436,
+      "url:job-boards": 0.000327,
+      "url:jobs.": 0.00238
+     }
+    },
+    "provider_message_id": {
+     "kind": "key",
+     "null_rate": 0.0
+    },
+    "provider_thread_id": {
+     "kind": "key",
+     "null_rate": 0.904516
+    },
+    "sent_at": {
+     "age_days": [
+      0.825,
+      155.357,
+      313.607,
+      754.85,
+      1432.963,
+      2290.892,
+      7229.288
+     ],
+     "kind": "timestamp",
+     "naive_rate": 0.0,
+     "null_rate": 1.5e-05
+    },
+    "source": {
+     "kind": "categorical",
+     "null_rate": 0.0,
+     "values": {
+      "gmail": 0.008702,
+      "olm": 0.423214,
+      "takeout": 0.568084
+     }
+    },
+    "subject": {
+     "binary": false,
+     "charclasses": [
+      " -9A",
+      " -9Aa",
+      " -9a",
+      " -A",
+      " -Aa",
+      " -a",
+      " 9A",
+      " 9Aa",
+      " 9a",
+      " A",
+      " Aa",
+      " a",
+      "-9Aa",
+      "-Aa",
+      "9Aa",
+      "A",
+      "Aa",
+      "a"
+     ],
+     "kind": "text",
+     "lengths": [
+      3,
+      19,
+      32,
+      43,
+      65,
+      99,
+      171
+     ],
+     "null_rate": 0.005712
+    },
+    "thread_topic": {
+     "binary": false,
+     "charclasses": [
+      " -9A",
+      " -9Aa",
+      " -9a",
+      " -A",
+      " -Aa",
+      " 9Aa",
+      " 9a",
+      " A",
+      " Aa",
+      " a",
+      "A",
+      "Aa",
+      "a"
+     ],
+     "kind": "text",
+     "lengths": [
+      4,
+      19,
+      30,
+      46,
+      67,
+      110,
+      171
+     ],
+     "null_rate": 0.579791
+    },
+    "to_emails": {
+     "kind": "array",
+     "lengths": [
+      0,
+      1,
+      1,
+      1,
+      2,
+      3,
+      592
+     ],
+     "null_rate": 0.0
+    },
+    "user_id": {
+     "kind": "key",
+     "null_rate": 0.0
+    }
+   },
+   "rows": 67226,
+   "sampled": 4000
+  },
+  "filter_presets": {
+   "columns": {
+    "active": {
+     "kind": "boolean",
+     "null_rate": 0.0,
+     "true_rate": 1.0
+    },
+    "created_at": {
+     "age_days": [
+      10.284,
+      10.284,
+      10.929,
+      10.929,
+      10.929,
+      10.929,
+      10.929
+     ],
+     "kind": "timestamp",
+     "naive_rate": 0.0,
+     "null_rate": 0.0
+    },
+    "description": {
+     "binary": false,
+     "charclasses": [
+      " -9Aa",
+      " -Aa"
+     ],
+     "kind": "text",
+     "lengths": [
+      57,
+      97,
+      112,
+      115,
+      124,
+      133,
+      133
+     ],
+     "null_rate": 0.0
+    },
+    "fail_closed": {
+     "kind": "boolean",
+     "null_rate": 0.0,
+     "true_rate": 0.181818
+    },
+    "id": {
+     "kind": "key",
+     "null_rate": 0.0
+    },
+    "name": {
+     "kind": "categorical",
+     "null_rate": 0.0,
+     "values": {
+      "Aerospace engineering": 0.090909,
+      "Backend & infrastructure focus": 0.090909,
+      "Early-career software roles": 0.090909,
+      "Industrial engineering": 0.090909,
+      "New grad / entry level only": 0.090909,
+      "No staffing agencies or consultancies": 0.090909,
+      "Pay: $150k+ stated (new grad)": 0.090909,
+      "Pay: $200k+ total comp (new grad)": 0.090909,
+      "Supply chain": 0.090909,
+      "Top-tier companies only": 0.090909,
+      "US or remote only": 0.090909
+     }
+    },
+    "on_ambiguous": {
+     "kind": "categorical",
+     "null_rate": 0.0,
+     "values": {
+      "filter": 0.181818,
+      "keep": 0.818182
+     }
+    },
+    "prompt": {
+     "binary": false,
+     "kind": "text",
+     "lengths": [
+      148,
+      442,
+      476,
+      710,
+      914,
+      1669,
+      1669
+     ],
+     "null_rate": 0.0
+    },
+    "updated_at": {
+     "age_days": [
+      10.284,
+      10.284,
+      10.929,
+      10.929,
+      10.929,
+      10.929,
+      10.929
+     ],
+     "kind": "timestamp",
+     "naive_rate": 0.0,
+     "null_rate": 0.0
+    }
+   },
+   "rows": 11,
+   "sampled": 11
+  },
+  "group_budgets": {
+   "columns": {
+    "allowed_models": {
+     "kind": "array",
+     "lengths": [],
+     "null_rate": 1.0
+    },
+    "group_name": {
+     "binary": false,
+     "charclasses": [
+      "-a"
+     ],
+     "kind": "text",
+     "lengths": [
+      12,
+      12,
+      12,
+      25,
+      25,
+      25,
+      25
+     ],
+     "null_rate": 0.0
+    },
+    "weekly_token_budget": {
+     "kind": "categorical",
+     "null_rate": 0.5,
+     "values": {
+      "5000000": 1.0
+     }
+    }
+   },
+   "rows": 2,
+   "sampled": 2
+  },
+  "health_alerts": {
+   "columns": {
+    "detail": {
+     "documents": [
+      "{\"base_rejected\": 27, \"base_total\": 1170, \"check_type\": \"closed\", \"recent_rejected\": 33, \"recent_total\": 84, \"source\": \"jobright_supply_chain\"}",
+      "{\"base_rejected\": 32, \"base_total\": 82, \"check_type\": \"clearance\", \"recent_rejected\": 13, \"recent_total\": 18, \"source\": \"speedyapply_intern\"}",
+      "{\"base_rejected\": 630, \"base_total\": 2068, \"check_type\": \"clearance\", \"recent_rejected\": 124, \"recent_total\": 201, \"source\": \"internships\"}"
+     ],
+     "keysets": {
+      "base_rejected,base_total,check_type,recent_rejected,recent_total,source": 1.0
+     },
+     "kind": "json",
+     "null_rate": 0.0
+    },
+    "first_seen": {
+     "age_days": [
+      2.921,
+      2.921,
+      3.711,
+      3.711,
+      3.919,
+      3.919,
+      3.919
+     ],
+     "kind": "timestamp",
+     "naive_rate": 0.0,
+     "null_rate": 0.0
+    },
+    "id": {
+     "kind": "key",
+     "null_rate": 0.0
+    },
+    "kind": {
+     "kind": "categorical",
+     "null_rate": 0.0,
+     "values": {
+      "clearance_rate_spike": 0.666667,
+      "closed_rate_spike": 0.333333
+     }
+    },
+    "last_seen": {
+     "age_days": [
+      2.837,
+      2.837,
+      2.921,
+      2.921,
+      3.919,
+      3.919,
+      3.919
+     ],
+     "kind": "timestamp",
+     "naive_rate": 0.0,
+     "null_rate": 0.0
+    },
+    "message": {
+     "binary": false,
+     "charclasses": [
+      " -9a"
+     ],
+     "kind": "text",
+     "lengths": [
+      140,
+      140,
+      200,
+      200,
+      200,
+      200,
+      200
+     ],
+     "null_rate": 0.0
+    },
+    "notified_at": {
+     "age_days": [],
+     "kind": "timestamp",
+     "naive_rate": 0.0,
+     "null_rate": 1.0
+    },
+    "resolved_at": {
+     "age_days": [
+      2.71,
+      2.71,
+      2.877,
+      2.877,
+      3.752,
+      3.752,
+      3.752
+     ],
+     "kind": "timestamp",
+     "naive_rate": 0.0,
+     "null_rate": 0.0
+    },
+    "severity": {
+     "kind": "categorical",
+     "null_rate": 0.0,
+     "values": {
+      "critical": 1.0
+     }
+    },
+    "subject": {
+     "kind": "categorical",
+     "null_rate": 0.0,
+     "values": {
+      "internships": 0.333333,
+      "jobright_supply_chain": 0.333333,
+      "speedyapply_intern": 0.333333
+     }
+    }
+   },
+   "rows": 3,
+   "sampled": 3
+  },
+  "job_embeddings": {
+   "columns": {
+    "content_hash": {
+     "kind": "key",
+     "null_rate": 0.0
+    },
+    "content_row_id": {
+     "kind": "key",
+     "null_rate": 0.0
+    },
+    "cost_usd": {
+     "kind": "numeric",
+     "null_rate": 0.0,
+     "quantiles": [
+      1.13e-05,
+      1.718e-05,
+      1.866e-05,
+      1.946e-05,
+      2.254e-05,
+      2.77e-05,
+      4.002e-05
+     ]
+    },
+    "created_at": {
+     "age_days": [
+      0.151,
+      0.833,
+      1.541,
+      1.583,
+      1.667,
+      1.75,
+      1.841
+     ],
+     "kind": "timestamp",
+     "naive_rate": 0.0,
+     "null_rate": 0.0
+    },
+    "embedding": {
+     "kind": "opaque",
+     "null_rate": 1.0
+    },
+    "input_tokens": {
+     "kind": "numeric",
+     "null_rate": 0.0,
+     "quantiles": [
+      565.0,
+      859.0,
+      933.0,
+      973.0,
+      1127.0,
+      1385.0,
+      2001.0
+     ]
+    },
+    "model": {
+     "kind": "categorical",
+     "null_rate": 0.0,
+     "values": {
+      "text-embedding-3-small": 1.0
+     }
+    },
+    "url": {
+     "kind": "key",
+     "null_rate": 0.0
+    }
+   },
+   "rows": 24548,
+   "sampled": 4000
+  },
+  "job_requirements": {
+   "columns": {
+    "citizenship_required": {
+     "kind": "boolean",
+     "null_rate": 0.0,
+     "true_rate": 0.18175
+    },
+    "clearance": {
+     "kind": "categorical",
+     "null_rate": 0.917692,
+     "values": {
+      "confidential": 0.002317,
+      "none": 0.125145,
+      "public_trust": 0.050985,
+      "secret": 0.480881,
+      "top_secret": 0.118192,
+      "ts_sci": 0.22248
+     }
+    },
+    "content_hash": {
+     "kind": "key",
+     "null_rate": 0.0
+    },
+    "content_row_id": {
+     "kind": "key",
+     "null_rate": 0.612876
+    },
+    "degree_fields": {
+     "kind": "array",
+     "lengths": [
+      0,
+      0,
+      0,
+      1,
+      3,
+      6,
+      13
+     ],
+     "null_rate": 0.0
+    },
+    "degree_min": {
+     "kind": "categorical",
+     "null_rate": 0.214974,
+     "values": {
+      "associate": 0.040214,
+      "bachelors": 0.701008,
+      "high_school": 0.166444,
+      "masters": 0.041429,
+      "none": 0.026971,
+      "phd": 0.023934
+     }
+    },
+    "degree_required": {
+     "kind": "boolean",
+     "null_rate": 0.0,
+     "true_rate": 0.656
+    },
+    "employment_type": {
+     "kind": "categorical",
+     "null_rate": 0.05999,
+     "values": {
+      "contract": 0.006494,
+      "full_time": 0.886871,
+      "intern": 0.071327,
+      "part_time": 0.031656,
+      "temporary": 0.003653
+     }
+    },
+    "enrollment_required": {
+     "kind": "boolean",
+     "null_rate": 0.0,
+     "true_rate": 0.11075
+    },
+    "extracted_at": {
+     "age_days": [
+      1.354,
+      1.354,
+      1.744,
+      1.744,
+      1.775,
+      1.782,
+      1.835
+     ],
+     "kind": "timestamp",
+     "naive_rate": 0.0,
+     "null_rate": 0.0
+    },
+    "has_requirements": {
+     "kind": "boolean",
+     "null_rate": 0.0,
+     "true_rate": 0.985
+    },
+    "model": {
+     "kind": "categorical",
+     "null_rate": 0.0,
+     "values": {
+      "gpt-5-mini": 0.998569,
+      "gpt-5.6-luna": 0.001431
+     }
+    },
+    "seniority": {
+     "kind": "categorical",
+     "null_rate": 0.076109,
+     "values": {
+      "entry": 0.716631,
+      "intern": 0.125942,
+      "manager": 0.000826,
+      "mid": 0.065242,
+      "new_grad": 0.077733,
+      "postdoc": 0.006194,
+      "principal": 0.000103,
+      "senior": 0.00702,
+      "staff": 0.00031
+     }
+    },
+    "sponsorship": {
+     "kind": "categorical",
+     "null_rate": 0.743443,
+     "values": {
+      "not_offered": 0.968773,
+      "offered": 0.031227
+     }
+    },
+    "url": {
+     "kind": "key",
+     "null_rate": 0.0
+    },
+    "yoe_max": {
+     "kind": "categorical",
+     "null_rate": 0.787029,
+     "values": {
+      "0": 0.0309,
+      "1": 0.07837,
+      "10": 0.002687,
+      "12": 0.001343,
+      "15": 0.000448,
+      "2": 0.396328,
+      "24": 0.001791,
+      "3": 0.322884,
+      "4": 0.04747,
+      "5": 0.104344,
+      "6": 0.005374,
+      "7": 0.005374,
+      "8": 0.001343,
+      "9": 0.001343
+     }
+    },
+    "yoe_min": {
+     "kind": "categorical",
+     "null_rate": 0.508155,
+     "values": {
+      "0": 0.427768,
+      "1": 0.455691,
+      "10": 0.000582,
+      "12": 0.000194,
+      "13": 0.000194,
+      "2": 0.076401,
+      "3": 0.019391,
+      "4": 0.009502,
+      "5": 0.006011,
+      "6": 0.00097,
+      "7": 0.002715,
+      "8": 0.000388,
+      "9": 0.000194
+     }
+    }
+   },
+   "rows": 10485,
+   "sampled": 4000
+  },
+  "job_skills": {
+   "columns": {
+    "kind": {
+     "kind": "categorical",
+     "null_rate": 0.0,
+     "values": {
+      "preferred": 0.287506,
+      "required": 0.712494
+     }
+    },
+    "skill": {
+     "binary": false,
+     "charclasses": [
+      " -9a",
+      " -a",
+      " 9a",
+      " a",
+      "-9a",
+      "-a",
+      "9a",
+      "a"
+     ],
+     "kind": "text",
+     "lengths": [
+      1,
+      3,
+      6,
+      13,
+      20,
+      30,
+      40
+     ],
+     "null_rate": 0.0
+    },
+    "skill_raw": {
+     "binary": false,
+     "charclasses": [
+      " -9A",
+      " -9Aa",
+      " -9a",
+      " -A",
+      " -Aa",
+      " -a",
+      " 9A",
+      " 9Aa",
+      " 9a",
+      " A",
+      " Aa",
+      " a",
+      "-9A",
+      "-9a",
+      "-A",
+      "-Aa",
+      "-a",
+      "9A",
+      "9Aa",
+      "A",
+      "Aa",
+      "a"
+     ],
+     "kind": "text",
+     "lengths": [
+      1,
+      3,
+      6,
+      13,
+      20,
+      31,
+      95
+     ],
+     "null_rate": 0.0
+    },
+    "url": {
+     "kind": "key",
+     "null_rate": 0.0
+    }
+   },
+   "rows": 140696,
+   "sampled": 4000
+  },
+  "jobs": {
+   "columns": {
+    "active": {
+     "kind": "boolean",
+     "null_rate": 0.0,
+     "true_rate": 0.569
+    },
+    "comp_basis": {
+     "kind": "categorical",
+     "null_rate": 0.933155,
+     "values": {
+      "base": 0.993193,
+      "stipend": 0.002836,
+      "total": 0.003403,
+      "unspecified": 0.000567
+     }
+    },
+    "comp_currency": {
+     "kind": "categorical",
+     "null_rate": 0.933003,
+     "values": {
+      "CAD": 0.024335,
+      "GBP": 0.002547,
+      "USD": 0.973118
+     }
+    },
+    "comp_extracted": {
+     "kind": "boolean",
+     "null_rate": 0.0,
+     "true_rate": 0.3
+    },
+    "comp_max": {
+     "kind": "numeric",
+     "null_rate": 0.7821,
+     "quantiles": [
+      5000.0,
+      34320.0,
+      47840.0,
+      70000.0,
+      101000.0,
+      179000.0,
+      4160000.0
+     ]
+    },
+    "comp_min": {
+     "kind": "numeric",
+     "null_rate": 0.783749,
+     "quantiles": [
+      5000.0,
+      31200.0,
+      40000.0,
+      52100.0,
+      73342.0,
+      114400.0,
+      4160000.0
+     ]
+    },
+    "comp_period": {
+     "kind": "categorical",
+     "null_rate": 0.933022,
+     "values": {
+      "biweekly": 0.001698,
+      "hourly": 0.522785,
+      "monthly": 0.007359,
+      "one_time": 0.001415,
+      "weekly": 0.001981,
+      "yearly": 0.464761
+     }
+    },
+    "comp_text": {
+     "binary": false,
+     "charclasses": [
+      " -9",
+      " -9A",
+      " -9Aa",
+      " -9a",
+      "-9",
+      "-9A",
+      "-9Aa",
+      "-9a"
+     ],
+     "kind": "text",
+     "lengths": [
+      6,
+      6,
+      10,
+      15,
+      18,
+      22,
+      59
+     ],
+     "null_rate": 0.779977
+    },
+    "company": {
+     "binary": false,
+     "charclasses": [
+      " -9Aa",
+      " -Aa",
+      " 9Aa",
+      " A",
+      " Aa",
+      " a",
+      "-9Aa",
+      "-A",
+      "-Aa",
+      "-a",
+      "9A",
+      "9Aa",
+      "9a",
+      "A",
+      "Aa",
+      "a"
+     ],
+     "kind": "text",
+     "lengths": [
+      2,
+      4,
+      6,
+      10,
+      18,
+      29,
+      62
+     ],
+     "null_rate": 0.0
+    },
+    "created_at": {
+     "age_days": [
+      0.002,
+      1.63,
+      9.518,
+      10.812,
+      10.816,
+      10.915,
+      10.934
+     ],
+     "kind": "timestamp",
+     "naive_rate": 0.0,
+     "null_rate": 0.0
+    },
+    "date_posted": {
+     "age_days": [
+      0.34,
+      2.189,
+      9.21,
+      53.089,
+      176.484,
+      247.413,
+      521.663
+     ],
+     "kind": "timestamp",
+     "naive_rate": 0.0,
+     "null_rate": 0.083186
+    },
+    "extraction_status": {
+     "kind": "categorical",
+     "null_rate": 0.885837,
+     "values": {
+      "done": 1.0
+     }
+    },
+    "id": {
+     "kind": "key",
+     "null_rate": 0.0
+    },
+    "locations": {
+     "kind": "array",
+     "lengths": [
+      1,
+      1,
+      1,
+      1,
+      2,
+      4,
+      80
+     ],
+     "null_rate": 0.0
+    },
+    "raw_url": {
+     "kind": "key",
+     "null_rate": 0.0
+    },
+    "source": {
+     "kind": "categorical",
+     "null_rate": 0.0,
+     "values": {
+      "airtable1": 0.025801,
+      "fulltime": 0.3725,
+      "fulltime_ouckah": 0.009649,
+      "internships": 0.301333,
+      "internships_ouckah": 0.004019,
+      "jobright_ba": 0.011375,
+      "jobright_eng": 0.093405,
+      "jobright_supply_chain": 0.052968,
+      "sheet_import": 0.114144,
+      "speedyapply_intern": 0.002976,
+      "speedyapply_ng": 0.011811,
+      "upload": 1.9e-05
+     }
+    },
+    "terms": {
+     "elements": {
+      "Fall": 0.002109,
+      "Fall 2016": 9.4e-05,
+      "Fall 2017": 9.4e-05,
+      "Fall 2023": 4.7e-05,
+      "Fall 2024": 9.4e-05,
+      "Fall 2024 Spring 2025 Summer 2025": 4.7e-05,
+      "Fall 2025": 0.017202,
+      "Fall 2025 Spring 2025": 9.4e-05,
+      "Fall 2025 Spring 2026": 4.7e-05,
+      "Fall 2025 Summer 2026 Spring 2027": 4.7e-05,
+      "Fall 2025 Winter 2025": 0.000141,
+      "Fall 2025 Winter 2025 Spring 2026": 4.7e-05,
+      "Fall 2025 Winter 2026 Spring 2026": 0.001078,
+      "Fall 2026": 0.138083,
+      "Fall 2027": 0.005906,
+      "Fall 2028": 0.000328,
+      "Fall 2029": 9.4e-05,
+      "N/A": 0.067588,
+      "Spring": 9.4e-05,
+      "Spring 2016": 9.4e-05,
+      "Spring 2017": 9.4e-05,
+      "Spring 2024": 4.7e-05,
+      "Spring 2025": 0.001875,
+      "Spring 2025 Fall 2025": 4.7e-05,
+      "Spring 2025 Summer 2025": 4.7e-05,
+      "Spring 2025 Summer 2025 Fall 2025": 0.000141,
+      "Spring 2025 Summer 2025 Fall 2025 Winter 2026": 4.7e-05,
+      "Spring 2026": 0.059948,
+      "Spring 2026 Summer 2026": 9.4e-05,
+      "Spring 2027": 0.017202,
+      "Spring 2027 Summer 2027": 0.000141,
+      "Spring 2028": 0.001687,
+      "Spring 2029": 0.000328,
+      "Summer": 0.001078,
+      "Summer 2016": 9.4e-05,
+      "Summer 2017": 9.4e-05,
+      "Summer 2022": 4.7e-05,
+      "Summer 2023": 4.7e-05,
+      "Summer 2024": 0.000234,
+      "Summer 2024 Summer 2025": 4.7e-05,
+      "Summer 2025": 0.043169,
+      "Summer 2025 Fall 2025": 0.000844,
+      "Summer 2025 Fall 2025 Winter 2025": 4.7e-05,
+      "Summer 2025 Fall 2025 Winter 2025 Spring 2025": 0.000141,
+      "Summer 2025 Fall 2025 Winter 2026": 0.000187,
+      "Summer 2025 Spring 2025": 9.4e-05,
+      "Summer 2026": 0.484134,
+      "Summer 2027": 0.068807,
+      "Summer 2028": 0.002015,
+      "Summer 2029": 0.000281,
+      "Winter 2016": 9.4e-05,
+      "Winter 2017": 9.4e-05,
+      "Winter 2024": 9.4e-05,
+      "Winter 2025": 0.022123,
+      "Winter 2026": 0.036981,
+      "Winter 2027": 0.022592,
+      "Winter 2028": 0.001359,
+      "Winter 2029": 0.000281
+     },
+     "kind": "array",
+     "lengths": [
+      0,
+      0,
+      0,
+      0,
+      1,
+      1,
+      8
+     ],
+     "null_rate": 0.0
+    },
+    "title": {
+     "binary": false,
+     "charclasses": [
+      " -9Aa",
+      " -Aa",
+      " 9A",
+      " 9Aa",
+      " A",
+      " Aa",
+      "-Aa",
+      "Aa"
+     ],
+     "kind": "text",
+     "lengths": [
+      5,
+      16,
+      23,
+      31,
+      43,
+      67,
+      132
+     ],
+     "null_rate": 0.0
+    },
+    "uploaded_by": {
+     "kind": "key",
+     "null_rate": 0.999981
+    },
+    "url": {
+     "kind": "key",
+     "null_rate": 0.0
+    }
+   },
+   "rows": 52749,
+   "sampled": 4000
+  },
+  "reports": {
+   "columns": {
+    "corrections": {
+     "keysets": {
+      "company,title": 1.0
+     },
+     "kind": "json",
+     "null_rate": 0.5
+    },
+    "created_at": {
+     "age_days": [
+      0.064,
+      0.064,
+      0.064,
+      9.978,
+      9.978,
+      9.978,
+      9.978
+     ],
+     "kind": "timestamp",
+     "naive_rate": 0.0,
+     "null_rate": 0.0
+    },
+    "id": {
+     "kind": "key",
+     "null_rate": 0.0
+    },
+    "job_id": {
+     "kind": "key",
+     "null_rate": 0.0
+    },
+    "kind": {
+     "kind": "categorical",
+     "null_rate": 0.0,
+     "values": {
+      "wrong_data": 1.0
+     }
+    },
+    "message": {
+     "binary": false,
+     "charclasses": [
+      " a"
+     ],
+     "kind": "text",
+     "lengths": [
+      10,
+      10,
+      10,
+      11,
+      11,
+      11,
+      11
+     ],
+     "null_rate": 0.0
+    },
+    "resolution_note": {
+     "binary": false,
+     "charclasses": [],
+     "kind": "text",
+     "lengths": [],
+     "null_rate": 1.0
+    },
+    "resolved_at": {
+     "age_days": [
+      9.933,
+      9.933,
+      9.933,
+      9.933,
+      9.933,
+      9.933,
+      9.933
+     ],
+     "kind": "timestamp",
+     "naive_rate": 0.0,
+     "null_rate": 0.5
+    },
+    "status": {
+     "kind": "categorical",
+     "null_rate": 0.0,
+     "values": {
+      "dismissed": 0.5,
+      "open": 0.5
+     }
+    },
+    "user_id": {
+     "kind": "key",
+     "null_rate": 0.0
+    }
+   },
+   "rows": 2,
+   "sampled": 2
+  },
+  "source_groups": {
+   "columns": {
+    "active": {
+     "kind": "boolean",
+     "null_rate": 0.0,
+     "true_rate": 0.5
+    },
+    "created_at": {
+     "age_days": [
+      10.936,
+      10.936,
+      10.936,
+      10.936,
+      10.936,
+      10.936,
+      10.936
+     ],
+     "kind": "timestamp",
+     "naive_rate": 0.0,
+     "null_rate": 0.0
+    },
+    "description": {
+     "kind": "categorical",
+     "null_rate": 0.0,
+     "values": {
+      "": 1.0
+     }
+    },
+    "members": {
+     "elements": {
+      "airtable1": 0.076923,
+      "airtable2": 0.076923,
+      "airtable3": 0.076923,
+      "fulltime": 0.153846,
+      "fulltime_ouckah": 0.153846,
+      "fulltime_ouckah_2027": 0.076923,
+      "internships": 0.076923,
+      "internships_ouckah": 0.076923,
+      "speedyapply_intern": 0.076923,
+      "speedyapply_ng": 0.153846
+     },
+     "kind": "array",
+     "lengths": [
+      0,
+      0,
+      3,
+      4,
+      4,
+      6,
+      6
+     ],
+     "null_rate": 0.0
+    },
+    "name": {
+     "kind": "categorical",
+     "null_rate": 0.0,
+     "values": {
+      "airtable": 0.25,
+      "all": 0.25,
+      "dixon": 0.25,
+      "ft": 0.25
+     }
+    }
+   },
+   "rows": 4,
+   "sampled": 4
+  },
+  "source_requests": {
+   "columns": {
+    "created_at": {
+     "age_days": [
+      9.977,
+      9.977,
+      9.977,
+      9.977,
+      9.977,
+      9.977,
+      9.977
+     ],
+     "kind": "timestamp",
+     "naive_rate": 0.0,
+     "null_rate": 0.0
+    },
+    "id": {
+     "kind": "key",
+     "null_rate": 0.0
+    },
+    "note": {
+     "binary": false,
+     "charclasses": [
+      "a"
+     ],
+     "kind": "text",
+     "lengths": [
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4
+     ],
+     "null_rate": 0.0
+    },
+    "resolution_note": {
+     "binary": false,
+     "charclasses": [],
+     "kind": "text",
+     "lengths": [],
+     "null_rate": 1.0
+    },
+    "resolved_at": {
+     "age_days": [
+      9.933,
+      9.933,
+      9.933,
+      9.933,
+      9.933,
+      9.933,
+      9.933
+     ],
+     "kind": "timestamp",
+     "naive_rate": 0.0,
+     "null_rate": 0.0
+    },
+    "status": {
+     "kind": "categorical",
+     "null_rate": 0.0,
+     "values": {
+      "dismissed": 1.0
+     }
+    },
+    "url": {
+     "binary": false,
+     "charclasses": [
+      "-a"
+     ],
+     "kind": "text",
+     "lengths": [
+      18,
+      18,
+      18,
+      18,
+      18,
+      18,
+      18
+     ],
+     "null_rate": 0.0
+    },
+    "user_id": {
+     "kind": "key",
+     "null_rate": 0.0
+    }
+   },
+   "rows": 1,
+   "sampled": 1
+  },
+  "sources": {
+   "columns": {
+    "active": {
+     "kind": "boolean",
+     "null_rate": 0.0,
+     "true_rate": 0.625
+    },
+    "created_at": {
+     "age_days": [
+      10.293,
+      10.293,
+      10.936,
+      10.936,
+      10.936,
+      10.936,
+      10.936
+     ],
+     "kind": "timestamp",
+     "naive_rate": 0.0,
+     "null_rate": 0.0
+    },
+    "description": {
+     "kind": "categorical",
+     "null_rate": 0.0,
+     "values": {
+      "": 0.8125,
+      "Jobright new-grad business analyst board (newest ~50 per hourly pull)": 0.0625,
+      "Jobright new-grad engineering board (newest ~50 per hourly pull)": 0.0625,
+      "Jobright new-grad supply chain board (newest ~50 per hourly pull)": 0.0625
+     }
+    },
+    "listings_url": {
+     "binary": false,
+     "charclasses": [
+      "-9Aa",
+      "-Aa",
+      "-a"
+     ],
+     "kind": "text",
+     "lengths": [
+      58,
+      62,
+      88,
+      90,
+      101,
+      110,
+      114
+     ],
+     "null_rate": 0.0
+    },
+    "name": {
+     "kind": "categorical",
+     "null_rate": 0.0,
+     "values": {
+      "airtable1": 0.0625,
+      "airtable2": 0.0625,
+      "airtable3": 0.0625,
+      "airtable4": 0.0625,
+      "airtable5": 0.0625,
+      "fulltime": 0.0625,
+      "fulltime_ouckah": 0.0625,
+      "fulltime_ouckah_2027": 0.0625,
+      "internships": 0.0625,
+      "internships_ouckah": 0.0625,
+      "jobright_ba": 0.0625,
+      "jobright_eng": 0.0625,
+      "jobright_supply_chain": 0.0625,
+      "speedyapply_intern": 0.0625,
+      "speedyapply_ng": 0.0625,
+      "testing": 0.0625
+     }
+    }
+   },
+   "rows": 16,
+   "sampled": 16
+  },
+  "suggestion_responses": {
+   "columns": {
+    "application_id": {
+     "kind": "key",
+     "null_rate": 1.0
+    },
+    "created_at": {
+     "age_days": [],
+     "kind": "timestamp",
+     "naive_rate": 0.0,
+     "null_rate": 1.0
+    },
+    "event_id": {
+     "kind": "numeric",
+     "null_rate": 1.0,
+     "quantiles": []
+    },
+    "id": {
+     "kind": "key",
+     "null_rate": 1.0
+    },
+    "response": {
+     "binary": false,
+     "charclasses": [],
+     "kind": "text",
+     "lengths": [],
+     "null_rate": 1.0
+    },
+    "suggested_status": {
+     "binary": false,
+     "charclasses": [],
+     "kind": "text",
+     "lengths": [],
+     "null_rate": 1.0
+    },
+    "user_id": {
+     "kind": "key",
+     "null_rate": 1.0
+    }
+   },
+   "rows": 0,
+   "sampled": 0
+  },
+  "task_model_overrides": {
+   "columns": {
+    "acknowledged_cost": {
+     "kind": "boolean",
+     "null_rate": 1.0,
+     "true_rate": 0.0
+    },
+    "changed_by": {
+     "kind": "key",
+     "null_rate": 1.0
+    },
+    "created_at": {
+     "age_days": [],
+     "kind": "timestamp",
+     "naive_rate": 0.0,
+     "null_rate": 1.0
+    },
+    "id": {
+     "kind": "key",
+     "null_rate": 1.0
+    },
+    "model": {
+     "binary": false,
+     "charclasses": [],
+     "kind": "text",
+     "lengths": [],
+     "null_rate": 1.0
+    },
+    "overrode_sanctioned": {
+     "kind": "boolean",
+     "null_rate": 1.0,
+     "true_rate": 0.0
+    },
+    "purpose": {
+     "binary": false,
+     "charclasses": [],
+     "kind": "text",
+     "lengths": [],
+     "null_rate": 1.0
+    },
+    "reason": {
+     "binary": false,
+     "charclasses": [],
+     "kind": "text",
+     "lengths": [],
+     "null_rate": 1.0
+    }
+   },
+   "rows": 0,
+   "sampled": 0
+  },
+  "tasks": {
+   "columns": {
+    "attempts": {
+     "kind": "categorical",
+     "null_rate": 0.0,
+     "values": {
+      "0": 0.003622,
+      "1": 0.955013,
+      "2": 0.03984,
+      "3": 0.001525
+     }
+    },
+    "created_at": {
+     "age_days": [
+      0.004,
+      1.173,
+      1.666,
+      3.907,
+      6.879,
+      9.839,
+      10.902
+     ],
+     "kind": "timestamp",
+     "naive_rate": 0.0,
+     "null_rate": 0.0
+    },
+    "dedupe_key": {
+     "kind": "key",
+     "null_rate": 0.058902
+    },
+    "error": {
+     "binary": false,
+     "charclasses": [
+      " -9Aa",
+      " -9a",
+      " -Aa",
+      " -a",
+      " a"
+     ],
+     "kind": "text",
+     "lengths": [
+      17,
+      18,
+      22,
+      51,
+      124,
+      200,
+      200
+     ],
+     "null_rate": 0.993519
+    },
+    "finished_at": {
+     "age_days": [
+      0.066,
+      1.169,
+      1.663,
+      3.755,
+      6.871,
+      9.835,
+      10.837
+     ],
+     "kind": "timestamp",
+     "naive_rate": 0.0,
+     "null_rate": 0.004384
+    },
+    "id": {
+     "kind": "key",
+     "null_rate": 0.0
+    },
+    "kind": {
+     "kind": "categorical",
+     "null_rate": 0.0,
+     "values": {
+      "backfill_message_html": 0.000191,
+      "classify_mail": 0.011628,
+      "data_health": 0.019825,
+      "embed_postings": 0.008769,
+      "extract_comp": 0.011437,
+      "extract_requirements": 0.001334,
+      "extract_upload": 0.000191,
+      "fetch_missing_content": 0.019825,
+      "ingest_source": 0.475029,
+      "match_mail": 0.004766,
+      "poll_batches": 0.302135,
+      "probe_credentials": 0.008769,
+      "reverify_chunk": 0.0183,
+      "reverify_open": 0.002478,
+      "run_all_filters": 0.045368,
+      "run_filter": 0.000953,
+      "run_filter_batch_chunk": 0.022493,
+      "run_filter_chunk": 0.000572,
+      "send_digests": 0.002287,
+      "sync_gmail": 0.008769,
+      "verify_new": 0.034884
+     }
+    },
+    "last_heartbeat": {
+     "age_days": [
+      0.066,
+      1.169,
+      1.662,
+      3.755,
+      6.87,
+      9.798,
+      10.804
+     ],
+     "kind": "timestamp",
+     "naive_rate": 0.0,
+     "null_rate": 0.004575
+    },
+    "parent_id": {
+     "kind": "key",
+     "null_rate": 0.958635
+    },
+    "payload": {
+     "keysets": {
+      "": 0.004003,
+      "backfill,cap": 0.002287,
+      "batch_ids,claimed_message_ids": 0.000762,
+      "batch_ids,cycle": 0.011819,
+      "batch_ids,filter,jobs,parent_id,user_id": 0.014106,
+      "batch_ids,force,parent_id,rows": 0.013725,
+      "batched,user_id": 0.041937,
+      "cap,claimed_message_ids,message_ids": 0.000191,
+      "claimed_message_ids": 0.004384,
+      "cycle": 0.412695,
+      "cycle,force,user_id": 0.000191,
+      "cycle,full": 0.000191,
+      "cycle,source": 0.475029,
+      "filter,jobs,parent_id,user_id": 0.008959,
+      "filter_id,user_id": 0.000953,
+      "force,parent_id,rows": 0.003241,
+      "job_id,user_id": 0.000191,
+      "message_ids": 0.000572,
+      "parent_id,rows": 0.001334,
+      "user_id": 0.003431
+     },
+     "kind": "json",
+     "null_rate": 0.0
+    },
+    "progress": {
+     "keysets": {
+      "done,label,total": 1.0
+     },
+     "kind": "json",
+     "null_rate": 0.006291
+    },
+    "progress_at": {
+     "age_days": [],
+     "kind": "timestamp",
+     "naive_rate": 0.0,
+     "null_rate": 0.985894
+    },
+    "started_at": {
+     "age_days": [
+      0.066,
+      1.172,
+      1.664,
+      3.76,
+      6.871,
+      9.838,
+      10.867
+     ],
+     "kind": "timestamp",
+     "naive_rate": 0.0,
+     "null_rate": 0.003812
+    },
+    "status": {
+     "kind": "categorical",
+     "null_rate": 0.0,
+     "values": {
+      "awaiting_batch": 0.000953,
+      "cancelled": 0.000953,
+      "done": 0.989135,
+      "failed": 0.005528,
+      "pending": 0.002859,
+      "running": 0.000572
+     }
+    },
+    "worker": {
+     "binary": false,
+     "charclasses": [
+      "a"
+     ],
+     "kind": "text",
+     "lengths": [
+      3,
+      3,
+      3,
+      3,
+      7,
+      7,
+      7
+     ],
+     "null_rate": 0.025543
+    }
+   },
+   "rows": 5246,
+   "sampled": 4000
+  },
+  "user_filters": {
+   "columns": {
+    "created_at": {
+     "age_days": [
+      10.935,
+      10.935,
+      10.935,
+      10.935,
+      10.935,
+      10.936,
+      10.936
+     ],
+     "kind": "timestamp",
+     "naive_rate": 0.0,
+     "null_rate": 0.0
+    },
+    "enabled": {
+     "kind": "boolean",
+     "null_rate": 0.0,
+     "true_rate": 0.1
+    },
+    "fail_closed": {
+     "kind": "boolean",
+     "null_rate": 0.0,
+     "true_rate": 0.4
+    },
+    "id": {
+     "kind": "key",
+     "null_rate": 0.0
+    },
+    "name": {
+     "binary": false,
+     "charclasses": [
+      "-9a",
+      "-a",
+      "a"
+     ],
+     "kind": "text",
+     "lengths": [
+      5,
+      5,
+      7,
+      12,
+      12,
+      25,
+      25
+     ],
+     "null_rate": 0.0
+    },
+    "on_ambiguous": {
+     "kind": "categorical",
+     "null_rate": 0.0,
+     "values": {
+      "filter": 0.4,
+      "keep": 0.6
+     }
+    },
+    "prompt": {
+     "binary": false,
+     "kind": "text",
+     "lengths": [
+      28,
+      28,
+      518,
+      1572,
+      1884,
+      4334,
+      4334
+     ],
+     "null_rate": 0.0
+    },
+    "prompt_hash": {
+     "kind": "key",
+     "null_rate": 0.0
+    },
+    "updated_at": {
+     "age_days": [
+      10.42,
+      10.42,
+      10.89,
+      10.935,
+      10.935,
+      10.935,
+      10.935
+     ],
+     "kind": "timestamp",
+     "naive_rate": 0.0,
+     "null_rate": 0.0
+    },
+    "user_id": {
+     "kind": "key",
+     "null_rate": 0.0
+    }
+   },
+   "rows": 10,
+   "sampled": 10
+  },
+  "user_job_history": {
+   "columns": {
+    "created_at": {
+     "age_days": [
+      0.062,
+      0.063,
+      0.067,
+      0.073,
+      0.876,
+      5.22,
+      8.915
+     ],
+     "kind": "timestamp",
+     "naive_rate": 0.0,
+     "null_rate": 0.0
+    },
+    "id": {
+     "kind": "key",
+     "null_rate": 0.0
+    },
+    "job_id": {
+     "kind": "key",
+     "null_rate": 0.0
+    },
+    "new_status": {
+     "kind": "categorical",
+     "null_rate": 0.0,
+     "values": {
+      "Application Submitted": 1.0
+     }
+    },
+    "old_status": {
+     "binary": false,
+     "charclasses": [],
+     "kind": "text",
+     "lengths": [],
+     "null_rate": 1.0
+    },
+    "user_id": {
+     "kind": "key",
+     "null_rate": 0.0
+    }
+   },
+   "rows": 12,
+   "sampled": 12
+  },
+  "user_jobs": {
+   "columns": {
+    "connection1": {
+     "binary": false,
+     "charclasses": [],
+     "kind": "text",
+     "lengths": [],
+     "null_rate": 1.0
+    },
+    "connection2": {
+     "binary": false,
+     "charclasses": [],
+     "kind": "text",
+     "lengths": [],
+     "null_rate": 1.0
+    },
+    "created_at": {
+     "age_days": [
+      0.035,
+      4.249,
+      10.925,
+      10.928,
+      10.931,
+      10.934,
+      10.935
+     ],
+     "kind": "timestamp",
+     "naive_rate": 0.0,
+     "null_rate": 0.0
+    },
+    "date_applied": {
+     "age_days": [
+      0.09,
+      26.09,
+      101.09,
+      347.09,
+      385.09,
+      416.09,
+      467.09
+     ],
+     "kind": "timestamp",
+     "naive_rate": 0.0,
+     "null_rate": 0.557007
+    },
+    "documents": {
+     "binary": false,
+     "charclasses": [],
+     "kind": "text",
+     "lengths": [],
+     "null_rate": 1.0
+    },
+    "hidden": {
+     "kind": "boolean",
+     "null_rate": 0.0,
+     "true_rate": 0.0
+    },
+    "job_id": {
+     "kind": "key",
+     "null_rate": 0.0
+    },
+    "notes": {
+     "binary": false,
+     "charclasses": [],
+     "kind": "text",
+     "lengths": [],
+     "null_rate": 1.0
+    },
+    "recruiter": {
+     "binary": false,
+     "charclasses": [],
+     "kind": "text",
+     "lengths": [],
+     "null_rate": 1.0
+    },
+    "size": {
+     "binary": false,
+     "charclasses": [],
+     "kind": "text",
+     "lengths": [],
+     "null_rate": 1.0
+    },
+    "status": {
+     "kind": "categorical",
+     "null_rate": 0.192399,
+     "values": {
+      "Application Submitted": 0.533088,
+      "Follow-up": 0.000735,
+      "No Longer Interested": 0.466176
+     }
+    },
+    "updated_at": {
+     "age_days": [
+      0.035,
+      4.249,
+      10.925,
+      10.928,
+      10.931,
+      10.934,
+      10.935
+     ],
+     "kind": "timestamp",
+     "naive_rate": 0.0,
+     "null_rate": 0.0
+    },
+    "user_id": {
+     "kind": "key",
+     "null_rate": 0.0
+    }
+   },
+   "rows": 1684,
+   "sampled": 1684
+  },
+  "user_oauth_tokens": {
+   "columns": {
+    "access_token_enc": {
+     "binary": true,
+     "kind": "text",
+     "lengths": [
+      420,
+      420,
+      420,
+      420,
+      420,
+      420,
+      420
+     ],
+     "null_rate": 0.0
+    },
+    "access_token_expires_at": {
+     "age_days": [
+      -0.002,
+      -0.002,
+      -0.002,
+      -0.002,
+      -0.002,
+      -0.002,
+      -0.002
+     ],
+     "kind": "timestamp",
+     "naive_rate": 0.0,
+     "null_rate": 0.0
+    },
+    "account_email": {
+     "binary": false,
+     "charclasses": [
+      "-a"
+     ],
+     "kind": "text",
+     "lengths": [
+      24,
+      24,
+      24,
+      24,
+      24,
+      24,
+      24
+     ],
+     "null_rate": 0.0
+    },
+    "connected_at": {
+     "age_days": [
+      1.897,
+      1.897,
+      1.897,
+      1.897,
+      1.897,
+      1.897,
+      1.897
+     ],
+     "kind": "timestamp",
+     "naive_rate": 0.0,
+     "null_rate": 0.0
+    },
+    "invalid_at": {
+     "age_days": [],
+     "kind": "timestamp",
+     "naive_rate": 0.0,
+     "null_rate": 1.0
+    },
+    "invalid_reason": {
+     "binary": false,
+     "charclasses": [],
+     "kind": "text",
+     "lengths": [],
+     "null_rate": 1.0
+    },
+    "provider": {
+     "kind": "categorical",
+     "null_rate": 0.0,
+     "values": {
+      "google": 1.0
+     }
+    },
+    "refresh_token_enc": {
+     "binary": true,
+     "kind": "text",
+     "lengths": [
+      228,
+      228,
+      228,
+      228,
+      228,
+      228,
+      228
+     ],
+     "null_rate": 0.0
+    },
+    "scopes": {
+     "kind": "array",
+     "lengths": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1
+     ],
+     "null_rate": 0.0
+    },
+    "updated_at": {
+     "age_days": [
+      0.039,
+      0.039,
+      0.039,
+      0.039,
+      0.039,
+      0.039,
+      0.039
+     ],
+     "kind": "timestamp",
+     "naive_rate": 0.0,
+     "null_rate": 0.0
+    },
+    "user_id": {
+     "kind": "key",
+     "null_rate": 0.0
+    }
+   },
+   "rows": 1,
+   "sampled": 1
+  },
+  "user_settings": {
+   "columns": {
+    "ai_base_url": {
+     "binary": false,
+     "charclasses": [],
+     "kind": "text",
+     "lengths": [],
+     "null_rate": 1.0
+    },
+    "ai_model": {
+     "kind": "categorical",
+     "null_rate": 0.0,
+     "values": {
+      "gpt-5.6-luna": 1.0
+     }
+    },
+    "ai_params": {
+     "documents": [
+      "{}"
+     ],
+     "keysets": {
+      "": 1.0
+     },
+     "kind": "json",
+     "null_rate": 0.0
+    },
+    "ai_provider": {
+     "kind": "categorical",
+     "null_rate": 0.0,
+     "values": {
+      "openai": 1.0
+     }
+    },
+    "api_key_enc": {
+     "binary": true,
+     "kind": "text",
+     "lengths": [],
+     "null_rate": 1.0
+    },
+    "background": {
+     "keysets": {
+      "": 1.0
+     },
+     "kind": "json",
+     "null_rate": 0.0
+    },
+    "bypass_sponsorship_filter": {
+     "kind": "boolean",
+     "null_rate": 0.0,
+     "true_rate": 0.0
+    },
+    "column_layout": {
+     "keysets": {
+      "<array>": 1.0
+     },
+     "kind": "json",
+     "null_rate": 0.0
+    },
+    "criteria": {
+     "documents": [
+      "{\"date_posted_after\": \"2026-05-31\", \"excluded_locations\": [\"UK\", \"Canada\"], \"included_terms\": []}"
+     ],
+     "keysets": {
+      "date_posted_after,excluded_locations,included_terms": 1.0
+     },
+     "kind": "json",
+     "null_rate": 0.0
+    },
+    "digest_token": {
+     "binary": false,
+     "charclasses": [
+      "-9Aa"
+     ],
+     "kind": "text",
+     "lengths": [
+      32,
+      32,
+      32,
+      32,
+      32,
+      32,
+      32
+     ],
+     "null_rate": 0.0
+    },
+    "email_digest": {
+     "kind": "boolean",
+     "null_rate": 0.0,
+     "true_rate": 1.0
+    },
+    "identities": {
+     "keysets": {},
+     "kind": "json",
+     "null_rate": 1.0
+    },
+    "identities_confirmed_at": {
+     "age_days": [],
+     "kind": "timestamp",
+     "naive_rate": 0.0,
+     "null_rate": 1.0
+    },
+    "last_digest_at": {
+     "age_days": [
+      0.066,
+      0.066,
+      0.066,
+      0.066,
+      0.066,
+      0.066,
+      0.066
+     ],
+     "kind": "timestamp",
+     "naive_rate": 0.0,
+     "null_rate": 0.0
+    },
+    "prefs": {
+     "keysets": {
+      "tracker_filters": 1.0
+     },
+     "kind": "json",
+     "null_rate": 0.0
+    },
+    "updated_at": {
+     "age_days": [
+      0.004,
+      0.004,
+      0.004,
+      0.004,
+      0.004,
+      0.004,
+      0.004
+     ],
+     "kind": "timestamp",
+     "naive_rate": 0.0,
+     "null_rate": 0.0
+    },
+    "user_id": {
+     "kind": "key",
+     "null_rate": 0.0
+    }
+   },
+   "rows": 1,
+   "sampled": 1
+  },
+  "user_sources": {
+   "columns": {
+    "source": {
+     "kind": "key",
+     "null_rate": 0.0
+    },
+    "user_id": {
+     "kind": "key",
+     "null_rate": 0.0
+    }
+   },
+   "rows": 5,
+   "sampled": 5
+  },
+  "users": {
+   "columns": {
+    "created_at": {
+     "age_days": [
+      10.936,
+      10.936,
+      10.936,
+      10.936,
+      10.936,
+      10.936,
+      10.936
+     ],
+     "kind": "timestamp",
+     "naive_rate": 0.0,
+     "null_rate": 0.0
+    },
+    "email": {
+     "binary": false,
+     "charclasses": [
+      "-a"
+     ],
+     "kind": "text",
+     "lengths": [
+      24,
+      24,
+      24,
+      24,
+      24,
+      24,
+      24
+     ],
+     "null_rate": 0.0
+    },
+    "groups": {
+     "elements": {
+      "arr-users": 0.2,
+      "authentik Admins": 0.2,
+      "infra-admins": 0.2,
+      "jellyfin-users": 0.2,
+      "transmission": 0.2
+     },
+     "kind": "array",
+     "lengths": [
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5
+     ],
+     "null_rate": 0.0
+    },
+    "id": {
+     "kind": "key",
+     "null_rate": 0.0
+    },
+    "last_seen_at": {
+     "age_days": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+     ],
+     "kind": "timestamp",
+     "naive_rate": 0.0,
+     "null_rate": 0.0
+    },
+    "name": {
+     "binary": false,
+     "charclasses": [],
+     "kind": "text",
+     "lengths": [],
+     "null_rate": 1.0
+    },
+    "sub": {
+     "binary": false,
+     "charclasses": [
+      "9a"
+     ],
+     "kind": "text",
+     "lengths": [
+      64,
+      64,
+      64,
+      64,
+      64,
+      64,
+      64
+     ],
+     "null_rate": 0.0
+    }
+   },
+   "rows": 1,
+   "sampled": 1
+  },
+  "worker_status": {
+   "columns": {
+    "current_task_id": {
+     "kind": "key",
+     "null_rate": 0.0
+    },
+    "last_seen": {
+     "age_days": [
+      0.0,
+      0.0,
+      0.001,
+      0.001,
+      0.001,
+      0.001,
+      0.001
+     ],
+     "kind": "timestamp",
+     "naive_rate": 0.0,
+     "null_rate": 0.0
+    },
+    "name": {
+     "binary": false,
+     "charclasses": [
+      "a"
+     ],
+     "kind": "text",
+     "lengths": [
+      3,
+      3,
+      7,
+      7,
+      7,
+      7,
+      7
+     ],
+     "null_rate": 0.0
+    },
+    "started_at": {
+     "age_days": [
+      0.055,
+      0.055,
+      0.055,
+      0.055,
+      0.055,
+      0.055,
+      0.055
+     ],
+     "kind": "timestamp",
+     "naive_rate": 0.0,
+     "null_rate": 0.0
+    }
+   },
+   "rows": 3,
+   "sampled": 3
+  }
+ }
+}

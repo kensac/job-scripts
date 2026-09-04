@@ -1,8 +1,13 @@
-"""Integration tests for the things that go wrong at 3am.
+"""The things that go wrong at 3am.
 
-The other integration file checks data shapes. This one checks that the moving
-parts are still moving: nothing wedged, nothing parked forever, and the two
-independent spellings of the visibility predicate still agree.
+The other files check data shapes. This one checks that the moving parts are
+still moving: nothing wedged, nothing parked forever, and the two independent
+spellings of the visibility predicate still agree.
+
+The wedged/parked checks are monitors of a running fleet, so they stay on real
+data. The predicate comparison is a test of code, and now runs on every pull
+request against the corpus - which materialises its boards with the
+application's own write-time predicate, so the comparison stays able to fail.
 
 Deliberately not asserted here, because they are known backlogs rather than
 invariants and would fail today: 14,196 verdicts whose url matches no job (a
@@ -17,8 +22,6 @@ import pytest
 
 from api import db
 
-pytestmark = pytest.mark.integration
-
 
 def _count(sql: str, params=None) -> int:
     row = db.query_one(sql, params)
@@ -26,10 +29,15 @@ def _count(sql: str, params=None) -> int:
     return int(next(iter(row.values())))
 
 
+@pytest.mark.integration
 def test_no_task_is_wedged_in_running():
     """The reaper requeues a task whose worker died after HEARTBEAT_TIMEOUT.
     Anything still 'running' a day later means the reaper itself is not
-    working, which is invisible until the queue backs up."""
+    working, which is invisible until the queue backs up.
+
+    Real data only: this is a monitor of the reaper, not a test of any code path.
+    Nothing generates tasks in the corpus, so there is no reaper for it to be watching.
+    """
     wedged = db.query(
         "SELECT id, kind, worker, started_at FROM tasks "
         "WHERE status = 'running' AND started_at < now() - interval '24 hours' LIMIT 5"
@@ -37,6 +45,7 @@ def test_no_task_is_wedged_in_running():
     assert not wedged, f"tasks stuck running for over a day: {wedged}"
 
 
+@pytest.mark.integration
 def test_no_batch_is_parked_past_the_providers_own_window():
     """Tasks now park on provider batches instead of holding a worker. The
     failure mode that replaces 'worker blocked' is 'parked forever', so this
@@ -44,6 +53,9 @@ def test_no_batch_is_parked_past_the_providers_own_window():
 
     The window is the provider's, read from the same constant the submitter
     uses, so this cannot drift from what we asked for.
+
+
+    Real data only: a monitor of the batch poller, for the same reason.
     """
     from core.batch import completion_window_seconds
 
@@ -57,9 +69,15 @@ def test_no_batch_is_parked_past_the_providers_own_window():
     assert not stale, f"batches unresolved past twice the completion window: {stale}"
 
 
+@pytest.mark.integration
 def test_no_task_parked_without_batches_to_wait_for():
     """awaiting_batch with an empty batch_ids list would wait forever - the
-    poller has nothing to check, so nothing ever resumes it."""
+    poller has nothing to check, so nothing ever resumes it.
+
+    Real data only: a monitor of the submitter. The corpus draws task status and
+    payload independently, so it parks tasks with no batch_ids and would fail on its
+    own generator.
+    """
     orphaned = db.query(
         "SELECT id, kind FROM tasks WHERE status = 'awaiting_batch' "
         "AND COALESCE(jsonb_array_length(payload->'batch_ids'), 0) = 0 LIMIT 5"
@@ -67,6 +85,7 @@ def test_no_task_parked_without_batches_to_wait_for():
     assert not orphaned, f"parked with nothing to wait on: {orphaned}"
 
 
+@pytest.mark.corpus
 def test_the_two_visibility_predicates_agree():
     """The board is defined twice - as a read-time predicate in routers/jobs.py
     and as a write-time predicate in tasks/board.py. They have already drifted
@@ -114,6 +133,7 @@ def test_the_two_visibility_predicates_agree():
     )
 
 
+@pytest.mark.corpus
 def test_health_detectors_execute_against_real_data():
     """detect() is ratio comparisons over live tables with sample floors. It
     has silently stopped being evaluable before (a denominator polluted by rows
@@ -127,7 +147,13 @@ def test_health_detectors_execute_against_real_data():
         assert {"kind", "subject", "severity", "message"} <= set(a), f"malformed alert: {a}"
 
 
+@pytest.mark.integration
 def test_every_batch_row_has_a_task_that_exists():
+    """
+    Real data only: ai_batches.task_id has no foreign key, so in production this can
+    genuinely orphan. The corpus draws it from the tasks it has already written, so it
+    never can.
+    """
     orphans = _count(
         "SELECT count(*) FROM ai_batches b LEFT JOIN tasks t ON t.id = b.task_id "
         "WHERE b.task_id IS NOT NULL AND t.id IS NULL"
@@ -135,7 +161,12 @@ def test_every_batch_row_has_a_task_that_exists():
     assert orphans == 0
 
 
+@pytest.mark.integration
 def test_token_counts_are_never_negative():
+    """
+    Real data only: the subject is what the providers reported. The corpus samples
+    token counts from a measured range whose floor is zero.
+    """
     bad = _count(
         "SELECT count(*) FROM ai_queries "
         "WHERE prompt_tokens < 0 OR completion_tokens < 0 OR total_tokens < 0"
@@ -143,9 +174,14 @@ def test_token_counts_are_never_negative():
     assert bad == 0
 
 
+@pytest.mark.integration
 def test_every_enabled_filter_has_a_prompt_hash():
     """Verdicts are keyed on prompt_hash. A filter without one can never match
-    a verdict, so its user's board silently loses every job."""
+    a verdict, so its user's board silently loses every job.
+
+    Real data only: the corpus computes a prompt_hash for every filter it writes, so a
+    missing one cannot occur.
+    """
     missing = _count(
         "SELECT count(*) FROM user_filters WHERE enabled "
         "AND (prompt_hash IS NULL OR prompt_hash = '')"

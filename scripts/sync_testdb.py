@@ -13,6 +13,16 @@ daemon between you and running tests.
 The schema is built by the application's own migrations rather than copied, so
 a sync also proves that migrations produce the schema production actually has.
 
+WHAT THIS IS FOR, NOW THAT THERE IS A CORPUS. Most tests no longer want this.
+`tests/corpus.py` generates a catalog from a committed measurement of
+production, runs on every pull request, and holds several users - which this
+never will, because production has one. What is left here is the small set of
+checks whose subject is what a live writer actually did, and a dev API over
+real rows. See docs/agents/testing.md.
+
+Every identifying column is rewritten on the way out (see ANONYMISE). The
+mailbox, the addresses and the OAuth tokens do not travel.
+
 Usage:
     set -a && . ./.env && set +a
     python scripts/sync_testdb.py            # structure + data
@@ -29,30 +39,72 @@ from urllib.parse import urlparse, urlunparse
 
 import psycopg
 
-# Copy order is FK order. Foreign keys are disabled during the copy, but a
-# deterministic order keeps a partial failure readable.
-TABLES = [
-    "users",
-    "sources",
-    "source_groups",
-    "group_budgets",
-    "app_config",
-    "filter_presets",
-    "jobs",
-    "user_settings",
-    "user_sources",
-    "user_filters",
-    "user_jobs",
-    "user_job_history",
-    "ai_queries",
-    "ai_batches",
-    "api_usage",
-    "tasks",
-    "worker_status",
-    "reports",
-    "source_requests",
-    "health_alerts",
-]
+# Which tables get copied is read from the SOURCE at run time, not listed
+# here. A constant WAS listed here, and it had drifted eleven populated tables
+# behind production - job_skills, email_events, email_messages,
+# job_embeddings, application_matches, job_requirements, applications,
+# action_items, ai_prompt_samples, ai_prompts, user_oauth_tokens, 345,032 rows
+# between them - and nothing said so. The "not present on both sides" message
+# below only ever fired for a table that WAS in the list, so a table missing
+# from the list produced no output at all and the sync printed a total and
+# looked like it had worked.
+#
+# Deriving it means a new table is copied the day it exists, and a table the
+# local schema does not have is reported instead of skipped in silence.
+EXCLUDE_TABLES = {
+    # Written by the `alembic upgrade head` below. Copying it would put
+    # production's revision row beside the one the migrations just wrote.
+    "alembic_version",
+}
+
+# Columns rewritten during the copy, never selected verbatim.
+#
+# The copy lands on developer laptops and used to land in a GitHub Actions
+# secret. It carried the user's email address, their entire imported mailbox -
+# every sender, subject and body - and their Google refresh token, encrypted
+# under a key those same machines hold. None of that is needed to check a
+# query plan or a column's shape, and there is no version of "we will remember
+# to be careful with it" that survives a year.
+#
+# The expressions run inside the INSERT ... SELECT, so the original value
+# never leaves the server it was already on.
+ANONYMISE = {
+    "users.email": "'user' || id || '@example.invalid'",
+    "users.name": "'User ' || id",
+    "users.sub": "'copied-sub-' || id",
+    "user_settings.api_key_enc": "NULL",
+    "user_settings.digest_token": "NULL",
+    "user_settings.identities": "NULL",
+    # NOT NULL, so it cannot simply be dropped - and a random blob would fail
+    # to decrypt somewhere far from here. Marked invalid instead, which is a
+    # state the application already knows how to handle: a disconnected
+    # mailbox that asks its owner to reconnect.
+    "user_oauth_tokens.refresh_token_enc": r"'\x00'::bytea",
+    "user_oauth_tokens.access_token_enc": "NULL",
+    "user_oauth_tokens.account_email": "'user' || user_id || '@example.invalid'",
+    "user_oauth_tokens.invalid_at": "now()",
+    "user_oauth_tokens.invalid_reason": "'anonymised in the test copy'",
+    "email_messages.from_email": "'sender' || id || '@example.invalid'",
+    "email_messages.from_name": "'Sender ' || id",
+    "email_messages.to_emails": "ARRAY['user' || user_id || '@example.invalid']",
+    "email_messages.subject": "'subject ' || id",
+    "email_messages.thread_topic": "NULL",
+    # Length preserved, content not. The prefilter and the classifier are
+    # sensitive to how long a body is; nothing downstream needs the words.
+    "email_messages.body_text": "repeat('x', length(body_text))",
+    "email_messages.body_html": "repeat('x', length(body_html))",
+    "email_messages.headers": "NULL",
+    "user_jobs.notes": "NULL",
+    "user_jobs.recruiter": "NULL",
+    "user_jobs.connection1": "NULL",
+    "user_jobs.connection2": "NULL",
+    "user_jobs.documents": "NULL",
+    "reports.message": "'report ' || id",
+    "reports.resolution_note": "NULL",
+    "source_requests.note": "'request ' || id",
+    "source_requests.resolution_note": "NULL",
+    "application_matches.rationale": "NULL",
+}
 
 # input_content is ~80% of the database and almost no test needs page text.
 FAST_SKIP = {"ai_queries": ["input_content", "instructions", "parsed_json"]}
@@ -139,20 +191,44 @@ def main() -> int:
         )
         dst.execute("CREATE SCHEMA src_remote")
         dst.commit()
-        # Pull the source tables in as foreign tables, then INSERT..SELECT.
+        # Pull EVERY source table in as a foreign table, then INSERT..SELECT.
         # Postgres performs the read and the write inside the server; nothing
-        # travels to this machine.
-        dst.execute(
-            "IMPORT FOREIGN SCHEMA public LIMIT TO ({}) FROM SERVER src_srv INTO src_remote".format(
-                ", ".join(TABLES)
-            )
-        )
+        # travels to this machine. No LIMIT TO: what exists in production is
+        # what gets copied, so the list cannot fall behind it.
+        dst.execute("IMPORT FOREIGN SCHEMA public FROM SERVER src_srv INTO src_remote")
         dst.commit()
+
+        source_tables = {
+            r[0]
+            for r in dst.execute(
+                "SELECT table_name FROM information_schema.tables WHERE table_schema = 'src_remote'"
+            ).fetchall()
+        }
+        local_tables = {
+            r[0]
+            for r in dst.execute(
+                "SELECT tablename FROM pg_tables WHERE schemaname = 'public'"
+            ).fetchall()
+        }
+        missing = sorted(source_tables - local_tables - EXCLUDE_TABLES)
+        if missing:
+            # Loud, and fatal. A table in production that the migrations do not
+            # produce means the copy would be silently partial, which is the
+            # exact failure this script used to have.
+            print(
+                f"\nERROR: production has {len(missing)} table(s) the migrations "
+                f"did not create: {', '.join(missing)}\n"
+                "The copy would be silently incomplete. Add the migration.",
+                file=sys.stderr,
+            )
+            return 1
+        tables = sorted((source_tables & local_tables) - EXCLUDE_TABLES)
+        print(f"copying {len(tables)} tables")
 
         # FK order is not enough on its own - rows can reference others in the
         # same table. Disabling the triggers makes the copy order-independent.
         dst.execute("SET session_replication_role = replica")
-        for table in TABLES:
+        for table in tables:
             src_cols = {
                 r[0]
                 for r in dst.execute(
@@ -168,12 +244,16 @@ def main() -> int:
             skip = set(FAST_SKIP.get(table, []) if args.fast else [])
             cols = [c for c in dst_cols if c in src_cols and c not in skip]
             collist = ", ".join(f'"{c}"' for c in cols)
+            redacted = [c for c in cols if f"{table}.{c}" in ANONYMISE]
+            selects = ", ".join(
+                ANONYMISE.get(f"{table}.{c}", f'"{c}"') + f' AS "{c}"' for c in cols
+            )
             # OVERRIDING SYSTEM VALUE because the id columns are GENERATED
             # ALWAYS: a copy has to preserve the production ids, or every
             # foreign key in the copied data points at the wrong row.
             dst.execute(
                 f"INSERT INTO public.{table} ({collist}) OVERRIDING SYSTEM VALUE "
-                f"SELECT {collist} FROM src_remote.{table}"
+                f"SELECT {selects} FROM src_remote.{table}"
             )
             n = dst.execute(f"SELECT count(*) FROM public.{table}").fetchone()
             count = n[0] if n else 0
@@ -181,6 +261,7 @@ def main() -> int:
             print(
                 f"  {table}: {count} rows"
                 + (f" (skipped {', '.join(sorted(skip))})" if skip else "")
+                + (f" (anonymised {', '.join(redacted)})" if redacted else "")
             )
 
         # Sequences do not follow the rows; without this the first insert in a

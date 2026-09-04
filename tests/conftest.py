@@ -277,18 +277,53 @@ def _reseed() -> None:
         )
 
 
+def _real_production_data() -> bool:
+    """True when this database is a synced copy of production.
+
+    `sync_testdb.py` stamps `testdb_synced_at` into the copy it cuts, and
+    `corpus.build()` stamps its own key. Asking the data rather than reading
+    an environment variable means a run cannot be told it has production data
+    when it does not - which is the failure that would make an `integration`
+    test pass vacuously against an empty scratch database.
+    """
+    from tests import corpus
+
+    return corpus.holds_real_data()
+
+
 @pytest.fixture(autouse=True)
 def _clean_db(request):
-    """Isolate unit tests by truncating between them.
+    """Give each test the database its marker asks for.
 
-    Integration tests are exempt, and that exemption is load-bearing: they run
-    against a synced copy of production, so truncating first would delete the
-    only thing they are there to inspect. The guard test in the integration
-    suite exists because this fixture silently did exactly that.
+    Three populations, and the difference between them is what gets truncated:
+
+    unmarked  a truncated database it fills itself. 632 tests, unchanged.
+    corpus    the generated corpus from tests/corpus.py, built from a
+              measurement of production. Not truncated, or there would be
+              nothing to read; rebuilt lazily when an unmarked test has
+              emptied it.
+    integration  a synced copy of REAL production. Skipped unless the database
+              actually holds one, so a full `pytest tests` on CI - which has
+              no production credential and must not have one - skips them
+              rather than failing or, worse, passing against empty tables.
     """
     if request.node.get_closest_marker("integration"):
+        if not _real_production_data():
+            pytest.skip(
+                "needs a synced copy of production (make testdb-sync); "
+                "this database holds the generated corpus or nothing"
+            )
         yield
         return
+
+    if request.node.get_closest_marker("corpus"):
+        from tests import corpus
+
+        if not corpus.is_present():
+            corpus.build()
+        yield
+        return
+
     db.execute(f"TRUNCATE TABLE {', '.join(_mutable_tables())} RESTART IDENTITY CASCADE")
     _reseed()
     yield

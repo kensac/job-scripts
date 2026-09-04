@@ -1,6 +1,6 @@
 export PYTHONPATH := src
 
-.PHONY: api worker check lint fmt types test dev-api dev-headers testdb-up testdb-down testdb-url testdb-sync testdb-sync-fast integration schema migrate revision db-up db-down
+.PHONY: api worker check lint fmt types test dev-api dev-headers testdb-up testdb-down testdb-url testdb-sync testdb-sync-fast integration corpus profile profile-check schema migrate revision db-up db-down
 
 api:            ## run the API locally
 	uvicorn api.app:app --port 8000 --reload
@@ -98,6 +98,19 @@ testdb-url:     ## print this checkout's TEST_DATABASE_URL
 # Refreshing is DELIBERATELY a command and not a schedule. A copy that goes
 # stale without anyone noticing is the fixture problem again, one layer out,
 # so the staleness is at least attributable to the last time someone ran it.
+#
+# WITHOUT A PRODUCTION CREDENTIAL, which is what anyone working in
+# personal-portfolio actually wants:
+#
+#   make testdb-up && eval "$(make testdb-url)"
+#   make corpus
+#   JOBTRACKER_DEV_DATABASE_URL=$TEST_DATABASE_URL make dev-api
+#
+# The corpus is generated from a committed measurement of production, so the
+# shapes are real without any of the data being. It also holds five users with
+# overlapping boards, which the synced copy never will - production has one
+# user, so a copy cannot show whether a screen renders the right person's
+# rows.
 DEV_API_PORT ?= 8000
 
 dev-api:        ## run the API against the throwaway copy (needs JOBTRACKER_DEV_DATABASE_URL)
@@ -148,5 +161,28 @@ testdb-sync:    ## rebuild $(TESTDB) from production (destructive)
 testdb-sync-fast: ## same, minus the large text columns (~80% of the data)
 	python scripts/sync_testdb.py --name $(TESTDB) --fast
 
-integration:    ## run integration tests (needs TEST_DATABASE_URL on a *_test db)
+integration:    ## the tests that need a synced copy of REAL production
 	pytest -q -m integration tests
+
+# --- the generated corpus ------------------------------------------------
+# A catalog shaped like production and containing none of it, so the whole
+# suite runs on a pull request with no production credential anywhere. The
+# shapes are measured, not invented: `make profile` reads production and
+# rewrites tests/production_profile.json, and the scheduled `--check` fails
+# when production grows a shape the generator cannot produce.
+#
+# The suite builds this on demand, so there is normally nothing to run here.
+# It is a target because a dev API over generated data needs no secret at all,
+# which the synced copy will always need.
+
+corpus:         ## fill TEST_DATABASE_URL with the generated corpus
+	@test -n "$$TEST_DATABASE_URL" || { echo 'eval "$$(make testdb-url)"' >&2; exit 1; }
+	DATABASE_URL="$$TEST_DATABASE_URL" python -c "\
+	import tests.corpus as c; \
+	print('\n'.join(f'  {k}: {v}' for k, v in sorted(c.build().items())))"
+
+profile:        ## re-measure production into tests/production_profile.json
+	python scripts/measure_profile.py
+
+profile-check:  ## fail if production holds a shape the corpus cannot produce
+	python scripts/measure_profile.py --check
