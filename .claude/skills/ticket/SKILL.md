@@ -80,6 +80,18 @@ Aim for under 200 words. Put counts in a table, not in a paragraph.
 **Requirements.** A numbered list. One testable thing each. If a requirement
 needs a sentence of justification, the justification belongs in Reason.
 
+**Name the outcome, not the mechanism.** "Postings nobody can reach are not
+checked" survives being wrong about how. "Gate on `user_sources`" does not.
+Issue #303 said the second. Reachability is actually
+`user_sources OR sheet_import OR uploaded_by` (`src/api/tasks/board.py:65`),
+so implementing that requirement literally would have cut off the person's own
+imported history: 1,618 filter calls and 5,324 active postings. The finding was
+right and the requirement was still an outage.
+
+Before writing a requirement that stops work happening, open the predicate that
+decides who gets that work today and list every branch of it. A requirement
+naming one branch of three reads as precise and is not.
+
 **Passing criteria.** A checklist someone can actually run or query. Each line
 must be true or false with no judgement call. "The suite passes with no
 secrets set" is a criterion. "Test coverage is good" is not.
