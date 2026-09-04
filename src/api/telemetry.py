@@ -29,6 +29,7 @@ recording.
 from __future__ import annotations
 
 import contextlib
+import copy
 import logging
 import os
 import socket
@@ -54,6 +55,71 @@ RELEASE = os.environ.get("JOBTRACKER_REVISION", "unknown")
 DEFAULT_HOST = "https://us.i.posthog.com"
 
 
+# Loggers whose records must never be shipped: the exporter's own, so a
+# failing endpoint cannot generate the records that fail to ship, and this
+# module's, for the same reason one level up.
+_UNSHIPPED_LOGGERS = ("opentelemetry", "jobtracker_telemetry", "urllib3", "posthog")
+# Where psycopg puts parameter values in an exception's text. A log record is
+# not written with an egress policy in mind, and "unnamed portal parameter $5
+# = '...'" is a value from the failing query: an email, a token, a url, text
+# a user typed. Everything from the first of these markers is dropped.
+_SCRUB_MARKERS = ("\nCONTEXT:", "\nDETAIL:", "unnamed portal parameter", "\nLINE ")
+_MAX_MESSAGE = 4_000
+
+
+def scrub(text: str) -> str:
+    """The shipped form of a log line: cut at the first marker that precedes
+    query text or parameter values, then bounded in length."""
+    cut = len(text)
+    for marker in _SCRUB_MARKERS:
+        at = text.find(marker)
+        if at != -1:
+            cut = min(cut, at)
+    out = text[:cut].rstrip()
+    if len(out) > _MAX_MESSAGE:
+        out = out[:_MAX_MESSAGE] + " [truncated]"
+    return out
+
+
+def shipped_form(record: logging.LogRecord) -> logging.LogRecord | None:
+    """What may leave the box as a log record, and in what form.
+
+    None for the exporter's and this module's own records (a loop otherwise:
+    an endpoint that refuses records makes the exporter log, which makes a
+    record, which fails to ship). Every other record becomes a COPY carrying
+    its scrubbed message and the exception's class, never its traceback or
+    its text past the scrub markers. A copy, because the same record object
+    goes on to the stdout handler, which keeps the full line locally.
+    """
+    if record.name.split(".")[0] in _UNSHIPPED_LOGGERS:
+        return None
+    try:
+        message = record.getMessage()
+    except Exception:
+        message = str(record.msg)
+    if record.exc_info and record.exc_info[1] is not None:
+        exc = record.exc_info[1]
+        message = f"{message} [{type(exc).__name__}: {scrub(str(exc))[:300]}]"
+    out = copy.copy(record)
+    out.msg = scrub(message)
+    out.args = ()
+    out.exc_info = None
+    out.exc_text = None
+    return out
+
+
+def _shipping_handler(level: int, logger_provider: Any) -> logging.Handler:
+    from opentelemetry.sdk._logs import LoggingHandler
+
+    class ShippingHandler(LoggingHandler):
+        def emit(self, record: logging.LogRecord) -> None:
+            shipped = shipped_form(record)
+            if shipped is not None:
+                super().emit(shipped)
+
+    return ShippingHandler(level=level, logger_provider=logger_provider)
+
+
 def init(service: str = "jobtracker", instance: str | None = None) -> None:
     """Builds the clients once, from POSTHOG_API_KEY and POSTHOG_HOST. Called
     at API startup and worker startup with the process's service name and,
@@ -77,7 +143,7 @@ def init(service: str = "jobtracker", instance: str | None = None) -> None:
     from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
     from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
     from opentelemetry.instrumentation.requests import RequestsInstrumentor
-    from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
+    from opentelemetry.sdk._logs import LoggerProvider
     from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
     from opentelemetry.sdk.resources import Resource
     from opentelemetry.sdk.trace import TracerProvider
@@ -139,7 +205,7 @@ def init(service: str = "jobtracker", instance: str | None = None) -> None:
     set_logger_provider(_logger_provider)
     # Every record the service logs, at INFO and above, with the active trace
     # attached by the SDK. The root logger, so a module needs no registration.
-    handler = LoggingHandler(level=log_level, logger_provider=_logger_provider)
+    handler = _shipping_handler(log_level, _logger_provider)
     logging.getLogger().addHandler(handler)
     logger.info(
         f"telemetry: enabled service={service} host={host} release={RELEASE} "

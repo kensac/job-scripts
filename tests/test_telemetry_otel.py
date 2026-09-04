@@ -82,3 +82,36 @@ def test_an_event_inside_a_span_carries_the_trace_and_outside_carries_none(trace
     with telemetry.task_span({"id": 9, "kind": "k", "payload": {"user_id": 3}}, "w") as ids:
         telemetry.capture("inside")
     assert ids["trace_id"] and client.events[1][2]["trace_id"] == ids["trace_id"]
+
+
+def test_a_shipped_log_record_is_scrubbed_and_the_exporter_never_ships_its_own():
+    """A log line is not written with an egress policy in mind: psycopg puts
+    parameter values after CONTEXT and DETAIL, and the exporter logs its own
+    send failures, which would ship, fail, and log again."""
+    import logging as _logging
+
+    own = _logging.LogRecord("opentelemetry.exporter.otlp", 30, "x", 1, "export failed", (), None)
+    assert telemetry.shipped_form(own) is None
+    mine = _logging.LogRecord("jobtracker_telemetry", 30, "x", 1, "capture failed", (), None)
+    assert telemetry.shipped_form(mine) is None
+
+    try:
+        raise ValueError(
+            "malformed array literal: \"x\"\nCONTEXT: unnamed portal parameter $5 = 'secret@example.com'"
+        )
+    except ValueError:
+        import sys
+
+        rec = _logging.LogRecord(
+            "jobtracker_worker", 40, "x", 1, "Task %s failed", (42,), sys.exc_info()
+        )
+    shipped = telemetry.shipped_form(rec)
+    assert shipped is not None and shipped is not rec
+    assert shipped.getMessage().startswith("Task 42 failed [ValueError: malformed array literal")
+    assert (
+        "secret@example.com" not in shipped.getMessage() and "CONTEXT" not in shipped.getMessage()
+    )
+    assert shipped.exc_info is None and shipped.args == ()
+    # The original record is untouched for the stdout handler.
+    assert rec.exc_info is not None and rec.args == (42,)
+    assert telemetry.scrub("x" * 5000).endswith("[truncated]")
