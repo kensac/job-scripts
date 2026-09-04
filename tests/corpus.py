@@ -434,6 +434,14 @@ class _Generator:
             return None
         if column["udt_name"] in ("int2", "int4", "int8"):
             return self._next()
+        # Postgres names an array type after its element: text[] is _text. A
+        # synthesised string is not a valid array literal, so a NOT NULL array
+        # column the profile does not describe took the text branch below and
+        # failed the insert with "malformed array literal". Empty is the right
+        # default for the ones this hits: they are filters and tag lists whose
+        # absence means "no filter", not "unknown".
+        if column["udt_name"].startswith("_"):
+            return []
         return f"{table}-{name}-{self._next()}"
 
 

@@ -422,14 +422,21 @@ def _detect_queue() -> list[dict[str, Any]]:
     stall_minutes = int(db.get_config("queue_stall_minutes"))
     for r in db.query(
         """
-        WITH oldest AS (
-            SELECT MIN(created_at) AS at, COUNT(*) AS n,
-                   array_agg(DISTINCT kind ORDER BY kind) AS kinds
-            FROM tasks WHERE status = 'pending'
-        )
         SELECT w.name, w.last_seen, o.n AS pending, o.kinds,
                EXTRACT(EPOCH FROM now() - o.at) / 60 AS oldest_minutes
-        FROM worker_status w, oldest o
+        FROM worker_status w
+        CROSS JOIN LATERAL (
+            -- Per worker, not fleet-wide: a host that refuses ingest is not
+            -- stalled by a queue full of ingest. The filters mirror
+            -- _claim_task's, so this counts exactly what that worker would
+            -- have taken had it been able to.
+            SELECT MIN(t.created_at) AS at, COUNT(*) AS n,
+                   array_agg(DISTINCT t.kind ORDER BY t.kind) AS kinds
+            FROM tasks t
+            WHERE t.status = 'pending'
+              AND (cardinality(w.kinds) = 0 OR t.kind = ANY(w.kinds))
+              AND NOT (t.kind = ANY(w.excluded_kinds))
+        ) o
         WHERE w.current_task_id IS NULL
           AND w.last_seen > now() - %(fresh)s::interval
           AND o.at < now() - make_interval(mins => %(stall)s)
@@ -444,9 +451,8 @@ def _detect_queue() -> list[dict[str, Any]]:
                 "message": (
                     f"{r['name']} has reported idle while {r['pending']} tasks sit pending, the "
                     f"oldest for {r['oldest_minutes']:.0f} minutes ({', '.join(r['kinds'])}). A "
-                    f"claim takes one poll. Either the worker cannot claim, or its kind "
-                    "filters (JOBTRACKER_WORKER_KINDS allowlist, "
-                    "JOBTRACKER_WORKER_EXCLUDE_KINDS denylist) leave nothing that is queued."
+                    f"claim takes one poll, and this count already excludes kinds this "
+                    "worker refuses, so it cannot be explained by its kind filters."
                 ),
                 "detail": {
                     "worker": r["name"],
