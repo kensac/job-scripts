@@ -48,9 +48,12 @@ should say so.
 
 **A value an administrator might want to change lives in `app_config`, not
 in code.** Retry windows, caps, cycle sizes: seed the default in
-`api/db.py` (`_APP_CONFIG_SEED`), declare its type in the admin config route
-(`_CONFIG_KEYS`), read it at the point of use with `db.get_config`, and give
-it a field on the admin config page. A constant in code needs a deploy to
+`api/db.py` (`_APP_CONFIG_SEED`), declare its type, help text and choices in
+the admin config route (`_CONFIG_KEYS`), and read it at the point of use with
+`db.get_config`. GET /admin/config serves that registry beside the values and
+the admin config page renders every key from it, so a new key needs no
+frontend entry; four keys in one evening each needed one before it did. A
+constant in code needs a deploy to
 change; a row changes on the next cycle. The seed is the default, so the
 comment explaining the number goes beside the seed, not beside a literal
 somewhere else. Values that are facts about a system (a provider's page size,
