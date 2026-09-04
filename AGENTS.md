@@ -37,6 +37,7 @@ These are instructions, not history. Follow them.
 | [testing.md](docs/agents/testing.md) | Write a test or trust one |
 | [migrations.md](docs/agents/migrations.md) | Touch the schema |
 | [deployment.md](docs/agents/deployment.md) | Claim anything is deployed |
+| [generated-files.md](docs/agents/generated-files.md) | Change a route, a model, or anything CI regenerates |
 | [frontend.md](docs/agents/frontend.md) | Change any user-visible surface |
 
 ## Repository map
