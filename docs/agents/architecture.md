@@ -129,6 +129,15 @@ enough to matter, not that someone remembers when to run it:
   pinned indefinitely — the danger window is not the run's duration, it is
   unbounded until someone kills the connection.
 - Set both as role-level defaults so a future caller cannot forget them.
+- **Better than any timeout: do not keep the connection alive.** A process that
+  exits when its work finishes cannot leak a lock, because the state is gone
+  rather than bounded. A long-lived container holding a pool is what turns a
+  finished job into an open transaction.
+
+The exposure window is **not the duration of the run.** A connection can
+outlive the job that opened it, so "is a copy running right now" returns no
+while a lock is still held. Ask what connections exist, not what jobs are
+running.
 
 Two levers that look right and are not: `statement_timeout` caps how long the
 read runs but the DDL still queues for that whole period, and any timeout long
@@ -138,7 +147,11 @@ governs locks a session **waits for**, not ones it **holds**.
 **A foreign-data-wrapper session is opaque from the source side.** It shows as
 `FETCH n FROM cN` with no table name, so grepping the source for what you think
 it is reading finds nothing and proves nothing. Identify it by client address
-and application name.
+and application name — but note a host can present **more than one public IP**
+depending on egress path, and the same resolver can return different answers
+from different processes on that host. One reading does not identify a machine;
+check several, and prefer a causal test (stop the suspected process, see if the
+session goes) over an address match.
 
 ## Visibility and ownership
 
