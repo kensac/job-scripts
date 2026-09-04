@@ -308,6 +308,12 @@ class UserFilter(Base):
     fail_closed: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     enabled: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
     prompt_hash: Mapped[str] = mapped_column(Text)
+    # The preset this was adopted from, or NULL for a filter written by hand.
+    # Provenance, not identity: the name stays editable, and retiring the
+    # preset leaves the filter alone.
+    preset_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("filter_presets.id", ondelete="SET NULL")
+    )
     created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
     updated_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
 
