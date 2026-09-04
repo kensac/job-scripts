@@ -43,13 +43,11 @@ jobs:
           # Check out the branch itself (not the merge ref) so a fix can be
           # committed back to it.
           ref: ${{ github.head_ref || github.ref_name }}
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+      - uses: astral-sh/setup-uv@94527f2e458b27549849d47d273a16bec83a01e9 # v7
         with:
-          python-version: '3.13'
-          cache: pip
-      - run: |
-          pip install -r requirements.txt
-          pip install -r requirements-dev.txt
+          enable-cache: true
+      - run: uv sync --frozen
+      - run: echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
       # Mechanical fixes are committed, not reported. Lint autofixes,
       # formatting and the generated openapi.json are the three things a
       # human only ever fixes by running a command, so the run runs it: when

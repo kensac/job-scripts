@@ -53,7 +53,7 @@ Optional worker knobs: `JOBTRACKER_WORKER_POLL`, `JOBTRACKER_WORKER_KINDS`
 ## Running
 
 ```bash
-pip install -r requirements.txt
+uv sync --frozen && source .venv/bin/activate
 export PYTHONPATH=src
 
 uvicorn api.app:app --port 8000      # API (migrates + seeds on start)
