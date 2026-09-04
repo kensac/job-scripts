@@ -99,17 +99,28 @@ WORKER_NAME = os.environ.get("JOBTRACKER_WORKER_NAME") or socket.gethostname()
 
 
 def _claim_task() -> dict[str, Any] | None:
+    """Only kinds this image has a handler for. A roll goes host by host, and
+    a host still on the old image sees the new kind a rolled host enqueued:
+    on 2026-09-05 gcp-vps claimed the first classify_locations task and
+    failed it terminally as an unknown kind, in the seconds before its own
+    deploy. A kind this worker cannot run waits for one that can."""
     kinds_clause = _kinds_clause(WORKER_KINDS, EXCLUDE_KINDS)
     return db.query_one(
         f"""
         UPDATE tasks SET status = 'running', started_at = now(),
                          last_heartbeat = now(), attempts = attempts + 1,
                          worker = %(worker)s
-        WHERE id = (SELECT id FROM tasks WHERE status = 'pending' {kinds_clause}
+        WHERE id = (SELECT id FROM tasks WHERE status = 'pending'
+                      AND kind = ANY(%(known)s) {kinds_clause}
                     ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED)
         RETURNING id, kind, payload, attempts, worker
         """,
-        {"kinds": WORKER_KINDS, "exclude": EXCLUDE_KINDS, "worker": WORKER_NAME},
+        {
+            "known": list(HANDLERS),
+            "kinds": WORKER_KINDS,
+            "exclude": EXCLUDE_KINDS,
+            "worker": WORKER_NAME,
+        },
     )
 
 
