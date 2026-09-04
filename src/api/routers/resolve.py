@@ -63,6 +63,11 @@ ACCEPT_STATUS = "accept_status"
 DECLINE_STATUS = "decline_status"
 MARK_DONE = "mark_done"
 
+# Where a verb's target comes from. One value today, named rather than implied,
+# so a verb that ever picks from somewhere else is a value the client switches
+# on instead of a second thing it already had to know.
+CANDIDATES = "candidates"
+
 UNMATCHED_MESSAGE = "unmatched_message"
 UNCONFIRMED_MATCH = "unconfirmed_match"
 STATUS_PROPOSAL = "status_proposal"
@@ -97,6 +102,21 @@ class ResolveChoice(BaseModel):
     # Omitted when the verb touches exactly one message, and omission MEANS
     # one rather than unknown.
     affects: ResolveChoiceAffects | None = None
+    # Whether pressing this verb can be POSTed straight away or has to collect
+    # a target first. Omitted means it takes no target.
+    #
+    # Without it a client has to know that `assign_application` is the verb
+    # with an argument, which was the last piece of this vocabulary it was
+    # still required to hardcode - and the point of declaring the verbs is that
+    # a new decision type needs no client change. A verb that takes an argument
+    # and cannot say so makes every client wrong the first time there are two
+    # of them.
+    needs_target: bool | None = None
+    # WHERE the options come from, named rather than assumed. Every target
+    # comes from the row's own `candidates` today; a verb that picked from
+    # somewhere else would otherwise be a second silent assumption stacked on
+    # the first.
+    target_source: str | None = None
 
 
 class ResolveCandidate(BaseModel):
@@ -241,6 +261,7 @@ def _choice(
     eligible: bool = True,
     reason: str | None = None,
     messages: int = 1,
+    target_source: str | None = None,
 ) -> dict[str, Any]:
     """One verb, as the picker will render it.
 
@@ -257,6 +278,12 @@ def _choice(
         out["reason"] = reason
     if messages > 1:
         out["affects"] = {"messages": messages}
+    if target_source:
+        # The two travel together deliberately. A verb that says it needs a
+        # target without saying where the options come from has moved the
+        # guess rather than removed it.
+        out["needs_target"] = True
+        out["target_source"] = target_source
     return out
 
 
@@ -410,14 +437,25 @@ def choices_for_message(
     every call site.
     """
     key = mail_match.norm_company(company)
+    # Eligible EXACTLY WHEN the row's `candidates` is non-empty, because both
+    # read this index under the same normalised key. The frontend expands
+    # `candidates` when the verb is pressed, so an eligible verb beside an
+    # empty list would be a button a person cannot complete - and that would be
+    # two predicates agreeing by luck rather than one predicate.
     if key and apps_by_company.get(key):
-        assign = _choice(ASSIGN, "Belongs to an application", messages=thread_size)
+        assign = _choice(
+            ASSIGN,
+            "Belongs to an application",
+            messages=thread_size,
+            target_source=CANDIDATES,
+        )
     else:
         assign = _choice(
             ASSIGN,
             "Belongs to an application",
             eligible=False,
             reason="no application at this company yet",
+            target_source=CANDIDATES,
         )
     return [
         assign,

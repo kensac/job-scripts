@@ -541,3 +541,51 @@ def test_a_rejection_is_counted_against_the_tier_that_made_the_attachment(client
     assert rates["company_title"]["rejected"] == 1
     assert rates["company_title"]["confirm_rate"] == 0.0
     assert "detached" not in rates
+
+
+def test_a_verb_that_needs_an_argument_says_so(client, me):
+    """The last thing a client had to hardcode. Without this it has to know
+    that `assign_application` is the verb with a target, which is exactly what
+    declaring the verbs exists to avoid - the second such verb would make every
+    client wrong."""
+    headers, uid = me
+    _app(uid)
+    _msg(uid, "<needs@x>", "rejection", "Acme")
+
+    choices = _choices(_items(client, headers, "unmatched_message")[0])
+    assert choices["assign_application"]["needs_target"] is True
+    assert choices["assign_application"]["target_source"] == "candidates"
+    # Omission means the verb takes no argument, the same presence-not-value
+    # rule `affects` and `reason` follow.
+    for verb in ("not_an_application", "not_job_related"):
+        assert "needs_target" not in choices[verb]
+        assert "target_source" not in choices[verb]
+
+
+def test_an_ineligible_assign_still_declares_where_its_target_comes_from(client, me):
+    """`needs_target` is a property of the VERB, not of this row's luck. A
+    client that only learns it from eligible rows learns it from a sample."""
+    headers, uid = me
+    _msg(uid, "<nocand@x>", "rejection", "Nowhere Inc")
+
+    assign = _choices(_items(client, headers, "unmatched_message")[0])["assign_application"]
+    assert assign["eligible"] is False
+    assert assign["needs_target"] is True
+    assert assign["target_source"] == "candidates"
+
+
+def test_assign_is_eligible_exactly_when_there_are_candidates(client, me):
+    """The frontend expands `candidates` when the verb is pressed, so an
+    eligible verb beside an empty list is a button nobody can complete. One
+    index answers both, rather than two predicates agreeing by luck."""
+    headers, uid = me
+    _app(uid, company="Acme, Inc.")
+    _msg(uid, "<match@x>", "rejection", "Acme")
+    _msg(uid, "<nomatch@x>", "rejection", "Nowhere Inc")
+
+    for item in _items(client, headers, "unmatched_message"):
+        eligible = _choices(item)["assign_application"]["eligible"]
+        assert eligible == bool(item["candidates"]), item["message"]["extracted_company"]
+    # And the normalisation is the matcher's, so "Acme" reaches "Acme, Inc.".
+    hit = next(i for i in _items(client, headers, "unmatched_message") if i["candidates"])
+    assert hit["candidates"][0]["company_name"] == "Acme, Inc."
