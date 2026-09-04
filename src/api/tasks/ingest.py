@@ -61,7 +61,7 @@ async def handle_ingest_source(task_id: int, payload: dict[str, Any]) -> None:
     # ~2,800 sequential queries pulling ~15MB to compute a boolean, hourly.
     total = len(candidates)
     have_content = _content_ready_urls([p.url for p in candidates])
-    cached = 0
+    cached = fetch_failed = 0
     for i, p in enumerate(candidates):
         if i % 10 == 0 and _cancelled(task_id):
             logger.info(f"Task {task_id} cancelled mid-ingest")
@@ -73,13 +73,29 @@ async def handle_ingest_source(task_id: int, payload: dict[str, Any]) -> None:
                 p.url, company=p.company, job_title=p.title, context="ingest"
             )
         except Exception:
+            fetch_failed += 1
             logger.warning(f"Ingest {source['name']}: content fetch failed for {p.url}")
             continue
         cached += 1
         metrics.INGEST_JOBS.labels(source["name"], "cached").inc()
         if cached % 5 == 0:
             _set_progress(task_id, i + 1, total, source["name"])
-    _set_progress(task_id, total, total, source["name"])
+    # The counts the health detectors read: a feed that returned nothing, a
+    # pattern that admits nothing, a worker whose fetches stopped landing.
+    # Kept on the task because nothing else records what one ingest saw.
+    _set_progress(
+        task_id,
+        total,
+        total,
+        source["name"],
+        extra={
+            "fetched": fetched,
+            "kept": len(postings),
+            "already_cached": len(have_content),
+            "cached": cached,
+            "fetch_failed": fetch_failed,
+        },
+    )
 
     cycle = payload.get("cycle", "manual")
     users = db.query(
