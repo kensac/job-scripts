@@ -14360,6 +14360,17 @@
             "type": "boolean",
             "title": "On Board",
             "default": false
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id"
           }
         },
         "type": "object",
