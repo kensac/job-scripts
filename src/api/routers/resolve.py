@@ -636,7 +636,7 @@ def _match_items(owner_id: int, events: dict[int, list[dict[str, Any]]]) -> list
                 "board_updated": bool(row["on_board"]),
                 "reason": None
                 if row["on_board"]
-                else "this application is not on your board, so no status would move",
+                else "This application is not on your board, so no status would move.",
             }
         items.append(
             {
