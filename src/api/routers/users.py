@@ -344,10 +344,14 @@ def put_settings(body: SettingsPut, user: AuthedUser = Depends(require_user)):
     return {"ok": True}
 
 
-@router.get("/digest/unsubscribe")
+@router.api_route("/digest/unsubscribe", methods=["GET", "POST"])
 def digest_unsubscribe(token: str, _: None = Depends(require_service)):
-    """One-click unsubscribe target from digest emails; identified purely by
-    the emailed token, no user session required."""
+    """Unsubscribe from digest emails, identified purely by the emailed token,
+    no user session required. POST is the write the page should make: the
+    emailed link is a GET that mail clients and link scanners prefetch, and
+    a page that wrote on render would unsubscribe people who never clicked.
+    The mail's List-Unsubscribe-Post header already makes one-click clients
+    POST. GET stays only until the page has moved its write behind POST."""
     row = db.query_one(
         "UPDATE user_settings SET email_digest = FALSE, updated_at = now() "
         "WHERE digest_token = %s RETURNING user_id",

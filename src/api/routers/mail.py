@@ -183,11 +183,15 @@ def list_mail(
         """,
         {**params, "limit": page_size, "offset": (page - 1) * page_size},
     )
+    n = total["c"] if total else 0
     return {
         "rows": rows,
-        "total": total["c"] if total else 0,
+        "total": n,
         "page": page,
         "page_size": page_size,
+        # Stated, not derived: a client computing this from total against a
+        # corpus that grows between pages can walk forever.
+        "has_more": page * page_size < n,
     }
 
 

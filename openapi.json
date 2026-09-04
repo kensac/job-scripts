@@ -408,10 +408,56 @@
       }
     },
     "/v1/digest/unsubscribe": {
+      "post": {
+        "summary": "Digest Unsubscribe",
+        "description": "Unsubscribe from digest emails, identified purely by the emailed token,\nno user session required. POST is the write the page should make: the\nemailed link is a GET that mail clients and link scanners prefetch, and\na page that wrote on render would unsubscribe people who never clicked.\nThe mail's List-Unsubscribe-Post header already makes one-click clients\nPOST. GET stays only until the page has moved its write behind POST.",
+        "operationId": "digest_unsubscribe_v1_digest_unsubscribe_post",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Token"
+            }
+          },
+          {
+            "name": "x-service-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-Service-Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
       "get": {
         "summary": "Digest Unsubscribe",
-        "description": "One-click unsubscribe target from digest emails; identified purely by\nthe emailed token, no user session required.",
-        "operationId": "digest_unsubscribe_v1_digest_unsubscribe_get",
+        "description": "Unsubscribe from digest emails, identified purely by the emailed token,\nno user session required. POST is the write the page should make: the\nemailed link is a GET that mail clients and link scanners prefetch, and\na page that wrote on render would unsubscribe people who never clicked.\nThe mail's List-Unsubscribe-Post header already makes one-click clients\nPOST. GET stays only until the page has moved its write behind POST.",
+        "operationId": "digest_unsubscribe_v1_digest_unsubscribe_post",
         "parameters": [
           {
             "name": "token",
@@ -3988,8 +4034,19 @@
     "/v1/admin/sources": {
       "get": {
         "summary": "Admin List Sources",
+        "description": "shape=full is the ledger. shape=names is the vocabulary (name, active,\nkind, bundles) for pickers and filters; shape=counts is what a dashboard\ntile needs. Both skip the per-source aggregation over jobs, tasks and\nsubscribers, which the dashboard was paying for on every live tick.",
         "operationId": "admin_list_sources_v1_admin_sources_get",
         "parameters": [
+          {
+            "name": "shape",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "full",
+              "title": "Shape"
+            }
+          },
           {
             "name": "x-service-token",
             "in": "header",
@@ -4192,6 +4249,22 @@
               "type": "string",
               "default": "desc",
               "title": "Dir"
+            }
+          },
+          {
+            "name": "ids",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ids"
             }
           },
           {
