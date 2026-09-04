@@ -230,9 +230,10 @@ def resolve_source_request(
 
 @router.get("/sources")
 def admin_list_sources(user: AuthedUser = Depends(require_admin)):
-    return {
-        "sources": db.query(
-            """
+    from core import boards
+
+    rows = db.query(
+        """
             SELECT s.name, s.listings_url, s.description, s.active, s.created_at,
                    s.company, s.title_pattern,
                    (SELECT COUNT(*) FROM jobs j WHERE j.source = s.name) AS jobs,
@@ -258,8 +259,13 @@ def admin_list_sources(user: AuthedUser = Depends(require_admin)):
             ) li ON TRUE
             ORDER BY s.active DESC, s.name
             """
-        )
-    }
+    )
+    # The format is read off the URL, never stored, so it cannot drift from
+    # what ingest will actually do with the row. This is the top-level
+    # category the switch endpoint selects by.
+    for r in rows:
+        r["kind"] = boards.kind(r["listings_url"])
+    return {"sources": rows}
 
 
 class SourceBody(BaseModel):
@@ -1117,6 +1123,56 @@ def patch_source(name: str, body: SourceBody, user: AuthedUser = Depends(require
     if not row:
         raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown source"})
     return row
+
+
+class SourceSwitchBody(BaseModel):
+    active: bool
+    # Any combination; the selection is their union. A kind is the board format
+    # read off the listings URL (core/boards.kind), a group is a source bundle.
+    kind: str | None = None
+    group: str | None = None
+    names: list[str] | None = None
+
+
+@router.post("/sources/switch")
+def switch_sources(body: SourceSwitchBody, user: AuthedUser = Depends(require_admin)):
+    """One write flips a whole category of boards.
+
+    sources.active is already the switch that stops both the scrape and the AI
+    spend on a board's postings (SUBSCRIBED_SOURCE in core/store.py), so a
+    category is a way of SELECTING rows for that write, not a second layer of
+    state. Every row shows its own flag afterwards, and nothing is overridden
+    silently. The top level is the format (all Workday boards), the level below
+    is a bundle (the quant firms), and names catch the rest.
+    """
+    from core import boards
+
+    if body.kind is None and body.group is None and not body.names:
+        raise HTTPException(
+            400, detail={"code": "NO_SELECTION", "message": "give a kind, a group, or names"}
+        )
+    selected: set[str] = set(body.names or [])
+    if body.group is not None:
+        grp = db.query_one("SELECT members FROM source_groups WHERE name = %s", (body.group,))
+        if not grp:
+            raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown group"})
+        selected |= set(grp["members"])
+    if body.kind is not None:
+        selected |= {
+            r["name"]
+            for r in db.query("SELECT name, listings_url FROM sources")
+            if boards.kind(r["listings_url"]) == body.kind
+        }
+    changed = db.query(
+        "UPDATE sources SET active = %(active)s "
+        "WHERE name = ANY(%(names)s) AND active IS DISTINCT FROM %(active)s RETURNING name",
+        {"active": body.active, "names": sorted(selected)},
+    )
+    return {
+        "active": body.active,
+        "selected": sorted(selected),
+        "changed": sorted(r["name"] for r in changed),
+    }
 
 
 # key -> the type its value must have. Was a bare set of names back when
