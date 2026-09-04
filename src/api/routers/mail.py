@@ -1185,6 +1185,21 @@ def user_mail(
     """
     where = ["m.user_id = %(user)s"]
     params: dict[str, Any] = {"user": user.id, "limit": limit, "offset": offset}
+    if kind is None and classified is None and application_id is None:
+        # The default lens is job mail, not the mailbox. Nothing is filtered at
+        # ingest, on purpose (core/mail_prefilter.py): a missed job email is
+        # unrecoverable. That is a rule about what to STORE, and it was being
+        # read as a rule about what to show - 58,201 of 67,226 messages
+        # (86.6%, measured 2026-09-03) classify as not_job_related, so the
+        # unfiltered default handed a person their whole mailbox.
+        #
+        # Nothing becomes unreachable: kind=not_job_related returns all 58,201
+        # and classified=false returns the 158 nothing has looked at yet.
+        # Naming any of those three narrowings replaces this lens rather than
+        # stacking with it, which is why application_id is exempt - 638 matched
+        # messages are classified not_job_related, and dropping them would make
+        # "the messages behind this application" quietly untrue.
+        where.append("ce.kind IS NOT NULL AND ce.kind <> 'not_job_related'")
     if kind:
         # Comma-separated for the same reason as stage: "replies" is rejection
         # AND offer AND interview_invite AND assessment_invite, and a lens the

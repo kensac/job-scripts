@@ -202,3 +202,36 @@ def test_identities_fall_back_to_the_configured_address(f):
     """A mailbox with too little mail to judge must not switch the guard off."""
     uid = f.make_user(email="only@known.com")
     assert identities_for(uid) == ["only@known.com"]
+
+
+def test_the_guard_runs_off_the_mailbox_with_nothing_confirmed(client, user_headers, f):
+    """The confirmation screen is gone (#301) and the guard is not.
+
+    Both columns behind it were NULL in production, so the override branch had
+    never been taken and every correction the guard has made came from the
+    derivation. Removing the screen must therefore change nothing about what
+    the guard decides - which is what this asserts, rather than asserting the
+    endpoints 404, though it does that too so a reintroduced route is noticed.
+    """
+    uid = db.query_one("SELECT id FROM users WHERE sub = %s", (user_headers["X-User-Sub"],))["id"]
+    for i in range(60):
+        db.execute(
+            "INSERT INTO email_messages (user_id, provider_message_id, source, from_email, "
+            "to_emails, subject, sent_at) VALUES (%s, %s, 'gmail', %s, %s, 'x', now())",
+            (uid, f"own-{i}", "me@gmail.com", ["them@corp.com"]),
+        )
+    for i in range(40):
+        db.execute(
+            "INSERT INTO email_messages (user_id, provider_message_id, source, from_email, "
+            "to_emails, subject, sent_at) VALUES (%s, %s, 'gmail', %s, %s, 'x', now())",
+            (uid, f"theirs-{i}", "other@corp.com", ["me@gmail.com"]),
+        )
+    assert identities_for(uid) == ["me@gmail.com"]
+
+    assert client.get("/v1/user/identities", headers=user_headers).status_code == 404
+    assert (
+        client.put(
+            "/v1/user/identities", headers=user_headers, json={"addresses": ["a@x.com"]}
+        ).status_code
+        == 404
+    )

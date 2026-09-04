@@ -1,11 +1,10 @@
 """The closed vocabularies a posting's requirements are recorded in.
 
-Lives in core because three layers need the same words and must not each keep
-their own copy: the extraction validates the model's answer against them, the
-API validates a user's stated background against them, and the gap query
-compares the two by POSITION in these tuples. A background saying "bachelors"
-and a posting saying "Bachelor's degree" have to land on the same token or the
-comparison is nonsense.
+Lives in core because the extraction and the API must not each keep their own
+copy: the extraction validates the model's answer against them, and the market
+endpoint orders its degree and clearance tables by POSITION in these tuples. A
+model answering "Bachelor's degree" and one answering "bachelors" have to land
+on the same token or the counts are split across two spellings of one level.
 """
 
 from __future__ import annotations
@@ -13,8 +12,8 @@ from __future__ import annotations
 # Ordered least to most, because degree and clearance requirements are FLOORS.
 # A posting asking for "a Bachelor's or Master's" states a floor of bachelors,
 # and one asking for "Secret or above" states a floor of secret. Ordering is
-# what lets the gap query ask "does this posting want more than the user has"
-# with array_position rather than by grouping strings and hoping.
+# what lets a reader see the market's floors as a ladder - array_position
+# rather than alphabetical, which would put "bachelors" above "phd".
 DEGREE_LEVELS = ("none", "high_school", "associate", "bachelors", "masters", "phd")
 CLEARANCE_LEVELS = ("none", "public_trust", "confidential", "secret", "top_secret", "ts_sci")
 
