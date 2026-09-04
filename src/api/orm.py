@@ -77,12 +77,15 @@ class Job(Base):
     locations: Mapped[list[str]] = mapped_column(server_default=text("'{}'"))
     terms: Mapped[list[str]] = mapped_column(server_default=text("'{}'"))
     source: Mapped[str] = mapped_column(Text)
-    # NOT "this role is open". This is feed state: catalog.upsert_postings
-    # writes it straight from whatever the board last said (active =
-    # EXCLUDED.active) and NOTHING in this codebase ever clears it. So a board
-    # that only ever lists live postings keeps every row it has supplied at
-    # true forever, while a feed carrying an explicit per-posting flag
-    # accumulates false. That is a difference in feed format, not in the job.
+    # NOT "this role is open". This is feed state, and it means different
+    # things by source. catalog.upsert_postings writes whatever the board last
+    # said (active = EXCLUDED.active); a feed with a per-posting flag
+    # accumulates false that way. For a company board that lists every open
+    # posting (boards.AUTHORITATIVE), catalog.retire_unlisted also clears it
+    # on every pull for rows the pull did not admit - which is the board
+    # dropping the posting OR the source's title pattern no longer admitting
+    # it, and only the first is a closure. Aggregator rows are never cleared
+    # by absence.
     #
     # It is therefore not comparable across sources, and reading it as closure
     # has already shipped one user-facing bug: 478 applications were badged
@@ -90,6 +93,8 @@ class Job(Base):
     # the posting was OPEN and 363 had never been checked at all. Exactly one
     # was backed by evidence.
     #
+    # What it IS good for: every sweep and every selection gates on it, so a
+    # false row costs no checks and leaves boards through _demote_closed.
     # For "is this role still open", use the closed check - an AI verdict
     # against the posting url, applied uniformly across boards. Job rows serve
     # it as `closed_verdict` ('open' | 'closed' | NULL for never checked).
@@ -245,27 +250,6 @@ class Source(Base):
     # Hours between pulls; 1 is the hourly cycle. A bundle of a few hundred
     # company boards is set to 24 in one write through the category switch.
     ingest_interval_hours: Mapped[int] = mapped_column(Integer, server_default=text("1"))
-
-
-class ScreenedPosting(Base):
-    """Superseded by Listing. Still declared because the table still exists:
-    workers on the previous image write to it from the ingest path until the
-    roll completes, and a drop while they run would fail every ingest on
-    them. The migration after this fleet roll drops the table and this
-    class together."""
-
-    __tablename__ = "screened_postings"
-    __table_args__ = (Index("idx_screened_postings_source", "source", "last_seen_at"),)
-
-    url: Mapped[str] = mapped_column(Text, primary_key=True)
-    source: Mapped[str] = mapped_column(Text)
-    company: Mapped[str] = mapped_column(Text, server_default=text("''"))
-    title: Mapped[str] = mapped_column(Text, server_default=text("''"))
-    locations: Mapped[list[str]] = mapped_column(ARRAY(Text), server_default=text("'{}'"))
-    date_posted: Mapped[datetime.datetime | None]
-    pattern: Mapped[str] = mapped_column(Text)
-    first_seen_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
-    last_seen_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
 
 
 class Listing(Base):
