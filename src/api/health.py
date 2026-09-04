@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from api import db
+from api import db, telemetry
 
 logger = logging.getLogger("jobtracker_health")
 
@@ -770,6 +770,18 @@ def record(found: list[dict[str, Any]]) -> list[dict[str, Any]]:
         )
         if row and row["is_new"]:
             fresh.append({**f, "id": row["id"]})
+            # The condition's timeline beside the raw failures: a detector
+            # opening is an event too, so the error tracker can show what
+            # was wrong when the tracebacks started.
+            telemetry.capture(
+                "alert_opened",
+                properties={
+                    "kind": f["kind"],
+                    "subject": f["subject"],
+                    "severity": f["severity"],
+                    "alert_id": row["id"],
+                },
+            )
 
     # Resolve only after RESOLVE_GRACE of silence. A detector goes quiet when
     # it stops being evaluable as readily as when the condition ends, and
@@ -781,7 +793,15 @@ def record(found: list[dict[str, Any]]) -> list[dict[str, Any]]:
         "AND last_seen < now() - %s::interval",
         (RESOLVE_GRACE,),
     )
-    stale = [r["id"] for r in open_rows if (r["kind"], r["subject"]) not in seen]
+    stale = [r for r in open_rows if (r["kind"], r["subject"]) not in seen]
     if stale:
-        db.execute("UPDATE health_alerts SET resolved_at = now() WHERE id = ANY(%s)", (stale,))
+        db.execute(
+            "UPDATE health_alerts SET resolved_at = now() WHERE id = ANY(%s)",
+            ([r["id"] for r in stale],),
+        )
+        for r in stale:
+            telemetry.capture(
+                "alert_resolved",
+                properties={"kind": r["kind"], "subject": r["subject"], "alert_id": r["id"]},
+            )
     return fresh

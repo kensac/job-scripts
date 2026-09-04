@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 
 from pydantic import BaseModel
 
-from api import ai, db, metrics
+from api import ai, db, metrics, telemetry
 from api.ai import AIConfig
 from core import pricing
 from core.store import add_ai_result
@@ -70,6 +70,18 @@ async def run_check[T: BaseModel](
             **common,
         )
         metrics.CHECKS.labels(check_type, "failed").inc()
+        telemetry.capture(
+            "ai_call_failed",
+            properties={
+                "provider": cfg.provider,
+                "model": cfg.model,
+                "purpose": check_type,
+                "context": context,
+                "error_class": type(exc).__name__,
+                "error": str(exc)[:500],
+                "url": url,
+            },
+        )
         raise
     duration_ms = int((time.monotonic() - start) * 1000)
     if parsed is None:
@@ -183,6 +195,10 @@ def host_paced(url: str) -> bool:
     used = row["n"] if row else 0
     if used >= per_hour:
         logger.info(f"{host}: {used} of {per_hour} fetches this hour used; deferring {url}")
+        telemetry.capture(
+            "fetch_deferred",
+            properties={"fetch_host": host, "per_hour": per_hour, "used": used, "url": url},
+        )
         return True
     return False
 
@@ -268,6 +284,10 @@ async def refresh_content(
         # a page; extraction_failing counts it, which it could never do before.
         add_ai_result(
             url, "failed", "fetch returned nothing", "content", config_name="content-cache"
+        )
+        telemetry.capture(
+            "fetch_failed",
+            properties={"url": url, "fetch_host": urlparse(url).netloc.lower(), "context": context},
         )
     return content, None
 

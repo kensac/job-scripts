@@ -19,7 +19,7 @@ from typing import Any
 
 import psycopg
 
-from api import db, events, metrics
+from api import db, events, metrics, telemetry
 from api.tasks import HANDLERS
 from api.tasks.runtime import (
     CHUNK_KINDS,
@@ -125,7 +125,10 @@ def reap_stale_tasks() -> None:
     )
     if requeued:
         metrics.REAPER_REQUEUES.inc(requeued)
-    db.execute(
+        # A reaped task is a worker that died mid-run, which no exception
+        # handler on that worker could record. The reaper is the only witness.
+        telemetry.capture("tasks_reaped", properties={"requeued": requeued, "worker": WORKER_NAME})
+    lost = db.execute_count(
         f"""
         UPDATE tasks SET status = 'failed', finished_at = now(),
                          error = 'worker lost (heartbeat timeout after ' || attempts || ' attempts)',
@@ -134,6 +137,8 @@ def reap_stale_tasks() -> None:
           AND COALESCE(last_heartbeat, started_at) < now() - interval '{HEARTBEAT_TIMEOUT_MINUTES} minutes'
         """
     )
+    if lost:
+        telemetry.capture("tasks_lost", properties={"failed": lost, "worker": WORKER_NAME})
 
 
 def schedule_ingest_cycle() -> None:
@@ -352,6 +357,23 @@ _TRANSIENT_MARKERS = (
 )
 
 
+def _task_props(task: dict[str, Any], exc: BaseException) -> dict[str, Any]:
+    """What a failure event carries: enough to group by kind, worker and
+    error class, and to find the row. The user a task ran for, when it names
+    one, so a user-facing failure can be read per person."""
+    payload = task.get("payload") or {}
+    return {
+        "task_id": task["id"],
+        "task_kind": task["kind"],
+        "worker": WORKER_NAME,
+        "attempts": task.get("attempts"),
+        "error_class": type(exc).__name__,
+        "error": str(exc)[:500],
+        "user_id": payload.get("user_id"),
+        "source": payload.get("source"),
+    }
+
+
 def _is_transient(exc: Exception) -> bool:
     if isinstance(exc, _TRANSIENT_EXCEPTIONS):
         return True
@@ -489,10 +511,16 @@ async def run_once() -> bool:
             events.publish_task(task["id"])
             metrics.TASKS_PROCESSED.labels(task["kind"], "requeued").inc()
             logger.warning(f"Task {task['id']} hit a transient error, requeued: {exc}")
+            telemetry.capture("task_requeued", properties=_task_props(task, exc))
         else:
             _finish(task["id"], "failed", str(exc))
             metrics.TASKS_PROCESSED.labels(task["kind"], "failed").inc()
             logger.exception(f"Task {task['id']} failed")
+            # The traceback and the event both: the traceback groups with
+            # its siblings in the error tracker, the event is what a query
+            # over failures by kind and worker reads.
+            telemetry.capture_exception(exc, properties=_task_props(task, exc))
+            telemetry.capture("task_failed", properties=_task_props(task, exc))
     finally:
         # Signalled rather than cancelled: a thread cannot be cancelled, and
         # the wait() returns immediately so the join costs nothing. Joined so
@@ -522,11 +550,24 @@ def main() -> None:
         (WORKER_NAME,),
     )
     metrics.serve()
+    telemetry.init()
     ingest_enabled = os.environ.get("JOBTRACKER_INGEST_SCHEDULER", "1") == "1"
     logger.info(
         f"Worker started (kinds={WORKER_KINDS or 'all'}, "
         f"excluding={EXCLUDE_KINDS or 'nothing'}, "
         f"scheduler={'on' if ingest_enabled else 'off'})"
+    )
+    # A restart is an event: a worker that starts every few minutes is a
+    # crash loop, and the release it started on is what a regression is
+    # measured against.
+    telemetry.capture(
+        "worker_started",
+        properties={
+            "worker": WORKER_NAME,
+            "kinds": WORKER_KINDS,
+            "excluded_kinds": EXCLUDE_KINDS,
+            "scheduler": ingest_enabled,
+        },
     )
     last_housekeeping = 0.0
     while True:

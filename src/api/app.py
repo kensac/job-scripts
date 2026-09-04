@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
 
-from api import db, metrics
+from api import db, metrics, telemetry
 from api.auth import require_user
 from api.routers import (
     admin,
@@ -31,7 +31,9 @@ async def _lifespan(app: FastAPI):
 
     db.init_schema()
     metrics.serve()
+    telemetry.init()
     yield
+    telemetry.shutdown()
 
 
 app = FastAPI(
@@ -41,6 +43,24 @@ app = FastAPI(
     openapi_url=None,
     lifespan=_lifespan,
 )
+
+
+@app.middleware("http")
+async def _capture_unhandled(request: Request, call_next):
+    """An unhandled exception in a request handler is recorded with the
+    request it failed on and the caller it failed for, then re-raised so the
+    response is the 500 it always was. HTTPException is a handled answer, not
+    a failure, and never reaches here."""
+    try:
+        return await call_next(request)
+    except Exception as exc:
+        telemetry.capture_exception(
+            exc,
+            distinct_id=request.headers.get("X-User-Sub") or telemetry.SERVICE,
+            properties={"path": request.url.path, "method": request.method},
+        )
+        raise
+
 
 app.include_router(users.router, prefix="/v1")
 app.include_router(jobs.router, prefix="/v1")
