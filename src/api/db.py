@@ -40,6 +40,14 @@ _APP_CONFIG_SEED = [
     # ingest or backfill tries it again. The hourly cycle used to be the
     # retry: 24 attempts a day at the same dead URL from every worker.
     ("fetch_retry_after_hours", 24),
+    # An idle worker beside pending work for this long is a stall: a claim
+    # takes one poll (JOBTRACKER_WORKER_POLL, 5s), so ten minutes is not
+    # latency. Kinds allowlists (JOBTRACKER_WORKER_KINDS) are the one
+    # legitimate reason, and the alert names them.
+    ("queue_stall_minutes", 10),
+    # Pending ingests older than this many ingest cycles mean the fleet is
+    # behind the hour; one cycle is the normal wait.
+    ("ingest_backlog_cycles", 2),
 ]
 # One source of truth for a seeded key's value: the seed writes it, and
 # get_config falls back to it when the row is missing.

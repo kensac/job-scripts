@@ -341,6 +341,16 @@ class Task(Base):
             "status",
             postgresql_where=text("parent_id IS NOT NULL"),
         ),
+        # Every worker asks once a minute, per active source, whether that
+        # source has a pending ingest and when its last one was. Without this
+        # each of those is a sequential scan of tasks: 738 scans and 1.4s per
+        # tick per worker on 2026-09-04, measured with EXPLAIN ANALYZE.
+        Index(
+            "idx_tasks_ingest_source",
+            text("(payload->>'source')"),
+            text("created_at DESC"),
+            postgresql_where=text("kind = 'ingest_source'"),
+        ),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
