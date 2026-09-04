@@ -21,6 +21,7 @@ from fastapi import APIRouter, Depends, Query
 from api import budget, db
 from api.auth import AuthedUser
 from api.routers.admin import require_admin
+from core.store import AI_ELIGIBLE_JOB
 
 router = APIRouter()
 
@@ -156,6 +157,58 @@ def spend(
         params,
     )
 
+    # What the bill bought that nobody can open.
+    #
+    # The sweeps that spend tokens selected postings with no reference to who
+    # subscribes to what, so 21.7M of a 99.7M-token 30-day bill went to boards
+    # no user had enabled and to one an admin had switched off. The gate is
+    # fixed (core/store.py AI_ELIGIBLE_JOB); this is how it stays fixed,
+    # because the only symptom was a number in a bill nobody attributed.
+    #
+    # Measured 2026-09-03. The ticket's own figure was 31.6%, counting
+    # `sheet_import` as unsubscribed; it is reachable, so the honest share is
+    # 21.8%.
+    #
+    # Three buckets, not two. 'no_posting' is a call whose url has no jobs row,
+    # and it is deliberate rather than unexplained: the requirements and
+    # embeddings sweeps are url-keyed so they still reach the fifth of the
+    # corpus whose posting row is gone and whose page can never be scraped
+    # again. That work cannot be attributed to a source, which is a different
+    # fact from being unwanted - folding it into 'unreachable' would report
+    # deliberate work as waste. Unpriced calls are counted, never summed as
+    # zero: a NULL cost is a rate nobody looked up, not a free call.
+    by_source_reach = db.query(
+        f"""
+        SELECT COALESCE(j.source, '') AS source,
+               CASE WHEN j.url IS NULL THEN 'no_posting'
+                    WHEN {AI_ELIGIBLE_JOB.format(job="j")} THEN 'reachable'
+                    ELSE 'unreachable' END AS reach,
+               COUNT(*) AS calls,
+               COUNT(*) FILTER (WHERE a.cost_usd IS NULL) AS unpriced_calls,
+               COALESCE(SUM(a.cost_usd), 0) AS cost_usd,
+               COALESCE(SUM(a.total_tokens), 0) AS total_tokens
+        FROM ai_queries a
+        LEFT JOIN jobs j ON j.url = a.url
+        WHERE a.{_WINDOW} AND a.model IS NOT NULL
+        GROUP BY 1, 2 ORDER BY 6 DESC
+        """,
+        params,
+    )
+    by_reach: dict[str, dict[str, Any]] = {}
+    for row in by_source_reach:
+        acc = by_reach.setdefault(
+            row["reach"],
+            {
+                "reach": row["reach"],
+                "calls": 0,
+                "unpriced_calls": 0,
+                "cost_usd": 0,
+                "total_tokens": 0,
+            },
+        )
+        for k in ("calls", "unpriced_calls", "cost_usd", "total_tokens"):
+            acc[k] += row[k]
+
     # Every AI caller, grouped by the purpose it already declares.
     #
     # The rest of this endpoint reads ai_queries, which is the VERDICT log -
@@ -211,6 +264,11 @@ def spend(
         },
         "batching": batching,
         "by_check_type": by_check_type,
+        # Spend that reached a person, spend that could not, and spend whose
+        # posting is unknown - with the sources behind each, so the answer to
+        # "why is this not zero" is on the same screen as the number.
+        "by_reach": sorted(by_reach.values(), key=lambda r: r["calls"], reverse=True),
+        "by_source_reach": by_source_reach,
         "by_model": by_model,
         "by_day": by_day,
         "waste": waste,

@@ -13,6 +13,7 @@ from typing import Any
 
 from api import db, verdicts
 from api.tasks.runtime import SCRAPE_CONCURRENCY, AdaptiveLimiter, _cancelled, _set_progress
+from core.store import SUBSCRIBED_SOURCE
 
 logger = logging.getLogger("jobtracker_worker")
 
@@ -29,9 +30,9 @@ async def handle_fetch_missing_content(task_id: int, payload: dict[str, Any]) ->
 
     cap = max(1, payload.get("limit") or CONTENT_BACKFILL_PER_CYCLE)
     rows = db.query(
-        """
+        f"""
         SELECT j.url, j.company, j.title FROM jobs j
-        WHERE j.active AND j.source IN (SELECT source FROM user_sources)
+        WHERE j.active AND {SUBSCRIBED_SOURCE.format(source="j.source")}
           AND NOT EXISTS (
             SELECT 1 FROM ai_queries q WHERE q.url = j.url
               AND q.input_content IS NOT NULL AND length(q.input_content) > 200)
