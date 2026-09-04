@@ -17,6 +17,22 @@ it. A timestamp cannot tell you whether the commit behind an image was on a
 working main — and an image built while main was broken is an outage, not
 merely a stale one.
 
+## Checking whether a route is live, without access
+
+An **unauthenticated** request to the production API distinguishes a deployed
+route from an absent one: an existing route returns 401 from its auth
+dependency, an absent one returns 404. Include a known-fake path as a control.
+
+This is safe because the authorisation check fails before any write. It is not
+a licence to send an *authenticated* request — that provisions a user row, and
+the rule against it stands.
+
+**Do not use `git merge-base` against a commit from another repository.** A SHA
+the repository does not contain exits with the same status as a commit that is
+genuinely not an ancestor, so an unknown SHA fabricates a confident
+"not deployed" answer. Deployment records from an infrastructure repository
+refer to that repository's commits, not this one's.
+
 ## The pin
 
 The pin is a snapshot, not a follow. Automation proposes pin updates, but its
