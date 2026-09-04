@@ -57,11 +57,15 @@ jobs:
       # dispatched on that commit, and this run stops here green. The
       # dispatched run is the one that judges the branch; a fix that leaves a
       # real failure behind fails there, on a commit that already carries the
-      # mechanical corrections. Only for branches in this repository: a fork's
-      # token cannot push, and its run falls through to the checks below.
+      # mechanical corrections. Only the pull request's own run fixes, and only
+      # for branches in this repository: the dispatched run judges and never
+      # fixes, so a fix that does not converge (a schema that differs run to
+      # run) shows up as one failing check rather than an unbounded chain of
+      # green runs each pushing a commit; a fork's token cannot push, and its
+      # run falls through to the checks below.
       - name: Auto-fix lint, format and schema
         id: autofix
-        if: github.event_name != 'push' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
         env:
           JOBTRACKER_SERVICE_TOKEN: ci
           APP_ENCRYPTION_KEY: ci
@@ -69,6 +73,10 @@ jobs:
         run: |
           ruff check --fix src tests || true
           ruff format src tests
+          # Migrate before exporting: importing the app runs the legacy
+          # IF NOT EXISTS DDL in core.store, and a later migration that adds
+          # one of those columns then fails as a duplicate.
+          python -m alembic upgrade head
           python -m api.export_schema > openapi.json
           if git diff --quiet -- src tests openapi.json; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
