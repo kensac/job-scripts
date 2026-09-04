@@ -43,7 +43,7 @@ jobs:
           # Check out the branch itself (not the merge ref) so a fix can be
           # committed back to it.
           ref: ${{ github.head_ref || github.ref_name }}
-      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           enable-cache: true
       - run: uv sync --frozen
