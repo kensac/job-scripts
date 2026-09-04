@@ -148,6 +148,15 @@ text as the posting's content instead of fetching the page. Scraping is the
 action that gets the fleet blocked, so a backtest or a backfill reads this
 table rather than asking a board twice. Nothing downstream reads it.
 
+**A company board's pull is the closure signal for its rows.** After a pull
+from a board that lists every open posting (`boards.AUTHORITATIVE`), every
+active catalog row of that source the pull did not admit is set inactive:
+the board dropped it, or the pattern stopped admitting it. Inactive rows are
+excluded from every sweep and leave boards through `_demote_closed`; listed
+and admitted again, the upsert reactivates them. An aggregator list is not
+such a signal, and an empty pull is a broken fetch rather than an empty
+board, so neither retires anything.
+
 **A page fetch that returns nothing leaves a record.** It is a `content` row
 with `status = 'failed'` and no text, and nothing retries that URL inside
 `fetch_retry_after_hours`. Without the record the hourly cycle was the retry:

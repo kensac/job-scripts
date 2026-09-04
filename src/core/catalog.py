@@ -60,6 +60,20 @@ def upsert_postings(postings: list[JobPosting], source: str) -> int:
     return len(rows)
 
 
+def retire_unlisted(source: str, listed_and_admitted: list[str]) -> int:
+    """Marks inactive every active row of this source that the pull did not
+    admit. Only for a board that lists every open posting (boards.AUTHORITATIVE),
+    where absence is closure; the caller decides that. Rows come back active
+    through upsert_postings when the board lists them and the pattern admits
+    them again, so a pattern change in either direction is one pull away."""
+    with pool.connection() as conn:
+        result = conn.execute(
+            "UPDATE jobs SET active = false WHERE source = %s AND active AND url <> ALL(%s)",
+            (source, listed_and_admitted),
+        )
+        return result.rowcount
+
+
 _BATCH = 500
 
 

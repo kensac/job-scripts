@@ -69,6 +69,12 @@ def kind(url: str) -> str:
 # row.
 NEEDS_COMPANY = frozenset({"lever", "ashby", "workday"})
 
+# A company's own board lists every open posting, so a posting missing from
+# it is closed. An aggregator list trims old rows on its own schedule, so
+# absence there says nothing; those postings close through the reverify
+# sweep instead.
+AUTHORITATIVE = frozenset({"greenhouse", "lever", "ashby", "workday"})
+
 
 def fetch_listings(url: str, company: str | None = None) -> list[JobPosting]:
     fetcher = {
