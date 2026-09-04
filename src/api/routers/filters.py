@@ -16,7 +16,8 @@ router = APIRouter()
 IMPROVE_MODEL = os.environ.get("JOBTRACKER_IMPROVE_MODEL", "gpt-5.6-luna")
 
 _FILTER_COLS = (
-    "id, name, prompt, on_ambiguous, fail_closed, enabled, prompt_hash, created_at, updated_at"
+    "id, name, prompt, on_ambiguous, fail_closed, enabled, prompt_hash, preset_id, "
+    "created_at, updated_at"
 )
 
 
@@ -284,8 +285,12 @@ def adopt_preset(preset_id: int, user: AuthedUser = Depends(require_user)):
     if not preset:
         raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown preset"})
     name = preset["name"]
+    # Adopted is a fact on the row (preset_id), not a guess from the name: a
+    # renamed adopted filter is still adopted, and a hand-written filter that
+    # happens to share the name still blocks, because the name is unique.
     if db.query_one(
-        "SELECT id FROM user_filters WHERE user_id = %s AND name = %s", (user.id, name)
+        "SELECT id FROM user_filters WHERE user_id = %s AND (preset_id = %s OR name = %s)",
+        (user.id, preset_id, name),
     ):
         raise HTTPException(
             409,
@@ -293,8 +298,9 @@ def adopt_preset(preset_id: int, user: AuthedUser = Depends(require_user)):
         )
     row = db.query_one(
         f"""
-        INSERT INTO user_filters (user_id, name, prompt, on_ambiguous, fail_closed, enabled, prompt_hash)
-        VALUES (%s, %s, %s, %s, %s, TRUE, %s)
+        INSERT INTO user_filters
+            (user_id, name, prompt, on_ambiguous, fail_closed, enabled, prompt_hash, preset_id)
+        VALUES (%s, %s, %s, %s, %s, TRUE, %s, %s)
         RETURNING {_FILTER_COLS}
         """,
         (
@@ -304,6 +310,7 @@ def adopt_preset(preset_id: int, user: AuthedUser = Depends(require_user)):
             preset["on_ambiguous"],
             preset["fail_closed"],
             _hash(preset["prompt"], preset["on_ambiguous"]),
+            preset_id,
         ),
     )
     assert row is not None

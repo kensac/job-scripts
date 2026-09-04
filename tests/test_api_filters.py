@@ -74,6 +74,30 @@ def test_adopt_preset_creates_user_filter(client, admin_headers, user_headers):
     assert again.status_code == 409
     assert again.json()["detail"]["code"] == "ALREADY_ADOPTED"
 
+    # Provenance is on the row, so a rename does not turn it back into "Add":
+    # the list still says which preset it came from and a re-adopt is still
+    # refused. A hand-written filter carries no preset.
+    assert body["preset_id"] == preset_id
+    renamed = client.patch(
+        f"/v1/user/filters/{body['id']}", json={"name": "My junior filter"}, headers=user_headers
+    )
+    assert renamed.status_code == 200, renamed.text
+    listed = {
+        f["id"]: f for f in client.get("/v1/user/filters", headers=user_headers).json()["filters"]
+    }
+    assert listed[body["id"]]["preset_id"] == preset_id
+    assert listed[body["id"]]["name"] == "My junior filter"
+    assert (
+        client.post(f"/v1/filter-presets/{preset_id}/adopt", headers=user_headers).status_code
+        == 409
+    )
+    own = client.post(
+        "/v1/user/filters",
+        json={"name": "hand written", "prompt": "no agencies"},
+        headers=user_headers,
+    )
+    assert own.status_code == 200 and own.json()["preset_id"] is None
+
 
 def _preset(name: str, prompt: str) -> int:
     from api import db
