@@ -1,14 +1,12 @@
-"""Board analytics against a synced copy of production.
+"""Board analytics over a full catalog.
 
 The unit suite proves the arithmetic. These prove the assumptions the metrics
-are built on still hold over real rows - specifically the two that invert the
-obvious reading of the numbers, and the ones that decide which metrics are
-honest to render at all.
+are built on still hold over a realistic population - specifically the two
+that invert the obvious reading of the numbers, and the ones that decide which
+metrics are honest to render at all.
 
-Run with:
-    set -a && . ./.env && set +a
-    make testdb-sync
-    TEST_DATABASE_URL=...jobtracker_test make integration
+Most run on the generated corpus and therefore on every pull request; see
+tests/test_prod_shapes.py for what the two markers mean.
 """
 
 from __future__ import annotations
@@ -19,8 +17,6 @@ import pytest
 
 from api import db
 from api.routers import analytics
-
-pytestmark = pytest.mark.integration
 
 # The spend metric reads ai_queries.cost_usd, which a fixture synced before that
 # migration does not have. Skipping loudly beats failing seven tests with an
@@ -41,6 +37,7 @@ def _sources() -> list[dict]:
     return analytics._collect(analytics.DEFAULT_MIN_SAMPLE)
 
 
+@pytest.mark.corpus
 def test_every_source_in_jobs_survives_into_the_response():
     """sheet_import and upload have no row in `sources`. An inner join drops
     them, and sheet_import is the largest board in the catalog."""
@@ -49,6 +46,7 @@ def test_every_source_in_jobs_survives_into_the_response():
     assert in_jobs <= rows, f"sources lost between jobs and the response: {in_jobs - rows}"
 
 
+@pytest.mark.corpus
 def test_unconfigured_sources_are_reported_as_such_not_omitted():
     rows = {r["source"]: r for r in _sources()}
     configured = {r["name"] for r in db.query("SELECT name FROM sources")}
@@ -56,11 +54,18 @@ def test_unconfigured_sources_are_reported_as_such_not_omitted():
         assert row["configured"] is (name in configured)
 
 
+@pytest.mark.integration
 def test_active_share_is_not_comparable_across_feeds():
     """The finding the caveat rests on: some boards have zero inactive rows,
     because their feed only ever lists live postings and the ingest never
     clears the flag. If that ever stops being true the caveat is stale and
-    should be revisited rather than left in the response."""
+    should be revisited rather than left in the response.
+
+    Real data only: the finding is that SOME feeds never clear the active flag. That is
+    per-feed ingest behaviour, a correlation between source and active that a
+    per-column distribution does not carry, so every source in the corpus reports
+    inactive rows.
+    """
     rows = _sources()
     with_postings = [r for r in rows if r["inventory"]["total"] > 0]
     reporting = [r for r in with_postings if r["inventory"]["reports_inactive"]]
@@ -72,6 +77,7 @@ def test_active_share_is_not_comparable_across_feeds():
     )
 
 
+@pytest.mark.corpus
 def test_a_job_belongs_to_exactly_one_source():
     """Why overlap is keyed on (company, title) rather than url."""
     dupes = db.query_one(
@@ -80,10 +86,16 @@ def test_a_job_belongs_to_exactly_one_source():
     assert dupes is not None and dupes["c"] == 0
 
 
+@pytest.mark.integration
 def test_status_vocabulary_still_has_no_interview_or_offer_state():
     """Interview and offer rates per board are not computable, and this is the
     reason. If a status like that ever appears, the metric becomes available
-    and this test is the prompt to add it."""
+    and this test is the prompt to add it.
+
+    Real data only: the subject is what users actually typed into the status column.
+    Over the corpus it asserts the profile's measured vocabulary, which is already
+    checked by measure_profile.py --check.
+    """
     statuses = {
         (r["status"] or "").lower()
         for r in db.query("SELECT DISTINCT status FROM user_jobs WHERE status IS NOT NULL")
@@ -93,6 +105,7 @@ def test_status_vocabulary_still_has_no_interview_or_offer_state():
     assert not found, f"outcome statuses now exist ({found}); board outcome rates are computable"
 
 
+@pytest.mark.corpus
 def test_rates_never_render_a_number_below_the_floor():
     for row in _sources():
         for name, stage in row["funnel"].items():
@@ -101,6 +114,7 @@ def test_rates_never_render_a_number_below_the_floor():
                 assert rate["value"] is None, f"{row['source']}/{name} rendered a floored rate"
 
 
+@pytest.mark.corpus
 def test_every_rate_carries_its_denominator():
     def _check(node, path: str) -> None:
         if isinstance(node, dict):
@@ -118,6 +132,7 @@ def test_every_rate_carries_its_denominator():
         _check(row, row["source"])
 
 
+@pytest.mark.corpus
 def test_funnel_never_claims_to_have_checked_more_than_the_board_holds():
     for row in _sources():
         total = row["inventory"]["total"]
@@ -125,6 +140,7 @@ def test_funnel_never_claims_to_have_checked_more_than_the_board_holds():
             assert stage["checked"] <= total, f"{row['source']}/{name} checked > total"
 
 
+@pytest.mark.corpus
 def test_collect_stays_within_its_measured_budget():
     """The queries were tuned against production (the funnel alone went from
     ~1.15s to ~245ms by deduping on jobs.id instead of the url text). This

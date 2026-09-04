@@ -45,7 +45,8 @@ These are instructions, not history. Follow them.
 - `src/api/` — FastAPI application. Routers, task handlers, matching, pipeline.
 - `src/core/` — provider datasheets, pricing, routing, storage primitives.
 - `alembic/` — migrations. See migrations.md before adding one.
-- `tests/` — integration tests against a real database. See testing.md.
+- `tests/` — three populations against a real database: hermetic, the
+  generated corpus, and a synced copy of production. See testing.md.
 - The frontend lives in a separate repository, `personal-portfolio`, under
   `app/job-tracker/` (a person's own data) and `app/job-scripts/` (the
   administrative view). It is not documented there — [frontend.md](docs/agents/frontend.md)
@@ -57,4 +58,6 @@ These are instructions, not history. Follow them.
 
 - `make check` — lint, format, types, compile, tests. CI gates on this.
 - `make testdb-up` / `make testdb-down` — disposable test database.
+- `make profile` — re-measure production into `tests/production_profile.json`,
+  which is what the generated test corpus is built from. See testing.md.
 - Regenerate `openapi.json` when routes change.

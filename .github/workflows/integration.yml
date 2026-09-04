@@ -1,9 +1,26 @@
-name: Integration tests
+name: Real-data checks
 
-# Deliberately NOT on pull_request. These run against a database holding real
-# production data, so the credential must never be reachable from a workflow
-# an outside contributor can influence. Schedule plus manual dispatch keeps it
-# to code that is already on main.
+# Deliberately NOT on pull_request. Everything here touches real production
+# data, so the credentials must never be reachable from a workflow an outside
+# contributor can influence. Schedule plus manual dispatch keeps it to code
+# that is already on main.
+#
+# What this is NOT any more: the gate. The tests that check code are in ci.yml
+# and run on every pull request against the generated corpus, with no secrets.
+# Two things are left here, and both are about production itself rather than
+# about the code:
+#
+#   1. The profile drift check. tests/production_profile.json is a measurement
+#      of production, and a measurement taken once is an assumption again by
+#      the following month. This re-measures and fails when production holds a
+#      shape the corpus cannot produce - a new categorical value, a column
+#      that started holding nulls, a range that moved, a new table. That is
+#      what keeps the corpus a measurement instead of a belief.
+#
+#   2. The tests whose subject is a live writer, not a code path: is the
+#      reaper still requeueing, is the batch poller still resuming, did the
+#      comp extractor write a sane figure. Each one says in its own docstring
+#      why the corpus cannot falsify it.
 on:
   schedule:
     - cron: "0 6 * * *"
@@ -14,10 +31,40 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  integration:
+  profile-drift:
     runs-on: ubuntu-latest
-    # Absent secret = skipped, not failed. A red badge for "not configured"
-    # teaches people to ignore the badge.
+    if: github.repository == 'kensac/job-scripts'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt
+
+      - name: Check credential is configured
+        id: creds
+        env:
+          DATABASE_URL: ${{ secrets.PRODUCTION_READONLY_DATABASE_URL }}
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "PRODUCTION_READONLY_DATABASE_URL is not set; skipping."
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # SELECT only. The script opens its transaction with
+      # `SET default_transaction_read_only = on`, so a bug in it cannot write.
+      - name: Production still matches the measured profile
+        if: steps.creds.outputs.configured == 'true'
+        env:
+          DATABASE_URL: ${{ secrets.PRODUCTION_READONLY_DATABASE_URL }}
+          PYTHONPATH: src
+        run: python scripts/measure_profile.py --check
+
+  real-data:
+    runs-on: ubuntu-latest
     if: github.repository == 'kensac/job-scripts'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -27,19 +74,21 @@ jobs:
           cache: pip
       - run: pip install -r requirements.txt -r requirements-dev.txt
 
+      # Absent secret = skipped, not failed. A red badge for "not configured"
+      # teaches people to ignore the badge.
       - name: Check credential is configured
         id: creds
         env:
           TEST_DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}
         run: |
           if [ -z "$TEST_DATABASE_URL" ]; then
-            echo "TEST_DATABASE_URL is not set; skipping integration tests."
+            echo "TEST_DATABASE_URL is not set; skipping."
             echo "configured=false" >> "$GITHUB_OUTPUT"
           else
             echo "configured=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Run integration tests
+      - name: Run the tests that need real data
         if: steps.creds.outputs.configured == 'true'
         env:
           TEST_DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}

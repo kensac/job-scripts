@@ -32,10 +32,61 @@ Verify fixture shapes against the source that produces them in production, not
 against your expectation of it. When a contract is not machine-checkable,
 shape drift is invisible and silent.
 
-Prefer a disposable copy of real data over fabricated rows. Real data carries
-the awkward cases — nulls where you expected values, strings where you
-expected numbers, absent fields whose absence is the meaning — and those are
-where the bugs are.
+Prefer real shapes over invented ones. Real data carries the awkward cases.
+Nulls where you expected values, strings where you expected numbers, absent
+fields whose absence is the meaning. Those are where the bugs are.
+
+## Three populations, and how a test picks one
+
+Every test here is in exactly one of these. The marker says which. There is no
+marker filter, so `pytest tests` runs all three.
+
+**Unmarked.** A truncated database the test fills itself. Fast, hermetic, and
+where almost everything belongs.
+
+**`@pytest.mark.corpus`.** The generated corpus in `tests/corpus.py`. It is a
+full catalog whose every value is drawn from `tests/production_profile.json`,
+which `scripts/measure_profile.py` measures off production. Use it when the
+subject is code running over realistic shape and volume: a query plan, a
+predicate over a whole catalog, an aggregate across several users. It runs on
+every pull request, because generated data needs no credential.
+
+**`@pytest.mark.integration`.** A synced copy of real production. Skipped when
+the database does not hold one. Use it only when the subject is something a
+live writer produced and a generator cannot: what the comp extractor wrote,
+what users typed, whether the reaper is still requeueing, hashes stored by an
+older version of the code.
+
+**Do not build the corpus to satisfy an assertion.** A corpus that reproduces
+an invariant makes every test of that invariant a tautology, which is the
+first failure mode listed above. When a test needs an invariant the generator
+does not produce, that is the signal it belongs on real data, and it must say
+so in its own docstring. `tests/test_prod_shapes.py` is the worked example.
+
+## Keeping the corpus a measurement
+
+The profile is the whole safety argument, and a measurement taken once is an
+assumption again within a month. `scripts/measure_profile.py --check` runs on
+a schedule against production and fails when production holds a shape the
+generator cannot produce: a new categorical value, a column that started
+holding nulls, a range that moved, a table nobody added to the profile.
+
+When it fails, re-measure with `make profile`, commit the result, then check
+that the corpus and the tests reading it still cover what it now says. Do not
+silence it by widening a range by hand. Every number in that file is supposed
+to be a fact about production, and once one of them is typed rather than
+measured, none of them can be trusted.
+
+The profile never carries identifying values. A column's literal values are
+recorded only when it is low-cardinality, short, absent from
+`measure_profile.IDENTIFYING`, and free of anything that looks like an address
+or a token. Everything else is reduced to lengths and character classes. The
+file is committed, so that rule is load-bearing rather than a nicety.
+
+The synced copy is still real data and now anonymises on the way out:
+`sync_testdb.ANONYMISE` rewrites the mailbox, the email addresses and the
+OAuth tokens inside the `INSERT ... SELECT`, so they never leave the server
+they were already on.
 
 ## Test databases
 
