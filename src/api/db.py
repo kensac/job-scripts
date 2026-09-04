@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import atexit
+import datetime
+import decimal
+import json
 import os
 from typing import Any, LiteralString, cast
 
@@ -182,5 +185,17 @@ def execute_count(sql: str, params: Any = None) -> int:
         return conn.execute(_as_query(sql), params).rowcount
 
 
+def _json_default(value: Any) -> Any:
+    """psycopg's default dumps refuses the types SQL hands back. A detector
+    building its detail from dict(row) gets Decimal for every rate and
+    datetime for every timestamp, and the write fails at the driver with a
+    message naming neither the column nor the detector."""
+    if isinstance(value, decimal.Decimal):
+        return float(value)
+    if isinstance(value, (datetime.datetime, datetime.date)):
+        return value.isoformat()
+    return str(value)
+
+
 def jsonb(value: Any) -> Jsonb:
-    return Jsonb(value)
+    return Jsonb(value, dumps=lambda v: json.dumps(v, default=_json_default))
