@@ -8359,6 +8359,7 @@
     "/v1/admin/stats": {
       "get": {
         "summary": "Stats",
+        "description": "Lifetime totals over ai_queries, served from a per-process cache for\nadmin_stats_cache_seconds. Every call is five full scans of the largest\ntable, and the dashboard asks on every worker event; the totals move by\na few rows an hour. ponytail: per-process cache, so each api replica\nscans once per window; shared cache if replicas multiply.",
         "operationId": "stats_v1_admin_stats_get",
         "parameters": [
           {
