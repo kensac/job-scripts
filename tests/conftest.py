@@ -295,6 +295,21 @@ def _reseed() -> None:
 
 
 @pytest.fixture(autouse=True)
+def _no_network_static_fetch(monkeypatch):
+    """The browserless fetch tier is seeded on, and it is a real HTTP client.
+    A test that stubs the browser and lets the tier run would fetch the
+    posting for real (one did, and got a real page). Every test starts with
+    the tier failing closed, so the browser stub is reached exactly as before;
+    a test of the tier itself replaces this with its own stub."""
+    import curl_cffi.requests as cffi_requests
+
+    def refuse(url, **kw):
+        raise RuntimeError("tests do not reach the network")
+
+    monkeypatch.setattr(cffi_requests, "get", refuse)
+
+
+@pytest.fixture(autouse=True)
 def _clean_db(request):
     """Give each test the database its marker asks for.
 

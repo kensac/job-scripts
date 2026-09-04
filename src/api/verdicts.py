@@ -266,7 +266,12 @@ async def refresh_content(
         static = await fetching.fetch_static(url, int(db.get_config("static_fetch_min_chars")))
         if static:
             add_ai_result(
-                url, "passed", "static", "content", input_content=static, config_name="content-cache"
+                url,
+                "passed",
+                "static",
+                "content",
+                input_content=static,
+                config_name="content-cache",
             )
             return static, None
     if scrape_sem is not None:
