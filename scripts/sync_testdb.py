@@ -238,9 +238,6 @@ def main() -> int:
     # this fails here, which is a genuinely useful thing for a sync to catch.
     env = {**os.environ, "DATABASE_URL": dst_url, "PYTHONPATH": "src"}
     subprocess.run([sys.executable, "-m", "alembic", "upgrade", "head"], env=env, check=True)
-    subprocess.run(
-        [sys.executable, "-c", "import core.store"], env=env, check=True
-    )  # creates ai_queries, which alembic does not own
     print("schema built from migrations")
 
     # Which BASE TABLES the source has, asked of the source directly.
