@@ -77,6 +77,22 @@ def upgrade() -> None:
         ON CONFLICT (url) DO NOTHING
         """
     )
+    # The kept half comes from the catalog, so pattern-preview judges a
+    # candidate against both sides from the first minute rather than against
+    # screened titles alone until every board has pulled again (up to a day
+    # on the daily interval, never for a source with no board to re-pull).
+    op.execute(
+        """
+        INSERT INTO listings
+            (url, source, company, title, locations, date_posted, pattern, kept,
+             first_seen_at, last_seen_at)
+        SELECT j.url, j.source, j.company, j.title, j.locations, j.date_posted,
+               COALESCE(s.title_pattern, ''), true, j.created_at, now()
+        FROM jobs j JOIN sources s ON s.name = j.source
+        WHERE j.active
+        ON CONFLICT (url) DO NOTHING
+        """
+    )
 
 
 def downgrade() -> None:
