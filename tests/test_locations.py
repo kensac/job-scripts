@@ -138,9 +138,9 @@ async def test_the_sweep_classifies_every_unseen_string_once(
         return (
             {
                 s.custom_id: SimpleNamespace(
-                    text='{"country": "IN", "region": "", "city": "Bengaluru", "remote": false}'
+                    text='{"places": [{"country": "IN", "region": "", "city": "Bengaluru"}], "remote": false}'
                     if s.input == "Bengaluru"
-                    else '{"country": "IN", "region": "", "city": "", "remote": false}',
+                    else '{"places": [{"country": "IN", "region": "", "city": ""}], "remote": false}',
                     error=None,
                 )
                 for s in specs
@@ -200,3 +200,123 @@ def test_admin_locations_page_and_count_what_the_filters_keep(client, admin_head
         "q",
         "unplaced",
     ]
+
+
+def test_a_string_naming_several_places_matches_on_any_of_them(client, user_headers, clean):
+    uid = _uid(user_headers)
+    both = _insert_job("src-mp", "https://x.test/mp1", locations=["New York, London"])
+    abroad = _insert_job("src-mp", "https://x.test/mp2", locations=["London, Singapore"])
+    _pass_closed("https://x.test/mp1")
+    _pass_closed("https://x.test/mp2")
+    _subscribe(uid, "src-mp")
+    P = locations.Place
+    locations.store(
+        "New York, London",
+        locations.LocationExtract(
+            places=[P(country="US", region="NY", city="New York"), P(country="GB", city="London")]
+        ),
+        "t",
+    )
+    locations.store(
+        "London, Singapore",
+        locations.LocationExtract(places=[P(country="GB", city="London"), P(country="SG")]),
+        "t",
+    )
+    locations.store("United States", locations.LocationExtract(country="US"), "t")
+    locations.store("UK", locations.LocationExtract(country="GB"), "t")
+    locations.store(
+        "United States and Canada",
+        locations.LocationExtract(places=[P(country="US"), P(country="CA")]),
+        "t",
+    )
+    row = db.query_one(
+        "SELECT country, city, places FROM locations WHERE text = 'New York, London'"
+    )
+    assert (row["country"], row["city"]) == ("US", "New York") and len(row["places"]) == 2
+
+    assert _board(client, user_headers, "src-mp") == {both, abroad}
+    _criteria(client, user_headers, ["UK"])
+    assert _board(client, user_headers, "src-mp") == set()
+    r = client.put(
+        "/v1/user/settings",
+        json={"criteria": {"excluded_locations": [], "included_locations": ["United States"]}},
+        headers=user_headers,
+    )
+    assert r.status_code == 200
+    assert _board(client, user_headers, "src-mp") == {both}
+    r = client.put(
+        "/v1/user/settings",
+        json={"criteria": {"included_locations": ["United States and Canada"]}},
+        headers=user_headers,
+    )
+    assert r.status_code == 200 and _board(client, user_headers, "src-mp") == {both}
+
+
+@pytest.mark.asyncio
+async def test_a_reclassify_cycle_re_asks_every_model_row_and_keeps_hand_corrections(
+    clean, monkeypatch
+):
+    locations.store("Golden", locations.LocationExtract(), "gpt-5-nano")
+    locations.store("EMEA", locations.LocationExtract(), "admin")
+    asked: list[str] = []
+
+    async def fake_run_batched(task_id, shape, specs):
+        asked.extend(s.input for s in specs)
+        return (
+            {
+                s.custom_id: SimpleNamespace(
+                    text='{"places": [{"country": "US", "region": "CO", "city": "Golden"}], "remote": false}',
+                    error=None,
+                )
+                for s in specs
+            },
+            SimpleNamespace(model="gpt-5-nano"),
+        )
+
+    monkeypatch.setattr(locations, "run_batched", fake_run_batched)
+    task = db.query_one(
+        "INSERT INTO tasks (kind, payload, status) VALUES ('classify_locations', '{}', 'running') RETURNING id"
+    )
+    await locations.handle_classify_locations(task["id"], {"reclassify": True})
+    assert asked == ["Golden"]
+    row = db.query_one("SELECT country, region, city, places FROM locations WHERE text = 'Golden'")
+    assert (row["country"], row["region"], row["city"]) == ("US", "CO", "Golden")
+    assert row["places"] == [{"country": "US", "region": "CO", "city": "Golden"}]
+
+
+def test_a_materialised_board_row_obeys_the_criteria_and_an_acted_on_row_does_not(
+    client, user_headers, clean
+):
+    """The worker writes an empty board row for every passing posting; that
+    row is not a decision, so the person's location and date criteria still
+    apply to it. A status, a note or a date applied is a decision and wins."""
+    uid = _uid(user_headers)
+    sg = _insert_job("src-mat", "https://x.test/mat1", locations=["Singapore"])
+    sg_applied = _insert_job("src-mat", "https://x.test/mat2", locations=["Singapore"])
+    us = _insert_job("src-mat", "https://x.test/mat3", locations=["Austin, TX"])
+    for url in ("https://x.test/mat1", "https://x.test/mat2", "https://x.test/mat3"):
+        _pass_closed(url)
+    _subscribe(uid, "src-mat")
+    for jid in (sg, sg_applied, us):
+        db.execute(
+            "INSERT INTO user_jobs (user_id, job_id) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+            (uid, jid),
+        )
+    db.execute(
+        "UPDATE user_jobs SET status = 'Applied' WHERE user_id = %s AND job_id = %s",
+        (uid, sg_applied),
+    )
+    locations.store("Singapore", locations.LocationExtract(country="SG", city="Singapore"), "t")
+    locations.store(
+        "Austin, TX", locations.LocationExtract(country="US", region="TX", city="Austin"), "t"
+    )
+    locations.store("United States", locations.LocationExtract(country="US"), "t")
+
+    assert _board(client, user_headers, "src-mat") == {sg, sg_applied, us}
+    r = client.put(
+        "/v1/user/settings",
+        json={"criteria": {"included_locations": ["United States"]}},
+        headers=user_headers,
+    )
+    assert r.status_code == 200, r.text
+    assert _board(client, user_headers, "src-mat") == {sg_applied, us}

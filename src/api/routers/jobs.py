@@ -64,7 +64,16 @@ FROM jobs j
 LEFT JOIN user_jobs uj ON uj.job_id = j.id AND uj.user_id = %(uid)s
 WHERE (
     j.uploaded_by = %(uid)s
-    OR uj.user_id IS NOT NULL
+    -- A board row the person ACTED on (a status, a note, a date applied) is
+    -- theirs whatever the criteria say. A row the worker materialised for a
+    -- passing posting and nobody touched is not a decision, so it obeys the
+    -- criteria like any other posting: 1,629 such rows carried postings in
+    -- Singapore, London and Sydney past a United States filter on
+    -- 2026-09-05, because a row's mere existence read as a grant.
+    OR (uj.user_id IS NOT NULL
+        AND (COALESCE(uj.status, '') <> '' OR COALESCE(uj.notes, '') <> ''
+             OR uj.date_applied IS NOT NULL
+             OR (TRUE {criteria})))
     OR (
         j.active
         AND j.source IN (SELECT source FROM user_sources WHERE user_id = %(uid)s)
@@ -309,7 +318,7 @@ def _touchable(user: AuthedUser, job_ids: list[int]) -> set[int]:
 
     Pinning an unsubscribed job by patching it is a deliberate feature (the
     "watching" case). But a user_jobs row IS a visibility grant - _VISIBILITY
-    trusts `uj.user_id IS NOT NULL` unconditionally - so an unrestricted pin
+    trusts a row the person acted on unconditionally - so an unrestricted pin
     launders around every other gate: pin, then read the job's cached page
     through /detail. The public catalog is fine to pin; another user's
     private upload is not, and that is the only distinction that matters.

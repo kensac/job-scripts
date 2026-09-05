@@ -15414,6 +15414,43 @@
         "type": "object",
         "title": "JobCorrection"
       },
+      "LocationPlace": {
+        "properties": {
+          "country": {
+            "type": "string",
+            "maxLength": 2,
+            "title": "Country"
+          },
+          "region": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Region"
+          },
+          "city": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "City"
+          }
+        },
+        "type": "object",
+        "required": [
+          "country"
+        ],
+        "title": "LocationPlace"
+      },
       "LocationPut": {
         "properties": {
           "country": {
@@ -15455,10 +15492,26 @@
             "type": "boolean",
             "title": "Remote",
             "default": false
+          },
+          "places": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/LocationPlace"
+                },
+                "type": "array",
+                "maxItems": 20
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Places"
           }
         },
         "type": "object",
-        "title": "LocationPut"
+        "title": "LocationPut",
+        "description": "One place through country/region/city, or several through places;\nplaces wins when both are sent."
       },
       "MatchOverride": {
         "properties": {

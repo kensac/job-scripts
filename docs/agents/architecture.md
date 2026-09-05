@@ -343,9 +343,16 @@ Job visibility is a read-time conjunctive predicate, spelled in one place and
 formatted into per-object routes. Never write a fresh "can this user see this"
 predicate.
 
+**A board row is a grant only when the person acted on it.** The worker
+materialises an empty row for every posting that passes a person's filters;
+that row is bookkeeping, not a decision, so the person's criteria (locations,
+posted date) still apply to it. A status, a note or a date applied is a
+decision, and the row is theirs whatever the criteria say.
+
 **Location criteria match places, not words.** Every distinct location
 string a board writes is one row of `locations`, classified once by a model
-into country, region, city and remote (`api.tasks.locations`), and a user's
+into the places it names (country, region, city, as many as it lists) and
+remote (`api.tasks.locations`), and a user's
 excluded and included locations are rows of the same table: a country
 criterion takes every city in it, a city criterion that city, a bare Remote
 criterion remote postings. Excluded hides a posting with any matching

@@ -41,31 +41,63 @@ LOCATIONS_TASK = TaskShape(
 )
 
 
+class Place(BaseModel):
+    country: str = ""
+    region: str = ""
+    city: str = ""
+
+
+class LocationAnswer(BaseModel):
+    """What the model returns: every place the string names, and whether it
+    says remote. A string naming three cities is three entries."""
+
+    places: list[Place] = []
+    remote: bool = False
+
+
 class LocationExtract(BaseModel):
+    """What store() takes. One place through country/region/city, or several
+    through places; the first is what the display columns carry."""
+
     country: str = ""
     region: str = ""
     city: str = ""
     remote: bool = False
+    places: list[Place] = []
+
+    def all_places(self) -> list[Place]:
+        if self.places:
+            return self.places
+        if self.country:
+            return [Place(country=self.country, region=self.region, city=self.city)]
+        return []
 
 
 _INSTRUCTIONS = (
-    "Classify ONE job-location string into a place.\n"
-    "country: the ISO 3166-1 alpha-2 code, uppercase, of the single country the "
-    "string refers to. 'United States', 'USA', 'US', a US city, a US state name "
-    "or two-letter code are US; 'UK', 'London', 'England' are GB; 'Bengaluru', "
-    "'Bangalore', 'Hyderabad', 'Pune' are IN. Empty when the string names no "
-    "single country ('Multiple locations', 'US or Canada', 'EMEA', 'Global', "
-    "'Anywhere') or is not a place.\n"
+    "Classify ONE job-location string into the places it names.\n"
+    "places: one entry per distinct place the string names, in the order "
+    "written. 'London, Montreal, Singapore' is three entries; 'United States "
+    "and Canada' is two (countries with no city); 'San Jose, CA, United "
+    "States' is one. A bare town name IS a place: give its most likely "
+    "country and region (Golden is US CO, Normal is US IL, Novi is US MI, "
+    "Alexandria is US VA, Montevideo is UY). Empty only when the string "
+    "names no place at all ('In-Office', 'N/A', '13 Locations', 'Multiple "
+    "Locations') or only a continent or region ('Europe', 'EMEA', 'North "
+    "America', 'Middle East', 'Asia').\n"
+    "country: the ISO 3166-1 alpha-2 code, uppercase. 'United States', 'USA', "
+    "'US', a US city, a US state name or two-letter code are US; 'UK', "
+    "'London', 'England' are GB; 'Bengaluru', 'Bangalore', 'Hyderabad', 'Pune' "
+    "are IN.\n"
     "region: for the US the two-letter state code (NYC and New York are NY, SF "
     "and San Francisco are CA); for Canada the two-letter province code; for "
     "other countries empty. Empty when no state or province is stated or "
     "implied by the city.\n"
     "city: the city in English, title case, without state or country ('San "
     "Francisco', 'New York', 'Bengaluru', 'London'). A neighbourhood, campus or "
-    "office name maps to its city. Empty when the string names no city.\n"
+    "office name maps to its city. Empty for a country or state alone.\n"
     "remote: true when the string says remote, work from home, distributed, "
-    "telecommute or anywhere; 'Remote in USA' is remote true with country US. "
-    "Hybrid is not remote."
+    "telecommute or anywhere; 'Remote in USA' is remote true with one place, "
+    "country US. Hybrid is not remote."
 )
 
 # Strings from every active posting plus every user's exclusion criteria (a
@@ -163,27 +195,41 @@ def _clean(value: str, length: int) -> str | None:
     return v.upper() if v and len(v) == length and v.isalpha() else None
 
 
+def _normalised(place: Place) -> dict[str, str | None] | None:
+    """A place with a valid country, or nothing: a region or city without a
+    country is a half-answer that could match the wrong country's CA."""
+    country = _clean(place.country, 2)
+    if not country:
+        return None
+    return {
+        "country": country,
+        "region": _clean(place.region, 2),
+        "city": place.city.strip() or None,
+    }
+
+
 def store(text: str, parsed: LocationExtract, model: str) -> None:
     code = text.strip().upper()
     if code in _CODES:
         parsed = LocationExtract(country=_CODES[code], region=code)
-    country = _clean(parsed.country, 2)
+    places = [p for p in (_normalised(pl) for pl in parsed.all_places()) if p is not None]
+    first = places[0] if places else {"country": None, "region": None, "city": None}
     db.execute(
         """
-        INSERT INTO locations (text, country, region, city, remote, model)
-        VALUES (%(text)s, %(country)s, %(region)s, %(city)s, %(remote)s, %(model)s)
+        INSERT INTO locations (text, country, region, city, remote, places, model)
+        VALUES (%(text)s, %(country)s, %(region)s, %(city)s, %(remote)s, %(places)s, %(model)s)
         ON CONFLICT (text) DO UPDATE SET
             country = EXCLUDED.country, region = EXCLUDED.region, city = EXCLUDED.city,
-            remote = EXCLUDED.remote, model = EXCLUDED.model, classified_at = now()
+            remote = EXCLUDED.remote, places = EXCLUDED.places, model = EXCLUDED.model,
+            classified_at = now()
         """,
         {
             "text": text,
-            "country": country,
-            # A region or city without a country is a half-answer that could
-            # match the wrong country's "CA"; both hang off the country.
-            "region": _clean(parsed.region, 2) if country else None,
-            "city": (parsed.city.strip() or None) if country else None,
+            "country": first["country"],
+            "region": first["region"],
+            "city": first["city"],
             "remote": bool(parsed.remote),
+            "places": db.jsonb(places),
             "model": model,
         },
     )
@@ -195,15 +241,25 @@ async def handle_classify_locations(task_id: int, payload: dict[str, Any]) -> No
     from core.batch import BatchSpec
 
     cap = int(db.get_config("classify_locations_per_cycle"))
-    texts = [r["text"] for r in db.query(_CANDIDATES, {"cap": cap})]
+    if payload.get("reclassify"):
+        # Every model-made row again, in place: a row keeps its old answer
+        # until the new one lands, so a filter never sees a gap. Hand
+        # corrections are never re-asked.
+        texts = [
+            r["text"]
+            for r in db.query(
+                "SELECT text FROM locations WHERE model <> 'admin' ORDER BY text LIMIT %(cap)s",
+                {"cap": cap},
+            )
+        ]
+    else:
+        texts = [r["text"] for r in db.query(_CANDIDATES, {"cap": cap})]
     if not texts:
         _set_progress(task_id, 0, 0, "nothing to classify")
         return
-    schema = to_strict_json_schema(LocationExtract)
+    schema = to_strict_json_schema(LocationAnswer)
     by_id = {_custom_id(t): t for t in texts}
-    specs = [
-        BatchSpec(cid, _INSTRUCTIONS, t, "LocationExtract", schema) for cid, t in by_id.items()
-    ]
+    specs = [BatchSpec(cid, _INSTRUCTIONS, t, "LocationAnswer", schema) for cid, t in by_id.items()]
     _set_progress(task_id, 0, len(specs), "locations batch submitted (half price)")
     results, chosen = await run_batched(task_id, LOCATIONS_TASK, specs)
     done = 0
@@ -212,7 +268,8 @@ async def handle_classify_locations(task_id: int, payload: dict[str, Any]) -> No
         if text is None or not res.text or res.error:
             continue
         try:
-            store(text, LocationExtract.model_validate_json(res.text), chosen.model)
+            answer = LocationAnswer.model_validate_json(res.text)
+            store(text, LocationExtract(places=answer.places, remote=answer.remote), chosen.model)
             done += 1
         except Exception:
             # No row, so the next cycle asks again: the same re-sweep contract
