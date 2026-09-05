@@ -310,6 +310,16 @@ def test_workday_pages_until_the_total_and_builds_the_public_url(monkeypatch):
         ),
         # The public Workday page is not the search endpoint.
         ("https://ngc.wd1.myworkdayjobs.com/Northrop_Grumman_External_Site", "sheet_era"),
+        ("https://api.smartrecruiters.com/v1/companies/BoschGroup/postings", "smartrecruiters"),
+        (
+            "https://fa-evmr-saasfaprod1.fa.ocs.oraclecloud.com/hcmRestApi/resources/latest/"
+            "recruitingCEJobRequisitions?siteNumber=CX_1",
+            "oracle",
+        ),
+        ("https://apply.workable.com/api/v3/accounts/zego/jobs", "workable"),
+        # The public pages of those three are not their APIs.
+        ("https://jobs.smartrecruiters.com/BoschGroup", "sheet_era"),
+        ("https://apply.workable.com/zego/", "sheet_era"),
     ],
 )
 def test_kind_is_read_off_the_url(url, expected):
@@ -317,7 +327,157 @@ def test_kind_is_read_off_the_url(url, expected):
 
 
 def test_boards_that_never_name_a_company_are_the_ones_that_need_one():
-    assert {"lever", "ashby", "workday"} == boards.NEEDS_COMPANY
+    assert {"lever", "ashby", "workday", "oracle", "workable"} == boards.NEEDS_COMPANY
+    # Every board that needs a company is one whose absence closes a posting.
+    assert boards.NEEDS_COMPANY <= boards.AUTHORITATIVE
+
+
+def test_smartrecruiters_pages_by_offset_and_names_the_company(monkeypatch):
+    asked = []
+
+    def get(url, **kw):
+        asked.append(url)
+        offset = int(url.split("offset=")[1])
+        content = {
+            0: [
+                {
+                    "id": "744000147613789",
+                    "name": "Software Engineer",
+                    "company": {"identifier": "BoschGroup", "name": "Bosch Group"},
+                    "releasedDate": "2026-09-05T00:02:29.676Z",
+                    "location": {
+                        "city": "Guadalajara",
+                        "region": "Jal.",
+                        "country": "mx",
+                        "fullLocation": "Guadalajara, Jal., Mexico",
+                    },
+                },
+            ],
+            1: [
+                {
+                    "id": "87619425",
+                    "name": "Software Developer- Full Stack",
+                    "company": {"identifier": "Zoro", "name": "Zoro"},
+                    "releasedDate": "2015-12-03T15:03:39.000Z",
+                    "location": {"city": "Buffalo Grove", "region": "IL", "country": "us"},
+                },
+            ],
+        }[offset]
+        return _Resp({"offset": offset, "limit": 100, "totalFound": 2, "content": content})
+
+    monkeypatch.setattr(boards._session, "get", get)
+    out = boards.fetch_listings("https://api.smartrecruiters.com/v1/companies/BoschGroup/postings")
+    assert [(p.company, p.title, p.locations) for p in out] == [
+        ("Bosch Group", "Software Engineer", ["Guadalajara, Jal., Mexico"]),
+        ("Zoro", "Software Developer- Full Stack", ["Buffalo Grove, IL, us"]),
+    ]
+    assert out[0].url == "https://jobs.smartrecruiters.com/BoschGroup/744000147613789"
+    assert out[0].date_posted == 1788566549
+    assert [u.split("?")[1] for u in asked] == ["limit=100&offset=0", "limit=100&offset=1"]
+
+
+def test_oracle_reads_the_site_off_the_url_and_pages_by_offset(monkeypatch):
+    asked = []
+
+    def get(url, **kw):
+        asked.append(url)
+        offset = int(url.split("offset=")[1].split(",")[0])
+        rows = {
+            0: [
+                {
+                    "Id": "40082",
+                    "Title": "Firmware Development Engineer",
+                    "PostedDate": "2026-09-05",
+                    "PrimaryLocation": "India",
+                    "secondaryLocations": [{"Name": "Bangalore, India"}],
+                    "ShortDescriptionStr": "Join us.",
+                }
+            ],
+            1: [
+                {
+                    "Id": "40083",
+                    "Title": "Test Engineer",
+                    "PostedDate": None,
+                    "PrimaryLocation": "Espoo, Finland",
+                    "secondaryLocations": [],
+                }
+            ],
+        }[offset]
+        return _Resp({"items": [{"TotalJobsCount": 2, "requisitionList": rows}]})
+
+    monkeypatch.setattr(boards._session, "get", get)
+    out = boards.fetch_listings(
+        "https://fa-evmr-saasfaprod1.fa.ocs.oraclecloud.com/hcmRestApi/resources/latest/"
+        "recruitingCEJobRequisitions?siteNumber=CX_7",
+        "Nokia",
+    )
+    assert [(p.title, p.locations, p.date_posted) for p in out] == [
+        ("Firmware Development Engineer", ["India", "Bangalore, India"], 1788566400),
+        ("Test Engineer", ["Espoo, Finland"], 0),
+    ]
+    assert out[0].url == (
+        "https://fa-evmr-saasfaprod1.fa.ocs.oraclecloud.com/hcmUI/CandidateExperience/en/sites/"
+        "CX_7/job/40082"
+    )
+    assert all(p.company == "Nokia" for p in out)
+    # The finder rides on the URL unencoded, site and offset inside it.
+    assert asked[0].endswith(
+        "finder=findReqs;siteNumber=CX_7,limit=200,offset=0,sortBy=POSTING_DATES_DESC"
+    )
+    # The next page starts where the last ended, not at the page size.
+    assert "offset=1," in asked[1]
+
+
+def test_workable_follows_the_next_page_token(monkeypatch):
+    posts = []
+
+    def post(url, json, **kw):
+        posts.append((url, json))
+        if "token" not in json:
+            return _Resp(
+                {
+                    "total": 2,
+                    "nextPage": "WzE3ODU5NzQ0MDAwMDAsNDE4MjgyN10=",
+                    "results": [
+                        {
+                            "shortcode": "BCEAC9B2D1",
+                            "title": "Tech Talent Sourcer",
+                            "published": "2026-09-01T00:00:00.000Z",
+                            "remote": False,
+                            "location": {
+                                "country": "United Kingdom",
+                                "city": "London",
+                                "region": "England",
+                            },
+                        }
+                    ],
+                }
+            )
+        return _Resp(
+            {
+                "total": 2,
+                "nextPage": None,
+                "results": [
+                    {
+                        "shortcode": "637F3B9521",
+                        "title": "Driver",
+                        "published": "2026-08-30T00:00:00.000Z",
+                        "remote": True,
+                        "location": {},
+                    }
+                ],
+            }
+        )
+
+    monkeypatch.setattr(boards._session, "post", post)
+    out = boards.fetch_listings("https://apply.workable.com/api/v3/accounts/zego/jobs", "Zego")
+    assert [(p.title, p.locations) for p in out] == [
+        ("Tech Talent Sourcer", ["London, England, United Kingdom"]),
+        ("Driver", []),
+    ]
+    assert out[0].url == "https://apply.workable.com/zego/j/BCEAC9B2D1/"
+    assert all(p.company == "Zego" for p in out)
+    assert [j.get("token") for _, j in posts] == [None, "WzE3ODU5NzQ0MDAwMDAsNDE4MjgyN10="]
 
 
 def test_unknown_urls_fall_through_to_the_sheet_era_fetcher(monkeypatch):

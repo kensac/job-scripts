@@ -104,6 +104,30 @@ def ashby_text(job: dict) -> str:
     )
 
 
+def oracle_text(item: dict) -> str:
+    """One requisition as Oracle Recruiting's detail call returns it. The
+    listing call carries the same keys minus the description, so a listing
+    row would read short; the resolver fetches the detail instead."""
+    return join(
+        item.get("Title"),
+        item.get("PrimaryLocation"),
+        clean_html(item.get("ExternalDescriptionStr") or ""),
+        clean_html(item.get("ExternalResponsibilitiesStr") or ""),
+        clean_html(item.get("ExternalQualificationsStr") or ""),
+    )
+
+
+def workable_text(data: dict) -> str:
+    loc = data.get("location") or {}
+    return join(
+        data.get("title"),
+        ", ".join(str(loc[k]) for k in ("city", "region", "country") if loc.get(k)),
+        clean_html(data.get("description") or ""),
+        clean_html(data.get("requirements") or ""),
+        clean_html(data.get("benefits") or ""),
+    )
+
+
 class AtsResolver(ABC):
     name: ClassVar[str]
     markers: ClassVar[tuple[str, ...]]
@@ -315,6 +339,77 @@ class Workday(AtsResolver):
         return replace(result, posted=_iso_date(info.get("startDate")))
 
 
+class Oracle(AtsResolver):
+    """Oracle Recruiting (Fusion HCM) candidate experience: the posting page is
+    rendered by script, but the same tenant serves the requisition as JSON."""
+
+    name = "oracle"
+    markers = ("oraclecloud.com",)
+    _JOB = re.compile(r"/sites/([^/]+)/job/(\d+)")
+
+    def canonical(self, url: str) -> str | None:
+        parsed = urlparse(url)
+        match = self._JOB.search(parsed.path)
+        return (
+            f"https://{parsed.netloc.lower()}/hcmUI/CandidateExperience/en/sites/"
+            f"{match.group(1)}/job/{match.group(2)}"
+            if match
+            else None
+        )
+
+    def fetch(self, url: str) -> AtsResult:
+        parsed = urlparse(url)
+        match = self._JOB.search(parsed.path)
+        if not match:
+            return UNSUPPORTED
+        site, job_id = match.groups()
+        resp = self.get(
+            f"https://{parsed.netloc}/hcmRestApi/resources/latest/recruitingCEJobRequisitionDetails"
+            f"?onlyData=true&expand=all&finder=ById;siteNumber={site},Id=%22{job_id}%22"
+        )
+        early = self.from_response(resp)
+        if early is not None:
+            return early
+        assert resp is not None
+        items = resp.json().get("items") or []
+        # A requisition that is no longer posted comes back as an empty list,
+        # not a 404.
+        if not items:
+            return AtsResult(Status.GONE, source=self.name)
+        return replace(
+            self.result(oracle_text(items[0])),
+            posted=_iso_date(items[0].get("ExternalPostedStartDate") or items[0].get("PostedDate")),
+        )
+
+
+class Workable(AtsResolver):
+    name = "workable"
+    markers = ("workable.com",)
+    _JOB = re.compile(r"workable\.com/([^/]+)/j/([A-Za-z0-9]+)")
+
+    def canonical(self, url: str) -> str | None:
+        match = self._JOB.search(url)
+        return (
+            f"https://apply.workable.com/{match.group(1)}/j/{match.group(2).upper()}/"
+            if match
+            else None
+        )
+
+    def fetch(self, url: str) -> AtsResult:
+        match = self._JOB.search(url)
+        if not match:
+            return UNSUPPORTED
+        resp = self.get(
+            f"https://apply.workable.com/api/v2/accounts/{match.group(1)}/jobs/{match.group(2)}"
+        )
+        early = self.from_response(resp)
+        if early is not None:
+            return early
+        assert resp is not None
+        data = resp.json()
+        return replace(self.result(workable_text(data)), posted=_iso_date(data.get("published")))
+
+
 class ICims(AtsResolver):
     """No public content API; registered for URL canonicalization only."""
 
@@ -337,6 +432,8 @@ RESOLVERS: list[AtsResolver] = [
     Ashby(),
     SmartRecruiters(),
     Workday(),
+    Oracle(),
+    Workable(),
     ICims(),
 ]
 
