@@ -74,6 +74,9 @@ DEFAULT_HOST = "https://us.i.posthog.com"
 # failing endpoint cannot generate the records that fail to ship, and this
 # module's, for the same reason one level up.
 _UNSHIPPED_LOGGERS = ("opentelemetry", "jobtracker_telemetry", "urllib3", "posthog")
+# Loggers configured with propagate=False by their owner, so a handler on the
+# root never sees them; they get the shipping handler directly.
+_NON_PROPAGATING_LOGGERS = ("uvicorn", "uvicorn.access", "uvicorn.error")
 # Where psycopg puts parameter values in an exception's text. A log record is
 # not written with an egress policy in mind, and "unnamed portal parameter $5
 # = '...'" is a value from the failing query: an email, a token, a url, text
@@ -245,6 +248,12 @@ def init(service: str = "jobtracker", instance: str | None = None) -> None:
     # attached by the SDK. The root logger, so a module needs no registration.
     handler = _shipping_handler(log_level, _logger_provider)
     logging.getLogger().addHandler(handler)
+    # uvicorn's loggers do not propagate to the root, so its request log
+    # (every method, path and status) and its own lifecycle lines never
+    # reached the handler; Kanishk wants every log line shipped, not only
+    # the service's own.
+    for name in _NON_PROPAGATING_LOGGERS:
+        logging.getLogger(name).addHandler(handler)
     logger.info(
         f"telemetry: enabled service={service} host={host} release={RELEASE} "
         f"process_host={HOST} traces_sampled={ratio} logs_from={logging.getLevelName(log_level)}"

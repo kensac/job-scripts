@@ -143,3 +143,12 @@ def test_the_host_is_the_fleet_name_never_the_container_id(monkeypatch):
     monkeypatch.delenv("JOBTRACKER_HOST_NAME")
     monkeypatch.delenv("JOBTRACKER_WORKER_NAME")
     assert telemetry._host_name()
+
+
+def test_uvicorns_request_log_is_shipped_too():
+    """uvicorn sets propagate=False on its loggers, so the root handler never
+    saw a request line; the shipping handler is attached to them directly."""
+    assert set(telemetry._NON_PROPAGATING_LOGGERS) >= {"uvicorn.access", "uvicorn.error"}
+    rec = logging.LogRecord("uvicorn.access", 20, "x", 1, "GET /v1/healthz 200", (), None)
+    shipped = telemetry.shipped_form(rec)
+    assert shipped is not None and shipped.getMessage() == "GET /v1/healthz 200"

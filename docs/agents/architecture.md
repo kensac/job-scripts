@@ -130,7 +130,9 @@ another.
   (`task_failed`, `task_requeued`, `tasks_reaped`, `tasks_lost`,
   `ingest_pull_failed`, `fetch_failed`, `fetch_deferred`, `ai_call_failed`,
   `alert_opened`, `alert_resolved`, `worker_started`); every log record at
-  INFO and above, through OpenTelemetry; and one span per HTTP request, per
+  INFO and above, through OpenTelemetry, uvicorn's request log included
+  (its loggers do not propagate, so the handler is attached to them by
+  name); and one span per HTTP request, per
   worker task and per outbound `requests` call (the board pulls and ATS
   resolvers), so a trace of the queue reads as tasks with their fetches
   underneath. Every record carries `service.name` (`jobtracker-api` or
