@@ -484,7 +484,10 @@ async def handle_extract_requirements(task_id: int, payload: dict[str, Any]) -> 
                 # No row is written, so the next sweep picks the url up again -
                 # the same idempotent-by-re-sweep contract every batched pass has.
                 logger.warning(f"requirements parse failed for {url}")
-        done += 1
+            else:
+                # Only a written row counts as done, so a sweep whose every
+                # line failed reads done == 0 rather than done == total.
+                done += 1
         if done % 200 == 0:
             _set_progress(task_id, done, len(specs), "requirements extracted")
     _set_progress(task_id, done, len(specs), "requirements extracted")
