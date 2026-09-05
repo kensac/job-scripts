@@ -192,7 +192,8 @@ the Sources page, and a new format is one fetcher returning the same
 derived: `company` (required where the system never names it), a
 `title_pattern` that gates which titles enter the catalog, and an
 `ingest_interval_hours`. `sources.active = false` stops both the scrape and
-every AI check on that board's postings; a bundle (`source_groups`) or a
+every AI check on that board's postings, and keeps every subscription to it
+(a person can keep or leave a switched-off board, only not join it); a bundle (`source_groups`) or a
 format is a way of selecting rows for that flag and the interval through
 `POST /admin/sources/switch`, not a second layer of state.
 The list shape (`GET /admin/sources`) carries everything but `title_pattern`;
