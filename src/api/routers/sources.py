@@ -119,19 +119,39 @@ class SourcesPatch(BaseModel):
     remove: list[str] = Field(default_factory=list)
 
 
+def _check_names(user_id: int, names: set[str], adding: set[str]) -> None:
+    """Refuse a name no source has, and refuse a NEW subscription to a board
+    that is switched off. A board a person already holds stays theirs after
+    it is switched off: on 2026-09-05 eight feeds went inactive under a
+    subscriber, and every save of that page was refused whole for naming
+    them, so nothing could be saved until the switch was undone."""
+    rows = db.query("SELECT name, active FROM sources WHERE name = ANY(%s)", (sorted(names),))
+    known = {r["name"]: r["active"] for r in rows}
+    unknown = sorted(n for n in names if n not in known)
+    if unknown:
+        raise HTTPException(
+            400, detail={"code": "UNKNOWN_SOURCE", "message": f"unknown sources: {unknown}"}
+        )
+    held = {
+        r["source"]
+        for r in db.query("SELECT source FROM user_sources WHERE user_id = %s", (user_id,))
+    }
+    off = sorted(n for n in adding if not known[n] and n not in held)
+    if off:
+        raise HTTPException(
+            400,
+            detail={"code": "SOURCE_INACTIVE", "message": f"switched off, cannot subscribe: {off}"},
+        )
+
+
 @router.patch("/user/sources")
 def patch_sources(body: SourcesPatch, user: AuthedUser = Depends(require_user)):
     """A delta: subscribe to these, unsubscribe from those. One toggle used to
     PUT the whole enabled set, which at 389 boards raced with itself and could
     not express "leave this bundle" at all. Names in both lists end up
-    subscribed; unknown or inactive names are refused whole rather than
-    partially applied."""
-    known = {r["name"] for r in db.query("SELECT name FROM sources WHERE active")}
-    unknown = sorted({s for s in body.add + body.remove if s not in known})
-    if unknown:
-        raise HTTPException(
-            400, detail={"code": "UNKNOWN_SOURCE", "message": f"unknown sources: {unknown}"}
-        )
+    subscribed; an unknown name, or a new subscription to a switched-off
+    board, refuses the write whole rather than applying half."""
+    _check_names(user.id, set(body.add) | set(body.remove), set(body.add))
     with db.pool.connection() as conn:
         removed = conn.execute(
             "DELETE FROM user_sources WHERE user_id = %s AND source = ANY(%s) RETURNING source",
@@ -159,12 +179,7 @@ def patch_sources(body: SourcesPatch, user: AuthedUser = Depends(require_user)):
 
 @router.put("/user/sources")
 def put_sources(body: SourcesPut, user: AuthedUser = Depends(require_user)):
-    known = {r["name"] for r in db.query("SELECT name FROM sources WHERE active")}
-    unknown = [s for s in body.enabled if s not in known]
-    if unknown:
-        raise HTTPException(
-            400, detail={"code": "UNKNOWN_SOURCE", "message": f"unknown sources: {unknown}"}
-        )
+    _check_names(user.id, set(body.enabled), set(body.enabled))
     with db.pool.connection() as conn:
         conn.execute("DELETE FROM user_sources WHERE user_id = %s", (user.id,))
         for source in set(body.enabled):
