@@ -133,6 +133,12 @@ def recompute(user_id: int) -> int:
     one transaction, so a read never sees the board half-built."""
     ids = member_ids(user_id)
     with db.pool.connection() as conn:
+        # One recompute per person at a time. Two ran together on 2026-09-05
+        # (the three-minute cycle beside a preference-driven refresh) and the
+        # second died on a duplicate key between the other's DELETE and INSERT.
+        # The lock is transaction-scoped, so the later one waits and then
+        # recomputes on top of the earlier result rather than under it.
+        conn.execute("SELECT pg_advisory_xact_lock(%s, %s)", (7001, user_id))
         conn.execute("DELETE FROM board_visible WHERE user_id = %s", (user_id,))
         conn.execute(
             "INSERT INTO board_visible (user_id, job_id, computed_at) "
