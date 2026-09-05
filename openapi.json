@@ -4481,6 +4481,22 @@
             }
           },
           {
+            "name": "worker",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Worker"
+            }
+          },
+          {
             "name": "limit",
             "in": "query",
             "required": false,

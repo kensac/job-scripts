@@ -353,6 +353,18 @@ nothing for at most the one cycle that classifies it. A wrong row is a PUT to
 /admin/locations, never a deploy; the sweep never re-asks about a string that
 has a row.
 
+**A vocabulary the frontend renders is served with its meaning, never
+copied.** Board statuses come with `status_meta` (terminal, outcome), report
+kinds with their labels, pipeline stages with their order and which are
+terminal, task rows with `cancellable`, tunables with type and help. The
+frontend renders from the response and keeps no parallel list; a new value is
+one backend entry.
+
+**A set-shaped filter takes a comma list and the response echoes `filters`.**
+`status=pending,running` through `api.params.csv`; the envelope carries
+`filters: {status: [...]}` with what was applied, empty when nothing was, so
+a client can tell "lists accepted" from an older build by the key's presence.
+
 List endpoints sort through `api.sorting` against a per-endpoint whitelist of
 column expressions: `sort=a,b&dir=asc,desc` is several columns at once, a
 `dir` shorter than `sort` repeats its last value, unknown keys drop rather
