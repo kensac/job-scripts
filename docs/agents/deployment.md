@@ -14,7 +14,7 @@ reading it as a version produces confident wrong answers.
 **Gate a roll on commit ancestry, not on a build timestamp.** Resolve the
 digest to its source commit, then verify the commit you need is an ancestor of
 it. A timestamp cannot tell you whether the commit behind an image was on a
-working main — and an image built while main was broken is an outage, not
+working main, and an image built while main was broken is an outage, not
 merely a stale one.
 
 ## Checking whether a route is live, without access
@@ -24,7 +24,7 @@ route from an absent one: an existing route returns 401 from its auth
 dependency, an absent one returns 404. Include a known-fake path as a control.
 
 This is safe because the authorisation check fails before any write. It is not
-a licence to send an *authenticated* request — that provisions a user row, and
+a licence to send an *authenticated* request: that provisions a user row, and
 the rule against it stands.
 
 **Do not use `git merge-base` against a commit from another repository.** A SHA

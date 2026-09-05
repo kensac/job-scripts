@@ -122,7 +122,7 @@ def _annualize(value: float | None, period: str) -> int | None:
         return None
     annual = round(value * multiplier)
     # Model slips (cents-as-ints, stray digits) produce absurd annuals;
-    # better no number than a wrong sortable one — display text is kept.
+    # better no number than a wrong sortable one. Display text is kept.
     if annual < 5_000 or annual > 5_000_000:
         return None
     return annual
@@ -192,7 +192,7 @@ async def handle_extract_comp(task_id: int, payload: dict[str, Any]) -> None:
                 (comp_min, comp_max, comp_text, comp_period, comp_currency, comp_basis, job_id),
             )
         # Failed/errored lines stay comp_extracted=false so the next daily
-        # sweep retries them — batch operations are idempotent by re-sweep.
+        # sweep retries them. Batch operations are idempotent by re-sweep.
         done += 1
         if done % 200 == 0:
             _set_progress(task_id, done, len(specs), "comp extracted")

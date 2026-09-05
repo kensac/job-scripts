@@ -65,27 +65,30 @@ what you did not verify.
 
 **Keep these claims separate. They are not the same claim:**
 
-- **Built** — the code exists.
-- **Source-verified** — checked against the code it integrates with.
-- **Unit-tested** — a test constrains it.
-- **Seen** — rendered or executed and observed.
-- **Seen against production shapes** — observed against real data, with the age
+- **Built**: the code exists.
+- **Source-verified**: checked against the code it integrates with.
+- **Unit-tested**: a test constrains it.
+- **Seen**: rendered or executed and observed.
+- **Seen against production shapes**: observed against real data, with the age
   of that data stated.
 
 A caveat that lives only in a side conversation does not exist. Put it in the
 report, because the report is the record.
 
+No em dashes anywhere in the repository: code, comments, strings, docs, tests.
+Write a comma, a colon, or a new sentence instead. `make check` fails on one.
+
 ## Attribution
 
 **Nothing in this repository names an AI assistant.** No model or tool name, no
-"generated with", no `Co-Authored-By` trailer, no "as an AI" aside — not in
+"generated with", no `Co-Authored-By` trailer, no "as an AI" aside: not in
 commit messages, PR titles or bodies, code comments, or documentation. The work
 is the author's; the tooling is not part of the record.
 
 **This needs checking, not remembering, because of how it reaches history.** A
 squash merge uses the PR BODY as the commit message, so anything written in a
 description ships permanently even though nobody typed it into a commit. Scrub
-the body before merging, not after — a merged commit message is not
+the body before merging, not after. A merged commit message is not
 straightforward to change, and rewriting shared history to remove it is worse
 than the problem.
 

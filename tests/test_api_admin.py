@@ -318,7 +318,7 @@ def test_manual_check_addresses_filters_by_hash(client, admin_headers):
         headers=admin_headers,
     )
     # No cached content for this job, so it stops at the content guard rather
-    # than the addressing — which is what proves the hash resolved.
+    # than the addressing, which is what proves the hash resolved.
     assert resp.status_code == 409 and resp.json()["detail"]["code"] == "NO_CONTENT"
     bad = client.post(
         "/v1/admin/checks/run", json={"job_id": jid, "check": "nonsense"}, headers=admin_headers

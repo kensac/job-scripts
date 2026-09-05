@@ -1,10 +1,10 @@
-# Gmail connect — your setup steps
+# Gmail connect: your setup steps
 
 Everything that can be done headlessly is done. Google exposes no API for
 external OAuth consent screens or standard OAuth clients, so these three are
 console-only. Should take about ten minutes.
 
-The Gmail API is already enabled on the `localscripts` GCP project — homelab
+The Gmail API is already enabled on the `localscripts` GCP project. Homelab
 did that. Start at step 1.
 
 ---
@@ -20,7 +20,7 @@ Make sure the project selector at the top says **localscripts**.
    your gmail. Save.
 3. Go to **Audience** in the left nav. Under **Test users** → **Add users** →
    add `kanishksachdev@gmail.com` → Save.
-4. Leave publishing status as **Testing**. Do not click "Publish app" — that
+4. Leave publishing status as **Testing**. Do not click "Publish app". That
    starts a verification review we do not want.
 5. Go to **Data access** in the left nav → **Add or remove scopes** → paste
    this into the filter box and tick it:
@@ -43,7 +43,7 @@ and fine in Testing mode.
 1. **Create client**
 2. Application type: **Web application**
 3. Name: `Job Tracker web`
-4. Under **Authorised redirect URIs**, add both of these exactly — trailing
+4. Under **Authorised redirect URIs**, add both of these exactly. Trailing
    slashes and http vs https matter, Google requires an exact match:
 
    ```
@@ -53,7 +53,7 @@ and fine in Testing mode.
 
 5. **Create**. Copy the **Client ID** and **Client secret** off the dialog.
 
-Send both to homelab-config — the client ID goes into compose as a literal
+Send both to homelab-config. The client ID goes into compose as a literal
 (it is public by OAuth design), the secret into Infisical. Do not paste the
 secret into chat with me; I do not need to see it.
 
@@ -63,7 +63,7 @@ secret into chat with me; I do not need to see it.
 
 ---
 
-## 3. Takeout — your mail history
+## 3. Takeout: your mail history
 
 <https://takeout.google.com>
 
@@ -79,7 +79,7 @@ that arrives from today onward.
    **Export once**, Type **.zip**, Size **50 GB** (fewer files to handle).
 4. **Create export.** Google takes anywhere from minutes to a couple of days.
 5. When the link arrives, download it and tell me the path. Do not move it into
-   the repo — put it in `~/personal/localscripts/` and I will read it from
+   the repo. Put it in `~/personal/localscripts/` and I will read it from
    there.
 
 The export is an `.mbox` file. That is what the backfill parses.
@@ -93,8 +93,8 @@ appears in tracker settings, gated to `infra-admins`. You click it once,
 approve Google's consent screen, and the ingest starts.
 
 You will need to re-approve roughly every 7 days. That is a Google constraint
-on apps in Testing mode with restricted scopes, not something in our control —
-you accepted this tradeoff to avoid an account-wide app password and a paid
+on apps in Testing mode with restricted scopes, not something in our control.
+You accepted this tradeoff to avoid an account-wide app password and a paid
 verification review. If it becomes annoying, the two escapes are paid Google
 verification, or switching to IMAP with an app password. The credential storage
 is per-user from day one specifically so either swap is a provider change

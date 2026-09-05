@@ -113,7 +113,7 @@ def _preset(name: str, prompt: str) -> int:
 
 def test_preset_coverage_says_what_it_would_show_before_spending_anything(client, user_headers, f):
     """A preset's cached verdicts are reusable across users because
-    prompt_hash is computed from the prompt and on_ambiguous alone — nothing
+    prompt_hash is computed from the prompt and on_ambiguous alone. Nothing
     user-specific. That is what lets someone with no API key see a real board
     on day one instead of 7,397 undifferentiated postings."""
     from core.filters import build_custom_instructions, compute_prompt_hash

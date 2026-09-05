@@ -257,7 +257,7 @@ def test_settles_on_separates_awaiting_from_never_closeable():
 
     An assessment invite is awaiting an event that may still arrive. An offer
     is not: measured over the corpus, of 71 applications carrying an offer
-    event only 11 have ANY later event, and no kind follows one reliably —
+    event only 11 have ANY later event, and no kind follows one reliably,
     because no email says "you accepted". Rendering both as open asserts a
     live obligation for the second that has never existed.
     """

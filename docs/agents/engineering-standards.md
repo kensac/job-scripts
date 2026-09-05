@@ -22,8 +22,8 @@ maintenance. Prefer a rule that falls out of how the system actually works:
 - A count that is bimodal gives you the threshold directly.
 - A cap derived from a downstream consumer's limit cannot drift out of sync
   with it.
-- A bound taken from a value the system already declares — a provider's stated
-  completion window, an existing timeout — inherits that value's meaning
+- A bound taken from a value the system already declares, such as a provider's stated
+  completion window or an existing timeout, inherits that value's meaning
   instead of inventing one.
 
 **A threshold must not be derived from a statistic the failure it detects can
@@ -32,7 +32,7 @@ ideal derived threshold: it adapts, needs no tuning, and tracks the operation
 as it changes. It is a trap when the failure mode ends in a completed run,
 because each failure that survives enters the history and raises the bound.
 The detector then goes blind exactly as often as the problem occurs, while
-continuing to look like it works — which is worse than having none.
+continuing to look like it works, which is worse than having none.
 
 Before deriving a bound from history, ask whether the thing being detected can
 end up inside that history. If it can, the statistic is contaminated and you
@@ -84,7 +84,7 @@ production count to see:
 - **The rule is fixed for new data only.** A derivation corrected at write time
   leaves every existing row computed the old way, and nothing recomputes them.
   Prefer a correction that runs every cycle, only ever moves in the safe
-  direction, and becomes a no-op once the data is right — then the next change
+  direction, and becomes a no-op once the data is right. Then the next change
   to that rule reaches everything automatically.
 - **Two predicates in one module mean different things.** One reads "nothing
   has looked", its sibling reads "looked and found nothing". Both look correct
@@ -93,7 +93,7 @@ production count to see:
   be summing every outcome. Read the assignment, not the name.
 
 After a change lands, count the population it was supposed to affect. If the
-number did not move, the fix did not reach it — regardless of what the tests
+number did not move, the fix did not reach it, regardless of what the tests
 say, because the tests exercise the new path and the old data is not on it.
 
 ## Trusting a signal
@@ -104,7 +104,7 @@ not evidence about the underlying state. Compare the state directly.
 This applies to: exit codes, "no changes" messages, completion counts, task
 status, a truncated command's first lines, and any field whose name describes
 an outcome. Read the field's definition before treating its name as its
-meaning — a counter named for successes may be counting attempts.
+meaning: a counter named for successes may be counting attempts.
 
 A clean exit reads as success everywhere. Verify that the thing happened, not
 that the process finished.

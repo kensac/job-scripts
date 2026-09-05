@@ -404,7 +404,7 @@ def test_comp_amounts_are_served_with_their_currency(client, user_headers, f):
     """comp_min/comp_max are annualised numbers and 96% of extracted rows
     carry no currency. Serving the amount without the unit invites a renderer
     to supply one, which is how a CAD range becomes a dollar figure. NULL
-    means we never captured a unit — it does not mean USD."""
+    means we never captured a unit. It does not mean USD."""
     user_id = db.query_one("SELECT id FROM users WHERE sub = 'test-user'")
     assert user_id is not None
     job_id, _ = f.make_ready_job(source="comped", comp_min=90000, comp_max=120000)

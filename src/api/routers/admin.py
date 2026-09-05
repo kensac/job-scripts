@@ -1115,7 +1115,7 @@ def query_options(user: AuthedUser = Depends(require_admin)):
             "status",
         ),
         # Pipeline context (which code path decided), not the dead legacy
-        # config names — only values seen in the last 30 days.
+        # config names: only values seen in the last 30 days.
         "contexts": col(
             "SELECT DISTINCT config_name FROM ai_queries WHERE config_name IS NOT NULL "
             "AND created_at > now() - interval '30 days' ORDER BY config_name",
@@ -1136,7 +1136,7 @@ def batch_jobs(
     offset: int = 0,
     user: AuthedUser = Depends(require_admin),
 ):
-    """Every verdict this batch produced, with its own token cost — so a batch
+    """Every verdict this batch produced, with its own token cost, so a batch
     is inspectable down to the individual job. Paged: a batch is up to 500
     requests and the drill-down rendered every one of them."""
     batch = db.query_one(
@@ -1229,7 +1229,7 @@ class RunCheckBody(BaseModel):
 async def run_single_check(body: RunCheckBody, user: AuthedUser = Depends(require_admin)):
     """Manually re-run one check on one job, ignoring the cached verdict. The
     fresh row becomes the latest for that (url, check_type), so visibility
-    re-derives from it immediately — no downstream re-run needed, since
+    re-derives from it immediately. No downstream re-run needed, since
     visibility is a read-time predicate rather than stored derived state."""
     from api import verdicts as _verdicts
     from api.tasks.models import FilterVerdict, JobClosedVerdict
@@ -1258,7 +1258,7 @@ async def run_single_check(body: RunCheckBody, user: AuthedUser = Depends(requir
         )
     elif check.startswith(("filter:", "hash:")):
         if check.startswith("hash:"):
-            # Verdicts are cached by prompt_hash, not by filter id — several
+            # Verdicts are cached by prompt_hash, not by filter id. Several
             # users' filters can share one hash. Any of them reproduces the
             # same check, so re-running by hash is the honest admin-side
             # addressing for a verdict row.
@@ -1384,8 +1384,8 @@ def data_health(user: AuthedUser = Depends(require_admin)):
         # Nothing is suppressed any more: the detectors exclude backlog-sweep
         # rows individually (health.FRESH_CHECK_WINDOW) instead of switching a
         # whole detector off while the content backfill runs. Kept in the
-        # response so a future suppression has somewhere to be reported —
-        # a detector that is off and says nothing is indistinguishable from a
+        # response so a future suppression has somewhere to be reported.
+        # A detector that is off and says nothing is indistinguishable from a
         # detector that sees nothing.
         "suppressed": [],
         # subject_kind says WHAT an alert's subject is - a source, a host, a
@@ -1548,9 +1548,9 @@ def upsert_source_group(
 
 @router.delete("/sources/{name}")
 def delete_source(name: str, force: bool = False, user: AuthedUser = Depends(require_admin)):
-    """Permanently remove a source. Refuses while anything still hangs off it —
-    jobs would be orphaned into a source that no longer exists, and there is no
-    undo — so emptiness is proven rather than assumed. force=true is the
+    """Permanently remove a source. Refuses while anything still hangs off it.
+    Jobs would be orphaned into a source that no longer exists, and there is no
+    undo, so emptiness is proven rather than assumed. force=true is the
     deliberate override. Group memberships are always cleaned up, because a
     group pointing at a deleted source is silent debris."""
     src = db.query_one("SELECT name FROM sources WHERE name = %s", (name,))

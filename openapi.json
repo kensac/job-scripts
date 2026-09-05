@@ -6070,7 +6070,7 @@
     "/v1/admin/batches/{provider_batch_id}/jobs": {
       "get": {
         "summary": "Batch Jobs",
-        "description": "Every verdict this batch produced, with its own token cost \u2014 so a batch\nis inspectable down to the individual job. Paged: a batch is up to 500\nrequests and the drill-down rendered every one of them.",
+        "description": "Every verdict this batch produced, with its own token cost, so a batch\nis inspectable down to the individual job. Paged: a batch is up to 500\nrequests and the drill-down rendered every one of them.",
         "operationId": "batch_jobs_v1_admin_batches__provider_batch_id__jobs_get",
         "parameters": [
           {
@@ -6257,7 +6257,7 @@
     "/v1/admin/checks/run": {
       "post": {
         "summary": "Run Single Check",
-        "description": "Manually re-run one check on one job, ignoring the cached verdict. The\nfresh row becomes the latest for that (url, check_type), so visibility\nre-derives from it immediately \u2014 no downstream re-run needed, since\nvisibility is a read-time predicate rather than stored derived state.",
+        "description": "Manually re-run one check on one job, ignoring the cached verdict. The\nfresh row becomes the latest for that (url, check_type), so visibility\nre-derives from it immediately. No downstream re-run needed, since\nvisibility is a read-time predicate rather than stored derived state.",
         "operationId": "run_single_check_v1_admin_checks_run_post",
         "parameters": [
           {
@@ -6807,7 +6807,7 @@
     "/v1/admin/sources/{name}": {
       "delete": {
         "summary": "Delete Source",
-        "description": "Permanently remove a source. Refuses while anything still hangs off it \u2014\njobs would be orphaned into a source that no longer exists, and there is no\nundo \u2014 so emptiness is proven rather than assumed. force=true is the\ndeliberate override. Group memberships are always cleaned up, because a\ngroup pointing at a deleted source is silent debris.",
+        "description": "Permanently remove a source. Refuses while anything still hangs off it.\nJobs would be orphaned into a source that no longer exists, and there is no\nundo, so emptiness is proven rather than assumed. force=true is the\ndeliberate override. Group memberships are always cleaned up, because a\ngroup pointing at a deleted source is silent debris.",
         "operationId": "delete_source_v1_admin_sources__name__delete",
         "parameters": [
           {

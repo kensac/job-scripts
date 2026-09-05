@@ -86,8 +86,8 @@ def _evidence_superseded(results: dict[str, Any]) -> set[str]:
 def _record_reverify_results(
     results: dict[str, Any], by_url: dict[str, dict[str, Any]], model: str
 ) -> int:
-    """Turns batch lines into closed verdicts. Only parseable lines record —
-    anything failed or missing simply stays stale and the next daily sweep
+    """Turns batch lines into closed verdicts. Only parseable lines record.
+    Anything failed or missing simply stays stale and the next daily sweep
     picks it up, which is what makes the whole task idempotent.
 
     Recording is guarded at the point of the write rather than in the caller,
@@ -140,7 +140,7 @@ async def _reverify_jobs(
     force: bool = False,
 ) -> None:
     """Two phases: gather evidence concurrently (ATS gone-detection, then
-    content — the fleet-distributed, network-bound part), then settle every
+    content, the fleet-distributed, network-bound part), then settle every
     remaining verdict in ONE half-price batch instead of a call per job."""
     from openai.lib._pydantic import to_strict_json_schema
 
@@ -166,7 +166,7 @@ async def _reverify_jobs(
         return
 
     # Resumability: a requeued chunk skips rows already re-verified this cycle.
-    # A forced sweep skips nothing — the point is to overturn existing verdicts.
+    # A forced sweep skips nothing. The point is to overturn existing verdicts.
     import datetime as _dt
 
     if force:
@@ -289,7 +289,7 @@ async def handle_reverify_open(task_id: int, payload: dict[str, Any]) -> None:
     across the fleet, demote closed rows when the last chunk lands.
 
     full=true re-checks EVERY active job currently believed open, ignoring
-    staleness, board membership and the per-cycle cap — for when the evidence
+    staleness, board membership and the per-cycle cap, for when the evidence
     behind existing verdicts is itself suspect (e.g. verdicts taken before the
     fetcher could tell a redirect from a live page)."""
     if payload.get("full"):
@@ -361,8 +361,8 @@ async def handle_reverify_chunk(task_id: int, payload: dict[str, Any]) -> None:
 
 async def handle_verify_new(task_id: int, payload: dict[str, Any]) -> None:
     """Batched replacement for ingest-time closed/clearance checks: one
-    half-price call per job yields both verdicts. Idempotent by re-sweep —
-    only successful lines produce verdict rows; anything missed or failed is
+    half-price call per job yields both verdicts. Idempotent by re-sweep.
+    Only successful lines produce verdict rows; anything missed or failed is
     picked up by the next cycle's sweep."""
     from openai.lib._pydantic import to_strict_json_schema
 
@@ -433,7 +433,7 @@ async def handle_verify_new(task_id: int, payload: dict[str, Any]) -> None:
         }
         # Write ONLY the verdicts this job was actually missing. A job is
         # selected when EITHER check has a hole, but the text we just read is
-        # whatever was last cached — which can predate a closure that another
+        # whatever was last cached, which can predate a closure that another
         # path already recorded. Writing both would let a stale page overturn
         # a fresh 'closed' rejection, and latest-row-wins would put the dead
         # posting back on people's boards.

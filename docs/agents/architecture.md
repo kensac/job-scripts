@@ -4,14 +4,14 @@
 
 Import → classify → match → derive.
 
-- `email_messages` — the message as it arrived. Body text and body HTML are
+- `email_messages`: the message as it arrived. Body text and body HTML are
   both retained; the text is derived from the HTML, so the HTML must be stored
   before anything re-derives the text.
-- `email_events` — append-only. Latest row per message wins on read.
-- `application_matches` — append-only. Latest row per message wins on read.
-- `applications` — `job_id` is nullable. **Never synthesise a job row from an
+- `email_events`: append-only. Latest row per message wins on read.
+- `application_matches`: append-only. Latest row per message wins on read.
+- `applications`: `job_id` is nullable. **Never synthesise a job row from an
   email.** Mail predating the catalog is the normal case.
-- `action_items` — derived from events, resolvable by a person.
+- `action_items`: derived from events, resolvable by a person.
 
 **Stage is derived at read time from the event stream and never stored.**
 Terminal outcomes beat progress regardless of arrival order. Withdrawal comes
@@ -20,10 +20,10 @@ from the board, not from mail: no employer writes to say you withdrew.
 ## Matching
 
 Tiers run in order and each may decline. **A tier never guesses.** Two
-plausible candidates is a refusal, not a coin flip — the refusal is recorded
+plausible candidates is a refusal, not a coin flip. The refusal is recorded
 and a person resolves it.
 
-An employer cannot reply before you applied, so a date lower bound is valid —
+An employer cannot reply before you applied, so a date lower bound is valid,
 but only where the date means what it says. A date the system recorded when a
 row was created is an upper bound on when the person applied, not a lower one.
 A date derived from a subset of the evidence must not then veto the rest of it.
@@ -270,19 +270,19 @@ carry that width rather than inventing an hour by casting.
 These exist in exactly one place each. Change them there, and never write a
 fresh copy:
 
-- **Job visibility** — a read-time conjunctive predicate in `routers/jobs.py`,
+- **Job visibility**: a read-time conjunctive predicate in `routers/jobs.py`,
   mirrored in the board task's materialise and candidate queries. Per-object
   routes format the same predicate. Change all of them together.
-- **AI pricing** — `core/pricing.py`, rendered as both Python and SQL from one
+- **AI pricing**: `core/pricing.py`, rendered as both Python and SQL from one
   source with a parity test.
-- **Provider facts** — one datasheet per provider under `core/providers/`.
-- **Task handlers** — `api/tasks/`, one module per family. The task runtime
+- **Provider facts**: one datasheet per provider under `core/providers/`.
+- **Task handlers**: `api/tasks/`, one module per family. The task runtime
   imports nothing from the worker; the worker imports only the handler table.
-- **Listing formats** — `core/boards.py`, one fetcher per board format,
+- **Listing formats**: `core/boards.py`, one fetcher per board format,
   chosen by the listings URL. A source is a row, never a code path: a new
   board in a known format is added on the Sources page, and a new format is
   one fetcher returning the same `JobPosting` as the rest.
-- **What the mail implies the board should say** — `mail_pipeline.proposals_for`
+- **What the mail implies the board should say**: `mail_pipeline.proposals_for`
   and `answer_proposal`. The route that lists proposals and the queue that
   merges them into everything else read the same function; a second spelling
   would drift, and the first one already had - an inner join against
@@ -298,8 +298,8 @@ therefore safe.
 **A long read blocks schema changes.** A bulk read holds a shared lock for its
 whole duration; a queued `ALTER TABLE` waits behind it, and everything after
 that queues behind the ALTER. The application runs migrations at startup, so a
-read that outlives a deploy prevents the application from starting at all —
-containers sit at "waiting for application startup" while every health check,
+read that outlives a deploy prevents the application from starting at all.
+Containers sit at "waiting for application startup" while every health check,
 image digest and container status reports normal.
 
 The property to build for is that such a tool **cannot** hold a lock long
@@ -310,7 +310,7 @@ enough to matter, not that someone remembers when to run it:
   copy resumable, which a large transfer needs regardless.
 - **Set `idle_in_transaction_session_timeout` on the reading role** as the
   backstop. A tool that dies at the client end can otherwise leave a cursor
-  pinned indefinitely — the danger window is not the run's duration, it is
+  pinned indefinitely. The danger window is not the run's duration, it is
   unbounded until someone kills the connection.
 - Set both as role-level defaults so a future caller cannot forget them.
 - **Better than any timeout: do not keep the connection alive.** A process that
@@ -331,7 +331,7 @@ governs locks a session **waits for**, not ones it **holds**.
 **A foreign-data-wrapper session is opaque from the source side.** It shows as
 `FETCH n FROM cN` with no table name, so grepping the source for what you think
 it is reading finds nothing and proves nothing. Identify it by client address
-and application name — but note a host can present **more than one public IP**
+and application name, but note a host can present **more than one public IP**
 depending on egress path, and the same resolver can return different answers
 from different processes on that host. One reading does not identify a machine;
 check several, and prefer a causal test (stop the suspected process, see if the

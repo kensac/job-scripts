@@ -309,7 +309,7 @@ def extract_url_content(url: str) -> Optional[str]:
 def extract_url_content_ex(url: str) -> tuple[Optional[str], Optional[str]]:
     """Returns (content, final_url). The final URL matters: an expired posting
     very often 302s to a board index or careers page, and the page that lands
-    is perfectly healthy-looking — so without knowing we were redirected, the
+    is perfectly healthy-looking, so without knowing we were redirected, the
     text reads as a live job to both a human and the model."""
     if not openai_client:
         return None, None

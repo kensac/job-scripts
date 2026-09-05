@@ -23,7 +23,7 @@ CONTENT_BACKFILL_PER_CYCLE = int(os.environ.get("JOBTRACKER_CONTENT_BACKFILL_PER
 
 
 async def handle_fetch_missing_content(task_id: int, payload: dict[str, Any]) -> None:
-    """Jobs nobody ever scraped are invisible to every AI check — they can't be
+    """Jobs nobody ever scraped are invisible to every AI check. They can't be
     verified, filtered, or comp-extracted. This walks that backlog newest-first
     and caches their pages; the existing sweeps then pick them up for free.
     Self-limiting: once every job has content it finds nothing and costs

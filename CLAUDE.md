@@ -5,7 +5,7 @@ topic library under [docs/agents/](docs/agents/).** Read those. This file
 exists so that Claude Code finds them.
 
 Everything durable is there deliberately, in one copy, so it stays true for any
-agent rather than only this one. Do not restate a rule here — a second copy is
+agent rather than only this one. Do not restate a rule here. A second copy is
 a copy that drifts, and the standards in this repository say to delete
 duplication rather than maintain it.
 
