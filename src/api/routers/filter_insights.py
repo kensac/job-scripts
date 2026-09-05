@@ -26,7 +26,8 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 
-from api import db
+from api import db, scoping
+from api import params as params_
 from api.auth import AuthedUser, require_user
 from api.routers.admin import require_admin
 from core import reason_taxonomy
@@ -180,6 +181,7 @@ def phrasings(
     days: int = Query(30, ge=1, le=365),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
+    users: str | None = Query(default=None, alias="user"),
     user: AuthedUser = Depends(require_admin),
 ) -> dict[str, Any]:
     """Every distinct phrasing in one group of one prompt version, with counts.
@@ -203,6 +205,10 @@ def phrasings(
         _WINDOW,
     ]
     params: dict[str, Any] = {"prompt_hash": prompt_hash, "days": days}
+    ids = scoping.user_ids(users)
+    if ids:
+        where.append(scoping.filters_of())
+        params["user_ids"] = ids
     if group is not None:
         if group == UNGROUPED:
             # The residual is defined by matching nothing, so it is the
@@ -245,6 +251,10 @@ def phrasings(
         # of 159" instead of silently presenting a page as the whole set.
         "has_more": offset + len(rows) < total_phrasings,
         "phrasings": [dict(r) for r in rows],
+        "filters": params_.applied(
+            prompt_hash=[prompt_hash], group=params_.csv(group), user=scoping.echo(ids)
+        ),
+        "filterable": ["prompt_hash", "group", "user"],
     }
 
 
@@ -254,6 +264,7 @@ def rejection_reasons(
     prompt_hash: str | None = None,
     min_decisions: int = Query(_DEFAULT_MIN_DECISIONS, ge=1),
     examples: int = Query(3, ge=0, le=5),
+    users: str | None = Query(default=None, alias="user"),
     user: AuthedUser = Depends(require_admin),
 ) -> dict[str, Any]:
     params: dict[str, Any] = {"days": days}
@@ -261,6 +272,14 @@ def rejection_reasons(
     if prompt_hash:
         hash_clause = " AND prompt_hash = %(prompt_hash)s"
         params["prompt_hash"] = prompt_hash
+    ids = scoping.user_ids(users)
+    if ids:
+        hash_clause += " AND " + scoping.filters_of()
+        params["user_ids"] = ids
+    scoped = {
+        "filters": params_.applied(prompt_hash=params_.csv(prompt_hash), user=scoping.echo(ids)),
+        "filterable": ["prompt_hash", "user"],
+    }
 
     totals = db.query(
         f"""
@@ -285,7 +304,7 @@ def rejection_reasons(
         params,
     )
     if not totals:
-        return _empty(days, min_decisions)
+        return {**_empty(days, min_decisions), **scoped}
 
     rejections = db.query(
         f"""
@@ -405,6 +424,7 @@ def rejection_reasons(
         "examples_selection": _examples_selection(),
         "evidence_missing_criterion": _criterion(),
         "prompt_versions": out,
+        **scoped,
     }
 
 

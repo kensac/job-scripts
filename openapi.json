@@ -4497,6 +4497,22 @@
             }
           },
           {
+            "name": "user",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "User"
+            }
+          },
+          {
             "name": "limit",
             "in": "query",
             "required": false,
@@ -4939,7 +4955,7 @@
     "/v1/admin/batches": {
       "get": {
         "summary": "List Batches",
-        "description": "Provider batch jobs: what's pending at OpenAI right now, and recent\nhistory. Pending first, then newest.",
+        "description": "Provider batch jobs: what's pending at OpenAI right now, and recent\nhistory. Pending first, then newest. A batch belongs to the user its\ntask ran for; fleet batches belong to nobody.",
         "operationId": "list_batches_v1_admin_batches_get",
         "parameters": [
           {
@@ -4950,6 +4966,22 @@
               "type": "integer",
               "default": 72,
               "title": "Hours"
+            }
+          },
+          {
+            "name": "user",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "User"
             }
           },
           {
@@ -7077,6 +7109,22 @@
             }
           },
           {
+            "name": "user",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "User"
+            }
+          },
+          {
             "name": "page",
             "in": "query",
             "required": false,
@@ -7959,6 +8007,22 @@
                 }
               ],
               "title": "Prompt Hash"
+            }
+          },
+          {
+            "name": "user",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "User"
             }
           },
           {
@@ -9613,6 +9677,22 @@
             }
           },
           {
+            "name": "user",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "User"
+            }
+          },
+          {
             "name": "days",
             "in": "query",
             "required": false,
@@ -9851,6 +9931,22 @@
                 }
               ],
               "title": "Q"
+            }
+          },
+          {
+            "name": "user",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "User"
             }
           },
           {
@@ -13772,6 +13868,22 @@
             }
           },
           {
+            "name": "user",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "User"
+            }
+          },
+          {
             "name": "x-service-token",
             "in": "header",
             "required": false,
@@ -13902,6 +14014,22 @@
               "minimum": 0,
               "default": 3,
               "title": "Examples"
+            }
+          },
+          {
+            "name": "user",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "User"
             }
           },
           {
