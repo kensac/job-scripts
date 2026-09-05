@@ -3316,7 +3316,7 @@
     "/v1/user/sources": {
       "patch": {
         "summary": "Patch Sources",
-        "description": "A delta: subscribe to these, unsubscribe from those. One toggle used to\nPUT the whole enabled set, which at 389 boards raced with itself and could\nnot express \"leave this bundle\" at all. Names in both lists end up\nsubscribed; unknown or inactive names are refused whole rather than\npartially applied.",
+        "description": "A delta: subscribe to these, unsubscribe from those. One toggle used to\nPUT the whole enabled set, which at 389 boards raced with itself and could\nnot express \"leave this bundle\" at all. Names in both lists end up\nsubscribed; an unknown name, or a new subscription to a switched-off\nboard, refuses the write whole rather than applying half.",
         "operationId": "patch_sources_v1_user_sources_patch",
         "parameters": [
           {
