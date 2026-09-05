@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 from api import ai, budget, crypto, db
 from api.auth import AuthedUser, require_service, require_user
-from api.models import ApiKeyPut, SettingsPut
+from api.models import ApiKeyPut, Criteria, SettingsPut
 from core import providers as core_providers
 
 router = APIRouter()
@@ -254,7 +254,15 @@ def get_settings(user: AuthedUser = Depends(require_user)):
         "FROM user_settings WHERE user_id = %s",
         (user.id,),
     )
-    return {**(row or _SETTINGS_DEFAULTS), **_effective_model(user)}
+    settings = {**(row or _SETTINGS_DEFAULTS)}
+    # Criteria in their full shape, defaults filled, whatever the row holds:
+    # a client that reads support for a criterion by the key's presence
+    # must not depend on what this user happened to save before the key
+    # existed. A stale key the model no longer knows drops out here too.
+    settings["criteria"] = Criteria.model_validate(settings.get("criteria") or {}).model_dump(
+        mode="json"
+    )
+    return {**settings, **_effective_model(user)}
 
 
 _SETTINGS_DEFAULTS = {

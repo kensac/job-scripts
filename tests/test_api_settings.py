@@ -289,3 +289,24 @@ def test_per_source_funnel_flags_a_sample_too_small_to_read(client, user_headers
     row = next(r for r in body["by_source"] if r["source"] == "tiny-board")
     assert row["applications"] == 1
     assert row["below_sample_floor"] is True
+
+
+def test_criteria_are_served_in_full_shape_whatever_was_saved(client, user_headers):
+    """A client reads support for a criterion by the key's presence, so the
+    key is present with its default even on a row saved before it existed."""
+    from api import db
+
+    fresh = client.get("/v1/user/settings", headers=user_headers).json()["criteria"]
+    assert fresh == {"date_posted_after": None, "excluded_locations": [], "included_locations": []}
+    uid = db.query_one("SELECT id FROM users WHERE sub = %s", (user_headers["X-User-Sub"],))["id"]
+    db.execute(
+        "INSERT INTO user_settings (user_id, criteria) VALUES (%s, %s) "
+        "ON CONFLICT (user_id) DO UPDATE SET criteria = EXCLUDED.criteria",
+        (uid, db.jsonb({"included_terms": [], "excluded_locations": ["UK"]})),
+    )
+    old_row = client.get("/v1/user/settings", headers=user_headers).json()["criteria"]
+    assert old_row == {
+        "date_posted_after": None,
+        "excluded_locations": ["UK"],
+        "included_locations": [],
+    }
