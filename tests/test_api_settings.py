@@ -310,3 +310,20 @@ def test_criteria_are_served_in_full_shape_whatever_was_saved(client, user_heade
         "excluded_locations": ["UK"],
         "included_locations": [],
     }
+
+
+def test_put_settings_echoes_the_saved_settings_in_get_shape(client, user_headers):
+    r = client.put(
+        "/v1/user/settings",
+        json={"criteria": {"included_locations": ["United States", "Remote"]}},
+        headers=user_headers,
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["ok"] is True
+    assert body["criteria"] == {
+        "date_posted_after": None,
+        "excluded_locations": [],
+        "included_locations": ["United States", "Remote"],
+    }
+    assert body == {"ok": True, **client.get("/v1/user/settings", headers=user_headers).json()}

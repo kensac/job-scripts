@@ -349,7 +349,12 @@ def put_settings(body: SettingsPut, user: AuthedUser = Depends(require_user)):
             "WHERE user_id = %s AND digest_token IS NULL",
             (_secrets.token_urlsafe(24), user.id),
         )
-    return {"ok": True}
+    # The saved settings, in the shape GET serves them, so a client can read
+    # what the write did from the write. The deployed page read criteria off
+    # this response to decide whether a criterion was supported, found no
+    # criteria in {"ok": true}, and told Kanishk his include list was
+    # unsupported by an API that had just stored it.
+    return {"ok": True, **get_settings(user)}
 
 
 @router.get("/digest/unsubscribe")
