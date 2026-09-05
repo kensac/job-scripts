@@ -45,9 +45,24 @@ _client: Any = None
 _tracer: Any = None
 _logger_provider: Any = None
 _tracer_provider: Any = None
-HOST = socket.gethostname()
+
+
+def _host_name() -> str:
+    """The fleet's name for this host, never the container id. A process's
+    hostname inside Docker is twelve hex characters, and a log page keyed on
+    it is unreadable; the fleet already names every worker container in
+    JOBTRACKER_WORKER_NAME, and JOBTRACKER_HOST_NAME names a container that
+    is not a worker (the api). The hostname is the last resort."""
+    return (
+        os.environ.get("JOBTRACKER_HOST_NAME")
+        or os.environ.get("JOBTRACKER_WORKER_NAME")
+        or socket.gethostname()
+    )
+
+
+HOST = _host_name()
 # The process's fleet name once init() has run (a worker's WORKER_NAME, the
-# api's hostname); what tells hetzner-worker-2 from oci in every record.
+# api's host name); what tells hetzner-worker-2 from oci in every record.
 INSTANCE = HOST
 # The commit the image was built from (deploy/Dockerfile sets it from the
 # build arg), so a regression is dated to a release rather than to a day.
@@ -144,9 +159,10 @@ def init(service: str = "jobtracker", instance: str | None = None) -> None:
     for a worker, its fleet name (hetzner-worker-2, oci, ...), so the api and
     each worker are distinguishable in every trace and log line as
     service.name and service.instance.id. Safe to call again."""
-    global _client, _tracer, _logger_provider, _tracer_provider
+    global _client, _tracer, _logger_provider, _tracer_provider, HOST
     if _client is not None:
         return
+    HOST = _host_name()
     key = os.environ.get("POSTHOG_API_KEY")
     # Said once at startup either way. A layer that never raises and is a
     # no-op without a key has two silent modes that look identical from

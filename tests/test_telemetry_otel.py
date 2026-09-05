@@ -132,3 +132,14 @@ def test_every_export_attempt_is_counted_by_outcome():
     exporter.shutdown()
     exporter.export([object()])
     assert failed._value.get() == before_failed + 1
+
+
+def test_the_host_is_the_fleet_name_never_the_container_id(monkeypatch):
+    monkeypatch.delenv("JOBTRACKER_HOST_NAME", raising=False)
+    monkeypatch.setenv("JOBTRACKER_WORKER_NAME", "oci")
+    assert telemetry._host_name() == "oci"
+    monkeypatch.setenv("JOBTRACKER_HOST_NAME", "hetzner")
+    assert telemetry._host_name() == "hetzner"
+    monkeypatch.delenv("JOBTRACKER_HOST_NAME")
+    monkeypatch.delenv("JOBTRACKER_WORKER_NAME")
+    assert telemetry._host_name()
