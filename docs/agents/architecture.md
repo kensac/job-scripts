@@ -380,6 +380,14 @@ one backend entry.
 `filters: {status: [...]}` with what was applied, empty when nothing was, so
 a client can tell "lists accepted" from an older build by the key's presence.
 
+**A view is a name that returns a page to a state.** `saved_views` holds,
+per user and per page, the filters, the sort order across columns, the
+columns and the search a person wants back; several per page, one default,
+ordered. The state is the page's canonical request shape, the same names
+the API echoes in `filters`, `sorts` and `sortable`, never a build's private
+wording, so a view outlives the frontend that wrote it. A single column
+layout or filter set on `user_settings` is the pre-view form.
+
 List endpoints sort through `api.sorting` against a per-endpoint whitelist of
 column expressions: `sort=a,b&dir=asc,desc` is several columns at once, a
 `dir` shorter than `sort` repeats its last value, unknown keys drop rather
