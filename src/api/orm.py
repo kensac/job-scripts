@@ -296,6 +296,33 @@ class UserSource(Base):
     source: Mapped[str] = mapped_column(Text, primary_key=True)
 
 
+class SavedView(Base):
+    """A named state of one list page, per user: its filters, its sort order
+    across columns, its columns, its search. Clicking a view applies all of
+    it. `page` is the surface key the frontend uses (board, pipeline, admin
+    queue, admin mail, ...); `state` is the page's canonical request shape,
+    the same parameter names the API echoes back in `filters`, `sorts` and
+    `sortable`, so a view is reproducible against any build that serves
+    those. One default per page; position orders the switcher.
+    """
+
+    __tablename__ = "saved_views"
+    __table_args__ = (
+        UniqueConstraint("user_id", "page", "name", name="uq_saved_views_user_page_name"),
+        Index("idx_saved_views_user_page", "user_id", "page", "position"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"))
+    page: Mapped[str] = mapped_column(Text)
+    name: Mapped[str] = mapped_column(Text)
+    state: Mapped[dict] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
+    is_default: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    position: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+    updated_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+
+
 class UserFilter(Base):
     __tablename__ = "user_filters"
     __table_args__ = (UniqueConstraint("user_id", "name"),)
