@@ -15,7 +15,7 @@ contract must be announced before it merges, not after.
 **Parallel work produces two heads from one parent.** Each branch is green
 against its own parent, and `upgrade head` fails only once both are on main.
 The application runs `upgrade head` at startup, so two heads means new hosts
-do not come up at all — while already-running hosts, whose version row is
+do not come up at all, while already-running hosts, whose version row is
 populated, look perfectly healthy.
 
 Check for this against **main merged into your branch**, not against your

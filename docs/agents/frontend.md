@@ -5,7 +5,7 @@ The frontend lives in the `personal-portfolio` repository, under
 those surfaces must meet.
 
 They are recorded here rather than there so a feature can be specified
-completely from this repository — an API change and the surface that consumes
+completely from this repository: an API change and the surface that consumes
 it are one piece of work, and whoever owns the frontend half needs to be told
 what the whole thing is, not just the endpoint.
 
@@ -13,7 +13,7 @@ what the whole thing is, not just the endpoint.
 
 **Use the shared component kit. Do not hand-roll what it already provides.**
 If a pattern recurs and the kit has nothing for it, add it to the kit and
-convert the call sites — then delete the hand-rolled versions. Leaving both is
+convert the call sites, then delete the hand-rolled versions. Leaving both is
 worse than either.
 
 Consistency across pages matters more than any single page being clever. When
@@ -50,8 +50,8 @@ reports success is not proof the viewport changed.
 
 **Anything that exists only in a desktop-only element does not exist on
 mobile.** A navigation rail hidden below a breakpoint takes its contents with
-it. When a rail holds something load-bearing — a way out of the app, a warning
-— that thing needs a home that no viewport can hide.
+it. When a rail holds something load-bearing, a way out of the app or a warning,
+that thing needs a home that no viewport can hide.
 
 Wide content scrolls inside its own container. The page body never scrolls
 sideways.
@@ -63,7 +63,7 @@ independently.** Verify shapes against the server source, not against your
 expectation or your own fixture.
 
 Response schemas are frequently undeclared, so nothing mechanical catches a
-response-shape disagreement. Where you can declare one, do — it is the only
+response-shape disagreement. Where you can declare one, do. It is the only
 place this class of drift becomes detectable.
 
 **Eligibility is decided by the server, never by the client.** The server
@@ -77,7 +77,7 @@ One primary action per view. A page of rows each carrying a primary button is a
 wall.
 
 A control that navigates is a link, so it can be opened in a new tab. A control
-that acts is a button. Quiet, dotted treatment is for links inside prose — used
+that acts is a button. Quiet, dotted treatment is for links inside prose, used
 beside a real control it reads as a caption.
 
 An action whose effect reaches beyond the row must say so before it is taken,

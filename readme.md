@@ -23,7 +23,7 @@ spreadsheet UI where each user tracks their applications.
   `X-User-Sub`, `X-User-Groups`); Authentik groups drive entitlements and
   weekly AI-token budgets (`group_budgets` table).
 - **Workers** (`python -m api.worker`): claim tasks from a Postgres queue
-  (`FOR UPDATE SKIP LOCKED`) — safe across any number of machines. Handle
+  (`FOR UPDATE SKIP LOCKED`), safe across any number of machines. Handle
   source ingestion, link-upload extraction, and per-user filter runs, with
   heartbeats, a stale-task reaper, attempt caps, and mid-task cancellation.
   A leaderless scheduler (dedupe keys) enqueues one ingest per active source
@@ -68,12 +68,12 @@ scraping. Healthcheck: `python -m api.healthcheck`.
 
 ## Configuration files
 
-- `configs.toml` — source feeds (name → listings URL + sheet id). Seeds the
+- `configs.toml`: source feeds (name → listings URL + sheet id). Seeds the
   `sources` and `source_groups` tables; runtime source management is in the
   DB via the admin API.
-- `filters.toml` — named filter prompts for the legacy CLI
+- `filters.toml`: named filter prompts for the legacy CLI
   (`--apply-filter <name>`); product filters live per-user in the DB.
 
 ## License
 
-MIT — see `LICENSE`.
+MIT, see `LICENSE`.

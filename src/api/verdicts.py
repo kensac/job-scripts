@@ -212,7 +212,7 @@ async def refresh_content(
 ) -> tuple[str | None, str | None]:
     """Re-fetches a posting and returns fresh text, or None when the posting is
     gone. A 'recheck' that reuses cached text can only ever re-run the model
-    over the page as it looked before it closed — it cannot discover a closure,
+    over the page as it looked before it closed. It cannot discover a closure,
     which is the one thing a recheck is usually asked to do.
 
     Returns (content, closure_signal). closure_signal is 'ats_gone' and only

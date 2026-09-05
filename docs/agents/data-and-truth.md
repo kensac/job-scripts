@@ -26,9 +26,9 @@ looked", and collapsing them is the most common bug in this codebase.
 setting is overridden at runtime, show the effective value beside the chosen
 one, with the reason.
 
-**A capability says what is allowed and, when it is not, why not** — in the
+**A capability says what is allowed and, when it is not, why not**, in the
 same object. "You may not select this" is useless. "Not available because your
-group is capped — bring your own key or ask an admin" renders itself.
+group is capped: bring your own key or ask an admin" renders itself.
 
 ## Distinctions that must not collapse
 

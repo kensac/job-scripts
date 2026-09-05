@@ -56,7 +56,7 @@ _VERIFY_INSTRUCTIONS = (
     "position filled, expired, deadline passed, job not found, 404). Site-wide errors, "
     "captchas, access blocks, or login walls say nothing about the job: false. "
     "Ambiguous: false.\n"
-    "requires_clearance_or_restrictions: true ONLY for explicit restrictions — required "
+    "requires_clearance_or_restrictions: true ONLY for explicit restrictions: required "
     "security clearance or citizenship (US citizen required, US Person, Secret/TS-SCI/"
     "Public Trust), explicit no-sponsorship ('will not sponsor', 'no H1B'), or F1-not-"
     "eligible. Do NOT flag preferences, sponsorship offered, or application questions. "

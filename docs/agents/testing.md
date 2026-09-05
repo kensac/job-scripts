@@ -9,14 +9,14 @@ that passes both ways constrains nothing.
 
 Failure modes seen repeatedly here:
 
-- **Tautology** — the test joins on the same condition the code checks, so it
+- **Tautology**: the test joins on the same condition the code checks, so it
   cannot disagree.
-- **Conditional vacuity** — the test asserts only on rows that already contain
+- **Conditional vacuity**: the test asserts only on rows that already contain
   the field it checks. If the code stops emitting the field, zero rows match
   and it passes.
-- **Wrong subject** — the test exercises a different route than the one whose
+- **Wrong subject**: the test exercises a different route than the one whose
   behaviour it is named for.
-- **Self-confirming fixture** — the test asserts against a recorder it
+- **Self-confirming fixture**: the test asserts against a recorder it
   installed, not against the behaviour.
 
 A good pattern: supply input the code is expected to *reject*, so a broken
@@ -96,7 +96,7 @@ and anything destructive must refuse a name that does not match.
 
 One test process per database, enforced rather than assumed. Two concurrent
 runs against one database truncate each other's rows between tests, and the
-failure surfaces in whichever test lost the race — so the reader debugs their
+failure surfaces in whichever test lost the race, so the reader debugs their
 own change.
 
 ## Fixtures must state what they mean
@@ -104,7 +104,7 @@ own change.
 **Check a column's default before letting a fixture rely on it.** A fixture
 that leans on a default can create the opposite of what the test asserts and
 pass for the wrong reason. State the value the test depends on, even when it
-matches the default — especially then, because the default can change under a
+matches the default. Especially then, because the default can change under a
 test that never mentioned it.
 
 ## Diagnosing a failure

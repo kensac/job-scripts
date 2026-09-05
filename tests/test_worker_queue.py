@@ -865,7 +865,7 @@ async def test_content_backfill_caches_pages_and_skips_covered_jobs(monkeypatch)
 
 @pytest.mark.asyncio
 async def test_full_sweep_rechecks_even_fresh_verdicts(monkeypatch):
-    """A forced sweep must overturn verdicts made today — skipping them is
+    """A forced sweep must overturn verdicts made today. Skipping them is
     exactly what would preserve the stale-evidence verdicts it exists to fix."""
     from core import ats as core_ats
     from core import batch as core_batch

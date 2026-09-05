@@ -91,7 +91,7 @@ async def handle_ingest_source(task_id: int, payload: dict[str, Any]) -> None:
     # Ingest caches pages but runs NO AI. It reached here through the task
     # queue, which makes it scheduled work, and the rule for scheduled work is
     # that it batches: the hourly verify_new task settles closed+clearance as
-    # one half-price call per job. Checking inline here bypassed that — it was
+    # one half-price call per job. Checking inline here bypassed that. It was
     # why ~90% of closed/clearance verdicts were still full-price sync calls,
     # since verify_new only ever saw the jobs ingest had not already reached.
     #

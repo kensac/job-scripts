@@ -4,7 +4,7 @@ Some files in this repository are produced by tooling rather than written. Two
 of them are enforced in CI, and they behave differently: one is **checked**, the
 other is **rewritten and pushed back to your branch.**
 
-## `openapi.json` — regenerated and auto-committed
+## `openapi.json`: regenerated and auto-committed
 
 CI runs the schema export and compares. If the committed file is stale, CI
 **commits the regenerated file to your branch and pushes it.**
@@ -21,7 +21,7 @@ What that means for you:
 - **A commit you did not write will appear in your branch.** It is expected.
 
 **This mechanism is the reason CI checks out the branch head rather than the
-merge result** — it has to push back to a real branch. That makes every check in
+merge result**. It has to push back to a real branch. That makes every check in
 that job structurally unable to see your branch combined with the base, so
 anything that only breaks in combination has to be checked in a separate job
 that uses the merge result.
@@ -30,9 +30,9 @@ that uses the merge result.
 a response schema; the rest are empty objects. So it will catch a bad path,
 method, or query parameter, and it will never catch a client and server
 disagreeing about the shape of a response. Where you can declare a response
-schema, do — it is the only place that class of drift becomes machine-visible.
+schema, do. It is the only place that class of drift becomes machine-visible.
 
-## The migration drift check — checked, never committed
+## The migration drift check: checked, never committed
 
 CI generates a migration with `--autogenerate` and fails if it contains any
 schema operation. A non-empty result means the ORM models and the migrations
@@ -42,7 +42,7 @@ The generated file is a throwaway and is never committed. **Do not commit it if
 you run the check locally.**
 
 The usual cause is a column defined one way in the model and another in the
-migration — a server default without a matching `nullable=False` is the common
+migration: a server default without a matching `nullable=False` is the common
 one. Fix the mismatch and write a real migration; do not rename the throwaway.
 
 ## The rule

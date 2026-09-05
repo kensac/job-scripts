@@ -9,7 +9,7 @@ logger = logging.getLogger("jobtracker_health")
 
 # Minimum sample sizes: below these a "rate" is noise, and alerting on noise
 # trains you to ignore alerts. The rate floor is deliberately high because the
-# samples are not independent — see MAX_PER_COMPANY.
+# samples are not independent, see MAX_PER_COMPANY.
 MIN_SAMPLES = 50
 MIN_CONTENT_SAMPLES = 10
 
@@ -20,8 +20,8 @@ MIN_CONTENT_SAMPLES = 10
 MAX_PER_COMPANY = 5
 
 # A job whose first-ever check lands long after we catalogued it came from a
-# backlog sweep, not the live feed. Those are systematically staler — and more
-# often closed or restricted — than freshly-ingested postings, so mixing them
+# backlog sweep, not the live feed. Those are systematically staler, and more
+# often closed or restricted, than freshly-ingested postings, so mixing them
 # in makes a coverage change look like breakage. This is the same confound
 # #110 removed for re-checks, one level down: fetch_missing_content gives old
 # jobs their FIRST check, so restricting to first-ever checks does not exclude
@@ -109,13 +109,13 @@ def detect() -> list[dict[str, Any]]:
     """Compares the last 24h against the preceding week, per source, looking for
     the shapes that mean 'something upstream changed' rather than 'the job
     market moved'. Everything here is deliberately relative to each source's
-    own baseline — absolute thresholds would fire constantly on sources that
+    own baseline. Absolute thresholds would fire constantly on sources that
     are legitimately mostly-closed or legitimately short."""
     found: list[dict[str, Any]] = []
 
     # 1. The ATS text path silently breaking. When a resolver stops returning
     #    usable text we fall back to chromium, so the share collapses long
-    #    before anything is visibly wrong — this is the earliest warning we get.
+    #    before anything is visibly wrong. This is the earliest warning we get.
     for r in db.query(
         """
         SELECT j.source,
@@ -131,7 +131,7 @@ def detect() -> list[dict[str, Any]]:
           -- Only rows that record where the text CAME from. Other writers
           -- (pittcsc's 'content cached') log a content row with no origin,
           -- and counting those in the denominator silently buries the ATS
-          -- share far below the `base >= 0.30` floor — which is why this
+          -- share far below the `base >= 0.30` floor, which is why this
           -- detector had never once fired.
           AND q.reason IN ('ats text', 'scraped', 'static')
           AND q.created_at > now() - interval '8 days'
@@ -158,15 +158,15 @@ def detect() -> list[dict[str, Any]]:
                     "subject": r["source"],
                     "severity": "critical",
                     "message": (
-                        f"ATS text share for {r['source']} fell from {base:.0%} to {recent:.0%} "
-                        "— the resolver is probably broken and we're paying to scrape instead."
+                        f"ATS text share for {r['source']} fell from {base:.0%} to {recent:.0%}. "
+                        "The resolver is probably broken and we're paying to scrape instead."
                     ),
                     "detail": dict(r),
                 }
             )
 
     # 2. Verdict-rate shifts on FIRST-EVER checks only. Re-checks flipping to
-    #    closed is the system working — postings expire, and a sweep that newly
+    #    closed is the system working. Postings expire, and a sweep that newly
     #    covers a backlog of old jobs will legitimately reject a lot of them at
     #    once. Mixing the two makes coverage changes look like breakage (it did:
     #    the first live alert was a reverify backlog on a board whose postings
@@ -222,7 +222,7 @@ def detect() -> list[dict[str, Any]]:
                     "message": (
                         f"{r['check_type']} rejection rate for newly-seen {r['source']} jobs "
                         f"jumped from {base:.0%} to {recent:.0%} over {r['recent_total']} "
-                        f"first-time checks (max {MAX_PER_COMPANY} per company) — jobs are "
+                        f"first-time checks (max {MAX_PER_COMPANY} per company). Jobs are "
                         "being written off on arrival, so suspect the input text before "
                         "believing the verdicts."
                     ),
@@ -231,7 +231,7 @@ def detect() -> list[dict[str, Any]]:
             )
 
     # 3. Extraction failures concentrated on one host: the bot-wall signature.
-    #    Relative to the host's own prior week, not an absolute rate — a site
+    #    Relative to the host's own prior week, not an absolute rate. A site
     #    that has always failed 60% is a known cost of doing business, and an
     #    alert that fires forever on it is one the reader learns to skip. What
     #    matters is a host that STARTED failing.
@@ -263,8 +263,8 @@ def detect() -> list[dict[str, Any]]:
                     "severity": "warning",
                     "message": (
                         f"{r['recent_failed']} of {r['recent_total']} fetches from {r['host']} "
-                        f"failed in 24h ({recent:.0%}, up from {base:.0%} over the prior week) "
-                        "— blocked, or the page shape changed."
+                        f"failed in 24h ({recent:.0%}, up from {base:.0%} over the prior week). "
+                        "Blocked, or the page shape changed."
                     ),
                     "detail": dict(r),
                 }
@@ -295,7 +295,7 @@ def detect() -> list[dict[str, Any]]:
                 "severity": "warning",
                 "message": (
                     f"{r['provider']} access for {mailbox} was rejected "
-                    f"{r['dead_for']} ago ({r['invalid_reason']}) — mail ingest is "
+                    f"{r['dead_for']} ago ({r['invalid_reason']}). Mail ingest is "
                     "stopped until it is reconnected in tracker settings."
                 ),
                 "detail": dict(r),

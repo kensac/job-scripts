@@ -15,7 +15,7 @@ logger = logging.getLogger("jobtracker_worker")
 async def handle_send_digests(task_id: int, payload: dict[str, Any]) -> None:
     """Daily batched digest (never per-event: single-IP mail server, see
     homelab constraints). force+user_id sends the last day's rows regardless
-    of digest state — used for template testing by admins."""
+    of digest state, used for template testing by admins."""
     import secrets as _secrets
 
     from api import mail

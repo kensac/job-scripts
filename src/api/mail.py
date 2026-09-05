@@ -26,13 +26,13 @@ def send_invite(to: str, invite_url: str) -> None:
     msg["From"] = f"Job Tracker <{MAIL_FROM}>"
     msg["To"] = to
     msg.set_content(
-        "You've been invited to Job Tracker — an AI-filtered job application tracker.\n\n"
+        "You've been invited to Job Tracker, an AI-filtered job application tracker.\n\n"
         f"Create your account here (link valid for 7 days):\n{invite_url}\n\n"
         "You'll pick your own username and password; this email address will be your login identity."
     )
     msg.add_alternative(
         f"""<div style="font-family:Inter,system-ui,sans-serif;color:#0c0a08;max-width:560px">
-<p>You've been invited to <strong>Job Tracker</strong> — an AI-filtered job application tracker.</p>
+<p>You've been invited to <strong>Job Tracker</strong>, an AI-filtered job application tracker.</p>
 <p><a href="{invite_url}" style="color:#533afd">Create your account</a> (link valid for 7 days).</p>
 <p style="color:#64748d;font-size:12px">You'll pick your own username and password; this email address will be your login identity.</p>
 </div>""",
@@ -50,7 +50,7 @@ def send_health_alert(to: str, alerts: list[dict[str, Any]]) -> None:
     html = []
     for a in alerts:
         lines.append(f"- [{a['severity'].upper()}] {a['message']}")
-        html.append(f"<li><strong>{a['severity'].upper()}</strong> — {a['message']}</li>")
+        html.append(f"<li><strong>{a['severity'].upper()}</strong>: {a['message']}</li>")
     lines += ["", f"Admin: {APP_URL.replace('/job-tracker', '/job-scripts')}/dashboard"]
     msg = EmailMessage()
     msg["Subject"] = (
@@ -84,9 +84,9 @@ def send_digest(to: str, jobs: list[dict[str, Any]], unsubscribe_token: str) -> 
     ]
     html_rows = []
     for j in jobs[:50]:
-        loc = ", ".join(j.get("locations") or []) or "—"
+        loc = ", ".join(j.get("locations") or []) or "no location"
         comp = j.get("comp_text") or ""
-        lines.append(f"- {j['company']} — {j['title']} ({loc}){' · ' + comp if comp else ''}")
+        lines.append(f"- {j['company']}: {j['title']} ({loc}){' · ' + comp if comp else ''}")
         html_rows.append(
             f"<tr><td style='padding:6px 12px 6px 0'><strong>{j['company']}</strong></td>"
             f"<td style='padding:6px 12px 6px 0'>{j['title']}</td>"
