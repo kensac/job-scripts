@@ -29,6 +29,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from api import db, mail_pipeline, rates, signals
+from api import params as params_
 from api.auth import AuthedUser
 from api.routers.admin import require_admin
 
@@ -109,10 +110,27 @@ SELECT base.*,
        COALESCE(apps.applications_n, 0) AS applications_n,
        apps.last_applied_at
 FROM base LEFT JOIN apps ON apps.company_key = base.company_key
-WHERE (%(q)s::text IS NULL OR base.company_key LIKE %(q)s::text)
+WHERE {cuts}
 ORDER BY {order}, base.company_key
 LIMIT %(limit)s OFFSET %(offset)s
 """
+
+# The lenses over 8,503 names: the ones this admin applied to, the ones whose
+# postings state pay, the ones that re-list. Each is a predicate over the same
+# aggregate the page already computes, spelled once here and applied to the
+# page and to the total alike, so "12 of 8,503" is the count of what the
+# lens shows. The repost cut is the same grouping _REPOST_SQL uses per page,
+# run once over the catalog rather than per company.
+_CUTS = """(%(q)s::text IS NULL OR base.company_key LIKE %(q)s::text)
+  AND (NOT %(applied)s OR apps.applications_n IS NOT NULL)
+  AND (NOT %(has_comp)s OR base.comp_found > 0)
+  AND (NOT %(repost)s OR EXISTS (
+      SELECT 1 FROM jobs r
+      WHERE r.company <> '' AND r.title <> '' AND r.date_posted IS NOT NULL
+        AND lower(btrim(r.company)) = base.company_key
+      GROUP BY lower(btrim(r.title)), r.source, r.locations
+      HAVING count(*) >= %(min_urls)s
+         AND max(r.date_posted) - min(r.date_posted) > make_interval(days => %(min_span)s)))"""
 
 
 # A reply is any classified mail attached to the application. An OUTCOME is a
@@ -194,12 +212,12 @@ SELECT company_key,
 FROM per_app GROUP BY company_key
 """
 
-_COUNT_SQL = """
-SELECT count(*) AS c FROM (
-    SELECT lower(btrim(company)) AS company_key FROM jobs
-    WHERE company <> '' GROUP BY lower(btrim(company))
-) t WHERE (%(q)s::text IS NULL OR t.company_key LIKE %(q)s::text)
-"""
+# The total counts what the lenses show: same CTEs, same cuts, no page.
+_COUNT_SQL = (
+    _BASE_SQL.split("SELECT base.*")[0]
+    + "SELECT count(*) AS c\nFROM base LEFT JOIN apps ON apps.company_key = base.company_key\n"
+    + "WHERE {cuts}\n"
+)
 
 # Currency is present on 452 of 11,442 extracted rows, so the NULL bucket is
 # the overwhelming majority. It is reported as its own entry rather than
@@ -459,6 +477,9 @@ def _offset_from(cursor: str | None) -> int:
 @router.get("/companies")
 def list_companies(
     q: str | None = None,
+    applied: bool = False,
+    has_comp: bool = False,
+    repost: bool = False,
     sort: str = "total_postings_seen",
     dir: str = "desc",
     limit: int = 50,
@@ -475,9 +496,19 @@ def list_companies(
     # ranking of 7,564.
     order = f"{column} {direction} NULLS LAST"
     pattern = f"%{q.strip().lower()}%" if q and q.strip() else None
-    params = {"q": pattern, "limit": limit + 1, "offset": offset, "user_id": user.id}
+    params = {
+        "q": pattern,
+        "limit": limit + 1,
+        "offset": offset,
+        "user_id": user.id,
+        "applied": applied,
+        "has_comp": has_comp,
+        "repost": repost,
+        "min_urls": signals.REPOST_MIN_URLS,
+        "min_span": signals.REPOST_MIN_SPAN_DAYS,
+    }
 
-    rows = db.query(_BASE_SQL.format(order=order), params)
+    rows = db.query(_BASE_SQL.format(order=order, cuts=_CUTS), params)
     has_more = len(rows) > limit
     rows = rows[:limit]
     keys = [r["company_key"] for r in rows]
@@ -518,7 +549,7 @@ def list_companies(
         else {}
     )
 
-    total_row = db.query_one(_COUNT_SQL, {"q": pattern})
+    total_row = db.query_one(_COUNT_SQL.format(cuts=_CUTS), params)
     return {
         "items": [
             _item(
@@ -552,4 +583,11 @@ def list_companies(
         },
         "total_names": int(total_row["c"]) if total_row else 0,
         "caveats": _CAVEATS,
+        "filters": params_.applied(
+            q=[q.strip()] if q and pattern else [],
+            applied=["true"] if applied else [],
+            has_comp=["true"] if has_comp else [],
+            repost=["true"] if repost else [],
+        ),
+        "filterable": ["q", "applied", "has_comp", "repost"],
     }

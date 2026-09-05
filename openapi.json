@@ -9387,6 +9387,36 @@
             }
           },
           {
+            "name": "applied",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Applied"
+            }
+          },
+          {
+            "name": "has_comp",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Has Comp"
+            }
+          },
+          {
+            "name": "repost",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Repost"
+            }
+          },
+          {
             "name": "sort",
             "in": "query",
             "required": false,
