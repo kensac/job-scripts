@@ -353,6 +353,12 @@ nothing for at most the one cycle that classifies it. A wrong row is a PUT to
 /admin/locations, never a deploy; the sweep never re-asks about a string that
 has a row.
 
+**An admin closes a posting the way the closed check does.** POST
+/admin/jobs/{id}/close writes a rejected closed verdict naming the admin and
+the reason, so the posting leaves every board on the next read and nothing
+re-runs; `active` stays the catalog's fact about whether the board still
+lists it. The report row says `posting_closed` from the same verdict.
+
 **A vocabulary the frontend renders is served with its meaning, never
 copied.** Board statuses come with `status_meta` (terminal, outcome), report
 kinds with their labels, pipeline stages with their order and which are

@@ -7363,6 +7363,104 @@
         }
       }
     },
+    "/v1/admin/jobs/{job_id}/close": {
+      "post": {
+        "summary": "Close Posting",
+        "description": "An admin asserts the posting is closed, for everyone.\n\nThe same mechanism the closed check uses: a verdict row, latest per url,\nthat every board reads at visibility time. So the posting leaves every\nboard on the next read, nothing re-runs, and the row records who said so\nand why. Not `active`: that is the catalog's fact about whether the board\nstill lists it, and a board can keep listing a posting that should never\nhave passed.",
+        "operationId": "close_posting_v1_admin_jobs__job_id__close_post",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Job Id"
+            }
+          },
+          {
+            "name": "x-service-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-Service-Token"
+            }
+          },
+          {
+            "name": "x-user-sub",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Sub"
+            }
+          },
+          {
+            "name": "x-user-email",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Email"
+            }
+          },
+          {
+            "name": "x-user-name",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Name"
+            }
+          },
+          {
+            "name": "x-user-groups",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Groups"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClosePostingBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/admin/jobs/{job_id}/reparse": {
       "post": {
         "summary": "Reparse Job",
@@ -14659,6 +14757,18 @@
         },
         "type": "object",
         "title": "CancelTasksBody"
+      },
+      "ClosePostingBody": {
+        "properties": {
+          "reason": {
+            "type": "string",
+            "maxLength": 500,
+            "title": "Reason",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "title": "ClosePostingBody"
       },
       "ConfigPut": {
         "properties": {
