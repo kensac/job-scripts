@@ -380,7 +380,7 @@ def client(request):
         headers = kwargs.get("headers") or {}
         path = str(url)
         sub = headers.get("X-User-Sub")
-        if sub and path.startswith(("/v1/user/jobs", "/v1/requirements")):
+        if sub and path.startswith(("/v1/user/jobs", "/v1/requirements", "/v1/jobs/")):
             row = db.query_one("SELECT id FROM users WHERE sub = %s", (sub,))
             if row:
                 visibility.recompute(row["id"])
