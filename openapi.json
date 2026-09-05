@@ -5060,7 +5060,7 @@
     "/v1/admin/locations": {
       "get": {
         "summary": "List Locations",
-        "description": "The classified location strings, most recent first; q searches the\ntext, unplaced narrows to strings the model could not place.",
+        "description": "The classified location strings, most recent first, paged; q searches\nthe text, unplaced narrows to strings the model could not place. total\ncounts what the filters keep, total_all the whole table.",
         "operationId": "list_locations_v1_admin_locations_get",
         "parameters": [
           {
@@ -5097,6 +5097,16 @@
               "type": "integer",
               "default": 200,
               "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "title": "Offset"
             }
           },
           {

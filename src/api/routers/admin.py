@@ -874,24 +874,38 @@ def list_locations(
     q: str | None = None,
     unplaced: bool = False,
     limit: int = 200,
+    offset: int = 0,
     user: AuthedUser = Depends(require_admin),
 ):
-    """The classified location strings, most recent first; q searches the
-    text, unplaced narrows to strings the model could not place."""
+    """The classified location strings, most recent first, paged; q searches
+    the text, unplaced narrows to strings the model could not place. total
+    counts what the filters keep, total_all the whole table."""
+    limit = max(1, min(limit, 1000))
+    offset = max(0, offset)
     where = ["true"]
-    params: dict[str, Any] = {"limit": max(1, min(limit, 1000))}
+    params: dict[str, Any] = {"limit": limit + 1, "offset": offset}
     if q:
         where.append("text ILIKE %(q)s")
         params["q"] = f"%{q}%"
     if unplaced:
         where.append("country IS NULL AND NOT remote")
+    clause = " AND ".join(where)
     rows = db.query(
         f"SELECT text, country, region, city, remote, model, classified_at FROM locations "
-        f"WHERE {' AND '.join(where)} ORDER BY classified_at DESC, text LIMIT %(limit)s",
+        f"WHERE {clause} ORDER BY classified_at DESC, text LIMIT %(limit)s OFFSET %(offset)s",
         params,
     )
-    total = db.query_one("SELECT COUNT(*) AS c FROM locations")
-    return {"rows": rows, "total": total["c"] if total else 0}
+    total = db.query_one(f"SELECT COUNT(*) AS c FROM locations WHERE {clause}", params)
+    total_all = db.query_one("SELECT COUNT(*) AS c FROM locations")
+    return {
+        "rows": rows[:limit],
+        "has_more": len(rows) > limit,
+        "offset": offset,
+        "total": total["c"] if total else 0,
+        "total_all": total_all["c"] if total_all else 0,
+        "filters": params_.applied(q=[q] if q else [], unplaced=["true"] if unplaced else []),
+        "filterable": ["q", "unplaced"],
+    }
 
 
 @router.put("/locations/{text}")
