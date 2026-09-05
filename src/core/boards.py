@@ -19,6 +19,7 @@ from __future__ import annotations
 import datetime
 import logging
 import re
+import time
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 import ftfy
@@ -359,6 +360,24 @@ def _oracle(url: str, company: str) -> list[JobPosting]:
             return out
 
 
+# apply.workable.com answers 429 to a burst: 143 of 172 boards failed the
+# hour the bundle first pulled (2026-09-05), all on one per-address limit.
+# One request every six seconds per process stays under it; each worker
+# keeps its own clock and its own address.
+_PACE_SECONDS = {"apply.workable.com": 6.0}
+_last_call: dict[str, float] = {}
+
+
+def _pace(host: str) -> None:
+    wait = _PACE_SECONDS.get(host)
+    if not wait:
+        return
+    ahead = _last_call.get(host, 0.0) + wait - time.monotonic()
+    if ahead > 0:
+        time.sleep(ahead)
+    _last_call[host] = time.monotonic()
+
+
 def _workable(url: str, company: str) -> list[JobPosting]:
     """POST https://apply.workable.com/api/v3/accounts/{account}/jobs
 
@@ -371,6 +390,7 @@ def _workable(url: str, company: str) -> list[JobPosting]:
     body: dict = {"query": "", "location": [], "department": [], "worktype": [], "remote": []}
     out: list[JobPosting] = []
     while True:
+        _pace("apply.workable.com")
         resp = _session.post(url, json=body, timeout=TIMEOUT)
         resp.raise_for_status()
         data = resp.json()

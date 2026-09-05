@@ -575,6 +575,14 @@ async def run_once() -> bool:
     return True
 
 
+def _seed_gauges() -> None:
+    """A gauge is a process value: it read 0 on every worker from each of
+    eight restarts on 2026-09-05 until the hourly detector ran, with 19
+    alerts open the whole day. The database is the truth; read it once."""
+    row = db.query_one("SELECT COUNT(*) AS n FROM health_alerts WHERE resolved_at IS NULL")
+    metrics.HEALTH_ALERTS.set(row["n"] if row else 0)
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
     signal.signal(signal.SIGTERM, _graceful_exit)
@@ -586,6 +594,7 @@ def main() -> None:
         (WORKER_NAME,),
     )
     metrics.serve()
+    _seed_gauges()
     telemetry.init("jobtracker-worker", WORKER_NAME)
     ingest_enabled = os.environ.get("JOBTRACKER_INGEST_SCHEDULER", "1") == "1"
     logger.info(

@@ -485,3 +485,16 @@ def test_unknown_urls_fall_through_to_the_sheet_era_fetcher(monkeypatch):
     monkeypatch.setattr(boards, "fetch_job_postings", lambda url: seen.append(url) or [])
     assert boards.fetch_listings("https://airtable.com/appX/shrY", "Acme") == []
     assert seen == ["https://airtable.com/appX/shrY"]
+
+
+def test_workable_paces_its_requests(monkeypatch):
+    slept = []
+    monkeypatch.setattr(boards.time, "sleep", lambda s: slept.append(round(s, 1)))
+    monkeypatch.setattr(
+        boards._session, "post", lambda url, json, **kw: _Resp({"total": 0, "results": []})
+    )
+    boards._last_call.clear()
+    boards.fetch_listings("https://apply.workable.com/api/v3/accounts/a/jobs", "A")
+    boards.fetch_listings("https://apply.workable.com/api/v3/accounts/b/jobs", "B")
+    # The first call goes straight out; the second waits out the six seconds.
+    assert slept and 5.0 < slept[-1] <= 6.0

@@ -1070,3 +1070,14 @@ async def test_polling_stamps_completed_at_once_terminal(monkeypatch, f):
     assert row is not None
     assert row["status"] == "completed"
     assert row["completed_at"] is not None
+
+
+def test_the_open_alerts_gauge_is_seeded_from_the_database_at_startup():
+    from api import metrics, worker
+
+    db.execute(
+        "INSERT INTO health_alerts (kind, subject, severity, message) "
+        "VALUES ('ingest_failing', 'x', 'warning', 'm'), ('ingest_failing', 'y', 'warning', 'm')"
+    )
+    worker._seed_gauges()
+    assert metrics.HEALTH_ALERTS._value.get() == 2
