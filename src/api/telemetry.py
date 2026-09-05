@@ -50,9 +50,11 @@ _tracer_provider: Any = None
 def _host_name() -> str:
     """The fleet's name for this host, never the container id. A process's
     hostname inside Docker is twelve hex characters, and a log page keyed on
-    it is unreadable; the fleet already names every worker container in
-    JOBTRACKER_WORKER_NAME, and JOBTRACKER_HOST_NAME names a container that
-    is not a worker (the api). The hostname is the last resort."""
+    it is unreadable. JOBTRACKER_HOST_NAME is the host; JOBTRACKER_WORKER_NAME
+    is a fair default only where one worker runs per box and is named for
+    it, because a second worker on a box (hetzner-2 on hetzner) has a worker
+    name that is not a host, and compose sets HOST_NAME there explicitly.
+    The hostname is the last resort."""
     return (
         os.environ.get("JOBTRACKER_HOST_NAME")
         or os.environ.get("JOBTRACKER_WORKER_NAME")
