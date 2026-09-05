@@ -200,6 +200,12 @@ The list shape (`GET /admin/sources`) carries everything but `title_pattern`;
 one row (`GET /admin/sources/{name}`) carries it. At 1,732 sources the
 pattern was more than half of a 1.8 MB body, and only the edit form reads it.
 
+**A board that limits by address is paced, not retried.** apply.workable.com
+answered 429 to 143 of 172 boards the hour they first pulled together; the
+fetcher now spaces its requests to that host six seconds apart per process.
+The `ingest_host_failing` detector names the host when ingests fail against
+one upstream, whichever boards they were.
+
 **Everything a board returns is stored, once.** Every pull records every
 listing in `listings`, kept by the pattern or not, with the posting text the
 listing call carried (Greenhouse with `content=true`, Lever, Ashby; the text

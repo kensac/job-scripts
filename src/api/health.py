@@ -74,6 +74,7 @@ _SUBJECT_KINDS = {
     "batch_parked_too_long": SUBJECT_TASK,
     "batch_failed_whole": SUBJECT_PURPOSE,
     "ingest_failing": SUBJECT_SOURCE,
+    "ingest_host_failing": SUBJECT_HOST,
     "source_feed_empty": SUBJECT_SOURCE,
     "source_pattern_excludes_all": SUBJECT_SOURCE,
     "worker_fetches_failing": SUBJECT_WORKER,
@@ -678,7 +679,10 @@ def _detect_boards() -> list[dict[str, Any]]:
             r["fetched"] > 0
             and r["kept"] == 0
             and r["title_pattern"]
-            and (r["best_prior_kept"] or 0) > 0
+            # A board that admitted one or two roles last week and none this
+            # week has had them filled, not its pattern broken. At 2,293
+            # boards that churn held 18 warnings open at once (2026-09-05).
+            and (r["best_prior_kept"] or 0) >= 5
         ):
             found.append(
                 {
@@ -693,6 +697,39 @@ def _detect_boards() -> list[dict[str, Any]]:
                     "detail": dict(r),
                 }
             )
+
+    # Ingests failing against one upstream host, whichever boards they were.
+    # 143 Workable boards failed on one per-address limit on 2026-09-05 and
+    # each looked like its own transient failure; the host was the story.
+    for r in db.query(
+        """
+        SELECT substring(s.listings_url from '//([^/]+)') AS host,
+               COUNT(*) AS recent_total,
+               COUNT(*) FILTER (WHERE t.status = 'failed') AS recent_failed,
+               COUNT(DISTINCT t.payload->>'source') FILTER (WHERE t.status = 'failed')
+                   AS boards_failed,
+               max(t.error) FILTER (WHERE t.status = 'failed') AS sample_error
+        FROM tasks t JOIN sources s ON s.name = t.payload->>'source'
+        WHERE t.kind = 'ingest_source' AND t.status IN ('done', 'failed')
+          AND t.created_at > now() - interval '24 hours'
+        GROUP BY 1
+        """
+    ):
+        if r["recent_failed"] < 10 or _pct(r["recent_failed"], r["recent_total"]) < 0.25:
+            continue
+        found.append(
+            {
+                "kind": "ingest_host_failing",
+                "subject": r["host"],
+                "severity": "warning",
+                "message": (
+                    f"{r['recent_failed']} of {r['recent_total']} ingests against {r['host']} "
+                    f"failed in 24h across {r['boards_failed']} boards; last error: "
+                    f"{(r['sample_error'] or '')[:120]}"
+                ),
+                "detail": dict(r),
+            }
+        )
 
     # 3. One worker's page fetches failing where they used to land: the
     #    egress-blocked signature, per fleet host rather than per site.

@@ -80,8 +80,40 @@ def test_a_pattern_that_admits_nothing_fires_only_when_a_pattern_is_set(f):
     for name in ("tight", "no_pattern"):
         _ingest(name, "done", age_hours=1, fetched=300, kept=0)
         _ingest(name, "done", age_hours=30, fetched=300, kept=12)
+    # Two roles admitted last week and none this week: filled, not broken.
+    f.make_source("small")
+    db.execute("UPDATE sources SET title_pattern = 'new grad' WHERE name = 'small'")
+    _ingest("small", "done", age_hours=1, fetched=40, kept=0)
+    _ingest("small", "done", age_hours=30, fetched=40, kept=2)
 
     assert _kinds() == {("source_pattern_excludes_all", "tight")}
+
+
+def test_ingests_failing_against_one_host_fire_as_one_alert(f):
+    """143 Workable boards failed on one per-address limit and each looked
+    like its own transient failure; the host is the alert."""
+    for i in range(12):
+        f.make_source(f"workable_{i}")
+        db.execute(
+            "UPDATE sources SET listings_url = %s WHERE name = %s",
+            (f"https://apply.workable.com/api/v3/accounts/acct{i}/jobs", f"workable_{i}"),
+        )
+    for i in range(10):
+        _ingest(f"workable_{i}", "failed", age_hours=1, error="429 Client Error: Too Many Requests")
+    _ingest("workable_10", "done", age_hours=1, fetched=30, kept=3)
+    _ingest("workable_11", "done", age_hours=1, fetched=30, kept=3)
+    # A host with a few failures among many pulls is weather, not an outage.
+    for i in range(20):
+        f.make_source(f"gh_{i}")
+        db.execute(
+            "UPDATE sources SET listings_url = %s WHERE name = %s",
+            (f"https://boards-api.greenhouse.io/v1/boards/co{i}/jobs", f"gh_{i}"),
+        )
+        _ingest(f"gh_{i}", "failed" if i < 2 else "done", age_hours=1, fetched=10, kept=1)
+
+    found = {(a["kind"], a["subject"]) for a in health._detect_boards()}
+    assert ("ingest_host_failing", "apply.workable.com") in found
+    assert not any(k == "ingest_host_failing" and s != "apply.workable.com" for k, s in found)
 
 
 def test_a_worker_whose_fetches_started_failing_fires_against_its_own_week(f):
