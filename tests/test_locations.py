@@ -174,3 +174,29 @@ def test_a_bare_state_or_province_code_is_a_table_lookup_not_a_judgment(clean):
     assert (rows["CA"]["country"], rows["CA"]["region"], rows["CA"]["city"]) == ("US", "CA", None)
     assert (rows["in"]["country"], rows["in"]["region"]) == ("US", "IN")
     assert (rows["ON"]["country"], rows["ON"]["region"]) == ("CA", "ON")
+
+
+def test_admin_locations_page_and_count_what_the_filters_keep(client, admin_headers, clean):
+    for i in range(5):
+        locations.store(f"Town {i}", locations.LocationExtract(country="US", city=f"Town {i}"), "t")
+    locations.store("Nowhere", locations.LocationExtract(), "t")
+    page = client.get("/v1/admin/locations", params={"limit": 4}, headers=admin_headers).json()
+    assert len(page["rows"]) == 4 and page["has_more"] is True
+    assert page["total"] == 6 and page["total_all"] == 6 and page["filters"] == {}
+    rest = client.get(
+        "/v1/admin/locations", params={"limit": 4, "offset": 4}, headers=admin_headers
+    ).json()
+    assert len(rest["rows"]) == 2 and rest["has_more"] is False and rest["offset"] == 4
+    assert {r["text"] for r in page["rows"]} | {r["text"] for r in rest["rows"]} == {
+        *(f"Town {i}" for i in range(5)),
+        "Nowhere",
+    }
+    unplaced = client.get(
+        "/v1/admin/locations", params={"unplaced": "true"}, headers=admin_headers
+    ).json()
+    assert [r["text"] for r in unplaced["rows"]] == ["Nowhere"]
+    assert unplaced["total"] == 1 and unplaced["total_all"] == 6
+    assert unplaced["filters"] == {"unplaced": ["true"]} and unplaced["filterable"] == [
+        "q",
+        "unplaced",
+    ]
