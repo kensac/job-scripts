@@ -58,9 +58,10 @@ REQUIREMENTS_REASONING_EFFORT = "minimal"
 
 # Cheapest first, and every value here is accepted by SOME model in the
 # registry, so swapping the model swaps the effort with it rather than sending
-# one the model refuses. Kept in this order because low-effort reasoning was
-# 78% of the output bill and bought nothing this task needs.
-_EFFORT_PREFERENCE = ("none", "minimal", "low")
+# one the model refuses. luna takes "none". nano takes "low", not "minimal":
+# on 2026-09-04 nano ran this task at minimal and 21,525 of 21,525 batched
+# lines failed, while verify and comp, which nano runs at low, failed none.
+_EFFORT_PREFERENCE = ("none", "low")
 
 
 # Measured p100 over the pilot was 378 tokens; the JSON's whole variable part is
@@ -68,8 +69,10 @@ _EFFORT_PREFERENCE = ("none", "minimal", "low")
 # widest skill list seen. An unfinished response is unparseable JSON, and an
 # unparseable line leaves the url unextracted for the next sweep to re-pay
 # forever, so the headroom is worth more than the tokens - a cap is a ceiling,
-# not a charge.
-REQUIREMENTS_MAX_OUTPUT_TOKENS = 1000
+# not a charge. 2000 rather than 1000 because nano at low effort spent 802
+# output tokens a posting in the pilot before the JSON, and a cap the
+# reasoning alone can hit turns every long posting into an unparseable line.
+REQUIREMENTS_MAX_OUTPUT_TOKENS = 2000
 
 
 # The same declaration every other batched extraction makes. The model is the
