@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 from api import db, visibility
 from api.auth import AuthedUser, require_user
 from api.models import SourcesPut
+from core import boards
 
 router = APIRouter()
 
@@ -92,8 +93,6 @@ def list_own_source_requests(user: AuthedUser = Depends(require_user)):
 
 @router.get("/sources")
 def list_sources(user: AuthedUser = Depends(require_user)):
-    from core import boards
-
     rows = db.query(
         """
         SELECT s.name, s.listings_url, s.description, s.company,
