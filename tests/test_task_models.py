@@ -274,6 +274,30 @@ class TestTakesEffect:
         _put(client, admin_headers, "requirements", model="gpt-5-nano")
         assert configured_model("requirements") == "gpt-5-nano"
 
+    @pytest.mark.asyncio
+    async def test_the_sweep_sends_the_effort_of_the_model_it_chose(
+        self, client, admin_headers, monkeypatch
+    ):
+        """Under an override the batch carried the sanctioned candidate's
+        effort: luna's "none" went to nano and 21,525 lines died on a 400 on
+        2026-09-04, then 112 more on 2026-09-05."""
+        from api.tasks import runtime
+        from api.tasks.requirements import REQUIREMENTS_TASK
+
+        sent = {}
+
+        async def fake_submit(task_id, specs, model, effort, max_tokens, hook):
+            sent.update(model=model, effort=effort, max_tokens=max_tokens)
+            return {}
+
+        monkeypatch.setattr(runtime, "submit_or_collect", fake_submit)
+        _put(client, admin_headers, "requirements", model="gpt-5-nano")
+        await runtime.run_batched(1, REQUIREMENTS_TASK, [])
+        assert sent["model"] == "gpt-5-nano" and sent["effort"] == "minimal"
+        _put(client, admin_headers, "requirements", model=None)
+        await runtime.run_batched(1, REQUIREMENTS_TASK, [])
+        assert sent["model"] == "gpt-5.6-luna" and sent["effort"] == "none"
+
     def test_an_unreadable_override_falls_back_rather_than_stopping_a_sweep(self, monkeypatch):
         from api.tasks import runtime
 
