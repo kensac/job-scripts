@@ -5,7 +5,7 @@ from urllib.parse import urlparse
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from api import ai, budget, crypto, db
+from api import ai, budget, crypto, db, visibility
 from api.auth import AuthedUser, require_service, require_user
 from api.models import ApiKeyPut, Criteria, SettingsPut
 from core import providers as core_providers
@@ -354,6 +354,7 @@ def put_settings(body: SettingsPut, user: AuthedUser = Depends(require_user)):
     # this response to decide whether a criterion was supported, found no
     # criteria in {"ok": true}, and told Kanishk his include list was
     # unsupported by an API that had just stored it.
+    visibility.request_refresh(user.id)
     return {"ok": True, **get_settings(user)}
 
 

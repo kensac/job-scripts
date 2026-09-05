@@ -461,3 +461,25 @@ def test_comp_carries_the_period_and_basis_it_was_derived_from(client, user_head
     detail = client.get(f"/v1/user/jobs/{job_id}/detail", headers=user_headers).json()["job"]
     assert detail["comp_period"] == "hourly"
     assert detail["comp_basis"] == "base"
+
+
+def test_total_rides_on_the_page_and_survives_an_empty_page(client, user_headers):
+    uid = _uid(user_headers)
+    for i in range(4):
+        url = f"https://x.test/tt{i}"
+        _insert_job("src-tt", url)
+        _pass_closed(url)
+    _subscribe(uid, "src-tt")
+    page = client.get(
+        "/v1/user/jobs",
+        params={"limit": 3, "with_total": "true", "source": "src-tt", "sort": "company,added_at"},
+        headers=user_headers,
+    ).json()
+    assert page["total"] == 4 and len(page["rows"]) == 3 and page["has_more"] is True
+    assert "total_rows" not in page["rows"][0]
+    beyond = client.get(
+        "/v1/user/jobs",
+        params={"limit": 3, "offset": 10, "with_total": "true", "source": "src-tt"},
+        headers=user_headers,
+    ).json()
+    assert beyond["total"] == 4 and beyond["rows"] == [] and beyond["has_more"] is False

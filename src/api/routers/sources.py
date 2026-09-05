@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from api import db
+from api import db, visibility
 from api.auth import AuthedUser, require_user
 from api.models import SourcesPut
 
@@ -56,6 +56,7 @@ def apply_source_group(body: ApplyGroupBody, user: AuthedUser = Depends(require_
                 "INSERT INTO user_sources (user_id, source) VALUES (%s, %s) ON CONFLICT DO NOTHING",
                 (user.id, source),
             )
+    visibility.request_refresh(user.id)
     return {"ok": True, "enabled": members, "mode": body.mode}
 
 
@@ -148,6 +149,7 @@ def patch_sources(body: SourcesPatch, user: AuthedUser = Depends(require_user)):
             "SELECT source FROM user_sources WHERE user_id = %s ORDER BY source", (user.id,)
         )
     ]
+    visibility.request_refresh(user.id)
     return {
         "ok": True,
         "added": sorted(r["source"] for r in added),
@@ -171,4 +173,5 @@ def put_sources(body: SourcesPut, user: AuthedUser = Depends(require_user)):
                 "INSERT INTO user_sources (user_id, source) VALUES (%s, %s)",
                 (user.id, source),
             )
+    visibility.request_refresh(user.id)
     return {"ok": True}

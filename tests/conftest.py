@@ -359,12 +359,35 @@ def _clean_db(request):
 
 
 @pytest.fixture
-def client():
+def client(request):
+    """The API, with the board's membership recomputed before any board or
+    per-object read. In production a worker recomputes a person's board
+    within a minute of a preference write and every board_refresh_minutes;
+    the tests assert what the predicate admits, not the worker's timing, so
+    the read itself triggers the recompute. A test that is ABOUT the timing
+    opts out with the no_board_recompute marker."""
     from fastapi.testclient import TestClient
 
+    from api import visibility
     from api.app import app
 
-    return TestClient(app)
+    tc = TestClient(app)
+    if request.node.get_closest_marker("no_board_recompute"):
+        return tc
+    original = tc.request
+
+    def recomputing(method, url, *args, **kwargs):
+        headers = kwargs.get("headers") or {}
+        path = str(url)
+        sub = headers.get("X-User-Sub")
+        if sub and (path.startswith("/v1/user/jobs") or path.startswith("/v1/requirements")):
+            row = db.query_one("SELECT id FROM users WHERE sub = %s", (sub,))
+            if row:
+                visibility.recompute(row["id"])
+        return original(method, url, *args, **kwargs)
+
+    tc.request = recomputing  # type: ignore[method-assign]
+    return tc
 
 
 SERVICE_TOKEN = os.environ["JOBTRACKER_SERVICE_TOKEN"]

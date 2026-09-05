@@ -16,9 +16,9 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from api import criteria, db
+from api import criteria, db, visibility
 from api.auth import AuthedUser, require_user
-from api.routers.jobs import _VISIBILITY, _require_visible_job
+from api.routers.jobs import _require_visible_job
 from core.requirements import (
     CLEARANCE_LEVELS,
     DEGREE_LEVELS,
@@ -37,7 +37,7 @@ TOP_SKILLS = 40
 
 
 # The slice every endpoint here reads: the jobs this user can see, joined to
-# what their pages said. _VISIBILITY is imported rather than restated - there
+# what their pages said. The membership read is imported rather than restated - there
 # are already three spellings of "can this user see this job" in the codebase
 # and the whole point of the constant is that a fourth never gets written.
 # job_requirements is url-keyed, so the join is on url, not on job id.
@@ -62,12 +62,7 @@ slice AS (
 
 
 def _visible_sql(body: str) -> str:
-    return (
-        _VISIBLE.format(
-            visibility=_VISIBILITY.format(columns="j.url", criteria=criteria.SQL, extra="")
-        )
-        + body
-    )
+    return _VISIBLE.format(visibility=visibility.FAST.format(columns="j.url", extra="")) + body
 
 
 def _slice_sql(body: str) -> str:

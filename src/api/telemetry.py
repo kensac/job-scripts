@@ -232,12 +232,9 @@ def init(service: str = "jobtracker", instance: str | None = None) -> None:
     # Outbound HTTP: the board pulls and ATS resolvers go through `requests`,
     # so every board fetch is a span with its status, under the task's span.
     RequestsInstrumentor().instrument()
-    # Database time inside the same spans. psycopg connections are opened
-    # by the pool after this point, so patching the module is enough; the
-    # statement text is not recorded, only the operation and its duration.
-    from opentelemetry.instrumentation.psycopg import PsycopgInstrumentor
-
-    PsycopgInstrumentor().instrument()
+    # Database time inside the same spans: psycopg is instrumented in api.db
+    # before its pool opens, because a connection made before instrumentation
+    # never produces a span.
 
     _logger_provider = LoggerProvider(resource=resource)
     _logger_provider.add_log_record_processor(

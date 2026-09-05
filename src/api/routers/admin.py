@@ -1832,6 +1832,11 @@ _CONFIG_KEYS: dict[str, _Key] = {
     "classify_locations_per_cycle": _Key(
         int, "Distinct location strings the hourly classification cycle sends to the model."
     ),
+    # Read by api.worker.schedule_ingest_cycle.
+    "board_refresh_minutes": _Key(
+        int,
+        "Minutes between recomputes of every person's board; a preference change recomputes sooner.",
+    ),
 }
 
 

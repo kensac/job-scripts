@@ -6,7 +6,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from api import criteria, db, events, signals, sorting
+from api import db, events, signals, sorting, visibility
 from api.auth import AuthedUser, require_user
 from api.models import UploadRequest, UserJobPatch, UserJobsBulkIds, UserJobsBulkPatch
 from core.urls import normalize_url
@@ -27,69 +27,16 @@ _JOB_ROW = """
     j.url, j.raw_url, j.active, j.date_posted, j.created_at AS added_at,
     j.extraction_status, j.comp_min, j.comp_max, j.comp_text, j.comp_currency,
     j.comp_period, j.comp_basis,
-    (SELECT CASE lc.status WHEN 'passed' THEN 'open' WHEN 'rejected' THEN 'closed' END
-     FROM latest_check lc
-     WHERE lc.url = j.url AND lc.check_type = 'closed') AS closed_verdict,
+    (SELECT CASE q.status WHEN 'passed' THEN 'open' WHEN 'rejected' THEN 'closed' END
+     FROM ai_queries q
+     WHERE q.url = j.url AND q.check_type = 'closed' AND q.status IN ('passed', 'rejected')
+     ORDER BY q.id DESC LIMIT 1) AS closed_verdict,
     uj.status, uj.date_applied, uj.notes, uj.size, uj.recruiter,
     uj.connection1, uj.connection2, uj.documents,
     COALESCE(uj.hidden, FALSE) AS hidden
 """
 
-_VISIBILITY = """
-WITH enabled_filters AS (
-    -- DISTINCT is load-bearing: two enabled filters can share a prompt_hash
-    -- (same prompt text under different names - adopting a preset and then
-    -- pasting the same prompt does it). filter_pass dedupes per hash, so
-    -- without this the passed_count could never reach COUNT(*) and the board
-    -- would silently go empty.
-    SELECT DISTINCT prompt_hash FROM user_filters WHERE user_id = %(uid)s AND enabled
-),
-latest_check AS (
-    SELECT DISTINCT ON (url, check_type) url, check_type, status
-    FROM ai_queries
-    WHERE check_type IN ('closed', 'clearance') AND status IN ('passed', 'rejected')
-    ORDER BY url, check_type, id DESC
-),
-filter_pass AS (
-    SELECT url, COUNT(*) AS passed_count FROM (
-        SELECT DISTINCT ON (q.url, q.prompt_hash) q.url, q.status
-        FROM ai_queries q
-        JOIN enabled_filters f ON q.prompt_hash = f.prompt_hash
-        WHERE q.check_type = 'custom' AND q.status IN ('passed', 'rejected')
-        ORDER BY q.url, q.prompt_hash, q.id DESC
-    ) t WHERE t.status = 'passed' GROUP BY url
-)
-SELECT {columns}
-FROM jobs j
-LEFT JOIN user_jobs uj ON uj.job_id = j.id AND uj.user_id = %(uid)s
-WHERE (
-    j.uploaded_by = %(uid)s
-    -- A board row the person ACTED on (a status, a note, a date applied) is
-    -- theirs whatever the criteria say. A row the worker materialised for a
-    -- passing posting and nobody touched is not a decision, so it obeys the
-    -- criteria like any other posting: 1,629 such rows carried postings in
-    -- Singapore, London and Sydney past a United States filter on
-    -- 2026-09-05, because a row's mere existence read as a grant.
-    OR (uj.user_id IS NOT NULL
-        AND (COALESCE(uj.status, '') <> '' OR COALESCE(uj.notes, '') <> ''
-             OR uj.date_applied IS NOT NULL
-             OR (TRUE {criteria})))
-    OR (
-        j.active
-        AND j.source IN (SELECT source FROM user_sources WHERE user_id = %(uid)s)
-        {criteria}
-        AND EXISTS (SELECT 1 FROM latest_check lc
-                    WHERE lc.url = j.url AND lc.check_type = 'closed' AND lc.status = 'passed')
-        AND (%(bypass_sponsorship)s
-             OR EXISTS (SELECT 1 FROM latest_check lc
-                        WHERE lc.url = j.url AND lc.check_type = 'clearance' AND lc.status = 'passed'))
-        AND ((SELECT COUNT(*) FROM enabled_filters) = 0
-             OR COALESCE((SELECT fp.passed_count FROM filter_pass fp WHERE fp.url = j.url), 0)
-                = (SELECT COUNT(*) FROM enabled_filters))
-    )
-)
-{extra}
-"""
+_VISIBILITY = visibility.FULL
 
 
 def _visible_job(user: AuthedUser, job_id: int, columns: str) -> dict | None:
@@ -102,21 +49,13 @@ def _visible_job(user: AuthedUser, job_id: int, columns: str) -> dict | None:
     into an append-only log with no user_id - flip a job's closed status for
     EVERY user at once, because latest-row-per-(url, check_type) wins globally.
 
-    The gate is _VISIBILITY itself rather than a new predicate. A fourth
-    spelling of "can this user see this job" is how the first three drifted.
+    The gate is the board's own membership (api.visibility.FAST) rather than
+    a new predicate. A fourth spelling of "can this user see this job" is how
+    the first three drifted.
     """
-    settings = db.query_one(
-        "SELECT bypass_sponsorship_filter, criteria FROM user_settings WHERE user_id = %s",
-        (user.id,),
-    )
     return db.query_one(
-        _VISIBILITY.format(columns=columns, criteria=criteria.SQL, extra="AND j.id = %(jid)s"),
-        {
-            "uid": user.id,
-            "jid": job_id,
-            "bypass_sponsorship": settings["bypass_sponsorship_filter"] if settings else True,
-            **criteria.params(settings),
-        },
+        visibility.FAST.format(columns=columns, extra="AND j.id = %(jid)s"),
+        {"uid": user.id, "jid": job_id},
     )
 
 
@@ -241,18 +180,8 @@ def list_jobs(
     limit = max(1, min(limit, 1000))
     offset = max(0, offset)
     sorts = sorting.parse(sort, dir, _SORTABLE, "added_at")
-    settings = db.query_one(
-        "SELECT bypass_sponsorship_filter, criteria FROM user_settings WHERE user_id = %s",
-        (user.id,),
-    )
     extra = []
-    params: dict = {
-        "uid": user.id,
-        "limit": limit + 1,
-        "offset": offset,
-        "bypass_sponsorship": settings["bypass_sponsorship_filter"] if settings else True,
-        **criteria.params(settings),
-    }
+    params: dict = {"uid": user.id, "limit": limit + 1, "offset": offset}
     if not include_hidden:
         extra.append("AND COALESCE(uj.hidden, FALSE) = FALSE")
     if search:
@@ -278,13 +207,6 @@ def list_jobs(
 
     filter_sql = "\n".join(extra)
     total = None
-    if with_total:
-        count_sql = _VISIBILITY.format(
-            columns="COUNT(*) AS c", extra=filter_sql, criteria=criteria.SQL
-        )
-        row = db.query_one(count_sql, params)
-        total = row["c"] if row else 0
-
     if cursor is not None:
         # Legacy cursor mode: fixed newest-first by id.
         order = "AND j.id < %(cursor)s\nORDER BY j.id DESC LIMIT %(limit)s"
@@ -294,10 +216,23 @@ def list_jobs(
             f"ORDER BY {sorting.clause(sorts, _SORTABLE)}, j.id DESC "
             "LIMIT %(limit)s OFFSET %(offset)s"
         )
-    sql = _VISIBILITY.format(
-        columns=_JOB_ROW, extra=f"{filter_sql}\n{order}", criteria=criteria.SQL
-    )
+    # One pass, not two: the total rides on the page as a window count over
+    # the same filtered set, so a sort with with_total costs one board read
+    # rather than the count query and then the page query.
+    columns = _JOB_ROW + (", COUNT(*) OVER () AS total_rows" if with_total else "")
+    sql = visibility.FAST.format(columns=columns, extra=f"{filter_sql}\n{order}")
     rows = db.query(sql, params)
+    if with_total:
+        if rows:
+            total = rows[0]["total_rows"]
+            for r in rows:
+                r.pop("total_rows", None)
+        else:
+            # A page past the end carries no row to read the count from.
+            row = db.query_one(
+                visibility.FAST.format(columns="COUNT(*) AS c", extra=filter_sql), params
+            )
+            total = row["c"] if row else 0
     has_more = len(rows) > limit
     rows = rows[:limit]
     return {
@@ -310,6 +245,9 @@ def list_jobs(
         # the default, and the keys it may ask for.
         "sorts": sorts,
         "sortable": sorted(_SORTABLE),
+        # When the board's membership was last computed, so a page can say
+        # "as of" and a person knows a preference change has landed.
+        "board_computed_at": visibility.computed_at(user.id),
     }
 
 
@@ -419,9 +357,9 @@ def job_detail(job_id: int, user: AuthedUser = Depends(require_user)):
         "j.active, j.date_posted, j.comp_min, j.comp_max, j.comp_text, j.comp_currency, "
         "j.comp_period, j.comp_basis, "
         "j.created_at, "
-        "(SELECT CASE lc.status WHEN 'passed' THEN 'open' WHEN 'rejected' THEN 'closed' END "
-        " FROM latest_check lc "
-        " WHERE lc.url = j.url AND lc.check_type = 'closed') AS closed_verdict",
+        "(SELECT CASE q.status WHEN 'passed' THEN 'open' WHEN 'rejected' THEN 'closed' END "
+        " FROM ai_queries q WHERE q.url = j.url AND q.check_type = 'closed' "
+        " AND q.status IN ('passed', 'rejected') ORDER BY q.id DESC LIMIT 1) AS closed_verdict",
     )
     content_row = db.query_one(
         "SELECT input_content, created_at FROM ai_queries "

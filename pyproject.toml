@@ -153,6 +153,7 @@ testpaths = ["tests"]
 markers = [
     "corpus: runs against the generated corpus (tests/corpus.py), built on demand",
     "integration: needs a synced copy of REAL production; skipped without one",
+    "no_board_recompute: the client fixture must not recompute the board before a read",
 ]
 # No marker filter. `pytest tests` runs everything: the hermetic suite on a
 # truncated database, the corpus suite on generated data measured out of

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from api.tasks import comp, locations, mail_classify, requirements, verify
 from api.tasks.batches import handle_poll_batches
+from api.tasks.board import handle_recompute_board
 from api.tasks.comp import handle_extract_comp
 from api.tasks.content import handle_fetch_missing_content
 from api.tasks.digests import handle_send_digests
@@ -73,6 +74,7 @@ HANDLERS = {
     "extract_comp": handle_extract_comp,
     "extract_requirements": handle_extract_requirements,
     "classify_locations": handle_classify_locations,
+    "recompute_board": handle_recompute_board,
     "embed_postings": handle_embed_postings,
     "send_digests": handle_send_digests,
     "data_health": handle_data_health,
