@@ -58,10 +58,13 @@ REQUIREMENTS_REASONING_EFFORT = "minimal"
 
 # Cheapest first, and every value here is accepted by SOME model in the
 # registry, so swapping the model swaps the effort with it rather than sending
-# one the model refuses. luna takes "none". nano takes "low", not "minimal":
-# on 2026-09-04 nano ran this task at minimal and 21,525 of 21,525 batched
-# lines failed, while verify and comp, which nano runs at low, failed none.
-_EFFORT_PREFERENCE = ("none", "low")
+# one the model refuses. luna takes "none"; nano takes "minimal", and sent
+# the same request directly on 2026-09-05 it completed at ~200 output tokens
+# with no reasoning, against 750 to 1,450 at "low". The 21,525-line failure
+# of 2026-09-04 was not the effort: OpenAI's error file for those batches says
+# every line carried "none", which nano rejects, from a routing path that did
+# not yet re-pick the effort for an overridden model.
+_EFFORT_PREFERENCE = ("none", "minimal", "low")
 
 
 # Measured p100 over the pilot was 378 tokens; the JSON's whole variable part is
