@@ -234,6 +234,7 @@ def test_a_string_naming_several_places_matches_on_any_of_them(client, user_head
     )
     assert (row["country"], row["city"]) == ("US", "New York") and len(row["places"]) == 2
 
+    assert _board(client, user_headers, "src-mp") == {both, abroad}
     _criteria(client, user_headers, ["UK"])
     assert _board(client, user_headers, "src-mp") == set()
     r = client.put(
