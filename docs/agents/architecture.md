@@ -195,6 +195,9 @@ derived: `company` (required where the system never names it), a
 every AI check on that board's postings; a bundle (`source_groups`) or a
 format is a way of selecting rows for that flag and the interval through
 `POST /admin/sources/switch`, not a second layer of state.
+The list shape (`GET /admin/sources`) carries everything but `title_pattern`;
+one row (`GET /admin/sources/{name}`) carries it. At 1,732 sources the
+pattern was more than half of a 1.8 MB body, and only the edit form reads it.
 
 **Everything a board returns is stored, once.** Every pull records every
 listing in `listings`, kept by the pattern or not, with the posting text the

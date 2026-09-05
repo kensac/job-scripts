@@ -14,7 +14,7 @@ from api import ai, db, events, health, scoping, sorting
 from api import params as params_
 from api.auth import AuthedUser, require_user
 from api.routers.jobs import report_kinds
-from core import pricing, reason_taxonomy
+from core import boards, pricing, reason_taxonomy
 
 logger = logging.getLogger("jobtracker_api")
 
@@ -252,8 +252,6 @@ def admin_list_sources(shape: str = "full", user: AuthedUser = Depends(require_a
     kind, bundles) for pickers and filters; shape=counts is what a dashboard
     tile needs. Both skip the per-source aggregation over jobs, tasks and
     subscribers, which the dashboard was paying for on every live tick."""
-    from core import boards
-
     if shape == "names":
         rows = db.query(
             """
@@ -316,8 +314,11 @@ def admin_list_sources(shape: str = "full", user: AuthedUser = Depends(require_a
             FROM tasks WHERE kind = 'ingest_source'
             ORDER BY payload->>'source', id DESC
         )
+        -- title_pattern is not here: it is a 584-byte regex repeated on
+        -- most rows, more than half of a 1.8 MB body at 1,732 sources, and
+        -- only the edit form reads it, through GET /admin/sources/{name}.
         SELECT s.name, s.listings_url, s.description, s.active, s.created_at,
-               s.company, s.title_pattern, s.ingest_interval_hours,
+               s.company, s.ingest_interval_hours,
                -- Bundle membership per row, so grouping the list needs no
                -- client-side join of every row against every bundle.
                COALESCE(b.groups, '{}') AS groups,
@@ -365,8 +366,6 @@ def _check_source(listings_url: str, company: str | None, title_pattern: str | N
     """The two facts a source row can get wrong silently: a company board on a
     system that never names the company, and a pattern that ingest cannot
     compile. Both would surface only as a failed ingest an hour later."""
-    from core import boards
-
     if boards.kind(listings_url) in boards.NEEDS_COMPANY and not (company or "").strip():
         raise HTTPException(
             400,
@@ -1597,6 +1596,16 @@ def delete_source_group(name: str, user: AuthedUser = Depends(require_admin)):
     return {"ok": True, "deleted": name}
 
 
+@router.get("/sources/{name}")
+def get_source(name: str, user: AuthedUser = Depends(require_admin)):
+    """One source as stored, title_pattern included; the list shape omits it."""
+    row = db.query_one("SELECT * FROM sources WHERE name = %s", (name,))
+    if not row:
+        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown source"})
+    row["kind"] = boards.kind(row["listings_url"])
+    return row
+
+
 @router.patch("/sources/{name}")
 def patch_source(name: str, body: SourceBody, user: AuthedUser = Depends(require_admin)):
     fields = body.model_dump(exclude_unset=True, exclude={"name"})
@@ -1645,8 +1654,6 @@ def switch_sources(body: SourceSwitchBody, user: AuthedUser = Depends(require_ad
     top level is the format (all Workday boards), the level below is a bundle
     (the quant firms), and names catch the rest.
     """
-    from core import boards
-
     if body.kind is None and body.group is None and not body.names:
         raise HTTPException(
             400, detail={"code": "NO_SELECTION", "message": "give a kind, a group, or names"}

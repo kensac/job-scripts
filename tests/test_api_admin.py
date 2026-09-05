@@ -504,12 +504,20 @@ def test_a_board_that_never_names_its_company_needs_one_on_the_source(client, ad
         headers=admin_headers,
     )
     assert r.status_code == 200, r.text
-    row = next(
+    listed = next(
         s
         for s in client.get("/v1/admin/sources", headers=admin_headers).json()["sources"]
         if s["name"] == "palantir"
     )
-    assert (row["company"], row["title_pattern"]) == ("Palantir", "new grad|intern")
+    # The list carries the company but not the pattern; the row does.
+    assert listed["company"] == "Palantir" and "title_pattern" not in listed
+    row = client.get("/v1/admin/sources/palantir", headers=admin_headers).json()
+    assert (row["company"], row["title_pattern"], row["kind"]) == (
+        "Palantir",
+        "new grad|intern",
+        "lever",
+    )
+    assert client.get("/v1/admin/sources/nope", headers=admin_headers).status_code == 404
 
     # A patch is checked against the merged row: blanking the company on a
     # Lever board is refused, and an aggregator never needed one.
