@@ -96,12 +96,77 @@ def _custom_id(text: str) -> str:
     return hashlib.sha1(text.encode("utf-8"), usedforsecurity=False).hexdigest()
 
 
+# A bare two-letter code is a US state or a Canadian province on these boards,
+# and the model got a third of them wrong on the first pass over production:
+# CA became Canada (1,604 postings say CA and mean California), IN India, DE
+# Germany, AR Argentina, ME Britain, ON the US, and a dozen states grew an
+# invented city. Sixty-three codes is a table, not a judgment, so it is one.
+_US_STATES = [
+    "AL",
+    "AK",
+    "AZ",
+    "AR",
+    "CA",
+    "CO",
+    "CT",
+    "DE",
+    "FL",
+    "GA",
+    "HI",
+    "ID",
+    "IL",
+    "IN",
+    "IA",
+    "KS",
+    "KY",
+    "LA",
+    "ME",
+    "MD",
+    "MA",
+    "MI",
+    "MN",
+    "MS",
+    "MO",
+    "MT",
+    "NE",
+    "NV",
+    "NH",
+    "NJ",
+    "NM",
+    "NY",
+    "NC",
+    "ND",
+    "OH",
+    "OK",
+    "OR",
+    "PA",
+    "RI",
+    "SC",
+    "SD",
+    "TN",
+    "TX",
+    "UT",
+    "VT",
+    "VA",
+    "WA",
+    "WV",
+    "WI",
+    "WY",
+    "DC",
+]
+_CA_PROVINCES = ["AB", "BC", "MB", "NB", "NL", "NS", "NT", "NU", "ON", "PE", "QC", "SK", "YT"]
+_CODES = {code: "US" for code in _US_STATES} | {code: "CA" for code in _CA_PROVINCES}
+
+
 def _clean(value: str, length: int) -> str | None:
     v = value.strip()
     return v.upper() if v and len(v) == length and v.isalpha() else None
 
 
 def store(text: str, parsed: LocationExtract, model: str) -> None:
+    code = text.strip().upper()
+    if code in _CODES:
+        parsed = LocationExtract(country=_CODES[code], region=code)
     country = _clean(parsed.country, 2)
     db.execute(
         """

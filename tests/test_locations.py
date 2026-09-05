@@ -164,3 +164,13 @@ def test_a_place_without_a_country_is_stored_empty(clean):
     locations.store("EMEA", locations.LocationExtract(region="CA", city="Somewhere"), "test")
     row = db.query_one("SELECT * FROM locations WHERE text = 'EMEA'")
     assert row["country"] is None and row["region"] is None and row["city"] is None
+
+
+def test_a_bare_state_or_province_code_is_a_table_lookup_not_a_judgment(clean):
+    locations.store("CA", locations.LocationExtract(country="CA", city="Canada"), "gpt-5-nano")
+    locations.store("in", locations.LocationExtract(country="IN"), "gpt-5-nano")
+    locations.store("ON", locations.LocationExtract(country="US", region="ON"), "gpt-5-nano")
+    rows = {r["text"]: r for r in db.query("SELECT * FROM locations")}
+    assert (rows["CA"]["country"], rows["CA"]["region"], rows["CA"]["city"]) == ("US", "CA", None)
+    assert (rows["in"]["country"], rows["in"]["region"]) == ("US", "IN")
+    assert (rows["ON"]["country"], rows["ON"]["region"]) == ("CA", "ON")
