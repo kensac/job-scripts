@@ -45,9 +45,26 @@ _client: Any = None
 _tracer: Any = None
 _logger_provider: Any = None
 _tracer_provider: Any = None
-HOST = socket.gethostname()
+
+
+def _host_name() -> str:
+    """The fleet's name for this host, never the container id. A process's
+    hostname inside Docker is twelve hex characters, and a log page keyed on
+    it is unreadable. JOBTRACKER_HOST_NAME is the host; JOBTRACKER_WORKER_NAME
+    is a fair default only where one worker runs per box and is named for
+    it, because a second worker on a box (hetzner-2 on hetzner) has a worker
+    name that is not a host, and compose sets HOST_NAME there explicitly.
+    The hostname is the last resort."""
+    return (
+        os.environ.get("JOBTRACKER_HOST_NAME")
+        or os.environ.get("JOBTRACKER_WORKER_NAME")
+        or socket.gethostname()
+    )
+
+
+HOST = _host_name()
 # The process's fleet name once init() has run (a worker's WORKER_NAME, the
-# api's hostname); what tells hetzner-worker-2 from oci in every record.
+# api's host name); what tells hetzner-worker-2 from oci in every record.
 INSTANCE = HOST
 # The commit the image was built from (deploy/Dockerfile sets it from the
 # build arg), so a regression is dated to a release rather than to a day.
@@ -59,6 +76,9 @@ DEFAULT_HOST = "https://us.i.posthog.com"
 # failing endpoint cannot generate the records that fail to ship, and this
 # module's, for the same reason one level up.
 _UNSHIPPED_LOGGERS = ("opentelemetry", "jobtracker_telemetry", "urllib3", "posthog")
+# Loggers configured with propagate=False by their owner, so a handler on the
+# root never sees them; they get the shipping handler directly.
+_NON_PROPAGATING_LOGGERS = ("uvicorn", "uvicorn.access", "uvicorn.error")
 # Where psycopg puts parameter values in an exception's text. A log record is
 # not written with an egress policy in mind, and "unnamed portal parameter $5
 # = '...'" is a value from the failing query: an email, a token, a url, text
@@ -144,9 +164,10 @@ def init(service: str = "jobtracker", instance: str | None = None) -> None:
     for a worker, its fleet name (hetzner-worker-2, oci, ...), so the api and
     each worker are distinguishable in every trace and log line as
     service.name and service.instance.id. Safe to call again."""
-    global _client, _tracer, _logger_provider, _tracer_provider
+    global _client, _tracer, _logger_provider, _tracer_provider, HOST
     if _client is not None:
         return
+    HOST = _host_name()
     key = os.environ.get("POSTHOG_API_KEY")
     # Said once at startup either way. A layer that never raises and is a
     # no-op without a key has two silent modes that look identical from
@@ -229,6 +250,12 @@ def init(service: str = "jobtracker", instance: str | None = None) -> None:
     # attached by the SDK. The root logger, so a module needs no registration.
     handler = _shipping_handler(log_level, _logger_provider)
     logging.getLogger().addHandler(handler)
+    # uvicorn's loggers do not propagate to the root, so its request log
+    # (every method, path and status) and its own lifecycle lines never
+    # reached the handler; Kanishk wants every log line shipped, not only
+    # the service's own.
+    for name in _NON_PROPAGATING_LOGGERS:
+        logging.getLogger(name).addHandler(handler)
     logger.info(
         f"telemetry: enabled service={service} host={host} release={RELEASE} "
         f"process_host={HOST} traces_sampled={ratio} logs_from={logging.getLevelName(log_level)}"
