@@ -625,10 +625,12 @@ async def run_batched(
             task_id,
             specs,
             chosen.model,
-            # The shape's own answer, not the call site's. A model that rejects
-            # the value is not eligible, so resolve() has already refused
-            # rather than letting a batch fail whole on a bad parameter.
-            shape.resolved_effort() or "",
+            # The effort the router chose FOR THE MODEL IT CHOSE. The shape's
+            # own resolved_effort() answers for its sanctioned candidate only,
+            # so under an override it sent luna's "none" to nano: every line
+            # of every requirements batch on nano died on a 400 for it, on
+            # 2026-09-04 (21,525 lines) and again on 2026-09-05 (112).
+            str(chosen.params.get("reasoning_effort") or shape.resolved_effort() or ""),
             shape.max_output_tokens,
             hook,
         )
