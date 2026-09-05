@@ -59,21 +59,29 @@ def kind(url: str) -> str:
         return "ashby"
     if host.endswith("myworkdayjobs.com") and "/wday/cxs/" in parsed.path:
         return "workday"
+    if host == "api.smartrecruiters.com":
+        return "smartrecruiters"
+    if host.endswith("oraclecloud.com") and "/hcmRestApi/" in parsed.path:
+        return "oracle"
+    if host == "apply.workable.com" and parsed.path.startswith("/api/"):
+        return "workable"
     if parsed.path.endswith(".md"):
         return "markdown"
     return "sheet_era"
 
 
-# Lever, Ashby and Workday list a company's own openings and never say whose;
-# Greenhouse names the company on every job and the aggregators name it per
-# row.
-NEEDS_COMPANY = frozenset({"lever", "ashby", "workday"})
+# Lever, Ashby, Workday, Oracle and Workable list a company's own openings and
+# never say whose; Greenhouse and SmartRecruiters name the company on every
+# job and the aggregators name it per row.
+NEEDS_COMPANY = frozenset({"lever", "ashby", "workday", "oracle", "workable"})
 
 # A company's own board lists every open posting, so a posting missing from
 # it is closed. An aggregator list trims old rows on its own schedule, so
 # absence there says nothing; those postings close through the reverify
 # sweep instead.
-AUTHORITATIVE = frozenset({"greenhouse", "lever", "ashby", "workday"})
+AUTHORITATIVE = frozenset(
+    {"greenhouse", "lever", "ashby", "workday", "smartrecruiters", "oracle", "workable"}
+)
 
 
 def fetch_listings(url: str, company: str | None = None) -> list[JobPosting]:
@@ -82,6 +90,9 @@ def fetch_listings(url: str, company: str | None = None) -> list[JobPosting]:
         "lever": _lever,
         "ashby": _ashby,
         "workday": _workday,
+        "smartrecruiters": _smartrecruiters,
+        "oracle": _oracle,
+        "workable": _workable,
         "markdown": _markdown,
     }.get(kind(url))
     if fetcher is None:
@@ -253,6 +264,139 @@ def _workday(url: str, company: str) -> list[JobPosting]:
         offset += len(page)
         if not page or offset >= int(data.get("total") or 0):
             return out
+
+
+# SmartRecruiters' public postings API pages 100 at a time whatever limit is
+# asked for; measured on BoschGroup, 4,813 postings, 2026-09-05.
+_SMARTRECRUITERS_PAGE = 100
+
+
+def _smartrecruiters(url: str, company: str) -> list[JobPosting]:
+    """GET https://api.smartrecruiters.com/v1/companies/{id}/postings
+
+    Names the company on every row. The posting's text is one more call per
+    row, which the resolver in core/ats.py makes when the text is needed.
+    """
+    out: list[JobPosting] = []
+    offset = 0
+    while True:
+        resp = _session.get(
+            _with_query(url, limit=str(_SMARTRECRUITERS_PAGE), offset=str(offset)),
+            timeout=TIMEOUT,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        page = data.get("content") or []
+        for j in page:
+            org = j.get("company") or {}
+            loc = j.get("location") or {}
+            p = _posting(
+                org.get("name") or company,
+                j.get("name"),
+                [loc.get("fullLocation") or _place(loc)],
+                f"https://jobs.smartrecruiters.com/{org['identifier']}/{j['id']}"
+                if org.get("identifier") and j.get("id")
+                else None,
+                _iso_ts(j.get("releasedDate")),
+                raw=j,
+            )
+            if p:
+                out.append(p)
+        offset += len(page)
+        if not page or offset >= int(data.get("totalFound") or 0):
+            return out
+
+
+# Oracle Recruiting's candidate-experience API honoured limit=200 on Nokia's
+# site (617 postings) on 2026-09-05.
+_ORACLE_PAGE = 200
+
+
+def _oracle(url: str, company: str) -> list[JobPosting]:
+    """GET https://{host}/hcmRestApi/resources/latest/recruitingCEJobRequisitions?siteNumber=CX_1
+
+    The site number on the listings URL is the one in the tenant's own posting
+    URLs (/hcmUI/CandidateExperience/en/sites/{site}/job/{id}). The finder
+    goes on the URL verbatim because Oracle reads its ; and , unencoded. A row
+    carries a short description and, when the tenant filled them in, its
+    qualifications and responsibilities; the full text is one more call per
+    row, which the resolver makes.
+    """
+    parsed = urlparse(url)
+    site = (parse_qs(parsed.query).get("siteNumber") or ["CX_1"])[0]
+    endpoint = urlunparse(parsed._replace(query="", fragment=""))
+    base = f"https://{parsed.netloc}/hcmUI/CandidateExperience/en/sites/{site}/job/"
+    out: list[JobPosting] = []
+    offset = 0
+    while True:
+        finder = (
+            f"findReqs;siteNumber={site},limit={_ORACLE_PAGE},offset={offset},"
+            "sortBy=POSTING_DATES_DESC"
+        )
+        resp = _session.get(
+            f"{endpoint}?onlyData=true&expand=requisitionList.secondaryLocations&finder={finder}",
+            timeout=TIMEOUT,
+        )
+        resp.raise_for_status()
+        items = resp.json().get("items") or [{}]
+        page = items[0].get("requisitionList") or []
+        for j in page:
+            p = _posting(
+                company,
+                j.get("Title"),
+                [
+                    j.get("PrimaryLocation"),
+                    *[s.get("Name") for s in j.get("secondaryLocations") or []],
+                ],
+                base + str(j["Id"]) if j.get("Id") else None,
+                _iso_ts(f"{j['PostedDate']}T00:00:00+00:00") if j.get("PostedDate") else 0,
+                raw=j,
+            )
+            if p:
+                out.append(p)
+        offset += len(page)
+        if not page or offset >= int(items[0].get("TotalJobsCount") or 0):
+            return out
+
+
+def _workable(url: str, company: str) -> list[JobPosting]:
+    """POST https://apply.workable.com/api/v3/accounts/{account}/jobs
+
+    Ten postings per reply, the next page named by a token in it; no page
+    size parameter is honoured (limit, pageSize and size all tried
+    2026-09-05). The posting's text is one more call per row, which the
+    resolver makes.
+    """
+    account = urlparse(url).path.split("/accounts/", 1)[1].split("/")[0]
+    body: dict = {"query": "", "location": [], "department": [], "worktype": [], "remote": []}
+    out: list[JobPosting] = []
+    while True:
+        resp = _session.post(url, json=body, timeout=TIMEOUT)
+        resp.raise_for_status()
+        data = resp.json()
+        page = data.get("results") or []
+        for j in page:
+            p = _posting(
+                company,
+                j.get("title"),
+                [_place(j.get("location") or {})],
+                f"https://apply.workable.com/{account}/j/{j['shortcode']}/"
+                if j.get("shortcode")
+                else None,
+                _iso_ts(j.get("published")),
+                raw=j,
+            )
+            if p:
+                out.append(p)
+        token = data.get("nextPage")
+        if not page or not token:
+            return out
+        body = {**body, "token": token}
+
+
+def _place(loc: dict) -> str:
+    """City, region, country as the ATS spells them, skipping what is unset."""
+    return ", ".join(str(loc[k]) for k in ("city", "region", "country") if loc.get(k))
 
 
 # --- markdown tables ---------------------------------------------------------

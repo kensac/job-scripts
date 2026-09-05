@@ -201,7 +201,9 @@ listing in `listings`, kept by the pattern or not, with the posting text the
 listing call carried (Greenhouse with `content=true`, Lever, Ashby; the text
 is assembled by the same `core/ats.py` helpers the resolvers use, so it is
 what a per-posting fetch would have returned) and the raw record minus that
-text. Refreshed per pull and aged out by `screened_retention_days` after the
+text. Workday, SmartRecruiters, Oracle Recruiting and Workable list without
+the text, so their postings get it from the matching resolver, one call each,
+when a check needs it. Refreshed per pull and aged out by `screened_retention_days` after the
 board stops listing it. A candidate pattern is judged against it
 (`pattern-preview`) before it replaces the live one; a posting a wider
 pattern admits arrives in `jobs` on the next pull; ingest stores the carried
