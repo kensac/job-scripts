@@ -1871,10 +1871,16 @@ def list_reports(
     rows = db.query(
         f"""
         SELECT r.*, u.email AS reporter_email, u.name AS reporter_name,
-               j.url, j.company, j.title, j.source, j.extraction_status
+               j.url, j.company, j.title, j.source, j.extraction_status,
+               COALESCE(c.status = 'rejected', FALSE) AS posting_closed
         FROM reports r
         JOIN users u ON u.id = r.user_id
         JOIN jobs j ON j.id = r.job_id
+        LEFT JOIN LATERAL (
+            SELECT status FROM ai_queries
+            WHERE url = j.url AND check_type = 'closed' AND status IN ('passed', 'rejected')
+            ORDER BY id DESC LIMIT 1
+        ) c ON TRUE
         {where}
         ORDER BY r.id DESC LIMIT %(limit)s OFFSET %(offset)s
         """,
@@ -1888,6 +1894,8 @@ def list_reports(
         "page_size": page_size,
         "has_more": page * page_size < total,
         "report_kinds": report_kinds(),
+        # The drawer offers "close this posting" only on a build that has it.
+        "can_close_posting": True,
     }
 
 
@@ -1935,6 +1943,41 @@ def patch_catalog_job(job_id: int, body: JobCorrection, user: AuthedUser = Depen
     if not row:
         raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown job"})
     return row
+
+
+class ClosePostingBody(BaseModel):
+    reason: str = Field(default="", max_length=500)
+
+
+@router.post("/jobs/{job_id}/close")
+def close_posting(job_id: int, body: ClosePostingBody, user: AuthedUser = Depends(require_admin)):
+    """An admin asserts the posting is closed, for everyone.
+
+    The same mechanism the closed check uses: a verdict row, latest per url,
+    that every board reads at visibility time. So the posting leaves every
+    board on the next read, nothing re-runs, and the row records who said so
+    and why. Not `active`: that is the catalog's fact about whether the board
+    still lists it, and a board can keep listing a posting that should never
+    have passed.
+    """
+    from api import verdicts as _verdicts
+
+    job = db.query_one("SELECT url, company, title FROM jobs WHERE id = %s", (job_id,))
+    if not job:
+        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown job"})
+    reason = f"closed by admin {user.email}" + (
+        f": {body.reason.strip()}" if body.reason.strip() else ""
+    )
+    _verdicts.record_manual(
+        url=job["url"],
+        check_type="closed",
+        rejected=True,
+        reason=reason,
+        company=job["company"] or "",
+        job_title=job["title"] or "",
+        context="admin",
+    )
+    return {"job_id": job_id, "url": job["url"], "posting_closed": True, "reason": reason}
 
 
 @router.post("/jobs/{job_id}/reparse")
