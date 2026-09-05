@@ -281,3 +281,41 @@ async def test_a_reclassify_cycle_re_asks_every_model_row_and_keeps_hand_correct
     row = db.query_one("SELECT country, region, city, places FROM locations WHERE text = 'Golden'")
     assert (row["country"], row["region"], row["city"]) == ("US", "CO", "Golden")
     assert row["places"] == [{"country": "US", "region": "CO", "city": "Golden"}]
+
+
+def test_a_materialised_board_row_obeys_the_criteria_and_an_acted_on_row_does_not(
+    client, user_headers, clean
+):
+    """The worker writes an empty board row for every passing posting; that
+    row is not a decision, so the person's location and date criteria still
+    apply to it. A status, a note or a date applied is a decision and wins."""
+    uid = _uid(user_headers)
+    sg = _insert_job("src-mat", "https://x.test/mat1", locations=["Singapore"])
+    sg_applied = _insert_job("src-mat", "https://x.test/mat2", locations=["Singapore"])
+    us = _insert_job("src-mat", "https://x.test/mat3", locations=["Austin, TX"])
+    for url in ("https://x.test/mat1", "https://x.test/mat2", "https://x.test/mat3"):
+        _pass_closed(url)
+    _subscribe(uid, "src-mat")
+    for jid in (sg, sg_applied, us):
+        db.execute(
+            "INSERT INTO user_jobs (user_id, job_id) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+            (uid, jid),
+        )
+    db.execute(
+        "UPDATE user_jobs SET status = 'Applied' WHERE user_id = %s AND job_id = %s",
+        (uid, sg_applied),
+    )
+    locations.store("Singapore", locations.LocationExtract(country="SG", city="Singapore"), "t")
+    locations.store(
+        "Austin, TX", locations.LocationExtract(country="US", region="TX", city="Austin"), "t"
+    )
+    locations.store("United States", locations.LocationExtract(country="US"), "t")
+
+    assert _board(client, user_headers, "src-mat") == {sg, sg_applied, us}
+    r = client.put(
+        "/v1/user/settings",
+        json={"criteria": {"included_locations": ["United States"]}},
+        headers=user_headers,
+    )
+    assert r.status_code == 200, r.text
+    assert _board(client, user_headers, "src-mat") == {sg_applied, us}
