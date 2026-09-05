@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -149,6 +150,40 @@ DEFAULT_STATUSES = [
     "No Longer Interested",
 ]
 
+# What a status MEANS, served beside the names so the board never decides
+# "is this over" or "which tone" by matching a name it hand-copied: a status
+# absent here is in play with no outcome. The withdrawn pair mirrors
+# mail_pipeline.WITHDRAWN_STATUSES.
+_STATUS_META: dict[str, tuple[bool, str | None]] = {
+    "Accepted": (True, "won"),
+    "Rejected": (True, "lost"),
+    "No Longer Interested": (True, "withdrawn"),
+    "Withdrawn": (True, "withdrawn"),
+}
+
+
+def status_meta(statuses: list[str]) -> list[dict[str, Any]]:
+    return [
+        {"name": name, "terminal": meta[0], "outcome": meta[1]}
+        for name in statuses
+        for meta in (_STATUS_META.get(name, (False, None)),)
+    ]
+
+
+REPORT_KINDS = ("stale", "wrong_data", "closed", "other")
+_REPORT_LABELS = {
+    "stale": "Posting is stale",
+    "wrong_data": "Details are wrong",
+    "closed": "Posting is closed",
+    "other": "Something else",
+}
+
+
+def report_kinds() -> list[dict[str, str]]:
+    """The kinds a report can carry, with the label the form shows; one copy,
+    served to the board's report modal and the admin reports page."""
+    return [{"kind": k, "label": _REPORT_LABELS[k]} for k in REPORT_KINDS]
+
 
 @router.get("/user/jobs/options")
 def job_options(user: AuthedUser = Depends(require_user)):
@@ -170,7 +205,13 @@ def job_options(user: AuthedUser = Depends(require_user)):
             (user.id,),
         )
     ]
-    return {"statuses": statuses, "not_applied_sentinel": NOT_APPLIED, "sources": sources}
+    return {
+        "statuses": statuses,
+        "status_meta": status_meta(statuses),
+        "not_applied_sentinel": NOT_APPLIED,
+        "sources": sources,
+        "report_kinds": report_kinds(),
+    }
 
 
 @router.get("/user/jobs")
@@ -614,9 +655,6 @@ def upload_links(body: UploadRequest, user: AuthedUser = Depends(require_user)):
                 events.publish_task(task["id"])
         accepted.append({"job_id": row["id"], "url": url})
     return {"accepted": accepted, "rejected": rejected}
-
-
-REPORT_KINDS = ("stale", "wrong_data", "closed", "other")
 
 
 class ReportBody(BaseModel):

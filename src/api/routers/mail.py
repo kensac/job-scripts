@@ -19,6 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from api import db, mail_match, mail_pipeline, rates
+from api import params as params_
 from api.auth import AuthedUser, require_user
 from api.routers import resolve
 from api.routers.admin import require_admin
@@ -47,20 +48,21 @@ NEVER_ATTEMPTED = "never_attempted"
 
 def _where(
     *,
-    kind: str | None,
+    kind: str | list[str] | None,
     matched: bool | None,
-    source: str | None,
+    source: str | list[str] | None,
     prefilter: bool | None,
     q: str | None,
-    method: str | None = None,
+    method: str | list[str] | None = None,
     job_related: bool | None = None,
     classified: bool | None = None,
 ) -> tuple[str, dict[str, Any]]:
     clauses: list[str] = []
     params: dict[str, Any] = {}
-    if kind:
-        clauses.append("ev.kind = %(kind)s")
-        params["kind"] = kind
+    kinds, sources, methods = params_.csv(kind), params_.csv(source), params_.csv(method)
+    if kinds:
+        clauses.append("ev.kind = ANY(%(kind)s)")
+        params["kind"] = kinds
     if matched is not None:
         # NULL application_id is a real recorded outcome - "we looked and
         # found nothing" - so unmatched is a value to filter on, not an
@@ -102,14 +104,20 @@ def _where(
             if job_related
             else "ev.kind = 'not_job_related'"
         )
-    if method == NEVER_ATTEMPTED:
-        clauses.append("mt.match_id IS NULL")
-    elif method:
-        clauses.append("mt.method = %(method)s")
-        params["method"] = method
-    if source:
-        clauses.append("m.source = %(source)s")
-        params["source"] = source
+    if methods:
+        # never_attempted is an absence, not a method value, so it is its own
+        # branch inside the same OR as the named methods.
+        parts = []
+        if NEVER_ATTEMPTED in methods:
+            parts.append("mt.match_id IS NULL")
+        named = [x for x in methods if x != NEVER_ATTEMPTED]
+        if named:
+            parts.append("mt.method = ANY(%(method)s)")
+            params["method"] = named
+        clauses.append("(" + " OR ".join(parts) + ")")
+    if sources:
+        clauses.append("m.source = ANY(%(source)s)")
+        params["source"] = sources
     if prefilter is not None:
         clauses.append("COALESCE(m.prefilter_hit, FALSE) = %(prefilter)s")
         params["prefilter"] = prefilter
@@ -192,6 +200,9 @@ def list_mail(
         # Stated, not derived: a client computing this from total against a
         # corpus that grows between pages can walk forever.
         "has_more": page * page_size < n,
+        "filters": params_.applied(
+            kind=params_.csv(kind), method=params_.csv(method), source=params_.csv(source)
+        ),
     }
 
 
@@ -801,6 +812,12 @@ def pipeline_summary(user: AuthedUser = Depends(require_user)):
         "with_evidence": with_evidence,
         "without_evidence": len(live) - with_evidence,
         "dismissed": len(rows) - len(live),
+        # The stage vocabulary in process order with which stages are over,
+        # so the lenses are read from here rather than copied.
+        "stages": [
+            {"key": key, "label": key.capitalize(), "terminal": key in mail_pipeline.TERMINAL}
+            for key in _STAGE_RANK
+        ],
     }
 
 
@@ -841,10 +858,11 @@ def pipeline(
         rows = [r for r in rows if r["stage"] not in mail_pipeline.TERMINAL]
     if stages:
         rows = [r for r in rows if r["stage"] in stages]
-    if provenance:
-        rows = [r for r in rows if r["source_provenance"] == provenance]
-    if tier:
-        rows = [r for r in rows if r["strongest_tier"] == tier]
+    provenances, tiers = params_.csv(provenance), params_.csv(tier)
+    if provenances:
+        rows = [r for r in rows if r["source_provenance"] in provenances]
+    if tiers:
+        rows = [r for r in rows if r["strongest_tier"] in tiers]
     if silent_days is not None:
         # Applied, and nothing since. `evidence=false` is "no mail at all";
         # this is "no mail LATELY", which is the ghosting question and the one
@@ -885,6 +903,7 @@ def pipeline(
         "applications": page,
         "total": len(rows),
         "has_more": offset + len(page) < len(rows),
+        "filters": params_.applied(provenance=provenances, tier=tiers),
         "actions": mail_pipeline.with_settling(
             db.query(
                 """

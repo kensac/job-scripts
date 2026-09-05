@@ -11,7 +11,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from api import ai, db, events, health, sorting
+from api import params as params_
 from api.auth import AuthedUser, require_user
+from api.routers.jobs import report_kinds
 from core import pricing, reason_taxonomy
 
 logger = logging.getLogger("jobtracker_api")
@@ -562,6 +564,7 @@ def list_tasks(
     status: str | None = None,
     kind: str | None = None,
     source: str | None = None,
+    worker: str | None = None,
     limit: int = 100,
     before_id: int | None = None,
     user: AuthedUser = Depends(require_admin),
@@ -570,18 +573,28 @@ def list_tasks(
     # loads more (offset would shift and duplicate rows).
     limit = max(1, min(limit, 500))
     clauses: list[str] = []
+    statuses, kinds, sources, workers = (
+        params_.csv(status),
+        params_.csv(kind),
+        params_.csv(source),
+        params_.csv(worker),
+    )
     params: dict[str, Any] = {"limit": limit + 1}
-    if status:
-        clauses.append("status = %(status)s")
-        params["status"] = status
-    if kind:
-        clauses.append("kind = %(kind)s")
-        params["kind"] = kind
-    if source:
+    if statuses:
+        clauses.append("status = ANY(%(status)s)")
+        params["status"] = statuses
+    if kinds:
+        clauses.append("kind = ANY(%(kind)s)")
+        params["kind"] = kinds
+    if sources:
         # Ingest tasks are most of the queue at 389 boards; this cuts it to
         # one board's history.
-        clauses.append("payload->>'source' = %(source)s")
-        params["source"] = source
+        clauses.append("payload->>'source' = ANY(%(source)s)")
+        params["source"] = sources
+    if workers:
+        # A health alert about a worker links here.
+        clauses.append("worker = ANY(%(worker)s)")
+        params["worker"] = workers
     if before_id is not None:
         clauses.append("id < %(before_id)s")
         params["before_id"] = before_id
@@ -589,15 +602,22 @@ def list_tasks(
     rows = db.query(
         f"""
         SELECT id, kind, payload, status, attempts, worker, progress, error,
-               created_at, started_at, last_heartbeat, finished_at
+               created_at, started_at, last_heartbeat, finished_at,
+               status = ANY(%(cancellable)s) AS cancellable
         FROM tasks {where} ORDER BY id DESC LIMIT %(limit)s
         """,
-        params,
+        {**params, "cancellable": list(CANCELLABLE)},
     )
     summary = db.query(
         "SELECT kind, status, COUNT(*) AS count FROM tasks GROUP BY kind, status ORDER BY kind, status"
     )
-    return {"rows": rows[:limit], "has_more": len(rows) > limit, "summary": summary}
+    return {
+        "rows": rows[:limit],
+        "has_more": len(rows) > limit,
+        "summary": summary,
+        "filters": params_.applied(status=statuses, kind=kinds, source=sources, worker=workers),
+        "statuses": list(TASK_STATUSES),
+    }
 
 
 AUTHENTIK_URL = os.environ.get("AUTHENTIK_URL", "").rstrip("/")
@@ -728,6 +748,9 @@ def revoke_invite(pk: str, user: AuthedUser = Depends(require_admin)):
 
 # The statuses a task can be cancelled from: it holds a worker, a parent's
 # slot, or a parked batch. Anything else is already over.
+# Every status a task row can carry, in lifecycle order; served on the queue
+# envelope so the summary strip renders tones from data rather than a copy.
+TASK_STATUSES = ("pending", "waiting", "running", "awaiting_batch", "done", "failed", "cancelled")
 CANCELLABLE = ("pending", "waiting", "running", "awaiting_batch")
 
 
@@ -1864,6 +1887,7 @@ def list_reports(
         "page": page,
         "page_size": page_size,
         "has_more": page * page_size < total,
+        "report_kinds": report_kinds(),
     }
 
 
