@@ -16,11 +16,17 @@ from typing import Any
 # stays, having nothing to judge. A string not yet classified matches
 # nothing, for at most the one hourly cycle that classifies it. There is no
 # word match beside this: the raw text cannot know that London is the UK.
+# A string may name several places and so may a criterion ("United States
+# and Canada"); the match is any of the string's against any of the
+# criterion's, at every level the criterion's entry names.
 _PLACE_MATCH = """
               (x.country IS NULL AND x.remote AND l.remote)
-              OR (x.country IS NOT NULL AND x.country = l.country
-                  AND (x.region IS NULL OR x.region = l.region)
-                  AND (x.city IS NULL OR x.city = l.city))"""
+              OR EXISTS (
+                  SELECT 1
+                  FROM jsonb_array_elements(x.places) xp, jsonb_array_elements(l.places) lp
+                  WHERE xp->>'country' = lp->>'country'
+                    AND (xp->>'region' IS NULL OR xp->>'region' = lp->>'region')
+                    AND (xp->>'city' IS NULL OR xp->>'city' = lp->>'city'))"""
 
 SQL = f"""
         AND (%(crit_date)s::date IS NULL OR j.date_posted >= %(crit_date)s::date)

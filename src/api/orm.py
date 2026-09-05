@@ -647,6 +647,10 @@ class Location(Base):
     region: Mapped[str | None] = mapped_column(Text)
     city: Mapped[str | None] = mapped_column(Text)
     remote: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    # Every place the string names, [{country, region, city}], in the order
+    # written. "London, Montreal, Singapore" is three; the columns above are
+    # the first, for display. A criterion matches when any of them does.
+    places: Mapped[list] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
     model: Mapped[str | None] = mapped_column(Text)
     classified_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
 
