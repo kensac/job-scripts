@@ -18,7 +18,8 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 
-from api import budget, db
+from api import budget, db, scoping
+from api import params as params_
 from api.auth import AuthedUser
 from api.routers.admin import require_admin
 from core.store import AI_ELIGIBLE_JOB
@@ -284,6 +285,7 @@ def spend_calls(
     model: str | None = Query(default=None),
     batched: bool | None = Query(default=None),
     unpriced: bool | None = Query(default=None),
+    users: str | None = Query(default=None, alias="user"),
     days: int = Query(default=30, ge=1, le=3650),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
@@ -314,6 +316,10 @@ def spend_calls(
         params["batched"] = batched
     if unpriced is not None:
         where.append("cost_usd IS NULL" if unpriced else "cost_usd IS NOT NULL")
+    ids = scoping.user_ids(users)
+    if ids:
+        where.append(scoping.column("user_id"))
+        params["user_ids"] = ids
     predicate = " AND ".join(where)
 
     totals = _scalars(
@@ -341,4 +347,8 @@ def spend_calls(
         ),
         "totals": totals,
         "window_days": days,
+        "filters": params_.applied(
+            purpose=params_.csv(purpose), model=params_.csv(model), user=scoping.echo(ids)
+        ),
+        "filterable": ["purpose", "model", "batched", "unpriced", "user"],
     }

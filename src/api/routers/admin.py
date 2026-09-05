@@ -7,10 +7,10 @@ import time
 from decimal import Decimal
 from typing import Any, NamedTuple
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from api import ai, db, events, health, sorting
+from api import ai, db, events, health, scoping, sorting
 from api import params as params_
 from api.auth import AuthedUser, require_user
 from api.routers.jobs import report_kinds
@@ -65,9 +65,15 @@ def _where(
     reason_group: str | None = None,
     evidence_missing: bool = False,
     prompt_hash: str | None = None,
+    user_ids: list[int] | None = None,
 ) -> tuple[str, dict]:
     clauses = []
     params: dict = {}
+    if user_ids:
+        # A user's rows are the custom verdicts their filters produced; the
+        # shared checks belong to nobody and fall out of any user's scope.
+        clauses.append(scoping.filters_of())
+        params["user_ids"] = user_ids
     wanted_sources = [s.strip() for s in (sources or "").split(",") if s.strip()]
     if wanted_sources:
         # ai_queries is keyed by url; source lives on the job. Subquery instead
@@ -565,6 +571,7 @@ def list_tasks(
     kind: str | None = None,
     source: str | None = None,
     worker: str | None = None,
+    users: str | None = Query(default=None, alias="user"),
     limit: int = 100,
     before_id: int | None = None,
     user: AuthedUser = Depends(require_admin),
@@ -573,6 +580,7 @@ def list_tasks(
     # loads more (offset would shift and duplicate rows).
     limit = max(1, min(limit, 500))
     clauses: list[str] = []
+    ids = scoping.user_ids(users)
     statuses, kinds, sources, workers = (
         params_.csv(status),
         params_.csv(kind),
@@ -595,6 +603,9 @@ def list_tasks(
         # A health alert about a worker links here.
         clauses.append("worker = ANY(%(worker)s)")
         params["worker"] = workers
+    if ids:
+        clauses.append(scoping.task())
+        params["user_ids"] = ids
     if before_id is not None:
         clauses.append("id < %(before_id)s")
         params["before_id"] = before_id
@@ -609,13 +620,19 @@ def list_tasks(
         {**params, "cancellable": list(CANCELLABLE)},
     )
     summary = db.query(
-        "SELECT kind, status, COUNT(*) AS count FROM tasks GROUP BY kind, status ORDER BY kind, status"
+        f"SELECT kind, status, COUNT(*) AS count FROM tasks "
+        f"{'WHERE ' + scoping.task() if ids else ''} "
+        "GROUP BY kind, status ORDER BY kind, status",
+        params,
     )
     return {
         "rows": rows[:limit],
         "has_more": len(rows) > limit,
         "summary": summary,
-        "filters": params_.applied(status=statuses, kind=kinds, source=sources, worker=workers),
+        "filters": params_.applied(
+            status=statuses, kind=kinds, source=sources, worker=workers, user=scoping.echo(ids)
+        ),
+        "filterable": ["status", "kind", "source", "worker", "user"],
         "statuses": list(TASK_STATUSES),
     }
 
@@ -812,26 +829,37 @@ def cancel_tasks(body: CancelTasksBody, user: AuthedUser = Depends(require_admin
 
 
 @router.get("/batches")
-def list_batches(hours: int = 72, user: AuthedUser = Depends(require_admin)):
+def list_batches(
+    hours: int = 72,
+    users: str | None = Query(default=None, alias="user"),
+    user: AuthedUser = Depends(require_admin),
+):
     """Provider batch jobs: what's pending at OpenAI right now, and recent
-    history. Pending first, then newest."""
+    history. Pending first, then newest. A batch belongs to the user its
+    task ran for; fleet batches belong to nobody."""
     hours = max(1, min(hours, 720))
+    ids = scoping.user_ids(users)
     rows = db.query(
-        """
+        f"""
         SELECT b.id, b.provider_batch_id, b.task_id, b.purpose, b.model,
                b.requests, b.completed, b.failed_count, b.status,
                b.est_tokens, b.input_tokens, b.output_tokens, b.est_cost_usd,
                b.submitted_at, b.updated_at, b.completed_at,
                t.kind AS task_kind, t.status AS task_status
         FROM ai_batches b LEFT JOIN tasks t ON t.id = b.task_id
-        WHERE b.status NOT IN ('completed', 'failed', 'expired', 'cancelled')
-           OR b.submitted_at > now() - make_interval(hours => %(hours)s)
+        WHERE (b.status NOT IN ('completed', 'failed', 'expired', 'cancelled')
+           OR b.submitted_at > now() - make_interval(hours => %(hours)s))
+          {"AND " + scoping.task("t") if ids else ""}
         ORDER BY (b.status IN ('completed', 'failed', 'expired', 'cancelled')), b.id DESC
         LIMIT 200
         """,
-        {"hours": hours},
+        {"hours": hours, "user_ids": ids},
     )
-    return {"rows": rows}
+    return {
+        "rows": rows,
+        "filters": params_.applied(user=scoping.echo(ids)),
+        "filterable": ["user"],
+    }
 
 
 class LocationPut(BaseModel):
@@ -1860,14 +1888,21 @@ def put_config(key: str, body: ConfigPut, user: AuthedUser = Depends(require_adm
 @router.get("/reports")
 def list_reports(
     status: str = "open",
+    users: str | None = Query(default=None, alias="user"),
     page: int = 1,
     page_size: int = 50,
     user: AuthedUser = Depends(require_admin),
 ):
     page = max(1, page)
     page_size = max(1, min(page_size, 200))
-    where = "" if status == "all" else "WHERE r.status = %(status)s"
-    total_row = db.query_one(f"SELECT COUNT(*) AS c FROM reports r {where}", {"status": status})
+    ids = scoping.user_ids(users)
+    clauses = [] if status == "all" else ["r.status = %(status)s"]
+    if ids:
+        clauses.append(scoping.column("r.user_id"))
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    total_row = db.query_one(
+        f"SELECT COUNT(*) AS c FROM reports r {where}", {"status": status, "user_ids": ids}
+    )
     rows = db.query(
         f"""
         SELECT r.*, u.email AS reporter_email, u.name AS reporter_name,
@@ -1884,7 +1919,12 @@ def list_reports(
         {where}
         ORDER BY r.id DESC LIMIT %(limit)s OFFSET %(offset)s
         """,
-        {"status": status, "limit": page_size, "offset": (page - 1) * page_size},
+        {
+            "status": status,
+            "user_ids": ids,
+            "limit": page_size,
+            "offset": (page - 1) * page_size,
+        },
     )
     total = total_row["c"] if total_row else 0
     return {
@@ -1896,6 +1936,10 @@ def list_reports(
         "report_kinds": report_kinds(),
         # The drawer offers "close this posting" only on a build that has it.
         "can_close_posting": True,
+        "filters": params_.applied(
+            status=[] if status in ("all", "") else [status], user=scoping.echo(ids)
+        ),
+        "filterable": ["status", "user"],
     }
 
 
@@ -2064,12 +2108,14 @@ def list_queries(
     reason_group: str | None = None,
     evidence_missing: bool = False,
     prompt_hash: str | None = None,
+    users: str | None = Query(default=None, alias="user"),
     sort: str = "id",
     dir: str = "desc",
     page: int = 1,
     page_size: int = 50,
     user: AuthedUser = Depends(require_admin),
 ):
+    ids = scoping.user_ids(users)
     try:
         where, params = _where(
             check_type,
@@ -2082,6 +2128,7 @@ def list_queries(
             reason_group,
             evidence_missing,
             prompt_hash,
+            user_ids=ids,
         )
     except KeyError:
         # An unknown group key is a bad request, not a server fault. The keys
@@ -2112,7 +2159,31 @@ def list_queries(
         "page": page,
         "page_size": page_size,
         "has_more": page * page_size < total,
+        "filters": params_.applied(
+            check_type=params_.csv(check_type),
+            status=params_.csv(status),
+            config=params_.csv(config),
+            sources=params_.csv(sources),
+            prompt_hash=params_.csv(prompt_hash),
+            reason_group=params_.csv(reason_group),
+            user=scoping.echo(ids),
+        ),
+        "filterable": _QUERIES_FILTERABLE,
     }
+
+
+_QUERIES_FILTERABLE = [
+    "check_type",
+    "status",
+    "config",
+    "url",
+    "q",
+    "sources",
+    "reason_group",
+    "evidence_missing",
+    "prompt_hash",
+    "user",
+]
 
 
 @router.get("/queries/{query_id}")

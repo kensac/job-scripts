@@ -18,7 +18,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
-from api import db, mail_match, mail_pipeline, rates
+from api import db, mail_match, mail_pipeline, rates, scoping
 from api import params as params_
 from api.auth import AuthedUser, require_user
 from api.routers import resolve
@@ -56,10 +56,14 @@ def _where(
     method: str | list[str] | None = None,
     job_related: bool | None = None,
     classified: bool | None = None,
+    user_ids: list[int] | None = None,
 ) -> tuple[str, dict[str, Any]]:
     clauses: list[str] = []
     params: dict[str, Any] = {}
     kinds, sources, methods = params_.csv(kind), params_.csv(source), params_.csv(method)
+    if user_ids:
+        clauses.append(scoping.column("m.user_id"))
+        params["user_ids"] = user_ids
     if kinds:
         clauses.append("ev.kind = ANY(%(kind)s)")
         params["kind"] = kinds
@@ -152,12 +156,14 @@ def list_mail(
     job_related: bool | None = None,
     classified: bool | None = None,
     q: str | None = None,
+    users: str | None = Query(default=None, alias="user"),
     sort: str = "sent_at",
     dir: str = "desc",
     page: int = 1,
     page_size: int = 50,
     user: AuthedUser = Depends(require_admin),
 ):
+    ids = scoping.user_ids(users)
     where, params = _where(
         kind=kind,
         matched=matched,
@@ -167,6 +173,7 @@ def list_mail(
         method=method,
         job_related=job_related,
         classified=classified,
+        user_ids=ids,
     )
     page = max(1, page)
     page_size = max(1, min(page_size, 200))
@@ -201,8 +208,22 @@ def list_mail(
         # corpus that grows between pages can walk forever.
         "has_more": page * page_size < n,
         "filters": params_.applied(
-            kind=params_.csv(kind), method=params_.csv(method), source=params_.csv(source)
+            kind=params_.csv(kind),
+            method=params_.csv(method),
+            source=params_.csv(source),
+            user=scoping.echo(ids),
         ),
+        "filterable": [
+            "kind",
+            "matched",
+            "source",
+            "prefilter",
+            "method",
+            "job_related",
+            "classified",
+            "q",
+            "user",
+        ],
     }
 
 

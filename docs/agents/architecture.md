@@ -383,3 +383,11 @@ checked against the caller, not assumed from the path.
 
 Any authenticated request auto-provisions a user row. Treat authentication as a
 write.
+
+**Every admin list that returns rows a person owns takes `user=<id>[,<id>]`,
+and the predicate per table lives in `api/scoping.py`.** Rows, summaries and
+totals narrow together. The envelope carries `filterable`, the parameters the
+endpoint filters on, beside the `filters` echo, so a client renders a User
+control from the former. An endpoint with no user dimension (fleet workers,
+the shared checks, source analytics) leaves `user` out of `filterable`
+rather than pretending.
