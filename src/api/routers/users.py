@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 from api import ai, budget, crypto, db
 from api.auth import AuthedUser, require_service, require_user
-from api.models import ApiKeyPut, SettingsPut
+from api.models import ApiKeyPut, Criteria, SettingsPut
 from core import providers as core_providers
 
 router = APIRouter()
@@ -254,7 +254,15 @@ def get_settings(user: AuthedUser = Depends(require_user)):
         "FROM user_settings WHERE user_id = %s",
         (user.id,),
     )
-    return {**(row or _SETTINGS_DEFAULTS), **_effective_model(user)}
+    settings = {**(row or _SETTINGS_DEFAULTS)}
+    # Criteria in their full shape, defaults filled, whatever the row holds:
+    # a client that reads support for a criterion by the key's presence
+    # must not depend on what this user happened to save before the key
+    # existed. A stale key the model no longer knows drops out here too.
+    settings["criteria"] = Criteria.model_validate(settings.get("criteria") or {}).model_dump(
+        mode="json"
+    )
+    return {**settings, **_effective_model(user)}
 
 
 _SETTINGS_DEFAULTS = {
@@ -341,7 +349,12 @@ def put_settings(body: SettingsPut, user: AuthedUser = Depends(require_user)):
             "WHERE user_id = %s AND digest_token IS NULL",
             (_secrets.token_urlsafe(24), user.id),
         )
-    return {"ok": True}
+    # The saved settings, in the shape GET serves them, so a client can read
+    # what the write did from the write. The deployed page read criteria off
+    # this response to decide whether a criterion was supported, found no
+    # criteria in {"ok": true}, and told Kanishk his include list was
+    # unsupported by an API that had just stored it.
+    return {"ok": True, **get_settings(user)}
 
 
 @router.get("/digest/unsubscribe")
