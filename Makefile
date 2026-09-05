@@ -16,6 +16,7 @@ check:          ## everything CI gates on: lint, format, types, compile, tests
 	ruff format --check src tests
 	pyright
 	python -m compileall -q src
+	@if git grep -In "—" -- . ':!Makefile' ; then echo "em dash found: write a comma, a colon, or a new sentence"; exit 1; fi
 	pytest -q tests
 
 lint:           ## report lint findings (add ARGS=--fix to apply)

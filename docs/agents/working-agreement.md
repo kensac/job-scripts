@@ -76,8 +76,7 @@ A caveat that lives only in a side conversation does not exist. Put it in the
 report, because the report is the record.
 
 No em dashes anywhere in the repository: code, comments, strings, docs, tests.
-Write a comma, a colon, or a new sentence instead. `make check` does not police
-this; a reviewer does.
+Write a comma, a colon, or a new sentence instead. `make check` fails on one.
 
 ## Attribution
 
