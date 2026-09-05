@@ -144,6 +144,17 @@ def test_a_board_switched_off_under_a_subscriber_still_saves(client, user_header
     # A delta that keeps holding it, and one that leaves it.
     r = client.patch("/v1/user/sources", json={"add": ["ashby_ramp"]}, headers=user_headers)
     assert r.status_code == 200 and r.json()["enabled"] == ["ashby_ramp", "fulltime", "gh_stripe"]
+    # The page lists the held off board so it can be left, flagged, and not a
+    # switched-off board nobody holds; "only these" keeps it too.
+    db.execute("UPDATE sources SET active = false WHERE name = 'ashby_ramp'")
+    client.patch("/v1/user/sources", json={"remove": ["ashby_ramp"]}, headers=user_headers)
+    listed = {
+        s["name"]: s for s in client.get("/v1/sources", headers=user_headers).json()["sources"]
+    }
+    assert listed["fulltime"]["active"] is False and listed["fulltime"]["enabled"] is True
+    assert listed["gh_stripe"]["active"] is True and "ashby_ramp" not in listed
+    r = client.post("/v1/user/sources/apply-group", json={"name": "top_tech"}, headers=user_headers)
+    assert r.status_code == 200 and r.json()["enabled"] == ["fulltime", "gh_stripe"]
     r = client.patch("/v1/user/sources", json={"remove": ["fulltime"]}, headers=user_headers)
     assert r.status_code == 200 and r.json()["removed"] == ["fulltime"]
     # Once let go, an off board cannot be picked up again until it is on.

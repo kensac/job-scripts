@@ -51,14 +51,27 @@ def apply_source_group(body: ApplyGroupBody, user: AuthedUser = Depends(require_
     ]
     with db.pool.connection() as conn:
         if body.mode == "replace":
-            conn.execute("DELETE FROM user_sources WHERE user_id = %s", (user.id,))
+            # "Only these" replaces what a person could have chosen. A held
+            # board that is switched off is not on offer, so it is kept, the
+            # same as a save from the page keeps it.
+            conn.execute(
+                "DELETE FROM user_sources WHERE user_id = %s "
+                "AND source IN (SELECT name FROM sources WHERE active)",
+                (user.id,),
+            )
         for source in members:
             conn.execute(
                 "INSERT INTO user_sources (user_id, source) VALUES (%s, %s) ON CONFLICT DO NOTHING",
                 (user.id, source),
             )
     visibility.request_refresh(user.id)
-    return {"ok": True, "enabled": members, "mode": body.mode}
+    enabled = [
+        r["source"]
+        for r in db.query(
+            "SELECT source FROM user_sources WHERE user_id = %s ORDER BY source", (user.id,)
+        )
+    ]
+    return {"ok": True, "enabled": enabled, "mode": body.mode}
 
 
 class SourceRequestBody(BaseModel):
@@ -95,13 +108,15 @@ def list_own_source_requests(user: AuthedUser = Depends(require_user)):
 def list_sources(user: AuthedUser = Depends(require_user)):
     rows = db.query(
         """
-        SELECT s.name, s.listings_url, s.description, s.company,
+        SELECT s.name, s.listings_url, s.description, s.company, s.active,
                us.user_id IS NOT NULL AS enabled,
                COALESCE((SELECT array_agg(g.name ORDER BY g.name) FROM source_groups g
                          WHERE g.active AND s.name = ANY(g.members)), '{}') AS groups
         FROM sources s
         LEFT JOIN user_sources us ON us.source = s.name AND us.user_id = %s
-        WHERE s.active
+        -- Every board on offer, plus every board this person holds that is
+        -- switched off: a held row has to be on the page to be left.
+        WHERE s.active OR us.user_id IS NOT NULL
         ORDER BY s.name
         """,
         (user.id,),
