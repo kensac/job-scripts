@@ -339,9 +339,16 @@ session goes) over an address match.
 
 ## Visibility and ownership
 
-Job visibility is a read-time conjunctive predicate, spelled in one place and
-formatted into per-object routes. Never write a fresh "can this user see this"
-predicate.
+Job visibility is one predicate, spelled once (`api.visibility.FULL`), and
+it is COMPUTED, not evaluated on read: a worker runs it per person into
+`board_visible` and every board read, per-object route and requirements
+slice goes through `api.visibility.FAST`, a lookup. It was evaluated on every
+read until 2026-09-05, at 2 to 7 seconds a sort. Membership changes when a
+preference changes or a verdict lands, so a preference write asks for a
+recompute within a minute and the scheduler asks for everyone every
+`board_refresh_minutes` (persisted config, seeded 3). A posting the person
+uploaded or acted on is visible without waiting. Never write a fresh "can
+this user see this" predicate, and never evaluate FULL on a request.
 
 **A board row is a grant only when the person acted on it.** The worker
 materialises an empty row for every posting that passes a person's filters;

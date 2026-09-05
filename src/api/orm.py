@@ -200,6 +200,23 @@ class JobSkill(Base):
     skill: Mapped[str] = mapped_column(Text)
 
 
+class BoardVisible(Base):
+    """The computed membership of a person's board: every job the full
+    visibility predicate admits, written by the recompute_board task and read
+    by every board request. See api.visibility."""
+
+    __tablename__ = "board_visible"
+    __table_args__ = (Index("idx_board_visible_user", "user_id", "computed_at"),)
+
+    user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    job_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("jobs.id", ondelete="CASCADE"), primary_key=True
+    )
+    computed_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+
+
 class UserJob(Base):
     __tablename__ = "user_jobs"
 

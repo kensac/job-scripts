@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Request
 
-from api import db, metrics, telemetry
+from api import db, metrics, telemetry, visibility
 from api.auth import require_user
 from api.routers import (
     admin,
@@ -38,6 +38,10 @@ async def _lifespan(app: FastAPI):
     import core.store  # noqa: F401  (creates ai_queries on import)
 
     db.init_schema()
+    # Every person's board membership is recomputed once per process start,
+    # so a roll never serves an empty board for longer than a worker's poll.
+    for u in db.query("SELECT id FROM users"):
+        visibility.request_refresh(u["id"])
     metrics.serve()
     telemetry.init("jobtracker-api")
     yield

@@ -196,6 +196,18 @@ def schedule_ingest_cycle() -> None:
             {"source": s["name"], "cycle": cycle},
             dedupe_key=f"ingest:{s['name']}:{cycle}",
         )
+    # Board membership for every person, every board_refresh_minutes, so new
+    # verdicts reach a board without anyone touching a preference. Bucketed
+    # like the ingest cycle; a person's own preference write asks sooner.
+    refresh = max(1, int(db.get_config("board_refresh_minutes")))
+    rbucket = now.replace(minute=(now.minute // refresh) * refresh, second=0, microsecond=0)
+    rcycle = rbucket.strftime("%Y-%m-%dT%H:%M")
+    for u in db.query("SELECT id FROM users ORDER BY id"):
+        enqueue(
+            "recompute_board",
+            {"user_id": u["id"], "cycle": rcycle},
+            dedupe_key=f"board:{u['id']}:{rcycle}",
+        )
     day = now.strftime("%Y-%m-%d")
     enqueue("reverify_open", {"cycle": day}, dedupe_key=f"reverify:{day}")
     enqueue("sync_gmail", {"cycle": cycle}, dedupe_key=f"gmail:{cycle}")

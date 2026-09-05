@@ -14,6 +14,20 @@ from psycopg_pool import ConnectionPool
 
 dotenv.load_dotenv()
 
+# Instrumented BEFORE the pool opens its first connection: the instrumentor
+# wraps connections as they are made, so a connection opened here at import
+# and instrumented later in telemetry.init produced no spans for the queries
+# it ran. Kanishk's trace of a 7 s board read showed the count query and then
+# six seconds of nothing, which was the page query on that first connection.
+# Without a tracer provider yet this is a no-op that becomes live once
+# telemetry.init sets one.
+try:
+    from opentelemetry.instrumentation.psycopg import PsycopgInstrumentor
+
+    PsycopgInstrumentor().instrument()
+except ImportError:  # pragma: no cover - the exporter is a runtime dependency
+    pass
+
 pool = ConnectionPool(
     os.environ["DATABASE_URL"],
     min_size=1,
@@ -91,6 +105,10 @@ _APP_CONFIG_SEED = [
     # 8,735 strings; set low for a first look at GET /admin/locations, then
     # raised to clear it in one cycle.
     ("classify_locations_per_cycle", 10000),
+    # Minutes between recomputes of every person's board membership. A
+    # preference write recomputes within a minute regardless; this is how
+    # long a new verdict waits to reach a board. Kanishk: minutes, never a day.
+    ("board_refresh_minutes", 3),
 ]
 # One source of truth for a seeded key's value: the seed writes it, and
 # get_config falls back to it when the row is missing.

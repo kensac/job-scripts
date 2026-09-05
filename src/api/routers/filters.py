@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from psycopg.errors import UniqueViolation
 from pydantic import BaseModel
 
-from api import ai, budget, db, events
+from api import ai, budget, db, events, visibility
 from api.auth import AuthedUser, require_user
 from api.models import FilterCreate, FilterPatch, ImprovePromptRequest
 from core.filters import ON_AMBIGUOUS_VALUES, build_custom_instructions, compute_prompt_hash
@@ -93,6 +93,7 @@ def create_filter(body: FilterCreate, user: AuthedUser = Depends(require_user)):
         task_id, blocked = _enqueue(
             user, "run_filter", {"user_id": user.id, "filter_id": row["id"]}
         )
+    visibility.request_refresh(user.id)
     return {**row, "task_id": task_id, "run_blocked": blocked}
 
 
@@ -131,12 +132,14 @@ def patch_filter(filter_id: int, body: FilterPatch, user: AuthedUser = Depends(r
         task_id, blocked = _enqueue(
             user, "run_filter", {"user_id": user.id, "filter_id": filter_id}
         )
+    visibility.request_refresh(user.id)
     return {**row, "task_id": task_id, "run_blocked": blocked}
 
 
 @router.delete("/user/filters/{filter_id}")
 def delete_filter(filter_id: int, user: AuthedUser = Depends(require_user)):
     db.execute("DELETE FROM user_filters WHERE id = %s AND user_id = %s", (filter_id, user.id))
+    visibility.request_refresh(user.id)
     return {"ok": True}
 
 
@@ -315,6 +318,7 @@ def adopt_preset(preset_id: int, user: AuthedUser = Depends(require_user)):
     )
     assert row is not None
     task_id, blocked = _enqueue(user, "run_filter", {"user_id": user.id, "filter_id": row["id"]})
+    visibility.request_refresh(user.id)
     return {**row, "task_id": task_id, "run_blocked": blocked}
 
 
