@@ -66,6 +66,10 @@ SUBJECT_PURPOSE = "purpose"
 SUBJECT_WORKER = "worker"
 # An applicant-tracking system family (greenhouse, lever, ...), not one host.
 SUBJECT_ATS = "ats"
+# A task KIND (extract_comp), not a task id.
+SUBJECT_TASK_KIND = "task_kind"
+# One of the detector sections in this module, when it is the thing broken.
+SUBJECT_DETECTOR = "detector"
 
 _SUBJECT_KINDS = {
     "ats_text_collapse": SUBJECT_SOURCE,
@@ -82,6 +86,12 @@ _SUBJECT_KINDS = {
     "queue_stalled": SUBJECT_WORKER,
     "ingest_backlog": SUBJECT_TASK,
     "fleet_mixed_release": SUBJECT_WORKER,
+    "source_pattern_admits_all": SUBJECT_SOURCE,
+    "sweep_did_nothing": SUBJECT_TASK_KIND,
+    "task_kind_failing": SUBJECT_TASK_KIND,
+    "task_requeued_forever": SUBJECT_TASK,
+    "alerts_unnotified": SUBJECT_DETECTOR,
+    "detector_failed": SUBJECT_DETECTOR,
 }
 
 
@@ -427,15 +437,149 @@ def detect() -> list[dict[str, Any]]:
             }
         )
 
-    found.extend(_detect_boards())
-    found.extend(_detect_queue())
-    found.extend(_detect_fleet())
+    # Each section on its own: on 2026-09-04 three detectors failed in three
+    # ways on one day, the exception took the whole task down, and the open
+    # alerts auto-resolved because nothing re-observed them. A raising
+    # detector looked exactly like all clear. Now it is an alert of its own.
+    for section in (_detect_boards, _detect_queue, _detect_fleet, _detect_silent):
+        try:
+            found.extend(section())
+        except Exception as exc:
+            logger.exception(f"health detector {section.__name__} raised")
+            found.append(
+                {
+                    "kind": "detector_failed",
+                    "subject": section.__name__,
+                    "severity": "critical",
+                    "message": (
+                        f"{section.__name__} raised {type(exc).__name__}: {str(exc)[:200]}. "
+                        "Every alert it owns is unobserved until it runs again."
+                    ),
+                    "detail": {"error": str(exc)[:1000]},
+                }
+            )
     return found
 
 
 # A worker whose last report is older than this is not idle, it is gone, and
 # the reaper's concern rather than this detector's. Two housekeeping ticks.
 WORKER_FRESH = "2 minutes"
+
+
+def _detect_silent() -> list[dict[str, Any]]:
+    """Work that reported success while doing nothing, from the audit of
+    2026-09-05. Every check here is one indexed pass over tasks or the tiny
+    health_alerts table, and every one can be made to fire in a test."""
+    found: list[dict[str, Any]] = []
+
+    # A sweep that finished done with work in front of it and none written.
+    # comp and requirements used to count every line as done; now a line
+    # counts only when its row lands, so this reads the honest number.
+    for r in db.query(
+        """
+        SELECT kind, COUNT(*) AS n, MAX(id) AS task_id,
+               MAX((progress->>'total')::int) AS total
+        FROM tasks
+        WHERE status = 'done' AND finished_at > now() - interval '24 hours'
+          AND (progress->>'total')::int > 0 AND (progress->>'done')::int = 0
+        GROUP BY kind
+        """
+    ):
+        found.append(
+            {
+                "kind": "sweep_did_nothing",
+                "subject": r["kind"],
+                "severity": "warning",
+                "message": (
+                    f"{r['n']} {r['kind']} sweep(s) in 24h finished done with up to "
+                    f"{r['total']} items in front of them and none completed (latest task "
+                    f"{r['task_id']}). The work was selected, paid for if batched, and "
+                    "nothing was written."
+                ),
+                "detail": dict(r),
+            }
+        )
+
+    # A kind failing repeatedly. ingest_source has its own per-board and
+    # per-host detectors; everything else failed in silence: a rotated
+    # encryption key fails probe_credentials three times an hour with no
+    # invalid_at and no alert.
+    for r in db.query(
+        """
+        SELECT kind, COUNT(*) AS n, MAX(LEFT(error, 200)) AS sample_error
+        FROM tasks
+        WHERE status = 'failed' AND finished_at > now() - interval '3 hours'
+          AND kind <> 'ingest_source'
+        GROUP BY kind HAVING COUNT(*) >= 3
+        """
+    ):
+        found.append(
+            {
+                "kind": "task_kind_failing",
+                "subject": r["kind"],
+                "severity": "critical",
+                "message": (
+                    f"{r['n']} {r['kind']} tasks failed in 3h; last error: "
+                    f"{r['sample_error'] or ''}"
+                ),
+                "detail": dict(r),
+            }
+        )
+
+    # A task the reaper keeps handing back. A graceful exit requeues with
+    # attempts - 1, so a task that kills its worker every run never reaches
+    # the attempt ceiling and never fails.
+    for r in db.query(
+        """
+        SELECT id, kind, attempts, created_at
+        FROM tasks
+        WHERE status IN ('pending', 'running') AND attempts >= 3
+          AND created_at < now() - interval '6 hours'
+        """
+    ):
+        found.append(
+            {
+                "kind": "task_requeued_forever",
+                "subject": str(r["id"]),
+                "severity": "warning",
+                "message": (
+                    f"task {r['id']} ({r['kind']}) is on attempt {r['attempts']} and has "
+                    f"been in the queue since {r['created_at']:%Y-%m-%d %H:%M}. Nothing "
+                    "ends a task that keeps coming back."
+                ),
+                "detail": {"id": r["id"], "kind": r["kind"], "attempts": r["attempts"]},
+            }
+        )
+
+    # An alert nobody was told about. _notify returns quietly when mail is not
+    # configured or no admin has an address; notified_at was written but read
+    # nowhere.
+    from api import mail
+
+    if mail.configured():
+        r = db.query_one(
+            """
+            SELECT COUNT(*) AS n, MIN(first_seen) AS oldest
+            FROM health_alerts
+            WHERE resolved_at IS NULL AND notified_at IS NULL
+              AND first_seen < now() - interval '1 hour'
+            """
+        )
+        if r and r["n"]:
+            found.append(
+                {
+                    "kind": "alerts_unnotified",
+                    "subject": "_notify",
+                    "severity": "warning",
+                    "message": (
+                        f"{r['n']} open alert(s) were never mailed, the oldest from "
+                        f"{r['oldest']:%Y-%m-%d %H:%M}. Mail is configured, so the send "
+                        "itself is failing or no admin has an address."
+                    ),
+                    "detail": {"n": r["n"]},
+                }
+            )
+    return found
 
 
 def _detect_fleet() -> list[dict[str, Any]]:
@@ -671,6 +815,21 @@ def _detect_boards() -> list[dict[str, Any]]:
                         f"{r['source']} fetched fine and returned 0 postings; it returned "
                         f"{r['best_prior_fetched']} within the prior week. The feed moved, "
                         "the board token changed, or the table shape did."
+                    ),
+                    "detail": dict(r),
+                }
+            )
+        elif r["fetched"] >= 50 and r["kept"] == r["fetched"] and r["title_pattern"]:
+            found.append(
+                {
+                    "kind": "source_pattern_admits_all",
+                    "subject": r["source"],
+                    "severity": "warning",
+                    "message": (
+                        f"{r['source']} returned {r['fetched']} postings and its title "
+                        "pattern admitted every one. A pattern that drops nothing on a "
+                        "company board is a pattern that stopped matching, and every "
+                        "admitted posting is paid for."
                     ),
                     "detail": dict(r),
                 }

@@ -200,6 +200,15 @@ The list shape (`GET /admin/sources`) carries everything but `title_pattern`;
 one row (`GET /admin/sources/{name}`) carries it. At 1,732 sources the
 pattern was more than half of a 1.8 MB body, and only the edit form reads it.
 
+**A detector that raises is an alert.** Each section of `health.detect()`
+runs on its own; one that raises opens `detector_failed` for itself rather
+than taking the hour's run down and letting every open alert auto-resolve.
+The `_detect_silent` section watches for success that did nothing: a sweep
+finished with work in front of it and none completed, a task kind failing
+three times in three hours, a task the reaper keeps handing back, an open
+alert never mailed, and a pattern that admits every posting. A batched
+sweep counts a line as done only when its row lands.
+
 **A board that limits by address is paced, not retried.** apply.workable.com
 answered 429 to 143 of 172 boards the hour they first pulled together; the
 fetcher now spaces its requests to that host six seconds apart per process.

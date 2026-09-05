@@ -193,7 +193,11 @@ async def handle_extract_comp(task_id: int, payload: dict[str, Any]) -> None:
             )
         # Failed/errored lines stay comp_extracted=false so the next daily
         # sweep retries them. Batch operations are idempotent by re-sweep.
-        done += 1
+        # Only a written row counts as done: counted unconditionally, a sweep
+        # whose every line failed reported done == total and nothing could
+        # tell (audit of 2026-09-05).
+        if parsed_ok:
+            done += 1
         if done % 200 == 0:
             _set_progress(task_id, done, len(specs), "comp extracted")
     _set_progress(task_id, done, len(specs), "comp extracted")
