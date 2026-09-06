@@ -107,6 +107,24 @@ def refused(host: str, egress: str | None = None) -> datetime.datetime:
     return datetime.datetime.now(datetime.UTC) + datetime.timedelta(seconds=REFUSED_MIN_SECONDS)
 
 
+# A refusal count with no success behind it is a block, not a pace: hetzner
+# was 0 for 18 against Workable while four other addresses were 15 for 15.
+BLOCKED_AFTER = 3
+# How long a refused pull waits before any open address may take it.
+REQUEUE_SECONDS = 5.0
+
+
+def soon() -> datetime.datetime:
+    return datetime.datetime.now(datetime.UTC) + datetime.timedelta(seconds=REQUEUE_SECONDS)
+
+
+def blocked(ok: int, refused: int) -> bool:
+    """Refused repeatedly with nothing ever accepted: the address is shut out
+    of the host, and no gap will open it. The slot still reopens at the cap,
+    so the address probes once in a while and a lifted block shows as ok > 0."""
+    return ok == 0 and refused >= BLOCKED_AFTER
+
+
 def succeeded(host: str, egress: str | None = None) -> None:
     db.execute(
         """

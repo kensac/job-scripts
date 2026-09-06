@@ -128,7 +128,10 @@ async def test_a_429_from_the_board_defers_the_pull_and_teaches_the_budget(monke
     b = _budget("apply.workable.com", hosts.EGRESS_GROUP)
     # The seeded floor for Workable is 20 s, so the first refusal doubles it.
     assert b["refused"] == 1 and b["pace_seconds"] == 40
-    assert excinfo.value.not_before == b["next_allowed_at"]
+    # This address's slot is closed for its gap, but the pull itself comes
+    # back within seconds so an open address can take it.
+    assert b["next_allowed_at"] > excinfo.value.not_before
+    assert (excinfo.value.not_before - datetime.datetime.now(datetime.UTC)).total_seconds() < 10
 
 
 def test_an_idle_worker_beside_only_throttled_or_deferred_work_is_not_stalled(f):
@@ -176,3 +179,16 @@ def test_the_admin_view_carries_the_budgets_and_the_pulls_waiting_per_host(clien
     assert row["host"] == "apply.workable.com" and row["closed"] is True and row["refused"] == 2
     waiting = {d["host"]: d["count"] for d in body["deferred"]}
     assert waiting == {"apply.workable.com": 2, "api.lever.co": 1}
+
+
+def test_an_address_refused_with_nothing_accepted_is_blocked_and_alerts():
+    assert not hosts.blocked(0, 2) and not hosts.blocked(1, 50) and hosts.blocked(0, 3)
+    db.execute(
+        "INSERT INTO host_budget (host, egress_group, pace_seconds, ok, refused) VALUES "
+        "('apply.workable.com', 'hetzner', 160, 0, 4), ('apply.workable.com', 'oci', 20, 9, 0), "
+        "('api.lever.co', 'hetzner', 30, 0, 1)"
+    )
+    alerts = [a for a in health._detect_silent() if a["kind"] == "address_blocked_by_host"]
+    assert [(a["subject"], a["detail"]["addresses"]) for a in alerts] == [
+        ("apply.workable.com", ["hetzner"])
+    ]

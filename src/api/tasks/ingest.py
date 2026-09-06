@@ -42,9 +42,13 @@ async def handle_ingest_source(task_id: int, payload: dict[str, Any]) -> None:
     except Exception as exc:
         response = getattr(exc, "response", None)
         if getattr(response, "status_code", None) == 429:
-            # The host said too many for this address: the gap doubles, the
-            # pull waits it out, and it is not a failure of the board.
-            raise Deferred(hosts.refused(host)) from exc
+            # The host said too many for THIS address: its gap doubles and its
+            # slot closes, but the pull itself goes back almost at once, so an
+            # address the host is not refusing takes it. Holding the pull
+            # until the refused address reopened kept work waiting on the one
+            # address that could not do it (hetzner, 0 for 18, 2026-09-06).
+            hosts.refused(host)
+            raise Deferred(hosts.soon()) from exc
         # The board itself failed to answer: the source, the host and the
         # HTTP status when there was one, so a board going dark is a query
         # rather than a traceback search.
