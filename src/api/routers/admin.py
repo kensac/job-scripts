@@ -1814,6 +1814,13 @@ _CONFIG_KEYS: dict[str, _Key] = {
         "drip-fed at this rate instead of being pulled off; the fetch-failure "
         "alert names the host.",
     ),
+    # Read by core.boards through the ingest task.
+    "ingest_host_pace_seconds": _Key(
+        dict,
+        "Host to seconds between listing requests, per worker process. A board "
+        "host that limits by address (apply.workable.com) is paced at this gap "
+        "instead of being pulled off; the ingest_host_failing alert names the host.",
+    ),
     # Read by api.verdicts.refresh_content.
     "fetch_engine": _Key(
         str,

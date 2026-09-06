@@ -80,6 +80,10 @@ _APP_CONFIG_SEED = [
     # after 12 in an hour) is added here, from the alert, at the rate it
     # tolerates. Hosts are data, so none is written into code.
     ("fetch_host_limits", {}),
+    # Host -> seconds between LISTING requests per worker process. Workable
+    # limits by address and two workers share hetzner's; six seconds was not
+    # enough, twenty holds. Read by core.boards through the ingest task.
+    ("ingest_host_pace_seconds", {"apply.workable.com": 20}),
     # Which engine fetches a posting page after the ATS resolvers decline.
     # static_first tries a browserless fetch with a real Chrome fingerprint
     # and falls through to the browser unless the page plainly came back

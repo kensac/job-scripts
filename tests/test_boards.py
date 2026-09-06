@@ -494,7 +494,39 @@ def test_workable_paces_its_requests(monkeypatch):
         boards._session, "post", lambda url, json, **kw: _Resp({"total": 0, "results": []})
     )
     boards._last_call.clear()
+    boards.set_pace({"apply.workable.com": 6})
     boards.fetch_listings("https://apply.workable.com/api/v3/accounts/a/jobs", "A")
     boards.fetch_listings("https://apply.workable.com/api/v3/accounts/b/jobs", "B")
     # The first call goes straight out; the second waits out the six seconds.
     assert slept and 5.0 < slept[-1] <= 6.0
+
+
+def test_a_nul_byte_in_a_posting_is_dropped_before_it_reaches_jsonb():
+    p = boards._posting(
+        "Northwell",
+        "Nurse\x00",
+        ["NY"],
+        "https://x.test/1",
+        0,
+        raw={
+            "Id": "1",
+            "ShortDescriptionStr": "care\x00giver",
+            "secondaryLocations": [{"Name": "a\x00b"}],
+        },
+        description="text\x00here",
+    )
+    assert p is not None and p.title == "Nurse" and p.description == "texthere"
+    assert p.raw == {
+        "Id": "1",
+        "ShortDescriptionStr": "caregiver",
+        "secondaryLocations": [{"Name": "ab"}],
+    }
+
+
+def test_an_unpaced_host_is_not_slowed(monkeypatch):
+    slept = []
+    monkeypatch.setattr(boards.time, "sleep", slept.append)
+    boards.set_pace({})
+    boards._pace("apply.workable.com")
+    boards._pace("apply.workable.com")
+    assert slept == []
