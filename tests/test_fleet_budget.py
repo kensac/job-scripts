@@ -156,6 +156,7 @@ def test_every_task_is_covered_by_the_ceiling():
         "verify",
         "mail_classify",
         "mail_classify_backfill",
+        "application",
     }
 
 

@@ -10,6 +10,7 @@ from api.auth import require_user
 from api.routers import (
     admin,
     analytics,
+    application,
     companies,
     filter_insights,
     filters,
@@ -78,6 +79,7 @@ async def _capture_unhandled(request: Request, call_next):
 app.include_router(users.router, prefix="/v1")
 app.include_router(views.router, prefix="/v1", dependencies=[Depends(require_user)])
 app.include_router(jobs.router, prefix="/v1")
+app.include_router(application.router, prefix="/v1")
 app.include_router(filters.router, prefix="/v1")
 app.include_router(sources.router, prefix="/v1")
 app.include_router(stats.router, prefix="/v1")

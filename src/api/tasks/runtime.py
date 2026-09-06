@@ -593,6 +593,8 @@ async def run_batched(
     task_id: int,
     shape: TaskShape,
     specs: list,
+    *,
+    charged_to_user: bool = False,
 ) -> tuple[dict[str, Any], Choice]:
     """The one way a scheduled handler runs a batch.
 
@@ -614,11 +616,17 @@ async def run_batched(
     Anything recorded here in future - prompt identity, output samples - lands
     for every caller at once rather than being added to four files and missed
     in a fifth.
+
+    `charged_to_user` is for a shape run on one person's behalf (application
+    drafts): the handler books every result against them with
+    budget.record_usage, so the hook must not book the same tokens against
+    the fleet, and the fleet ceiling does not apply - their weekly entitlement
+    is the ceiling on their own spend, the way it is for their filters.
     """
     purpose = shape.purpose
     existing = pending_batch_ids(task_id)
     chosen = resolve(shape, override=configured_model(purpose))
-    if not existing:
+    if not existing and not charged_to_user:
         # Only when about to SUBMIT. A resuming task is collecting work the
         # provider has already been paid for, and refusing that would discard
         # it - the ceiling exists to stop new spend, not to strand old.
@@ -635,7 +643,9 @@ async def run_batched(
     # constants - so the first is the prompt for the batch. Recorded before
     # submitting, so a sweep that dies mid-flight still says what it asked.
     prompt_id = _record_prompt(purpose, specs[0].instructions) if specs else None
-    hook = batch_event_hook(task_id, purpose, chosen.model, prompt_id=prompt_id)
+    hook = batch_event_hook(
+        task_id, purpose, chosen.model, prompt_id=prompt_id, charged_to_user=charged_to_user
+    )
     if existing:
         logger.info(f"Task {task_id}: reattaching to {len(existing)} in-flight batch(es)")
         results = await collect_pending(task_id, hook)

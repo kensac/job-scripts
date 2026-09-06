@@ -83,6 +83,9 @@ class SettingsPut(BaseModel):
     bypass_sponsorship_filter: bool | None = None
     criteria: Criteria | None = None
     email_digest: bool | None = None
+    # How the person writes, in their own words, for application answers.
+    # Empty string clears it back to the built-in default.
+    writing_style: str | None = Field(default=None, max_length=6000)
 
 
 class ApiKeyPut(BaseModel):
