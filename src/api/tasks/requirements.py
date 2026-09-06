@@ -12,8 +12,8 @@ from pydantic import BaseModel
 from api import db
 from api.tasks import rescrape
 from api.tasks.runtime import (
-    _set_progress,
     run_batched,
+    set_progress,
 )
 from core import skills as skills_lib
 from core.providers import StructuredOutput
@@ -420,7 +420,7 @@ async def handle_extract_requirements(task_id: int, payload: dict[str, Any]) -> 
     rows = db.query(_CANDIDATES, {"cap": EXTRACT_REQUIREMENTS_PER_CYCLE})
     rows = rescrape.drop_unchanged(rows, table="job_requirements", limit=REQUIREMENTS_INPUT_CHARS)
     if not rows:
-        _set_progress(task_id, 0, 0, "nothing to extract")
+        set_progress(task_id, 0, 0, "nothing to extract")
         return
     schema = to_strict_json_schema(RequirementsExtract)
     specs = [
@@ -437,7 +437,7 @@ async def handle_extract_requirements(task_id: int, payload: dict[str, Any]) -> 
     # row extracted from today's page from one extracted from a page that has
     # since been re-scraped.
     by_url = {r["url"]: r for r in rows}
-    _set_progress(task_id, 0, len(specs), "requirements batch submitted (half price)")
+    set_progress(task_id, 0, len(specs), "requirements batch submitted (half price)")
     results, _ = await run_batched(task_id, REQUIREMENTS_TASK, specs)
     done = 0
     for url, res in results.items():
@@ -461,5 +461,5 @@ async def handle_extract_requirements(task_id: int, payload: dict[str, Any]) -> 
                 # line failed reads done == 0 rather than done == total.
                 done += 1
         if done % 200 == 0:
-            _set_progress(task_id, done, len(specs), "requirements extracted")
-    _set_progress(task_id, done, len(specs), "requirements extracted")
+            set_progress(task_id, done, len(specs), "requirements extracted")
+    set_progress(task_id, done, len(specs), "requirements extracted")

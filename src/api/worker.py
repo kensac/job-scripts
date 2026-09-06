@@ -28,10 +28,10 @@ from api.tasks.runtime import (
     AwaitingBatch,
     Deferred,
     TaskClaim,
-    _finish,
-    _maybe_finalize_parent,
-    _reconcile_chunks,
     enqueue,
+    finish,
+    maybe_finalize_parent,
+    reconcile_chunks,
     repark_if_unfinished,
     set_current_claim,
 )
@@ -481,7 +481,7 @@ async def run_once() -> bool:
     events.publish_task(task["id"])
     logger.info(f"Task {task['id']} ({task['kind']}) starting")
     if not handler:
-        _finish(task["id"], "failed", f"unknown task kind: {task['kind']}")
+        finish(task["id"], "failed", f"unknown task kind: {task['kind']}")
         return True
     task_start = time.monotonic()
 
@@ -533,7 +533,7 @@ async def run_once() -> bool:
             metrics.TASKS_PROCESSED.labels(task["kind"], "awaiting_batch").inc()
             logger.info(f"Task {task['id']} parked again on unfinished batches")
         else:
-            _finish(task["id"], "done")
+            finish(task["id"], "done")
             metrics.TASKS_PROCESSED.labels(task["kind"], "done").inc()
             logger.info(f"Task {task['id']} done")
     except AwaitingBatch:
@@ -573,7 +573,7 @@ async def run_once() -> bool:
             logger.warning(f"Task {task['id']} hit a transient error, requeued: {exc}")
             telemetry.capture("task_requeued", properties={**_task_props(task, exc), **span_ids})
         else:
-            _finish(task["id"], "failed", str(exc))
+            finish(task["id"], "failed", str(exc))
             metrics.TASKS_PROCESSED.labels(task["kind"], "failed").inc()
             logger.exception(f"Task {task['id']} failed")
             # The traceback and the event both: the traceback groups with
@@ -593,7 +593,7 @@ async def run_once() -> bool:
     metrics.TASK_DURATION.labels(task["kind"]).observe(time.monotonic() - task_start)
     if task["kind"] in CHUNK_KINDS:
         try:
-            _maybe_finalize_parent(task["payload"]["parent_id"])
+            maybe_finalize_parent(task["payload"]["parent_id"])
         except Exception:
             logger.exception("parent finalize failed")
     return True
@@ -644,7 +644,7 @@ def main() -> None:
             last_housekeeping = time.monotonic()
             try:
                 reap_stale_tasks()
-                _reconcile_chunks()
+                reconcile_chunks()
                 metrics.refresh_queue_gauges()
                 if ingest_enabled:
                     schedule_ingest_cycle()

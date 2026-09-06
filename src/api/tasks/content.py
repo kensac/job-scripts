@@ -13,7 +13,7 @@ from typing import Any
 
 from api import db, verdicts
 from api.tasks.board import fetch_retry_interval
-from api.tasks.runtime import SCRAPE_CONCURRENCY, AdaptiveLimiter, _cancelled, _set_progress
+from api.tasks.runtime import SCRAPE_CONCURRENCY, AdaptiveLimiter, cancelled, set_progress
 from core.store import SUBSCRIBED_SOURCE
 
 logger = logging.getLogger("jobtracker_worker")
@@ -55,7 +55,7 @@ async def handle_fetch_missing_content(task_id: int, payload: dict[str, Any]) ->
         (fetch_retry_interval(), cap),
     )
     if not rows:
-        _set_progress(task_id, 0, 0, "no content gaps")
+        set_progress(task_id, 0, 0, "no content gaps")
         return
     total = len(rows)
     done = fetched = 0
@@ -92,9 +92,9 @@ async def handle_fetch_missing_content(task_id: int, payload: dict[str, Any]) ->
                 limiter.record(error=True)
                 logger.warning(f"content backfill failed for {r['url']}")
             if done % 10 == 0:
-                _set_progress(task_id, done, total, f"fetched {fetched} pages")
-        if _cancelled(task_id):
+                set_progress(task_id, done, total, f"fetched {fetched} pages")
+        if cancelled(task_id):
             for tk in pending:
                 tk.cancel()
             return
-    _set_progress(task_id, total, total, f"cached {fetched} of {total} pages")
+    set_progress(task_id, total, total, f"cached {fetched} of {total} pages")

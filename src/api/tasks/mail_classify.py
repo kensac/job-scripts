@@ -23,7 +23,7 @@ from typing import Any, Literal
 from pydantic import BaseModel
 
 from api import db
-from api.tasks.runtime import _pending_batch_ids, _set_progress, run_batched
+from api.tasks.runtime import pending_batch_ids, run_batched, set_progress
 from core.providers.spec import StructuredOutput
 from core.routing import Evidence, TaskShape, resolve
 
@@ -758,9 +758,9 @@ async def handle_classify_mail(task_id: int, payload: dict[str, Any]) -> None:
     # output tokens and NULL cost recorded, which is what a batch that was
     # never downloaded looks like, and 2,646 messages sat unclassified behind
     # claims that were never going to be collected.
-    resuming = bool(_pending_batch_ids(task_id))
+    resuming = bool(pending_batch_ids(task_id))
     if not rows and not resuming:
-        _set_progress(task_id, len(corrected), len(corrected), "nothing to classify")
+        set_progress(task_id, len(corrected), len(corrected), "nothing to classify")
         return
 
     # Record what this task claimed BEFORE submitting, so a sweep an hour from
@@ -802,7 +802,7 @@ async def handle_classify_mail(task_id: int, payload: dict[str, Any]) -> None:
         BatchSpec(str(r["id"]), _INSTRUCTIONS, _spec_text(r), "MailClassification", schema)
         for r in specs_source
     ]
-    _set_progress(task_id, 0, len(specs), f"mail classification submitted ({model}, half price)")
+    set_progress(task_id, 0, len(specs), f"mail classification submitted ({model}, half price)")
     results, _ = await run_batched(task_id, shape, specs)
 
     done = 0
@@ -890,7 +890,7 @@ async def handle_classify_mail(task_id: int, payload: dict[str, Any]) -> None:
             continue
         done += 1
         if done % 200 == 0:
-            _set_progress(task_id, done, len(specs), "mail classified")
-    _set_progress(task_id, done, len(specs), "mail classified")
+            set_progress(task_id, done, len(specs), "mail classified")
+    set_progress(task_id, done, len(specs), "mail classified")
     if skipped:
         logger.warning(f"mail classify: {skipped} row(s) skipped on write")

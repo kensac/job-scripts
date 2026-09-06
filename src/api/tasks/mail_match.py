@@ -23,7 +23,7 @@ from typing import Any
 
 from api import db, mail_match
 from api.mail_pipeline import sync_action_items
-from api.tasks.runtime import _set_progress
+from api.tasks.runtime import set_progress
 
 logger = logging.getLogger("jobtracker_worker")
 
@@ -530,7 +530,7 @@ async def handle_match_mail(task_id: int, payload: dict[str, Any]) -> None:
             )
         ]
     if not user_ids:
-        _set_progress(task_id, 0, 0, "no mail to match")
+        set_progress(task_id, 0, 0, "no mail to match")
         return
 
     limit = payload.get("limit")
@@ -552,7 +552,7 @@ async def handle_match_mail(task_id: int, payload: dict[str, Any]) -> None:
         "resolved": 0,
     }
     for index, user_id in enumerate(user_ids):
-        _set_progress(task_id, index, len(user_ids), f"matching user {user_id}")
+        set_progress(task_id, index, len(user_ids), f"matching user {user_id}")
         totals["tracked"] += seed_from_tracker(user_id)
         totals["detached"] += detach_unattachable(user_id)
         # Before matching, so a floor lowered now releases its messages in the
@@ -585,4 +585,4 @@ async def handle_match_mail(task_id: int, payload: dict[str, Any]) -> None:
         f"{totals['opened']} items opened, {totals['resolved']} resolved"
     )
     logger.info(f"Task {task_id}: {summary}")
-    _set_progress(task_id, len(user_ids), len(user_ids), summary)
+    set_progress(task_id, len(user_ids), len(user_ids), summary)

@@ -54,7 +54,7 @@ async def test_probe_lets_needsreconnect_propagate(monkeypatch, f):
         raise oauth.NeedsReconnect("grant revoked")
 
     monkeypatch.setattr(mail_sync.oauth, "get_access_token", boom)
-    monkeypatch.setattr(mail_sync, "_set_progress", lambda *a, **k: None)
+    monkeypatch.setattr(mail_sync, "set_progress", lambda *a, **k: None)
     with pytest.raises(oauth.NeedsReconnect):
         await mail_sync.handle_probe_credentials(1, {})
 
@@ -68,7 +68,7 @@ async def test_probe_discards_the_token(monkeypatch, f):
     monkeypatch.setattr(
         mail_sync.oauth, "get_access_token", lambda u, provider=None: calls.append(u) or "tok"
     )
-    monkeypatch.setattr(mail_sync, "_set_progress", lambda *a, **k: None)
+    monkeypatch.setattr(mail_sync, "set_progress", lambda *a, **k: None)
     await mail_sync.handle_probe_credentials(1, {})
     assert calls == [uid]
 
@@ -123,7 +123,7 @@ async def test_import_reads_an_archive_and_queues_backfill(monkeypatch, tmp_path
     )
     queued: list[tuple] = []
     monkeypatch.setattr(mail_sync, "enqueue", lambda k, p, dedupe_key=None: queued.append((k, p)))
-    monkeypatch.setattr(mail_sync, "_set_progress", lambda *a, **k: None)
+    monkeypatch.setattr(mail_sync, "set_progress", lambda *a, **k: None)
     await mail_sync.handle_import_archive(1, {"user_id": uid, "path": str(mbox)})
 
     row = db.query_one(
@@ -156,7 +156,7 @@ def _gmail_stub(monkeypatch, messages: list[ImportedMessage]) -> dict[str, list]
 
     monkeypatch.setattr(mail_sync.gmail, "list_message_ids", list_message_ids)
     monkeypatch.setattr(mail_sync.gmail, "fetch_message", fetch_message)
-    monkeypatch.setattr(mail_sync, "_set_progress", lambda *a, **k: None)
+    monkeypatch.setattr(mail_sync, "set_progress", lambda *a, **k: None)
     monkeypatch.setattr(mail_sync, "enqueue", lambda *a, **k: None)
     return calls
 
@@ -242,7 +242,7 @@ async def test_sync_lets_needsreconnect_propagate(monkeypatch, f):
         raise oauth.NeedsReconnect("grant revoked")
 
     monkeypatch.setattr(mail_sync.gmail, "list_message_ids", boom)
-    monkeypatch.setattr(mail_sync, "_set_progress", lambda *a, **k: None)
+    monkeypatch.setattr(mail_sync, "set_progress", lambda *a, **k: None)
     monkeypatch.setattr(mail_sync, "enqueue", lambda *a, **k: None)
     with pytest.raises(oauth.NeedsReconnect):
         await mail_sync.handle_sync_gmail(1, {"user_id": uid})
@@ -260,7 +260,7 @@ async def test_sync_lets_providererror_propagate_without_killing_the_grant(monke
         raise oauth.ProviderError("503 backend_error")
 
     monkeypatch.setattr(mail_sync.gmail, "list_message_ids", boom)
-    monkeypatch.setattr(mail_sync, "_set_progress", lambda *a, **k: None)
+    monkeypatch.setattr(mail_sync, "set_progress", lambda *a, **k: None)
     monkeypatch.setattr(mail_sync, "enqueue", lambda *a, **k: None)
     with pytest.raises(oauth.ProviderError):
         await mail_sync.handle_sync_gmail(1, {"user_id": uid})

@@ -22,7 +22,7 @@ import logging
 from typing import Any
 
 from api import db
-from api.tasks.runtime import _cancelled, _set_progress
+from api.tasks.runtime import cancelled, set_progress
 from core.mail_import import MAX_BODY_CHARS, MAX_HTML_CHARS, _html_to_text
 
 logger = logging.getLogger("jobtracker_worker")
@@ -77,16 +77,16 @@ def _convert_chunk(limit: int) -> int:
 
 async def handle_backfill_message_html(task_id: int, payload: dict[str, Any]) -> None:
     total = pending_count()
-    _set_progress(task_id, 0, total, "recovering markup")
+    set_progress(task_id, 0, total, "recovering markup")
     done = 0
     while True:
-        if _cancelled(task_id):
+        if cancelled(task_id):
             logger.info("Task %s cancelled after %s messages", task_id, done)
             return
         moved = _convert_chunk(int(payload.get("chunk") or _CHUNK))
         if not moved:
             break
         done += moved
-        _set_progress(task_id, done, total, "recovering markup")
-    _set_progress(task_id, total, total, f"recovered markup on {done} messages")
+        set_progress(task_id, done, total, "recovering markup")
+    set_progress(task_id, total, total, f"recovered markup on {done} messages")
     logger.info("backfill_message_html: %s messages", done)

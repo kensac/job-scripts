@@ -167,9 +167,9 @@ class TestFilterWorkIsNotFleetWork:
     """
 
     def _fire(self, purpose, **kw):
-        from api.tasks.runtime import _batch_event_hook
+        from api.tasks.runtime import batch_event_hook
 
-        hook = _batch_event_hook(1, purpose, "gpt-5-nano", **kw)
+        hook = batch_event_hook(1, purpose, "gpt-5-nano", **kw)
         hook("b-usage", "submitted", {"requests": 1, "completed": 0, "failed": 0})
         hook("b-usage", "completed", {"input_tokens": 1000, "output_tokens": 100})
 
@@ -203,9 +203,9 @@ class TestFilterWorkIsNotFleetWork:
         # Enough to breach several times over, so the assertion is about the
         # user_id predicate and not about a magnitude that happens to fit.
         for i in range(60):
-            from api.tasks.runtime import _batch_event_hook
+            from api.tasks.runtime import batch_event_hook
 
-            hook = _batch_event_hook(1, "filter", "gpt-5-nano", charged_to_user=True)
+            hook = batch_event_hook(1, "filter", "gpt-5-nano", charged_to_user=True)
             hook(f"b{i}", "submitted", {"requests": 1, "completed": 0, "failed": 0})
             hook(f"b{i}", "completed", {"input_tokens": 200_000_000, "output_tokens": 0})
         budget.check_fleet_budget()

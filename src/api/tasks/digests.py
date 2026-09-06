@@ -7,7 +7,7 @@ import logging
 from typing import Any
 
 from api import db
-from api.tasks.runtime import _set_progress
+from api.tasks.runtime import set_progress
 
 logger = logging.getLogger("jobtracker_worker")
 
@@ -21,7 +21,7 @@ async def handle_send_digests(task_id: int, payload: dict[str, Any]) -> None:
     from api import mail
 
     if not mail.configured():
-        _set_progress(task_id, 0, 0, "mail not configured")
+        set_progress(task_id, 0, 0, "mail not configured")
         return
     force = bool(payload.get("force"))
     where_user = "AND u.id = %(only)s" if payload.get("user_id") else ""
@@ -68,4 +68,4 @@ async def handle_send_digests(task_id: int, payload: dict[str, Any]) -> None:
             sent += 1
         except Exception:
             logger.exception(f"digest failed for user {u['id']}")
-    _set_progress(task_id, sent, len(users), "digests sent")
+    set_progress(task_id, sent, len(users), "digests sent")

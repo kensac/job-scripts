@@ -225,9 +225,9 @@ def _demote_closed() -> int:
 async def handle_recompute_board(task_id: int, payload: dict[str, Any]) -> None:
     """One person's board membership, from the full predicate, in place."""
     from api import visibility
-    from api.tasks.runtime import _set_progress
+    from api.tasks.runtime import set_progress
 
     user_id = int(payload["user_id"])
     n = visibility.recompute(user_id)
-    _set_progress(task_id, n, n, f"board recomputed: {n} postings")
+    set_progress(task_id, n, n, f"board recomputed: {n} postings")
     logger.info(f"board recomputed for user {user_id}: {n} postings")

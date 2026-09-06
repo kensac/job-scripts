@@ -118,7 +118,7 @@ def test_reap_stale_tasks_leaves_fresh_heartbeat_running():
 def test_finish_sets_status_when_running():
     task_id = tasks_runtime.enqueue("run_filter", {})
     worker._claim_task()
-    tasks_runtime._finish(task_id, "done")
+    tasks_runtime.finish(task_id, "done")
     row = db.query_one("SELECT status, finished_at FROM tasks WHERE id = %s", (task_id,))
     assert row["status"] == "done"
     assert row["finished_at"] is not None
@@ -127,7 +127,7 @@ def test_finish_sets_status_when_running():
 def test_finish_is_noop_on_cancelled_task():
     task_id = tasks_runtime.enqueue("run_filter", {})
     db.execute("UPDATE tasks SET status = 'cancelled' WHERE id = %s", (task_id,))
-    tasks_runtime._finish(task_id, "done")
+    tasks_runtime.finish(task_id, "done")
     row = db.query_one("SELECT status FROM tasks WHERE id = %s", (task_id,))
     assert row["status"] == "cancelled"
 
@@ -158,7 +158,7 @@ def test_graceful_exit_requeue_sql_decrements_attempts_on_running_task():
 def test_graceful_exit_requeue_sql_noop_on_done_task():
     task_id = tasks_runtime.enqueue("run_filter", {})
     worker._claim_task()
-    tasks_runtime._finish(task_id, "done")
+    tasks_runtime.finish(task_id, "done")
     db.execute(_REQUEUE_SQL, (task_id, worker.WORKER_NAME, 1))
     row = db.query_one("SELECT status FROM tasks WHERE id = %s", (task_id,))
     assert row["status"] == "done"
@@ -223,7 +223,7 @@ def test_park_refuses_once_the_task_has_been_reclaimed():
     assert row["worker"] == "other-host"
     # The ids are still recorded: they are paid work, and dropping them would
     # leave nothing pointing at the batches.
-    assert tasks_runtime._pending_batch_ids(task_id) == ["batch_lost"]
+    assert tasks_runtime.pending_batch_ids(task_id) == ["batch_lost"]
 
 
 def test_park_succeeds_while_the_claim_is_held():
@@ -246,12 +246,12 @@ def test_park_does_not_duplicate_ids_the_hook_already_recorded():
     task_id = tasks_runtime.enqueue("run_filter_batch_chunk", {"parent_id": 1})
     worker._claim_task()
     _hold_claim(task_id)
-    hook = tasks_runtime._batch_event_hook(task_id, "filter", "gpt-5-nano")
+    hook = tasks_runtime.batch_event_hook(task_id, "filter", "gpt-5-nano")
     hook("batch_1", "validating", {"requests": 1, "completed": 0, "failed": 0})
     hook("batch_2", "validating", {"requests": 1, "completed": 0, "failed": 0})
 
     assert tasks_runtime._park_awaiting_batch(task_id, ["batch_1", "batch_2"]) is True
-    assert tasks_runtime._pending_batch_ids(task_id) == ["batch_1", "batch_2"]
+    assert tasks_runtime.pending_batch_ids(task_id) == ["batch_1", "batch_2"]
 
 
 def test_park_records_ids_the_hook_never_saw():
@@ -260,7 +260,7 @@ def test_park_records_ids_the_hook_never_saw():
     _hold_claim(task_id)
 
     assert tasks_runtime._park_awaiting_batch(task_id, ["batch_1", "batch_2"]) is True
-    assert tasks_runtime._pending_batch_ids(task_id) == ["batch_1", "batch_2"]
+    assert tasks_runtime.pending_batch_ids(task_id) == ["batch_1", "batch_2"]
 
 
 def test_finish_refuses_once_the_task_has_been_reclaimed():
@@ -269,7 +269,7 @@ def test_finish_refuses_once_the_task_has_been_reclaimed():
     _hold_claim(task_id)
     _reclaim_elsewhere(task_id)
 
-    tasks_runtime._finish(task_id, "done")
+    tasks_runtime.finish(task_id, "done")
     row = db.query_one("SELECT status, finished_at FROM tasks WHERE id = %s", (task_id,))
     assert row["status"] == "running"
     assert row["finished_at"] is None
@@ -283,12 +283,12 @@ def test_finish_clears_batch_ids_so_a_rerun_cannot_recollect():
     task_id = tasks_runtime.enqueue("run_filter_batch_chunk", {"parent_id": 1})
     worker._claim_task()
     _hold_claim(task_id)
-    hook = tasks_runtime._batch_event_hook(task_id, "filter", "gpt-5-nano")
+    hook = tasks_runtime.batch_event_hook(task_id, "filter", "gpt-5-nano")
     hook("batch_spent", "completed", {"requests": 1, "completed": 1, "failed": 0})
-    assert tasks_runtime._pending_batch_ids(task_id) == ["batch_spent"]
+    assert tasks_runtime.pending_batch_ids(task_id) == ["batch_spent"]
 
-    tasks_runtime._finish(task_id, "done")
-    assert tasks_runtime._pending_batch_ids(task_id) == []
+    tasks_runtime.finish(task_id, "done")
+    assert tasks_runtime.pending_batch_ids(task_id) == []
     row = db.query_one("SELECT status, payload FROM tasks WHERE id = %s", (task_id,))
     assert row["status"] == "done"
     assert row["payload"]["parent_id"] == 1, "only batch_ids is dropped"
@@ -300,7 +300,7 @@ def test_transient_requeue_keeps_batch_ids_for_reattach():
     task_id = tasks_runtime.enqueue("run_filter_batch_chunk", {"parent_id": 1})
     worker._claim_task()
     _hold_claim(task_id)
-    hook = tasks_runtime._batch_event_hook(task_id, "filter", "gpt-5-nano")
+    hook = tasks_runtime.batch_event_hook(task_id, "filter", "gpt-5-nano")
     hook("batch_live", "in_progress", {"requests": 1, "completed": 0, "failed": 0})
 
     db.execute(
@@ -308,11 +308,11 @@ def test_transient_requeue_keeps_batch_ids_for_reattach():
         "WHERE id = %s AND status = 'running'",
         (task_id,),
     )
-    assert tasks_runtime._pending_batch_ids(task_id) == ["batch_live"]
+    assert tasks_runtime.pending_batch_ids(task_id) == ["batch_live"]
 
 
 def test_progress_heartbeat_refuses_once_the_task_has_been_reclaimed():
-    """_set_progress carries the heartbeat, so a lost worker would otherwise
+    """set_progress carries the heartbeat, so a lost worker would otherwise
     keep vouching for the liveness of the run that replaced it."""
     task_id = tasks_runtime.enqueue("run_filter", {})
     worker._claim_task()
@@ -320,7 +320,7 @@ def test_progress_heartbeat_refuses_once_the_task_has_been_reclaimed():
     _reclaim_elsewhere(task_id)
     db.execute("UPDATE tasks SET last_heartbeat = NULL WHERE id = %s", (task_id,))
 
-    tasks_runtime._set_progress(task_id, 5, 10, "half way")
+    tasks_runtime.set_progress(task_id, 5, 10, "half way")
     row = db.query_one("SELECT last_heartbeat, progress FROM tasks WHERE id = %s", (task_id,))
     assert row["last_heartbeat"] is None
     assert row["progress"] is None
@@ -330,7 +330,7 @@ def test_progress_writes_while_the_claim_is_held():
     task_id = tasks_runtime.enqueue("run_filter", {})
     worker._claim_task()
     _hold_claim(task_id)
-    tasks_runtime._set_progress(task_id, 5, 10, "half way")
+    tasks_runtime.set_progress(task_id, 5, 10, "half way")
     row = db.query_one("SELECT last_heartbeat, progress FROM tasks WHERE id = %s", (task_id,))
     assert row["last_heartbeat"] is not None
     assert row["progress"]["done"] == 5 and row["progress"]["label"] == "half way"
@@ -341,8 +341,8 @@ def test_lifecycle_writes_are_unrestricted_without_a_claim():
     behaviour it had before ownership was enforced."""
     task_id = tasks_runtime.enqueue("run_filter", {})
     worker._claim_task()
-    tasks_runtime._set_progress(task_id, 1, 2, "direct")
-    tasks_runtime._finish(task_id, "done")
+    tasks_runtime.set_progress(task_id, 1, 2, "direct")
+    tasks_runtime.finish(task_id, "done")
     row = db.query_one("SELECT status, progress FROM tasks WHERE id = %s", (task_id,))
     assert row["status"] == "done" and row["progress"]["done"] == 1
 
@@ -394,7 +394,7 @@ async def test_run_once_leaves_an_unknown_kind_pending():
 
 
 # ---------------------------------------------------------------------------
-# _reconcile_chunks
+# reconcile_chunks
 # ---------------------------------------------------------------------------
 
 
@@ -405,7 +405,7 @@ def test_reconcile_chunks_cancels_pending_chunk_of_cancelled_parent():
         "run_filter_chunk",
         {"parent_id": parent_id, "user_id": 999, "filter": {}, "jobs": []},
     )
-    worker._reconcile_chunks()
+    worker.reconcile_chunks()
     row = db.query_one("SELECT status FROM tasks WHERE id = %s", (chunk_id,))
     assert row["status"] == "cancelled"
 
@@ -414,7 +414,7 @@ def test_reconcile_chunks_finalizes_waiting_parent_with_no_live_chunks(user_head
     user_id = db.query_one("SELECT id FROM users WHERE sub = 'test-user'")["id"]
     parent_id = tasks_runtime.enqueue("run_all_filters", {"user_id": user_id})
     db.execute("UPDATE tasks SET status = 'waiting' WHERE id = %s", (parent_id,))
-    worker._reconcile_chunks()
+    worker.reconcile_chunks()
     row = db.query_one("SELECT status FROM tasks WHERE id = %s", (parent_id,))
     assert row["status"] == "done"
 
@@ -556,7 +556,7 @@ async def _run_batched(task_id, coro_factory):
     try:
         await coro_factory()
     except AwaitingBatch:
-        tasks_runtime._resume_parked(task_id)
+        tasks_runtime.resume_parked(task_id)
         _claim_for_test(task_id)
         await coro_factory()
 
@@ -606,7 +606,7 @@ async def test_reverify_jobs_skips_urls_with_fresh_closed_verdicts(monkeypatch):
 def test_batch_event_hook_registers_and_stores_ids():
 
     t1 = tasks_runtime.enqueue("run_filter_batch_chunk", {"parent_id": 1, "user_id": 1})
-    hook = tasks_runtime._batch_event_hook(t1, "filter", "gpt-5-nano")
+    hook = tasks_runtime.batch_event_hook(t1, "filter", "gpt-5-nano")
     hook("batch_abc", "validating", {"requests": 10, "completed": 0, "failed": 0})
     hook("batch_abc", "in_progress", {"requests": 10, "completed": 4, "failed": 0})
     hook("batch_abc", "completed", {"requests": 10, "completed": 9, "failed": 1})
@@ -615,11 +615,11 @@ def test_batch_event_hook_registers_and_stores_ids():
     row = db.query_one("SELECT * FROM ai_batches WHERE provider_batch_id = 'batch_abc'")
     assert row["status"] == "completed" and row["completed"] == 9
     assert row["failed_count"] == 1 and row["completed_at"] is not None
-    assert tasks_runtime._pending_batch_ids(t1) == ["batch_abc"]
+    assert tasks_runtime.pending_batch_ids(t1) == ["batch_abc"]
     hook("batch_def", "validating", {"requests": 5, "completed": 0, "failed": 0})
-    assert tasks_runtime._pending_batch_ids(t1) == ["batch_abc", "batch_def"]
+    assert tasks_runtime.pending_batch_ids(t1) == ["batch_abc", "batch_def"]
     hook("batch_abc", "completed", {"requests": 10, "completed": 9, "failed": 1})
-    assert tasks_runtime._pending_batch_ids(t1) == ["batch_abc", "batch_def"]
+    assert tasks_runtime.pending_batch_ids(t1) == ["batch_abc", "batch_def"]
 
 
 def test_worker_status_report_upserts():
@@ -782,7 +782,7 @@ async def test_reverify_records_batch_verdicts_and_reattaches(monkeypatch):
     # Collected, so nothing is left to reattach to: a rerun cannot download
     # and re-record the same batch. Reattaching to a batch still in flight is
     # covered in test_batch_stragglers.
-    assert tasks_runtime._pending_batch_ids(task_id) == []
+    assert tasks_runtime.pending_batch_ids(task_id) == []
 
 
 @pytest.mark.asyncio
