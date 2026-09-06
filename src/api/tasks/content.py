@@ -42,6 +42,13 @@ async def handle_fetch_missing_content(task_id: int, payload: dict[str, Any]) ->
           AND NOT EXISTS (
             SELECT 1 FROM ai_queries q WHERE q.url = j.url AND q.check_type = 'content'
               AND q.created_at > now() - %s::interval)
+          -- A posting its board reports gone has no page to fetch. That
+          -- result is recorded as a closed verdict, not a content row, so
+          -- the window above never saw it: 40 gone postings were re-fetched
+          -- and re-verdicted every hour, 743 rows in a day (2026-09-06).
+          AND NOT EXISTS (
+            SELECT 1 FROM ai_queries q WHERE q.url = j.url
+              AND q.check_type = 'closed' AND q.status = 'rejected')
         ORDER BY j.date_posted DESC NULLS LAST
         LIMIT %s
         """,
