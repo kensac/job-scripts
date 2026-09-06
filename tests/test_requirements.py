@@ -361,7 +361,7 @@ class TestRescrapedPages:
         """A re-scrape that changed nothing is the common case, and the id
         moving is not evidence the text did. Re-extracting on the id alone
         would re-pay for the catalog every time a refresh ran."""
-        from api.tasks.requirements import _drop_unchanged_rescrapes
+        from api.tasks import rescrape
 
         _, url = f.make_ready_job(content=CONTENT)
         rows = db.query(_CANDIDATES, {"cap": 10})
@@ -376,12 +376,17 @@ class TestRescrapedPages:
         f.make_verdict(url, "content", "passed", content=CONTENT)
         candidates = db.query(_CANDIDATES, {"cap": 10})
         assert url in [r["url"] for r in candidates], "the newer row makes it a candidate"
-        assert url not in [r["url"] for r in _drop_unchanged_rescrapes(candidates)]
+        assert url not in [
+            r["url"]
+            for r in rescrape.drop_unchanged(
+                candidates, table="job_requirements", limit=REQUIREMENTS_INPUT_CHARS
+            )
+        ]
 
     def test_an_unchanged_rescrape_stops_coming_back(self, f):
         """Re-stamped rather than merely skipped, or it is re-examined every
         cycle forever."""
-        from api.tasks.requirements import _drop_unchanged_rescrapes
+        from api.tasks import rescrape
 
         _, url = f.make_ready_job(content=CONTENT)
         rows = db.query(_CANDIDATES, {"cap": 10})
@@ -393,7 +398,11 @@ class TestRescrapedPages:
             row["content_row_id"],
         )
         f.make_verdict(url, "content", "passed", content=CONTENT)
-        _drop_unchanged_rescrapes(db.query(_CANDIDATES, {"cap": 10}))
+        rescrape.drop_unchanged(
+            db.query(_CANDIDATES, {"cap": 10}),
+            table="job_requirements",
+            limit=REQUIREMENTS_INPUT_CHARS,
+        )
         assert url not in _candidates()
 
     def test_a_row_that_does_not_know_its_page_is_re_read_once(self, f):
