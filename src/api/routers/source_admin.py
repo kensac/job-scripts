@@ -129,11 +129,28 @@ def admin_list_sources(shape: str = "full", user: AuthedUser = Depends(require_a
         ORDER BY s.active DESC, s.name
         """
     )
+    # The pull still queued or running per board, so the page disables its
+    # button from server state and POST /admin/ingest's refusal is not a
+    # surprise. The last_ingest CTE answers "how did the last one go";
+    # this answers "is one going".
+    in_flight = {
+        r["source"]: {"id": r["id"], "status": r["status"], "created_at": r["created_at"]}
+        for r in db.query(
+            """
+            SELECT DISTINCT ON (payload->>'source') payload->>'source' AS source,
+                   id, status, created_at
+            FROM tasks WHERE kind = 'ingest_source'
+              AND status IN ('pending', 'running', 'awaiting_batch', 'waiting')
+            ORDER BY payload->>'source', id DESC
+            """
+        )
+    }
     # The format is read off the URL, never stored, so it cannot drift from
     # what ingest will actually do with the row. This is the top-level
     # category the switch endpoint selects by.
     for r in rows:
         r["kind"] = boards.kind(r["listings_url"])
+        r["task"] = in_flight.get(r["name"])
     return {"sources": rows}
 
 

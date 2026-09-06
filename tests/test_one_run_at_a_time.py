@@ -65,3 +65,40 @@ def test_another_persons_run_does_not_block_mine(client, user_headers, other_use
         (fid,),
     )
     assert client.post(f"/v1/user/filters/{fid}/run", headers=user_headers).status_code == 200
+
+
+def test_an_admin_pull_already_queued_is_reported_not_queued_again(client, admin_headers, f):
+    """A pull of a board whose task is still queued would wait behind it and
+    pull the same listings; the request says which boards were skipped, and
+    is refused whole only when every board named is in flight."""
+    f.make_source("a")
+    f.make_source("b")
+    first = client.post("/v1/admin/ingest", json={"sources": ["a"]}, headers=admin_headers)
+    assert first.status_code == 200, first.text
+    a_task = first.json()["tasks"][0]["task_id"]
+    ledger = {
+        s["name"]: s
+        for s in client.get("/v1/admin/sources", headers=admin_headers).json()["sources"]
+    }
+    assert ledger["a"]["task"]["id"] == a_task and ledger["b"]["task"] is None
+
+    r = client.post("/v1/admin/ingest", json={"sources": ["a", "b"]}, headers=admin_headers)
+    assert r.status_code == 200, r.text
+    assert [t["source"] for t in r.json()["tasks"]] == ["b"]
+    assert r.json()["in_flight"] == [{"source": "a", "task_id": a_task}]
+
+    r = client.post("/v1/admin/ingest", json={"sources": ["a"]}, headers=admin_headers)
+    assert r.status_code == 409 and r.json()["detail"]["code"] == "IN_PROGRESS"
+    db.execute("UPDATE tasks SET status = 'done' WHERE id = %s", (a_task,))
+    assert (
+        client.post("/v1/admin/ingest", json={"sources": ["a"]}, headers=admin_headers).status_code
+        == 200
+    )
+
+
+def test_a_reparse_already_queued_is_refused(client, admin_headers, f):
+    job_id = f.make_job()
+    r = client.post(f"/v1/admin/jobs/{job_id}/reparse", headers=admin_headers)
+    assert r.status_code == 200, r.text
+    again = client.post(f"/v1/admin/jobs/{job_id}/reparse", headers=admin_headers)
+    assert again.status_code == 409 and again.json()["detail"]["task_id"] == r.json()["task_id"]

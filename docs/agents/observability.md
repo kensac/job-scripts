@@ -154,7 +154,11 @@ that memory is gone on reload and never existed in another tab. For the
 same reason the view's own GET serves the in-flight task (`task` on the
 application view), so a button is disabled from server state, and the
 request that would start a second one is refused with 409 `IN_PROGRESS`
-rather than queued twice.
+rather than queued twice. The admin surfaces follow the same rule: the
+sources ledger carries each board's in-flight pull, `POST /admin/ingest`
+reports the boards it skipped for that reason and refuses only when every
+board named is in flight, and a reparse of a posting already being parsed
+is refused.
 
 How much goes is a measurement, not a guess. Everything ships first
 (`POSTHOG_TRACE_SAMPLE=1.0`, `POSTHOG_LOG_LEVEL=INFO`), the daily volume is
