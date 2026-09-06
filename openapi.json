@@ -3085,6 +3085,7 @@
     "/v1/user/filters": {
       "get": {
         "summary": "List Filters",
+        "description": "Each filter carries its in-flight run, and the list carries the\nin-flight run-all, so a button is disabled from server state.",
         "operationId": "list_filters_v1_user_filters_get",
         "parameters": [
           {

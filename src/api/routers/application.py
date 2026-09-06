@@ -130,6 +130,23 @@ def _job(user: AuthedUser, job_id: int) -> dict[str, Any]:
     return _require_visible_job(user, job_id, "j.id, j.url, j.company, j.title")
 
 
+def _inflight(user_id: int, job_id: int) -> dict[str, Any] | None:
+    """The draft task still working on this person's answers for this job,
+    if any. Served on the view so the page disables the button from server
+    state, and checked on the request so a second click while the first
+    parks on the provider's batch is refused rather than queued twice."""
+    return db.query_one(
+        """
+        SELECT id, status, progress, created_at FROM tasks
+        WHERE kind = 'application_draft'
+          AND status IN ('pending', 'running', 'awaiting_batch', 'waiting')
+          AND (payload->>'user_id')::bigint = %s AND (payload->>'job_id')::bigint = %s
+        ORDER BY id DESC LIMIT 1
+        """,
+        (user_id, job_id),
+    )
+
+
 def _answers(user_id: int, job_id: int) -> list[dict[str, Any]]:
     return db.query(
         f"SELECT {_ANSWER_COLS} FROM application_answers "
@@ -164,6 +181,13 @@ def get_application(job_id: int, user: AuthedUser = Depends(require_user)):
                 "updated_at": None,
             },
         )
+    # Whether the box wants prose. A one-line box (a URL, a salary) is a
+    # field to fill, not an answer to draft; the view renders it as one and
+    # the task drafts it only when asked for by key. A pasted question is
+    # prose by definition.
+    multiline = {q["key"]: q.get("kind") == "long" for q in (form or {}).get("questions") or []}
+    for a in answers.values():
+        a["multiline"] = multiline.get(a["key"], True)
     return {
         "job": job,
         "form": {
@@ -174,6 +198,7 @@ def get_application(job_id: int, user: AuthedUser = Depends(require_user)):
             "questions": len((form or {}).get("questions") or []),
         },
         "questions": list(answers.values()),
+        "task": _inflight(user.id, job_id),
         "resumes": db.query(
             "SELECT id, name FROM user_resumes WHERE user_id = %s ORDER BY updated_at DESC",
             (user.id,),
@@ -244,6 +269,16 @@ def request_drafts(job_id: int, body: DraftRequest, user: AuthedUser = Depends(r
     if ent.key_source is None:
         raise _bad(
             402, "BUDGET_EXCEEDED" if ent.owner_key else "NO_API_KEY", "no key to draft with"
+        )
+    running = _inflight(user.id, job_id)
+    if running:
+        raise HTTPException(
+            409,
+            detail={
+                "code": "IN_PROGRESS",
+                "message": "drafts for this job are already being written",
+                "task_id": running["id"],
+            },
         )
     task = db.query_one(
         "INSERT INTO tasks (kind, payload) VALUES ('application_draft', %s) RETURNING id",
@@ -350,8 +385,8 @@ async def refine_answer(
     if parsed is None:
         raise _bad(502, "NO_ANSWER", "the model returned no usable answer; try again")
     turns = [
-        {"role": "user", "text": body.instruction, "at": _now()},
-        {"role": "assistant", "text": parsed.answer, "at": _now()},
+        {"role": "user", "kind": "instruction", "text": body.instruction, "at": _now()},
+        {"role": "assistant", "kind": "refine", "text": parsed.answer, "at": _now()},
     ]
     updated = db.query_one(
         f"""

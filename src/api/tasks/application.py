@@ -189,6 +189,7 @@ def writing_style(user_id: int) -> str | None:
 def store_draft(user_id: int, job_id: int, key: str, answer: str, model: str) -> None:
     turn = {
         "role": "assistant",
+        "kind": "draft",
         "text": answer,
         "at": datetime.datetime.now(datetime.UTC).isoformat(),
     }

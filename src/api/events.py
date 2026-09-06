@@ -55,6 +55,13 @@ def publish_task(task_id: int) -> None:
             "error": row["error"],
             "source": payload.get("source"),
             "user_id": payload.get("user_id"),
+            # The subject the task is about, so a view can match "a task
+            # about MY job finished" from the event alone. Matching by a
+            # task id the page remembered from its own POST fails the moment
+            # the page is reloaded or the task was started from another tab:
+            # the application panel did that and sat on a finished draft.
+            "job_id": payload.get("job_id"),
+            "filter_id": payload.get("filter_id"),
             "created_at": str(row["created_at"]),
             "started_at": str(row["started_at"]) if row["started_at"] else None,
             "finished_at": str(row["finished_at"]) if row["finished_at"] else None,
