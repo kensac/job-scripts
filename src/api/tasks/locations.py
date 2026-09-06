@@ -9,7 +9,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from api import db
-from api.tasks.runtime import _set_progress, run_batched
+from api.tasks.runtime import run_batched, set_progress
 from core.providers import StructuredOutput
 from core.routing import TaskShape
 
@@ -255,12 +255,12 @@ async def handle_classify_locations(task_id: int, payload: dict[str, Any]) -> No
     else:
         texts = [r["text"] for r in db.query(_CANDIDATES, {"cap": cap})]
     if not texts:
-        _set_progress(task_id, 0, 0, "nothing to classify")
+        set_progress(task_id, 0, 0, "nothing to classify")
         return
     schema = to_strict_json_schema(LocationAnswer)
     by_id = {_custom_id(t): t for t in texts}
     specs = [BatchSpec(cid, _INSTRUCTIONS, t, "LocationAnswer", schema) for cid, t in by_id.items()]
-    _set_progress(task_id, 0, len(specs), "locations batch submitted (half price)")
+    set_progress(task_id, 0, len(specs), "locations batch submitted (half price)")
     results, chosen = await run_batched(task_id, LOCATIONS_TASK, specs)
     done = 0
     for cid, res in results.items():
@@ -275,4 +275,4 @@ async def handle_classify_locations(task_id: int, payload: dict[str, Any]) -> No
             # No row, so the next cycle asks again: the same re-sweep contract
             # every batched pass has.
             logger.warning(f"location parse failed for {text!r}")
-    _set_progress(task_id, done, len(specs), f"{done} location(s) classified")
+    set_progress(task_id, done, len(specs), f"{done} location(s) classified")

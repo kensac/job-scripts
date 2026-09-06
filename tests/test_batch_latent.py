@@ -9,7 +9,7 @@ than anything in this code.
 from __future__ import annotations
 
 from api import db
-from api.tasks.runtime import _batch_event_hook
+from api.tasks.runtime import batch_event_hook
 
 
 def _park(kind: str, hours: float = 0.5) -> int:
@@ -101,7 +101,7 @@ class TestUsageIsRecordedOncePerBatch:
     """
 
     def _collect(self, batch_id="b1", inp=1000, out=100):
-        hook = _batch_event_hook(1, "comp", "gpt-5-nano")
+        hook = batch_event_hook(1, "comp", "gpt-5-nano")
         hook(batch_id, "submitted", {"requests": 1, "completed": 0, "failed": 0})
         hook(batch_id, "completed", {"input_tokens": inp, "output_tokens": out})
 

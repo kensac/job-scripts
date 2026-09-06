@@ -20,16 +20,16 @@ from api.tasks.runtime import (
     CHUNK_SIZE,
     SCRAPE_CONCURRENCY,
     AdaptiveLimiter,
-    _batch_event_hook,
-    _cancelled,
-    _load_config,
-    _parent_cancelled,
-    _pending_batch_ids,
-    _set_progress,
-    _update_parent_progress,
+    batch_event_hook,
+    cancelled,
     collect_pending,
     enqueue,
+    load_config,
+    parent_cancelled,
+    pending_batch_ids,
+    set_progress,
     submit_or_collect,
+    update_parent_progress,
 )
 from core.filters import build_custom_instructions
 from core.store import add_ai_result, get_content, get_custom_result
@@ -143,10 +143,10 @@ async def _process_jobs(
                     usage["total_tokens"],
                 )
             if done % 5 == 0:
-                _set_progress(task_id, done, total, flt["name"])
+                set_progress(task_id, done, total, flt["name"])
                 if parent_id:
-                    _update_parent_progress(parent_id)
-        if _cancelled(task_id) or (parent_id and _parent_cancelled(parent_id)):
+                    update_parent_progress(parent_id)
+        if cancelled(task_id) or (parent_id and parent_cancelled(parent_id)):
             for t in pending:
                 t.cancel()
             logger.info(f"Task {task_id} cancelled mid-run")
@@ -159,14 +159,14 @@ async def _process_jobs(
             for t in pending:
                 t.cancel()
             raise PermissionError(f"BUDGET_EXCEEDED after {done}/{total} checks")
-    _set_progress(task_id, total, total, flt["name"])
+    set_progress(task_id, total, total, flt["name"])
     if parent_id:
         # Each chunk publishes what it decided. The parent materializes again
         # when it finalizes, but a parent waits on its slowest chunk, and a
         # chunk parked on a straggler batch holds every other chunk's passes
         # off the board for as long as the provider takes.
         _materialize_passing(user_id)
-        _update_parent_progress(parent_id)
+        update_parent_progress(parent_id)
 
 
 async def _run_filters(
@@ -176,7 +176,7 @@ async def _run_filters(
     runs send content-ready jobs through the half-price Batch API in large
     centralized chunks; jobs still needing a scrape go through live fleet
     chunks as usual (sharded parsing, centralized batching)."""
-    ent, cfg = _load_config(user_id)
+    ent, cfg = load_config(user_id)
     held = _in_flight_urls(user_id)
     candidates = [j for j in _candidates(user_id) if j["url"] not in held]
     urls = [j["url"] for j in candidates]
@@ -196,7 +196,7 @@ async def _run_filters(
             units.append(("live", flt, todo[start : start + CHUNK_SIZE]))
     if not units:
         _materialize_passing(user_id)
-        _set_progress(task_id, 0, 0, "everything already decided")
+        set_progress(task_id, 0, 0, "everything already decided")
         return
     if len(units) == 1 and units[0][0] == "live":
         _, flt, jobs = units[0]
@@ -225,7 +225,7 @@ async def _run_filters(
 
 
 async def handle_run_filter_chunk(task_id: int, payload: dict[str, Any]) -> None:
-    ent, cfg = _load_config(payload["user_id"])
+    ent, cfg = load_config(payload["user_id"])
     await _process_jobs(
         task_id,
         payload["user_id"],
@@ -251,7 +251,7 @@ async def handle_run_filter_batch_chunk(task_id: int, payload: dict[str, Any]) -
     flt = payload["filter"]
     jobs = payload["jobs"]
     parent_id = payload["parent_id"]
-    ent, cfg = _load_config(user_id)
+    ent, cfg = load_config(user_id)
     if cfg.key_source != "owner" or cfg.provider != "openai":
         # Entitlement changed since split (e.g. BYO key added): run live.
         await _process_jobs(task_id, user_id, ent, cfg, flt, jobs, parent_id=parent_id)
@@ -270,28 +270,28 @@ async def handle_run_filter_batch_chunk(task_id: int, payload: dict[str, Any]) -
         by_url[job["url"]] = (job, input_text)
     total = len(jobs)
     if not specs:
-        _set_progress(task_id, total, total, "no content-ready jobs")
+        set_progress(task_id, total, total, "no content-ready jobs")
         if parent_id:
-            _update_parent_progress(parent_id)
+            update_parent_progress(parent_id)
         return
-    _set_progress(task_id, 0, total, f"batch of {len(specs)} submitted (half price)")
+    set_progress(task_id, 0, total, f"batch of {len(specs)} submitted (half price)")
     if parent_id:
-        _update_parent_progress(parent_id)
+        update_parent_progress(parent_id)
 
     async def _heartbeat() -> None:
         while True:
             await asyncio.sleep(60)
             db.execute("UPDATE tasks SET last_heartbeat = now() WHERE id = %s", (task_id,))
-            if _cancelled(task_id) or (parent_id and _parent_cancelled(parent_id)):
+            if cancelled(task_id) or (parent_id and parent_cancelled(parent_id)):
                 raise asyncio.CancelledError
 
     hb = asyncio.create_task(_heartbeat())
     # charged_to_user: the loop below books every result against this
     # user with budget.record_usage, so the hook must not book the same
     # tokens again against the fleet.
-    hook = _batch_event_hook(task_id, "filter", cfg.model, charged_to_user=True)
+    hook = batch_event_hook(task_id, "filter", cfg.model, charged_to_user=True)
     try:
-        existing = _pending_batch_ids(task_id)
+        existing = pending_batch_ids(task_id)
         if existing:
             logger.info(f"Task {task_id}: reattaching to {len(existing)} in-flight batch(es)")
             results = await collect_pending(task_id, hook)
@@ -381,15 +381,15 @@ async def handle_run_filter_batch_chunk(task_id: int, payload: dict[str, Any]) -
                 usage["total_tokens"],
             )
         if done % 50 == 0:
-            _set_progress(task_id, done, total, flt["name"])
+            set_progress(task_id, done, total, flt["name"])
             if parent_id:
-                _update_parent_progress(parent_id)
-    _set_progress(task_id, total, total, flt["name"])
+                update_parent_progress(parent_id)
+    set_progress(task_id, total, total, flt["name"])
     if parent_id:
         # See _process_jobs: publish this chunk's passes without waiting on
         # the siblings still parked at the provider.
         _materialize_passing(user_id)
-        _update_parent_progress(parent_id)
+        update_parent_progress(parent_id)
 
 
 async def handle_run_filter(task_id: int, payload: dict[str, Any]) -> None:

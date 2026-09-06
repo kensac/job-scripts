@@ -10,8 +10,8 @@ from pydantic import BaseModel
 
 from api import db
 from api.tasks.runtime import (
-    _set_progress,
     run_batched,
+    set_progress,
 )
 from core.providers.spec import StructuredOutput
 from core.routing import TaskShape
@@ -146,7 +146,7 @@ async def handle_extract_comp(task_id: int, payload: dict[str, Any]) -> None:
         {"cap": EXTRACT_COMP_PER_CYCLE},
     )
     if not rows:
-        _set_progress(task_id, 0, 0, "nothing to extract")
+        set_progress(task_id, 0, 0, "nothing to extract")
         return
     schema = to_strict_json_schema(CompExtract)
     specs = [
@@ -154,7 +154,7 @@ async def handle_extract_comp(task_id: int, payload: dict[str, Any]) -> None:
         for r in rows
     ]
     by_url = {r["url"]: r["id"] for r in rows}
-    _set_progress(task_id, 0, len(specs), "comp batch submitted (half price)")
+    set_progress(task_id, 0, len(specs), "comp batch submitted (half price)")
     results, _ = await run_batched(task_id, COMP_TASK, specs)
     done = 0
     for url, res in results.items():
@@ -199,5 +199,5 @@ async def handle_extract_comp(task_id: int, payload: dict[str, Any]) -> None:
         if parsed_ok:
             done += 1
         if done % 200 == 0:
-            _set_progress(task_id, done, len(specs), "comp extracted")
-    _set_progress(task_id, done, len(specs), "comp extracted")
+            set_progress(task_id, done, len(specs), "comp extracted")
+    set_progress(task_id, done, len(specs), "comp extracted")

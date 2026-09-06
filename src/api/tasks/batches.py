@@ -6,7 +6,7 @@ import logging
 from typing import Any
 
 from api import db
-from api.tasks.runtime import _resume_parked, _set_progress
+from api.tasks.runtime import resume_parked, set_progress
 
 logger = logging.getLogger("jobtracker_worker")
 
@@ -70,7 +70,7 @@ async def handle_poll_batches(task_id: int, payload: dict[str, Any]) -> None:
         "SELECT id, kind, payload FROM tasks WHERE status = 'awaiting_batch' ORDER BY id"
     )
     if not parked:
-        _set_progress(task_id, 0, 0, "nothing awaiting batches")
+        set_progress(task_id, 0, 0, "nothing awaiting batches")
         return
 
     # The provider guarantees a terminal state inside the window we asked for,
@@ -87,7 +87,7 @@ async def handle_poll_batches(task_id: int, payload: dict[str, Any]) -> None:
         ids = list((t["payload"] or {}).get("batch_ids") or [])
         if not ids:
             # Parked with nothing to wait for: resume rather than strand it.
-            _resume_parked(t["id"])
+            resume_parked(t["id"])
             resumed += 1
             continue
         progress = await batch_progress(ids)
@@ -97,11 +97,11 @@ async def handle_poll_batches(task_id: int, payload: dict[str, Any]) -> None:
         # transient provider error delays a resume instead of dropping results.
         finished = [b for b in ids if is_terminal(states.get(b, ""))]
         if len(finished) == len(ids):
-            _resume_parked(t["id"])
+            resume_parked(t["id"])
             resumed += 1
             continue
         if finished and not _younger_than([b for b in ids if b not in finished], straggler_seconds):
-            _resume_parked(t["id"])
+            resume_parked(t["id"])
             partial += 1
             continue
         overdue = db.query_one(
@@ -116,9 +116,9 @@ async def handle_poll_batches(task_id: int, payload: dict[str, Any]) -> None:
             logger.warning(
                 f"Task {t['id']} batches exceeded the {window}s completion window; collecting"
             )
-            _resume_parked(t["id"])
+            resume_parked(t["id"])
             expired += 1
-    _set_progress(
+    set_progress(
         task_id,
         resumed + partial + expired,
         len(parked),

@@ -106,7 +106,7 @@ class TestAResumeReachesCollection:
             return {}, None
 
         monkeypatch.setattr(mail_classify, "run_batched", fake_run_batched)
-        monkeypatch.setattr(mail_classify, "_set_progress", lambda *a, **k: None)
+        monkeypatch.setattr(mail_classify, "set_progress", lambda *a, **k: None)
         await mail_classify.handle_classify_mail(tid, {})
         assert collected == ["reached"], "returned before collecting a paid-for batch"
 
@@ -121,7 +121,7 @@ class TestAResumeReachesCollection:
             return {}, None
 
         monkeypatch.setattr(mail_classify, "run_batched", fake_run_batched)
-        monkeypatch.setattr(mail_classify, "_set_progress", lambda *a, **k: None)
+        monkeypatch.setattr(mail_classify, "set_progress", lambda *a, **k: None)
         await mail_classify.handle_classify_mail(_task([]), {})
         assert called == []
 
@@ -138,7 +138,7 @@ class TestAResumeReachesCollection:
             return {}, None
 
         monkeypatch.setattr(mail_classify, "run_batched", fake_run_batched)
-        monkeypatch.setattr(mail_classify, "_set_progress", lambda *a, **k: None)
+        monkeypatch.setattr(mail_classify, "set_progress", lambda *a, **k: None)
         await mail_classify.handle_classify_mail(tid, {})
         row = db.query_one(
             "SELECT payload -> 'claimed_message_ids' AS ids FROM tasks WHERE id = %s", (tid,)

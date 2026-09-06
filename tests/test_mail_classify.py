@@ -57,7 +57,7 @@ async def _run(monkeypatch, payload, results):
         return results, resolve(shape)
 
     monkeypatch.setattr(mail_classify, "run_batched", fake)
-    monkeypatch.setattr(mail_classify, "_set_progress", lambda *a, **k: None)
+    monkeypatch.setattr(mail_classify, "set_progress", lambda *a, **k: None)
     await mail_classify.handle_classify_mail(1, payload)
 
 
@@ -272,7 +272,7 @@ async def test_the_cap_is_clamped_not_trusted(monkeypatch, f):
     for i in range(3):
         _store(f, mid=f"<cap{i}@x>")
     monkeypatch.setattr(mail_classify, "run_batched", fake)
-    monkeypatch.setattr(mail_classify, "_set_progress", lambda *a, **k: None)
+    monkeypatch.setattr(mail_classify, "set_progress", lambda *a, **k: None)
     monkeypatch.setattr(mail_classify, "MAX_CLASSIFY_PER_CYCLE", 2)
     await mail_classify.handle_classify_mail(1, {"cap": 999999})
     assert seen["count"] <= 2
@@ -636,7 +636,7 @@ async def test_repairing_a_self_sent_message_corrects_it_without_a_model(monkeyp
         return {}, None
 
     monkeypatch.setattr(mail_classify, "run_batched", never)
-    monkeypatch.setattr(mail_classify, "_set_progress", lambda *a, **k: None)
+    monkeypatch.setattr(mail_classify, "set_progress", lambda *a, **k: None)
     await mail_classify.handle_classify_mail(1, {"message_ids": [mid]})
 
     events = _events(mid)
@@ -713,7 +713,7 @@ async def test_a_sweep_does_not_reselect_what_another_sweep_is_already_paying_fo
         raise AwaitingBatch(["batch_stuck"])
 
     monkeypatch.setattr(mail_classify, "run_batched", capture)
-    monkeypatch.setattr(mail_classify, "_set_progress", lambda *a, **k: None)
+    monkeypatch.setattr(mail_classify, "set_progress", lambda *a, **k: None)
 
     first = f.make_task("classify_mail", {})
     with pytest.raises(AwaitingBatch):

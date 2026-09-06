@@ -182,7 +182,7 @@ class TestSeam:
 
     def test_the_batch_row_carries_the_prompt(self):
         pid = runtime._record_prompt("comp", "P")
-        hook = runtime._batch_event_hook(1, "comp", "gpt-5-nano", prompt_id=pid)
+        hook = runtime.batch_event_hook(1, "comp", "gpt-5-nano", prompt_id=pid)
         hook("batch_x", "submitted", {"requests": 3, "completed": 0, "failed": 0})
         row = db.query_one("SELECT prompt_id FROM ai_batches WHERE provider_batch_id = 'batch_x'")
         assert row is not None and row["prompt_id"] == pid

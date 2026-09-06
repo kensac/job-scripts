@@ -23,7 +23,7 @@ first. That is what this ships.
 from __future__ import annotations
 
 from api import db
-from api.tasks.runtime import _set_progress
+from api.tasks.runtime import set_progress
 
 
 def _task(kind: str = "match_mail") -> int:
@@ -48,14 +48,14 @@ class TestProgressAtTracksMovementNotWrites:
     def test_the_first_report_stamps_it(self, f):
         task_id = _task()
         assert _row(task_id)["progress_at"] is None
-        _set_progress(task_id, 0, 10, "starting")
+        set_progress(task_id, 0, 10, "starting")
         assert _row(task_id)["progress_at"] is not None
 
     def test_advancing_moves_it(self, f):
         task_id = _task()
-        _set_progress(task_id, 1, 10, "working")
+        set_progress(task_id, 1, 10, "working")
         first = _row(task_id)["progress_at"]
-        _set_progress(task_id, 2, 10, "working")
+        set_progress(task_id, 2, 10, "working")
         assert _row(task_id)["progress_at"] > first
 
     def test_reporting_the_same_numbers_again_does_NOT_move_it(self, f):
@@ -63,9 +63,9 @@ class TestProgressAtTracksMovementNotWrites:
         advanced, and stamping it would make a stalled handler look identical
         to a working one - the timer-heartbeat mistake, one column along."""
         task_id = _task()
-        _set_progress(task_id, 3, 10, "working")
+        set_progress(task_id, 3, 10, "working")
         first = _row(task_id)["progress_at"]
-        _set_progress(task_id, 3, 10, "working")
+        set_progress(task_id, 3, 10, "working")
         assert _row(task_id)["progress_at"] == first
 
     def test_the_heartbeat_still_moves_when_progress_does_not(self, f):
@@ -73,9 +73,9 @@ class TestProgressAtTracksMovementNotWrites:
         wedged handler is exactly the case where the heartbeat is fresh and
         progress is stale."""
         task_id = _task()
-        _set_progress(task_id, 3, 10, "working")
+        set_progress(task_id, 3, 10, "working")
         before = _row(task_id)
-        _set_progress(task_id, 3, 10, "working")
+        set_progress(task_id, 3, 10, "working")
         after = _row(task_id)
         assert after["last_heartbeat"] > before["last_heartbeat"]
         assert after["progress_at"] == before["progress_at"]
@@ -84,13 +84,13 @@ class TestProgressAtTracksMovementNotWrites:
         """The label is part of what the handler reported. A handler that says
         something new about where it is has done something."""
         task_id = _task()
-        _set_progress(task_id, 3, 10, "scraping")
+        set_progress(task_id, 3, 10, "scraping")
         first = _row(task_id)["progress_at"]
-        _set_progress(task_id, 3, 10, "parsing")
+        set_progress(task_id, 3, 10, "parsing")
         assert _row(task_id)["progress_at"] > first
 
     def test_it_is_not_stamped_for_a_worker_that_lost_the_claim(self, f):
-        """_set_progress already refuses to write for a lost claim so a stale
+        """set_progress already refuses to write for a lost claim so a stale
         worker cannot vouch for the run that replaced it. progress_at inherits
         that or it would carry the same lie.
 
@@ -103,11 +103,11 @@ class TestProgressAtTracksMovementNotWrites:
         task_id = _task()
         token = _current_claim.set(TaskClaim(task_id=task_id, worker="oci", attempts=1))
         try:
-            _set_progress(task_id, 1, 10, "working")
+            set_progress(task_id, 1, 10, "working")
             first = _row(task_id)["progress_at"]
             assert first is not None
             db.execute("UPDATE tasks SET attempts = 2 WHERE id = %s", (task_id,))
-            _set_progress(task_id, 9, 10, "working")
+            set_progress(task_id, 9, 10, "working")
             assert _row(task_id)["progress_at"] == first
         finally:
             _current_claim.reset(token)

@@ -14,15 +14,15 @@ from api.tasks.runtime import (
     CHUNK_SIZE,
     SCRAPE_CONCURRENCY,
     AdaptiveLimiter,
-    _batch_event_hook,
-    _cancelled,
-    _parent_cancelled,
-    _pending_batch_ids,
-    _set_progress,
-    _update_parent_progress,
+    batch_event_hook,
+    cancelled,
     collect_pending,
     enqueue,
+    parent_cancelled,
+    pending_batch_ids,
+    set_progress,
     submit_or_collect,
+    update_parent_progress,
 )
 from core.providers.spec import StructuredOutput
 from core.routing import TaskShape, resolve
@@ -151,18 +151,18 @@ async def _reverify_jobs(
         raise LookupError("no server OpenAI key for reverification")
     model = resolve(VERIFY_TASK).model
     by_url = {r["url"]: r for r in rows}
-    hook = _batch_event_hook(task_id, "reverify", model)
+    hook = batch_event_hook(task_id, "reverify", model)
 
     # A chunk requeued after submitting reattaches to its live batch instead
     # of rescraping and paying again.
-    existing = _pending_batch_ids(task_id)
+    existing = pending_batch_ids(task_id)
     if existing:
         logger.info(f"Task {task_id}: reattaching to {len(existing)} reverify batch(es)")
         results = await collect_pending(task_id, hook)
         _record_reverify_results(results, by_url, model)
-        _set_progress(task_id, len(rows), len(rows), "reverified")
+        set_progress(task_id, len(rows), len(rows), "reverified")
         if parent_id:
-            _update_parent_progress(parent_id)
+            update_parent_progress(parent_id)
         return
 
     # Resumability: a requeued chunk skips rows already re-verified this cycle.
@@ -227,18 +227,18 @@ async def _reverify_jobs(
                 limiter.record(error=True, rate_limited="429" in s or "rate limit" in s)
                 logger.exception(f"Reverify gather failed for {r['url']}")
             if done % 5 == 0:
-                _set_progress(task_id, done, total, "checking open status")
+                set_progress(task_id, done, total, "checking open status")
                 if parent_id:
-                    _update_parent_progress(parent_id)
-        if _cancelled(task_id) or (parent_id and _parent_cancelled(parent_id)):
+                    update_parent_progress(parent_id)
+        if cancelled(task_id) or (parent_id and parent_cancelled(parent_id)):
             for t in pending:
                 t.cancel()
             return
 
     if needs_ai:
-        _set_progress(task_id, done, total, f"batch of {len(needs_ai)} submitted (half price)")
+        set_progress(task_id, done, total, f"batch of {len(needs_ai)} submitted (half price)")
         if parent_id:
-            _update_parent_progress(parent_id)
+            update_parent_progress(parent_id)
         schema = to_strict_json_schema(JobClosedVerdict)
         specs = [
             BatchSpec(url, CLOSED_INSTRUCTIONS, content[:20000], "JobClosedVerdict", schema)
@@ -253,9 +253,9 @@ async def _reverify_jobs(
             hook,
         )
         _record_reverify_results(results, by_url, model)
-    _set_progress(task_id, total, total, "reverified")
+    set_progress(task_id, total, total, "reverified")
     if parent_id:
-        _update_parent_progress(parent_id)
+        update_parent_progress(parent_id)
 
 
 # Closed/clearance verification, batched. One candidate, so this resolves to
@@ -321,7 +321,7 @@ async def handle_reverify_open(task_id: int, payload: dict[str, Any]) -> None:
             {"days": REVERIFY_DAYS, "cap": REVERIFY_PER_CYCLE},
         )
     if not rows:
-        _set_progress(task_id, 0, 0, "nothing stale")
+        set_progress(task_id, 0, 0, "nothing stale")
         _demote_closed()
         return
     if len(rows) <= CHUNK_SIZE:
@@ -398,7 +398,7 @@ async def handle_verify_new(task_id: int, payload: dict[str, Any]) -> None:
         """
     )
     if not rows:
-        _set_progress(task_id, 0, 0, "nothing to verify")
+        set_progress(task_id, 0, 0, "nothing to verify")
         return
     schema = to_strict_json_schema(VerifyVerdict)
     specs = [
@@ -408,10 +408,10 @@ async def handle_verify_new(task_id: int, payload: dict[str, Any]) -> None:
         for r in rows
     ]
     by_url = {r["url"]: r for r in rows}
-    _set_progress(task_id, 0, len(specs), "verify batch submitted (half price)")
+    set_progress(task_id, 0, len(specs), "verify batch submitted (half price)")
     model = resolve(VERIFY_TASK).model
-    hook = _batch_event_hook(task_id, "verify", model)
-    existing = _pending_batch_ids(task_id)
+    hook = batch_event_hook(task_id, "verify", model)
+    existing = pending_batch_ids(task_id)
     if existing:
         results = await collect_pending(task_id, hook)
     else:
@@ -469,5 +469,5 @@ async def handle_verify_new(task_id: int, payload: dict[str, Any]) -> None:
             )
         done += 1
         if done % 200 == 0:
-            _set_progress(task_id, done, len(specs), "verified")
-    _set_progress(task_id, done, len(specs), "verified")
+            set_progress(task_id, done, len(specs), "verified")
+    set_progress(task_id, done, len(specs), "verified")

@@ -14,7 +14,7 @@ from urllib.parse import urlparse
 
 from api import db, hosts, metrics, telemetry, verdicts
 from api.tasks.board import _content_attempted_urls, _content_ready_urls
-from api.tasks.runtime import Deferred, _cancelled, _set_progress, enqueue
+from api.tasks.runtime import Deferred, cancelled, enqueue, set_progress
 from core.store import add_ai_result
 
 logger = logging.getLogger("jobtracker_worker")
@@ -128,7 +128,7 @@ async def handle_ingest_source(task_id: int, payload: dict[str, Any]) -> None:
     tried_recently = _content_attempted_urls([p.url for p in candidates]) - have_content
     cached = fetch_failed = gone = 0
     for i, p in enumerate(candidates):
-        if i % 10 == 0 and _cancelled(task_id):
+        if i % 10 == 0 and cancelled(task_id):
             logger.info(f"Task {task_id} cancelled mid-ingest")
             return
         if p.url in have_content or p.url in tried_recently:
@@ -171,11 +171,11 @@ async def handle_ingest_source(task_id: int, payload: dict[str, Any]) -> None:
         cached += 1
         metrics.INGEST_JOBS.labels(source["name"], "cached").inc()
         if cached % 5 == 0:
-            _set_progress(task_id, i + 1, total, source["name"])
+            set_progress(task_id, i + 1, total, source["name"])
     # The counts the health detectors read: a feed that returned nothing, a
     # pattern that admits nothing, a worker whose fetches stopped landing.
     # Kept on the task because nothing else records what one ingest saw.
-    _set_progress(
+    set_progress(
         task_id,
         total,
         total,

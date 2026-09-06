@@ -88,14 +88,14 @@ async def test_collect_pending_rewrites_payload_to_what_is_still_running(monkeyp
 
     monkeypatch.setattr("core.batch.collect_finished_batches", fake)
     assert list(await runtime.collect_pending(tid, None)) == ["u1"]
-    assert runtime._pending_batch_ids(tid) == ["b"]
+    assert runtime.pending_batch_ids(tid) == ["b"]
 
     async def all_done(ids, on_event=None):
         return {}, []
 
     monkeypatch.setattr("core.batch.collect_finished_batches", all_done)
     await runtime.collect_pending(tid, None)
-    assert runtime._pending_batch_ids(tid) == []
+    assert runtime.pending_batch_ids(tid) == []
 
 
 def test_repark_only_when_ids_remain():
@@ -114,7 +114,7 @@ async def test_worker_parks_a_handler_that_returns_with_batches_left(monkeypatch
     tid = runtime.enqueue("test_kind", {})
     assert await worker.run_once() is True
     assert _status(tid) == "awaiting_batch"
-    assert runtime._pending_batch_ids(tid) == ["b"]
+    assert runtime.pending_batch_ids(tid) == ["b"]
 
 
 @pytest.mark.asyncio

@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Any
 
 from api import db, gmail, mail_store, oauth
-from api.tasks.runtime import _set_progress, enqueue
+from api.tasks.runtime import enqueue, set_progress
 from core.mail_import import read_archive
 
 logger = logging.getLogger("jobtracker_worker")
@@ -80,10 +80,10 @@ async def handle_probe_credentials(task_id: int, payload: dict[str, Any]) -> Non
     the silence this handler exists to break.
     """
     users = connected_user_ids()
-    _set_progress(task_id, 0, len(users), "probing credentials")
+    set_progress(task_id, 0, len(users), "probing credentials")
     for i, user_id in enumerate(users, 1):
         oauth.get_access_token(user_id)
-        _set_progress(task_id, i, len(users), "probing credentials")
+        set_progress(task_id, i, len(users), "probing credentials")
 
 
 async def handle_sync_gmail(task_id: int, payload: dict[str, Any]) -> None:
@@ -122,10 +122,10 @@ def _sync_one(task_id: int, user_id: int) -> None:
         if len(pending) >= IMPORT_FLUSH:
             mail_store.store_messages(user_id, pending)
             pending = []
-            _set_progress(task_id, stored, SYNC_BATCH, "gmail sync")
+            set_progress(task_id, stored, SYNC_BATCH, "gmail sync")
     if pending:
         mail_store.store_messages(user_id, pending)
-    _set_progress(task_id, stored, SYNC_BATCH, "gmail sync")
+    set_progress(task_id, stored, SYNC_BATCH, "gmail sync")
     logger.info(f"gmail sync: stored {stored} new message(s) for user {user_id}")
 
 
@@ -198,8 +198,8 @@ def _import_one(task_id: int, payload: dict[str, Any]) -> None:
         if len(pending) >= IMPORT_FLUSH:
             stored += mail_store.store_messages(user_id, pending)
             pending = []
-            _set_progress(task_id, stored, 0, f"importing {path.name}")
+            set_progress(task_id, stored, 0, f"importing {path.name}")
     if pending:
         stored += mail_store.store_messages(user_id, pending)
-    _set_progress(task_id, stored, stored, f"imported {path.name}")
+    set_progress(task_id, stored, stored, f"imported {path.name}")
     logger.info(f"archive import: {stored} message(s) from {path.name} for user {user_id}")

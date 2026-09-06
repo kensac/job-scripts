@@ -3,6 +3,15 @@
 Sits below the handlers so a handler can import it without pulling in the
 worker loop, while the loop imports handlers for its registry. That ordering
 is what keeps the two from forming a cycle.
+
+The names here are public because they are used that way. They were spelled
+with a leading underscore while sixteen modules imported set_progress and
+eleven names in total crossed a module boundary, so the underscore was a claim
+about the interface that the callers falsified. A handler reads this module to
+find out what it may call; that is easier when the answer is "the public names"
+than when it is "the private ones, apparently".
+
+Anything genuinely internal to this module keeps its underscore.
 """
 
 from __future__ import annotations
@@ -213,7 +222,7 @@ def _park_awaiting_batch(task_id: int, batch_ids: list[str]) -> bool:
     """Records the batches a task is waiting on and releases the worker.
 
     The ids go in the payload so a resumed run reattaches to work already paid
-    for instead of resubmitting - the same guarantee _pending_batch_ids gave a
+    for instead of resubmitting - the same guarantee pending_batch_ids gave a
     crashed worker, now used as the normal path rather than as recovery.
 
     Returns False when the task was no longer claimable (cancelled, or reaped
@@ -242,7 +251,7 @@ def _park_awaiting_batch(task_id: int, batch_ids: list[str]) -> bool:
     return parked
 
 
-def _finish(task_id: int, status: str, error: str | None = None) -> None:
+def finish(task_id: int, status: str, error: str | None = None) -> None:
     """Ends the task and closes out its batch lifecycle.
 
     Only running tasks can be finished; an admin 'cancelled' status sticks, and
@@ -271,17 +280,17 @@ def _finish(task_id: int, status: str, error: str | None = None) -> None:
     events.publish_task(task_id)
 
 
-def _cancelled(task_id: int) -> bool:
+def cancelled(task_id: int) -> bool:
     row = db.query_one("SELECT status FROM tasks WHERE id = %s", (task_id,))
     return not row or row["status"] != "running"
 
 
-def _parent_cancelled(parent_id: int) -> bool:
+def parent_cancelled(parent_id: int) -> bool:
     row = db.query_one("SELECT status FROM tasks WHERE id = %s", (parent_id,))
     return not row or row["status"] == "cancelled"
 
 
-def _update_parent_progress(parent_id: int) -> None:
+def update_parent_progress(parent_id: int) -> None:
     agg = db.query_one(
         "SELECT COALESCE(SUM((progress->>'done')::int), 0) AS done FROM tasks "
         "WHERE kind = ANY(%s) AND parent_id = %s",
@@ -296,8 +305,8 @@ def _update_parent_progress(parent_id: int) -> None:
     events.publish_task(parent_id)
 
 
-def _maybe_finalize_parent(parent_id: int) -> None:
-    _update_parent_progress(parent_id)
+def maybe_finalize_parent(parent_id: int) -> None:
+    update_parent_progress(parent_id)
     live = db.query_one(
         # awaiting_batch counts as live: a parked chunk has work in flight
         # at the provider, and finalizing the parent without it would publish
@@ -340,7 +349,7 @@ def _maybe_finalize_parent(parent_id: int) -> None:
     events.publish_task(parent_id)
 
 
-def _reconcile_chunks() -> None:
+def reconcile_chunks() -> None:
     db.execute(
         "UPDATE tasks SET status = 'cancelled', error = 'parent cancelled', finished_at = now() "
         "WHERE kind = ANY(%s) AND status = 'pending' "
@@ -356,10 +365,10 @@ def _reconcile_chunks() -> None:
         """,
         (CHUNK_KINDS,),
     ):
-        _maybe_finalize_parent(r["id"])
+        maybe_finalize_parent(r["id"])
 
 
-def _set_progress(
+def set_progress(
     task_id: int, done: int, total: int, label: str, extra: dict[str, Any] | None = None
 ) -> None:
     # `extra` is for counts a handler wants queryable afterwards (what an
@@ -388,7 +397,7 @@ def _set_progress(
     events.publish_task(task_id)
 
 
-def _batch_event_hook(
+def batch_event_hook(
     task_id: int,
     purpose: str,
     model: str,
@@ -607,7 +616,7 @@ async def run_batched(
     in a fifth.
     """
     purpose = shape.purpose
-    existing = _pending_batch_ids(task_id)
+    existing = pending_batch_ids(task_id)
     chosen = resolve(shape, override=configured_model(purpose))
     if not existing:
         # Only when about to SUBMIT. A resuming task is collecting work the
@@ -626,7 +635,7 @@ async def run_batched(
     # constants - so the first is the prompt for the batch. Recorded before
     # submitting, so a sweep that dies mid-flight still says what it asked.
     prompt_id = _record_prompt(purpose, specs[0].instructions) if specs else None
-    hook = _batch_event_hook(task_id, purpose, chosen.model, prompt_id=prompt_id)
+    hook = batch_event_hook(task_id, purpose, chosen.model, prompt_id=prompt_id)
     if existing:
         logger.info(f"Task {task_id}: reattaching to {len(existing)} in-flight batch(es)")
         results = await collect_pending(task_id, hook)
@@ -672,7 +681,7 @@ async def submit_or_collect(
     """
     from core.batch import submit_responses_batches
 
-    existing = _pending_batch_ids(task_id)
+    existing = pending_batch_ids(task_id)
     if existing:
         logger.info(f"Task {task_id}: collecting {len(existing)} batch(es)")
         return await collect_pending(task_id, hook)
@@ -697,12 +706,12 @@ async def submit_or_collect(
     raise AwaitingBatch()
 
 
-def _pending_batch_ids(task_id: int) -> list[str]:
+def pending_batch_ids(task_id: int) -> list[str]:
     row = db.query_one("SELECT payload->'batch_ids' AS ids FROM tasks WHERE id = %s", (task_id,))
     return list(row["ids"]) if row and row["ids"] else []
 
 
-def _resume_parked(task_id: int) -> None:
+def resume_parked(task_id: int) -> None:
     db.execute(
         "UPDATE tasks SET status = 'pending', started_at = NULL, last_heartbeat = NULL "
         "WHERE id = %s AND status = 'awaiting_batch'",
@@ -733,7 +742,7 @@ async def collect_pending(task_id: int, hook) -> dict[str, Any]:
     """
     from core.batch import collect_finished_batches
 
-    existing = _pending_batch_ids(task_id)
+    existing = pending_batch_ids(task_id)
     if not existing:
         return {}
     results, unfinished = await collect_finished_batches(existing, hook)
@@ -751,13 +760,13 @@ def repark_if_unfinished(task_id: int) -> bool:
     """After a handler returns: if its payload still names batches, the run
     collected only part of its work and the task waits on the rest. True when
     it was parked again; the caller must then not finish it."""
-    remaining = _pending_batch_ids(task_id)
+    remaining = pending_batch_ids(task_id)
     if not remaining:
         return False
     return _park_awaiting_batch(task_id, remaining)
 
 
-def _load_config(user_id: int) -> tuple[Entitlement, ai.AIConfig]:
+def load_config(user_id: int) -> tuple[Entitlement, ai.AIConfig]:
     user = db.query_one("SELECT id, sub, email, name, groups FROM users WHERE id = %s", (user_id,))
     if not user:
         raise LookupError("unknown user")

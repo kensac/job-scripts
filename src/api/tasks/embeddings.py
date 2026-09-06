@@ -8,7 +8,7 @@ from typing import Any
 
 from api import db
 from api.tasks import rescrape
-from api.tasks.runtime import _set_progress
+from api.tasks.runtime import set_progress
 from core.embeddings import (
     EMBEDDING_BATCH_SIZE,
     EMBEDDING_DIMENSIONS,
@@ -118,7 +118,7 @@ async def handle_embed_postings(task_id: int, payload: dict[str, Any]) -> None:
     if not key:
         # Not an error: a host without a server key simply does no embedding,
         # the same way the batched sweeps no-op without one.
-        _set_progress(task_id, 0, 0, "no api key")
+        set_progress(task_id, 0, 0, "no api key")
         return
 
     candidates = rescrape.drop_unchanged(
@@ -127,13 +127,13 @@ async def handle_embed_postings(task_id: int, payload: dict[str, Any]) -> None:
         limit=EMBEDDING_INPUT_CHARS,
     )
     if not candidates:
-        _set_progress(task_id, 0, 0, "nothing to embed")
+        set_progress(task_id, 0, 0, "nothing to embed")
         return
 
     client = AsyncOpenAI(api_key=key)
     total = len(candidates)
     done = 0
-    _set_progress(task_id, 0, total, "embedding postings")
+    set_progress(task_id, 0, total, "embedding postings")
     for start in range(0, total, EMBEDDING_BATCH_SIZE):
         wave = candidates[start : start + EMBEDDING_BATCH_SIZE]
         texts = [r["input_content"][:EMBEDDING_INPUT_CHARS] for r in wave]
@@ -181,5 +181,5 @@ async def handle_embed_postings(task_id: int, payload: dict[str, Any]) -> None:
         if rows:
             _store(rows)
         done += len(wave)
-        _set_progress(task_id, done, total, "embedding postings")
-    _set_progress(task_id, done, total, "postings embedded")
+        set_progress(task_id, done, total, "embedding postings")
+    set_progress(task_id, done, total, "postings embedded")

@@ -6,7 +6,7 @@ from typing import Any
 
 from api import ai, budget, db, verdicts
 from api.tasks.models import JobExtract
-from api.tasks.runtime import _load_config
+from api.tasks.runtime import load_config
 from core.store import get_content
 
 
@@ -14,7 +14,7 @@ async def handle_extract_upload(payload: dict[str, Any]) -> None:
     job = db.query_one("SELECT * FROM jobs WHERE id = %s", (payload["job_id"],))
     if not job:
         raise LookupError("unknown job")
-    _, cfg = _load_config(payload["user_id"])
+    _, cfg = load_config(payload["user_id"])
 
     content = None if payload.get("force") else get_content(job["url"])
     if not content:

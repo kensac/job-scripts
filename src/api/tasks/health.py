@@ -7,7 +7,7 @@ import logging
 from typing import Any
 
 from api import db, metrics
-from api.tasks.runtime import _set_progress
+from api.tasks.runtime import set_progress
 
 logger = logging.getLogger("jobtracker_worker")
 
@@ -23,7 +23,7 @@ async def handle_data_health(task_id: int, payload: dict[str, Any]) -> None:
     metrics.HEALTH_ALERTS.set(len(found))
     if fresh:
         await asyncio.to_thread(_notify, fresh)
-    _set_progress(
+    set_progress(
         task_id,
         len(found),
         len(found),
