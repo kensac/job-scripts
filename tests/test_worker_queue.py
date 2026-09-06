@@ -833,8 +833,12 @@ async def test_content_backfill_caches_pages_and_skips_covered_jobs(monkeypatch)
     )
     db.execute(
         "INSERT INTO jobs (url, source, company, title) VALUES "
-        "('https://bf.test/needs', 'bf', 'A', 'T'), ('https://bf.test/has', 'bf', 'B', 'T')"
+        "('https://bf.test/needs', 'bf', 'A', 'T'), ('https://bf.test/has', 'bf', 'B', 'T'), "
+        "('https://bf.test/gone', 'bf', 'C', 'T')"
     )
+    # A posting its board reported gone has a closed verdict and no content
+    # row; it was re-fetched every hour for two days before this line.
+    add_ai_result("https://bf.test/gone", "rejected", "ATS reports posting gone", "closed")
     add_ai_result(
         "https://bf.test/has",
         "passed",
