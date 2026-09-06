@@ -10,7 +10,7 @@ from typing import Any, NamedTuple
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from api import ai, db, events, health, scoping, sorting
+from api import ai, db, events, health, hosts, scoping, sorting
 from api import params as params_
 from api.auth import AuthedUser, require_user
 from api.routers.jobs import report_kinds
@@ -1608,6 +1608,10 @@ def host_budgets(user: AuthedUser = Depends(require_admin)):
         FROM host_budget ORDER BY refused DESC, host, egress_group
         """
     )
+    for r in rows:
+        # Refused with nothing ever accepted is a block, not a pace; the page
+        # says so instead of showing a gap that only grows.
+        r["blocked"] = hosts.blocked(r["ok"], r["refused"])
     # The pulls waiting on a slot, per host, so the page need not page every
     # pending ingest task to say "3 waiting, next 14:52".
     deferred = db.query(

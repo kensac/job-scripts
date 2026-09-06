@@ -91,6 +91,7 @@ _SUBJECT_KINDS = {
     "task_kind_failing": SUBJECT_TASK_KIND,
     "task_requeued_forever": SUBJECT_TASK,
     "alerts_unnotified": SUBJECT_DETECTOR,
+    "address_blocked_by_host": SUBJECT_HOST,
     "detector_failed": SUBJECT_DETECTOR,
 }
 
@@ -569,6 +570,34 @@ def _detect_silent() -> list[dict[str, Any]]:
                     "ends a task that keeps coming back."
                 ),
                 "detail": {"id": r["id"], "kind": r["kind"], "attempts": r["attempts"]},
+            }
+        )
+
+    # An address a host has shut out: refused repeatedly, never accepted. The
+    # budget cannot open it and the work flows to the other addresses, but a
+    # person should know one lane is dead against one host.
+    from api import hosts as _hosts
+
+    for r in db.query(
+        """
+        SELECT host, array_agg(egress_group ORDER BY egress_group) AS addresses,
+               sum(refused) AS refused
+        FROM host_budget WHERE ok = 0 AND refused >= %(n)s
+        GROUP BY host
+        """,
+        {"n": _hosts.BLOCKED_AFTER},
+    ):
+        found.append(
+            {
+                "kind": "address_blocked_by_host",
+                "subject": r["host"],
+                "severity": "warning",
+                "message": (
+                    f"{r['host']} has refused every pull from {', '.join(r['addresses'])} "
+                    f"({r['refused']} refusals, nothing accepted). Other addresses carry "
+                    "its boards; this one needs a different exit or to be left alone."
+                ),
+                "detail": {"host": r["host"], "addresses": list(r["addresses"])},
             }
         )
 
