@@ -95,7 +95,7 @@ class Job(Base):
     # was backed by evidence.
     #
     # What it IS good for: every sweep and every selection gates on it, so a
-    # false row costs no checks and leaves boards through _demote_closed.
+    # false row costs no checks and leaves boards through demote_closed.
     # For "is this role still open", use the closed check - an AI verdict
     # against the posting url, applied uniformly across boards. Job rows serve
     # it as `closed_verdict` ('open' | 'closed' | NULL for never checked).

@@ -8,7 +8,7 @@ import os
 from typing import Any
 
 from api import ai, db, events, verdicts
-from api.tasks.board import _UNTOUCHED, _demote_closed
+from api.tasks.board import UNTOUCHED, demote_closed
 from api.tasks.models import _VERIFY_INSTRUCTIONS, JobClosedVerdict, VerifyVerdict
 from api.tasks.runtime import (
     CHUNK_SIZE,
@@ -312,7 +312,7 @@ async def handle_reverify_open(task_id: int, payload: dict[str, Any]) -> None:
             f"""
             SELECT DISTINCT j.url, j.company, j.title FROM user_jobs uj
             JOIN jobs j ON j.id = uj.job_id
-            WHERE {_UNTOUCHED}
+            WHERE {UNTOUCHED}
               AND COALESCE((SELECT MAX(q.created_at) FROM ai_queries q
                             WHERE q.url = j.url AND q.check_type = 'closed'),
                            '-infinity') < now() - make_interval(days => %(days)s)
@@ -322,11 +322,11 @@ async def handle_reverify_open(task_id: int, payload: dict[str, Any]) -> None:
         )
     if not rows:
         set_progress(task_id, 0, 0, "nothing stale")
-        _demote_closed()
+        demote_closed()
         return
     if len(rows) <= CHUNK_SIZE:
         await _reverify_jobs(task_id, rows, force=bool(payload.get("full")))
-        _demote_closed()
+        demote_closed()
         return
     total = len(rows)
     n_chunks = 0

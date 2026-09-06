@@ -10,7 +10,7 @@ def _user_id() -> int:
 
 
 def _make_passing_job(user_id: int, url: str, source: str = "internships") -> int:
-    """A job that satisfies every _materialize_passing gate: user is subscribed
+    """A job that satisfies every materialize_passing gate: user is subscribed
     to its source, it's active, its latest closed check passed, and it passed
     the user's one enabled filter."""
     job = db.query_one(
@@ -34,7 +34,7 @@ def _board_row(user_id: int, job_id: int):
 
 
 # ---------------------------------------------------------------------------
-# _materialize_passing
+# materialize_passing
 # ---------------------------------------------------------------------------
 
 
@@ -43,13 +43,13 @@ def test_materialize_passing_recreates_a_deleted_row(user_headers):
     url = "https://jobs.example.com/board-1"
     job_id = _make_passing_job(user_id, url)
 
-    assert tasks_board._materialize_passing(user_id) == 1
+    assert tasks_board.materialize_passing(user_id) == 1
     assert _board_row(user_id, job_id) is not None
 
     db.execute("DELETE FROM user_jobs WHERE user_id = %s AND job_id = %s", (user_id, job_id))
     assert _board_row(user_id, job_id) is None
 
-    assert tasks_board._materialize_passing(user_id) == 1
+    assert tasks_board.materialize_passing(user_id) == 1
     assert _board_row(user_id, job_id) is not None
 
 
@@ -58,19 +58,19 @@ def test_materialize_passing_leaves_hidden_row_alone(user_headers):
     url = "https://jobs.example.com/board-2"
     job_id = _make_passing_job(user_id, url)
 
-    tasks_board._materialize_passing(user_id)
+    tasks_board.materialize_passing(user_id)
     db.execute(
         "UPDATE user_jobs SET hidden = true WHERE user_id = %s AND job_id = %s", (user_id, job_id)
     )
 
-    assert tasks_board._materialize_passing(user_id) == 0
+    assert tasks_board.materialize_passing(user_id) == 0
     row = _board_row(user_id, job_id)
     assert row is not None
     assert row["hidden"] is True
 
 
 # ---------------------------------------------------------------------------
-# _demote_closed
+# demote_closed
 # ---------------------------------------------------------------------------
 
 
@@ -78,11 +78,11 @@ def test_demote_closed_removes_untouched_row_when_closed_now_rejected(user_heade
     user_id = _user_id()
     url = "https://jobs.example.com/board-3"
     job_id = _make_passing_job(user_id, url)
-    tasks_board._materialize_passing(user_id)
+    tasks_board.materialize_passing(user_id)
 
     add_ai_result(url, "rejected", "now closed", "closed")
 
-    assert tasks_board._demote_closed() == 1
+    assert tasks_board.demote_closed() == 1
     assert _board_row(user_id, job_id) is None
 
 
@@ -90,7 +90,7 @@ def test_demote_closed_leaves_touched_row_even_when_closed(user_headers):
     user_id = _user_id()
     url = "https://jobs.example.com/board-4"
     job_id = _make_passing_job(user_id, url)
-    tasks_board._materialize_passing(user_id)
+    tasks_board.materialize_passing(user_id)
     db.execute(
         "UPDATE user_jobs SET status = 'applied' WHERE user_id = %s AND job_id = %s",
         (user_id, job_id),
@@ -98,7 +98,7 @@ def test_demote_closed_leaves_touched_row_even_when_closed(user_headers):
 
     add_ai_result(url, "rejected", "now closed", "closed")
 
-    assert tasks_board._demote_closed() == 0
+    assert tasks_board.demote_closed() == 0
     assert _board_row(user_id, job_id) is not None
 
 
@@ -106,7 +106,7 @@ def test_demote_closed_leaves_untouched_row_when_still_open(user_headers):
     user_id = _user_id()
     url = "https://jobs.example.com/board-5"
     job_id = _make_passing_job(user_id, url)
-    tasks_board._materialize_passing(user_id)
+    tasks_board.materialize_passing(user_id)
 
-    assert tasks_board._demote_closed() == 0
+    assert tasks_board.demote_closed() == 0
     assert _board_row(user_id, job_id) is not None

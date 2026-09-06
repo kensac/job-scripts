@@ -1,9 +1,14 @@
 """Board membership: which jobs are on a user's board, and why.
 
+Every name here is public, because every one of them was already imported by
+another module while spelled private. candidates_for is not called `candidates`
+because tasks/filters.py binds a local of that name around the call, where the
+short name would shadow the function rather than read as it.
+
 The predicate itself is not spelled here. api/visibility.py owns it: FULL is
 the one spelling, and handle_recompute_board below runs it through
 visibility.recompute. What this module does spell is the write path around it,
-_materialize_passing and _candidates, which share criteria.SQL and the
+materialize_passing and candidates_for, which share criteria.SQL and the
 structural gates with FULL and must stay consistent with it.
 """
 
@@ -20,7 +25,7 @@ logger = logging.getLogger("jobtracker_worker")
 # A board row counts as untouched (machine-managed) when the user never set
 # anything on it; only these are auto-added by materialization and auto-removed
 # by re-verification.
-_UNTOUCHED = """
+UNTOUCHED = """
     (uj.status IS NULL OR uj.status = '') AND uj.date_applied IS NULL
     AND COALESCE(uj.notes, '') = '' AND COALESCE(uj.size, '') = ''
     AND COALESCE(uj.recruiter, '') = '' AND COALESCE(uj.connection1, '') = ''
@@ -29,7 +34,7 @@ _UNTOUCHED = """
 """
 
 
-def _materialize_passing(user_id: int) -> int:
+def materialize_passing(user_id: int) -> int:
     """Mirror of the old write_to_sheet step: every job currently passing ALL
     of the user's enabled filters (and the structural gates) becomes a board
     row. Existing rows (including hidden ones) are untouched, so deleting a
@@ -93,7 +98,7 @@ def _materialize_passing(user_id: int) -> int:
     return added
 
 
-def _candidates(user_id: int) -> list[dict[str, Any]]:
+def candidates_for(user_id: int) -> list[dict[str, Any]]:
     from api import criteria
 
     settings = db.query_one(
@@ -128,7 +133,7 @@ def _candidates(user_id: int) -> list[dict[str, Any]]:
     )
 
 
-def _decided_urls(urls: list[str], prompt_hash: str, model: str) -> set:
+def decided_urls(urls: list[str], prompt_hash: str, model: str) -> set:
     """URLs that already have a decided verdict for this filter+model - one
     query instead of one per job, so cache-hit reruns cost nothing per row."""
     if not urls:
@@ -142,13 +147,13 @@ def _decided_urls(urls: list[str], prompt_hash: str, model: str) -> set:
     return {r["url"] for r in rows}
 
 
-def _in_flight_urls(user_id: int) -> set:
+def in_flight_urls(user_id: int) -> set:
     """URLs a live filter chunk of an earlier run still holds for this user.
 
     A run that splits while those chunks wait at the provider must not
     submit them again. A batch yields nothing until it is terminal, so a
     chunk parked on a straggler holds every url in it undecided for hours,
-    and _decided_urls cannot see them; re-selecting would pay twice for the
+    and decided_urls cannot see them; re-selecting would pay twice for the
     same verdicts. Excluding them is what lets a new run start while an old
     one is still parked: it judges only what arrived since.
     """
@@ -163,7 +168,7 @@ def _in_flight_urls(user_id: int) -> set:
     return {r["url"] for r in rows}
 
 
-def _content_ready_urls(urls: list[str]) -> set:
+def content_ready_urls(urls: list[str]) -> set:
     if not urls:
         return set()
     rows = db.query(
@@ -182,7 +187,7 @@ def fetch_retry_interval() -> str:
     return f"{int(db.get_config('fetch_retry_after_hours'))} hours"
 
 
-def _content_attempted_urls(urls: list[str]) -> set:
+def content_attempted_urls(urls: list[str]) -> set:
     """URLs whose page was fetched, with or without a result, inside the retry
     window. A failed fetch leaves a 'failed' content row (verdicts.refresh_content)
     and that row is the only memory of the attempt."""
@@ -196,12 +201,12 @@ def _content_attempted_urls(urls: list[str]) -> set:
     return {r["url"] for r in rows}
 
 
-def _demote_closed() -> int:
+def demote_closed() -> int:
     with db.pool.connection() as conn:
         result = conn.execute(
             f"""
             DELETE FROM user_jobs uj USING jobs j
-            WHERE uj.job_id = j.id AND {_UNTOUCHED}
+            WHERE uj.job_id = j.id AND {UNTOUCHED}
               AND (
                 -- A posting that vanished from its source feed is gone even
                 -- if no closed-check ever ran on it. Keying only on the

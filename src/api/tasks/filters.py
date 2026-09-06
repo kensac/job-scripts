@@ -8,11 +8,11 @@ from typing import Any
 
 from api import ai, budget, db, events, metrics, verdicts
 from api.tasks.board import (
-    _candidates,
-    _content_ready_urls,
-    _decided_urls,
-    _in_flight_urls,
-    _materialize_passing,
+    candidates_for,
+    content_ready_urls,
+    decided_urls,
+    in_flight_urls,
+    materialize_passing,
 )
 from api.tasks.models import FilterVerdict
 from api.tasks.runtime import (
@@ -165,7 +165,7 @@ async def _process_jobs(
         # when it finalizes, but a parent waits on its slowest chunk, and a
         # chunk parked on a straggler batch holds every other chunk's passes
         # off the board for as long as the provider takes.
-        _materialize_passing(user_id)
+        materialize_passing(user_id)
         update_parent_progress(parent_id)
 
 
@@ -177,17 +177,17 @@ async def _run_filters(
     centralized chunks; jobs still needing a scrape go through live fleet
     chunks as usual (sharded parsing, centralized batching)."""
     ent, cfg = load_config(user_id)
-    held = _in_flight_urls(user_id)
-    candidates = [j for j in _candidates(user_id) if j["url"] not in held]
+    held = in_flight_urls(user_id)
+    candidates = [j for j in candidates_for(user_id) if j["url"] not in held]
     urls = [j["url"] for j in candidates]
     use_batch = batched and cfg.key_source == "owner" and cfg.provider == "openai"
     units: list[tuple] = []
     for flt in filters:
-        decided = _decided_urls(urls, flt["prompt_hash"], cfg.model)
+        decided = decided_urls(urls, flt["prompt_hash"], cfg.model)
         todo = [j for j in candidates if j["url"] not in decided]
         metrics.CACHED_VERDICTS.inc(len(candidates) - len(todo))
         if use_batch and todo:
-            ready = _content_ready_urls([j["url"] for j in todo])
+            ready = content_ready_urls([j["url"] for j in todo])
             batchable = [j for j in todo if j["url"] in ready]
             todo = [j for j in todo if j["url"] not in ready]
             for start in range(0, len(batchable), BATCH_CHUNK_SIZE):
@@ -195,13 +195,13 @@ async def _run_filters(
         for start in range(0, len(todo), CHUNK_SIZE):
             units.append(("live", flt, todo[start : start + CHUNK_SIZE]))
     if not units:
-        _materialize_passing(user_id)
+        materialize_passing(user_id)
         set_progress(task_id, 0, 0, "everything already decided")
         return
     if len(units) == 1 and units[0][0] == "live":
         _, flt, jobs = units[0]
         await _process_jobs(task_id, user_id, ent, cfg, flt, jobs)
-        _materialize_passing(user_id)
+        materialize_passing(user_id)
         return
     total = sum(len(jobs) for _, _, jobs in units)
     for mode, flt, jobs in units:
@@ -388,7 +388,7 @@ async def handle_run_filter_batch_chunk(task_id: int, payload: dict[str, Any]) -
     if parent_id:
         # See _process_jobs: publish this chunk's passes without waiting on
         # the siblings still parked at the provider.
-        _materialize_passing(user_id)
+        materialize_passing(user_id)
         update_parent_progress(parent_id)
 
 

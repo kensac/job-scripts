@@ -13,7 +13,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from api import db, hosts, metrics, telemetry, verdicts
-from api.tasks.board import _content_attempted_urls, _content_ready_urls
+from api.tasks.board import content_attempted_urls, content_ready_urls
 from api.tasks.runtime import Deferred, cancelled, enqueue, set_progress
 from core.store import add_ai_result
 
@@ -85,7 +85,7 @@ async def handle_ingest_source(task_id: int, payload: dict[str, Any]) -> None:
     # A company board lists every open posting, so a catalog row this pull
     # did not admit is closed (the board dropped it) or retired (the pattern
     # no longer admits it); either way it stops costing checks and leaves
-    # boards through _demote_closed. Listed and admitted again, the upsert
+    # boards through demote_closed. Listed and admitted again, the upsert
     # above sets it active. Not for aggregator lists, whose rows age off on
     # their own schedule, and not on an empty pull, which is a broken fetch
     # rather than an empty board. Nothing did this before: 4,554 of 6,306
@@ -122,10 +122,10 @@ async def handle_ingest_source(task_id: int, payload: dict[str, Any]) -> None:
     # and almost all of them are already cached, so the per-posting form was
     # ~2,800 sequential queries pulling ~15MB to compute a boolean, hourly.
     total = len(candidates)
-    have_content = _content_ready_urls([p.url for p in candidates])
+    have_content = content_ready_urls([p.url for p in candidates])
     # A posting whose fetch came back empty inside the retry window is not
     # tried again this hour; see FETCH_RETRY_AFTER for why once a day.
-    tried_recently = _content_attempted_urls([p.url for p in candidates]) - have_content
+    tried_recently = content_attempted_urls([p.url for p in candidates]) - have_content
     cached = fetch_failed = gone = 0
     for i, p in enumerate(candidates):
         if i % 10 == 0 and cancelled(task_id):
@@ -201,7 +201,7 @@ def schedule_filter_runs(cycle: str) -> None:
     A run that has not split yet (pending or running) blocks the next: two
     splitters would select the same jobs. A run that HAS split and is waiting
     on its chunks does not block, because the splitter excludes every url a
-    live chunk holds (board._in_flight_urls) and so judges only what arrived
+    live chunk holds (board.in_flight_urls) and so judges only what arrived
     since. Before that exclusion the guard covered 'waiting' too, and one
     chunk parked on a straggler batch kept a user's new postings unjudged
     until the provider finished it - 6,226 postings for 14 hours on
