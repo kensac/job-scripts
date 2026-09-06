@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import datetime
-import hashlib
 import logging
 import os
 from typing import Any
@@ -11,6 +10,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from api import db
+from api.tasks import rescrape
 from api.tasks.runtime import (
     _set_progress,
     run_batched,
@@ -412,41 +412,13 @@ def _store(
             )
 
 
-def _drop_unchanged_rescrapes(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Re-stamp the pages that were scraped again but did not change.
-
-    A url reaches the candidate list when its current content row is not the
-    one its answer came from, which a re-scrape makes true whether or not the
-    page actually changed - and a re-scrape that changed nothing is the common
-    case. Comparing the stored hash to the new text separates the two, and the
-    unchanged ones have their row id refreshed here so they do not come back
-    every cycle. Nothing is paid for; the row keeps the answer it had.
-    """
-    changed = []
-    unchanged: list[tuple[int | None, str]] = []
-    for row in rows:
-        text = row["input_content"][:REQUIREMENTS_INPUT_CHARS]
-        row["content_hash"] = hashlib.sha256(text.encode("utf-8")).hexdigest()
-        if row["stored_hash"] and row["stored_hash"] == row["content_hash"]:
-            unchanged.append((row["content_row_id"], row["url"]))
-        else:
-            changed.append(row)
-    if unchanged:
-        with db.pool.connection() as conn:
-            conn.cursor().executemany(
-                "UPDATE job_requirements SET content_row_id = %s WHERE url = %s", unchanged
-            )
-        logger.info(f"{len(unchanged)} page(s) re-scraped without changing; not re-extracted")
-    return changed
-
-
 async def handle_extract_requirements(task_id: int, payload: dict[str, Any]) -> None:
     from openai.lib._pydantic import to_strict_json_schema
 
     from core.batch import BatchSpec
 
     rows = db.query(_CANDIDATES, {"cap": EXTRACT_REQUIREMENTS_PER_CYCLE})
-    rows = _drop_unchanged_rescrapes(rows)
+    rows = rescrape.drop_unchanged(rows, table="job_requirements", limit=REQUIREMENTS_INPUT_CHARS)
     if not rows:
         _set_progress(task_id, 0, 0, "nothing to extract")
         return

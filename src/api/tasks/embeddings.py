@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import os
 from typing import Any
 
 from api import db
+from api.tasks import rescrape
 from api.tasks.runtime import _set_progress
 from core.embeddings import (
     EMBEDDING_BATCH_SIZE,
@@ -111,33 +111,6 @@ def _store(rows: list[dict[str, Any]]) -> None:
         )
 
 
-def _drop_unchanged_rescrapes(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Re-stamp the pages scraped again that did not change.
-
-    Same reasoning as the requirements sweep: a url reaches this list when its
-    current content row is not the one its vector came from, which a re-scrape
-    makes true whether or not the text moved. Comparing the stored hash
-    separates them, and an unchanged page has its row id refreshed rather than
-    being re-embedded - it would produce the same vector at the same cost.
-    """
-    changed = []
-    unchanged: list[tuple[int | None, str]] = []
-    for row in rows:
-        text = row["input_content"][:EMBEDDING_INPUT_CHARS]
-        row["content_hash"] = hashlib.sha256(text.encode("utf-8")).hexdigest()
-        if row["stored_hash"] and row["stored_hash"] == row["content_hash"]:
-            unchanged.append((row["content_row_id"], row["url"]))
-        else:
-            changed.append(row)
-    if unchanged:
-        with db.pool.connection() as conn:
-            conn.cursor().executemany(
-                "UPDATE job_embeddings SET content_row_id = %s WHERE url = %s", unchanged
-            )
-        logger.info(f"{len(unchanged)} page(s) re-scraped without changing; not re-embedded")
-    return changed
-
-
 async def handle_embed_postings(task_id: int, payload: dict[str, Any]) -> None:
     from openai import AsyncOpenAI
 
@@ -148,7 +121,11 @@ async def handle_embed_postings(task_id: int, payload: dict[str, Any]) -> None:
         _set_progress(task_id, 0, 0, "no api key")
         return
 
-    candidates = _drop_unchanged_rescrapes(db.query(_CANDIDATES, {"cap": EMBED_POSTINGS_PER_CYCLE}))
+    candidates = rescrape.drop_unchanged(
+        db.query(_CANDIDATES, {"cap": EMBED_POSTINGS_PER_CYCLE}),
+        table="job_embeddings",
+        limit=EMBEDDING_INPUT_CHARS,
+    )
     if not candidates:
         _set_progress(task_id, 0, 0, "nothing to embed")
         return

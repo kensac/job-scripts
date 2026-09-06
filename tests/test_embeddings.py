@@ -186,3 +186,55 @@ class TestSimilarEndpoint:
     def test_requires_authentication(self, client, user_headers, f):
         jobs = self._board(client, user_headers, f, n=2)
         assert client.get(f"/v1/jobs/{jobs[0][0]}/similar").status_code in (401, 403)
+
+
+class TestUnchangedRescrapes:
+    """The re-stamp shared with the requirements sweep (api/tasks/rescrape.py).
+
+    This behaviour was spelled twice and only the requirements copy was
+    tested, so the embeddings table had it by copy and by nobody's assertion.
+    """
+
+    def test_an_unchanged_rescrape_re_stamps_the_embedding_instead_of_repaying(self, f):
+        import hashlib
+
+        from api.tasks import rescrape
+        from core.embeddings import EMBEDDING_INPUT_CHARS
+
+        _, url = f.make_ready_job(content="a posting long enough to embed " * 20)
+        f.make_embedding(url)
+        row = db.query_one(
+            "SELECT id, input_content FROM ai_queries WHERE url = %s "
+            "AND input_content IS NOT NULL ORDER BY id DESC LIMIT 1",
+            (url,),
+        )
+        assert row is not None
+        digest = hashlib.sha256(
+            row["input_content"][:EMBEDDING_INPUT_CHARS].encode("utf-8")
+        ).hexdigest()
+        db.execute(
+            "UPDATE job_embeddings SET content_hash = %s, content_row_id = %s WHERE url = %s",
+            (digest, row["id"] - 1, url),
+        )
+
+        candidate = {
+            "url": url,
+            "input_content": row["input_content"],
+            "stored_hash": digest,
+            "content_row_id": row["id"],
+        }
+        kept = rescrape.drop_unchanged(
+            [candidate], table="job_embeddings", limit=EMBEDDING_INPUT_CHARS
+        )
+
+        assert kept == [], "the text did not move, so it must not be re-embedded"
+        stamped = db.query_one("SELECT content_row_id FROM job_embeddings WHERE url = %s", (url,))
+        assert stamped is not None
+        assert stamped["content_row_id"] == row["id"], "re-stamped, or it comes back every cycle"
+
+    def test_a_table_it_does_not_know_is_refused_rather_than_formatted_into_sql(self):
+        from api.tasks import rescrape
+
+        assert {"job_embeddings", "job_requirements"} == rescrape.STAMPABLE
+        with pytest.raises(ValueError, match="not a re-stampable table"):
+            rescrape.drop_unchanged([], table="jobs", limit=10)
