@@ -276,7 +276,7 @@ class TestDrafting:
             submitted.append((shape.purpose, charged_to_user))
             return {
                 s.custom_id: SimpleNamespace(
-                    text=json.dumps({"answer": f"Because {s.custom_id}."}),
+                    text=json.dumps({"answer": f"Because {s.custom_id.partition('|')[2]}."}),
                     error=None,
                     usage={"input_tokens": 100, "output_tokens": 20, "total_tokens": 120},
                     batch_id="b1",

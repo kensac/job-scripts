@@ -1,0 +1,163 @@
+"""Answers ahead of need: the hourly sweep reads the forms of the postings on
+a person's board and drafts every missing answer in one batch, so the answer
+is there when the posting is opened."""
+
+from __future__ import annotations
+
+import json
+from types import SimpleNamespace
+
+import pytest
+
+from api import db, visibility
+from api.tasks import application as drafts
+from core import forms
+from tests.test_application import GREENHOUSE, _owner_config, _user_id
+from tests.test_application import _job_for as _row_for
+
+
+def _job_for(f, uid: int, url: str) -> int:
+    """A posting on the person's board as the sweep sees it: the membership
+    the recompute task writes, not only the row the factory inserts."""
+    job_id = _row_for(f, uid, url)
+    visibility.recompute(uid)
+    return job_id
+
+
+def _sweep_task(uid: int) -> int:
+    row = db.query_one(
+        "INSERT INTO tasks (kind, payload, status) VALUES ('application_sweep', %s, 'running') "
+        "RETURNING id",
+        (db.jsonb({"user_id": uid}),),
+    )
+    assert row is not None
+    return row["id"]
+
+
+def _fake_batch(monkeypatch, calls):
+    async def fake_run_batched(task_id, shape, specs, *, charged_to_user=False):
+        calls.append([s.custom_id for s in specs])
+        return {
+            s.custom_id: SimpleNamespace(
+                text=json.dumps({"answer": f"Ready: {s.custom_id.partition('|')[2]}."}),
+                error=None,
+                usage={"input_tokens": 100, "output_tokens": 20, "total_tokens": 120},
+                batch_id="b",
+            )
+            for s in specs
+        }, SimpleNamespace(model="gpt-5.6-luna")
+
+    monkeypatch.setattr(drafts, "run_batched", fake_run_batched)
+
+
+@pytest.mark.asyncio
+async def test_the_sweep_reads_the_board_forms_and_drafts_what_is_missing_once(
+    client, user_headers, f, monkeypatch
+):
+    uid = _user_id()
+    on_board = _job_for(f, uid, "https://job-boards.greenhouse.io/anthropic/jobs/10")
+    unreadable = _job_for(f, uid, "https://nvidia.wd5.myworkdayjobs.com/en-US/x/job/z")
+    # Visible but on nobody's board row: the sweep works the board, not the catalog.
+    off_board, _ = f.make_ready_job(url="https://job-boards.greenhouse.io/anthropic/jobs/11")
+    client.post("/v1/user/resumes", json={"name": "master", "text": "Alice."}, headers=user_headers)
+    fetched = []
+    monkeypatch.setattr(forms, "_get", lambda url: fetched.append(url) or GREENHOUSE)
+    _owner_config(monkeypatch)
+    calls: list[list[str]] = []
+    _fake_batch(monkeypatch, calls)
+
+    await drafts.handle_application_sweep(_sweep_task(uid), {"user_id": uid})
+
+    # One read for the readable posting; the Workday one is recorded as
+    # unreadable, the off-board one untouched.
+    assert len(fetched) == 1 and "anthropic/jobs/10" in fetched[0]
+    rows = {r["url"]: r for r in db.query("SELECT url, questions FROM application_forms")}
+    assert len(rows["https://job-boards.greenhouse.io/anthropic/jobs/10"]["questions"]) == 2
+    assert rows["https://nvidia.wd5.myworkdayjobs.com/en-US/x/job/z"]["questions"] is None
+    assert "https://job-boards.greenhouse.io/anthropic/jobs/11" not in rows
+    # Only the paragraph question got a row and a draft, in one batch.
+    assert calls == [[f"{on_board}|question_1001"]]
+    answers = db.query(
+        "SELECT job_id, key, draft FROM application_answers WHERE user_id = %s ORDER BY id", (uid,)
+    )
+    assert [(a["job_id"], a["key"], a["draft"]) for a in answers] == [
+        (on_board, "question_1001", "Ready: question_1001.")
+    ]
+    task = db.query_one("SELECT progress FROM tasks WHERE kind = 'application_sweep'")
+    assert task["progress"]["label"].startswith("drafts written ahead of need")
+
+    # The next cycle finds nothing: forms read, drafts written.
+    await drafts.handle_application_sweep(_sweep_task(uid), {"user_id": uid})
+    assert len(fetched) == 1 and calls == [[f"{on_board}|question_1001"]]
+    assert unreadable and off_board
+
+
+@pytest.mark.asyncio
+async def test_the_sweep_needs_a_resume_and_respects_the_switch(
+    client, user_headers, f, monkeypatch
+):
+    uid = _user_id()
+    _job_for(f, uid, "https://job-boards.greenhouse.io/anthropic/jobs/12")
+    fetched = []
+    monkeypatch.setattr(forms, "_get", lambda url: fetched.append(url) or GREENHOUSE)
+    calls: list[list[str]] = []
+    _fake_batch(monkeypatch, calls)
+
+    await drafts.handle_application_sweep(_sweep_task(uid), {"user_id": uid})
+    assert fetched == [] and calls == []
+    assert (
+        db.query_one(
+            "SELECT progress FROM tasks WHERE kind = 'application_sweep' ORDER BY id DESC LIMIT 1"
+        )["progress"]["label"]
+        == "no resume on file"
+    )
+
+    client.post("/v1/user/resumes", json={"name": "master", "text": "Alice."}, headers=user_headers)
+    client.put("/v1/user/settings", json={"prefs": {"auto_draft": False}}, headers=user_headers)
+    await drafts.handle_application_sweep(_sweep_task(uid), {"user_id": uid})
+    assert fetched == [] and calls == []
+
+    client.put("/v1/user/settings", json={"prefs": {"auto_draft": True}}, headers=user_headers)
+    _owner_config(monkeypatch)
+    await drafts.handle_application_sweep(_sweep_task(uid), {"user_id": uid})
+    assert len(fetched) == 1 and len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_busy_host_is_skipped_this_cycle_not_waited_on(
+    client, user_headers, f, monkeypatch
+):
+    from api import hosts
+
+    uid = _user_id()
+    _job_for(f, uid, "https://job-boards.greenhouse.io/anthropic/jobs/13")
+    client.post("/v1/user/resumes", json={"name": "master", "text": "Alice."}, headers=user_headers)
+    fetched = []
+    monkeypatch.setattr(forms, "_get", lambda url: fetched.append(url) or GREENHOUSE)
+    db.execute(
+        "INSERT INTO host_budget (host, egress_group, pace_seconds, next_allowed_at) "
+        "VALUES ('job-boards.greenhouse.io', %s, 60, now() + interval '1 minute')",
+        (hosts.EGRESS_GROUP,),
+    )
+    calls: list[list[str]] = []
+    _fake_batch(monkeypatch, calls)
+    await drafts.handle_application_sweep(_sweep_task(uid), {"user_id": uid})
+    assert fetched == [] and calls == []
+    task = db.query_one("SELECT progress FROM tasks WHERE kind = 'application_sweep'")
+    assert "forms: 0 read, 1 host busy" in task["progress"]["label"]
+
+
+def test_the_cycle_queues_a_sweep_for_each_person_with_a_resume(client, user_headers, f):
+    from api import worker
+
+    uid = _user_id()
+    client.post("/v1/user/resumes", json={"name": "master", "text": "Alice."}, headers=user_headers)
+    f.make_user(sub="no-resume")
+    worker.schedule_ingest_cycle()
+    queued = db.query(
+        "SELECT payload->>'user_id' AS uid FROM tasks WHERE kind = 'application_sweep'"
+    )
+    assert [int(r["uid"]) for r in queued] == [uid]
+    # Same cycle again queues nothing more.
+    worker.schedule_ingest_cycle()
+    assert len(db.query("SELECT 1 FROM tasks WHERE kind = 'application_sweep'")) == 1
