@@ -27,6 +27,14 @@ def test_oracle_canonical_drops_locale_and_facets():
         "CX_1/job/40082"
     )
     assert ats.canonicalize("https://hdhe.fa.em3.oraclecloud.com/hcmUI/CandidateExperience") is None
+    # A prefixed requisition id is still a requisition (267 fetches a day
+    # said unsupported and fell to the scraper before this line).
+    assert (
+        ats.canonicalize(
+            "https://eofd.fa.us6.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001/job/W737248?x=1"
+        )
+        == "https://eofd.fa.us6.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001/job/W737248"
+    )
 
 
 def test_oracle_fetches_the_requisition_detail_and_reads_its_date(monkeypatch):
