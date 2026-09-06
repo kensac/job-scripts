@@ -1,0 +1,147 @@
+# The fleet, batched work, and observability
+
+How work runs and how you find out what it did. Named `observability.md`
+because that is what most visits are for; the fleet and batching are here
+because the signals only make sense beside them.
+
+## The worker fleet
+
+Tasks are claimed with row-level locking and skip-locked selection. A worker
+heartbeats while it holds a task.
+
+**A worker claims only kinds its own image has a handler for.** A roll goes
+host by host, so for a minute an old image and a new one share the queue. A
+kind the new image added must wait for a host that can run it, rather than be
+claimed and failed as unknown by one that cannot. That happened to the first
+classify_locations task on 2026-09-05, in the seconds before the claiming
+host's own deploy. The registry in `api/tasks/__init__.py` is what the worker
+can do, and the claim reads it; the kind allow and exclude lists narrow from
+there.
+
+**Process alive and handler progressing are different facts.** A liveness
+signal decoupled from the work cannot observe the work stopping; a liveness
+signal coupled to the work stops when the work stops. Neither alone is
+sufficient, and reaping keyed on the wrong one either kills healthy work or
+never recovers stuck work.
+
+A handler that never yields holds its worker until it finishes. Long handlers
+should hold progress in the database so an interruption resumes rather than
+restarts.
+
+A worker runs one task at a time, and its housekeeping (reaping, scheduling,
+gauges) runs only between tasks. A long task therefore starves scheduling on
+that worker; keep tasks short and let the queue carry the volume.
+
+## Batched work
+
+Scheduled work batches at half price and parks rather than holding a worker.
+A human waiting is the only reason to call a model synchronously.
+
+**A batch is submitted whole and fails whole.** All requests failing means the
+submission was rejected on grounds that applied to every one of them; some
+failing means bad inputs. Different causes, and only the first is certainly a
+defect.
+
+**Every error a batch returns is stored as the provider wrote it**
+(`ai_batch_errors`, one row per failed request, or one row under an empty
+custom_id for a batch rejected before any request ran). The batch row counts
+failures; only the text says why, and a handler that skips errored results
+must not be the only reader of it. The whole-failure alert carries the most
+frequent stored reason and resolves once a later batch for the same purpose
+succeeds, whatever fixed it.
+
+**Selection must exclude work already in flight**, and a task's own in-flight
+claim must not exclude the task itself when it resumes. A guard that hides a
+task's own work from it will make the task discard results it already paid for.
+
+**Collection must be reachable when there is nothing new to submit.** An early
+return on an empty selection, placed before collection, strands completed work.
+
+**A task waiting on several batches collects the ones that finished and parks
+again on the rest.** The unit of partial collection is the batch, not the
+request: a provider batch yields nothing until it is terminal, so its slowest
+request sets when any of it can be read. Size a batch knowing that.
+
+The poll resumes a task once some of its batches are terminal and the rest
+have run past `batch_straggler_hours` (persisted config). The resumed handler
+goes through `collect_pending`, which takes what landed and rewrites the
+payload to the ids still running. The worker parks a handler that returns with
+ids left rather than finishing it. A handler must therefore be safe to run
+again from the top with a subset of its results, which every batched sweep
+already is: they iterate the results they were given and re-select on the next
+run.
+
+**A parked chunk must not hold what its siblings decided, nor the next run.**
+Each filter chunk materializes its own passes when it finishes. A split run
+does not block the next cycle's run: the splitter excludes every url a live
+chunk still holds (`board._in_flight_urls`), so the new run judges only what
+arrived since. Only a run that has not split yet blocks another.
+
+Dry-run a handful of live calls before committing to a large batch. A batch
+fails whole, and the dry run also measures real token counts.
+
+## Observability
+
+Three layers, each answering a different question, none standing in for
+another.
+
+**Metrics** (`api/metrics.py`, Prometheus) answer "how much, how fast":
+counters and gauges, no identity.
+
+**Conditions** (`api/health.py`, `health_alerts`) answer "is something wrong":
+app-aware detectors comparing a window against a baseline, opening and
+resolving alerts, mailing once. A new detector is written when a pattern
+emerges, never one per traceback.
+
+**Errors, events, logs and traces** (`api/telemetry.py`, PostHog, one project
+end to end with the frontend) answer "what failed, where, on which release,
+inside which request or task". Four things ship:
+
+- Every unhandled exception in a request handler or a worker's handler.
+- A queryable event wherever the service swallows or retries a failure that
+  would otherwise leave no trace (`task_failed`, `task_requeued`,
+  `tasks_reaped`, `tasks_lost`, `ingest_pull_failed`, `fetch_failed`,
+  `fetch_deferred`, `ai_call_failed`, `alert_opened`, `alert_resolved`,
+  `worker_started`).
+- Every log record at INFO and above, through OpenTelemetry, uvicorn's request
+  log included. Its loggers do not propagate, so the handler is attached to
+  them by name.
+- One span per HTTP request, per worker task and per outbound `requests` call
+  (the board pulls and ATS resolvers), so a trace of the queue reads as tasks
+  with their fetches underneath.
+
+Every record carries `service.name` (`jobtracker-api` or `jobtracker-worker`),
+`service.instance.id` (the worker's fleet name), `host`, and `release` (the
+image's commit, from the build arg). Every exception and event carries the ids
+of the span it happened inside, so an error links to its request or task.
+
+PostHog is a generic OTLP receiver: the full `/i/v1/logs` and `/i/v1/traces`
+paths, bearer-authenticated with the same project key.
+
+How much goes is a measurement, not a guess. Everything ships first
+(`POSTHOG_TRACE_SAMPLE=1.0`, `POSTHOG_LOG_LEVEL=INFO`), the daily volume is
+read in PostHog, and the two knobs come down if the bill or the noise says so.
+Errors and events are never sampled.
+
+`telemetry` is a no-op without `POSTHOG_API_KEY`, so tests and a bare checkout
+need no destination, and it says so once at startup. It never raises. It
+counts what it could not send in `jobtracker_telemetry_failures_total`, and
+every OTLP export attempt in
+`jobtracker_telemetry_exports_total{kind,result}`, so whether it is shipping
+is one query and zero failures is never mistaken for zero attempts.
+
+The frontend captures its own exceptions and records upstream API failures on
+its side; this layer is for failures inside the service that never surface as
+a bad HTTP answer.
+
+## A detector that raises is an alert
+
+Each section of `health.detect()` runs on its own. One that raises opens
+`detector_failed` for itself, rather than taking the hour's run down and
+letting every open alert auto-resolve.
+
+The `_detect_silent` section watches for success that did nothing: a sweep
+finished with work in front of it and none completed, a task kind failing
+three times in three hours, a task the reaper keeps handing back, an open
+alert never mailed, and a pattern that admits every posting. A batched sweep
+counts a line as done only when its row lands.
