@@ -1608,7 +1608,17 @@ def host_budgets(user: AuthedUser = Depends(require_admin)):
         FROM host_budget ORDER BY refused DESC, host, egress_group
         """
     )
-    return {"budgets": rows}
+    # The pulls waiting on a slot, per host, so the page need not page every
+    # pending ingest task to say "3 waiting, next 14:52".
+    deferred = db.query(
+        """
+        SELECT payload->>'host' AS host, COUNT(*) AS count, MIN(not_before) AS soonest_not_before
+        FROM tasks
+        WHERE kind = 'ingest_source' AND status = 'pending' AND not_before > now()
+        GROUP BY 1 ORDER BY 2 DESC
+        """
+    )
+    return {"budgets": rows, "deferred": deferred}
 
 
 @router.get("/sources/{name}")

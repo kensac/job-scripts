@@ -154,3 +154,25 @@ def test_an_idle_worker_beside_only_throttled_or_deferred_work_is_not_stalled(f)
     assert not [a for a in health._detect_queue() if a["kind"] == "queue_stalled"]
     db.execute("UPDATE host_budget SET next_allowed_at = now() - interval '1 second'")
     assert [a["subject"] for a in health._detect_queue() if a["kind"] == "queue_stalled"] == ["w1"]
+
+
+def test_the_admin_view_carries_the_budgets_and_the_pulls_waiting_per_host(client, admin_headers):
+    db.execute(
+        "INSERT INTO host_budget (host, egress_group, pace_seconds, next_allowed_at, refused) "
+        "VALUES ('apply.workable.com', 'hetzner', 40, now() + interval '30 seconds', 2)"
+    )
+    for name, host, ahead in (
+        ("a", "apply.workable.com", 30),
+        ("b", "apply.workable.com", 90),
+        ("c", "api.lever.co", 10),
+    ):
+        db.execute(
+            "INSERT INTO tasks (kind, payload, status, not_before) VALUES "
+            "('ingest_source', %s, 'pending', now() + make_interval(secs => %s))",
+            (db.jsonb({"source": name, "host": host}), ahead),
+        )
+    body = client.get("/v1/admin/host-budgets", headers=admin_headers).json()
+    (row,) = body["budgets"]
+    assert row["host"] == "apply.workable.com" and row["closed"] is True and row["refused"] == 2
+    waiting = {d["host"]: d["count"] for d in body["deferred"]}
+    assert waiting == {"apply.workable.com": 2, "api.lever.co": 1}
