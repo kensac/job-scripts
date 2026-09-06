@@ -345,7 +345,8 @@ class Oracle(AtsResolver):
 
     name = "oracle"
     markers = ("oraclecloud.com",)
-    _JOB = re.compile(r"/sites/([^/]+)/job/(\d+)")
+    # Requisition ids are usually numeric; some tenants prefix them (W737248).
+    _JOB = re.compile(r"/sites/([^/]+)/job/([A-Za-z0-9_-]+)")
 
     def canonical(self, url: str) -> str | None:
         parsed = urlparse(url)
