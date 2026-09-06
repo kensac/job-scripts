@@ -249,7 +249,7 @@ def _effective_model(user: AuthedUser) -> dict:
 def get_settings(user: AuthedUser = Depends(require_user)):
     row = db.query_one(
         "SELECT column_layout, prefs, ai_provider, ai_base_url, ai_model, ai_params, "
-        "bypass_sponsorship_filter, criteria, email_digest, "
+        "bypass_sponsorship_filter, criteria, email_digest, writing_style, "
         "api_key_enc IS NOT NULL AS has_byo_key "
         "FROM user_settings WHERE user_id = %s",
         (user.id,),
@@ -262,7 +262,12 @@ def get_settings(user: AuthedUser = Depends(require_user)):
     settings["criteria"] = Criteria.model_validate(settings.get("criteria") or {}).model_dump(
         mode="json"
     )
-    return {**settings, **_effective_model(user)}
+    # Read-only, beside the field it is the placeholder for: the settings
+    # page is where a person writes their style, so it shows the default
+    # there without reading a job's application view to find it.
+    from api.tasks.application import DEFAULT_STYLE
+
+    return {**settings, "default_style": DEFAULT_STYLE, **_effective_model(user)}
 
 
 _SETTINGS_DEFAULTS = {
@@ -275,6 +280,7 @@ _SETTINGS_DEFAULTS = {
     "bypass_sponsorship_filter": True,
     "criteria": {},
     "email_digest": False,
+    "writing_style": None,
     "has_byo_key": False,
 }
 
@@ -313,11 +319,11 @@ def put_settings(body: SettingsPut, user: AuthedUser = Depends(require_user)):
         """
         INSERT INTO user_settings (user_id, column_layout, prefs, ai_model, ai_params,
                                    bypass_sponsorship_filter, criteria,
-                                   email_digest, updated_at)
+                                   email_digest, writing_style, updated_at)
         VALUES (%(uid)s, %(layout)s, COALESCE(%(prefs)s, '{}'::jsonb),
                 %(model)s, COALESCE(%(params)s, '{}'::jsonb),
                 COALESCE(%(bypass)s, TRUE), COALESCE(%(criteria)s, '{}'::jsonb),
-                COALESCE(%(digest)s, FALSE), now())
+                COALESCE(%(digest)s, FALSE), NULLIF(%(style)s, ''), now())
         ON CONFLICT (user_id) DO UPDATE SET
             column_layout = COALESCE(EXCLUDED.column_layout, user_settings.column_layout),
             prefs = COALESCE(%(prefs)s, user_settings.prefs),
@@ -326,6 +332,9 @@ def put_settings(body: SettingsPut, user: AuthedUser = Depends(require_user)):
             bypass_sponsorship_filter = COALESCE(%(bypass)s, user_settings.bypass_sponsorship_filter),
             criteria = COALESCE(%(criteria)s, user_settings.criteria),
             email_digest = COALESCE(%(digest)s, user_settings.email_digest),
+            -- Absent keeps it; an empty string clears it to the default.
+            writing_style = CASE WHEN %(style)s IS NULL THEN user_settings.writing_style
+                                 ELSE NULLIF(%(style)s, '') END,
             updated_at = now()
         """,
         {
@@ -339,6 +348,7 @@ def put_settings(body: SettingsPut, user: AuthedUser = Depends(require_user)):
             if body.criteria is not None
             else None,
             "digest": body.email_digest,
+            "style": body.writing_style.strip() if body.writing_style is not None else None,
         },
     )
     if body.email_digest:

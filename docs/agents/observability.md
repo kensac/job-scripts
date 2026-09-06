@@ -80,6 +80,31 @@ arrived since. Only a run that has not split yet blocks another.
 Dry-run a handful of live calls before committing to a large batch. A batch
 fails whole, and the dry run also measures real token counts.
 
+## Application answers
+
+Browser autofill stops at the free-response box on an application form. The
+questions are public on four ATSs (Greenhouse and Workable as JSON, Ashby
+through the GraphQL call its own page makes, Lever as the apply page's HTML;
+`core/forms.py`), read once per posting url into `application_forms` from
+inside the task, under the same per-host budget as an ingest. Workday and
+Oracle keep the form behind a sign-in and SmartRecruiters publishes none;
+there the person pastes the question in (`source = 'manual'`). Only the
+employer's own questions are kept: the identity block, the resume upload and
+the cover-letter slot are left to autofill.
+
+A draft is per person and per job (`application_answers`), written from a
+resume the person keeps here as text (`user_resumes`; a PDF is read at upload
+and the file is not stored) in a style they describe in their own words
+(`user_settings.writing_style`, replacing the built-in default rather than
+merging with it). The `application_draft` task batches the drafts through the
+`application` shape, overridable from the task screen like any other step,
+and books the tokens to the person, not the fleet; a person's own key runs
+live, one question at a time, the way their filters do. The back-and-forth on
+one draft is a live call on the person's configured model, because a person
+is waiting for it, and every turn is kept on the row so the next request
+starts from what they said. A draft is shown as editable text and never
+submitted anywhere by this code.
+
 ## Observability
 
 Three layers, each answering a different question, none standing in for

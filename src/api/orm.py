@@ -216,6 +216,56 @@ class HostBudget(Base):
     updated_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
 
 
+class UserResume(Base):
+    """A resume a person keeps here, as text: pasted, or read out of a PDF
+    at upload. The drafts in application_answers are written from it."""
+
+    __tablename__ = "user_resumes"
+    __table_args__ = (UniqueConstraint("user_id", "name"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"))
+    name: Mapped[str] = mapped_column(Text)
+    text: Mapped[str] = mapped_column(Text)
+    filename: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+    updated_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+
+
+class ApplicationForm(Base):
+    """The questions a posting's application form asks, read once per url
+    from the ATS (core.forms). questions is NULL when the host cannot be
+    read; error says why the last read failed."""
+
+    __tablename__ = "application_forms"
+
+    url: Mapped[str] = mapped_column(Text, primary_key=True)
+    questions: Mapped[Any | None] = mapped_column(JSONB)
+    error: Mapped[str | None] = mapped_column(Text)
+    fetched_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+
+
+class ApplicationAnswer(Base):
+    """One person's draft for one question on one job's form. source is
+    'form' for a question read off the ATS and 'manual' for one pasted in;
+    turns is the back-and-forth that produced the draft."""
+
+    __tablename__ = "application_answers"
+    __table_args__ = (UniqueConstraint("user_id", "job_id", "key"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"))
+    job_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("jobs.id", ondelete="CASCADE"))
+    key: Mapped[str] = mapped_column(Text)
+    question: Mapped[str] = mapped_column(Text)
+    source: Mapped[str] = mapped_column(Text, server_default=text("'form'"))
+    required: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    draft: Mapped[str | None] = mapped_column(Text)
+    turns: Mapped[Any] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
+    model: Mapped[str | None] = mapped_column(Text)
+    updated_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+
+
 class BoardVisible(Base):
     """The computed membership of a person's board: every job the full
     visibility predicate admits, written by the recompute_board task and read
@@ -394,6 +444,9 @@ class UserSettings(Base):
     ai_model: Mapped[str | None] = mapped_column(Text)
     ai_params: Mapped[dict] = mapped_column(server_default=text("'{}'::jsonb"))
     email_digest: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    # How the person writes, in their own words; NULL means the built-in
+    # default in api.tasks.application.
+    writing_style: Mapped[str | None] = mapped_column(Text)
     digest_token: Mapped[str | None] = mapped_column(Text, unique=True)
     last_digest_at: Mapped[datetime.datetime | None]
     updated_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
