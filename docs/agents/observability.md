@@ -143,6 +143,19 @@ of the span it happened inside, so an error links to its request or task.
 PostHog is a generic OTLP receiver: the full `/i/v1/logs` and `/i/v1/traces`
 paths, bearer-authenticated with the same project key.
 
+**A view that is the product of a task reloads on the task's event, matched
+by subject, and reads in-flight work from the server.** Every change to a
+task's state is published to `jobtracker:tasks` and, for a task with a
+`user_id`, to `jobtracker:user.<id>`, carrying the kind, the status and the
+subject (`job_id`, `filter_id`, `source`). A page matches "a task of this
+kind about my subject reached a terminal state" from the event alone; it
+does not match on a task id it remembered from its own request, because
+that memory is gone on reload and never existed in another tab. For the
+same reason the view's own GET serves the in-flight task (`task` on the
+application view), so a button is disabled from server state, and the
+request that would start a second one is refused with 409 `IN_PROGRESS`
+rather than queued twice.
+
 How much goes is a measurement, not a guess. Everything ships first
 (`POSTHOG_TRACE_SAMPLE=1.0`, `POSTHOG_LOG_LEVEL=INFO`), the daily volume is
 read in PostHog, and the two knobs come down if the bill or the noise says so.

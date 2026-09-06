@@ -37,14 +37,50 @@ def _validate_ambiguous(value: str) -> str:
     return value
 
 
+def _running(user_id: int, kind: str, filter_id: int | None = None) -> dict | None:
+    """The run of this kind still in flight for this person (for one filter
+    when given), if any. A parent that split into chunks is 'waiting', not
+    'running', and is still in flight."""
+    return db.query_one(
+        """
+        SELECT id, status, progress, created_at FROM tasks
+        WHERE kind = %(kind)s
+          AND status IN ('pending', 'running', 'awaiting_batch', 'waiting')
+          AND (payload->>'user_id')::bigint = %(uid)s
+          AND (%(fid)s::bigint IS NULL OR (payload->>'filter_id')::bigint = %(fid)s)
+        ORDER BY id DESC LIMIT 1
+        """,
+        {"kind": kind, "uid": user_id, "fid": filter_id},
+    )
+
+
+def _refuse_second_run(running: dict | None) -> None:
+    """A second run while the first is in flight is refused, not queued: the
+    page disabled its button only while it remembered its own task id, so a
+    reload could queue the same run twice while the first parked on the
+    provider's batch."""
+    if running:
+        raise HTTPException(
+            409,
+            detail={
+                "code": "IN_PROGRESS",
+                "message": "this run is already in progress",
+                "task_id": running["id"],
+            },
+        )
+
+
 @router.get("/user/filters")
 def list_filters(user: AuthedUser = Depends(require_user)):
-    return {
-        "filters": db.query(
-            f"SELECT {_FILTER_COLS} FROM user_filters WHERE user_id = %s ORDER BY id",
-            (user.id,),
-        )
-    }
+    """Each filter carries its in-flight run, and the list carries the
+    in-flight run-all, so a button is disabled from server state."""
+    rows = db.query(
+        f"SELECT {_FILTER_COLS} FROM user_filters WHERE user_id = %s ORDER BY id",
+        (user.id,),
+    )
+    for row in rows:
+        row["task"] = _running(user.id, "run_filter", row["id"])
+    return {"filters": rows, "run_all_task": _running(user.id, "run_all_filters")}
 
 
 def _enqueue(user: AuthedUser, kind: str, payload: dict) -> tuple:
@@ -149,6 +185,9 @@ def run_filter(filter_id: int, user: AuthedUser = Depends(require_user)):
         "SELECT id FROM user_filters WHERE id = %s AND user_id = %s", (filter_id, user.id)
     ):
         raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown filter"})
+    _refuse_second_run(
+        _running(user.id, "run_filter", filter_id) or _running(user.id, "run_all_filters")
+    )
     task_id, blocked = _enqueue(user, "run_filter", {"user_id": user.id, "filter_id": filter_id})
     if blocked:
         raise HTTPException(
@@ -163,6 +202,7 @@ def run_filter(filter_id: int, user: AuthedUser = Depends(require_user)):
 
 @router.post("/user/filters/run-all")
 def run_all_filters(user: AuthedUser = Depends(require_user)):
+    _refuse_second_run(_running(user.id, "run_all_filters"))
     task_id, blocked = _enqueue(user, "run_all_filters", {"user_id": user.id})
     if blocked:
         raise HTTPException(
