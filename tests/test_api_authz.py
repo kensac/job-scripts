@@ -54,7 +54,7 @@ def test_owner_can_still_read_their_own_upload(client, user_headers, private_upl
 
 
 def test_cannot_pin_another_users_private_upload(client, other_user_headers, private_upload):
-    """Patching creates a user_jobs row, and _VISIBILITY trusts that row
+    """Patching creates a user_jobs row, and visibility.FULL trusts that row
     unconditionally - so an unrestricted pin is a self-service permanent grant
     that launders around the detail gate."""
     resp = client.patch(

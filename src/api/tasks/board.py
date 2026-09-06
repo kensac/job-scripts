@@ -1,7 +1,10 @@
 """Board membership: which jobs are on a user's board, and why.
 
-The visibility predicate is spelled here and in routers/jobs.py; the two must
-change together or the read path and the write path drift.
+The predicate itself is not spelled here. api/visibility.py owns it: FULL is
+the one spelling, and handle_recompute_board below runs it through
+visibility.recompute. What this module does spell is the write path around it,
+_materialize_passing and _candidates, which share criteria.SQL and the
+structural gates with FULL and must stay consistent with it.
 """
 
 from __future__ import annotations
@@ -47,7 +50,7 @@ def _materialize_passing(user_id: int) -> int:
         result = conn.execute(
             f"""
             WITH enabled AS (
-                -- DISTINCT for the same reason as _VISIBILITY: duplicate
+                -- DISTINCT for the same reason as visibility.FULL: duplicate
                 -- prompt_hashes cancel out in this query's symmetric counts,
                 -- but the two predicates must stay spelled the same way or
                 -- the read path and the write path drift apart again.
