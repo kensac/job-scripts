@@ -161,3 +161,32 @@ def test_every_new_kind_says_what_its_subject_is():
     assert health.subject_kind_for("source_pattern_excludes_all") == "source"
     assert health.subject_kind_for("worker_fetches_failing") == "worker"
     assert health.subject_kind_for("resolver_bypassed") == "ats"
+
+
+def _job_content(source, url, reason, age_hours):
+    db.execute(
+        "INSERT INTO jobs (url, raw_url, company, title, source, active, created_at) "
+        "VALUES (%s, %s, 'Acme', 'Engineer', %s, true, now() - make_interval(hours => %s)) "
+        "ON CONFLICT (url) DO NOTHING",
+        (url, url, source, age_hours),
+    )
+    _content(url, reason, age_hours)
+
+
+def test_text_from_the_listing_call_is_ats_text_not_a_collapse(f):
+    """gh_point72 read as a collapse from 98% to 47% on 2026-09-06 because 58
+    of its 100 content rows said listing text, the path #331 added; only the
+    resolver's ats text counted. A board whose text moved from the resolver to
+    the listing call is fine; one whose text moved to the scraper is not."""
+    f.make_source("moved_to_listing")
+    f.make_source("moved_to_scraper")
+    for i in range(20):
+        _job_content("moved_to_listing", f"https://boards.greenhouse.io/a/jobs/{i}", "ats text", 40)
+        _job_content("moved_to_scraper", f"https://boards.greenhouse.io/b/jobs/{i}", "ats text", 40)
+    for i in range(12):
+        _job_content(
+            "moved_to_listing", f"https://boards.greenhouse.io/a/jobs/t{i}", "listing text", 2
+        )
+        _job_content("moved_to_scraper", f"https://boards.greenhouse.io/b/jobs/t{i}", "scraped", 2)
+    found = {(a["kind"], a["subject"]) for a in health.detect() if a["kind"] == "ats_text_collapse"}
+    assert found == {("ats_text_collapse", "moved_to_scraper")}

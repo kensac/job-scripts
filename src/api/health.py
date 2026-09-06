@@ -132,12 +132,18 @@ def detect() -> list[dict[str, Any]]:
         """
         SELECT j.source,
                COUNT(*) FILTER (WHERE q.created_at > now() - interval '24 hours') AS recent_total,
+               -- The board's own API text, whether the listing call carried
+               -- it ("listing text", since #331) or the resolver fetched it
+               -- ("ats text"). Counting only the resolver read the listing
+               -- path taking over as a collapse: gh_point72, 98 to 47 percent,
+               -- 2026-09-06, with 58 of 100 rows being listing text.
                COUNT(*) FILTER (WHERE q.created_at > now() - interval '24 hours'
-                                AND q.reason = 'ats text') AS recent_ats,
+                                AND q.reason IN ('ats text', 'listing text')) AS recent_ats,
                COUNT(*) FILTER (WHERE q.created_at BETWEEN now() - interval '8 days'
                                 AND now() - interval '24 hours') AS base_total,
                COUNT(*) FILTER (WHERE q.created_at BETWEEN now() - interval '8 days'
-                                AND now() - interval '24 hours' AND q.reason = 'ats text') AS base_ats
+                                AND now() - interval '24 hours'
+                                AND q.reason IN ('ats text', 'listing text')) AS base_ats
         FROM ai_queries q JOIN jobs j ON j.url = q.url
         WHERE q.check_type = 'content'
           -- Only rows that record where the text CAME from. Other writers
@@ -145,7 +151,7 @@ def detect() -> list[dict[str, Any]]:
           -- and counting those in the denominator silently buries the ATS
           -- share far below the `base >= 0.30` floor, which is why this
           -- detector had never once fired.
-          AND q.reason IN ('ats text', 'scraped', 'static')
+          AND q.reason IN ('ats text', 'listing text', 'scraped', 'static')
           AND q.created_at > now() - interval '8 days'
           -- Backlog sweeps and live ingest are different populations with
           -- different ATS-text shares, so comparing a backfill-heavy baseline
@@ -1007,13 +1013,15 @@ def _detect_boards() -> list[dict[str, Any]]:
                END AS ats,
                COUNT(*) FILTER (WHERE created_at > now() - interval '24 hours') AS recent_total,
                COUNT(*) FILTER (WHERE created_at > now() - interval '24 hours'
-                                AND reason = 'ats text') AS recent_ats,
+                                AND reason IN ('ats text', 'listing text')) AS recent_ats,
                COUNT(*) FILTER (WHERE created_at BETWEEN now() - interval '8 days'
                                 AND now() - interval '24 hours') AS base_total,
                COUNT(*) FILTER (WHERE created_at BETWEEN now() - interval '8 days'
-                                AND now() - interval '24 hours' AND reason = 'ats text') AS base_ats
+                                AND now() - interval '24 hours'
+                                AND reason IN ('ats text', 'listing text')) AS base_ats
         FROM ai_queries
-        WHERE check_type = 'content' AND reason IN ('ats text', 'scraped', 'static')
+        WHERE check_type = 'content'
+          AND reason IN ('ats text', 'listing text', 'scraped', 'static')
           AND created_at > now() - interval '8 days'
         GROUP BY 1
         HAVING CASE
