@@ -15,7 +15,7 @@ import asyncio
 from api import db, verdicts
 from api.tasks import ingest
 from core import boards
-from core.pittcsc_simplify import JobPosting
+from core.posting import JobPosting
 
 TODAY = 2_000_000_000
 

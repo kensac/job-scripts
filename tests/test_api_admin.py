@@ -773,7 +773,7 @@ def test_a_recheck_runs_on_the_chosen_model_and_that_choice_becomes_the_default(
     last used for that option. The choice is per check option, persisted on
     the user's prefs, and offered back with the models the caller may run."""
     from api import ai, verdicts
-    from core.pittcsc_simplify import JobClosedResponse
+    from core.checks import JobClosedResponse
 
     db.execute(
         "INSERT INTO jobs (url, source, company, title) VALUES ('https://rc.test/1','s','C','T')"

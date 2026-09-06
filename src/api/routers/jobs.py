@@ -429,13 +429,13 @@ async def explain_check(job_id: int, body: ExplainBody, user: AuthedUser = Depen
     from api import budget
     from api import verdicts as _verdicts
     from api.tasks.models import FilterVerdict
-    from core.filters import build_custom_instructions
-    from core.pittcsc_simplify import (
+    from core.checks import (
         CLEARANCE_INSTRUCTIONS,
         CLOSED_INSTRUCTIONS,
         ClearanceRequirementResponse,
         JobClosedResponse,
     )
+    from core.filters import build_custom_instructions
 
     # This route writes a verdict into ai_queries, which has no user_id and is
     # resolved latest-row-per-(url, check_type) for EVERY user. An ungated
