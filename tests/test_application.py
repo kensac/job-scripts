@@ -176,6 +176,29 @@ class TestReadingTheForm:
         assert seen == ["https://apply.workable.com/api/v1/jobs/0E026F8FD6/form"]
         assert [(q.key, q.kind) for q in qs] == [("q9", "long"), ("q10", "short")]
 
+    def test_a_form_read_is_paced_under_the_host_it_speaks_to(self, monkeypatch):
+        """Greenhouse's form is read from boards-api.greenhouse.io, the host
+        the listing pulls already pace under; keyed by the posting host the
+        reads had their own row and ignored a Greenhouse backoff."""
+        from api import db, hosts
+        from api.tasks import application as drafts
+
+        assert forms.budget_host("https://job-boards.greenhouse.io/x/jobs/1") == (
+            "boards-api.greenhouse.io"
+        )
+        assert forms.budget_host("https://boards.greenhouse.io/x/jobs/1") == (
+            "boards-api.greenhouse.io"
+        )
+        assert forms.budget_host("https://jobs.lever.co/x/1") == "jobs.lever.co"
+        monkeypatch.setattr(forms, "_get", lambda url: GREENHOUSE)
+        db.execute(
+            "INSERT INTO host_budget (host, egress_group, pace_seconds, next_allowed_at) "
+            "VALUES ('boards-api.greenhouse.io', %s, 60, now() + interval '1 minute')",
+            (hosts.EGRESS_GROUP,),
+        )
+        with pytest.raises(drafts.Deferred):
+            drafts.read_form("https://job-boards.greenhouse.io/x/jobs/1")
+
     def test_a_host_this_code_cannot_read_says_so(self):
         assert forms.fetch("https://nvidia.wd5.myworkdayjobs.com/en-US/x/job/y") is None
         assert forms.fetch("https://boards.greenhouse.io/embed/job_app?token=1") is None

@@ -184,6 +184,20 @@ def host_of(url: str) -> str:
     return (urlparse(url).hostname or "").lower()
 
 
+def budget_host(url: str) -> str:
+    """The host a form read actually speaks to, which is the row the host
+    budget must key on. Greenhouse's form lives on boards-api.greenhouse.io
+    while the posting lives on job-boards.greenhouse.io; keyed by the posting
+    host, the form reads would sit under their own row with no shared
+    refusal history, so a listing pull paced out to the cap would leave the
+    form reads hammering the same operator at full speed. The listing pulls
+    already key on boards-api.greenhouse.io, so this makes the two one row."""
+    host = host_of(url)
+    if host.endswith("greenhouse.io"):
+        return "boards-api.greenhouse.io"
+    return host
+
+
 def reader_for(url: str):
     host = host_of(url)
     return next((fn for suffix, fn in _READERS.items() if host.endswith(suffix)), None)

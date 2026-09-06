@@ -136,7 +136,7 @@ async def test_a_busy_host_is_skipped_this_cycle_not_waited_on(
     monkeypatch.setattr(forms, "_get", lambda url: fetched.append(url) or GREENHOUSE)
     db.execute(
         "INSERT INTO host_budget (host, egress_group, pace_seconds, next_allowed_at) "
-        "VALUES ('job-boards.greenhouse.io', %s, 60, now() + interval '1 minute')",
+        "VALUES ('boards-api.greenhouse.io', %s, 60, now() + interval '1 minute')",
         (hosts.EGRESS_GROUP,),
     )
     calls: list[list[str]] = []
@@ -161,3 +161,29 @@ def test_the_cycle_queues_a_sweep_for_each_person_with_a_resume(client, user_hea
     # Same cycle again queues nothing more.
     worker.schedule_ingest_cycle()
     assert len(db.query("SELECT 1 FROM tasks WHERE kind = 'application_sweep'")) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_sweep_back_from_its_batch_collects_and_reads_no_more_forms(
+    client, user_headers, f, monkeypatch
+):
+    """The first sweep read 113 forms on the way out and 114 more on the
+    way back from the batch, spending two cycles of reads on one and
+    reporting 60 of 158 done. A resumed task only collects."""
+    uid = _user_id()
+    _job_for(f, uid, "https://job-boards.greenhouse.io/anthropic/jobs/20")
+    client.post("/v1/user/resumes", json={"name": "master", "text": "Alice."}, headers=user_headers)
+    fetched = []
+    monkeypatch.setattr(forms, "_get", lambda url: fetched.append(url) or GREENHOUSE)
+    _owner_config(monkeypatch)
+    calls: list[list[str]] = []
+    _fake_batch(monkeypatch, calls)
+    task = db.query_one(
+        "INSERT INTO tasks (kind, payload, status) VALUES ('application_sweep', %s, 'running') "
+        "RETURNING id",
+        (db.jsonb({"user_id": uid, "batch_ids": ["batch_parked"]}),),
+    )
+    await drafts.handle_application_sweep(
+        task["id"], {"user_id": uid, "batch_ids": ["batch_parked"]}
+    )
+    assert fetched == [] and calls == [[]]
