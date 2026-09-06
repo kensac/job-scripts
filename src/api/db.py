@@ -113,6 +113,13 @@ _APP_CONFIG_SEED = [
     # preference write recomputes within a minute regardless; this is how
     # long a new verdict waits to reach a board. Kanishk: minutes, never a day.
     ("board_refresh_minutes", 3),
+    # The hourly application sweep, per person: how many unread forms it
+    # reads (one request each to the ATS, under the host budget; 1,307
+    # readable postings were on the board on 2026-09-06, so the first pass
+    # takes a working day at this rate and the ATSs see a trickle) and how
+    # many missing drafts it batches (about $0.0005 each on luna).
+    ("application_form_reads_per_cycle", 150),
+    ("application_drafts_per_cycle", 500),
 ]
 # One source of truth for a seeded key's value: the seed writes it, and
 # get_config falls back to it when the row is missing.

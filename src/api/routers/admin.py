@@ -1534,6 +1534,16 @@ _CONFIG_KEYS: dict[str, _Key] = {
         int,
         "Minutes between recomputes of every person's board; a preference change recomputes sooner.",
     ),
+    "application_form_reads_per_cycle": _Key(
+        int,
+        "Application forms the hourly sweep reads per person per cycle, newest postings "
+        "first, one request each to the ATS under the host budget.",
+    ),
+    "application_drafts_per_cycle": _Key(
+        int,
+        "Missing application answers the hourly sweep drafts per person per cycle, in one "
+        "half-price batch; about $0.0005 each on the sanctioned model.",
+    ),
 }
 
 

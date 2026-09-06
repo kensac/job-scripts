@@ -230,6 +230,16 @@ def schedule_ingest_cycle() -> None:
             {"user_id": u["id"], "cycle": rcycle},
             dedupe_key=f"board:{u['id']}:{rcycle}",
         )
+    # Application answers ahead of need, hourly, for each person who has put
+    # a resume in: the forms of the postings on their board are read and
+    # every question without a draft rides one half-price batch, so the
+    # answer is there when the posting is opened. See api.tasks.application.
+    for u in db.query("SELECT DISTINCT user_id AS id FROM user_resumes ORDER BY 1"):
+        enqueue(
+            "application_sweep",
+            {"user_id": u["id"], "cycle": cycle},
+            dedupe_key=f"appsweep:{u['id']}:{cycle}",
+        )
     day = now.strftime("%Y-%m-%d")
     enqueue("reverify_open", {"cycle": day}, dedupe_key=f"reverify:{day}")
     enqueue("sync_gmail", {"cycle": cycle}, dedupe_key=f"gmail:{cycle}")

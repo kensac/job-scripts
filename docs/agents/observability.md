@@ -105,6 +105,19 @@ is waiting for it, and every turn is kept on the row so the next request
 starts from what they said. A draft is shown as editable text and never
 submitted anywhere by this code.
 
+**Answers are written ahead of need.** The hourly cycle queues an
+`application_sweep` per person who has a resume in (their switch is
+`prefs.auto_draft`, on unless set false): it reads the forms of the postings
+on their board that have not been read, newest first and a bounded number
+per cycle (`application_form_reads_per_cycle`), skipping a host whose slot
+is closed rather than waiting on it; opens a row for every paragraph
+question; and drafts every row without a draft in one half-price batch
+(`application_drafts_per_cycle`). It never re-drafts: the button does that.
+Sized 2026-09-06 against Kanishk's board: 2,614 visible postings, 1,307 on
+readable hosts, about one form in three with a real question, about 13 new
+postings a day; the first pass is under a dollar and the steady state is
+cents.
+
 ## Observability
 
 Three layers, each answering a different question, none standing in for

@@ -6,6 +6,13 @@ resume they keep here, in a style they describe in their own words, about the
 posting the board already holds. Drafts are batched like every other
 scheduled AI step; the back-and-forth on one draft is a live call because a
 person is waiting for it (routers/application.py).
+
+Two tasks write drafts. The sweep (application_sweep, hourly per person
+with a resume) reads the forms of the postings on their board and drafts
+every question that has no draft yet, so the answer is ready when they open
+the posting and the whole day's work rides one half-price batch. The
+on-demand task (application_draft) is the button: one posting, drafted or
+re-drafted now.
 """
 
 from __future__ import annotations
@@ -17,7 +24,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from api import ai, budget, db, hosts
+from api import ai, budget, db, hosts, visibility
 from api.tasks.runtime import (
     Deferred,
     load_config,
@@ -32,6 +39,7 @@ from core.store import get_content
 logger = logging.getLogger("jobtracker_worker")
 
 PURPOSE = "application"
+IN_FLIGHT = ("pending", "running", "awaiting_batch", "waiting")
 
 # What a stranger's answer sounds like when nobody has said otherwise. A
 # person overrides the whole thing from settings; this is not merged with
@@ -111,20 +119,34 @@ def question_input(
     return "\n\n".join(parts)
 
 
-def sync_form_questions(url: str, *, refresh: bool = False) -> list[dict[str, Any]] | None:
-    """The form's questions for this url, read once and cached. None when the
-    host cannot be read. Raises Deferred when the host's slot is closed."""
-    if not refresh:
-        row = db.query_one("SELECT questions, error FROM application_forms WHERE url = %s", (url,))
-        if row and row["error"] is None:
-            return row["questions"]
-    if not forms.supported(url):
+def store_form(url: str, questions: list[forms.Question] | None, error: str | None = None) -> None:
+    """One row per url: the questions as read, NULL for a host that cannot be
+    read, and the error text when the read failed (questions kept as they
+    were, so a transient failure does not blank a form already read)."""
+    if error is not None:
         db.execute(
             "INSERT INTO application_forms (url, questions, error, fetched_at) "
-            "VALUES (%s, NULL, NULL, now()) ON CONFLICT (url) DO UPDATE "
-            "SET questions = NULL, error = NULL, fetched_at = now()",
-            (url,),
+            "VALUES (%s, NULL, %s, now()) ON CONFLICT (url) DO UPDATE "
+            "SET error = EXCLUDED.error, fetched_at = now()",
+            (url, error[:300]),
         )
+        return
+    payload = None if questions is None else [q.as_dict() for q in questions]
+    db.execute(
+        "INSERT INTO application_forms (url, questions, error, fetched_at) "
+        "VALUES (%s, %s, NULL, now()) ON CONFLICT (url) DO UPDATE "
+        "SET questions = EXCLUDED.questions, error = NULL, fetched_at = now()",
+        (url, db.jsonb(payload) if payload is not None else None),
+    )
+
+
+def read_form(url: str) -> list[dict[str, Any]] | None:
+    """Read the form under the host's budget and store it. Returns the
+    questions, or None for a host that cannot be read. Raises Deferred when
+    the host's slot is closed or the host refused, and re-raises a failed
+    read after recording it."""
+    if not forms.supported(url):
+        store_form(url, None)
         return None
     host = forms.host_of(url)
     opens = hosts.take(host)
@@ -137,22 +159,21 @@ def sync_form_questions(url: str, *, refresh: bool = False) -> list[dict[str, An
         if status == 429:
             hosts.refused(host)
             raise Deferred(hosts.soon()) from exc
-        db.execute(
-            "INSERT INTO application_forms (url, questions, error, fetched_at) "
-            "VALUES (%s, NULL, %s, now()) ON CONFLICT (url) DO UPDATE "
-            "SET error = EXCLUDED.error, fetched_at = now()",
-            (url, str(exc)[:300]),
-        )
+        store_form(url, None, error=str(exc))
         raise
     hosts.succeeded(host)
-    payload = [q.as_dict() for q in questions or []]
-    db.execute(
-        "INSERT INTO application_forms (url, questions, error, fetched_at) "
-        "VALUES (%s, %s, NULL, now()) ON CONFLICT (url) DO UPDATE "
-        "SET questions = EXCLUDED.questions, error = NULL, fetched_at = now()",
-        (url, db.jsonb(payload)),
-    )
-    return payload
+    store_form(url, questions or [])
+    return [q.as_dict() for q in questions or []]
+
+
+def sync_form_questions(url: str, *, refresh: bool = False) -> list[dict[str, Any]] | None:
+    """The form's questions for this url, read once and cached. None when the
+    host cannot be read. Raises Deferred when the host's slot is closed."""
+    if not refresh:
+        row = db.query_one("SELECT questions, error FROM application_forms WHERE url = %s", (url,))
+        if row and row["error"] is None:
+            return row["questions"]
+    return read_form(url)
 
 
 def ensure_answer_rows(user_id: int, job_id: int, questions: list[dict[str, Any]]) -> None:
@@ -186,10 +207,21 @@ def writing_style(user_id: int) -> str | None:
     return (row or {}).get("writing_style") or None
 
 
-def store_draft(user_id: int, job_id: int, key: str, answer: str, model: str) -> None:
+def auto_draft(user_id: int) -> bool:
+    """Whether the sweep drafts for this person. On unless they turned it off
+    (prefs.auto_draft = false); the resume is what opts a person in."""
+    row = db.query_one(
+        "SELECT prefs->>'auto_draft' AS v FROM user_settings WHERE user_id = %s", (user_id,)
+    )
+    return (row or {}).get("v") != "false"
+
+
+def store_draft(
+    user_id: int, job_id: int, key: str, answer: str, model: str, kind: str = "draft"
+) -> None:
     turn = {
         "role": "assistant",
-        "kind": "draft",
+        "kind": kind,
         "text": answer,
         "at": datetime.datetime.now(datetime.UTC).isoformat(),
     }
@@ -212,55 +244,42 @@ def _usage_of(res: Any) -> dict[str, int]:
     }
 
 
-async def handle_application_draft(task_id: int, payload: dict[str, Any]) -> None:
-    """Payload: user_id, job_id, optional resume_id, keys (only these
-    questions), refresh (re-read the form). Safe to run again from the top:
-    a resumed task collects the batch it parked on and overwrites drafts."""
+async def draft_rows(
+    task_id: int,
+    user_id: int,
+    rows: list[dict[str, Any]],
+    resume_id: int | None = None,
+    kind: str = "draft",
+) -> int:
+    """Write a draft for each row (job_id, url, company, title, key,
+    question), for one person, from their resume and style: one half-price
+    batch on the fleet's key, or live one at a time on their own. Returns
+    how many drafts were written. Safe to run again from the top: a resumed
+    task collects the batch it parked on and overwrites."""
     from openai.lib._pydantic import to_strict_json_schema
 
     from core.batch import BatchSpec
 
-    user_id, job_id = payload["user_id"], payload["job_id"]
-    job = db.query_one("SELECT id, url, company, title FROM jobs WHERE id = %s", (job_id,))
-    if not job:
-        raise LookupError("unknown job")
-    questions = sync_form_questions(job["url"], refresh=bool(payload.get("refresh")))
-    keys = payload.get("keys")
-    if questions:
-        # The paragraph boxes by default. A one-line box (a URL, a start
-        # date) is drafted only when asked for by key: a live Greenhouse form
-        # carried seven of them beside two real questions, and a draft for
-        # "LinkedIn Profile" is noise the person has to delete.
-        ensure_answer_rows(
-            user_id,
-            job_id,
-            [q for q in questions if q.get("kind") == "long" or q["key"] in (keys or [])],
-        )
-    rows = db.query(
-        "SELECT key, question FROM application_answers WHERE user_id = %s AND job_id = %s"
-        + (" AND key = ANY(%s)" if keys else "")
-        + " ORDER BY id",
-        (user_id, job_id, keys) if keys else (user_id, job_id),
-    )
-    if not rows:
-        set_progress(task_id, 0, 0, "no questions to answer")
-        return
-    resume = resume_text(user_id, payload.get("resume_id"))
+    resume = resume_text(user_id, resume_id)
     if not resume:
         raise RuntimeError("no resume on file; add one under settings first")
     text = instructions(writing_style(user_id))
-    posting = get_content(job["url"]) or ""
     schema = to_strict_json_schema(Draft)
-    specs = [
-        BatchSpec(
-            r["key"],
-            text,
-            question_input(r["question"], job["company"], job["title"], posting, resume),
-            "Draft",
-            schema,
+    postings: dict[str, str] = {}
+    specs = []
+    for r in rows:
+        if r["url"] not in postings:
+            postings[r["url"]] = get_content(r["url"]) or ""
+        specs.append(
+            BatchSpec(
+                # job first, then the key: a key never carries a bar.
+                f"{r['job_id']}|{r['key']}",
+                text,
+                question_input(r["question"], r["company"], r["title"], postings[r["url"]], resume),
+                "Draft",
+                schema,
+            )
         )
-        for r in rows
-    ]
     _, cfg = load_config(user_id)
     total = len(specs)
     done = 0
@@ -270,7 +289,8 @@ async def handle_application_draft(task_id: int, payload: dict[str, Any]) -> Non
         # standard caller is told not to book them against the fleet as well.
         set_progress(task_id, 0, total, f"{total} draft(s) submitted (half price)")
         results, chosen = await run_batched(task_id, APPLICATION_TASK, specs, charged_to_user=True)
-        for key, res in results.items():
+        for custom_id, res in results.items():
+            job_id, _, key = custom_id.partition("|")
             usage = _usage_of(res)
             if usage["total_tokens"]:
                 budget.record_usage(
@@ -290,12 +310,13 @@ async def handle_application_draft(task_id: int, payload: dict[str, Any]) -> Non
             except Exception:
                 logger.warning(f"application draft {key} for job {job_id}: unparsable")
                 continue
-            store_draft(user_id, job_id, key, answer, chosen.model)
+            store_draft(user_id, int(job_id), key, answer, chosen.model, kind)
             done += 1
     else:
         # A person's own key has no batch endpoint we can bill to them; one
         # live call per question, the way their filters run.
         for spec in specs:
+            job_id, _, key = spec.custom_id.partition("|")
             parsed, usage = await ai.parse(cfg, spec.instructions, spec.input, Draft)
             budget.record_usage(
                 user_id,
@@ -307,7 +328,137 @@ async def handle_application_draft(task_id: int, payload: dict[str, Any]) -> Non
                 usage.get("total_tokens", 0),
             )
             if parsed:
-                store_draft(user_id, job_id, spec.custom_id, parsed.answer, cfg.model)
+                store_draft(user_id, int(job_id), key, parsed.answer, cfg.model, kind)
                 done += 1
             set_progress(task_id, done, total, "drafting")
-    set_progress(task_id, done, total, "drafts written")
+    return done
+
+
+async def handle_application_draft(task_id: int, payload: dict[str, Any]) -> None:
+    """The button. Payload: user_id, job_id, optional resume_id, keys (only
+    these questions), refresh (re-read the form). Drafts every question of
+    the posting, drafted before or not."""
+    user_id, job_id = payload["user_id"], payload["job_id"]
+    job = db.query_one("SELECT id, url, company, title FROM jobs WHERE id = %s", (job_id,))
+    if not job:
+        raise LookupError("unknown job")
+    questions = sync_form_questions(job["url"], refresh=bool(payload.get("refresh")))
+    keys = payload.get("keys")
+    if questions:
+        # The paragraph boxes by default. A one-line box (a URL, a start
+        # date) is drafted only when asked for by key: a live Greenhouse form
+        # carried seven of them beside two real questions, and a draft for
+        # "LinkedIn Profile" is noise the person has to delete.
+        ensure_answer_rows(
+            user_id,
+            job_id,
+            [q for q in questions if q.get("kind") == "long" or q["key"] in (keys or [])],
+        )
+    rows = db.query(
+        "SELECT a.job_id, a.key, a.question, j.url, j.company, j.title "
+        "FROM application_answers a JOIN jobs j ON j.id = a.job_id "
+        "WHERE a.user_id = %s AND a.job_id = %s"
+        + (" AND a.key = ANY(%s)" if keys else "")
+        + " ORDER BY a.id",
+        (user_id, job_id, keys) if keys else (user_id, job_id),
+    )
+    if not rows:
+        set_progress(task_id, 0, 0, "no questions to answer")
+        return
+    done = await draft_rows(task_id, user_id, rows, payload.get("resume_id"))
+    set_progress(task_id, done, len(rows), "drafts written")
+
+
+async def handle_application_sweep(task_id: int, payload: dict[str, Any]) -> None:
+    """Ahead of need, for one person: read the forms of the postings on
+    their board that have not been read (newest first, a bounded number per
+    cycle, skipping a host whose slot is closed rather than waiting on it),
+    open a row for every paragraph question, and draft every row without a
+    draft in one batch. Nothing is re-drafted: the button does that."""
+    user_id = payload["user_id"]
+    if not auto_draft(user_id):
+        set_progress(task_id, 0, 0, "automatic drafts are off for this person")
+        return
+    if not resume_text(user_id, None):
+        set_progress(task_id, 0, 0, "no resume on file")
+        return
+    reads_cap = int(db.get_config("application_form_reads_per_cycle"))
+    drafts_cap = int(db.get_config("application_drafts_per_cycle"))
+
+    # "On their board" is the board's own membership predicate
+    # (api.visibility.FAST), not a fresh spelling of it.
+    unread = db.query(
+        visibility.FAST.format(
+            columns="j.url",
+            extra=(
+                "AND j.active AND NOT EXISTS (SELECT 1 FROM application_forms f WHERE f.url = j.url) "
+                "ORDER BY j.created_at DESC LIMIT %(n)s"
+            ),
+        ),
+        {"uid": user_id, "n": reads_cap},
+    )
+    read = skipped = failed = 0
+    for r in unread:
+        try:
+            read_form(r["url"])
+            read += 1
+        except Deferred:
+            skipped += 1
+        except Exception:
+            failed += 1
+    # Kept on the final label too: the form phase is the part that can
+    # quietly stall (every host busy, every read failing), and its count
+    # is the one thing a person reads off the task afterwards.
+    note = f" (forms: {read} read, {skipped} host busy, {failed} failed)" if unread else ""
+    if unread:
+        set_progress(task_id, 0, 0, note.strip(" ()"))
+
+    # A row for every paragraph question on a board posting whose form is
+    # read and that this person has no rows for yet.
+    for r in db.query(
+        visibility.FAST.format(
+            columns=(
+                "j.id AS job_id, (SELECT f.questions FROM application_forms f "
+                "WHERE f.url = j.url) AS questions"
+            ),
+            extra=(
+                "AND j.active "
+                "AND EXISTS (SELECT 1 FROM application_forms f "
+                "            WHERE f.url = j.url AND f.questions IS NOT NULL) "
+                "AND NOT EXISTS (SELECT 1 FROM application_answers a "
+                "                WHERE a.user_id = %(uid)s AND a.job_id = j.id)"
+            ),
+        ),
+        {"uid": user_id},
+    ):
+        ensure_answer_rows(
+            user_id, r["job_id"], [q for q in r["questions"] if q.get("kind") == "long"]
+        )
+
+    on_board = [
+        r["id"]
+        for r in db.query(
+            visibility.FAST.format(
+                columns="j.id",
+                extra=(
+                    "AND j.active AND EXISTS (SELECT 1 FROM application_answers a "
+                    "WHERE a.user_id = %(uid)s AND a.job_id = j.id AND a.draft IS NULL)"
+                ),
+            ),
+            {"uid": user_id},
+        )
+    ]
+    rows = db.query(
+        """
+        SELECT a.job_id, a.key, a.question, j.url, j.company, j.title
+        FROM application_answers a JOIN jobs j ON j.id = a.job_id
+        WHERE a.user_id = %s AND a.job_id = ANY(%s) AND a.draft IS NULL
+        ORDER BY j.created_at DESC, a.id LIMIT %s
+        """,
+        (user_id, on_board, drafts_cap),
+    )
+    if not rows:
+        set_progress(task_id, 0, 0, "nothing new to draft" + note)
+        return
+    done = await draft_rows(task_id, user_id, rows, kind="sweep")
+    set_progress(task_id, done, len(rows), "drafts written ahead of need" + note)

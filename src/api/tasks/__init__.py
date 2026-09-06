@@ -8,7 +8,7 @@ and keeps handlers from importing the loop.
 from __future__ import annotations
 
 from api.tasks import application, comp, locations, mail_classify, requirements, verify
-from api.tasks.application import handle_application_draft
+from api.tasks.application import handle_application_draft, handle_application_sweep
 from api.tasks.batches import handle_poll_batches
 from api.tasks.board import handle_recompute_board
 from api.tasks.comp import handle_extract_comp
@@ -84,6 +84,7 @@ HANDLERS = {
     "verify_new": handle_verify_new,
     "fetch_missing_content": handle_fetch_missing_content,
     "application_draft": handle_application_draft,
+    "application_sweep": handle_application_sweep,
 }
 
 __all__ = ["HANDLERS", "SHAPES"]
