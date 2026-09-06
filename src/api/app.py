@@ -18,6 +18,7 @@ from api.routers import (
     mail,
     requirements,
     resolve,
+    source_admin,
     sources,
     spend,
     stats,
@@ -82,6 +83,7 @@ app.include_router(sources.router, prefix="/v1")
 app.include_router(stats.router, prefix="/v1")
 app.include_router(requirements.router, prefix="/v1")
 app.include_router(admin.router, prefix="/v1")
+app.include_router(source_admin.router, prefix="/v1")
 app.include_router(task_models.router, prefix="/v1")
 app.include_router(analytics.router, prefix="/v1")
 app.include_router(companies.router, prefix="/v1")
