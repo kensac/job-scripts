@@ -1330,9 +1330,37 @@ def trigger_ingest(body: IngestBody, user: AuthedUser = Depends(require_admin)):
         )
     import time as _time
 
+    # A board whose pull is still queued or running is not queued again: the
+    # second task would wait behind the first and pull the same listings.
+    # Reported per board rather than refused whole, since one request can
+    # name many; refused whole only when every board named is in flight.
+    in_flight = {
+        r["source"]: r["id"]
+        for r in db.query(
+            """
+            SELECT DISTINCT ON (payload->>'source') payload->>'source' AS source, id
+            FROM tasks WHERE kind = 'ingest_source'
+              AND status IN ('pending', 'running', 'awaiting_batch', 'waiting')
+              AND payload->>'source' = ANY(%s)
+            ORDER BY payload->>'source', id DESC
+            """,
+            (wanted,),
+        )
+    }
+    if in_flight and all(name in in_flight for name in wanted):
+        raise HTTPException(
+            409,
+            detail={
+                "code": "IN_PROGRESS",
+                "message": "every board named is already being pulled",
+                "in_flight": [{"source": s, "task_id": t} for s, t in sorted(in_flight.items())],
+            },
+        )
     cycle = f"manual-{user.id}-{int(_time.time())}"
     task_ids = []
     for name in wanted:
+        if name in in_flight:
+            continue
         row = db.query_one(
             "INSERT INTO tasks (kind, payload) VALUES ('ingest_source', %s) RETURNING id",
             (db.jsonb({"source": name, "cycle": cycle}),),
@@ -1340,7 +1368,10 @@ def trigger_ingest(body: IngestBody, user: AuthedUser = Depends(require_admin)):
         assert row is not None
         events.publish_task(row["id"])
         task_ids.append({"source": name, "task_id": row["id"]})
-    return {"tasks": task_ids}
+    return {
+        "tasks": task_ids,
+        "in_flight": [{"source": s, "task_id": t} for s, t in sorted(in_flight.items())],
+    }
 
 
 class SourceGroupBody(BaseModel):
@@ -1729,6 +1760,21 @@ def reparse_job(job_id: int, user: AuthedUser = Depends(require_admin)):
     job = db.query_one("SELECT id FROM jobs WHERE id = %s", (job_id,))
     if not job:
         raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown job"})
+    running = db.query_one(
+        "SELECT id FROM tasks WHERE kind = 'extract_upload' "
+        "AND status IN ('pending', 'running', 'awaiting_batch', 'waiting') "
+        "AND (payload->>'job_id')::bigint = %s ORDER BY id DESC LIMIT 1",
+        (job_id,),
+    )
+    if running:
+        raise HTTPException(
+            409,
+            detail={
+                "code": "IN_PROGRESS",
+                "message": "this posting is already being parsed",
+                "task_id": running["id"],
+            },
+        )
     db.execute("UPDATE jobs SET extraction_status = 'pending' WHERE id = %s", (job_id,))
     row = db.query_one(
         "INSERT INTO tasks (kind, payload) VALUES ('extract_upload', %s) RETURNING id",
