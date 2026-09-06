@@ -209,14 +209,14 @@ def test_a_board_query_over_real_volume_never_returns_another_users_rows():
     and with enough of it that a missing predicate is not masked by an empty
     table."""
     from api import criteria
-    from api.routers.jobs import _VISIBILITY
+    from api.visibility import FULL
 
     users = db.query("SELECT id FROM users ORDER BY id")
     assert len(users) > 1
     for user in users:
         uid = user["id"]
         settings = db.query_one("SELECT * FROM user_settings WHERE user_id = %s", (uid,))
-        sql = _VISIBILITY.format(columns="j.id", extra="", criteria=criteria.SQL)
+        sql = FULL.format(columns="j.id", extra="", criteria=criteria.SQL)
         visible = {
             r["id"]
             for r in db.query(

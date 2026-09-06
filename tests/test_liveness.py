@@ -97,7 +97,7 @@ def test_the_two_visibility_predicates_agree():
     combinations real data contains.
     """
     from api import criteria
-    from api.routers.jobs import _VISIBILITY
+    from api.visibility import FULL
 
     user = db.query_one("SELECT id FROM users ORDER BY id LIMIT 1")
     if user is None:
@@ -107,7 +107,7 @@ def test_the_two_visibility_predicates_agree():
     params = {"uid": uid, "bypass_sponsorship": False, **criteria.params(settings)}
 
     read_side = db.query_one(
-        _VISIBILITY.format(columns="COUNT(*) AS c", extra="", criteria=criteria.SQL), params
+        FULL.format(columns="COUNT(*) AS c", extra="", criteria=criteria.SQL), params
     )
     assert read_side is not None
 
@@ -115,7 +115,7 @@ def test_the_two_visibility_predicates_agree():
     # The reverse is not required: the read path also shows jobs a user has
     # touched, which materialisation never created.
     materialised_but_hidden = db.query_one(
-        _VISIBILITY.format(
+        FULL.format(
             columns="COUNT(*) AS c",
             extra="",
             criteria=criteria.SQL,

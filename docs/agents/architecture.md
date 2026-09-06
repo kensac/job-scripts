@@ -83,10 +83,12 @@ carry that width rather than inventing an hour by casting.
 These exist in exactly one place each. Change them there, and never write a
 fresh copy:
 
-- **Job visibility**: a read-time conjunctive predicate in `routers/jobs.py`,
-  mirrored in the board task's materialise and candidate queries. Per-object
-  routes format the same predicate. Change all of them together. See
-  [visibility.md](visibility.md).
+- **Job visibility**: `api/visibility.py`. `FULL` is the one spelling of the
+  predicate and only the recompute task runs it; `FAST` is the one spelling of
+  the read, and every board read, per-object route and requirements slice goes
+  through it. The board task's materialise and candidate queries share
+  `criteria.SQL` and the structural gates with `FULL` and must stay consistent
+  with it. See [visibility.md](visibility.md).
 - **AI pricing**: `core/pricing.py`, rendered as both Python and SQL from one
   source with a parity test.
 - **Provider facts**: one datasheet per provider under `core/providers/`.
