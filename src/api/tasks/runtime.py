@@ -7,6 +7,7 @@ is what keeps the two from forming a cycle.
 
 from __future__ import annotations
 
+import datetime
 import logging
 import os
 import time
@@ -185,6 +186,15 @@ def enqueue(kind: str, payload: dict[str, Any], dedupe_key: str | None = None) -
     if row:
         events.publish_task(row["id"])
     return row["id"] if row else None
+
+
+class Deferred(Exception):
+    """The task goes back to pending, unclaimed until not_before, with no
+    attempt spent: the host's slot for this address is not open yet."""
+
+    def __init__(self, not_before: datetime.datetime) -> None:
+        super().__init__(f"deferred until {not_before:%H:%M:%S}")
+        self.not_before = not_before
 
 
 class AwaitingBatch(Exception):

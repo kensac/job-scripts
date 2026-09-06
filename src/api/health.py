@@ -679,6 +679,14 @@ def _detect_queue() -> list[dict[str, Any]]:
             WHERE t.status = 'pending'
               AND (cardinality(w.kinds) = 0 OR t.kind = ANY(w.kinds))
               AND NOT (t.kind = ANY(w.excluded_kinds))
+              -- What the claim would refuse this worker is not work it could
+              -- have taken: a pull waiting for its host's slot is not a stall.
+              AND (t.not_before IS NULL OR t.not_before <= now())
+              AND NOT EXISTS (
+                  SELECT 1 FROM host_budget b
+                  WHERE b.host = t.payload->>'host'
+                    AND b.egress_group = COALESCE(w.egress_group, w.name)
+                    AND b.next_allowed_at > now())
         ) o
         WHERE w.current_task_id IS NULL
           AND w.last_seen > now() - %(fresh)s::interval

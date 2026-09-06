@@ -209,11 +209,18 @@ three times in three hours, a task the reaper keeps handing back, an open
 alert never mailed, and a pattern that admits every posting. A batched
 sweep counts a line as done only when its row lands.
 
-**A board that limits by address is paced, not retried.** apply.workable.com
-answered 429 to 143 of 172 boards the hour they first pulled together; the
-fetcher now spaces its requests to that host six seconds apart per process.
-The `ingest_host_failing` detector names the host when ingests fail against
-one upstream, whichever boards they were.
+**A board host is paced per egress address, and the pace is learned.**
+`host_budget` holds one row per upstream host and egress address: a worker
+takes the host's next slot for its address before a pull (`api.hosts`), and
+the claim query skips pulls whose slot is closed, so the queue is a buffer the
+host's own rate drains. A 429 doubles the gap and defers the pull
+(`Deferred`: back to pending with `not_before`, no attempt spent); a good pull
+narrows it toward the floor in `ingest_host_pace_seconds`. apply.workable.com
+refused 143 of 172 boards the hour a bundle first pulled, on one address two
+workers shared, which is why the row is per address and the worker names its
+address in `JOBTRACKER_EGRESS_GROUP`. The `ingest_host_failing` detector
+names the host when pulls fail against one upstream; a worker idle beside
+pulls whose slots are closed is not stalled.
 
 **Everything a board returns is stored, once.** Every pull records every
 listing in `listings`, kept by the pattern or not, with the posting text the
