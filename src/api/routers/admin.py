@@ -1232,13 +1232,13 @@ async def run_single_check(body: RunCheckBody, user: AuthedUser = Depends(requir
     visibility is a read-time predicate rather than stored derived state."""
     from api import verdicts as _verdicts
     from api.tasks.models import FilterVerdict, JobClosedVerdict
-    from core.filters import build_custom_instructions
-    from core.pittcsc_simplify import (
+    from core.checks import (
         CLEARANCE_INSTRUCTIONS,
         CLOSED_INSTRUCTIONS,
         ClearanceRequirementResponse,
         JobClosedResponse,
     )
+    from core.filters import build_custom_instructions
 
     job = db.query_one("SELECT id, url, company, title FROM jobs WHERE id = %s", (body.job_id,))
     if not job:

@@ -7,7 +7,7 @@ import asyncio
 from api import db, verdicts
 from api.tasks import ingest
 from core import boards
-from core.pittcsc_simplify import JobPosting
+from core.posting import JobPosting
 
 
 def _posting(title: str, date_posted: int = 0) -> JobPosting:

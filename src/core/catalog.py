@@ -12,7 +12,7 @@ from psycopg.types.json import Jsonb
 from core.store import _pool as pool
 
 if TYPE_CHECKING:
-    from core.pittcsc_simplify import JobPosting
+    from core.posting import JobPosting
 
 logger = logging.getLogger(__name__)
 
