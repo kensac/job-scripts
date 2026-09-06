@@ -19,13 +19,14 @@ from typing import Any
 
 import psycopg
 
-from api import db, events, metrics, telemetry
+from api import db, events, hosts, metrics, telemetry
 from api.tasks import HANDLERS
 from api.tasks.runtime import (
     CHUNK_KINDS,
     HEARTBEAT_TIMEOUT_MINUTES,
     MAX_ATTEMPTS,
     AwaitingBatch,
+    Deferred,
     TaskClaim,
     _finish,
     _maybe_finalize_parent,
@@ -112,6 +113,14 @@ def _claim_task() -> dict[str, Any] | None:
                          worker = %(worker)s
         WHERE id = (SELECT id FROM tasks WHERE status = 'pending'
                       AND kind = ANY(%(known)s) {kinds_clause}
+                      -- Not before its time, and not against a host whose
+                      -- slot for this address is still closed (api.hosts).
+                      AND (not_before IS NULL OR not_before <= now())
+                      AND NOT EXISTS (
+                          SELECT 1 FROM host_budget b
+                          WHERE b.host = tasks.payload->>'host'
+                            AND b.egress_group = %(egress)s
+                            AND b.next_allowed_at > now())
                     ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED)
         RETURNING id, kind, payload, attempts, worker
         """,
@@ -120,6 +129,7 @@ def _claim_task() -> dict[str, Any] | None:
             "kinds": WORKER_KINDS,
             "exclude": EXCLUDE_KINDS,
             "worker": WORKER_NAME,
+            "egress": hosts.EGRESS_GROUP,
         },
     )
 
@@ -180,7 +190,7 @@ def schedule_ingest_cycle() -> None:
     # by the per-cycle dedupe alone, which is exact where an age check drifts.
     for s in db.query(
         """
-        SELECT name FROM sources s WHERE active
+        SELECT name, listings_url FROM sources s WHERE active
           AND NOT EXISTS (
             SELECT 1 FROM tasks t WHERE t.kind = 'ingest_source' AND t.status = 'pending'
               AND t.payload->>'source' = s.name)
@@ -193,7 +203,7 @@ def schedule_ingest_cycle() -> None:
     ):
         enqueue(
             "ingest_source",
-            {"source": s["name"], "cycle": cycle},
+            {"source": s["name"], "cycle": cycle, "host": hosts.host_of(s["listings_url"])},
             dedupe_key=f"ingest:{s['name']}:{cycle}",
         )
     # Board membership for every person, every board_refresh_minutes, so new
@@ -431,16 +441,19 @@ def _report_worker_status(current_task_id: int | None) -> None:
         db.execute(
             """
             INSERT INTO worker_status
-                (name, started_at, current_task_id, last_seen, kinds, excluded_kinds, release)
-            VALUES (%(name)s, %(started)s, %(tid)s, now(), %(kinds)s, %(excluded)s, %(release)s)
+                (name, started_at, current_task_id, last_seen, kinds, excluded_kinds, release,
+                 egress_group)
+            VALUES (%(name)s, %(started)s, %(tid)s, now(), %(kinds)s, %(excluded)s, %(release)s,
+                    %(egress)s)
             ON CONFLICT (name) DO UPDATE SET
                 started_at = EXCLUDED.started_at,
                 current_task_id = %(tid)s, last_seen = now(),
                 kinds = EXCLUDED.kinds, excluded_kinds = EXCLUDED.excluded_kinds,
-                release = EXCLUDED.release
+                release = EXCLUDED.release, egress_group = EXCLUDED.egress_group
             """,
             {
                 "name": WORKER_NAME,
+                "egress": hosts.EGRESS_GROUP,
                 "started": _PROCESS_STARTED_AT,
                 "release": telemetry.RELEASE,
                 "tid": current_task_id,
@@ -528,6 +541,17 @@ async def run_once() -> bool:
         # resumes when its batches land.
         metrics.TASKS_PROCESSED.labels(task["kind"], "awaiting_batch").inc()
         logger.info(f"Task {task['id']} parked awaiting batches")
+    except Deferred as d:
+        # Back to pending until the host's slot opens, the attempt given
+        # back: waiting on a limit is not a failure and must not count as one.
+        db.execute(
+            "UPDATE tasks SET status = 'pending', started_at = NULL, last_heartbeat = NULL, "
+            "worker = NULL, attempts = GREATEST(attempts - 1, 0), not_before = %s "
+            "WHERE id = %s AND status = 'running' AND worker = %s",
+            (d.not_before, claim.task_id, claim.worker),
+        )
+        metrics.TASKS_PROCESSED.labels(task["kind"], "deferred").inc()
+        logger.info(f"Task {task['id']} {d}")
     except Exception as exc:
         if _is_transient(exc) and task["attempts"] < MAX_ATTEMPTS:
             # Host ran out of memory/threads, not a broken task: put it back so

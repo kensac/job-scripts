@@ -12,9 +12,9 @@ import re
 from typing import Any
 from urllib.parse import urlparse
 
-from api import db, metrics, telemetry, verdicts
+from api import db, hosts, metrics, telemetry, verdicts
 from api.tasks.board import _content_attempted_urls, _content_ready_urls
-from api.tasks.runtime import _cancelled, _set_progress, enqueue
+from api.tasks.runtime import Deferred, _cancelled, _set_progress, enqueue
 from core.store import add_ai_result
 
 logger = logging.getLogger("jobtracker_worker")
@@ -29,15 +29,25 @@ async def handle_ingest_source(task_id: int, payload: dict[str, Any]) -> None:
         raise LookupError("unknown or inactive source")
 
     boards.set_pace(db.get_config("ingest_host_pace_seconds") or {})
+    host = hosts.host_of(source["listings_url"])
+    # This address's slot for the host, or the task waits for it: the claim
+    # checks the same row, so this is the race of two workers on one address.
+    opens = hosts.take(host)
+    if opens is not None:
+        raise Deferred(opens)
     try:
         postings = await asyncio.to_thread(
             boards.fetch_listings, source["listings_url"], source["company"]
         )
     except Exception as exc:
+        response = getattr(exc, "response", None)
+        if getattr(response, "status_code", None) == 429:
+            # The host said too many for this address: the gap doubles, the
+            # pull waits it out, and it is not a failure of the board.
+            raise Deferred(hosts.refused(host)) from exc
         # The board itself failed to answer: the source, the host and the
         # HTTP status when there was one, so a board going dark is a query
         # rather than a traceback search.
-        response = getattr(exc, "response", None)
         telemetry.capture(
             "ingest_pull_failed",
             properties={
@@ -49,6 +59,7 @@ async def handle_ingest_source(task_id: int, payload: dict[str, Any]) -> None:
             },
         )
         raise
+    hosts.succeeded(host)
     fetched = len(postings)
     listed = postings
     if source["title_pattern"]:

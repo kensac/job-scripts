@@ -8,6 +8,7 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     Date,
+    Float,
     ForeignKey,
     Identity,
     Index,
@@ -198,6 +199,21 @@ class JobSkill(Base):
     kind: Mapped[str] = mapped_column(Text, primary_key=True)
     skill_raw: Mapped[str] = mapped_column(Text, primary_key=True)
     skill: Mapped[str] = mapped_column(Text)
+
+
+class HostBudget(Base):
+    """The pace one egress address keeps against one upstream host, learned
+    from refusals. See api.hosts."""
+
+    __tablename__ = "host_budget"
+
+    host: Mapped[str] = mapped_column(Text, primary_key=True)
+    egress_group: Mapped[str] = mapped_column(Text, primary_key=True)
+    pace_seconds: Mapped[float] = mapped_column(Float, server_default=text("0"))
+    next_allowed_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+    ok: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
+    refused: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
+    updated_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
 
 
 class BoardVisible(Base):
@@ -443,6 +459,8 @@ class Task(Base):
     worker: Mapped[str | None] = mapped_column(Text)
     last_heartbeat: Mapped[datetime.datetime | None]
     progress: Mapped[Any | None] = mapped_column(JSONB)
+    # A task put back until a host's slot opens is not claimed before then.
+    not_before: Mapped[datetime.datetime | None]
     # WHEN PROGRESS LAST CHANGED, which is not when the row was last written.
     # A heartbeat proves the process is alive; this is the only column that can
     # say the WORK advanced, and telling those apart is the open problem a
@@ -712,6 +730,8 @@ class WorkerStatus(Base):
     # it is configured to refuse.
     kinds: Mapped[list[str]] = mapped_column(server_default=text("'{}'"))
     excluded_kinds: Mapped[list[str]] = mapped_column(server_default=text("'{}'"))
+    # The address this worker speaks from; two containers on one box share it.
+    egress_group: Mapped[str | None] = mapped_column(Text)
     # The image commit this worker runs (JOBTRACKER_REVISION), so a host that
     # missed a roll is a query, not a sweep of seven containers. gcp-vps sat
     # two rolls behind for an hour on 2026-09-04 and nothing said so.

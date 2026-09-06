@@ -1596,6 +1596,21 @@ def delete_source_group(name: str, user: AuthedUser = Depends(require_admin)):
     return {"ok": True, "deleted": name}
 
 
+@router.get("/host-budgets")
+def host_budgets(user: AuthedUser = Depends(require_admin)):
+    """The pace each egress address keeps against each board host, as the
+    fleet has learned it: a host that keeps refusing shows a growing gap and
+    a rising refused count, and the address that is fine shows neither."""
+    rows = db.query(
+        """
+        SELECT host, egress_group, pace_seconds, next_allowed_at, ok, refused, updated_at,
+               next_allowed_at > now() AS closed
+        FROM host_budget ORDER BY refused DESC, host, egress_group
+        """
+    )
+    return {"budgets": rows}
+
+
 @router.get("/sources/{name}")
 def get_source(name: str, user: AuthedUser = Depends(require_admin)):
     """One source as stored, title_pattern included; the list shape omits it."""
@@ -1817,9 +1832,10 @@ _CONFIG_KEYS: dict[str, _Key] = {
     # Read by core.boards through the ingest task.
     "ingest_host_pace_seconds": _Key(
         dict,
-        "Host to seconds between listing requests, per worker process. A board "
-        "host that limits by address (apply.workable.com) is paced at this gap "
-        "instead of being pulled off; the ingest_host_failing alert names the host.",
+        "Host to the smallest gap in seconds between pulls from one address, "
+        "and between pages inside a pull. The fleet learns the actual gap per "
+        "host and address from refusals (GET /admin/host-budgets); this is the "
+        "floor it never goes under, not a ceiling.",
     ),
     # Read by api.verdicts.refresh_content.
     "fetch_engine": _Key(
