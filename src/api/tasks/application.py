@@ -28,6 +28,7 @@ from api import ai, budget, db, hosts, visibility
 from api.tasks.runtime import (
     Deferred,
     load_config,
+    pending_batch_ids,
     run_batched,
     set_progress,
 )
@@ -148,7 +149,7 @@ def read_form(url: str) -> list[dict[str, Any]] | None:
     if not forms.supported(url):
         store_form(url, None)
         return None
-    host = forms.host_of(url)
+    host = forms.budget_host(url)
     opens = hosts.take(host)
     if opens:
         raise Deferred(opens)
@@ -385,17 +386,28 @@ async def handle_application_sweep(task_id: int, payload: dict[str, Any]) -> Non
     reads_cap = int(db.get_config("application_form_reads_per_cycle"))
     drafts_cap = int(db.get_config("application_drafts_per_cycle"))
 
+    # A task back from the provider's batch collects and stores; it does
+    # not read another cap of forms first. The first sweep did (113 forms
+    # on the way out, 114 more on the way back, 2026-09-06), which spent
+    # two cycles of reads on one cycle and reported 60 of 158 done.
+    resumed = bool(pending_batch_ids(task_id))
+
     # "On their board" is the board's own membership predicate
     # (api.visibility.FAST), not a fresh spelling of it.
-    unread = db.query(
-        visibility.FAST.format(
-            columns="j.url",
-            extra=(
-                "AND j.active AND NOT EXISTS (SELECT 1 FROM application_forms f WHERE f.url = j.url) "
-                "ORDER BY j.created_at DESC LIMIT %(n)s"
+    unread = (
+        []
+        if resumed
+        else db.query(
+            visibility.FAST.format(
+                columns="j.url",
+                extra=(
+                    "AND j.active AND NOT EXISTS "
+                    "(SELECT 1 FROM application_forms f WHERE f.url = j.url) "
+                    "ORDER BY j.created_at DESC LIMIT %(n)s"
+                ),
             ),
-        ),
-        {"uid": user_id, "n": reads_cap},
+            {"uid": user_id, "n": reads_cap},
+        )
     )
     read = skipped = failed = 0
     for r in unread:
@@ -415,21 +427,25 @@ async def handle_application_sweep(task_id: int, payload: dict[str, Any]) -> Non
 
     # A row for every paragraph question on a board posting whose form is
     # read and that this person has no rows for yet.
-    for r in db.query(
-        visibility.FAST.format(
-            columns=(
-                "j.id AS job_id, (SELECT f.questions FROM application_forms f "
-                "WHERE f.url = j.url) AS questions"
+    for r in (
+        []
+        if resumed
+        else db.query(
+            visibility.FAST.format(
+                columns=(
+                    "j.id AS job_id, (SELECT f.questions FROM application_forms f "
+                    "WHERE f.url = j.url) AS questions"
+                ),
+                extra=(
+                    "AND j.active "
+                    "AND EXISTS (SELECT 1 FROM application_forms f "
+                    "            WHERE f.url = j.url AND f.questions IS NOT NULL) "
+                    "AND NOT EXISTS (SELECT 1 FROM application_answers a "
+                    "                WHERE a.user_id = %(uid)s AND a.job_id = j.id)"
+                ),
             ),
-            extra=(
-                "AND j.active "
-                "AND EXISTS (SELECT 1 FROM application_forms f "
-                "            WHERE f.url = j.url AND f.questions IS NOT NULL) "
-                "AND NOT EXISTS (SELECT 1 FROM application_answers a "
-                "                WHERE a.user_id = %(uid)s AND a.job_id = j.id)"
-            ),
-        ),
-        {"uid": user_id},
+            {"uid": user_id},
+        )
     ):
         ensure_answer_rows(
             user_id, r["job_id"], [q for q in r["questions"] if q.get("kind") == "long"]
@@ -457,7 +473,11 @@ async def handle_application_sweep(task_id: int, payload: dict[str, Any]) -> Non
         """,
         (user_id, on_board, drafts_cap),
     )
-    if not rows:
+    # Collection must be reachable when there is nothing new to submit: a
+    # resumed task goes on to run_batched with an empty selection so the
+    # batch it parked on is collected, even if every row it drafted has
+    # since left the board.
+    if not rows and not resumed:
         set_progress(task_id, 0, 0, "nothing new to draft" + note)
         return
     done = await draft_rows(task_id, user_id, rows, kind="sweep")
