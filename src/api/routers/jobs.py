@@ -36,8 +36,6 @@ _JOB_ROW = """
     COALESCE(uj.hidden, FALSE) AS hidden
 """
 
-_VISIBILITY = visibility.FULL
-
 
 def _visible_job(user: AuthedUser, job_id: int, columns: str) -> dict | None:
     """One job, but only if this user may address it.
@@ -255,7 +253,7 @@ def _touchable(user: AuthedUser, job_ids: list[int]) -> set[int]:
     """The ids this user may write a board row for.
 
     Pinning an unsubscribed job by patching it is a deliberate feature (the
-    "watching" case). But a user_jobs row IS a visibility grant - _VISIBILITY
+    "watching" case). But a user_jobs row IS a visibility grant - visibility.FULL
     trusts a row the person acted on unconditionally - so an unrestricted pin
     launders around every other gate: pin, then read the job's cached page
     through /detail. The public catalog is fine to pin; another user's
@@ -429,13 +427,13 @@ async def explain_check(job_id: int, body: ExplainBody, user: AuthedUser = Depen
     from api import budget
     from api import verdicts as _verdicts
     from api.tasks.models import FilterVerdict
-    from core.filters import build_custom_instructions
-    from core.pittcsc_simplify import (
+    from core.checks import (
         CLEARANCE_INSTRUCTIONS,
         CLOSED_INSTRUCTIONS,
         ClearanceRequirementResponse,
         JobClosedResponse,
     )
+    from core.filters import build_custom_instructions
 
     # This route writes a verdict into ai_queries, which has no user_id and is
     # resolved latest-row-per-(url, check_type) for EVERY user. An ungated

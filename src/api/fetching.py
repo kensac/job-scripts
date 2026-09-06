@@ -101,7 +101,7 @@ async def fetch_page(url: str) -> tuple[str | None, bool]:
     thing that can actually tell a job posting from a careers index.
     """
     from api import ssrf
-    from core.pittcsc_simplify import extract_url_content_ex
+    from core.scrape import extract_url_content_ex
 
     # The browser runs with --no-sandbox --disable-web-security and will fetch
     # whatever it is pointed at, including cloud metadata and services on the

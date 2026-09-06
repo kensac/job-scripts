@@ -145,7 +145,7 @@ async def _reverify_jobs(
     from openai.lib._pydantic import to_strict_json_schema
 
     from core.batch import BatchSpec
-    from core.pittcsc_simplify import CLOSED_INSTRUCTIONS
+    from core.checks import CLOSED_INSTRUCTIONS
 
     if not ai.server_key("openai"):
         raise LookupError("no server OpenAI key for reverification")
