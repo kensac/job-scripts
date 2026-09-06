@@ -4701,7 +4701,7 @@
     "/v1/jobs/{job_id}/similar": {
       "get": {
         "summary": "Similar",
-        "description": "Postings that read like this one, among the ones this user can see.\n\nGated through _require_visible_job rather than a fresh predicate: this is a\nper-job route, and per-job routes taking any of 49k ids is a bug this\ncodebase has already shipped once. The neighbours are constrained to the\nsame visible slice, so the route cannot become a way to read a posting the\nuser could not otherwise see.\n\nNo vector index backs this, deliberately. The slice is a fraction of the\ncorpus, which makes an exact scan single-digit milliseconds and exact\nrather than approximate; the migration carries the measurements.",
+        "description": "Postings that read like this one, among the ones this user can see.\n\nGated through require_visible_job rather than a fresh predicate: this is a\nper-job route, and per-job routes taking any of 49k ids is a bug this\ncodebase has already shipped once. The neighbours are constrained to the\nsame visible slice, so the route cannot become a way to read a posting the\nuser could not otherwise see.\n\nNo vector index backs this, deliberately. The slice is a fraction of the\ncorpus, which makes an exact scan single-digit milliseconds and exact\nrather than approximate; the migration carries the measurements.",
         "operationId": "similar_v1_jobs__job_id__similar_get",
         "parameters": [
           {
