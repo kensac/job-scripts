@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 from api import db, events, signals, sorting, visibility
 from api.auth import AuthedUser, require_user
+from api.job_access import require_visible_job
 from api.models import UploadRequest, UserJobPatch, UserJobsBulkIds, UserJobsBulkPatch
 from core.urls import normalize_url
 
@@ -35,35 +36,6 @@ _JOB_ROW = """
     uj.connection1, uj.connection2, uj.documents,
     COALESCE(uj.hidden, FALSE) AS hidden
 """
-
-
-def _visible_job(user: AuthedUser, job_id: int, columns: str) -> dict | None:
-    """One job, but only if this user may address it.
-
-    Every per-job route needs this and none of them had it: they resolved the
-    job with a bare `WHERE id = %s`, so any signed-in user could name any of
-    the 49k job ids. That let them read another user's private upload, pin it
-    to their own board, and - through the explain route, which writes a verdict
-    into an append-only log with no user_id - flip a job's closed status for
-    EVERY user at once, because latest-row-per-(url, check_type) wins globally.
-
-    The gate is the board's own membership (api.visibility.FAST) rather than
-    a new predicate. A fourth spelling of "can this user see this job" is how
-    the first three drifted.
-    """
-    return db.query_one(
-        visibility.FAST.format(columns=columns, extra="AND j.id = %(jid)s"),
-        {"uid": user.id, "jid": job_id},
-    )
-
-
-def _require_visible_job(user: AuthedUser, job_id: int, columns: str) -> dict:
-    job = _visible_job(user, job_id, columns)
-    if not job:
-        # 404, not 403: whether a job exists is itself information the caller
-        # is not entitled to.
-        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown job"})
-    return job
 
 
 # Whitelisted server-side sort columns (all NULLS LAST so empty cells sink).
@@ -348,7 +320,7 @@ def job_detail(job_id: int, user: AuthedUser = Depends(require_user)):
     """Everything behind one board row: cached posting content, the user's own
     row + status history, and why the AI let it through (per-filter verdicts
     plus the closed/clearance checks)."""
-    job = _require_visible_job(
+    job = require_visible_job(
         user,
         job_id,
         "j.id, j.url, j.raw_url, j.company, j.title, j.locations, j.terms, j.source, "
@@ -439,7 +411,7 @@ async def explain_check(job_id: int, body: ExplainBody, user: AuthedUser = Depen
     # resolved latest-row-per-(url, check_type) for EVERY user. An ungated
     # job_id here is therefore not a read leak but a write primitive against
     # everyone's board.
-    job = _require_visible_job(user, job_id, "j.id, j.url, j.company, j.title")
+    job = require_visible_job(user, job_id, "j.id, j.url, j.company, j.title")
     fresh, closure_signal = await _verdicts.refresh_content(
         job["url"], company=job["company"], job_title=job["title"], context="explain"
     )

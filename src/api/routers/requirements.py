@@ -18,7 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from api import criteria, db, visibility
 from api.auth import AuthedUser, require_user
-from api.routers.jobs import _require_visible_job
+from api.job_access import require_visible_job
 from core.requirements import (
     CLEARANCE_LEVELS,
     DEGREE_LEVELS,
@@ -215,7 +215,7 @@ SIMILAR_LIMIT = 10
 def similar(job_id: int, user: AuthedUser = Depends(require_user)):
     """Postings that read like this one, among the ones this user can see.
 
-    Gated through _require_visible_job rather than a fresh predicate: this is a
+    Gated through require_visible_job rather than a fresh predicate: this is a
     per-job route, and per-job routes taking any of 49k ids is a bug this
     codebase has already shipped once. The neighbours are constrained to the
     same visible slice, so the route cannot become a way to read a posting the
@@ -225,7 +225,7 @@ def similar(job_id: int, user: AuthedUser = Depends(require_user)):
     corpus, which makes an exact scan single-digit milliseconds and exact
     rather than approximate; the migration carries the measurements.
     """
-    job = _require_visible_job(user, job_id, "j.id, j.url")
+    job = require_visible_job(user, job_id, "j.id, j.url")
     anchor = db.query_one("SELECT embedding FROM job_embeddings WHERE url = %s", (job["url"],))
     if not anchor:
         # Not an error: the sweep is a backlog walker, so a posting ingested in

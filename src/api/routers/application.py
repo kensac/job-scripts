@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field
 
 from api import ai, budget, db, events
 from api.auth import AuthedUser, require_user
-from api.routers.jobs import _require_visible_job
+from api.job_access import require_visible_job
 from api.tasks import application as drafts
 from core import forms
 from core.store import get_content
@@ -127,7 +127,7 @@ def delete_resume(resume_id: int, user: AuthedUser = Depends(require_user)):
 
 
 def _job(user: AuthedUser, job_id: int) -> dict[str, Any]:
-    return _require_visible_job(user, job_id, "j.id, j.url, j.company, j.title")
+    return require_visible_job(user, job_id, "j.id, j.url, j.company, j.title")
 
 
 def _inflight(user_id: int, job_id: int) -> dict[str, Any] | None:
