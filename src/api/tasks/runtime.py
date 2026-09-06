@@ -26,7 +26,7 @@ from typing import Any, LiteralString, NamedTuple
 
 from api import ai, budget, db, events, metrics
 from api.budget import Entitlement
-from api.tasks.board import _demote_closed, _materialize_passing
+from api.tasks.board import demote_closed, materialize_passing
 from core import pricing
 from core.prompts import PROMPT_SAMPLE_SIZE, prompt_hash
 from core.routing import Choice, TaskShape, resolve
@@ -325,12 +325,12 @@ def maybe_finalize_parent(parent_id: int) -> None:
     parent = db.query_one("SELECT kind, payload FROM tasks WHERE id = %s", (parent_id,))
     if parent and parent["kind"] == "reverify_open":
         try:
-            _demote_closed()
+            demote_closed()
         except Exception:
             logger.exception("demotion failed")
     elif parent and (parent["payload"] or {}).get("user_id"):
         try:
-            _materialize_passing(parent["payload"]["user_id"])
+            materialize_passing(parent["payload"]["user_id"])
         except Exception:
             logger.exception("materialize failed")
     n_failed = failed["c"] if failed else 0

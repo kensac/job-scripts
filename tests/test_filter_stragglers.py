@@ -15,7 +15,7 @@ import pytest
 from api import ai, db, fetching
 from api.tasks import filters as tasks_filters
 from api.tasks import ingest as tasks_ingest
-from api.tasks.board import _in_flight_urls
+from api.tasks.board import in_flight_urls
 from core.store import add_ai_result
 from tests.factories import make_task
 
@@ -62,7 +62,7 @@ def test_in_flight_urls_are_what_live_chunks_hold():
     )
     make_task("run_filter_chunk", {"user_id": uid, "jobs": [{"url": "https://d"}]}, status="done")
     make_task("run_filter_chunk", {"user_id": 8, "jobs": [{"url": "https://e"}]}, status="running")
-    assert _in_flight_urls(uid) == {"https://a", "https://b", "https://c"}
+    assert in_flight_urls(uid) == {"https://a", "https://b", "https://c"}
 
 
 def test_a_waiting_run_no_longer_blocks_the_next_cycle(user_headers):

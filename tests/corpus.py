@@ -724,10 +724,10 @@ def _materialise_boards() -> None:
     own way, that test would compare the read path against the corpus instead
     of against the write path, and stop being able to see the drift at all.
     """
-    from api.tasks.board import _materialize_passing
+    from api.tasks.board import materialize_passing
 
     for row in db.query("SELECT id FROM users ORDER BY id"):
-        _materialize_passing(row["id"])
+        materialize_passing(row["id"])
 
 
 def fingerprint() -> str:

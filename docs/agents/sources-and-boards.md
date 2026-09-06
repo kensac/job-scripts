@@ -71,7 +71,7 @@ not admit is set inactive: the board dropped it, or the pattern stopped
 admitting it.
 
 Inactive rows are excluded from every sweep and leave boards through
-`_demote_closed`. Listed and admitted again, the upsert reactivates them.
+`demote_closed`. Listed and admitted again, the upsert reactivates them.
 
 An aggregator list is not such a signal, and an empty pull is a broken fetch
 rather than an empty board, so neither retires anything.
