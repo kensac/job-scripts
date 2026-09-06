@@ -33,7 +33,11 @@ These are instructions, not history. Follow them.
 | [working-agreement.md](docs/agents/working-agreement.md) | Take a task, own a feature, or coordinate with another agent |
 | [engineering-standards.md](docs/agents/engineering-standards.md) | Write or change any code |
 | [data-and-truth.md](docs/agents/data-and-truth.md) | Put a number, a state, or an inference in front of a person |
-| [architecture.md](docs/agents/architecture.md) | Change the pipeline, the matcher, or anything it reads |
+| [architecture.md](docs/agents/architecture.md) | Change the mail pipeline, the matcher, pricing, or a named place |
+| [sources-and-boards.md](docs/agents/sources-and-boards.md) | Add a board, change ingest, or touch how a posting is fetched |
+| [visibility.md](docs/agents/visibility.md) | Change who sees a posting, who owns a row, or a list response shape |
+| [observability.md](docs/agents/observability.md) | Add a task, batch model calls, or add a metric, alert or event |
+| [reading-production.md](docs/agents/reading-production.md) | Point anything at the production database |
 | [testing.md](docs/agents/testing.md) | Write a test or trust one |
 | [migrations.md](docs/agents/migrations.md) | Touch the schema |
 | [deployment.md](docs/agents/deployment.md) | Claim anything is deployed |
