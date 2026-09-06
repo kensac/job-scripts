@@ -14,8 +14,11 @@ It was evaluated on every read until 2026-09-05, at 2 to 7 seconds a sort.
 
 Membership changes when a preference changes or a verdict lands, so a
 preference write asks for a recompute within a minute, and the scheduler asks
-for everyone every `board_refresh_minutes` (persisted config, seeded 3). A
-posting the person uploaded or acted on is visible without waiting.
+every `board_refresh_minutes` (persisted config, seeded 3) for everyone the
+predicate can admit anything for: a subscription, an acted-on row or an
+upload. A users row with none of those is skipped; one such row drew 825
+recomputes in a day for zero rows. A posting the person uploaded or acted on
+is visible without waiting.
 
 **Never write a fresh "can this user see this" predicate, and never evaluate
 FULL on a request.**

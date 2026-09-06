@@ -206,13 +206,25 @@ def schedule_ingest_cycle() -> None:
             {"source": s["name"], "cycle": cycle, "host": hosts.host_of(s["listings_url"])},
             dedupe_key=f"ingest:{s['name']}:{cycle}",
         )
-    # Board membership for every person, every board_refresh_minutes, so new
-    # verdicts reach a board without anyone touching a preference. Bucketed
-    # like the ingest cycle; a person's own preference write asks sooner.
+    # Board membership for every person who can have one, every
+    # board_refresh_minutes, so new verdicts reach a board without anyone
+    # touching a preference. Bucketed like the ingest cycle; a person's own
+    # preference write asks sooner. A users row with no subscription, no
+    # board row and no upload admits nothing under the predicate, and one
+    # such row (a probe that signed in once) drew 825 full recomputes in a
+    # day, 60 percent of the real person's, each producing zero rows.
     refresh = max(1, int(db.get_config("board_refresh_minutes")))
     rbucket = now.replace(minute=(now.minute // refresh) * refresh, second=0, microsecond=0)
     rcycle = rbucket.strftime("%Y-%m-%dT%H:%M")
-    for u in db.query("SELECT id FROM users ORDER BY id"):
+    for u in db.query(
+        """
+        SELECT id FROM users u
+        WHERE EXISTS (SELECT 1 FROM user_sources s WHERE s.user_id = u.id)
+           OR EXISTS (SELECT 1 FROM user_jobs j WHERE j.user_id = u.id)
+           OR EXISTS (SELECT 1 FROM jobs j WHERE j.uploaded_by = u.id)
+        ORDER BY id
+        """
+    ):
         enqueue(
             "recompute_board",
             {"user_id": u["id"], "cycle": rcycle},

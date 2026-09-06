@@ -72,3 +72,27 @@ def test_a_daily_source_is_pulled_once_a_day_and_a_failure_does_not_count(f):
     assert _pending("running_now") == 0
     assert _pending("done_long_ago") == 1
     assert _pending("failed_recently") == 1
+
+
+def test_a_board_is_recomputed_only_for_someone_who_can_have_one(f):
+    """The cycle queued a recompute for every users row. One row that had
+    signed in once, with no subscription, no board row and no upload, drew
+    825 full recomputes in a day for zero rows, 60 percent of the real
+    person's. A person is worth a recompute when the predicate can admit
+    anything for them: a subscription, an acted-on row, or an upload."""
+    from api import worker
+
+    subscribed = f.make_user(sub="subscribed")
+    uploader = f.make_user(sub="uploader")
+    bare = f.make_user(sub="bare")
+    f.make_source("s1")
+    db.execute("INSERT INTO user_sources (user_id, source) VALUES (%s, %s)", (subscribed, "s1"))
+    f.make_job(uploaded_by=uploader)
+    worker.schedule_ingest_cycle()
+    queued = {
+        int(r["uid"])
+        for r in db.query(
+            "SELECT payload->>'user_id' AS uid FROM tasks WHERE kind = 'recompute_board'"
+        )
+    }
+    assert subscribed in queued and uploader in queued and bare not in queued
