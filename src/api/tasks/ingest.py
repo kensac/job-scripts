@@ -28,6 +28,7 @@ async def handle_ingest_source(task_id: int, payload: dict[str, Any]) -> None:
     if not source:
         raise LookupError("unknown or inactive source")
 
+    boards.set_pace(db.get_config("ingest_host_pace_seconds") or {})
     try:
         postings = await asyncio.to_thread(
             boards.fetch_listings, source["listings_url"], source["company"]

@@ -466,6 +466,25 @@ def detect() -> list[dict[str, Any]]:
 WORKER_FRESH = "2 minutes"
 
 
+# The sweeps whose "done" is a row written. A poll that finds no batch
+# terminal and a mail sync with nothing new both finish done with 0 of N and
+# are right to; on 2026-09-06 they opened 463 and 5 warnings between them.
+SWEEP_KINDS = frozenset(
+    {
+        "extract_comp",
+        "extract_requirements",
+        "verify_new",
+        "reverify_chunk",
+        "run_filter_chunk",
+        "run_filter_batch_chunk",
+        "classify_locations",
+        "classify_mail",
+        "embed_postings",
+        "fetch_missing_content",
+    }
+)
+
+
 def _detect_silent() -> list[dict[str, Any]]:
     """Work that reported success while doing nothing, from the audit of
     2026-09-05. Every check here is one indexed pass over tasks or the tiny
@@ -482,8 +501,10 @@ def _detect_silent() -> list[dict[str, Any]]:
         FROM tasks
         WHERE status = 'done' AND finished_at > now() - interval '24 hours'
           AND (progress->>'total')::int > 0 AND (progress->>'done')::int = 0
+          AND kind = ANY(%(kinds)s)
         GROUP BY kind
-        """
+        """,
+        {"kinds": sorted(SWEEP_KINDS)},
     ):
         found.append(
             {

@@ -37,6 +37,10 @@ def test_a_sweep_that_finished_with_nothing_written_fires():
     # Nothing to do is not nothing done; and partial progress is progress.
     _task("extract_requirements", "done", progress={"done": 0, "total": 0, "label": "nothing"})
     _task("verify_new", "done", progress={"done": 5, "total": 300, "label": "x"})
+    # A poll that found no batch terminal did its job; so did a sync with
+    # nothing new. Only a sweep whose done is a row written counts.
+    _task("poll_batches", "done", progress={"done": 0, "total": 8, "label": "polled"})
+    _task("sync_gmail", "done", progress={"done": 0, "total": 500, "label": "synced"})
     assert _silent() == {("sweep_did_nothing", "extract_comp")}
 
 

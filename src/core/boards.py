@@ -42,7 +42,7 @@ _session.headers.update({"User-Agent": "Mozilla/5.0", "Accept": "application/jso
 _session.mount(
     "https://",
     HTTPAdapter(
-        max_retries=Retry(total=3, backoff_factor=1, status_forcelist=(429, 500, 502, 503, 504))
+        max_retries=Retry(total=3, backoff_factor=1, status_forcelist=(500, 502, 503, 504))
     ),
 )
 
@@ -142,9 +142,21 @@ def _posting(
         active=True,
         date_posted=posted,
         raw_url=url,
-        description=description,
-        raw={k: v for k, v in (raw or {}).items() if k not in _TEXT_FIELDS},
+        description=description.replace("\x00", ""),
+        raw=_no_nul({k: v for k, v in (raw or {}).items() if k not in _TEXT_FIELDS}),
     )
+
+
+def _no_nul(value):
+    """jsonb refuses \u0000 anywhere in a document; an Oracle requisition
+    carried one on 2026-09-05 and every pull of that board failed whole."""
+    if isinstance(value, str):
+        return value.replace("\x00", "")
+    if isinstance(value, dict):
+        return {k: _no_nul(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_no_nul(v) for v in value]
+    return value
 
 
 def _with_query(url: str, **params: str) -> str:
@@ -360,12 +372,19 @@ def _oracle(url: str, company: str) -> list[JobPosting]:
             return out
 
 
-# apply.workable.com answers 429 to a burst: 143 of 172 boards failed the
-# hour the bundle first pulled (2026-09-05), all on one per-address limit.
-# One request every six seconds per process stays under it; each worker
-# keeps its own clock and its own address.
-_PACE_SECONDS = {"apply.workable.com": 6.0}
+# Host -> seconds between requests from this process. apply.workable.com
+# answers 429 to a burst: 143 of 172 boards failed the hour the bundle first
+# pulled (2026-09-05), and six seconds was not enough where two workers share
+# one egress address. The values are app_config ingest_host_pace_seconds,
+# handed in by the ingest task before each pull, so a host is tuned from the
+# alert rather than from a deploy.
+_PACE_SECONDS: dict[str, float] = {}
 _last_call: dict[str, float] = {}
+
+
+def set_pace(hosts: dict) -> None:
+    _PACE_SECONDS.clear()
+    _PACE_SECONDS.update({str(h): float(s) for h, s in (hosts or {}).items() if s})
 
 
 def _pace(host: str) -> None:
