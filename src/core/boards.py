@@ -20,6 +20,7 @@ import datetime
 import logging
 import re
 import time
+from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 import ftfy
@@ -147,7 +148,7 @@ def _posting(
     )
 
 
-def _no_nul(value):
+def _no_nul(value: Any) -> Any:
     """jsonb refuses \u0000 anywhere in a document; an Oracle requisition
     carried one on 2026-09-05 and every pull of that board failed whole."""
     if isinstance(value, str):
