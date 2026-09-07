@@ -201,6 +201,53 @@ def test_criteria_date_posted_after_hides_older(client, user_headers):
     assert new_id in ids
 
 
+def test_criteria_max_age_days_is_a_rolling_window_with_a_catalog_fallback(client, user_headers):
+    """A fixed date has to be moved by hand; the window moves every day. A
+    posting the board never dated ages from the day the catalog first saw
+    it, so it still expires; an acted-on row does not."""
+    uid = _uid(user_headers)
+    today = datetime.date.today()
+    fresh = _insert_job(
+        "src-age", "https://x.test/a1", date_posted=today - datetime.timedelta(days=5)
+    )
+    stale = _insert_job(
+        "src-age", "https://x.test/a2", date_posted=today - datetime.timedelta(days=40)
+    )
+    undated = _insert_job("src-age", "https://x.test/a3", date_posted=None)
+    stale_applied = _insert_job(
+        "src-age", "https://x.test/a4", date_posted=today - datetime.timedelta(days=40)
+    )
+    _subscribe(uid, "src-age")
+    for i in range(1, 5):
+        _pass_closed(f"https://x.test/a{i}")
+    db.execute("UPDATE jobs SET created_at = now() - interval '45 days' WHERE id = %s", (undated,))
+    db.execute(
+        "INSERT INTO user_jobs (user_id, job_id, status) VALUES (%s, %s, 'Applied')",
+        (uid, stale_applied),
+    )
+    assert _job_ids(client.get("/v1/user/jobs", headers=user_headers).json()) >= {
+        fresh,
+        stale,
+        undated,
+        stale_applied,
+    }
+
+    put = client.put(
+        "/v1/user/settings", json={"criteria": {"max_age_days": 30}}, headers=user_headers
+    )
+    assert put.status_code == 200, put.text
+    ids = _job_ids(client.get("/v1/user/jobs", headers=user_headers).json())
+    assert fresh in ids and stale_applied in ids
+    assert stale not in ids and undated not in ids
+    # Out of range is refused, not clamped.
+    assert (
+        client.put(
+            "/v1/user/settings", json={"criteria": {"max_age_days": 0}}, headers=user_headers
+        ).status_code
+        == 422
+    )
+
+
 def test_uploaded_by_user_always_visible(client, user_headers):
     uid = _uid(user_headers)
     jid = _insert_job("upload", "https://x.test/f1", active=False, uploaded_by=uid)

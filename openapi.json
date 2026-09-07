@@ -16867,6 +16867,19 @@
             ],
             "title": "Date Posted After"
           },
+          "max_age_days": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 365.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Age Days"
+          },
           "excluded_locations": {
             "items": {
               "type": "string"
