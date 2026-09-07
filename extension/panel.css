@@ -1,58 +1,412 @@
+/* The apply panel, on the job apps' design system.
+ *
+ * Tokens, names and values are lifted from personal-portfolio
+ * app/job-scripts/ui/admin.css so the panel reads as the same product as the
+ * board it reports to. app/job-scripts/DESIGN.md is the prescriptive
+ * reference: Ramp surfaces, Stripe voice. Indigo means "you can act", green
+ * means healthy, crimson means wrong, and no other hues.
+ *
+ * Two things differ from the apps, because this panel is injected into
+ * someone else's page rather than mounted in ours:
+ *
+ * - Theme resolves from prefers-color-scheme, not from the apps' explicit
+ *   data-x-theme attribute. That attribute and its localStorage key live on
+ *   our origin; a content script on greenhouse.io cannot read either. So the
+ *   panel follows the OS, and an explicit light choice in the app does not
+ *   reach it.
+ *
+ * - Inter Tight is used only if the machine already has it (local()).
+ *   Shipping the file would mean a web_accessible_resources entry in the
+ *   manifest, which is a bigger change than a stylesheet; the fallback stack
+ *   is the platform UI face, which is what the panel used before.
+ *
+ * Every selector here matches markup content.js already emits. Nothing in
+ * this file requires a change there.
+ */
+
 #jt-apply {
-  position: fixed; top: 16px; right: 16px; z-index: 2147483647; width: 340px;
-  max-height: calc(100vh - 32px); overflow: auto; box-sizing: border-box;
-  background: #fff; color: #1a1a1a; border: 1px solid #e3e3e3; border-radius: 12px;
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.14);
-  font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  padding: 12px 16px;
+  /* Light. Values are --x-* from admin.css, not approximations of them. */
+  --x-card: #ffffff;
+  --x-hair: #e7e5e2;
+  --x-wash: #f7f6f4;
+  --x-ink: #1f1e1c;
+  --x-slate: #5d5b58;
+  --x-ash: #6a6865;
+  --x-smoke: #d6d4d1;
+  --x-accent: #533afd;
+  --x-on-accent: #ffffff;
+  --x-good: #1e7a52;
+  --x-danger: #b42318;
+  --x-line-mix: 25%;
+  --x-wash-mix: 5%;
+
+  --x-danger-line: color-mix(in oklab, var(--x-danger) var(--x-line-mix), transparent);
+  --x-danger-wash: color-mix(in oklab, var(--x-danger) var(--x-wash-mix), transparent);
+
+  /* NOT admin.css's --x-accent-hover. That token lightens the indigo, which is
+     the wrong direction for a filled button carrying --x-on-accent: white on
+     #7389ff measures 3.11:1, under the AA bar DESIGN.md sets. Pulling the
+     accent toward --x-ink instead darkens it in light and lightens it in dark,
+     because ink flips with the theme - 7.02:1 and 7.37:1. Tokens only, no new
+     hex. The same failure exists in the app (kit.tsx:574); see the PR. */
+  --jt-accent-hover: color-mix(in oklab, var(--x-accent) 88%, var(--x-ink));
+
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 2147483647;
+  width: 340px;
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  box-sizing: border-box;
+  padding: 16px;
+
+  background: var(--x-card);
+  color: var(--x-ink);
+  /* Elevation is hairline borders and background-tint shifts, never a
+     box-shadow. The panel floats over a page we do not control, so it takes
+     a second hairline in smoke rather than the drop shadow it used to have:
+     one border disappears against a card-colored host page, and two do not. */
+  border: 1px solid var(--x-hair);
+  outline: 1px solid var(--x-smoke);
+  outline-offset: -2px;
+  border-radius: 8px;
+
+  font-family: "Inter Tight", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    Helvetica, Arial, sans-serif;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.45;
+  /* Digits line up: counts change in place as fields resolve. */
+  font-variant-numeric: tabular-nums;
+  text-align: left;
+  letter-spacing: normal;
+  text-transform: none;
 }
-#jt-apply * { box-sizing: border-box; }
-#jt-apply .head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+
+@media (prefers-color-scheme: dark) {
+  #jt-apply {
+    --x-card: #201e1a;
+    --x-hair: #34312b;
+    --x-wash: #282520;
+    --x-ink: #ebe7e0;
+    --x-slate: #b6afa4;
+    --x-ash: #968f84;
+    --x-smoke: #55504a;
+    --x-accent: #9c8cff;
+    --x-on-accent: #171512;
+    --x-good: #3fbf7d;
+    --x-danger: #f08075;
+    /* A 5% wash reads on bone and is invisible on a dark ground, so the mix
+       strengths are tokens too. */
+    --x-line-mix: 45%;
+    --x-wash-mix: 15%;
+
+    color-scheme: dark;
+  }
+}
+
+/* The host page styles its own buttons, lists and paragraphs, and those rules
+   reach in here. Every element the panel renders is reset to the panel's own
+   register rather than trusting what it inherits. */
+#jt-apply *,
+#jt-apply *::before,
+#jt-apply *::after {
+  box-sizing: border-box;
+  font-family: inherit;
+  letter-spacing: normal;
+  text-transform: none;
+  text-align: left;
+  box-shadow: none;
+  float: none;
+}
+
+/* -- header ------------------------------------------------------------- */
+
+#jt-apply .head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+/* The label register: 11px tracked uppercase ash, the same as a table header
+   in the apps. Hierarchy is size and tone, so the title is the quietest thing
+   in the panel and the content below it is the loudest. */
 #jt-apply h3 {
-  margin: 0; font-size: 13px; font-weight: 600; letter-spacing: 0.02em;
-  text-transform: uppercase; color: #6b6b6b; display: flex; align-items: center; gap: 8px;
+  margin: 0;
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--x-ash);
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
+
+/* Green is healthy and live, never an action. */
 #jt-apply h3::before {
-  content: ""; width: 8px; height: 8px; border-radius: 50%; background: #2f855a; display: inline-block;
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--x-good);
+  display: inline-block;
+  flex: none;
 }
+
 #jt-apply #jt-min {
-  margin: 0; padding: 0 8px; line-height: 20px; font-size: 15px; border-color: transparent;
-  background: transparent; color: #6b6b6b;
+  flex: none;
+  margin: 0;
+  padding: 0;
+  width: 24px;
+  height: 24px;
+  line-height: 22px;
+  font-size: 14px;
+  text-align: center;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--x-ash);
 }
-#jt-apply #jt-min:hover { background: #f0f0f0; color: #1a1a1a; }
-#jt-apply .body { margin-top: 8px; }
-#jt-apply.collapsed { width: auto; padding: 8px 12px; }
-#jt-apply.collapsed .body { display: none; }
-#jt-apply p { margin: 6px 0; }
-#jt-apply b { font-weight: 600; }
-#jt-apply ul { margin: 6px 0 8px; padding: 0; list-style: none; }
+
+#jt-apply #jt-min:hover {
+  background: var(--x-wash);
+  color: var(--x-ink);
+}
+
+#jt-apply .body {
+  margin-top: 12px;
+}
+
+#jt-apply.collapsed {
+  width: auto;
+  padding: 12px;
+}
+
+#jt-apply.collapsed .body {
+  display: none;
+}
+
+/* -- text --------------------------------------------------------------- */
+
+/* Whole 4px steps only. Body is slate; the facts inside it are ink, which is
+   where the emphasis comes from. */
+#jt-apply p {
+  margin: 8px 0 0;
+  color: var(--x-slate);
+}
+
+#jt-apply p:first-child {
+  margin-top: 0;
+}
+
+#jt-apply b {
+  font-weight: 400;
+  color: var(--x-ink);
+}
+
+#jt-apply .muted {
+  color: var(--x-ash);
+}
+
+/* A whole explanatory sentence is the secondary clause, not the fact, and the
+   scale gives that 12px. At 14px it carried the same weight as the counts
+   above it, which is the one thing this panel should not do: the numbers are
+   why someone looks at it. */
+#jt-apply p.muted {
+  font-size: 12px;
+}
+
+/* Crimson is "wrong": a failed resolve, a model call that did not land, a
+   sign-in that is missing. content.js also uses .warn for the count of fields
+   left to the person, which is not an error - see the note in the PR. */
+#jt-apply .warn {
+  color: var(--x-danger);
+}
+
+#jt-apply a {
+  color: var(--x-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* Hover thickens the rule rather than lightening the text: the lighter indigo
+   reads as hover but drops link contrast to 3.11:1 on card in light. */
+#jt-apply a:hover {
+  text-decoration-thickness: 2px;
+}
+
+/* -- field lists -------------------------------------------------------- */
+
+#jt-apply ul {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Ledger rows: hairline separated, no zebra, no card per row. */
 #jt-apply li {
-  display: flex; align-items: center; justify-content: space-between; gap: 8px;
-  padding: 5px 0; border-top: 1px solid #f0f0f0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 0;
+  border-top: 1px solid var(--x-hair);
+  color: var(--x-ink);
 }
-#jt-apply li:first-child { border-top: 0; }
-#jt-apply li > span.muted, #jt-apply li > span.warn { flex: none; font-size: 11px; }
-#jt-apply details { margin: 6px 0; }
-#jt-apply summary { cursor: pointer; user-select: none; }
+
+#jt-apply li:first-child {
+  border-top: 0;
+}
+
+#jt-apply li > span.muted,
+#jt-apply li > span.warn {
+  flex: none;
+  font-size: 11px;
+}
+
+#jt-apply details {
+  margin: 8px 0 0;
+}
+
+#jt-apply summary {
+  cursor: pointer;
+  user-select: none;
+  color: var(--x-ash);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+#jt-apply summary:hover {
+  color: var(--x-ink);
+}
+
+/* The default marker sits hard against the label with no space. Chrome-only
+   is fine here; this stylesheet only ever loads in the extension. */
+#jt-apply summary::marker {
+  content: "\25B8\00A0";
+}
+
+#jt-apply details[open] summary::marker {
+  content: "\25BE\00A0";
+}
+
+/* -- controls ----------------------------------------------------------- */
+
 #jt-apply button {
-  font: inherit; font-size: 12px; padding: 4px 10px; margin: 2px 6px 2px 0; cursor: pointer;
-  border: 1px solid #d0d0d0; border-radius: 6px; background: #f7f7f7; color: #1a1a1a;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 400;
+  padding: 4px 8px;
+  margin: 0;
+  cursor: pointer;
+  border: 1px solid var(--x-smoke);
+  border-radius: 4px;
+  background: var(--x-card);
+  color: var(--x-ink);
 }
-#jt-apply button:hover { background: #ededed; }
-#jt-apply button:disabled { opacity: 0.6; cursor: default; }
+
+#jt-apply button:hover {
+  background: var(--x-wash);
+}
+
+#jt-apply button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* Indigo is the one thing on the panel that says "you can act". */
 #jt-apply button.primary {
-  display: block; width: 100%; padding: 8px 12px; font-size: 13px; font-weight: 600;
-  background: #1a56db; border-color: #1a56db; color: #fff; margin: 8px 0;
+  display: block;
+  width: 100%;
+  margin: 12px 0 0;
+  padding: 8px 12px;
+  font-size: 14px;
+  background: var(--x-accent);
+  border-color: var(--x-accent);
+  color: var(--x-on-accent);
 }
-#jt-apply button.primary:hover { background: #164bc0; }
-#jt-apply li button { flex: none; padding: 2px 8px; font-size: 11px; }
+
+#jt-apply button.primary:hover {
+  background: var(--jt-accent-hover);
+  border-color: var(--jt-accent-hover);
+}
+
+#jt-apply li button {
+  flex: none;
+  padding: 2px 8px;
+  font-size: 11px;
+}
+
 #jt-apply textarea {
-  width: 100%; font: inherit; padding: 6px 8px; border: 1px solid #d0d0d0; border-radius: 6px;
-  resize: vertical; margin: 6px 0;
+  display: block;
+  width: 100%;
+  margin: 0 0 8px;
+  padding: 8px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--x-ink);
+  background: var(--x-card);
+  border: 1px solid var(--x-smoke);
+  border-radius: 4px;
+  resize: vertical;
 }
-#jt-apply .muted { color: #6b6b6b; }
-#jt-apply .warn { color: #b7410e; }
-#jt-apply a { color: #1a56db; }
-#jt-apply #jt-report { margin-top: 10px; padding-top: 8px; border-top: 1px solid #eee; }
-#jt-apply #jt-report > button { background: transparent; border-color: transparent; color: #6b6b6b; padding-left: 0; }
-#jt-apply #jt-report > button:hover { color: #1a1a1a; }
+
+#jt-apply textarea::placeholder {
+  color: var(--x-ash);
+}
+
+/* One focus treatment, indigo, on everything focusable. */
+#jt-apply button:focus-visible,
+#jt-apply textarea:focus-visible,
+#jt-apply summary:focus-visible,
+#jt-apply a:focus-visible {
+  outline: 2px solid var(--x-accent);
+  outline-offset: 1px;
+}
+
+#jt-apply textarea:focus {
+  border-color: var(--x-accent);
+  outline: none;
+}
+
+/* -- report ------------------------------------------------------------- */
+
+#jt-apply #jt-report {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--x-hair);
+}
+
+#jt-apply #jt-report > button {
+  padding-left: 0;
+  border-color: transparent;
+  background: transparent;
+  color: var(--x-ash);
+}
+
+#jt-apply #jt-report > button:hover {
+  background: transparent;
+  color: var(--x-ink);
+}
+
+#jt-apply #jt-send {
+  margin-right: 8px;
+}
+
+/* The panel scrolls on a short viewport; the scrollbar takes the theme so it
+   does not paint a light track on a dark panel. */
+#jt-apply {
+  scrollbar-color: var(--x-smoke) transparent;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  #jt-apply button,
+  #jt-apply textarea,
+  #jt-apply a {
+    transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+  }
+}
