@@ -11,6 +11,12 @@ Both readers STREAM. The Takeout mbox is 4.24 GB and each .olm is ~4.4 GB;
 anything that builds an index or holds the archive in memory is unusable on
 these files, which is why python's own `mailbox.mbox` is not used - it indexes
 the whole file before yielding anything.
+
+clean_text, html_to_text and parse_sent_at are public because api/gmail.py and
+tasks/message_html.py already call them: a live mail arriving through the API
+and a stored one being re-derived have to normalise identically, or the same
+message reads two ways depending on which path touched it last. The other
+twelve helpers here stay private, and nothing outside imports them.
 """
 
 from __future__ import annotations
@@ -112,7 +118,7 @@ def _strip_nul(text: str) -> str:
     return text.replace("\x00", "")
 
 
-def _clean(text: str) -> str:
+def clean_text(text: str) -> str:
     text = _WS.sub(" ", _strip_nul(text).replace("\r\n", "\n").replace("\r", "\n"))
     # A non-breaking space is a space. Left alone it survives every whitespace
     # rule here and reaches the reader as an invisible character that breaks
@@ -133,7 +139,7 @@ def _clean_header(value: str | None) -> str | None:
     return cleaned or None
 
 
-def _html_to_text(html: str) -> str:
+def html_to_text(html: str) -> str:
     html = re.sub(r"(?is)<(script|style).*?</\1>", " ", html)
     html = re.sub(r"(?i)<br\s*/?>", "\n", html)
     html = re.sub(r"(?i)</p>", "\n\n", html)
@@ -145,7 +151,7 @@ def _html_to_text(html: str) -> str:
     # literal "&lt;b&gt;" in the sender's text into a tag the stripper then
     # eats. Without it "&nbsp;" and "&amp;" reach the reader verbatim, which
     # is what a 67k-message corpus is currently full of.
-    return _clean(unescape(_TAG.sub(" ", html)))
+    return clean_text(unescape(_TAG.sub(" ", html)))
 
 
 # A field holds markup when it contains a CLOSING tag. Derived from the corpus
@@ -161,7 +167,7 @@ def _olm_body(body: str | None, html: str | None) -> tuple[str | None, str | Non
 
     OPFMessageCopyBody is named for text and holds raw markup on 96% of this
     corpus - 27,221 of 28,451 messages carry tags and 20,359 leak CSS
-    declarations. The previous form was `body or _html_to_text(html)`, so a
+    declarations. The previous form was `body or html_to_text(html)`, so a
     non-empty body short-circuited the conversion and the markup went straight
     into body_text, which is what the classifier reads and what the reader
     renders as prose. The model has been reading doctype declarations.
@@ -178,7 +184,7 @@ def _olm_body(body: str | None, html: str | None) -> tuple[str | None, str | Non
     markup = html or body
     if not markup:
         return None, None
-    return _html_to_text(markup)[:MAX_BODY_CHARS] or None, markup[:MAX_HTML_CHARS]
+    return html_to_text(markup)[:MAX_BODY_CHARS] or None, markup[:MAX_HTML_CHARS]
 
 
 def _part_content(msg: Message, kind: str) -> str | None:
@@ -212,7 +218,7 @@ def _body(msg: Message) -> tuple[str | None, str | None]:
     if plain is not None:
         text = plain
     elif html is not None:
-        text = _html_to_text(html)
+        text = html_to_text(html)
     else:
         try:
             payload = msg.get_payload(decode=True)
@@ -221,10 +227,10 @@ def _body(msg: Message) -> tuple[str | None, str | None]:
         if not isinstance(payload, bytes):
             return None, None
         text = payload.decode("utf-8", errors="replace")
-    return _clean(text)[:MAX_BODY_CHARS] or None, (html[:MAX_HTML_CHARS] if html else None)
+    return clean_text(text)[:MAX_BODY_CHARS] or None, (html[:MAX_HTML_CHARS] if html else None)
 
 
-def _sent_at(raw: str | None) -> datetime | None:
+def parse_sent_at(raw: str | None) -> datetime | None:
     """Aware UTC or nothing.
 
     A naive datetime here would be compared against `now()` in Postgres and be
@@ -266,7 +272,7 @@ def _from_message(msg: Message, *, source: str, fallback_id: str) -> ImportedMes
         from_name=_clean_header(from_name),
         to_emails=[r for r in (_clean_header(a) for a in recipients) if r],
         subject=_clean_header(str(msg.get("Subject", "") or "")),
-        sent_at=_sent_at(str(msg.get("Date", "") or "") or None),
+        sent_at=parse_sent_at(str(msg.get("Date", "") or "") or None),
         body_text=text,
         body_html=html,
         headers=_threading_headers(msg),
@@ -421,7 +427,7 @@ def _olm_entries(raw: bytes, *, source: str, origin: str) -> Iterator[ImportedMe
             to_emails=[r for r in (_clean_header(a) for a in addresses) if r and r != sender],
             subject=_clean_header(_olm_text(node, "OPFMessageCopySubject")),
             sent_at=_olm_sent_at(node),
-            body_text=(_clean(text)[:MAX_BODY_CHARS] if text else None),
+            body_text=(clean_text(text)[:MAX_BODY_CHARS] if text else None),
             body_html=html_source,
         )
 
@@ -444,7 +450,7 @@ def _olm_sent_at(node: ElementTree.Element) -> datetime | None:
     try:
         parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
     except ValueError:
-        return _sent_at(raw)
+        return parse_sent_at(raw)
     return parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
 
 
