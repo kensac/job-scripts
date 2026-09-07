@@ -205,7 +205,7 @@ class Suggestions(BaseModel):
     answers: list[SuggestedAnswer]
 
 
-_SUGGEST = (
+DEFAULT_SUGGEST = (
     "You fill the fields of a job application form that the person's profile "
     "did not fill by rule. Answer every field from the profile and resume; do "
     "not invent facts. For a field with options, the answer is exactly one "
@@ -240,10 +240,13 @@ async def suggest(body: SuggestBody, user: AuthedUser = Depends(require_user)):
     if job:
         parts.append(f"Job: {job['title']} at {job['company']}")
     parts.append("Fields:\n" + json.dumps([f.model_dump() for f in body.fields], indent=1))
-    parts.append("Profile:\n" + profile.model_dump_json(exclude={"default_resume_id"}))
+    if profile.notes:
+        parts.append("The person's standing answers, in their own words:\n" + profile.notes)
+    parts.append("Profile:\n" + profile.model_dump_json(exclude={"default_resume_id", "notes"}))
     if resume:
         parts.append("Resume:\n" + resume)
-    parsed, usage = await ai.parse(cfg, _SUGGEST, "\n\n".join(parts), Suggestions)
+    rules = (db.get_config("application_suggest_instructions") or "").strip() or DEFAULT_SUGGEST
+    parsed, usage = await ai.parse(cfg, rules, "\n\n".join(parts), Suggestions)
     budget.record_usage(
         user.id,
         cfg.key_source,

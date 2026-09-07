@@ -29,6 +29,11 @@ def test_the_ladder_rungs():
     assert apply.rule_for("How did you hear about us?") == "referral_source"
     assert apply.rule_for("How did you discover us?") == "referral_source"
     assert apply.rule_for("What is your current visa status?") == "visa_status"
+    assert apply.rule_for("Are you open to relocation?") == "willing_to_relocate"
+    assert apply.rule_for("Are you able to work from our SF office 5 days a week?") == (
+        "willing_onsite"
+    )
+    assert apply.rule_for("Are you willing to work on-site in Maryland?") == "willing_onsite"
     assert apply.pick_option("no", ["Yes", "No"]) == "No"
     assert apply.pick_option("yes", ["Yes, I am authorized", "No, I am not"]) == (
         "Yes, I am authorized"
@@ -346,6 +351,74 @@ def test_a_yes_no_question_about_a_place_is_not_answered_with_the_place(client, 
         ).json()["fields"]
     }
     assert got["hub"] == ("", None, None)
+    # The two questions every posting asks in its own words.
+    client.put(
+        "/v1/user/profile",
+        json={**_profile(), "willing_to_relocate": "yes", "willing_onsite": "yes"},
+        headers=user_headers,
+    )
+    fields2 = [
+        {
+            "key": "reloc",
+            "label": "Are you open to relocation?",
+            "kind": "yesno",
+            "options": ["Yes", "No"],
+        },
+        {
+            "key": "office",
+            "label": "Can you work from our SF office 5 days a week?",
+            "kind": "yesno",
+            "options": ["Yes", "No"],
+        },
+        {"key": "explain", "label": "Are you open to relocation? Please explain.", "kind": "text"},
+    ]
+    got2 = {
+        f["key"]: (f["rung"], f["value"])
+        for f in client.post(
+            "/v1/user/apply/resolve",
+            json={"url": "https://x.test/a", "fields": fields2},
+            headers=user_headers,
+        ).json()["fields"]
+    }
+    assert got2["reloc"] == ("profile", "Yes") and got2["office"] == ("profile", "Yes")
+    assert got2["explain"] == ("", None)
     assert got["office"] == ("profile", "London Office", None)
     assert got["where"] == ("profile", "London, United Kingdom", None)
     assert got["prev"] == ("", None, None)
+
+
+def test_a_draft_never_names_a_gap_and_an_empty_draft_does_not_fill_a_form(client, user_headers):
+    """A draft read "My resume does not include production LLM agents" on a live
+    form. The instructions used to ask for exactly that; now they forbid
+    naming a gap, and a question with no answer in the resume gets an empty
+    draft, which the form resolver treats as no draft at all."""
+    from api.tasks import application as drafts
+
+    text = drafts.instructions(None)
+    assert "never say what the resume or the applicant lacks" in text
+    assert "say so briefly" not in text
+    # The wording is a config row, so the next change is an admin edit.
+    db.execute(
+        "INSERT INTO app_config (key, value) VALUES ('application_draft_instructions', %s) "
+        "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+        (db.jsonb("Answer in haiku."),),
+    )
+    assert drafts.instructions("terse").startswith("Answer in haiku.")
+    assert "Writing style" in drafts.instructions("terse")
+    db.execute("DELETE FROM app_config WHERE key = 'application_draft_instructions'")
+    uid = _uid(user_headers)
+    job_id = _insert_job("src-gap", "https://jobs.ashbyhq.com/gap/abc")
+    db.execute(
+        "INSERT INTO application_answers (user_id, job_id, key, question, draft) "
+        "VALUES (%s, %s, 'q', 'Anything else?', '')",
+        (uid, job_id),
+    )
+    got = client.post(
+        "/v1/user/apply/resolve",
+        json={
+            "url": "https://jobs.ashbyhq.com/gap/abc/application",
+            "fields": [{"key": "q", "label": "Anything else?", "kind": "long"}],
+        },
+        headers=user_headers,
+    ).json()["fields"][0]
+    assert got["rung"] == "" and got["value"] is None

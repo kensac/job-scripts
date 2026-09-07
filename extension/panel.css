@@ -1,12 +1,58 @@
 #jt-apply {
-  position: fixed; top: 16px; right: 16px; z-index: 2147483647; width: 320px;
-  max-height: calc(100vh - 32px); overflow: auto; background: #fff; color: #111;
-  border: 1px solid #ccc; border-radius: 8px; box-shadow: 0 4px 24px rgba(0,0,0,.18);
-  font: 13px/1.4 system-ui, sans-serif; padding: 12px;
+  position: fixed; top: 16px; right: 16px; z-index: 2147483647; width: 340px;
+  max-height: calc(100vh - 32px); overflow: auto; box-sizing: border-box;
+  background: #fff; color: #1a1a1a; border: 1px solid #e3e3e3; border-radius: 12px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.14);
+  font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  padding: 12px 16px;
 }
-#jt-apply h3 { margin: 0 0 8px; font-size: 14px; }
-#jt-apply button { font: inherit; padding: 2px 8px; margin: 2px 4px 2px 0; cursor: pointer; }
-#jt-apply ul { margin: 6px 0; padding-left: 18px; }
-#jt-apply li { margin: 2px 0; }
-#jt-apply .muted { color: #666; }
-#jt-apply .warn { color: #a50; }
+#jt-apply * { box-sizing: border-box; }
+#jt-apply .head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+#jt-apply h3 {
+  margin: 0; font-size: 13px; font-weight: 600; letter-spacing: 0.02em;
+  text-transform: uppercase; color: #6b6b6b; display: flex; align-items: center; gap: 8px;
+}
+#jt-apply h3::before {
+  content: ""; width: 8px; height: 8px; border-radius: 50%; background: #2f855a; display: inline-block;
+}
+#jt-apply #jt-min {
+  margin: 0; padding: 0 8px; line-height: 20px; font-size: 15px; border-color: transparent;
+  background: transparent; color: #6b6b6b;
+}
+#jt-apply #jt-min:hover { background: #f0f0f0; color: #1a1a1a; }
+#jt-apply .body { margin-top: 8px; }
+#jt-apply.collapsed { width: auto; padding: 8px 12px; }
+#jt-apply.collapsed .body { display: none; }
+#jt-apply p { margin: 6px 0; }
+#jt-apply b { font-weight: 600; }
+#jt-apply ul { margin: 6px 0 8px; padding: 0; list-style: none; }
+#jt-apply li {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 5px 0; border-top: 1px solid #f0f0f0;
+}
+#jt-apply li:first-child { border-top: 0; }
+#jt-apply li > span.muted, #jt-apply li > span.warn { flex: none; font-size: 11px; }
+#jt-apply details { margin: 6px 0; }
+#jt-apply summary { cursor: pointer; user-select: none; }
+#jt-apply button {
+  font: inherit; font-size: 12px; padding: 4px 10px; margin: 2px 6px 2px 0; cursor: pointer;
+  border: 1px solid #d0d0d0; border-radius: 6px; background: #f7f7f7; color: #1a1a1a;
+}
+#jt-apply button:hover { background: #ededed; }
+#jt-apply button:disabled { opacity: 0.6; cursor: default; }
+#jt-apply button.primary {
+  display: block; width: 100%; padding: 8px 12px; font-size: 13px; font-weight: 600;
+  background: #1a56db; border-color: #1a56db; color: #fff; margin: 8px 0;
+}
+#jt-apply button.primary:hover { background: #164bc0; }
+#jt-apply li button { flex: none; padding: 2px 8px; font-size: 11px; }
+#jt-apply textarea {
+  width: 100%; font: inherit; padding: 6px 8px; border: 1px solid #d0d0d0; border-radius: 6px;
+  resize: vertical; margin: 6px 0;
+}
+#jt-apply .muted { color: #6b6b6b; }
+#jt-apply .warn { color: #b7410e; }
+#jt-apply a { color: #1a56db; }
+#jt-apply #jt-report { margin-top: 10px; padding-top: 8px; border-top: 1px solid #eee; }
+#jt-apply #jt-report > button { background: transparent; border-color: transparent; color: #6b6b6b; padding-left: 0; }
+#jt-apply #jt-report > button:hover { color: #1a1a1a; }

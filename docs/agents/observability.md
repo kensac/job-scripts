@@ -166,6 +166,12 @@ button posts `application_reports`: the fields as read with the markup
 around each, what the API resolved, what took, and the person's note, for
 triage later. `GET /user/apply/reports` lists them.
 
+**The drafting rules are config, not code.** `application_draft_instructions`
+and `application_suggest_instructions` in app_config hold the text the
+model drafts and fills under; empty means the built-in constant. A wording
+change is an admin edit that takes effect on the next draft, not a roll.
+The person's writing style is appended per person, as before.
+
 **What the rules leave blank, the model fills in one call.** After the
 deterministic pass the extension sends every field still blank (except
 free text, files and dates) to `POST /user/apply/suggest`, one live call
@@ -177,7 +183,11 @@ choice field must be one of the options. The person still sees every
 answer in the form before submitting, and an answer they leave in place
 goes into the bank on submit, so the same question never costs a call
 twice. A profile value may list alternatives in order, "South Asian |
-Asian", and the matcher takes the first that lands.
+Asian", and the matcher takes the first that lands. The profile's
+willing_to_relocate and willing_onsite answer the two yes/no questions
+every posting asks in its own words, and its free-text notes ("always
+willing to relocate") go to the model with every call, so a standing
+answer is written once rather than typed per form.
 
 The extension calls the frontend's proxy from its background worker, which
 rides the site's session cookie; the API's service token never leaves the

@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "Job Tracker Apply",
+  "version": "0.1.0",
+  "description": "Fills an application form from your Job Tracker profile, drafts and remembered answers. You review and click submit.",
+  "permissions": ["storage"],
+  "host_permissions": ["https://www.kanishksachdev.com/*"],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    {
+      "matches": ["https://jobs.ashbyhq.com/*"],
+      "js": ["readers/ashby.js", "content.js"],
+      "css": ["panel.css"],
+      "all_frames": true,
+      "run_at": "document_idle"
+    }
+  ],
+  "action": { "default_title": "Job Tracker Apply" }
+}

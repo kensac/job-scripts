@@ -18,10 +18,11 @@ submit button; the extension never does.
 
 ## Use it
 
-Open a posting's application page on a supported ATS. The panel in the
-corner fills what your profile, your remembered answers and your drafts
-cover, then asks the model once about whatever is still blank and fills
-that too, marked "ai". Consents and acknowledgements, files and date
+Open a posting's application page on a supported ATS; the panel in the
+corner appears when the form does, with or without a reload, and can be
+minimised to a pill. Click Autofill: it fills what your profile, your
+remembered answers and your drafts cover, then asks the model once about
+whatever is still blank and fills that too, marked "ai". Consents and acknowledgements, files and date
 pickers are always yours. Check everything, and click the form's own
 Submit button: what you typed or picked, and every model answer you left
 in place, is remembered for the next form with the same question
@@ -40,8 +41,8 @@ filled at all.
 
 - Ashby (`jobs.ashbyhq.com/<org>/<id>/application`): text, email, phone,
   url, number, textarea, file, yes/no buttons, choice questions (radio
-  groups), the location autocomplete. Date pickers and Ashby's education
-  history widget are left to you.
+  groups and searchable dropdowns), the location search box. Date pickers
+  and Ashby's education history widget are left to you.
 
 Forms embedded on an employer's own careers page in an iframe work
 too; a form rendered inline by the ATS's embed script, with no iframe,

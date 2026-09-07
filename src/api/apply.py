@@ -74,6 +74,13 @@ class Profile(BaseModel):
     referral_source: str = Field(default="", max_length=120)
     work_authorized: Literal["", "yes", "no"] = ""
     needs_sponsorship: Literal["", "yes", "no"] = ""
+    # The two yes/no questions every posting asks in its own words.
+    willing_to_relocate: Literal["", "yes", "no"] = ""
+    willing_onsite: Literal["", "yes", "no"] = ""
+    # Anything else the model should know when it answers a question the
+    # rules cannot: "always willing to relocate; any number of days in an
+    # office". Free text, the person's own words.
+    notes: str = Field(default="", max_length=2000)
     years_experience: str = Field(default="", max_length=10)
     desired_salary: str = Field(default="", max_length=60)
     start_date: str = Field(default="", max_length=100)
@@ -132,6 +139,11 @@ _RULES: tuple[tuple[str, str], ...] = (
     # Questions before places: "authorized to work in the country where the
     # job is located" is about authorisation, not a country.
     (r"\bsponsor", "needs_sponsorship"),
+    (r"\brelocat", "willing_to_relocate"),
+    (
+        r"\b(on ?site|in ?office|in the office|from (our|the|an) office|in person|days? (a|per) week|hybrid)\b",
+        "willing_onsite",
+    ),
     (r"\bvisa (status|type)\b|\bimmigration status\b", "visa_status"),
     (
         r"\b(hear|heard|find out|learn|discover)\b.*\babout\b|\bhow did you (find|discover)\b",
@@ -178,7 +190,7 @@ _RULES: tuple[tuple[str, str], ...] = (
     (r"\b(location|located|based|reside|residence|where do you live)\b", "location"),
 )
 
-YESNO_FACTS = {"work_authorized", "needs_sponsorship"}
+YESNO_FACTS = {"work_authorized", "needs_sponsorship", "willing_to_relocate", "willing_onsite"}
 YES = re.compile(r"^(yes|y|true)\b", re.I)
 NO = re.compile(r"^(no|n|false)\b", re.I)
 DECLINED = re.compile(
@@ -292,7 +304,7 @@ def resolve(user_id: int, job_id: int | None, fields: list[Field_]) -> list[dict
     if job_id is not None:
         for r in db.query(
             "SELECT key, question, draft FROM application_answers "
-            "WHERE user_id = %s AND job_id = %s AND draft IS NOT NULL",
+            "WHERE user_id = %s AND job_id = %s AND COALESCE(draft, '') <> ''",
             (user_id, job_id),
         ):
             drafts[r["key"]] = r["draft"]
@@ -312,6 +324,7 @@ def resolve(user_id: int, job_id: int | None, fields: list[Field_]) -> list[dict
         elif (
             (fact := rule_for(f.label))
             and (f.kind != "yesno" or fact in YESNO_FACTS)
+            and (fact not in YESNO_FACTS or f.kind in ("yesno", "select", "multiselect"))
             and (raw := profile_value(profile, fact))
         ):
             rung, value = "profile", raw

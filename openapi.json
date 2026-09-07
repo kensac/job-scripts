@@ -19281,6 +19281,32 @@
             "title": "Needs Sponsorship",
             "default": ""
           },
+          "willing_to_relocate": {
+            "type": "string",
+            "enum": [
+              "",
+              "yes",
+              "no"
+            ],
+            "title": "Willing To Relocate",
+            "default": ""
+          },
+          "willing_onsite": {
+            "type": "string",
+            "enum": [
+              "",
+              "yes",
+              "no"
+            ],
+            "title": "Willing Onsite",
+            "default": ""
+          },
+          "notes": {
+            "type": "string",
+            "maxLength": 2000,
+            "title": "Notes",
+            "default": ""
+          },
           "years_experience": {
             "type": "string",
             "maxLength": 10,
