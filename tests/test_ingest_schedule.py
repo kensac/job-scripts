@@ -74,6 +74,22 @@ def test_a_daily_source_is_pulled_once_a_day_and_a_failure_does_not_count(f):
     assert _pending("failed_recently") == 1
 
 
+def test_requirements_extraction_runs_only_when_switched_on(f):
+    """Its one consumer is the market table and the deployed arm measured
+    poorly, so the sweep is off until someone turns it on in config."""
+    from api import worker
+
+    worker.schedule_ingest_cycle()
+    kinds = {r["kind"] for r in db.query("SELECT DISTINCT kind FROM tasks")}
+    assert "extract_comp" in kinds and "extract_requirements" not in kinds
+    db.execute(
+        "INSERT INTO app_config (key, value) VALUES ('requirements_extraction_enabled', 'true') "
+        "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+    )
+    worker.schedule_ingest_cycle()
+    assert db.query_one("SELECT 1 FROM tasks WHERE kind = 'extract_requirements'")
+
+
 def test_a_board_is_recomputed_only_for_someone_who_can_have_one(f):
     """The cycle queued a recompute for every users row. One row that had
     signed in once, with no subscription, no board row and no upload, drew

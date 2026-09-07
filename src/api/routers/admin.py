@@ -1544,6 +1544,12 @@ _CONFIG_KEYS: dict[str, _Key] = {
         "Missing application answers the hourly sweep drafts per person per cycle, in one "
         "half-price batch; about $0.0005 each on the sanctioned model.",
     ),
+    "requirements_extraction_enabled": _Key(
+        bool,
+        "Whether the hourly requirements extraction runs. Off since 2026-09-07: its one "
+        "consumer is the market table and the deployed arm measured poorly; pick an arm "
+        "with an experiment before turning it on.",
+    ),
 }
 
 

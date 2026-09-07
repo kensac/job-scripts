@@ -98,6 +98,11 @@ _APP_CONFIG_SEED = [
     # many missing drafts it batches (about $0.0005 each on luna).
     ("application_form_reads_per_cycle", 150),
     ("application_drafts_per_cycle", 500),
+    # Whether the hourly requirements extraction runs. Off since 2026-09-07:
+    # its one consumer is the market table, and the deployed arm was measured
+    # at a third of the reference's skills with seniority mostly blank. Turn
+    # on from the admin config page after choosing a model worth paying for.
+    ("requirements_extraction_enabled", False),
 ]
 # One source of truth for a seeded key's value: the seed writes it, and
 # get_config falls back to it when the row is missing.

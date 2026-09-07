@@ -348,7 +348,25 @@ def summarise(experiment_id: int) -> dict[str, Any]:
 
 async def handle_run_experiment(task_id: int, payload: dict[str, Any]) -> None:
     """Submit one batch per arm, park, and on resume score every answer.
-    Safe to run again from the top: a resumed task collects and scores."""
+    Safe to run again from the top: a resumed task collects and scores.
+
+    A failure lands on the experiment row as well as the task: the first
+    requirements run failed in scoring and the experiment sat "running"
+    with every answer in, because only the task knew."""
+    try:
+        await _run(task_id, payload)
+    except AwaitingBatch:
+        raise
+    except Exception as exc:
+        db.execute(
+            "UPDATE ai_experiments SET status = 'failed', error = %s, finished_at = now() "
+            "WHERE id = %s AND status <> 'done'",
+            (str(exc)[:500], payload.get("experiment_id")),
+        )
+        raise
+
+
+async def _run(task_id: int, payload: dict[str, Any]) -> None:
     from openai.lib._pydantic import to_strict_json_schema
 
     from core.batch import BatchSpec, submit_responses_batches
