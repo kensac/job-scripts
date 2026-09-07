@@ -123,4 +123,16 @@ class PinnedPublicTransport(httpx.AsyncHTTPTransport):
 
 
 def safe_async_client() -> httpx.AsyncClient:
+    """An httpx client whose every connection is pinned to a public address.
+
+    httpx only. The anthropic client (1.4.0 and later) refuses an httpx
+    transport and takes httpx2, so this helper cannot be handed to the
+    Anthropic wire. Today that costs nothing: that wire never takes a
+    user-supplied base_url, so it only reaches the library's own endpoint,
+    and this helper guards the one place a user url is honoured
+    (openai_compatible). The day an Anthropic-wire provider is given a
+    user-settable base_url, it needs an httpx2 twin of this pinning first;
+    dropping the pinning to make the client construct is how the SSRF
+    control would get removed by someone fixing a type error.
+    """
     return httpx.AsyncClient(transport=PinnedPublicTransport())
