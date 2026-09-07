@@ -97,6 +97,7 @@ _APP_CONFIG_SEED = [
     # takes a working day at this rate and the ATSs see a trickle) and how
     # many missing drafts it batches (about $0.0005 each on luna).
     ("application_form_reads_per_cycle", 150),
+    ("resumes_per_user", 10),
     ("application_drafts_per_cycle", 500),
     # Whether the hourly requirements extraction runs. Off since 2026-09-07:
     # its one consumer is the market table, and the deployed arm was measured

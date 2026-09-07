@@ -11,6 +11,7 @@ from api.routers import (
     admin,
     analytics,
     application,
+    apply,
     companies,
     experiments,
     filter_insights,
@@ -81,6 +82,7 @@ app.include_router(users.router, prefix="/v1")
 app.include_router(views.router, prefix="/v1", dependencies=[Depends(require_user)])
 app.include_router(jobs.router, prefix="/v1")
 app.include_router(application.router, prefix="/v1")
+app.include_router(apply.router, prefix="/v1")
 app.include_router(filters.router, prefix="/v1")
 app.include_router(sources.router, prefix="/v1")
 app.include_router(stats.router, prefix="/v1")

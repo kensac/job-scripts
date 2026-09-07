@@ -130,6 +130,59 @@ readable hosts, about one form in three with a real question, about 13 new
 postings a day; the first pass is under a dollar and the steady state is
 cents.
 
+## Assisted apply
+
+The drafts cover the free-response box; the rest of an application form is
+the same twenty facts asked in a hundred phrasings. A browser extension
+(`extension/`) reads the form on the ATS page, asks the API what goes in
+each field, fills, and stops. **It never clicks submit.** The person checks
+the form and clicks the form's own button; the extension sees that click
+and records what was finally in every field.
+
+**Every field climbs one ladder (`api.apply.resolve`).** Bank: the person
+typed an answer to this exact label before (`application_answer_bank`,
+keyed by the normalised label). Profile: a regex table maps the label to a
+fact on `user_settings.profile` (`api.apply.Profile`: identity, contact,
+address, work authorisation, sponsorship, EEO answers defaulting to
+declining, links, the default resume, and structured experience and
+education). Draft: the label is a question with a draft in
+`application_answers`, matched by the ATS field key or the question text.
+Otherwise the field is left blank and listed for the person. The rules are
+a table rather than a model call on purpose: the ledger shows which
+phrasings the table misses, and a table grows from that evidence.
+
+**The bank learns from submits, the ledger says what to fix.** A field the
+person typed into and did not mark as free text goes into the bank on
+submit; the next form with that label is filled from it. Every fill is a
+row in `application_fills` with every field, the rung that filled it, the
+final value and whether the person changed it. `GET /user/apply/report`
+reads that ledger: fields by rung, the share filled and left unchanged, and
+the labels most often blank or corrected. That list is the backlog; a label
+on it is a rule to add or a fact the profile lacks. Never add a rule
+without a label in the ledger asking for it.
+
+**A report is the page as the extension saw it.** The panel's report
+button posts `application_reports`: the fields as read with the markup
+around each, what the API resolved, what took, and the person's note, for
+triage later. `GET /user/apply/reports` lists them.
+
+**What the rules leave blank, the model fills in one call.** After the
+deterministic pass the extension sends every field still blank (except
+free text, files and dates) to `POST /user/apply/suggest`, one live call
+on the person's own model settings booked to the `application` purpose:
+the fields with their options, the profile's answer as a hint where the
+option wording was not recognised ("South Asian | Asian" against
+"Asian/Pacific Islander"), the profile and the resume. An answer for a
+choice field must be one of the options. The person still sees every
+answer in the form before submitting, and an answer they leave in place
+goes into the bank on submit, so the same question never costs a call
+twice. A profile value may list alternatives in order, "South Asian |
+Asian", and the matcher takes the first that lands.
+
+The extension calls the frontend's proxy from its background worker, which
+rides the site's session cookie; the API's service token never leaves the
+proxy. One reader per ATS under `extension/readers/`; Ashby is the first.
+
 ## Observability
 
 Three layers, each answering a different question, none standing in for

@@ -462,6 +462,11 @@ class _Generator:
         # absence means "no filter", not "unknown".
         if column["udt_name"].startswith("_"):
             return []
+        # Same shape of failure for a NOT NULL jsonb column the profile has
+        # not measured yet (user_settings.profile, 2026-09-07): the text
+        # below is not a JSON literal. Empty is what the column defaults to.
+        if column["udt_name"] in ("json", "jsonb"):
+            return db.jsonb({})
         return f"{table}-{name}-{self._next()}"
 
 

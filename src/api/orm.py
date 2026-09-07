@@ -229,6 +229,9 @@ class UserResume(Base):
     name: Mapped[str] = mapped_column(Text)
     text: Mapped[str] = mapped_column(Text)
     filename: Mapped[str | None] = mapped_column(Text)
+    # The file itself, kept only so the extension can attach it to a form;
+    # NULL for a resume that was pasted.
+    pdf: Mapped[bytes | None] = mapped_column(BYTEA)
     created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
     updated_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
 
@@ -265,6 +268,63 @@ class ApplicationAnswer(Base):
     turns: Mapped[Any] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
     model: Mapped[str | None] = mapped_column(Text)
     updated_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+
+
+class ApplicationAnswerBank(Base):
+    """What one person typed into a form field the profile could not fill,
+    keyed by the field's normalised label so the next form asking the same
+    thing is filled from it (api.apply)."""
+
+    __tablename__ = "application_answer_bank"
+    __table_args__ = (UniqueConstraint("user_id", "label_norm"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"))
+    label: Mapped[str] = mapped_column(Text)
+    label_norm: Mapped[str] = mapped_column(Text)
+    kind: Mapped[str] = mapped_column(Text)
+    value: Mapped[str] = mapped_column(Text)
+    times_used: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    last_used_at: Mapped[datetime.datetime | None]
+    created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+    updated_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+
+
+class ApplicationFill(Base):
+    """One form the extension filled: every field, which rung filled it,
+    and what the person changed before submitting. The ledger the fill
+    rate and the most-often-blank labels are read from, and the corpus a
+    resolver change is measured against."""
+
+    __tablename__ = "application_fills"
+    __table_args__ = (Index("application_fills_user_created", "user_id", "created_at"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"))
+    job_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("jobs.id", ondelete="SET NULL")
+    )
+    url: Mapped[str] = mapped_column(Text)
+    host: Mapped[str] = mapped_column(Text)
+    fields: Mapped[Any] = mapped_column(JSONB)
+    created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+    submitted_at: Mapped[datetime.datetime | None]
+
+
+class ApplicationReport(Base):
+    """A page the extension could not handle, as it saw it: the fields it
+    read, what the API resolved, the form's markup, and the person's note.
+    Read when triaging what to teach the reader or the resolver next."""
+
+    __tablename__ = "application_reports"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"))
+    url: Mapped[str] = mapped_column(Text)
+    host: Mapped[str] = mapped_column(Text)
+    note: Mapped[str] = mapped_column(Text, server_default=text("''"))
+    page: Mapped[Any] = mapped_column(JSONB)
+    created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
 
 
 class AiExperiment(Base):
@@ -486,6 +546,8 @@ class UserSettings(Base):
     # How the person writes, in their own words; NULL means the built-in
     # default in api.tasks.application.
     writing_style: Mapped[str | None] = mapped_column(Text)
+    # The facts every application form asks, in api.apply.Profile's shape.
+    profile: Mapped[dict] = mapped_column(server_default=text("'{}'::jsonb"))
     digest_token: Mapped[str | None] = mapped_column(Text, unique=True)
     last_digest_at: Mapped[datetime.datetime | None]
     updated_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
