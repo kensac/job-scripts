@@ -27,7 +27,7 @@ from core.requirements import (
     in_vocabulary,
 )
 from core.routing import Evidence, TaskShape
-from core.store import AI_ELIGIBLE_JOB, CONTENT_LATERAL
+from core.store import AI_ELIGIBLE_JOB, CONTENT_LATERAL, VERIFIED_OPEN
 
 logger = logging.getLogger("jobtracker_worker")
 
@@ -293,7 +293,8 @@ _CANDIDATES = f"""
         FROM (
             SELECT DISTINCT a.url FROM ai_queries a
             LEFT JOIN jobs j ON j.url = a.url
-            WHERE j.url IS NULL OR {AI_ELIGIBLE_JOB.format(job="j")}
+            WHERE j.url IS NULL
+               OR ({AI_ELIGIBLE_JOB.format(job="j")} AND {VERIFIED_OPEN.format(url="j.url")})
         ) c
         {CONTENT_LATERAL.format(url="c.url", columns="id AS content_row_id")}
     ),

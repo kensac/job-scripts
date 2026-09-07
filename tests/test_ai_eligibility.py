@@ -81,8 +81,8 @@ def test_subscribing_needs_no_backfill(population, f):
 def test_requirements_sweep_skips_unreachable_postings(population, f):
     """The production candidate query, not a restatement of it.
 
-    Both postings have cached content and no stored answer, so the only thing
-    that can separate them is the gate.
+    Both postings have cached content, both are verified open, and neither
+    has a stored answer, so the only thing that can separate them is the gate.
     """
     from api.tasks.requirements import _CANDIDATES
 
@@ -92,6 +92,8 @@ def test_requirements_sweep_skips_unreachable_postings(population, f):
         assert row is not None
         urls[key] = row["url"]
         f.make_verdict(row["url"], "content", "passed", content="a long posting body " * 30)
+        f.make_verdict(row["url"], "closed", "passed")
+        f.make_verdict(row["url"], "clearance", "passed")
 
     got = {r["url"] for r in db.query(_CANDIDATES, {"cap": 100})}
     assert urls["subscribed"] in got

@@ -15,7 +15,7 @@ from api.tasks.runtime import (
 )
 from core.providers.spec import StructuredOutput
 from core.routing import TaskShape
-from core.store import AI_ELIGIBLE_JOB, CONTENT_LATERAL
+from core.store import AI_ELIGIBLE_JOB, CONTENT_LATERAL, VERIFIED_OPEN
 
 logger = logging.getLogger("jobtracker_worker")
 
@@ -140,6 +140,7 @@ async def handle_extract_comp(task_id: int, payload: dict[str, Any]) -> None:
         {CONTENT_LATERAL.format(url="j.url", columns="input_content")}
         WHERE NOT j.comp_extracted AND j.active
           AND {AI_ELIGIBLE_JOB.format(job="j")}
+          AND {VERIFIED_OPEN.format(url="j.url")}
         ORDER BY j.id DESC
         LIMIT %(cap)s
         """,
