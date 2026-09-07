@@ -377,6 +377,25 @@ async def handle_application_sweep(task_id: int, payload: dict[str, Any]) -> Non
     open a row for every paragraph question, and draft every row without a
     draft in one batch. Nothing is re-drafted: the button does that."""
     user_id = payload["user_id"]
+    # One sweep per person at a time. A parked sweep frees its worker, so
+    # the next hourly one was claimed while a manual full-board sweep sat on
+    # its batch (2026-09-07 00:00Z): both selected the same undrafted rows,
+    # and only the order the batches landed in kept them from drafting the
+    # same answers twice. The later one waits for the next cycle instead.
+    other = db.query_one(
+        """
+        SELECT id FROM tasks
+        WHERE kind = 'application_sweep' AND id <> %(tid)s
+          AND status IN ('pending', 'running', 'awaiting_batch', 'waiting')
+          AND (payload->>'user_id')::bigint = %(uid)s
+          AND id < %(tid)s
+        LIMIT 1
+        """,
+        {"tid": task_id, "uid": user_id},
+    )
+    if other:
+        set_progress(task_id, 0, 0, f"sweep {other['id']} for this person is still in flight")
+        return
     if not auto_draft(user_id):
         set_progress(task_id, 0, 0, "automatic drafts are off for this person")
         return
