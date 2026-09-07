@@ -173,6 +173,15 @@ async def test_a_filter_experiment_submits_one_batch_per_arm_and_scores_each(
     assert "text-embedding-3-small" not in efforts
     assert [(x["id"], x["name"]) for x in listing["filters"]] == [(fid, "strict")]
     assert listing["filters"][0]["user_email"] == "admin@example.com"
+    # The answers are kept; the scoring can be run again after a code change.
+    db.execute(
+        "UPDATE ai_experiments SET summary = NULL, status = 'failed', error = 'x' WHERE id = %s",
+        (eid,),
+    )
+    r = client.post(f"/v1/admin/experiments/{eid}/rescore", headers=admin_headers)
+    assert r.status_code == 200 and r.json()["summary"]["arms"]["gpt-5.6-luna@high"]["n"] == 4
+    again = client.get(f"/v1/admin/experiments/{eid}", headers=admin_headers).json()
+    assert again["status"] == "done" and again["error"] is None
     # A reference must be one of the arms.
     r = client.post(
         "/v1/admin/experiments",
@@ -184,6 +193,27 @@ async def test_a_filter_experiment_submits_one_batch_per_arm_and_scores_each(
         headers=admin_headers,
     )
     assert r.status_code == 400 and r.json()["detail"]["code"] == "BAD_REFERENCE"
+
+
+def test_requirements_answers_are_scored_on_the_stored_row_and_skills_between_arms(f):
+    """The first requirements run failed on a column that does not exist;
+    production's row has the scalars and no skills, so skills compare
+    between arms only and never count as a disagreement with production."""
+    _, url = f.make_ready_job(url="https://x.test/req1")
+    f.make_requirements(url, seniority="senior", clearance="", skills_required=["Python"])
+    deployed = exp.deployed_verdicts("requirements", [url], {})
+    assert deployed[url]["seniority"] == "senior" and "skills_required" not in deployed[url]
+    mine = exp._requirements_fields(
+        {"seniority": "senior", "skills_required": ["python", "Go"], "yoe_min": None}
+    )
+    scored = exp._agreement(mine, deployed[url])
+    assert scored["seniority"] == 1.0 and "skills_required" not in scored
+    assert (
+        exp._agreement(mine, exp._requirements_fields({"skills_required": ["Python"]}))[
+            "skills_required"
+        ]
+        == 0.5
+    )
 
 
 def test_the_sample_is_fixed_by_its_seed(f):
