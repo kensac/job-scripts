@@ -42,6 +42,8 @@
 
   --x-danger-line: color-mix(in oklab, var(--x-danger) var(--x-line-mix), transparent);
   --x-danger-wash: color-mix(in oklab, var(--x-danger) var(--x-wash-mix), transparent);
+  --x-accent-line: color-mix(in oklab, var(--x-accent) var(--x-line-mix), transparent);
+  --x-accent-wash: color-mix(in oklab, var(--x-accent) var(--x-wash-mix), transparent);
 
   /* NOT admin.css's --x-accent-hover. That token lightens the indigo, which is
      the wrong direction for a filled button carrying --x-on-accent: white on
@@ -382,7 +384,18 @@
   text-align: center;
 }
 
-/* Row actions stay inline: they belong to their field, not to the panel. */
+/* Row actions stay inline: they belong to their field, not to the panel.
+ *
+ * Indigo, because the outstanding list holds two kinds of row and they read
+ * identically without it: one the panel can finish for you, and one only you
+ * can ("attach the file" is a file input, which no extension may set). The
+ * tint is the kit's own treatment for that - border accent-line, bg
+ * accent-wash, text accent (ui/kit.tsx:1257) - rather than a solid fill, which
+ * is reserved for the panel's one primary action.
+ *
+ * The rows you must handle yourself keep ash: nothing to click is not a
+ * failure, so it takes no tone, and the contrast between the two is the guide.
+ */
 #jt-apply li button {
   flex: none;
   display: inline-block;
@@ -391,6 +404,14 @@
   padding: 2px 8px;
   font-size: 11px;
   text-align: center;
+  border-color: var(--x-accent-line);
+  background: var(--x-accent-wash);
+  color: var(--x-accent);
+}
+
+#jt-apply li button:hover {
+  border-color: var(--x-accent);
+  background: var(--x-accent-wash);
 }
 
 #jt-apply textarea {
