@@ -23,7 +23,7 @@ from typing import Any
 
 from api import db
 from api.tasks.runtime import cancelled, set_progress
-from core.mail_import import MAX_BODY_CHARS, MAX_HTML_CHARS, _html_to_text
+from core.mail_import import MAX_BODY_CHARS, MAX_HTML_CHARS, html_to_text
 
 logger = logging.getLogger("jobtracker_worker")
 
@@ -58,7 +58,7 @@ def _convert_chunk(limit: int) -> int:
         return 0
     converted = [
         (
-            _html_to_text(row["body_text"])[:MAX_BODY_CHARS] or None,
+            html_to_text(row["body_text"])[:MAX_BODY_CHARS] or None,
             row["body_text"][:MAX_HTML_CHARS],
             row["id"],
         )

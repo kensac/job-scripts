@@ -24,9 +24,9 @@ from core.mail_import import (
     MAX_BODY_CHARS,
     MAX_HTML_CHARS,
     ImportedMessage,
-    _clean,
-    _html_to_text,
-    _sent_at,
+    clean_text,
+    html_to_text,
+    parse_sent_at,
 )
 
 logger = logging.getLogger("jobtracker_api")
@@ -110,9 +110,9 @@ def _body(payload: dict[str, Any]) -> tuple[str | None, str | None]:
         elif mime == "text/html":
             html.append(data)
     markup = "\n".join(html) if html else None
-    text = "\n".join(plain) if plain else _html_to_text(markup or "")
+    text = "\n".join(plain) if plain else html_to_text(markup or "")
     return (
-        _clean(text)[:MAX_BODY_CHARS] or None,
+        clean_text(text)[:MAX_BODY_CHARS] or None,
         markup[:MAX_HTML_CHARS] if markup else None,
     )
 
@@ -140,7 +140,7 @@ def to_imported(message: dict[str, Any]) -> ImportedMessage:
         from_name=from_name or None,
         to_emails=[addr for _, addr in getaddresses([to_line]) if addr],
         subject=(_header(payload, "Subject") or "").strip() or None,
-        sent_at=_sent_at(_header(payload, "Date")),
+        sent_at=parse_sent_at(_header(payload, "Date")),
         body_text=text,
         body_html=html_source,
     )
