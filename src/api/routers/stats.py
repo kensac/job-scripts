@@ -2,39 +2,53 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
-from api import db
+from api import db, visibility
 from api.auth import AuthedUser, require_user
 
 router = APIRouter()
 
 
+# The rows the person sees, with their own board fields beside them. Every
+# count below reads this rather than user_jobs, because a user_jobs row is
+# not the board: the worker materialises one for every posting that ever
+# passed, and the row outlives the posting's membership. Counted from
+# user_jobs, "to apply" read 2,331 on 2026-09-07 while the board held 578,
+# because 1,753 untouched rows carried postings the filters had since
+# rejected or the person's expiry had aged out.
+_BOARD = visibility.FAST.format(
+    columns="j.id, j.source, uj.status, uj.date_applied, uj.hidden",
+    extra="",
+)
+
+
 @router.get("/user/stats")
 def stats(user: AuthedUser = Depends(require_user)):
+    params = {"uid": user.id}
     by_status = db.query(
-        "SELECT COALESCE(status, '') AS status, COUNT(*) AS count "
-        "FROM user_jobs WHERE user_id = %s AND NOT hidden "
-        "GROUP BY status ORDER BY count DESC",
-        (user.id,),
+        f"""
+        SELECT COALESCE(v.status, '') AS status, COUNT(*) AS count
+        FROM ({_BOARD}) v WHERE NOT COALESCE(v.hidden, FALSE)
+        GROUP BY 1 ORDER BY count DESC
+        """,
+        params,
     )
     by_source = db.query(
-        """
-        SELECT j.source, COUNT(*) AS total,
-               COUNT(*) FILTER (WHERE uj.status IS NOT NULL AND uj.status != '') AS with_status,
-               COUNT(*) FILTER (WHERE uj.date_applied IS NOT NULL) AS applied
-        FROM user_jobs uj JOIN jobs j ON j.id = uj.job_id
-        WHERE uj.user_id = %s AND NOT uj.hidden
-        GROUP BY j.source ORDER BY total DESC
+        f"""
+        SELECT v.source, COUNT(*) AS total,
+               COUNT(*) FILTER (WHERE v.status IS NOT NULL AND v.status != '') AS with_status,
+               COUNT(*) FILTER (WHERE v.date_applied IS NOT NULL) AS applied
+        FROM ({_BOARD}) v WHERE NOT COALESCE(v.hidden, FALSE)
+        GROUP BY v.source ORDER BY total DESC
         """,
-        (user.id,),
+        params,
     )
     by_source_status = db.query(
-        """
-        SELECT j.source, COALESCE(uj.status, '') AS status, COUNT(*) AS count
-        FROM user_jobs uj JOIN jobs j ON j.id = uj.job_id
-        WHERE uj.user_id = %s AND NOT uj.hidden
-        GROUP BY j.source, uj.status ORDER BY j.source, count DESC
+        f"""
+        SELECT v.source, COALESCE(v.status, '') AS status, COUNT(*) AS count
+        FROM ({_BOARD}) v WHERE NOT COALESCE(v.hidden, FALSE)
+        GROUP BY v.source, v.status ORDER BY v.source, count DESC
         """,
-        (user.id,),
+        params,
     )
     over_time = db.query(
         "SELECT date_trunc('week', date_applied)::date AS week, COUNT(*) AS applied "
