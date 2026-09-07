@@ -25,6 +25,14 @@ def _job_for(f, uid: int, url: str) -> int:
 
 
 def _sweep_task(uid: int) -> int:
+    """A claimed sweep for the person. The one before it is finished first,
+    the way the worker finishes a handler, since a sweep steps aside while
+    an earlier one for the same person is in flight."""
+    db.execute(
+        "UPDATE tasks SET status = 'done' WHERE kind = 'application_sweep' "
+        "AND status = 'running' AND (payload->>'user_id')::bigint = %s",
+        (uid,),
+    )
     row = db.query_one(
         "INSERT INTO tasks (kind, payload, status) VALUES ('application_sweep', %s, 'running') "
         "RETURNING id",
@@ -161,6 +169,41 @@ def test_the_cycle_queues_a_sweep_for_each_person_with_a_resume(client, user_hea
     # Same cycle again queues nothing more.
     worker.schedule_ingest_cycle()
     assert len(db.query("SELECT 1 FROM tasks WHERE kind = 'application_sweep'")) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_sweep_waits_for_an_earlier_one_still_parked_on_its_batch(
+    client, user_headers, f, monkeypatch
+):
+    """The hourly sweep was claimed while a manual one sat parked on its
+    batch; both selected the same undrafted rows. The later one steps
+    aside; the earlier one is unaffected by the later one's existence."""
+    uid = _user_id()
+    _job_for(f, uid, "https://job-boards.greenhouse.io/anthropic/jobs/30")
+    client.post("/v1/user/resumes", json={"name": "master", "text": "Alice."}, headers=user_headers)
+    fetched = []
+    monkeypatch.setattr(forms, "_get", lambda url: fetched.append(url) or GREENHOUSE)
+    _owner_config(monkeypatch)
+    calls: list[list[str]] = []
+    _fake_batch(monkeypatch, calls)
+    parked = db.query_one(
+        "INSERT INTO tasks (kind, payload, status) VALUES ('application_sweep', %s, 'awaiting_batch') "
+        "RETURNING id",
+        (db.jsonb({"user_id": uid, "batch_ids": ["b1"]}),),
+    )
+    later = _sweep_task(uid)
+    await drafts.handle_application_sweep(later, {"user_id": uid})
+    assert fetched == [] and calls == []
+    row = db.query_one("SELECT progress FROM tasks WHERE id = %s", (later,))
+    assert row["progress"]["label"] == f"sweep {parked['id']} for this person is still in flight"
+    # Another person's sweep is not in the way.
+    other_uid = f.make_user(sub="someone-else")
+    db.execute(
+        "UPDATE tasks SET payload = %s WHERE id = %s",
+        (db.jsonb({"user_id": other_uid}), parked["id"]),
+    )
+    await drafts.handle_application_sweep(_sweep_task(uid), {"user_id": uid})
+    assert len(fetched) == 1 and len(calls) == 1
 
 
 @pytest.mark.asyncio
