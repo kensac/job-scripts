@@ -71,6 +71,35 @@ def test_a_column_added_to_production_fails_the_check(recorded):
     assert any("jobs.comp_equity" in f for f in findings), findings
 
 
+def test_a_column_dropped_from_production_fails_the_check(recorded):
+    """The direction the check could not see.
+
+    drift() walked production and asked what the profile was missing, so a
+    column the profile describes and production has since dropped was
+    invisible. user_settings.background and .identities were dropped by
+    migrations 3c1d5a90f2e7 and 7f2b41c8ae03 and stayed in the committed
+    profile afterwards, and nothing reported it. A profile describing a column
+    nobody has is a measurement of a schema that no longer exists.
+    """
+    current = copy.deepcopy(recorded)
+    del current["tables"]["user_settings"]["columns"]["criteria"]
+    findings = mp.drift(recorded, current)
+    assert any("user_settings.criteria" in f for f in findings), findings
+
+
+def test_a_table_dropped_from_production_fails_the_check(recorded):
+    current = copy.deepcopy(recorded)
+    del current["tables"]["user_settings"]
+    findings = mp.drift(recorded, current)
+    assert any("user_settings" in f for f in findings), findings
+
+
+def test_the_committed_profile_describes_no_column_production_lacks(recorded):
+    """The specific staleness this pair was added for, asserted on the file
+    that ships rather than on a constructed one."""
+    assert mp.drift(recorded, copy.deepcopy(recorded)) == []
+
+
 def test_a_new_categorical_value_fails_the_check(recorded):
     """The one that matters most. A `status` the corpus cannot hold is a code
     path no generated row will ever reach."""

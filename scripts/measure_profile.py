@@ -663,6 +663,22 @@ def drift(recorded: dict[str, Any], current: dict[str, Any]) -> list[str]:
                 out.append(f"{where}: column exists in production and not in the profile")
                 continue
             out.extend(_shape_drift(where, before, shape))
+
+    # And the other direction. The loop above walks production, so a column the
+    # profile describes and production has since dropped was invisible to it:
+    # user_settings.background and .identities were dropped by migrations
+    # 3c1d5a90f2e7 and 7f2b41c8ae03 and stayed in the profile afterwards,
+    # because nothing here looked. A profile that describes a column nobody has
+    # is a measurement of a schema that no longer exists, and the generator
+    # reading it is being told about a shape it can never see.
+    for table, was in recorded["tables"].items():
+        now = current["tables"].get(table)
+        if now is None:
+            out.append(f"{table}: table is in the profile and not in production")
+            continue
+        for column in was["columns"]:
+            if column not in now["columns"]:
+                out.append(f"{table}.{column}: column is in the profile and not in production")
     return out
 
 

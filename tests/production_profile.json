@@ -3652,13 +3652,6 @@
      "lengths": [],
      "null_rate": 1.0
     },
-    "background": {
-     "keysets": {
-      "": 1.0
-     },
-     "kind": "json",
-     "null_rate": 0.0
-    },
     "bypass_sponsorship_filter": {
      "kind": "boolean",
      "null_rate": 0.0,
@@ -3707,11 +3700,6 @@
      "kind": "boolean",
      "null_rate": 0.0,
      "true_rate": 1.0
-    },
-    "identities": {
-     "keysets": {},
-     "kind": "json",
-     "null_rate": 1.0
     },
     "identities_confirmed_at": {
      "age_days": [],
