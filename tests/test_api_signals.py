@@ -12,7 +12,7 @@ def _detail(client, headers, job_id: int) -> dict:
 
 
 def _own(f, user_id: int, **kwargs) -> tuple[int, str]:
-    """A job on the user's own board, so it is visible without needing a
+    """A job the user acted on, so it is visible without needing a
     subscription, filters or a passing clearance check."""
     job_id, url = f.make_ready_job(**kwargs)
     f.make_board_row(user_id, job_id)

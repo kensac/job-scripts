@@ -118,12 +118,39 @@ async def handle_poll_batches(task_id: int, payload: dict[str, Any]) -> None:
             )
             resume_parked(t["id"])
             expired += 1
+    orphaned = _expire_orphans(window)
     set_progress(
         task_id,
         resumed + partial + expired,
         len(parked),
-        f"{resumed} resumed, {partial} resumed on stragglers, {expired} past the completion window",
+        f"{resumed} resumed, {partial} resumed on stragglers, {expired} past the completion "
+        f"window, {orphaned} orphaned batch row(s) expired",
     )
+
+
+def _expire_orphans(window: int) -> int:
+    """A batch row nothing will ever collect reads as live forever.
+
+    The poll updates a batch's state only through the task parked on it; when
+    that task fails or is cancelled the row stays at whatever the provider
+    last said. Batch 8423 sat "validating" for five days after its task
+    failed at submission on 2026-09-02, on the batches page, as if in flight.
+    Past the provider's completion window with no parked task, the batch is
+    terminal on the provider's side whatever we recorded; expired is the
+    honest state, and the reason is on the row's updated_at.
+    """
+    rows = db.query(
+        """
+        UPDATE ai_batches SET status = 'expired', updated_at = now()
+        WHERE status NOT IN ('completed', 'failed', 'expired', 'cancelled')
+          AND submitted_at < now() - make_interval(secs => %s)
+          AND NOT EXISTS (SELECT 1 FROM tasks t WHERE t.id = ai_batches.task_id
+                          AND t.status IN ('awaiting_batch', 'pending', 'running', 'waiting'))
+        RETURNING id
+        """,
+        (window,),
+    )
+    return len(rows)
 
 
 def _younger_than(batch_ids: list[str], seconds: int) -> bool:

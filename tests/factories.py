@@ -161,7 +161,13 @@ def subscribe(user_id: int, source: str) -> None:
     )
 
 
-def make_board_row(user_id: int, job_id: int, *, status: str | None = None) -> None:
+def make_board_row(user_id: int, job_id: int, *, status: str | None = "Saved") -> None:
+    """A row the person acted on, which is theirs whatever the criteria or
+    the verdicts say. The default is a status because a bare row grants
+    nothing: the worker materialises one for every passing posting, and
+    #424 made those obey the verdicts like any other posting after 614
+    rejected postings stayed on a board through them. Pass status=None
+    for that untouched kind when a test is about it."""
     db.execute(
         "INSERT INTO user_jobs (user_id, job_id, status) VALUES (%s, %s, %s) "
         "ON CONFLICT (user_id, job_id) DO UPDATE SET status = EXCLUDED.status",

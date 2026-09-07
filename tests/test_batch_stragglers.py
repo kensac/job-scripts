@@ -162,3 +162,33 @@ def test_straggler_hours_is_admin_config(client, admin_headers):
     )
     assert r.status_code == 200, r.text
     assert db.get_config("batch_straggler_hours") == 6
+
+
+@pytest.mark.asyncio
+async def test_a_batch_row_nothing_will_collect_expires_after_the_window(monkeypatch):
+    """Batch 8423 sat "validating" for five days after its task failed at
+    submission: the poll updates a row only through the task parked on it.
+    Past the provider window with no live task, the row reads expired."""
+
+    async def progress(ids):
+        return {}
+
+    monkeypatch.setattr("core.batch.batch_progress", progress)
+    poll = make_task("poll_batches", {}, status="running")
+    dead = make_task("run_filter", {"batch_ids": ["orphan"]}, status="failed")
+    live = make_task("run_filter", {"batch_ids": ["parked"]}, status="awaiting_batch")
+    _ai_batch("orphan", "validating", 30)
+    _ai_batch("young", "in_progress", 1)
+    _ai_batch("parked", "in_progress", 30)
+    db.execute("UPDATE ai_batches SET task_id = %s WHERE provider_batch_id = %s", (dead, "orphan"))
+    db.execute("UPDATE ai_batches SET task_id = %s WHERE provider_batch_id = %s", (live, "parked"))
+    await tasks_batches.handle_poll_batches(poll, {})
+    rows = {
+        r["provider_batch_id"]: r["status"]
+        for r in db.query("SELECT provider_batch_id, status FROM ai_batches")
+    }
+    assert rows["orphan"] == "expired"
+    # Young, or still parked on by a live task: left to the poll.
+    assert rows["young"] == "in_progress" and rows["parked"] == "in_progress"
+    label = db.query_one("SELECT progress->>%s AS l FROM tasks WHERE id = %s", ("label", poll))["l"]
+    assert "1 orphaned batch row(s) expired" in label

@@ -106,6 +106,15 @@ def _chunk_specs(specs: list[BatchSpec], max_output_tokens: int) -> list[list[Ba
     return chunks
 
 
+def prompt_cache_key(instructions: str) -> str:
+    """One key per distinct instruction text, so every request sharing a
+    prefix asks the provider for the same cache. The provider caps the key's
+    length, and the hash prefix is more than enough to keep prompts apart."""
+    import hashlib
+
+    return "jt-" + hashlib.sha256(instructions.encode()).hexdigest()[:32]
+
+
 def _build_line(spec: BatchSpec, model: str, reasoning_effort: str, max_output_tokens: int) -> dict:
     return {
         "custom_id": spec.custom_id,
@@ -118,6 +127,12 @@ def _build_line(spec: BatchSpec, model: str, reasoning_effort: str, max_output_t
             "reasoning": {"effort": reasoning_effort},
             "max_output_tokens": max_output_tokens,
             "store": False,
+            # Routes every request carrying the same instructions to the
+            # same prompt cache, so the shared prefix is served at the
+            # cached rate more often. Measured over 2026-08-07 to 09-06
+            # without it: a quarter of batched input tokens were cached
+            # against a ceiling of about half on the filter step.
+            "prompt_cache_key": prompt_cache_key(spec.instructions),
             "text": {
                 "format": {
                     "type": "json_schema",

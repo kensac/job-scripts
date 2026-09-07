@@ -150,17 +150,20 @@ def seed() -> dict[str, int]:
                         "still accepting" if status == "passed" else "position filled",
                     ),
                 )
-    # Materialised as board rows, which is what a completed filter run does -
-    # and it is also what makes the awkward jobs VISIBLE. Seeded through the
-    # visibility predicate rather than around it: a job that only exists in
-    # `jobs` never reaches the wire, so a seed that stopped there would look
-    # populated in the database and empty in the app.
+    # Board rows the person acted on, which is what makes the awkward jobs
+    # VISIBLE whatever their verdicts say. Seeded through the visibility
+    # predicate rather than around it: a job that only exists in `jobs` never
+    # reaches the wire, so a seed that stopped there would look populated in
+    # the database and empty in the app. An untouched row grants nothing
+    # since #424, so the rows without a status carry a note instead: a note
+    # is a decision, a bare row is bookkeeping.
     statuses = ["Application Submitted", None, None, "No Longer Interested", None, None]
     for job_id, status in zip(job_ids, statuses, strict=True):
         db.execute(
-            "INSERT INTO user_jobs (user_id, job_id, status) VALUES (%s, %s, %s) "
-            "ON CONFLICT (user_id, job_id) DO UPDATE SET status = EXCLUDED.status",
-            (user_id, job_id, status),
+            "INSERT INTO user_jobs (user_id, job_id, status, notes) VALUES (%s, %s, %s, %s) "
+            "ON CONFLICT (user_id, job_id) DO UPDATE "
+            "SET status = EXCLUDED.status, notes = EXCLUDED.notes",
+            (user_id, job_id, status, None if status else "seeded"),
         )
 
     # Two filters sharing one prompt_hash, because the real corpus has exactly

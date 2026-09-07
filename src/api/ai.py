@@ -9,6 +9,7 @@ from openai import AsyncOpenAI
 from pydantic import BaseModel
 
 from core import providers, routing
+from core.batch import prompt_cache_key
 from core.providers.spec import Model, StructuredOutput
 
 PROVIDERS = (*providers.PROVIDERS, "openai_compatible")
@@ -364,6 +365,9 @@ async def _parse[T: BaseModel](
             # the JSON gets truncated mid-string after a long reasoning pass.
             max_output_tokens=cfg.params.get("max_output_tokens", 6000),
             store=False,
+            # Same key the batched path uses for these instructions, so a
+            # live check and the sweep share one prompt cache.
+            prompt_cache_key=prompt_cache_key(instructions),
             timeout=timeout,
         )
         u = response.usage

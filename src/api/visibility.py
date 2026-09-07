@@ -67,15 +67,17 @@ LEFT JOIN filter_pass fp ON fp.url = j.url
 WHERE (
     j.uploaded_by = %(uid)s
     -- A board row the person ACTED on (a status, a note, a date applied) is
-    -- theirs whatever the criteria say. A row the worker materialised for a
-    -- passing posting and nobody touched is not a decision, so it obeys the
-    -- criteria like any other posting: 1,629 such rows carried postings in
-    -- Singapore, London and Sydney past a United States filter on
-    -- 2026-09-05, because a row's mere existence read as a grant.
+    -- theirs whatever the criteria or the verdicts say. A row the worker
+    -- materialised for a passing posting and nobody touched is not a
+    -- decision, so it obeys everything below like any other posting: the
+    -- criteria (1,629 such rows carried Singapore, London and Sydney past a
+    -- United States filter on 2026-09-05) AND the verdicts (614 such rows
+    -- kept postings the filter had since rejected on 2026-09-07, when the
+    -- untouched branch re-checked the criteria and nothing else, so a
+    -- re-judgement on a new model could not remove what the old one let in).
     OR (uj.user_id IS NOT NULL
         AND (COALESCE(uj.status, '') <> '' OR COALESCE(uj.notes, '') <> ''
-             OR uj.date_applied IS NOT NULL
-             OR (TRUE {criteria})))
+             OR uj.date_applied IS NOT NULL))
     OR (
         j.active
         AND j.source IN (SELECT source FROM user_sources WHERE user_id = %(uid)s)
