@@ -10472,6 +10472,94 @@
         }
       }
     },
+    "/v1/admin/experiments/{experiment_id}/rescore": {
+      "post": {
+        "summary": "Rescore Experiment",
+        "description": "Score the stored answers again. The answers are the paid-for part;\nthe scoring is code, and code changes. The first requirements run\ncollected all 800 answers and then failed on a column name in the\nscoring query, and nothing should have to be re-bought to fix that.",
+        "operationId": "rescore_experiment_v1_admin_experiments__experiment_id__rescore_post",
+        "parameters": [
+          {
+            "name": "experiment_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Experiment Id"
+            }
+          },
+          {
+            "name": "x-service-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-Service-Token"
+            }
+          },
+          {
+            "name": "x-user-sub",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Sub"
+            }
+          },
+          {
+            "name": "x-user-email",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Email"
+            }
+          },
+          {
+            "name": "x-user-name",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Name"
+            }
+          },
+          {
+            "name": "x-user-groups",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Groups"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/admin/experiments/{experiment_id}": {
       "get": {
         "summary": "Get Experiment",

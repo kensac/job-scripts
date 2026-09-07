@@ -109,6 +109,30 @@ def create_experiment(body: ExperimentCreate, user: AuthedUser = Depends(require
     return {**row, "task_id": task["id"], "refused_arms": refused}
 
 
+@router.post("/experiments/{experiment_id}/rescore")
+def rescore_experiment(experiment_id: int, user: AuthedUser = Depends(require_admin)):
+    """Score the stored answers again. The answers are the paid-for part;
+    the scoring is code, and code changes. The first requirements run
+    collected all 800 answers and then failed on a column name in the
+    scoring query, and nothing should have to be re-bought to fix that."""
+    row = db.query_one("SELECT id FROM ai_experiments WHERE id = %s", (experiment_id,))
+    if not row:
+        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown experiment"})
+    if not db.query_one(
+        "SELECT 1 FROM ai_experiment_results WHERE experiment_id = %s LIMIT 1", (experiment_id,)
+    ):
+        raise HTTPException(
+            409, detail={"code": "NO_RESULTS", "message": "nothing collected yet to score"}
+        )
+    summary = exp.summarise(experiment_id)
+    db.execute(
+        "UPDATE ai_experiments SET summary = %s, status = 'done', error = NULL, "
+        "finished_at = COALESCE(finished_at, now()) WHERE id = %s",
+        (db.jsonb(summary), experiment_id),
+    )
+    return {"id": experiment_id, "summary": summary}
+
+
 @router.get("/experiments/{experiment_id}")
 def get_experiment(
     experiment_id: int, arm: str | None = None, user: AuthedUser = Depends(require_admin)

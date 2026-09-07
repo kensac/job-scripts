@@ -72,9 +72,11 @@ def _comp_fields(p: dict[str, Any]) -> dict[str, Any]:
 
 def _requirements_fields(p: dict[str, Any]) -> dict[str, Any]:
     return {
-        "degree": p.get("degree"),
-        "seniority": p.get("seniority"),
-        "clearance": p.get("clearance"),
+        "degree_min": p.get("degree_min") or "",
+        "degree_required": bool(p.get("degree_required")),
+        "seniority": p.get("seniority") or "",
+        "employment_type": p.get("employment_type") or "",
+        "clearance": p.get("clearance") or "",
         "yoe_min": p.get("yoe_min"),
         "skills_required": sorted(s.lower() for s in (p.get("skills_required") or [])),
     }
@@ -234,18 +236,21 @@ def deployed_verdicts(purpose: str, urls: list[str], params: dict[str, Any]) -> 
             for r in rows
         }
     if purpose == "requirements":
+        # The stored row carries the scalar fields; skills live in their own
+        # table and are compared between arms only.
         rows = db.query(
-            "SELECT url, degree, seniority, clearance, yoe_min, skills_required "
-            "FROM job_requirements WHERE url = ANY(%s)",
+            "SELECT url, degree_min, degree_required, seniority, employment_type, clearance, "
+            "yoe_min FROM job_requirements WHERE url = ANY(%s)",
             (urls,),
         )
         return {
             r["url"]: {
-                "degree": r["degree"],
-                "seniority": r["seniority"],
-                "clearance": r["clearance"],
+                "degree_min": r["degree_min"] or "",
+                "degree_required": bool(r["degree_required"]),
+                "seniority": r["seniority"] or "",
+                "employment_type": r["employment_type"] or "",
+                "clearance": r["clearance"] or "",
                 "yoe_min": r["yoe_min"],
-                "skills_required": sorted(s.lower() for s in (r["skills_required"] or [])),
             }
             for r in rows
         }
@@ -256,7 +261,11 @@ def _agreement(a: dict[str, Any], b: dict[str, Any]) -> dict[str, float]:
     """Per-field agreement between two answers. A list field scores by
     Jaccard overlap; anything else by equality."""
     out: dict[str, float] = {}
+    # Only fields both sides carry: production's requirements row has no
+    # skills, and a field one side never answered is not a disagreement.
     for k in a:
+        if k not in b:
+            continue
         x, y = a.get(k), b.get(k)
         if isinstance(x, list) or isinstance(y, list):
             sx, sy = set(x or []), set(y or [])
