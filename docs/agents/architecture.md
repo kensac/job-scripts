@@ -71,6 +71,18 @@ cost on read rewrites history. There is one spend ledger, grouped by purpose.
 Where two totals answer different questions, report both and label them. Never
 present one as the other.
 
+**Extraction is paid for only where its result can be read.** Comp and
+requirements select on `core.store.VERIFIED_OPEN`: the posting's latest
+closed and clearance verdicts both passed. On 2026-09-06 that was 37,438 of
+74,477 active postings; the other half is closed or restricted and reaches
+no board, so a number extracted from it is never read. The narrower cut,
+extracting only for postings on someone's board (3,117 that day, 4 percent
+of the catalog), is a documented option not yet taken: it would make a
+posting that reaches a board later wait a cycle for its comp column and
+build the market table from a smaller slice than the filters admit. If the
+verified-open cost still reads as too high, that is the next step, and it
+is the same one-line change to the same two selections.
+
 ## Time
 
 Containers run on a local timezone by deliberate convention; hosts and the

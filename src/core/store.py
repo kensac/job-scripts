@@ -362,6 +362,26 @@ AI_ELIGIBLE_JOB = (
 )
 
 
+# A posting whose latest closed and clearance verdicts both passed. The
+# extractors (comp, requirements) select on it: on 2026-09-06 the catalog
+# held 74,477 active postings of which 37,438 were verified open, and both
+# extractors were paying for the other half, whose numbers nothing reads
+# because a closed or restricted posting reaches no board. The narrower
+# option, extracting only for postings on someone's board (3,117 that day,
+# 4 percent), is not taken yet: a posting reaching a board later would wait
+# a cycle for its comp column, and the market table would be built from a
+# smaller slice than the filters admit. Written down here so it is a
+# decision and not an oversight.
+VERIFIED_OPEN = """
+    (SELECT lc.status FROM ai_queries lc
+      WHERE lc.url = {url} AND lc.check_type = 'closed' AND lc.status IN ('passed', 'rejected')
+      ORDER BY lc.id DESC LIMIT 1) = 'passed'
+    AND (SELECT lc.status FROM ai_queries lc
+      WHERE lc.url = {url} AND lc.check_type = 'clearance' AND lc.status IN ('passed', 'rejected')
+      ORDER BY lc.id DESC LIMIT 1) = 'passed'
+"""
+
+
 def get_content(url: str) -> str | None:
     """Most recent non-empty raw scraped content stored for a url.
 
