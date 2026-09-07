@@ -1,41 +1,19 @@
 from __future__ import annotations
 
-import atexit
 import datetime
 import decimal
 import json
-import os
 from typing import Any, LiteralString, cast
 
 import dotenv
-from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
-from psycopg_pool import ConnectionPool
 
 dotenv.load_dotenv()
 
-# Instrumented BEFORE the pool opens its first connection: the instrumentor
-# wraps connections as they are made, so a connection opened here at import
-# and instrumented later in telemetry.init produced no spans for the queries
-# it ran. Kanishk's trace of a 7 s board read showed the count query and then
-# six seconds of nothing, which was the page query on that first connection.
-# Without a tracer provider yet this is a no-op that becomes live once
-# telemetry.init sets one.
-try:
-    from opentelemetry.instrumentation.psycopg import PsycopgInstrumentor
-
-    PsycopgInstrumentor().instrument()
-except ImportError:  # pragma: no cover - the exporter is a runtime dependency
-    pass
-
-pool = ConnectionPool(
-    os.environ["DATABASE_URL"],
-    min_size=1,
-    max_size=10,
-    kwargs={"row_factory": dict_row},
-    open=True,
-)
-atexit.register(pool.close)
+# The pool and the instrumentation that must precede it live in core/pool.py,
+# which core/store.py and core/catalog.py share. See that module for why
+# there used to be two.
+from core.pool import pool  # noqa: E402
 
 # Weekly owner-key token budgets by Authentik group. Seeded once with ON
 # CONFLICT DO NOTHING so runtime edits via /v1/admin/group-budgets stick;
