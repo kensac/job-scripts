@@ -288,6 +288,20 @@
   margin: 12px 0 0;
 }
 
+/* The standing note lives behind "how this works" rather than in front of the
+   counts. Prose inside a disclosure is reference: 11px, and the same footnote
+   register the note had when it sat in the body.
+   .todo, the count of fields left to the person, deliberately has no rule.
+   Crimson is wrong, green is success, indigo is action and amber is health
+   warnings only, so a count of outstanding work carries no hue: it falls
+   through to <b> and renders ink, like the filled count beside it. Dropping
+   class="warn" from that span was the whole fix. */
+#jt-apply details > p.muted {
+  margin: 8px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
 #jt-apply summary {
   cursor: pointer;
   user-select: none;
