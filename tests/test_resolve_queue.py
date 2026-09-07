@@ -356,3 +356,77 @@ def test_nothing_is_hidden_from_the_queue(client, me):
     body = client.get("/v1/user/resolve/queue", headers=headers).json()
     assert body["total"] == 4
     assert len(body["items"]) == 4
+
+
+# Owning a parent says nothing about owning a child, and the queue answers four
+# kinds of child. test_one_user_cannot_resolve_anothers_item covered one of
+# them; these are the other three. The gate is spelled once per kind, so a kind
+# added without one is the shape this guards against.
+
+
+def _event(message_id: int, kind: str = "rejection") -> int:
+    row = db.query_one(
+        "INSERT INTO email_events (message_id, kind, confidence, occurred_at) "
+        "VALUES (%s, %s, 'high', now()) RETURNING id",
+        (message_id, kind),
+    )
+    assert row is not None
+    return row["id"]
+
+
+def test_one_user_cannot_resolve_anothers_match(client, me, f):
+    """_resolve_match binds through applications.user_id, not the match id."""
+    headers, _uid = me
+    other = f.make_user()
+    mid = _msg(other, "<other-match@x>", "rejection", "Acme")
+    app_id = _app(other, "Acme")
+    _attach(mid, app_id)
+    match = db.query_one("SELECT id FROM application_matches WHERE message_id = %s", (mid,))
+    assert match is not None
+
+    resp = client.post(
+        f"/v1/user/resolve/match:{match['id']}",
+        json={"choice": "confirm_match"},
+        headers=headers,
+    )
+    assert resp.status_code == 404, resp.text
+
+
+def test_one_user_cannot_resolve_anothers_proposal(client, me, f):
+    """_resolve_proposal goes through answer_proposal, which scopes the
+    application to the caller."""
+    headers, _uid = me
+    other = f.make_user()
+    mid = _msg(other, "<other-proposal@x>", "rejection", "Acme")
+    app_id = _app(other, "Acme")
+    _attach(mid, app_id)
+    event_id = _event(mid)
+
+    resp = client.post(
+        f"/v1/user/resolve/proposal:{app_id}:{event_id}",
+        json={"choice": "accept_status"},
+        headers=headers,
+    )
+    assert resp.status_code == 404, resp.text
+
+
+def test_one_user_cannot_resolve_anothers_action(client, me, f):
+    """_resolve_action binds on action_items.user_id."""
+    headers, _uid = me
+    other = f.make_user()
+    mid = _msg(other, "<other-action@x>", "rejection", "Acme")
+    app_id = _app(other, "Acme")
+    event_id = _event(mid)
+    row = db.query_one(
+        "INSERT INTO action_items (user_id, application_id, event_id, kind, due_at) "
+        "VALUES (%s, %s, %s, 'reply_needed', now()) RETURNING id",
+        (other, app_id, event_id),
+    )
+    assert row is not None
+
+    resp = client.post(
+        f"/v1/user/resolve/action:{row['id']}",
+        json={"choice": "mark_done"},
+        headers=headers,
+    )
+    assert resp.status_code == 404, resp.text
