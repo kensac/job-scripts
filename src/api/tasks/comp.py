@@ -6,7 +6,7 @@ import logging
 import os
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from api import db
 from api.tasks.runtime import (
@@ -79,6 +79,8 @@ class CompExtract(BaseModel):
     exactly as advertised; normalisation to a yearly figure happens here, not
     in the model, so a bad period can be corrected without re-running the AI."""
 
+    model_config = ConfigDict(allow_inf_nan=False)
+
     has_comp: bool
     comp_min: float | None = None
     comp_max: float | None = None
@@ -138,7 +140,9 @@ async def handle_extract_comp(task_id: int, payload: dict[str, Any]) -> None:
         SELECT j.id, j.url, q.input_content
         FROM jobs j
         {CONTENT_LATERAL.format(url="j.url", columns="input_content")}
-        WHERE NOT j.comp_extracted AND j.active
+        WHERE (NOT j.comp_extracted
+               OR (j.comp_period IS NULL AND (j.comp_min IS NOT NULL OR j.comp_max IS NOT NULL)))
+          AND j.active
           AND {AI_ELIGIBLE_JOB.format(job="j")}
           AND {VERIFIED_OPEN.format(url="j.url")}
         ORDER BY j.id DESC
@@ -168,7 +172,6 @@ async def handle_extract_comp(task_id: int, payload: dict[str, Any]) -> None:
         if res.text and not res.error:
             try:
                 parsed = CompExtract.model_validate_json(res.text)
-                parsed_ok = True
                 if parsed.has_comp:
                     period = (parsed.period or "").strip().lower()
                     comp_min = _annualize(parsed.comp_min, period)
@@ -183,6 +186,7 @@ async def handle_extract_comp(task_id: int, payload: dict[str, Any]) -> None:
                     comp_currency = (parsed.currency or "").strip().upper()[:3] or None
                     basis = (parsed.basis or "").strip().lower()
                     comp_basis = basis if basis in COMP_BASES else None
+                parsed_ok = True
             except Exception:
                 logger.warning(f"comp parse failed for {url}")
         if parsed_ok:
@@ -192,8 +196,8 @@ async def handle_extract_comp(task_id: int, payload: dict[str, Any]) -> None:
                 "comp_extracted = TRUE WHERE id = %s",
                 (comp_min, comp_max, comp_text, comp_period, comp_currency, comp_basis, job_id),
             )
-        # Failed/errored lines stay comp_extracted=false so the next daily
-        # sweep retries them. Batch operations are idempotent by re-sweep.
+        # Failed lines retain their previous values and remain eligible for
+        # retry, including legacy rows that were already marked extracted.
         # Only a written row counts as done: counted unconditionally, a sweep
         # whose every line failed reported done == total and nothing could
         # tell (audit of 2026-09-05).

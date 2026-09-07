@@ -287,6 +287,9 @@ _REQUIREMENTS_INSTRUCTIONS = (
 # `stored_hash` rides along so the handler can tell a re-scrape that changed the
 # page from one that did not. An identical re-scrape refreshes the id and pays
 # for nothing.
+# Invalid stored bounds need fresh extraction even when the source is unchanged.
+_INVALID_YEARS = "(r.yoe_min < 0 OR r.yoe_max < 0)"
+
 _CANDIDATES = f"""
     WITH current_row AS (
         SELECT c.url, q.content_row_id
@@ -299,10 +302,12 @@ _CANDIDATES = f"""
         {CONTENT_LATERAL.format(url="c.url", columns="id AS content_row_id")}
     ),
     todo AS (
-        SELECT cr.url, cr.content_row_id, r.content_hash AS stored_hash
+        SELECT cr.url, cr.content_row_id,
+               CASE WHEN {_INVALID_YEARS} THEN NULL ELSE r.content_hash END AS stored_hash
         FROM current_row cr
         LEFT JOIN job_requirements r ON r.url = cr.url
         WHERE r.url IS NULL
+           OR {_INVALID_YEARS}
            OR r.content_row_id IS DISTINCT FROM cr.content_row_id
         LIMIT %(cap)s
     )
@@ -321,16 +326,21 @@ def _years(parsed: RequirementsExtract) -> tuple[int | None, int | None]:
     qualify for" filter that compares against yoe_min.
     """
     low, high = parsed.yoe_min, parsed.yoe_max
+    invalid_low = low is not None and low < 0
+    if invalid_low:
+        low = None
+    if high is not None and high < 0:
+        high = None
     if low is None and high is None:
         return None, None
-    if low is None:
+    if low is None and not invalid_low:
         low = 0
-    if high is not None and high < low:
+    if low is not None and high is not None and high < low:
         low, high = high, low
     # A posting asking for more than a career's worth of experience is a parse
     # slip (a year, a salary, a requisition number), and a wrong number here
     # silently reorders every "what does this market want" answer.
-    if low > MAX_PLAUSIBLE_YOE:
+    if low is not None and low > MAX_PLAUSIBLE_YOE:
         return None, None
     if high is not None and high > MAX_PLAUSIBLE_YOE:
         high = None
