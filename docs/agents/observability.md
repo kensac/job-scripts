@@ -80,6 +80,18 @@ arrived since. Only a run that has not split yet blocks another.
 Dry-run a handful of live calls before committing to a large batch. A batch
 fails whole, and the dry run also measures real token counts.
 
+**A model or effort is measured through the production path, never through
+a hand export.** `POST /admin/experiments` names a step (filter, verify,
+comp, requirements), a seeded sample size and the arms (model and effort);
+the `run_experiment` task builds every request with the step's own
+instructions, schema and input, submits one provider batch per arm, parks,
+and on resume scores each arm: cost and tokens per request, parse failures,
+per-field agreement with a reference arm (the dearest by default) and with
+what production decided for the same postings. The same seed draws the same
+postings later. The 2026-09-06 filter comparison was a script over an
+export, and the script fed every request the posting's first line; its
+headline was wrong and was nearly acted on. That is why this exists.
+
 ## Application answers
 
 Browser autofill stops at the free-response box on an application form. The

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime
+from decimal import Decimal
 from typing import Any
 
 from pgvector.sqlalchemy import Vector
@@ -264,6 +265,44 @@ class ApplicationAnswer(Base):
     turns: Mapped[Any] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
     model: Mapped[str | None] = mapped_column(Text)
     updated_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+
+
+class AiExperiment(Base):
+    """One AI step measured across models and efforts on a seeded sample,
+    through the production path. See api.tasks.experiments."""
+
+    __tablename__ = "ai_experiments"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
+    purpose: Mapped[str] = mapped_column(Text)
+    params: Mapped[Any] = mapped_column(JSONB)
+    status: Mapped[str] = mapped_column(Text, server_default=text("'queued'"))
+    created_by: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="SET NULL")
+    )
+    task_id: Mapped[int | None] = mapped_column(BigInteger)
+    summary: Mapped[Any | None] = mapped_column(JSONB)
+    error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+    finished_at: Mapped[datetime.datetime | None] = mapped_column()
+
+
+class AiExperimentResult(Base):
+    """One arm's answer for one posting in an experiment."""
+
+    __tablename__ = "ai_experiment_results"
+    __table_args__ = (UniqueConstraint("experiment_id", "arm", "url"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
+    experiment_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("ai_experiments.id", ondelete="CASCADE")
+    )
+    arm: Mapped[str] = mapped_column(Text)
+    url: Mapped[str] = mapped_column(Text)
+    output: Mapped[Any | None] = mapped_column(JSONB)
+    usage: Mapped[Any | None] = mapped_column(JSONB)
+    cost_usd: Mapped[Decimal | None] = mapped_column(Numeric(12, 6))
+    error: Mapped[str | None] = mapped_column(Text)
 
 
 class BoardVisible(Base):

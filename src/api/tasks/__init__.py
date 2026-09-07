@@ -15,6 +15,7 @@ from api.tasks.comp import handle_extract_comp
 from api.tasks.content import handle_fetch_missing_content
 from api.tasks.digests import handle_send_digests
 from api.tasks.embeddings import handle_embed_postings
+from api.tasks.experiments import handle_run_experiment
 from api.tasks.filters import (
     handle_run_all_filters,
     handle_run_filter,
@@ -85,6 +86,7 @@ HANDLERS = {
     "fetch_missing_content": handle_fetch_missing_content,
     "application_draft": handle_application_draft,
     "application_sweep": handle_application_sweep,
+    "run_experiment": handle_run_experiment,
 }
 
 __all__ = ["HANDLERS", "SHAPES"]
