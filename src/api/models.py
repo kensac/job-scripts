@@ -60,6 +60,11 @@ class SourcesPut(BaseModel):
 
 class Criteria(BaseModel):
     date_posted_after: datetime.date | None = None
+    # A rolling window: a posting older than this many days leaves the board
+    # on its own, by the date the board gave it or, when the board gave none,
+    # by the day the catalog first saw it. A fixed date has to be moved by
+    # hand; this one moves every day.
+    max_age_days: int | None = Field(default=None, ge=1, le=365)
     excluded_locations: list[str] = Field(default_factory=list, max_length=100)
     # Places a posting must be in to be shown at all; empty means anywhere.
     included_locations: list[str] = Field(default_factory=list, max_length=100)

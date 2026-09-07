@@ -32,6 +32,18 @@ filters. That row is bookkeeping, not a decision, so the person's criteria
 A status, a note or a date applied is a decision, and the row is theirs
 whatever the criteria say.
 
+## The criteria are the first paid rung
+
+A person's criteria (`user_settings.criteria`: a posted-after date, a rolling
+`max_age_days`, included and excluded places) are applied by the same SQL
+in two places: the board membership and the filter's candidate selection.
+So a posting outside the criteria is never sent to the filter model, and
+the criteria are the cheapest place to narrow spend. The verify and comp
+sweeps run on every verified-open posting regardless, because their results
+are shared across people. The rolling window reads the date the board gave
+the posting and falls back to the day the catalog first saw it, so an
+undated posting still expires.
+
 ## Location criteria match places, not words
 
 Every distinct location string a board writes is one row of `locations`,

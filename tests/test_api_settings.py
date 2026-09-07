@@ -297,7 +297,12 @@ def test_criteria_are_served_in_full_shape_whatever_was_saved(client, user_heade
     from api import db
 
     fresh = client.get("/v1/user/settings", headers=user_headers).json()["criteria"]
-    assert fresh == {"date_posted_after": None, "excluded_locations": [], "included_locations": []}
+    assert fresh == {
+        "date_posted_after": None,
+        "max_age_days": None,
+        "excluded_locations": [],
+        "included_locations": [],
+    }
     uid = db.query_one("SELECT id FROM users WHERE sub = %s", (user_headers["X-User-Sub"],))["id"]
     db.execute(
         "INSERT INTO user_settings (user_id, criteria) VALUES (%s, %s) "
@@ -307,6 +312,7 @@ def test_criteria_are_served_in_full_shape_whatever_was_saved(client, user_heade
     old_row = client.get("/v1/user/settings", headers=user_headers).json()["criteria"]
     assert old_row == {
         "date_posted_after": None,
+        "max_age_days": None,
         "excluded_locations": ["UK"],
         "included_locations": [],
     }
@@ -323,6 +329,7 @@ def test_put_settings_echoes_the_saved_settings_in_get_shape(client, user_header
     assert body["ok"] is True
     assert body["criteria"] == {
         "date_posted_after": None,
+        "max_age_days": None,
         "excluded_locations": [],
         "included_locations": ["United States", "Remote"],
     }
