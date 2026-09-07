@@ -117,12 +117,36 @@ def _pct(part: int, whole: int) -> float:
     return (part / whole) if whole else 0.0
 
 
-def detect() -> list[dict[str, Any]]:
-    """Compares the last 24h against the preceding week, per source, looking for
-    the shapes that mean 'something upstream changed' rather than 'the job
-    market moved'. Everything here is deliberately relative to each source's
-    own baseline. Absolute thresholds would fire constantly on sources that
-    are legitimately mostly-closed or legitimately short."""
+def _int_from(column: str, key: str) -> str:
+    """A jsonb value read as an integer, or NULL when it is not one.
+
+    `(progress->>'total')::int` in a WHERE clause is not safe: Postgres does
+    not promise to evaluate the filters before the cast, so one row anywhere in
+    tasks whose total is not a number fails the whole query, and the detector
+    that runs it reports detector_failed every hour instead of what it watches.
+    The corpus generates exactly that shape - tests/corpus.py fills every json
+    key with a random string - which is how this was found.
+
+    CASE fixes the order, so a bad value reads as NULL and drops out of the
+    comparison rather than raising.
+    """
+    return (
+        f"CASE WHEN jsonb_typeof({column}->'{key}') = 'number' THEN ({column}->>'{key}')::int END"
+    )
+
+
+def _detect_sources() -> list[dict[str, Any]]:
+    """The per-source comparisons: ATS text share, first-check verdict rates,
+    extraction failures concentrated on one host, and the batch failures that
+    close clean.
+
+    A section rather than code inline in detect(), because inline is what it
+    was and inline meant unprotected. The loop in detect() wrapped the four
+    extracted detectors; these ran ahead of it, so one of them raising took the
+    whole hourly run down and every open alert auto-resolved with nothing left
+    to re-observe it. That is the exact failure the loop was added for on
+    2026-09-04, and it never covered these.
+    """
     found: list[dict[str, Any]] = []
 
     # 1. The ATS text path silently breaking. When a resolver stops returning
@@ -444,11 +468,22 @@ def detect() -> list[dict[str, Any]]:
             }
         )
 
+    return found
+
+
+def detect() -> list[dict[str, Any]]:
+    """Compares the last 24h against the preceding week, per source, looking for
+    the shapes that mean 'something upstream changed' rather than 'the job
+    market moved'. Everything here is deliberately relative to each source's
+    own baseline. Absolute thresholds would fire constantly on sources that
+    are legitimately mostly-closed or legitimately short."""
+    found: list[dict[str, Any]] = []
+
     # Each section on its own: on 2026-09-04 three detectors failed in three
     # ways on one day, the exception took the whole task down, and the open
     # alerts auto-resolved because nothing re-observed them. A raising
     # detector looked exactly like all clear. Now it is an alert of its own.
-    for section in (_detect_boards, _detect_queue, _detect_fleet, _detect_silent):
+    for section in (_detect_sources, _detect_boards, _detect_queue, _detect_fleet, _detect_silent):
         try:
             found.extend(section())
         except Exception as exc:
@@ -502,12 +537,12 @@ def _detect_silent() -> list[dict[str, Any]]:
     # comp and requirements used to count every line as done; now a line
     # counts only when its row lands, so this reads the honest number.
     for r in db.query(
-        """
+        f"""
         SELECT kind, COUNT(*) AS n, MAX(id) AS task_id,
-               MAX((progress->>'total')::int) AS total
+               MAX({_int_from("progress", "total")}) AS total
         FROM tasks
         WHERE status = 'done' AND finished_at > now() - interval '24 hours'
-          AND (progress->>'total')::int > 0 AND (progress->>'done')::int = 0
+          AND {_int_from("progress", "total")} > 0 AND {_int_from("progress", "done")} = 0
           AND kind = ANY(%(kinds)s)
         GROUP BY kind
         """,
@@ -844,11 +879,11 @@ def _detect_boards() -> list[dict[str, Any]]:
     #    admits nothing. Only for a board that has produced before: a board
     #    that never has is 'never produced' on the admin list, not an alert.
     for r in db.query(
-        """
+        f"""
         WITH ingests AS (
             SELECT payload->>'source' AS source, id, finished_at,
-                   (progress->>'fetched')::int AS fetched,
-                   (progress->>'kept')::int AS kept
+                   {_int_from("progress", "fetched")} AS fetched,
+                   {_int_from("progress", "kept")} AS kept
             FROM tasks
             WHERE kind = 'ingest_source' AND status = 'done'
               AND progress ? 'fetched'
@@ -958,13 +993,13 @@ def _detect_boards() -> list[dict[str, Any]]:
     #    egress-blocked signature, per fleet host rather than per site.
     #    Relative to the worker's own prior week, like extraction_failing.
     for r in db.query(
-        """
+        f"""
         SELECT worker,
-               COALESCE(sum((progress->>'cached')::int + (progress->>'fetch_failed')::int)
+               COALESCE(sum(COALESCE({_int_from("progress", "cached")}, 0) + COALESCE({_int_from("progress", "fetch_failed")}, 0))
                    FILTER (WHERE finished_at > now() - interval '24 hours'), 0) AS recent_total,
                COALESCE(sum((progress->>'fetch_failed')::int)
                    FILTER (WHERE finished_at > now() - interval '24 hours'), 0) AS recent_failed,
-               COALESCE(sum((progress->>'cached')::int + (progress->>'fetch_failed')::int)
+               COALESCE(sum(COALESCE({_int_from("progress", "cached")}, 0) + COALESCE({_int_from("progress", "fetch_failed")}, 0))
                    FILTER (WHERE finished_at BETWEEN now() - interval '8 days'
                            AND now() - interval '24 hours'), 0) AS base_total,
                COALESCE(sum((progress->>'fetch_failed')::int)

@@ -38,6 +38,10 @@ import psycopg
 from psycopg import IsolationLevel
 from psycopg.rows import dict_row
 
+# How many documents a json column's value types are read from. A shape, not
+# a census: see _json_value_types.
+JSON_TYPE_SAMPLE = 5000
+
 PROFILE_PATH = Path(__file__).resolve().parents[1] / "tests" / "production_profile.json"
 
 # Rows pulled per table to decide a column's kind and to measure text and
@@ -395,6 +399,39 @@ def _json_documents(conn: psycopg.Connection, table: str, column: str) -> list[s
     return documents
 
 
+def _json_value_types(conn: psycopg.Connection, table: str, column: str) -> dict[str, str]:
+    """Per key, the jsonb type its value actually has in production.
+
+    keysets records which keys a document carries and nothing about what is in
+    them, so the generator filled every key with a random string. tasks.progress
+    holds {"done": 5, "total": 100, ...} in production and
+    {"done": "y1e9e55hf1iz", ...} in the corpus, and health.py's
+    (progress->>'total')::int failed on every corpus row - a real detector that
+    could not run against the data meant to stand in for production.
+
+    Bounded to a sample: this is a shape, and a full scan of ai_queries to learn
+    that `status` is a string is a long read on production for no extra truth.
+    """
+    rows = conn.execute(
+        f"""
+        SELECT k AS key, jsonb_typeof(v) AS t, count(*) AS n
+        FROM (SELECT "{column}" AS d FROM "{table}"
+              WHERE "{column}" IS NOT NULL AND jsonb_typeof("{column}") = 'object'
+              LIMIT {JSON_TYPE_SAMPLE}) s,
+             LATERAL jsonb_each(s.d) AS e(k, v)
+        GROUP BY 1, 2
+        """
+    ).fetchall()
+    best: dict[str, tuple[int, str]] = {}
+    for r in rows:
+        if r["t"] is None:
+            continue
+        prev = best.get(r["key"])
+        if prev is None or r["n"] > prev[0]:
+            best[r["key"]] = (r["n"], r["t"])
+    return {k: t for k, (_, t) in sorted(best.items())}
+
+
 def _json_keysets(conn: psycopg.Connection, table: str, column: str) -> dict[str, float]:
     rows = conn.execute(
         f"""
@@ -519,6 +556,9 @@ def _profile_column(
                 out["elements"] = elements
     elif kind == "json":
         out["keysets"] = _json_keysets(conn, table, column)
+        value_types = _json_value_types(conn, table, column)
+        if value_types:
+            out["value_types"] = value_types
         if not _identifying(table, column):
             documents = _json_documents(conn, table, column)
             if documents:
@@ -687,8 +727,55 @@ def _shape_drift(where: str, before: dict[str, Any], shape: dict[str, Any]) -> l
     return out
 
 
+def _merge_value_types(url: str) -> int:
+    """Add value_types to the committed profile without re-measuring the rest.
+
+    A json column profiled before value_types existed records which keys its
+    documents carry and nothing about what is in them, so the generator filled
+    all of them with strings. Re-running the whole measurement would fix that
+    and also rewrite every distribution in the file, which buries one new fact
+    in a diff of unrelated ones. This reads the types and merges only those.
+    """
+    profile = json.loads(PROFILE_PATH.read_text())
+    added = 0
+    missing: list[str] = []
+    with psycopg.connect(url, row_factory=dict_row, autocommit=True) as conn:
+        conn.execute("SET default_transaction_read_only = on")
+        for table, tv in profile.get("tables", {}).items():
+            for column, cv in (tv.get("columns") or {}).items():
+                if not isinstance(cv, dict) or cv.get("kind") != "json":
+                    continue
+                try:
+                    types = _json_value_types(conn, table, column)
+                except psycopg.errors.UndefinedColumn:
+                    # The profile can name a column production has since
+                    # dropped. That is drift for --check to report, not a
+                    # reason to abandon the other twelve columns.
+                    missing.append(f"{table}.{column}")
+                    continue
+                if types:
+                    cv["value_types"] = types
+                    added += 1
+                    print(f"  {table}.{column}: {types}", file=sys.stderr)
+    PROFILE_PATH.write_text(json.dumps(profile, indent=1, sort_keys=True) + "\n")
+    if missing:
+        print(
+            f"\nnot in production any more, left as profiled: {', '.join(missing)}", file=sys.stderr
+        )
+    print(f"\nvalue_types recorded for {added} json column(s) in {PROFILE_PATH}")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument(
+        "--value-types-only",
+        action="store_true",
+        help=(
+            "read only the json value types and merge them into the committed profile, "
+            "leaving every other measurement alone"
+        ),
+    )
     ap.add_argument(
         "--check",
         action="store_true",
@@ -701,6 +788,9 @@ def main() -> int:
     if not url:
         print("DATABASE_URL is not set", file=sys.stderr)
         return 1
+
+    if args.value_types_only:
+        return _merge_value_types(url)
 
     print("measuring production...", file=sys.stderr)
     current = measure(url)

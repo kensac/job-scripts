@@ -1024,7 +1024,11 @@
       "<boolean>": 0.5
      },
      "kind": "json",
-     "null_rate": 0.0
+     "null_rate": 0.0,
+     "value_types": {
+      "apply.workable.com": "number",
+      "www.tesla.com": "number"
+     }
     }
    },
    "rows": 2,
@@ -1311,7 +1315,12 @@
       "reason,superseded": 0.009963
      },
      "kind": "json",
-     "null_rate": 0.0
+     "null_rate": 0.0,
+     "value_types": {
+      "company": "string",
+      "reason": "string",
+      "role_title": "null"
+     }
     },
     "id": {
      "kind": "key",
@@ -1447,7 +1456,12 @@
       "message-id,references": 0.014478
      },
      "kind": "json",
-     "null_rate": 0.424685
+     "null_rate": 0.424685,
+     "value_types": {
+      "in-reply-to": "string",
+      "message-id": "string",
+      "references": "string"
+     }
     },
     "id": {
      "kind": "key",
@@ -1787,7 +1801,48 @@
       "base_rejected,base_total,check_type,recent_rejected,recent_total,source": 1.0
      },
      "kind": "json",
-     "null_rate": 0.0
+     "null_rate": 0.0,
+     "value_types": {
+      "addresses": "array",
+      "api_release": "string",
+      "base_ats": "number",
+      "base_failed": "number",
+      "base_rejected": "number",
+      "base_total": "number",
+      "batches": "number",
+      "best_prior_fetched": "number",
+      "best_prior_kept": "number",
+      "boards_failed": "number",
+      "check_type": "string",
+      "done_last_hour": "number",
+      "error": "string",
+      "fetched": "number",
+      "finished_at": "string",
+      "host": "string",
+      "kept": "number",
+      "kind": "string",
+      "limit_minutes": "number",
+      "minutes": "number",
+      "model": "string",
+      "n": "number",
+      "oldest_hours": "number",
+      "oldest_minutes": "number",
+      "pending": "number",
+      "purpose": "string",
+      "reason": "null",
+      "recent_ats": "number",
+      "recent_failed": "number",
+      "recent_rejected": "number",
+      "recent_total": "number",
+      "requests": "number",
+      "sample_error": "string",
+      "source": "string",
+      "task_id": "number",
+      "title_pattern": "string",
+      "total": "number",
+      "worker": "string",
+      "worker_release": "string"
+     }
     },
     "first_seen": {
      "age_days": [
@@ -2523,7 +2578,11 @@
       "company,title": 1.0
      },
      "kind": "json",
-     "null_rate": 0.5
+     "null_rate": 0.5,
+     "value_types": {
+      "company": "string",
+      "title": "string"
+     }
     },
     "created_at": {
      "age_days": [
@@ -3073,14 +3132,45 @@
       "user_id": 0.003382
      },
      "kind": "json",
-     "null_rate": 0.0
+     "null_rate": 0.0,
+     "value_types": {
+      "backfill": "boolean",
+      "batch_ids": "array",
+      "batched": "boolean",
+      "cap": "number",
+      "claimed_message_ids": "array",
+      "cycle": "string",
+      "filter": "object",
+      "filter_id": "number",
+      "force": "boolean",
+      "full": "boolean",
+      "job_id": "number",
+      "jobs": "array",
+      "message_ids": "array",
+      "parent_id": "number",
+      "rows": "array",
+      "source": "string",
+      "user_id": "number"
+     }
     },
     "progress": {
      "keysets": {
       "done,label,total": 1.0
      },
      "kind": "json",
-     "null_rate": 0.00357
+     "null_rate": 0.00357,
+     "value_types": {
+      "already_cached": "number",
+      "cached": "number",
+      "done": "number",
+      "fetch_failed": "number",
+      "fetched": "number",
+      "gone": "number",
+      "kept": "number",
+      "label": "string",
+      "skipped_recent_failure": "number",
+      "total": "number"
+     }
     },
     "progress_at": {
      "age_days": [],
@@ -3544,7 +3634,10 @@
       "": 1.0
      },
      "kind": "json",
-     "null_rate": 0.0
+     "null_rate": 0.0,
+     "value_types": {
+      "reasoning_effort": "string"
+     }
     },
     "ai_provider": {
      "kind": "categorical",
@@ -3586,7 +3679,12 @@
       "date_posted_after,excluded_locations,included_terms": 1.0
      },
      "kind": "json",
-     "null_rate": 0.0
+     "null_rate": 0.0,
+     "value_types": {
+      "date_posted_after": "string",
+      "excluded_locations": "array",
+      "included_locations": "array"
+     }
     },
     "digest_token": {
      "binary": false,
@@ -3640,7 +3738,11 @@
       "tracker_filters": 1.0
      },
      "kind": "json",
-     "null_rate": 0.0
+     "null_rate": 0.0,
+     "value_types": {
+      "tracker_filters": "object",
+      "views": "object"
+     }
     },
     "updated_at": {
      "age_days": [
