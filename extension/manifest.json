@@ -4,12 +4,26 @@
   "version": "0.1.0",
   "description": "Fills an application form from your Job Tracker profile, drafts and remembered answers. You review and click submit.",
   "permissions": ["storage"],
-  "host_permissions": ["https://www.kanishksachdev.com/*"],
+  "host_permissions": ["https://www.kanishksachdev.com/*", "https://boards-api.greenhouse.io/*", "https://boards-api.eu.greenhouse.io/*"],
   "background": { "service_worker": "background.js" },
   "content_scripts": [
     {
       "matches": ["https://jobs.ashbyhq.com/*"],
       "js": ["readers/ashby.js", "content.js"],
+      "css": ["panel.css"],
+      "all_frames": true,
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://job-boards.greenhouse.io/*", "https://boards.greenhouse.io/*", "https://job-boards.eu.greenhouse.io/*", "https://boards.eu.greenhouse.io/*"],
+      "js": ["readers/greenhouse.js", "content.js"],
+      "css": ["panel.css"],
+      "all_frames": true,
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://jobs.lever.co/*", "https://jobs.eu.lever.co/*"],
+      "js": ["readers/lever.js", "content.js"],
       "css": ["panel.css"],
       "all_frames": true,
       "run_at": "document_idle"

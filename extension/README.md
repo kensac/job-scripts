@@ -43,10 +43,19 @@ filled at all.
   url, number, textarea, file, yes/no buttons, choice questions (radio
   groups and searchable dropdowns), the location search box. Date pickers
   and Ashby's education history widget are left to you.
+- Greenhouse (`job-boards.greenhouse.io`, `boards.greenhouse.io`, the
+  `.eu` hosts, and the form an employer embeds on its own careers site,
+  which is the same page in an iframe): the fields come from Greenhouse's
+  public form API, fetched by the background worker, and are paired with
+  the page by id; text, phone, file, checkbox lists, and the react-select
+  dropdowns, which open only in a visible tab.
+- Lever (`jobs.lever.co/<company>/<id>/apply`): text, select, radio and
+  checkbox cards, textareas, file.
 
 Forms embedded on an employer's own careers page in an iframe work
-too; a form rendered inline by the ATS's embed script, with no iframe,
-does not, because the extension only runs on the ATS hosts it names.
+too (Greenhouse's embed is one); a form rendered inline by an ATS's
+script, with no iframe, does not, because the extension only runs on the
+ATS hosts it names.
 Readers are single-page: a paginated form with a proxy submit button
 (Workday, Taleo, iCIMS and the rest of that tier) is out of scope until
 readers gain a step model.

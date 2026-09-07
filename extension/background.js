@@ -35,8 +35,19 @@ async function pdf({ path }) {
   };
 }
 
+// A public form API a reader needs that the page's own content security
+// policy will not let a content script reach (Greenhouse's boards API).
+// Allowlisted by host; the reader gets the JSON body.
+const PUBLIC = ["boards-api.greenhouse.io", "boards-api.eu.greenhouse.io"];
+async function get({ url }) {
+  const u = new URL(url);
+  if (!PUBLIC.includes(u.hostname)) return { ok: false, status: 0, error: "host not allowed" };
+  const res = await fetch(url);
+  return { ok: res.ok, status: res.status, json: res.ok ? await res.json() : null };
+}
+
 chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
-  (msg.kind === "pdf" ? pdf : call)(msg)
+  (msg.kind === "pdf" ? pdf : msg.kind === "get" ? get : call)(msg)
     .then(reply)
     .catch((e) => reply({ ok: false, status: 0, error: String(e) }));
   return true;
