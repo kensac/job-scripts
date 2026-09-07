@@ -172,6 +172,16 @@ model drafts and fills under; empty means the built-in constant. A wording
 change is an admin edit that takes effect on the next draft, not a roll.
 The person's writing style is appended per person, as before.
 
+**Files first, then let the page settle.** Attaching a resume makes Ashby
+rebuild its form, and a field wrapper read before the attach is a detached
+copy a moment later: a click on it still flips the widget on screen, on a
+node the form no longer owns (report 2, Clera, 2026-09-07). The content
+script attaches files first, waits until the page's inputs and element
+count have been still for 1.5 seconds, re-reads every field, fills the
+rest, and then checks what the page holds, filling once more anything it
+dropped. Any ATS that rewrites its form after an upload is covered by the
+same wait.
+
 **What the rules leave blank, the model fills in one call.** After the
 deterministic pass the extension sends every field still blank (except
 free text, files and dates) to `POST /user/apply/suggest`, one live call
