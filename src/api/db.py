@@ -98,6 +98,9 @@ _APP_CONFIG_SEED = [
     # many missing drafts it batches (about $0.0005 each on luna).
     ("application_form_reads_per_cycle", 150),
     ("resumes_per_user", 10),
+    # Empty means the built-in text in the code; see the admin registry.
+    ("application_draft_instructions", ""),
+    ("application_suggest_instructions", ""),
     ("application_drafts_per_cycle", 500),
     # Whether the hourly requirements extraction runs. Off since 2026-09-07:
     # its one consumer is the market table, and the deployed arm was measured
