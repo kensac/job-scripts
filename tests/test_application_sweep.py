@@ -196,6 +196,19 @@ async def test_a_sweep_waits_for_an_earlier_one_still_parked_on_its_batch(
     assert fetched == [] and calls == []
     row = db.query_one("SELECT progress FROM tasks WHERE id = %s", (later,))
     assert row["progress"]["label"] == f"sweep {parked['id']} for this person is still in flight"
+    # A parked sweep older than the provider's completion window is a stuck
+    # task, not a live one: it does not block, or one stuck sweep would be
+    # no sweeps forever.
+    db.execute(
+        "UPDATE tasks SET created_at = now() - interval '25 hours' WHERE id = %s", (parked["id"],)
+    )
+    await drafts.handle_application_sweep(_sweep_task(uid), {"user_id": uid})
+    assert len(fetched) == 1 and len(calls) == 1
+    db.execute("UPDATE tasks SET created_at = now() WHERE id = %s", (parked["id"],))
+    fetched.clear()
+    calls.clear()
+    db.execute("DELETE FROM application_forms")
+    db.execute("DELETE FROM application_answers")
     # Another person's sweep is not in the way.
     other_uid = f.make_user(sub="someone-else")
     db.execute(
