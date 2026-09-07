@@ -193,7 +193,9 @@ def test_board_yield_counts_applications_per_source(client, admin_headers, f):
     applied = f.make_job(source="yielding")
     tracked = f.make_job(source="yielding")
     f.make_board_row(user_id, applied, status="Application Submitted")
-    f.make_board_row(user_id, tracked)
+    # An untouched row, the kind the worker materialises: counted as a board
+    # row but not as a status.
+    f.make_board_row(user_id, tracked, status=None)
     db.execute("UPDATE user_jobs SET date_applied = now() WHERE job_id = %s", (applied,))
 
     row = _row(client.get(f"{ENDPOINT}?min_sample=1", headers=admin_headers).json(), "yielding")

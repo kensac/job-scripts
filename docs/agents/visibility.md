@@ -26,11 +26,15 @@ FULL on a request.**
 ## A board row is a grant only when the person acted on it
 
 The worker materialises an empty row for every posting that passes a person's
-filters. That row is bookkeeping, not a decision, so the person's criteria
-(locations, posted date) still apply to it.
+filters. That row is bookkeeping, not a decision, so it obeys the whole
+predicate like any other posting: the person's criteria (locations, posted
+date) and the verdicts. The first version re-checked only the criteria, so
+a filter that later rejected a posting could not remove the row the earlier
+pass had made: 614 rejected postings sat on one board on 2026-09-07 after a
+model change, and the change read as having no effect.
 
 A status, a note or a date applied is a decision, and the row is theirs
-whatever the criteria say.
+whatever the criteria or the verdicts say.
 
 ## Location criteria match places, not words
 

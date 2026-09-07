@@ -284,6 +284,42 @@ async def test_a_reclassify_cycle_re_asks_every_model_row_and_keeps_hand_correct
     assert row["places"] == [{"country": "US", "region": "CO", "city": "Golden"}]
 
 
+def test_an_untouched_board_row_obeys_the_verdicts_too(client, user_headers, clean):
+    """The untouched branch re-checked the criteria and nothing else, so a
+    filter that later rejected a posting could not remove the row the
+    earlier pass had materialised: 614 such rows on 2026-09-07, one of
+    them a founding-engineer role luna had just called lead-level."""
+    from tests import factories
+
+    uid = _uid(user_headers)
+    kept = _insert_job("src-ver", "https://x.test/ver1", locations=["Austin, TX"])
+    rejected = _insert_job("src-ver", "https://x.test/ver2", locations=["Austin, TX"])
+    rejected_but_applied = _insert_job("src-ver", "https://x.test/ver3", locations=["Austin, TX"])
+    for url in ("https://x.test/ver1", "https://x.test/ver2", "https://x.test/ver3"):
+        _pass_closed(url)
+    _subscribe(uid, "src-ver")
+    flt = factories.make_filter(uid, name="strict")
+    factories.make_verdict(
+        "https://x.test/ver1", "custom", "passed", prompt_hash=flt["prompt_hash"]
+    )
+    for url in ("https://x.test/ver2", "https://x.test/ver3"):
+        factories.make_verdict(url, "custom", "passed", prompt_hash=flt["prompt_hash"])
+    for jid in (kept, rejected, rejected_but_applied):
+        db.execute(
+            "INSERT INTO user_jobs (user_id, job_id) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+            (uid, jid),
+        )
+    db.execute(
+        "UPDATE user_jobs SET status = 'Applied' WHERE user_id = %s AND job_id = %s",
+        (uid, rejected_but_applied),
+    )
+    assert _board(client, user_headers, "src-ver") == {kept, rejected, rejected_but_applied}
+    # A later re-judgement rejects two of them.
+    for url in ("https://x.test/ver2", "https://x.test/ver3"):
+        factories.make_verdict(url, "custom", "rejected", prompt_hash=flt["prompt_hash"])
+    assert _board(client, user_headers, "src-ver") == {kept, rejected_but_applied}
+
+
 def test_a_materialised_board_row_obeys_the_criteria_and_an_acted_on_row_does_not(
     client, user_headers, clean
 ):
