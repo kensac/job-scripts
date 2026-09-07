@@ -43,6 +43,13 @@ filled at all.
   groups), the location autocomplete. Date pickers and Ashby's education
   history widget are left to you.
 
+Forms embedded on an employer's own careers page in an iframe work
+too; a form rendered inline by the ATS's embed script, with no iframe,
+does not, because the extension only runs on the ATS hosts it names.
+Readers are single-page: a paginated form with a proxy submit button
+(Workday, Taleo, iCIMS and the rest of that tier) is out of scope until
+readers gain a step model.
+
 One reader per ATS lives under `readers/`. A reader exposes `ready`,
 `read` (fields with key, label, kind, required, options), `fill`,
 `current`, `submitButton` and `submitted` (the ATS's own confirmation
