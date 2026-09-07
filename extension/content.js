@@ -145,12 +145,54 @@
       const got = await pdf(`user/resumes/${fill.resume.id}/pdf`);
       if (got.ok) file = new File([new Uint8Array(got.bytes)], got.name, { type: "application/pdf" });
     }
+    // Files first, then let the page settle before anything else: Ashby
+    // parses an attached resume and rewrites its form a second or two
+    // later, and a value set in that window is dropped from the form's
+    // state while the widget still shows it (the Clera report, 2026-09-07).
+    let attached = false;
     for (const entry of fill.fields) {
-      if (entry.rung === "resume") await put(entry, null, file);
-      else if (entry.value != null) await put(entry, entry.value, null);
+      if (entry.rung === "resume") attached = (await put(entry, null, file)) || attached;
+    }
+    if (attached) {
+      await settle();
+      await readFields();
+    }
+    for (const entry of fill.fields) {
+      if (entry.rung !== "resume" && entry.value != null) await put(entry, entry.value, null);
     }
     await askModel(fill.fields.filter((e) => !isFilled(e) && askable(e)));
+    await verify();
     show();
+  }
+
+  // The page as a string of its input values and element count; stable for
+  // 1.5 seconds means whatever the attach set off has finished.
+  const fingerprint = () =>
+    [...document.querySelectorAll("input, textarea, select, button[aria-pressed]")]
+      .map((e) => (e.value || "") + (e.getAttribute("aria-pressed") || ""))
+      .join("") + document.querySelectorAll("*").length;
+  async function settle() {
+    let last = fingerprint();
+    let quiet = 0;
+    for (let i = 0; i < 16 && quiet < 3; i++) {
+      await sleep(500);
+      const now = fingerprint();
+      quiet = now === last ? quiet + 1 : 0;
+      last = now;
+    }
+  }
+
+  // What the page holds after everything: a field the page reset is filled
+  // once more, from fresh element references.
+  async function verify() {
+    await sleep(400);
+    const lost = fill.fields.filter((e) => {
+      const field = fieldByKey(e.key);
+      return field && e.value != null && e.rung !== "resume" && isFilled(e) && !reader.current(field);
+    });
+    if (!lost.length) return;
+    await readFields();
+    for (const entry of lost) await put(entry, entry.value, null);
   }
 
   const isFilled = (entry) => {
