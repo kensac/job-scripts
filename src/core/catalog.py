@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 from psycopg import errors
 from psycopg.types.json import Jsonb
 
-from core.store import _pool as pool
+from core.pool import pool
 
 if TYPE_CHECKING:
     from core.posting import JobPosting
