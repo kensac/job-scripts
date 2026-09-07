@@ -116,3 +116,15 @@ endpoint filters on, beside the `filters` echo, so a client renders a User
 control from the former. An endpoint with no user dimension (fleet workers,
 the shared checks, source analytics) leaves `user` out of `filterable` rather
 than pretending.
+
+## The ATS on the board
+
+Every board row carries `ats`, the applicant tracking system its url lives
+on (ashby, greenhouse, lever, workable, workday and a few more by host;
+anything else reads as its own host, usually the employer's careers
+site). One SQL expression, `ATS_SQL` in api.routers.jobs, feeds the row,
+the `ats=` filter on GET /user/jobs and the counted list in
+GET /user/jobs/options, so the filter offers what is on the board rather
+than a fixed list. It exists because assisted apply works one ATS at a
+time: "only the Ashby ones" is the first question a person asks of the
+board once the extension can fill Ashby.

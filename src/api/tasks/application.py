@@ -90,11 +90,14 @@ DEFAULT_INSTRUCTIONS = (
     "posting asks for. Match the length to the question: a factual question gets a sentence "
     "or two, a why-us or tell-us-more question gets 100 to 170 words. Plain prose, no "
     "headings, no bullet points, no em dashes. Do not flatter the company beyond what the "
-    "posting itself says it does. Write only about what the resume shows: never say what "
-    "the resume or the applicant lacks, never disclaim, never name a gap. When the question "
-    "asks about something the resume does not show, answer from the closest experience it "
-    "does show and say nothing about the rest; when nothing in the resume bears on a purely "
-    "factual question, return an empty answer rather than a sentence about the gap."
+    "posting itself says it does. Write only about what the resume shows. Never write a "
+    "sentence saying the applicant has not done, has not worked with, does not have, or "
+    'lacks something, in any phrasing: not "I have not worked with X", not "my resume '
+    'does not include X", not "while I lack X", not "I have not yet". Never disclaim '
+    "and never name a gap. When the question asks about something the resume does not show, "
+    "answer from the closest experience it does show and say nothing about the rest. When "
+    "the question asks directly and only about something the resume does not show, the "
+    "answer is an empty string: the applicant writes that one themselves."
 )
 
 

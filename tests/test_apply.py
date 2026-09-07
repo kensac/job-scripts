@@ -395,7 +395,7 @@ def test_a_draft_never_names_a_gap_and_an_empty_draft_does_not_fill_a_form(clien
     from api.tasks import application as drafts
 
     text = drafts.instructions(None)
-    assert "never say what the resume or the applicant lacks" in text
+    assert "never name a gap" in text and "I have not worked with X" in text
     assert "say so briefly" not in text
     # The wording is a config row, so the next change is an admin edit.
     db.execute(
