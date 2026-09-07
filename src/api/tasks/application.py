@@ -382,6 +382,10 @@ async def handle_application_sweep(task_id: int, payload: dict[str, Any]) -> Non
     # its batch (2026-09-07 00:00Z): both selected the same undrafted rows,
     # and only the order the batches landed in kept them from drafting the
     # same answers twice. The later one waits for the next cycle instead.
+    # Bounded to a day: the batch poll resumes a parked task once its batch
+    # is past the provider's completion window (24 h) whatever state it is
+    # in, so an earlier sweep older than that is a stuck task, not a live
+    # one, and must not turn one stuck sweep into no sweeps forever.
     other = db.query_one(
         """
         SELECT id FROM tasks
@@ -389,6 +393,7 @@ async def handle_application_sweep(task_id: int, payload: dict[str, Any]) -> Non
           AND status IN ('pending', 'running', 'awaiting_batch', 'waiting')
           AND (payload->>'user_id')::bigint = %(uid)s
           AND id < %(tid)s
+          AND created_at > now() - interval '1 day'
         LIMIT 1
         """,
         {"tid": task_id, "uid": user_id},

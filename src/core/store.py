@@ -372,6 +372,12 @@ AI_ELIGIBLE_JOB = (
 # a cycle for its comp column, and the market table would be built from a
 # smaller slice than the filters admit. Written down here so it is a
 # decision and not an oversight.
+#
+# This reads the latest closed and clearance rows in ai_queries. A retention
+# policy on that table (none exists; it is the largest table and the
+# decision is open) must keep the latest verdict per (url, check_type), or
+# a posting whose verdicts age out silently reads as unverified here and
+# drops out of both extractors, then re-enters them at cost once re-verified.
 VERIFIED_OPEN = """
     (SELECT lc.status FROM ai_queries lc
       WHERE lc.url = {url} AND lc.check_type = 'closed' AND lc.status IN ('passed', 'rejected')
