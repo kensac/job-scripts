@@ -29,7 +29,10 @@ router = APIRouter()
 
 MAX_PDF_BYTES = 5 * 1024 * 1024
 MAX_RESUME_CHARS = 60_000
-_RESUME_COLS = "id, name, filename, length(text) AS chars, text, created_at, updated_at"
+_RESUME_COLS = (
+    "id, name, filename, length(text) AS chars, text, pdf IS NOT NULL AS has_pdf, "
+    "created_at, updated_at"
+)
 _ANSWER_COLS = "key, question, source, required, draft, turns, model, updated_at"
 
 
@@ -71,6 +74,7 @@ def create_resume(body: ResumeCreate, user: AuthedUser = Depends(require_user)):
     """Pasted text or a PDF, base64 in the body. The PDF's text is what is
     kept; the file itself is not stored. Same name replaces the text."""
     text = (body.text or "").strip()
+    data = None
     if body.pdf_base64:
         try:
             data = base64.b64decode(body.pdf_base64, validate=True)
@@ -86,17 +90,49 @@ def create_resume(body: ResumeCreate, user: AuthedUser = Depends(require_user)):
             raise _bad(400, "NO_TEXT", "that PDF has no extractable text; paste the resume instead")
     if not text:
         raise _bad(400, "NO_TEXT", "paste the resume text or attach a PDF")
+    # The PDF's bytes live in the database and are dumped and archived with
+    # it, so the count per person is bounded as well as the size per file.
+    kept = db.query_one(
+        "SELECT count(*) AS n FROM user_resumes WHERE user_id = %s AND name != %s",
+        (user.id, body.name.strip()),
+    )
+    cap = int(db.get_config("resumes_per_user", 10))
+    if kept and kept["n"] >= cap:
+        raise _bad(409, "TOO_MANY_RESUMES", f"up to {cap} resumes; delete one first")
     row = db.query_one(
         f"""
-        INSERT INTO user_resumes (user_id, name, text, filename)
-        VALUES (%s, %s, %s, %s)
+        INSERT INTO user_resumes (user_id, name, text, filename, pdf)
+        VALUES (%s, %s, %s, %s, %s)
         ON CONFLICT (user_id, name) DO UPDATE
-            SET text = EXCLUDED.text, filename = EXCLUDED.filename, updated_at = now()
+            SET text = EXCLUDED.text, filename = EXCLUDED.filename, pdf = EXCLUDED.pdf,
+                updated_at = now()
         RETURNING {_RESUME_COLS}
         """,
-        (user.id, body.name.strip(), text[:MAX_RESUME_CHARS], body.filename),
+        (user.id, body.name.strip(), text[:MAX_RESUME_CHARS], body.filename, data),
     )
     return row
+
+
+@router.get("/user/resumes/{resume_id}/pdf")
+def resume_pdf(resume_id: int, user: AuthedUser = Depends(require_user)):
+    """The file as uploaded, for the extension to attach to a form. A pasted
+    resume has no file."""
+    from fastapi.responses import Response
+
+    row = db.query_one(
+        "SELECT filename, pdf FROM user_resumes WHERE id = %s AND user_id = %s",
+        (resume_id, user.id),
+    )
+    if not row:
+        raise _bad(404, "NOT_FOUND", "unknown resume")
+    if row["pdf"] is None:
+        raise _bad(404, "NO_FILE", "this resume was pasted; upload the PDF to attach it")
+    name = (row["filename"] or "resume.pdf").replace('"', "")
+    return Response(
+        bytes(row["pdf"]),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{name}"'},
+    )
 
 
 @router.patch("/user/resumes/{resume_id}")

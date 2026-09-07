@@ -1,0 +1,12 @@
+#jt-apply {
+  position: fixed; top: 16px; right: 16px; z-index: 2147483647; width: 320px;
+  max-height: calc(100vh - 32px); overflow: auto; background: #fff; color: #111;
+  border: 1px solid #ccc; border-radius: 8px; box-shadow: 0 4px 24px rgba(0,0,0,.18);
+  font: 13px/1.4 system-ui, sans-serif; padding: 12px;
+}
+#jt-apply h3 { margin: 0 0 8px; font-size: 14px; }
+#jt-apply button { font: inherit; padding: 2px 8px; margin: 2px 4px 2px 0; cursor: pointer; }
+#jt-apply ul { margin: 6px 0; padding-left: 18px; }
+#jt-apply li { margin: 2px 0; }
+#jt-apply .muted { color: #666; }
+#jt-apply .warn { color: #a50; }

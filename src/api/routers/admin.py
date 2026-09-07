@@ -1539,6 +1539,12 @@ _CONFIG_KEYS: dict[str, _Key] = {
         "Application forms the hourly sweep reads per person per cycle, newest postings "
         "first, one request each to the ATS under the host budget.",
     ),
+    "resumes_per_user": _Key(
+        int,
+        "Resumes one person may keep. Each holds its PDF (5 MB at most) in the database, "
+        "and the database is dumped and archived daily, so this bounds four copies of "
+        "every upload.",
+    ),
     "application_drafts_per_cycle": _Key(
         int,
         "Missing application answers the hourly sweep drafts per person per cycle, in one "
