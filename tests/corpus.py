@@ -299,9 +299,15 @@ class _Generator:
             if keyset.startswith("<"):
                 return db.jsonb([])
             keys = [k for k in keyset.split(",") if k]
-            return db.jsonb(
-                {k: self._text({"lengths": [6, 14], "charclasses": ["a9"]}) for k in keys}
-            )
+            # The value's type comes from the profile, not from convenience.
+            # Every key used to get a random string, so tasks.progress read
+            # {"done": "y1e9e55hf1iz"} where production has {"done": 5}, and
+            # health.py's (progress->>'total')::int failed on every row: a real
+            # detector that could not run against the data standing in for
+            # production. A column profiled before value_types existed has no
+            # types recorded, and those keys keep the old behaviour.
+            types = shape.get("value_types") or {}
+            return db.jsonb({k: self._json_value(types.get(k)) for k in keys})
         if kind == "opaque":
             # A type the profile cannot describe (pgvector). If the column is
             # NOT NULL, _specialise has to fill it; nothing here can.
@@ -309,6 +315,20 @@ class _Generator:
         if shape.get("binary"):
             return self._text({"lengths": shape.get("lengths") or [16]}).encode()
         return self._text(shape)
+
+    def _json_value(self, jsonb_type: str | None) -> Any:
+        """One value of the type production holds for this key."""
+        if jsonb_type == "number":
+            return self.rng.randint(0, 5000)
+        if jsonb_type == "boolean":
+            return self.rng.random() < 0.5
+        if jsonb_type == "null":
+            return None
+        if jsonb_type == "array":
+            return [self._text({"lengths": [4, 10], "charclasses": ["a9"]}) for _ in range(2)]
+        if jsonb_type == "object":
+            return {"k": self._text({"lengths": [4, 10], "charclasses": ["a9"]})}
+        return self._text({"lengths": [6, 14], "charclasses": ["a9"]})
 
     # -- row generation ----------------------------------------------------
 
