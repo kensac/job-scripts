@@ -1539,6 +1539,19 @@ _CONFIG_KEYS: dict[str, _Key] = {
         "Application forms the hourly sweep reads per person per cycle, newest postings "
         "first, one request each to the ATS under the host budget.",
     ),
+    "application_draft_instructions": _Key(
+        str,
+        "The rules the model drafts application answers under, before the person's own "
+        "writing style. Empty means the built-in text in api.tasks.application; a change "
+        "here takes effect on the next draft, with no roll. Read by application_draft, "
+        "application_sweep and the refine endpoint.",
+    ),
+    "application_suggest_instructions": _Key(
+        str,
+        "The rules the model fills the rest of an application form under (the fields the "
+        "profile and drafts did not). Empty means the built-in text in api.routers.apply. "
+        "Read by POST /user/apply/suggest.",
+    ),
     "resumes_per_user": _Key(
         int,
         "Resumes one person may keep. Each holds its PDF (5 MB at most) in the database, "

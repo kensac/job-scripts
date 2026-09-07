@@ -79,18 +79,28 @@ class Draft(BaseModel):
     answer: str
 
 
+# The rules the model drafts under. A change here is a roll; a change on
+# the admin page (app_config application_draft_instructions) is a config
+# edit and takes effect on the next draft, so wording is tuned there and
+# this text is what an empty row means.
+DEFAULT_INSTRUCTIONS = (
+    "You draft the applicant's answer to one question on a job application form, in the "
+    "first person, as the applicant. Use only facts that appear in the resume; never invent "
+    "employers, dates, projects, numbers or skills. Tie what the resume shows to what the "
+    "posting asks for. Match the length to the question: a factual question gets a sentence "
+    "or two, a why-us or tell-us-more question gets 100 to 170 words. Plain prose, no "
+    "headings, no bullet points, no em dashes. Do not flatter the company beyond what the "
+    "posting itself says it does. Write only about what the resume shows: never say what "
+    "the resume or the applicant lacks, never disclaim, never name a gap. When the question "
+    "asks about something the resume does not show, answer from the closest experience it "
+    "does show and say nothing about the rest; when nothing in the resume bears on a purely "
+    "factual question, return an empty answer rather than a sentence about the gap."
+)
+
+
 def instructions(style: str | None) -> str:
-    return (
-        "You draft the applicant's answer to one question on a job application form, in the "
-        "first person, as the applicant. Use only facts that appear in the resume; never invent "
-        "employers, dates, projects, numbers or skills. Tie what the resume shows to what the "
-        "posting asks for. Match the length to the question: a factual question gets a sentence "
-        "or two, a why-us or tell-us-more question gets 100 to 170 words. Plain prose, no "
-        "headings, no bullet points, no em dashes. Do not flatter the company beyond what the "
-        "posting itself says it does. When the resume does not cover what the question asks, "
-        "say so briefly in the answer rather than making something up, so the applicant can fill "
-        "it in.\n\nWriting style, in the applicant's own words:\n" + (style or DEFAULT_STYLE)
-    )
+    rules = (db.get_config("application_draft_instructions") or "").strip() or DEFAULT_INSTRUCTIONS
+    return rules + "\n\nWriting style, in the applicant's own words:\n" + (style or DEFAULT_STYLE)
 
 
 def question_input(

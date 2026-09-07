@@ -1,10 +1,12 @@
-// The generic half of the extension: wait for the reader to see the form,
-// ask the API what goes in each field, fill, ask the model once for what
-// is still blank, show what was filled and what was not, and when the
-// person clicks the form's own submit button, send the final values back
-// so the bank and the ledger learn. It never clicks submit itself. The
-// report button sends the page as the extension saw it, with a note, for
-// triage later.
+// The generic half of the extension. It runs on every page of an ATS
+// host, watches for the application form to appear (the ATS is a single-
+// page app, so the posting page becomes the form without a reload), and
+// offers one button: Autofill. On the click it asks the API what goes in
+// each field, fills, asks the model once for what is still blank, and
+// shows what was filled and what was not. When the person clicks the
+// form's own submit button and the ATS confirms, the final values go
+// back so the bank and the ledger learn. It never clicks submit itself.
+// The report button sends the page as the extension saw it, with a note.
 (async () => {
   const reader = window.__jtReader;
   if (!reader) return;
@@ -23,28 +25,83 @@
   const CONSENT = /acknowledg|consent|agree|certif|arbitration|privacy|terms/i;
   const askable = (e) => ASKABLE.has(e.kind) && !CONSENT.test(e.label || "");
 
-  const panel = document.createElement("div");
-  panel.id = "jt-apply";
-  document.body.appendChild(panel);
-  const render = (html) => {
-    panel.innerHTML = `<h3>Job Tracker Apply</h3>${html}
-      <div id="jt-report"><button id="jt-report-btn">Report this page</button></div>`;
-    panel.querySelector("#jt-report-btn").onclick = reportForm;
-  };
-
+  let panel = null;
   let fields = [];
   let fill = null;
   let filled = new Map();
   let lastError = null;
-
-  for (let i = 0; i < 50 && !reader.ready(); i++) await sleep(200);
-  if (!reader.ready()) {
-    render(`<p class="warn">No form found on this page.</p>`);
-    return;
+  let mountedFor = null;
+  let collapsed = false;
+  try {
+    collapsed = localStorage.getItem("jt-apply-collapsed") === "1";
+  } catch (_) {
+    collapsed = false;
   }
-  fields = reader.read();
+
+  const render = (html) => {
+    if (!panel) return;
+    panel.classList.toggle("collapsed", collapsed);
+    panel.innerHTML = `
+      <div class="head"><h3>Job Tracker Apply</h3>
+        <button id="jt-min" title="${collapsed ? "Expand" : "Minimise"}">${collapsed ? "+" : "–"}</button></div>
+      <div class="body">${html}
+        <div id="jt-report"><button id="jt-report-btn">Report this page</button></div></div>`;
+    panel.querySelector("#jt-report-btn").onclick = reportForm;
+    panel.querySelector("#jt-min").onclick = () => {
+      collapsed = !collapsed;
+      try {
+        localStorage.setItem("jt-apply-collapsed", collapsed ? "1" : "0");
+      } catch (_) {
+        // Nothing to remember it in; the panel still toggles.
+      }
+      panel.classList.toggle("collapsed", collapsed);
+      panel.querySelector("#jt-min").textContent = collapsed ? "+" : "–";
+    };
+  };
+
   const fieldByKey = (key) => fields.find((f) => f.key === key);
   const entryByKey = (key) => fill.fields.find((e) => e.key === key);
+  const readFields = async () => {
+    fields = await reader.read();
+  };
+
+  // The panel appears when a form is on the page and goes when it is not,
+  // so the posting page shows nothing and the form page shows the button
+  // without a reload.
+  function mount() {
+    const here = location.href;
+    if (reader.ready()) {
+      if (mountedFor === here && panel) return;
+      mountedFor = here;
+      fields = [];
+      fill = null;
+      filled = new Map();
+      if (!panel) {
+        panel = document.createElement("div");
+        panel.id = "jt-apply";
+        document.body.appendChild(panel);
+      }
+      offer();
+    } else if (panel && !fill) {
+      // No form and nothing recorded on it: the posting page, or a page
+      // away from the form. A panel after a submit stays for its message.
+      panel.remove();
+      panel = null;
+      mountedFor = null;
+    }
+  }
+
+  function offer() {
+    render(`
+      <p>Fill this application from your profile, your remembered answers and your drafts.</p>
+      <button id="jt-autofill" class="primary">Autofill</button>
+      <p class="muted">You check the form and click its own Submit button.</p>
+    `);
+    panel.querySelector("#jt-autofill").onclick = async () => {
+      await readFields();
+      run();
+    };
+  }
 
   async function put(entry, value, file) {
     const field = fieldByKey(entry.key);
@@ -63,15 +120,19 @@
     render(`<p class="muted">Resolving ${fields.length} fields…</p>`);
     const res = await api("user/apply/resolve", "POST", {
       url: location.href,
-      fields: fields.map(({ _wrap, _group, ...f }) => f),
+      fields: fields.map(({ _box, _group, ...f }) => f),
     });
     if (!res.ok) {
       lastError = res;
       render(
         res.signin
-          ? `<p class="warn">Not signed in. <a href="${res.signin}" target="_blank">Open Job Tracker</a>, sign in, then reload this page.</p>`
-          : `<p class="warn">Could not resolve the form (${esc(res.status)}): ${esc(JSON.stringify(res.json || res.error))}</p>`,
+          ? `<p class="warn">Not signed in. <a href="${res.signin}" target="_blank">Open Job Tracker</a>, sign in, then try again.</p><button id="jt-autofill">Autofill</button>`
+          : `<p class="warn">Could not resolve the form (${esc(res.status)}): ${esc(JSON.stringify(res.json || res.error))}</p><button id="jt-autofill">Try again</button>`,
       );
+      panel.querySelector("#jt-autofill").onclick = async () => {
+        await readFields();
+        run();
+      };
       return;
     }
     fill = res.json;
@@ -91,7 +152,7 @@
 
   const isFilled = (entry) => {
     const f = filled.get(entry.key);
-    return !!(f && f.ok && f.value != null);
+    return !!(f && f.ok && f.value != null && f.value !== "");
   };
 
   // One call for everything still blank. The answers land in the form
@@ -121,17 +182,17 @@
   function show() {
     const done = fill.fields.filter(isFilled);
     const todo = fill.fields.filter((e) => !isFilled(e));
-    const li = (e, extra = "") => `<li>${esc(e.label || e.key)}${extra}</li>`;
+    const li = (e, extra = "") => `<li><span>${esc(e.label || e.key)}</span>${extra}</li>`;
     render(`
       <p>${fill.job_id ? "On your board." : '<span class="warn">Not a posting on your board, so no drafts.</span>'}</p>
       <p><b>${done.length} filled</b>${todo.length ? `, <b class="warn">${todo.length} for you</b>` : ""}.${fill.ai_error ? ` <span class="warn">Model call failed: ${esc(fill.ai_error)}.</span>` : ""}</p>
-      ${todo.length ? `<ul>${todo.map((e) => li(e, e.kind === "file" ? ' <span class="muted">(attach the file)</span>' : ` <button data-ai="${esc(e.key)}">fill with AI</button>`)).join("")}</ul>` : ""}
-      <details><summary class="muted">filled (${done.length})</summary><ul>${done.map((e) => li(e, ` <span class="muted">${esc(e.rung)}</span>`)).join("")}</ul></details>
+      ${todo.length ? `<ul>${todo.map((e) => li(e, e.kind === "file" ? '<span class="muted">attach the file</span>' : `<button data-ai="${esc(e.key)}">fill with AI</button>`)).join("")}</ul>` : ""}
+      <details><summary class="muted">filled (${done.length})</summary><ul>${done.map((e) => li(e, `<span class="muted">${esc(e.rung)}</span>`)).join("")}</ul></details>
       <p class="muted">Check the form, then click its own Submit button. What you type or pick, and every model answer you leave in place, is remembered for the next form with the same question; free-text answers are not.</p>
       <button id="jt-again">Fill again</button>
     `);
-    panel.querySelector("#jt-again").onclick = () => {
-      fields = reader.read();
+    panel.querySelector("#jt-again").onclick = async () => {
+      await readFields();
       run();
     };
     for (const btn of panel.querySelectorAll("[data-ai]")) {
@@ -163,9 +224,9 @@
   // markup around each, what the API resolved, what took, the person's note.
   function capture() {
     const clean = (html, cap) => html.replace(/<script[\s\S]*?<\/script>/gi, "").slice(0, cap);
-    const wraps = fields.map((f) => f._wrap).filter(Boolean);
-    let root = wraps[0] ? wraps[0].parentElement : document.body;
-    while (root && root !== document.body && !wraps.every((w) => root.contains(w))) root = root.parentElement;
+    const boxes = fields.map((f) => f._box).filter(Boolean);
+    let root = boxes[0] ? boxes[0].parentElement : document.body;
+    while (root && root !== document.body && !boxes.every((b) => root.contains(b))) root = root.parentElement;
     return {
       title: document.title,
       host: reader.host,
@@ -173,13 +234,13 @@
       userAgent: navigator.userAgent,
       at: new Date().toISOString(),
       fields: fields.map((f) => {
-        const { _wrap, _group, ...plain } = f;
-        const ctl = _wrap && _wrap.querySelector("input:not([type=hidden]), textarea, select, button");
+        const { _box, _group, ...plain } = f;
+        const ctl = _box && _box.querySelector("input:not([type=hidden]), textarea, select, button");
         return {
           ...plain,
           current: reader.current(f),
           control: ctl ? { tag: ctl.tagName, type: ctl.type || null, id: ctl.id || null, class: ctl.className } : null,
-          html: _wrap ? clean(_wrap.outerHTML, 4000) : null,
+          html: _box ? clean(_box.outerHTML, 4000) : null,
         };
       }),
       resolved: fill,
@@ -189,10 +250,11 @@
     };
   }
 
-  function reportForm() {
+  async function reportForm() {
     const box = panel.querySelector("#jt-report");
+    if (!fields.length && reader.ready()) await readFields();
     box.innerHTML = `
-      <textarea id="jt-note" rows="3" style="width:100%" placeholder="What went wrong? (optional)"></textarea>
+      <textarea id="jt-note" rows="3" placeholder="What went wrong? (optional)"></textarea>
       <button id="jt-send">Send report</button> <button id="jt-cancel">Cancel</button>`;
     box.querySelector("#jt-cancel").onclick = () => {
       box.innerHTML = `<button id="jt-report-btn">Report this page</button>`;
@@ -248,5 +310,8 @@
     true,
   );
 
-  await run();
+  // A single-page app changes the url and the page without a load, so the
+  // form is watched for rather than assumed at load time.
+  mount();
+  setInterval(mount, 700);
 })();
