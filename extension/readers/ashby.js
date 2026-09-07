@@ -151,13 +151,16 @@
     if (field.kind === "select") {
       // The location autocomplete: the typed text filters the list and
       // Enter takes the first match. What it took is read back by current().
+      // This is the one control that wants the blur, to close the list.
       await new Promise((r) => setTimeout(r, 400));
       for (const type of ["keydown", "keyup"]) {
         ctl.dispatchEvent(new KeyboardEvent(type, { key: "Enter", code: "Enter", keyCode: 13, bubbles: true }));
       }
       await new Promise((r) => setTimeout(r, 200));
+      ctl.blur();
     }
-    ctl.blur();
+    // No blur otherwise: on a form with eager validation it raises the
+    // error state on a field the person has not reached.
     return true;
   }
 

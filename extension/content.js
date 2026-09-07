@@ -211,6 +211,12 @@
     };
   }
 
+  // The form is gone and the page says so, in the words every ATS uses.
+  // The fallback for a reader without its own signal, and for the day an
+  // ATS renames the class the reader looks for.
+  const CONFIRMED = /thank you for (applying|your application)|application (has been )?(received|submitted)|we('ve| have) received your application|we got your application|successfully submitted/i;
+  const confirmedByText = () => !reader.ready() && CONFIRMED.test(document.body.innerText);
+
   // Recorded only once the ATS confirms. The values are read at the click,
   // because the confirmation screen replaces the form; if no confirmation
   // comes, the person can record it by hand or try again.
@@ -232,7 +238,7 @@
       const values = finals();
       for (let i = 0; i < 150; i++) {
         await sleep(200);
-        if (reader.submitted()) return record(values);
+        if (reader.submitted() || confirmedByText()) return record(values);
       }
       render(`
         <p class="warn">The form did not confirm the submit within 30 seconds, so nothing was recorded.</p>
