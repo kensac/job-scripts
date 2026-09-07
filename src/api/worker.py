@@ -282,7 +282,13 @@ def schedule_ingest_cycle() -> None:
     # parks on the Batch API for hours would otherwise stack a new pass on top
     # of itself every cycle. Kept separate from the comp check so one pass
     # waiting on a slow batch does not block the other from ever starting.
-    if not db.query_one(
+    # Off unless switched on: the extraction has one consumer, the market
+    # table, and measured on 2026-09-07 its deployed arm named a seniority
+    # for 5 of 92 postings the reference named one for and shared a third
+    # of the skills. Kanishk chose to stop paying for it rather than pay
+    # more for it; the switch is a config row so that can change without a
+    # deploy.
+    if db.get_config("requirements_extraction_enabled") and not db.query_one(
         "SELECT 1 FROM tasks WHERE kind = 'extract_requirements' "
         "AND status IN ('pending', 'running', 'waiting', 'awaiting_batch') LIMIT 1"
     ):

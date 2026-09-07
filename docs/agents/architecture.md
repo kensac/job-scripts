@@ -71,9 +71,29 @@ cost on read rewrites history. There is one spend ledger, grouped by purpose.
 Where two totals answer different questions, report both and label them. Never
 present one as the other.
 
-**Extraction is paid for only where its result can be read.** Comp and
+**Extraction is paid for only where its result can be read, and not at all
+where nothing reads it.** Requirements extraction is off
+(`requirements_extraction_enabled`, persisted config, seeded false): its one
+consumer is the market table, and measured on 2026-09-07 through the
+experiments harness the deployed arm (nano, minimal) named a seniority for
+5 of the 92 postings the reference named one for and shared about a third
+of the skills, most of the rest being wording. Turning it on is a config
+row, not a deploy; choosing an arm worth paying for is the experiment
+(luna at none gets seniority to 74 percent of the reference for about 70
+cents a day at the current verification rate). Comp and
 requirements select on `core.store.VERIFIED_OPEN`: the posting's latest
-closed and clearance verdicts both passed. On 2026-09-06 that was 37,438 of
+closed and clearance verdicts both passed.
+
+**An arm that answers nothing is re-bought every sweep.** Comp leaves a row
+unextracted when the answer does not parse, so the next sweep selects it
+again; that is the right retry for a transient failure and a spend loop
+for a systematic one. The 2026-09-07 baselines showed the systematic case:
+nano at medium or high spends the whole output cap on reasoning and
+returns no text on verify, comp and requirements (65 to 100 of 100).
+Production runs those steps at low and never hit it. Try an effort in an
+experiment, where a failed arm costs one batch and shows as a count, not
+on a production step, where it costs one batch per hour until someone
+notices. On 2026-09-06 that was 37,438 of
 74,477 active postings; the other half is closed or restricted and reaches
 no board, so a number extracted from it is never read. The narrower cut,
 extracting only for postings on someone's board (3,117 that day, 4 percent

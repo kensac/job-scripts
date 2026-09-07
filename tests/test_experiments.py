@@ -216,6 +216,29 @@ def test_requirements_answers_are_scored_on_the_stored_row_and_skills_between_ar
     )
 
 
+@pytest.mark.asyncio
+async def test_a_failure_lands_on_the_experiment_row_too(client, admin_headers, f, monkeypatch):
+    """The first requirements run failed in scoring and the experiment sat
+    "running" with every answer in, because only the task knew."""
+    _sample(f, 2)
+    r = client.post(
+        "/v1/admin/experiments",
+        json={"purpose": "comp", "sample": 2, "arms": [{"model": "gpt-5-nano", "effort": "low"}]},
+        headers=admin_headers,
+    )
+    eid, task_id = r.json()["id"], r.json()["task_id"]
+
+    async def boom(specs, model, effort, max_out, on_event=None):
+        raise RuntimeError("provider is having a moment")
+
+    monkeypatch.setattr("core.batch.submit_responses_batches", boom)
+    db.execute("UPDATE tasks SET status = 'running' WHERE id = %s", (task_id,))
+    with pytest.raises(RuntimeError):
+        await exp.handle_run_experiment(task_id, {"experiment_id": eid})
+    row = db.query_one("SELECT status, error FROM ai_experiments WHERE id = %s", (eid,))
+    assert row["status"] == "failed" and "moment" in row["error"]
+
+
 def test_the_sample_is_fixed_by_its_seed(f):
     urls = _sample(f, 6)
     first = [r["url"] for r in exp.sample(3, "seed-a")]
