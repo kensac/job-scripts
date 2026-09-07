@@ -42,6 +42,8 @@
 
   --x-danger-line: color-mix(in oklab, var(--x-danger) var(--x-line-mix), transparent);
   --x-danger-wash: color-mix(in oklab, var(--x-danger) var(--x-wash-mix), transparent);
+  --x-accent-line: color-mix(in oklab, var(--x-accent) var(--x-line-mix), transparent);
+  --x-accent-wash: color-mix(in oklab, var(--x-accent) var(--x-wash-mix), transparent);
 
   /* NOT admin.css's --x-accent-hover. That token lightens the indigo, which is
      the wrong direction for a filled button carrying --x-on-accent: white on
@@ -191,11 +193,18 @@
 
 /* -- text --------------------------------------------------------------- */
 
-/* Whole 4px steps only. Body is slate; the facts inside it are ink, which is
-   where the emphasis comes from. */
+/* Whole 4px steps only. Two registers, so something leads: a sentence is the
+   secondary clause at 12px slate, and the line carrying the counts is the fact
+   at 14px. Selected by :has(b) rather than by a class, because <b> is already
+   how content.js marks the counts and this needs no markup change. */
 #jt-apply p {
   margin: 8px 0 0;
+  font-size: 12px;
   color: var(--x-slate);
+}
+
+#jt-apply p:has(b) {
+  font-size: 14px;
 }
 
 #jt-apply p:first-child {
@@ -211,12 +220,19 @@
   color: var(--x-ash);
 }
 
-/* A whole explanatory sentence is the secondary clause, not the fact, and the
-   scale gives that 12px. At 14px it carried the same weight as the counts
-   above it, which is the one thing this panel should not do: the numbers are
-   why someone looks at it. */
-#jt-apply p.muted {
-  font-size: 12px;
+/* The standing note - what gets remembered between forms - is the same words
+   every time and the largest block on the panel. It is reference, so it reads
+   as a footnote under a rule rather than as the body: separated from the
+   status above it, 11px, and last in the reading order before the actions. */
+/* :not(:first-child) matters. content.js also renders a lone muted paragraph
+   as the whole body while work is in flight ("Resolving 5 fields...", "Asking
+   the model about 3 fields..."). That is the only thing on the panel at the
+   time and must not be demoted to a footnote; the standing note always follows
+   something. */
+#jt-apply .body > p.muted:not(:first-child) {
+  margin-top: 12px;
+  font-size: 11px;
+  line-height: 1.5;
 }
 
 /* Crimson is "wrong": a failed resolve, a model call that did not land, a
@@ -267,8 +283,25 @@
   font-size: 11px;
 }
 
+/* Grouped by space, not by a rule. Three hairlines in a 340px panel read as
+   more structure rather than more clarity; the only rule left is the one that
+   closes the content off from the footer. */
 #jt-apply details {
+  margin: 12px 0 0;
+}
+
+/* The standing note lives behind "how this works" rather than in front of the
+   counts. Prose inside a disclosure is reference: 11px, and the same footnote
+   register the note had when it sat in the body.
+   .todo, the count of fields left to the person, deliberately has no rule.
+   Crimson is wrong, green is success, indigo is action and amber is health
+   warnings only, so a count of outstanding work carries no hue: it falls
+   through to <b> and renders ink, like the filled count beside it. Dropping
+   class="warn" from that span was the whole fix. */
+#jt-apply details > p.muted {
   margin: 8px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
 }
 
 #jt-apply summary {
@@ -335,10 +368,50 @@
   border-color: var(--jt-accent-hover);
 }
 
+/* Every panel-level action is a full-width block, so there is one place to
+   look for what to do next. #jt-again is the primary action of the state it
+   appears in (a fill has run) but is a repeat rather than a first move, so it
+   takes the shape without the indigo. */
+/* :not(.primary) because the two rules tie on specificity and this one is
+   later in the file, so without it the primary button silently took 13px
+   instead of the 14px its own rule sets. */
+#jt-apply .body > button:not(.primary) {
+  display: block;
+  width: 100%;
+  margin-top: 12px;
+  padding: 8px 12px;
+  font-size: 13px;
+  text-align: center;
+}
+
+/* Row actions stay inline: they belong to their field, not to the panel.
+ *
+ * Indigo, because the outstanding list holds two kinds of row and they read
+ * identically without it: one the panel can finish for you, and one only you
+ * can ("attach the file" is a file input, which no extension may set). The
+ * tint is the kit's own treatment for that - border accent-line, bg
+ * accent-wash, text accent (ui/kit.tsx:1257) - rather than a solid fill, which
+ * is reserved for the panel's one primary action.
+ *
+ * The rows you must handle yourself keep ash: nothing to click is not a
+ * failure, so it takes no tone, and the contrast between the two is the guide.
+ */
 #jt-apply li button {
   flex: none;
+  display: inline-block;
+  width: auto;
+  margin-top: 0;
   padding: 2px 8px;
   font-size: 11px;
+  text-align: center;
+  border-color: var(--x-accent-line);
+  background: var(--x-accent-wash);
+  color: var(--x-accent);
+}
+
+#jt-apply li button:hover {
+  border-color: var(--x-accent);
+  background: var(--x-accent-wash);
 }
 
 #jt-apply textarea {
