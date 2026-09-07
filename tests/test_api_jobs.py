@@ -530,3 +530,28 @@ def test_total_rides_on_the_page_and_survives_an_empty_page(client, user_headers
         headers=user_headers,
     ).json()
     assert beyond["total"] == 4 and beyond["rows"] == [] and beyond["has_more"] is False
+
+
+def test_the_board_filters_by_ats(client, user_headers):
+    """ "Only the Ashby ones": the ATS is read off the url, offered with counts
+    in the options, carried on every row, and filters the list."""
+    uid = _uid(user_headers)
+    urls = {
+        "ashby": "https://jobs.ashbyhq.com/acme/1111",
+        "greenhouse": "https://job-boards.greenhouse.io/acme/jobs/2222",
+        "lever": "https://jobs.lever.co/acme/3333",
+        "careers.acme.test": "https://careers.acme.test/jobs/4444",
+    }
+    for url in urls.values():
+        _insert_job("src-ats", url)
+        _pass_closed(url)
+    _insert_job("src-ats", "https://jobs.ashbyhq.com/acme/5555")
+    _pass_closed("https://jobs.ashbyhq.com/acme/5555")
+    _subscribe(uid, "src-ats")
+    options = client.get("/v1/user/jobs/options", headers=user_headers).json()
+    assert options["ats"][0] == {"ats": "ashby", "count": 2}
+    assert {a["ats"] for a in options["ats"]} == set(urls)
+    page = client.get("/v1/user/jobs?ats=ashby&with_total=true", headers=user_headers).json()
+    assert page["total"] == 2 and {r["ats"] for r in page["rows"]} == {"ashby"}
+    everything = client.get("/v1/user/jobs", headers=user_headers).json()["rows"]
+    assert {r["ats"] for r in everything} == set(urls)

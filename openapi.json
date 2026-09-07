@@ -1234,6 +1234,22 @@
             }
           },
           {
+            "name": "ats",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ats"
+            }
+          },
+          {
             "name": "include_hidden",
             "in": "query",
             "required": false,

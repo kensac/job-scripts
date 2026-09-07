@@ -23,8 +23,29 @@ router = APIRouter()
 # comparable. Collapsing NULL into 'closed' would reintroduce exactly the bug
 # this column exists to fix: 114 of the applications flagged dead by `active`
 # have a closed-check that says the posting is open.
-_JOB_ROW = """
+# The applicant tracking system a posting's url lives on, as the board
+# filters and labels it. The host names the ATS for the hosted ones; the
+# rest read as their own host, which is usually the employer's careers
+# site. One expression, used by the row, the filter and the options.
+ATS_SQL = """
+    CASE
+      WHEN j.url ILIKE 'https://jobs.ashbyhq.com/%%' THEN 'ashby'
+      WHEN j.url ILIKE '%%greenhouse.io/%%' THEN 'greenhouse'
+      WHEN j.url ILIKE 'https://jobs.lever.co/%%' THEN 'lever'
+      WHEN j.url ILIKE '%%workable.com/%%' THEN 'workable'
+      WHEN j.url ILIKE '%%myworkdayjobs.com/%%' THEN 'workday'
+      WHEN j.url ILIKE '%%smartrecruiters.com/%%' THEN 'smartrecruiters'
+      WHEN j.url ILIKE '%%icims.com/%%' THEN 'icims'
+      WHEN j.url ILIKE '%%jobvite.com/%%' THEN 'jobvite'
+      WHEN j.url ILIKE '%%bamboohr.com/%%' THEN 'bamboohr'
+      WHEN j.url ILIKE '%%rippling.com/%%' THEN 'rippling'
+      ELSE split_part(j.url, '/', 3)
+    END
+"""
+
+_JOB_ROW = f"""
     j.id AS job_id, j.company, j.title, j.locations, j.terms, j.source,
+    ({ATS_SQL}) AS ats,
     j.url, j.raw_url, j.active, j.date_posted, j.created_at AS added_at,
     j.extraction_status, j.comp_min, j.comp_max, j.comp_text, j.comp_currency,
     j.comp_period, j.comp_basis,
@@ -123,11 +144,21 @@ def job_options(user: AuthedUser = Depends(require_user)):
             (user.id,),
         )
     ]
+    # The ATSs on this person's board with how many rows each, most first,
+    # so the filter offers what is there rather than a fixed list.
+    ats = db.query(
+        visibility.FAST.format(
+            columns=f"({ATS_SQL}) AS ats, COUNT(*) AS count",
+            extra="AND COALESCE(uj.hidden, FALSE) = FALSE GROUP BY 1 ORDER BY 2 DESC, 1",
+        ),
+        {"uid": user.id},
+    )
     return {
         "statuses": statuses,
         "status_meta": status_meta(statuses),
         "not_applied_sentinel": NOT_APPLIED,
         "sources": sources,
+        "ats": ats,
         "report_kinds": report_kinds(),
     }
 
@@ -143,6 +174,7 @@ def list_jobs(
     status: str | None = None,
     statuses: str | None = None,
     source: str | None = None,
+    ats: str | None = None,
     include_hidden: bool = False,
     with_total: bool = False,
     user: AuthedUser = Depends(require_user),
@@ -174,6 +206,9 @@ def list_jobs(
     if source:
         extra.append("AND j.source = %(source)s")
         params["source"] = source
+    if ats:
+        extra.append(f"AND ({ATS_SQL}) = %(ats)s")
+        params["ats"] = ats.strip().lower()
 
     filter_sql = "\n".join(extra)
     total = None
