@@ -25,8 +25,10 @@ router = APIRouter()
 # have a closed-check that says the posting is open.
 # The applicant tracking system a posting's url lives on, as the board
 # filters and labels it. The host names the ATS for the hosted ones; the
-# rest read as their own host, which is usually the employer's careers
-# site. One expression, used by the row, the filter and the options.
+# rest fold into "other", because on a real board the tail is wide (183
+# employer careers hosts against five systems on 2026-09-07) and a select
+# of 188 entries filters nothing. One expression, used by the row, the
+# filter and the options.
 ATS_SQL = """
     CASE
       WHEN j.url ILIKE 'https://jobs.ashbyhq.com/%%' THEN 'ashby'
@@ -39,7 +41,7 @@ ATS_SQL = """
       WHEN j.url ILIKE '%%jobvite.com/%%' THEN 'jobvite'
       WHEN j.url ILIKE '%%bamboohr.com/%%' THEN 'bamboohr'
       WHEN j.url ILIKE '%%rippling.com/%%' THEN 'rippling'
-      ELSE split_part(j.url, '/', 3)
+      ELSE 'other'
     END
 """
 

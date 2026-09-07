@@ -540,7 +540,7 @@ def test_the_board_filters_by_ats(client, user_headers):
         "ashby": "https://jobs.ashbyhq.com/acme/1111",
         "greenhouse": "https://job-boards.greenhouse.io/acme/jobs/2222",
         "lever": "https://jobs.lever.co/acme/3333",
-        "careers.acme.test": "https://careers.acme.test/jobs/4444",
+        "other": "https://careers.acme.test/jobs/4444",
     }
     for url in urls.values():
         _insert_job("src-ats", url)

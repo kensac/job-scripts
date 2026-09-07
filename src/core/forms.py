@@ -18,7 +18,7 @@ import json
 import re
 from dataclasses import asdict, dataclass
 from html import unescape
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlparse, urlsplit, urlunsplit
 
 import requests
 
@@ -182,6 +182,36 @@ _READERS = {
 
 def host_of(url: str) -> str:
     return (urlparse(url).hostname or "").lower()
+
+
+def posting_urls(url: str) -> list[str]:
+    """The urls the board may store the posting under, for the page the
+    form is on. Beside budget_host on purpose: the two are the whole of
+    what this module knows about which hosts are one Greenhouse, and a
+    second copy of that knowledge is how the first one drifted (#405). Ashby's form lives under /application and Lever's under
+    /apply; a Greenhouse form embedded on an employer's site is
+    boards.greenhouse.io/embed/job_app?for=<board>&token=<id>, and a
+    Greenhouse posting is stored under whichever of its two hosts the
+    board listed it from. The query string is otherwise tracking."""
+    parts = urlsplit(url)
+    if parts.netloc.endswith("greenhouse.io"):
+        q = dict(parse_qsl(parts.query))
+        m = re.match(r"^/([^/]+)/jobs/(\d+)", parts.path)
+        board, job = (
+            (q["for"], q["token"])
+            if parts.path.startswith("/embed/job_app") and "for" in q and "token" in q
+            else (m.group(1), m.group(2))
+            if m
+            else (None, None)
+        )
+        if board and job:
+            eu = ".eu" if ".eu." in parts.netloc else ""
+            return [
+                f"https://{h}{eu}.greenhouse.io/{board}/jobs/{job}"
+                for h in ("job-boards", "boards")
+            ]
+    path = re.sub(r"/(application|apply)/?$", "", parts.path)
+    return [urlunsplit((parts.scheme, parts.netloc, path, "", ""))]
 
 
 def budget_host(url: str) -> str:

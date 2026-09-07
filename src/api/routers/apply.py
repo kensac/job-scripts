@@ -5,9 +5,8 @@ what to improve next. api.apply holds the resolving itself."""
 from __future__ import annotations
 
 import json
-import re
 from typing import Any
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -16,6 +15,7 @@ from api import ai, apply, budget, db
 from api.auth import AuthedUser, require_user
 from api.routers.jobs import _write_board_row
 from api.tasks import application as drafts
+from core.forms import posting_urls
 
 router = APIRouter()
 
@@ -94,20 +94,11 @@ class ResolveBody(BaseModel):
     fields: list[apply.Field_] = Field(max_length=300)
 
 
-def posting_url(url: str) -> str:
-    """The posting's url as the board stores it: Ashby's form lives under
-    /application, Greenhouse's and Lever's under /apply; the query string
-    is tracking."""
-    parts = urlsplit(url)
-    path = re.sub(r"/(application|apply)/?$", "", parts.path)
-    return urlunsplit((parts.scheme, parts.netloc, path, "", ""))
-
-
 @router.post("/user/apply/resolve")
 def resolve_form(body: ResolveBody, user: AuthedUser = Depends(require_user)):
     """What goes in each field. Opens a fill in the ledger; the extension
     closes it with /submitted once the person has clicked submit."""
-    job = db.query_one("SELECT id FROM jobs WHERE url = %s", (posting_url(body.url),))
+    job = db.query_one("SELECT id FROM jobs WHERE url = ANY(%s) LIMIT 1", (posting_urls(body.url),))
     job_id = job["id"] if job else None
     fields = apply.resolve(user.id, job_id, body.fields)
     fill = db.query_one(

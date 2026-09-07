@@ -422,3 +422,29 @@ def test_a_draft_never_names_a_gap_and_an_empty_draft_does_not_fill_a_form(clien
         headers=user_headers,
     ).json()["fields"][0]
     assert got["rung"] == "" and got["value"] is None
+
+
+def test_the_form_page_maps_back_to_the_posting_on_every_host():
+    from core.forms import posting_urls
+
+    assert posting_urls("https://jobs.ashbyhq.com/rogo/abc/application?utm=x") == [
+        "https://jobs.ashbyhq.com/rogo/abc"
+    ]
+    assert posting_urls("https://jobs.lever.co/shieldai/41c5/apply") == [
+        "https://jobs.lever.co/shieldai/41c5"
+    ]
+    both = [
+        "https://job-boards.greenhouse.io/yext/jobs/8174875",
+        "https://boards.greenhouse.io/yext/jobs/8174875",
+    ]
+    assert posting_urls("https://job-boards.greenhouse.io/yext/jobs/8174875#app") == both
+    assert (
+        posting_urls(
+            "https://boards.greenhouse.io/embed/job_app?for=yext&token=8174875&b=https%3A%2F%2Fx"
+        )
+        == both
+    )
+    assert posting_urls("https://job-boards.eu.greenhouse.io/acme/jobs/1") == [
+        "https://job-boards.eu.greenhouse.io/acme/jobs/1",
+        "https://boards.eu.greenhouse.io/acme/jobs/1",
+    ]

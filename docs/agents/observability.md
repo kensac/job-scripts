@@ -191,7 +191,13 @@ answer is written once rather than typed per form.
 
 The extension calls the frontend's proxy from its background worker, which
 rides the site's session cookie; the API's service token never leaves the
-proxy. One reader per ATS under `extension/readers/`; Ashby is the first.
+proxy. One reader per ATS under `extension/readers/`: Ashby reads the
+page's widgets; Greenhouse pairs the fields of its public form API (fetched
+by the background worker, since the page's content security policy does
+not list that host) with the page by id, which is also the drafts' key;
+Lever reads plain HTML. A form page maps back to the posting through
+`posting_urls` in the apply router, which knows Ashby's /application,
+Lever's /apply, Greenhouse's two hosts and its embed url.
 
 ## Observability
 

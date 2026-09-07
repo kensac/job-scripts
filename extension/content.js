@@ -59,6 +59,9 @@
     };
   };
 
+  // Underscore keys are the reader's DOM handles; the API never sees them.
+  const plain = (f) => Object.fromEntries(Object.entries(f).filter(([k]) => !k.startsWith("_")));
+  const boxOf = (f) => f._box || (f._ctl && (f._ctl.closest("fieldset, .field, .application-question, .select-shell") || f._ctl.parentElement)) || null;
   const fieldByKey = (key) => fields.find((f) => f.key === key);
   const entryByKey = (key) => fill.fields.find((e) => e.key === key);
   const readFields = async () => {
@@ -120,7 +123,7 @@
     render(`<p class="muted">Resolving ${fields.length} fields…</p>`);
     const res = await api("user/apply/resolve", "POST", {
       url: location.href,
-      fields: fields.map(({ _box, _group, ...f }) => f),
+      fields: fields.map(plain),
     });
     if (!res.ok) {
       lastError = res;
@@ -224,7 +227,7 @@
   // markup around each, what the API resolved, what took, the person's note.
   function capture() {
     const clean = (html, cap) => html.replace(/<script[\s\S]*?<\/script>/gi, "").slice(0, cap);
-    const boxes = fields.map((f) => f._box).filter(Boolean);
+    const boxes = fields.map(boxOf).filter(Boolean);
     let root = boxes[0] ? boxes[0].parentElement : document.body;
     while (root && root !== document.body && !boxes.every((b) => root.contains(b))) root = root.parentElement;
     return {
@@ -234,13 +237,13 @@
       userAgent: navigator.userAgent,
       at: new Date().toISOString(),
       fields: fields.map((f) => {
-        const { _box, _group, ...plain } = f;
-        const ctl = _box && _box.querySelector("input:not([type=hidden]), textarea, select, button");
+        const box = boxOf(f);
+        const ctl = f._ctl || (box && box.querySelector("input:not([type=hidden]), textarea, select, button"));
         return {
-          ...plain,
+          ...plain(f),
           current: reader.current(f),
           control: ctl ? { tag: ctl.tagName, type: ctl.type || null, id: ctl.id || null, class: ctl.className } : null,
-          html: _box ? clean(_box.outerHTML, 4000) : null,
+          html: box ? clean(box.outerHTML, 4000) : null,
         };
       }),
       resolved: fill,
