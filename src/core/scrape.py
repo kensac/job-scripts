@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import contextlib
 import logging
-import os
 import time
 
 import ftfy
@@ -48,14 +47,6 @@ def extract_url_content_ex(url: str) -> tuple[str | None, str | None]:
     very often 302s to a board index or careers page, and the page that lands
     is perfectly healthy-looking, so without knowing we were redirected, the
     text reads as a live job to both a human and the model."""
-    # Preserved from the sheet-era module verbatim in effect: the browser
-    # fetch was gated on an OpenAI client existing, and openai_client was
-    # non-None exactly when OPENAI_API_KEY was set. The coupling makes no
-    # sense for a page fetch and is worth removing, but not silently in a
-    # move: without a key today, scraping returns nothing.
-    if not os.environ.get("OPENAI_API_KEY"):
-        return None, None
-
     ats_result = ats.resolve(url)
     if ats_result.ok and ats_result.text:
         return ats_result.text, url

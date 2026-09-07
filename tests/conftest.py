@@ -309,6 +309,33 @@ def _no_network_static_fetch(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_browser(monkeypatch):
+    """The browser tier must never actually launch in a test.
+
+    Nothing stopped it deliberately. core/scrape.py returned early unless
+    OPENAI_API_KEY was set, which is nonsense as a condition on fetching a web
+    page and was inherited from the sheet-era module, and the key is unset here
+    and in CI. So whatever protection existed came from an accident.
+
+    Measured before adding this, by counting calls through a whole suite run:
+    no test reaches the browser tier at all, 0 calls in 1353 tests. That makes
+    this a latch rather than a rescue - removing the OPENAI_API_KEY early
+    return changed nothing here, and this keeps it changed-nothing as tests are
+    added.
+
+    Raising rather than returning None: a test meaning to exercise this tier
+    stubs it, and one arriving here by accident should say so rather than
+    quietly read no content and assert on the emptiness.
+    """
+    import core.scrape
+
+    def refuse(url):
+        raise RuntimeError(f"tests do not launch a browser (asked for {url})")
+
+    monkeypatch.setattr(core.scrape, "extract_url_content_ex", refuse)
+
+
+@pytest.fixture(autouse=True)
 def _clean_db(request):
     """Give each test the database its marker asks for.
 
