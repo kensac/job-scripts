@@ -129,6 +129,14 @@ celerybeat.pid
 
 # Environments
 .env
+# Every variant, not just the bare name. A .env.bak-2026-09-07 sitting beside
+# it is the same credentials with a different filename, and `git add -A` will
+# stage it: that happened, and only the gitleaks pre-commit hook stopped three
+# live OpenAI keys from being committed. .env.template and .env.example are
+# checked in deliberately and stay.
+.env.*
+!.env.template
+!.env.example
 .venv
 env/
 venv/
