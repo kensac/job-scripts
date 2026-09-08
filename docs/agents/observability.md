@@ -215,7 +215,12 @@ and publishes `{"type": "board_row", job_id, status, date_applied,
 hidden}` on the person's channel. A status written at submit time is not a
 task, so the task events never carried it and the board waited for a
 reload to move the row; a view holding the board moves or drops the row on
-this event and refreshes its counts.
+this event and refreshes its counts. A bulk patch publishes once for the
+whole selection, `{"type": "board_rows", job_ids, status, date_applied,
+hidden}`: the publish is a synchronous post on the request path, and the
+bulk endpoint exists so a 6,000-row selection is one request, not 6,000
+posts (measured 2026-09-08: about 5 ms each when Centrifugo is healthy, 2
+seconds each when it is not).
 
 ## Observability
 
