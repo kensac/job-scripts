@@ -190,6 +190,9 @@
     return combos.find((c) => !lab || lab.compareDocumentPosition(c) & Node.DOCUMENT_POSITION_FOLLOWING) || combos[0] || null;
   };
   const eduRows = () => ((window.__jtProfile || {}).education || []).filter((r) => r && r.school);
+  // A profile value may list alternatives for pickers ("Bachelor of Science
+  // | BS"); a text box takes the first.
+  const firstAlt = (v) => String(v ?? "").split("|")[0].trim();
 
   function eduCurrent() {
     const n = [...document.querySelectorAll(EDU_ENTRY)].filter((e) => schoolBox(e)?.value).length;
@@ -218,10 +221,10 @@
       if (degree && row.degree) {
         if (degree.tagName === "SELECT") chooseSelect(degree, [row.degree]);
         else if (isAuto(degree)) await pickFromList(degree, row.degree, false);
-        else setNative(degree, row.degree);
+        else setNative(degree, firstAlt(row.degree));
       }
       const major = entry.querySelector('input[id*="education_history-major"]');
-      if (major && row.field) setNative(major, row.field);
+      if (major && row.field) setNative(major, firstAlt(row.field));
       setDate(entry, "startDate", parseDate(row.start));
       setDate(entry, "endDate", parseDate(row.end));
       filled++;
