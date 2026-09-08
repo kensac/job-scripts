@@ -654,3 +654,67 @@ def test_the_admin_list_keeps_the_model_off_a_field(client, user_headers, monkey
     res = client.post("/v1/user/apply/suggest", json={"fields": fields[:1]}, headers=user_headers)
     assert res.json() == {"answers": {}, "skipped": ["location"], "model": None}
     assert not seen
+
+
+def test_a_field_the_form_reveals_joins_the_open_fill(client, user_headers):
+    """The EEO race question appears once Hispanic/Latino is answered; the
+    extension resolves what appeared with the fill's id, and the row grows
+    instead of a second row opening. A submitted fill is closed to that."""
+    client.put("/v1/user/profile", json=_profile(), headers=user_headers)
+    first = client.post(
+        "/v1/user/apply/resolve",
+        json={
+            "url": "https://x.test/apply",
+            "fields": [
+                {
+                    "key": "hispanic_ethnicity",
+                    "label": "Are you Hispanic/Latino?",
+                    "kind": "select",
+                    "options": ["Yes", "No", "Decline To Self Identify"],
+                },
+            ],
+        },
+        headers=user_headers,
+    ).json()
+    second = client.post(
+        "/v1/user/apply/resolve",
+        json={
+            "url": "https://x.test/apply",
+            "fill_id": first["fill_id"],
+            "fields": [
+                {
+                    "key": "race",
+                    "label": "Please identify your race",
+                    "kind": "select",
+                    "options": ["Asian", "White"],
+                }
+            ],
+        },
+        headers=user_headers,
+    ).json()
+    assert second["fill_id"] == first["fill_id"]
+    assert [f["key"] for f in second["fields"]] == ["race"]
+    row = db.query_one("SELECT fields FROM application_fills WHERE id = %s", (first["fill_id"],))
+    assert [f["key"] for f in row["fields"]] == ["hispanic_ethnicity", "race"]
+    assert (
+        db.query_one(
+            "SELECT count(*) AS n FROM application_fills WHERE url = 'https://x.test/apply'"
+        )["n"]
+        == 1
+    )
+
+    client.post(
+        f"/v1/user/apply/fills/{first['fill_id']}/submitted",
+        json={"fields": []},
+        headers=user_headers,
+    )
+    third = client.post(
+        "/v1/user/apply/resolve",
+        json={
+            "url": "https://x.test/apply",
+            "fill_id": first["fill_id"],
+            "fields": [{"key": "late", "label": "Late", "kind": "text"}],
+        },
+        headers=user_headers,
+    ).json()
+    assert third["fill_id"] != first["fill_id"]

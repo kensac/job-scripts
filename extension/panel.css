@@ -476,6 +476,14 @@
   scrollbar-color: var(--x-smoke) transparent;
 }
 
+/* An error body or a long option label is one unbroken token; it wraps
+   inside the panel rather than pushing past it. */
+#jt-apply .body,
+#jt-apply .body * {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
 @media (prefers-reduced-motion: no-preference) {
   #jt-apply button,
   #jt-apply textarea,
