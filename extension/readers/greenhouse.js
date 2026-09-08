@@ -137,6 +137,8 @@
         required: f.required,
         options: kind === "multiselect" || kind === "select" ? f.values : [],
         _ctl: ctl,
+        // The city search is the person's (see fill); the panel says so.
+        _person: f.name === "location",
       });
     }
     return out;

@@ -1552,6 +1552,13 @@ _CONFIG_KEYS: dict[str, _Key] = {
         "profile and drafts did not). Empty means the built-in text in api.routers.apply. "
         "Read by POST /user/apply/suggest.",
     ),
+    "application_ai_never_fills": _Key(
+        str,
+        "Fields the model never fills on an application form, left to the person: one "
+        "label a line or comma-separated, matched as whole words in the field's label or "
+        "key. Read by POST /user/apply/suggest, which drops them before the call and names "
+        "them in its reply so the extension lists them as the person's.",
+    ),
     "resumes_per_user": _Key(
         int,
         "Resumes one person may keep. Each holds its PDF (5 MB at most) in the database, "
