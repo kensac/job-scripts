@@ -221,6 +221,10 @@
     };
   }
 
+  // A reader's trace of a fill, kept by key: the fields are read again
+  // after a fill pass (revealed fields), and a fresh field object has no
+  // trace, which left report 10 blank where report 8 had them.
+  const traces = new Map();
   async function put(entry, value, file) {
     const field = fieldByKey(entry.key);
     if (!field) return false;
@@ -229,7 +233,9 @@
       ok = await reader.fill(field, value, file);
     } catch (e) {
       lastError = String(e);
+      traces.set(entry.key, [...(field._trace || []), `threw: ${String(e)}`]);
     }
+    if (field._trace && field._trace.length) traces.set(entry.key, field._trace);
     filled.set(entry.key, { ok, value: file ? file.name : value });
     return ok;
   }
@@ -531,7 +537,7 @@
         const ctl = f._ctl || (box && box.querySelector("input:not([type=hidden]), textarea, select, button"));
         return {
           ...plain(f),
-          trace: f._trace || null,
+          trace: traces.get(f.key) || f._trace || null,
           current: reader.current(f),
           control: ctl ? { tag: ctl.tagName, type: ctl.type || null, id: ctl.id || null, class: ctl.className } : null,
           html: box ? clean(box.outerHTML, 4000) : null,
