@@ -74,6 +74,10 @@
   function mount() {
     const here = location.href;
     if (reader.ready()) {
+      // A page that hydrates after load (Greenhouse's board is a Remix app)
+      // can throw the panel out of the body with the rest of the markup it
+      // did not render; put it back rather than believing it is there.
+      if (panel && !panel.isConnected) document.body.appendChild(panel);
       if (mountedFor === here && panel) return;
       mountedFor = here;
       fields = [];
@@ -270,10 +274,10 @@
     const li = (e, extra = "") => `<li><span>${esc(e.label || e.key)}</span>${extra}</li>`;
     render(`
       <p>${fill.job_id ? "On your board." : '<span class="warn">Not a posting on your board, so no drafts.</span>'}</p>
-      <p><b>${done.length} filled</b>${todo.length ? `, <b class="warn">${todo.length} for you</b>` : ""}.${fill.ai_error ? ` <span class="warn">Model call failed: ${esc(fill.ai_error)}.</span>` : ""}</p>
+      <p><b>${done.length} filled</b>${todo.length ? `, <b class="todo">${todo.length} for you</b>` : ""}.${fill.ai_error ? ` <span class="warn">Model call failed: ${esc(fill.ai_error)}.</span>` : ""}</p>
       ${todo.length ? `<ul>${todo.map((e) => li(e, e.kind === "file" ? '<span class="muted">attach the file</span>' : `<button data-ai="${esc(e.key)}">fill with AI</button>`)).join("")}</ul>` : ""}
       <details><summary class="muted">filled (${done.length})</summary><ul>${done.map((e) => li(e, `<span class="muted">${esc(e.rung)}</span>`)).join("")}</ul></details>
-      <p class="muted">Check the form, then click its own Submit button. What you type or pick, and every model answer you leave in place, is remembered for the next form with the same question; free-text answers are not.</p>
+      <details><summary class="muted">how this works</summary><p class="muted">Check the form, then click its own Submit button. What you type or pick, and every model answer you leave in place, is remembered for the next form with the same question; free-text answers are not.</p></details>
       <button id="jt-again">Fill again</button>
     `);
     panel.querySelector("#jt-again").onclick = async () => {
@@ -323,6 +327,7 @@
         const ctl = f._ctl || (box && box.querySelector("input:not([type=hidden]), textarea, select, button"));
         return {
           ...plain(f),
+          trace: f._trace || null,
           current: reader.current(f),
           control: ctl ? { tag: ctl.tagName, type: ctl.type || null, id: ctl.id || null, class: ctl.className } : null,
           html: box ? clean(box.outerHTML, 4000) : null,

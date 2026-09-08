@@ -109,7 +109,8 @@ class Field_(BaseModel):
     as shown, in order."""
 
     key: str = Field(min_length=1, max_length=300)
-    label: str = Field(default="", max_length=500)
+    # A consent's label is its whole paragraph; 500 refused a real form.
+    label: str = Field(default="", max_length=4000)
     kind: str = Field(default="text", max_length=20)
     required: bool = False
     options: list[str] = Field(default_factory=list, max_length=200)

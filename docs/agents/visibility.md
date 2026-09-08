@@ -128,4 +128,7 @@ the `ats=` filter on GET /user/jobs and the counted list in
 GET /user/jobs/options, so the filter offers what is on the board rather
 than a fixed list. It exists because assisted apply works one ATS at a
 time: "only the Ashby ones" is the first question a person asks of the
-board once the extension can fill Ashby.
+board once the extension can fill Ashby. The counts a select shows come
+from `with_facets=true` on the list, taken under every other filter the
+page has on, so they agree with what choosing one will show; the
+board-wide counts in the options describe the board, not the lens.

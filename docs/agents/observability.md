@@ -209,6 +209,14 @@ Lever reads plain HTML. A form page maps back to the posting through
 `posting_urls` in the apply router, which knows Ashby's /application,
 Lever's /apply, Greenhouse's two hosts and its embed url.
 
+**A board row change is an event too.** Every write to a board row, from
+the board's own patch or the extension's submit, ends in `_write_board_row`
+and publishes `{"type": "board_row", job_id, status, date_applied,
+hidden}` on the person's channel. A status written at submit time is not a
+task, so the task events never carried it and the board waited for a
+reload to move the row; a view holding the board moves or drops the row on
+this event and refreshes its counts.
+
 ## Observability
 
 Three layers, each answering a different question, none standing in for

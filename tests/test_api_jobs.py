@@ -4,6 +4,7 @@ import datetime
 import os
 
 from api import db
+from api.routers.jobs import NOT_APPLIED
 from core.store import add_ai_result
 
 SERVICE_TOKEN = os.environ["JOBTRACKER_SERVICE_TOKEN"]
@@ -555,3 +556,20 @@ def test_the_board_filters_by_ats(client, user_headers):
     assert page["total"] == 2 and {r["ats"] for r in page["rows"]} == {"ashby"}
     everything = client.get("/v1/user/jobs", headers=user_headers).json()["rows"]
     assert {r["ats"] for r in everything} == set(urls)
+
+    # The select's counts follow the lens: with both Ashby postings marked
+    # applied, the to-apply lens shows no Ashby, and says so.
+    for row in everything:
+        if row["ats"] == "ashby":
+            client.patch(
+                f"/v1/user/jobs/{row['job_id']}",
+                json={"status": "Application Submitted"},
+                headers=user_headers,
+            )
+    page = client.get(
+        f"/v1/user/jobs?statuses={NOT_APPLIED}&with_facets=true&ats=ashby", headers=user_headers
+    ).json()
+    facet = {f["ats"]: f["count"] for f in page["facets"]["ats"]}
+    assert "ashby" not in facet and facet["lever"] == 1 and page["rows"] == []
+    board_wide = client.get("/v1/user/jobs/options", headers=user_headers).json()["ats"]
+    assert {a["ats"]: a["count"] for a in board_wide}["ashby"] == 2
