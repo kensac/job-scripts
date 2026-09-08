@@ -1270,6 +1270,16 @@
             }
           },
           {
+            "name": "with_facets",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "With Facets"
+            }
+          },
+          {
             "name": "x-service-token",
             "in": "header",
             "required": false,
@@ -18509,7 +18519,7 @@
           },
           "label": {
             "type": "string",
-            "maxLength": 500,
+            "maxLength": 4000,
             "title": "Label",
             "default": ""
           },
@@ -20889,7 +20899,7 @@
           },
           "label": {
             "type": "string",
-            "maxLength": 500,
+            "maxLength": 4000,
             "minLength": 1,
             "title": "Label"
           },

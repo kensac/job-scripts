@@ -448,3 +448,53 @@ def test_the_form_page_maps_back_to_the_posting_on_every_host():
         "https://job-boards.eu.greenhouse.io/acme/jobs/1",
         "https://boards.eu.greenhouse.io/acme/jobs/1",
     ]
+
+
+def test_a_submit_moves_the_board_row_without_a_reload(client, user_headers, monkeypatch):
+    """The extension's submit writes a status the way the board's own patch
+    does, and an open board hears about it on the person's channel, since a
+    status written at submit time is not a task and the task events never
+    carried it."""
+    from api import events
+
+    published: list[tuple[str, dict]] = []
+    monkeypatch.setattr(events, "_publish", lambda channel, data: published.append((channel, data)))
+    uid = _uid(user_headers)
+    job_id = _insert_job("src-rt", "https://jobs.ashbyhq.com/rt/abc")
+    fill = client.post(
+        "/v1/user/apply/resolve",
+        json={
+            "url": "https://jobs.ashbyhq.com/rt/abc/application",
+            "fields": [{"key": "k", "label": "Name"}],
+        },
+        headers=user_headers,
+    ).json()
+    client.post(
+        f"/v1/user/apply/fills/{fill['fill_id']}/submitted",
+        json={"fields": []},
+        headers=user_headers,
+    )
+    rows = [
+        d for c, d in published if c == f"jobtracker:user.{uid}" and d.get("type") == "board_row"
+    ]
+    assert rows and rows[-1]["job_id"] == job_id and rows[-1]["status"] == "Application Submitted"
+    assert rows[-1]["date_applied"] and rows[-1]["hidden"] is False
+
+
+def test_a_consent_paragraph_is_a_label_too(client, user_headers):
+    """A Lever consent card's label is the whole certification paragraph, 600
+    characters; the 500 cap answered the extension with a 422 on a live form
+    (2026-09-07)."""
+    long_label = "I hereby certify that I have not knowingly withheld any information " * 9
+    res = client.post(
+        "/v1/user/apply/resolve",
+        json={
+            "url": "https://jobs.lever.co/x/1/apply",
+            "fields": [
+                {"key": "c", "label": long_label, "kind": "multiselect", "options": ["I agree"]}
+            ],
+        },
+        headers=user_headers,
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["fields"][0]["rung"] == ""

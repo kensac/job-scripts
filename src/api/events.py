@@ -71,3 +71,21 @@ def publish_task(task_id: int) -> None:
     user_id: int | None = payload.get("user_id")
     if user_id is not None:
         _publish(f"jobtracker:user.{user_id}", event)
+
+
+def publish_board_row(user_id: int, job_id: int, row: dict[str, Any]) -> None:
+    """One board row changed for one person: the status, date and hidden
+    flag as they now stand. Pushed to the person's channel so an open board
+    moves the row at once rather than on the next reload; a status written
+    from the extension at submit time is not a task, so the task events
+    never carried it."""
+    _publish(
+        f"jobtracker:user.{user_id}",
+        {
+            "type": "board_row",
+            "job_id": job_id,
+            "status": row.get("status"),
+            "date_applied": str(row["date_applied"]) if row.get("date_applied") else None,
+            "hidden": bool(row.get("hidden", False)),
+        },
+    )

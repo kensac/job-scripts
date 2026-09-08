@@ -179,6 +179,7 @@ def list_jobs(
     ats: str | None = None,
     include_hidden: bool = False,
     with_total: bool = False,
+    with_facets: bool = False,
     user: AuthedUser = Depends(require_user),
 ):
     limit = max(1, min(limit, 1000))
@@ -208,6 +209,21 @@ def list_jobs(
     if source:
         extra.append("AND j.source = %(source)s")
         params["source"] = source
+    # The ATS counts a select should show are the counts under every OTHER
+    # filter the page has on: a board-wide "rippling 4" beside a lens that
+    # holds none of them reads as a lie (2026-09-07). So the facet is taken
+    # before the ats clause joins the rest.
+    facets = None
+    if with_facets:
+        facets = {
+            "ats": db.query(
+                visibility.FAST.format(
+                    columns=f"({ATS_SQL}) AS ats, COUNT(*) AS count",
+                    extra="\n".join(extra) + "\nGROUP BY 1 ORDER BY 2 DESC, 1",
+                ),
+                params,
+            )
+        }
     if ats:
         extra.append(f"AND ({ATS_SQL}) = %(ats)s")
         params["ats"] = ats.strip().lower()
@@ -248,6 +264,10 @@ def list_jobs(
         "has_more": has_more,
         "offset": offset,
         "total": total,
+        # Counts per ATS under the page's other filters, for the select;
+        # options.ats is the board-wide count and stays for the profile of
+        # the board as a whole.
+        "facets": facets,
         # The active sort as applied, so the UI renders it without duplicating
         # the default, and the keys it may ask for.
         "sorts": sorts,
@@ -305,14 +325,18 @@ def _write_board_row(user_id: int, job_id: int, patch: dict) -> dict:
     cols = ", ".join(f"{k} = %({k})s" for k in fields)
     insert_cols = ", ".join(fields)
     insert_vals = ", ".join(f"%({k})s" for k in fields)
-    db.execute(
+    written = db.query_one(
         f"""
         INSERT INTO user_jobs (user_id, job_id, {insert_cols})
         VALUES (%(uid)s, %(jid)s, {insert_vals})
         ON CONFLICT (user_id, job_id) DO UPDATE SET {cols}, updated_at = now()
+        RETURNING status, date_applied, hidden
         """,
         {"uid": user_id, "jid": job_id, **fields},
     )
+    # Every path that writes a board row ends here, so this is the one place
+    # an open board learns of the change without a reload.
+    events.publish_board_row(user_id, job_id, written or fields)
     return autofilled
 
 

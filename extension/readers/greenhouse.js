@@ -43,9 +43,16 @@
   // These carry the file; the text twins and the cover letter are not ours.
   const SKIP = new Set(["resume_text", "cover_letter", "cover_letter_text", "latitude", "longitude"]);
 
+  // The API's name for the location question is "location"; the page's
+  // control is "candidate-location".
+  const ALIAS = { location: "candidate-location" };
   function control(name) {
     if (name.endsWith("[]")) return document.querySelector(`${FORM} input[name="${CSS.escape(name)}"]`);
-    return document.getElementById(name) || document.querySelector(`${FORM} [name="${CSS.escape(name)}"]`);
+    return (
+      document.getElementById(name) ||
+      (ALIAS[name] && document.getElementById(ALIAS[name])) ||
+      document.querySelector(`${FORM} [name="${CSS.escape(name)}"]`)
+    );
   }
   const shellOf = (ctl) => ctl.closest(".select-shell") || ctl.closest('[class*="select__control"]')?.parentElement;
   const isReactSelect = (ctl) => !!ctl && /select__input/.test(ctl.className);
@@ -115,25 +122,63 @@
   }
 
   // Open the menu, wait for its options, click the one that matches.
-  async function pickReactSelect(ctl, value, search) {
+  //
+  // react-select opens its menu from a real focus after a mousedown on the
+  // control, from ArrowDown on the input, or from typing into it. Which of
+  // those a scripted event achieves depends on the page and the tab, so
+  // each is tried in turn and the trace of what was tried and what it did
+  // rides on the field, into the page report, so the next form teaches the
+  // reader which one works.
+  const keydown = (el, key, keyCode) =>
+    el.dispatchEvent(new KeyboardEvent("keydown", { key, code: key, keyCode, which: keyCode, bubbles: true, cancelable: true, view: window }));
+
+  async function pickReactSelect(field, ctl, value, search) {
     const shell = shellOf(ctl);
-    if (!shell) return false;
+    const trace = [];
+    field._trace = trace;
+    if (!shell) {
+      trace.push("no shell");
+      return false;
+    }
+    const controlEl = shell.querySelector(".select__control") || shell;
     const menuOptions = () => [...shell.querySelectorAll('[class*="select__option"]')];
+    const opened = () => ctl.getAttribute("aria-expanded") === "true" || menuOptions().length > 0;
+    const waitOpen = async (label) => {
+      for (let i = 0; i < 6 && !opened(); i++) await sleep(150);
+      trace.push(`${label}:${opened() ? "open" : "closed"}`);
+      return opened();
+    };
     const wants = String(value ?? "").split("|").map((s) => s.trim()).filter(Boolean);
     for (const want of wants) {
-      const controlEl = shell.querySelector(".select__control") || shell;
+      const low = want.toLowerCase();
+      // 1. The user's gesture: mousedown on the control, then the focus it
+      //    hands the input.
       mouse(controlEl, ["mousedown"]);
       ctl.focus();
-      if (search) setNative(ctl, want);
-      let opts = [];
-      for (let i = 0; i < 12 && !opts.length; i++) {
-        await sleep(250);
-        opts = menuOptions();
-        if (!opts.length && i === 3) {
-          ctl.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", code: "ArrowDown", keyCode: 40, which: 40, bubbles: true, view: window }));
-        }
+      let open = await waitOpen("mousedown+focus");
+      // 2. A focus event of our own, for a tab the browser will not focus.
+      if (!open) {
+        ctl.dispatchEvent(new FocusEvent("focus", { view: window }));
+        ctl.dispatchEvent(new FocusEvent("focusin", { bubbles: true, view: window }));
+        mouse(controlEl, ["mousedown"]);
+        open = await waitOpen("focusevent+mousedown");
       }
-      const low = want.toLowerCase();
+      // 3. The keyboard: ArrowDown opens a closed menu.
+      if (!open) {
+        keydown(ctl, "ArrowDown", 40);
+        open = await waitOpen("arrowdown");
+      }
+      // 4. Typing filters the list and opens it.
+      if (!open || search) {
+        setNative(ctl, want);
+        open = await waitOpen("typed");
+      }
+      let opts = [];
+      for (let i = 0; i < 10 && !opts.length; i++) {
+        await sleep(200);
+        opts = menuOptions();
+      }
+      trace.push(`options:${opts.length}`);
       const hit =
         opts.find((o) => o.innerText.trim().toLowerCase() === low) ||
         opts.find((o) => o.innerText.trim().toLowerCase().startsWith(low)) ||
@@ -141,10 +186,25 @@
       if (hit) {
         mouse(hit, ["mousedown", "mouseup", "click"]);
         await sleep(300);
-        if (current({ _ctl: ctl, kind: "select" })) return true;
+        if (current({ _ctl: ctl, kind: "select" })) {
+          trace.push("clicked:took");
+          return true;
+        }
+        trace.push("clicked:not taken");
       }
-      ctl.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", keyCode: 27, bubbles: true, view: window }));
-      if (search) setNative(ctl, "");
+      // 5. With the text typed, Enter takes the first match react-select
+      //    has focused, whether or not its menu rendered where we look.
+      if (ctl.value) {
+        keydown(ctl, "Enter", 13);
+        await sleep(300);
+        if (current({ _ctl: ctl, kind: "select" })) {
+          trace.push("enter:took");
+          return true;
+        }
+        trace.push("enter:not taken");
+      }
+      keydown(ctl, "Escape", 27);
+      setNative(ctl, "");
       await sleep(150);
     }
     return false;
@@ -172,7 +232,7 @@
       }
       return took;
     }
-    if (isReactSelect(ctl)) return pickReactSelect(ctl, value, field.key === "location" || field.key === "candidate-location" || !field.options.length);
+    if (isReactSelect(ctl)) return pickReactSelect(field, ctl, value, field.key === "location" || !field.options.length);
     if (ctl.tagName === "SELECT") {
       const opt = [...ctl.options].find((o) => o.text.trim().toLowerCase() === want);
       if (!opt) return false;
