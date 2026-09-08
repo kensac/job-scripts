@@ -136,10 +136,15 @@
     // The click that opens the widget and puts the caret in the box: the
     // recipe's own click lands on the field's frame, and the measured
     // sequence clicked the input itself (captures 16 to 20).
+    if (document.querySelector('[data-automation-activepopup="true"], [class*="select__menu"]')) {
+      // A list left open by the step before would take the keystrokes.
+      (document.activeElement || document.body).dispatchEvent(new KeyboardEvent("keydown", { ...t, key: "Escape", code: "Escape", keyCode: 27, which: 27 }));
+      await sleep(300);
+    }
     el.focus();
     el.dispatchEvent(new FocusEvent("focus", t));
     if (typeof el.click === "function") el.click();
-    await sleep(250);
+    await sleep(300);
     note(`typing "${String(value).slice(0, 30)}" into ${el.id || el.name || "search"} one key at a time`);
     setValue(el, "");
     el.dispatchEvent(new InputEvent("input", { ...t, inputType: "deleteContentBackward" }));
@@ -151,9 +156,11 @@
       setValue(el, typed);
       el.dispatchEvent(new InputEvent("input", { ...t, data: ch, inputType: "insertText" }));
       el.dispatchEvent(new KeyboardEvent("keyup", { ...t, key: ch }));
-      await sleep(25);
+      await sleep(60);
     }
-    await sleep(400);
+    // The search needs a moment before Enter; measured at 700 ms on
+    // Workday's country-code box, 400 was not enough for the field of study.
+    await sleep(900);
     return true;
   }
   function clickOn(el, opts) {
@@ -392,7 +399,15 @@
         "",
     );
   const OPTION_SELECTORS = '[role="option"], [data-automation-id="promptLeafNode"], [data-automation-id="promptOption"], [class*="select__option"], li[role="menuitem"]';
-  const optionsOnScreen = () => [...document.querySelectorAll(OPTION_SELECTORS)].filter(visible);
+  // The options of the popup that is open now, not every option on the
+  // page: with the degree list still open, the field-of-study fallback
+  // clicked "Master of Computer Science" into the degree (capture 23).
+  const POPUP_SELECTORS = '[data-automation-activepopup="true"], [data-automation-id="activeListContainer"], [class*="select__menu"], [role="listbox"]';
+  const optionsOnScreen = () => {
+    const popups = [...document.querySelectorAll(POPUP_SELECTORS)].filter(visible);
+    const scope = popups.length ? popups[popups.length - 1] : null;
+    return scope ? [...scope.querySelectorAll(OPTION_SELECTORS)].filter(visible) : [];
+  };
   async function runActions(actions, ctx, root, fallbackEl, value, file) {
     for (const [i, a] of (actions || []).entries()) {
       if (a.delay) await sleep(a.delay);
@@ -408,7 +423,7 @@
       }
       let target = a.path ? null : { el: fallbackEl, path: ctx.inputPath };
       if (!target) target = await waitFirst(a.path, actx, root, a.hidden === true, a.time || 0);
-      const picksOption = list(a.path).some((p) => /%(UPPER|LOWER)?(UNMAPPED)?VALUE%/.test(p));
+      const picksOption = list(a.path).some((p) => /%(UPPER|LOWER)?(UNMAPPED)?VALUE%/.test(p) && /option|promptLeafNode|promptOption|listbox/i.test(p));
       if (!target && picksOption) {
         const shown = optionsOnScreen();
         const best = closest(shown, ctx.raw ?? actx.value);
