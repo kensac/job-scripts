@@ -1557,7 +1557,8 @@ _CONFIG_KEYS: dict[str, _Key] = {
         "Fields the model never fills on an application form, left to the person: one "
         "label a line or comma-separated, matched as whole words in the field's label or "
         "key. Read by POST /user/apply/suggest, which drops them before the call and names "
-        "them in its reply so the extension lists them as the person's.",
+        "them in its reply so the extension lists them as the person's. Empty is not off: "
+        "an empty list lets the model fill every field, the location box included.",
     ),
     "resumes_per_user": _Key(
         int,
