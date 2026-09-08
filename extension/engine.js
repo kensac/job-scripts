@@ -777,7 +777,7 @@
 
   // One entry per profile row: add a container when the page has fewer than
   // the row needs, then every nested field the row has a value for.
-  async function fillGroup(group, items, file, fact, asName = null, parentRoot = null) {
+  async function fillGroup(group, items, file, fact, asName = null, parentRoot = null, entryNumber = null) {
     const rows = group.limit ? items.slice(0, group.limit) : items;
     const ordered = group.reverse ? [...rows].reverse() : rows;
     let filledAny = false;
@@ -791,12 +791,16 @@
       // was workExperience-6, report 8), so every number up to thirty is
       // tried and the i-th container found is the i-th entry.
       const containerPaths = list(group.containerPath);
+      // Each container remembers the number it was found under: a recipe
+      // inside the entry may name the entry by number too (Workday's
+      // field-of-study click names education-%NUMBER0%), and the page's own
+      // number is the one that matches, not the entry's position.
+      const numberOf = new Map();
       const allContainers = () => {
-        const found = new Set();
         for (const path of containerPaths) {
-          for (let n = 0; n < 30; n++) for (const el of $x(expand(path, { ...ctx, index: n }))) found.add(el);
+          for (let n = 0; n < 30; n++) for (const el of $x(expand(path, { ...ctx, index: n }))) if (!numberOf.has(el)) numberOf.set(el, n);
         }
-        return [...found].sort((a, b) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1));
+        return [...numberOf.keys()].sort((a, b) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1));
       };
       // A nested group of one widget (company inside an experience, school
       // inside an education) has no container of its own: it fills inside
@@ -823,14 +827,16 @@
       // Summary box).
       const root = containers[i] || containers[containers.length - 1];
       if (!root) break;
-      note(`${fact} entry ${i + 1}: filling`);
+      const pageNumber = entryNumber ?? numberOf.get(root) ?? i;
+      const entryCtx = { ...ctx, index: pageNumber };
+      note(`${fact} entry ${i + 1}: filling${pageNumber !== i ? ` (page number ${pageNumber + 1})` : ""}`);
       for (const nested of group.fields || []) {
         // A nested group of one field ("major" holding "name") takes the
         // outer name's value: the inner "name" is the widget, not the fact.
         const value = entryValue(asName || nested.name, item, fact);
         if (value === null) continue;
         for (const v of nested.variants) {
-          if (isGroup(v)) await fillGroup({ ...v, containerPath: v.containerPath || [] }, [item], file, fact, asName || nested.name, root);
+          if (isGroup(v)) await fillGroup({ ...v, containerPath: v.containerPath || [] }, [item], file, fact, asName || nested.name, root, pageNumber);
         }
         const plain = nested.variants.filter((v) => !isGroup(v));
         if (plain.length) {
@@ -841,7 +847,7 @@
             const multi = plain.some((v) => list(v.paths).some((p) => /multiselect/i.test(p)));
             const parts = multi ? String(value).split("|").map((x) => x.trim()).filter(Boolean) : [String(value)];
             let took = false;
-            for (const part of parts) took = (await fillVariants(plain, part, file, root, ctx)) || took;
+            for (const part of parts) took = (await fillVariants(plain, part, file, root, entryCtx)) || took;
             note(`${nested.name} = "${String(value).slice(0, 40)}": ${took ? "took" : "not taken"}${multi ? ` (${parts.length} picks)` : ""}`);
           } catch (e) {
             note(`${nested.name}: ${String(e)}`);
