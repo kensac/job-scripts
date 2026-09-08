@@ -497,4 +497,52 @@ def test_a_consent_paragraph_is_a_label_too(client, user_headers):
         headers=user_headers,
     )
     assert res.status_code == 200, res.text
-    assert res.json()["fields"][0]["rung"] == ""
+    # And a one-box certification is filled: the person asked for every
+    # required field to be filled, consents included.
+    assert res.json()["fields"][0]["rung"] == "profile"
+    assert res.json()["fields"][0]["value"] == "I agree"
+
+
+def test_consents_are_given_and_a_reader_may_name_the_fact(client, user_headers):
+    """The person's standing instruction: every field that has to be filled
+    is filled, consents included; the extension relays the consent of the one
+    person it fills for. A config-driven reader that knows a selector's fact
+    sends it, and the label is not read."""
+    client.put(
+        "/v1/user/profile", json={**_profile(), "phone": "(814) 441-0134"}, headers=user_headers
+    )
+    fields = [
+        {
+            "key": "c1",
+            "label": "Applicant Arbitration Agreement Acknowledgement",
+            "kind": "multiselect",
+            "options": ["I acknowledge that I have read the Arbitration Agreement."],
+        },
+        {
+            "key": "c2",
+            "label": "Candidate Confidentiality Acknowledgment",
+            "kind": "select",
+            "options": ["I agree", "I do not agree"],
+        },
+        {
+            "key": "c3",
+            "label": "Do you consent to Socure processing your data?",
+            "kind": "yesno",
+            "options": ["Yes", "No"],
+        },
+        {"key": "f1", "label": "some unreadable label", "kind": "text", "fact": "phone_digits"},
+        {"key": "f2", "label": "x", "kind": "yesno", "options": ["Yes", "No"], "fact": "yes"},
+    ]
+    got = {
+        f["key"]: (f["rung"], f["value"])
+        for f in client.post(
+            "/v1/user/apply/resolve",
+            json={"url": "https://x.test/a", "fields": fields},
+            headers=user_headers,
+        ).json()["fields"]
+    }
+    assert got["c1"] == ("profile", "I acknowledge that I have read the Arbitration Agreement.")
+    assert got["c2"] == ("profile", "I agree")
+    assert got["c3"] == ("profile", "Yes")
+    assert got["f1"] == ("profile", "8144410134")
+    assert got["f2"] == ("profile", "Yes")

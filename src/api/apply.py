@@ -18,6 +18,7 @@ than from a classifier whose misses nobody can see.
 
 from __future__ import annotations
 
+import datetime
 import re
 from typing import Any, Literal
 
@@ -114,6 +115,9 @@ class Field_(BaseModel):
     kind: str = Field(default="text", max_length=20)
     required: bool = False
     options: list[str] = Field(default_factory=list, max_length=200)
+    # A config-driven reader knows which fact a selector fills (first_name,
+    # needs_sponsorship, resume); when it says so, the label is not read.
+    fact: str | None = Field(default=None, max_length=40)
 
 
 def normalize(label: str) -> str:
@@ -170,6 +174,13 @@ _RULES: tuple[tuple[str, str], ...] = (
     (r"\b(race|ethnicit)", "ethnicity"),
     (r"\bveteran\b|\bmilitary\b", "veteran"),
     (r"\bdisabilit", "disability"),
+    # The person's standing instruction (2026-09-08): every field that has
+    # to be filled is filled, consents included. The extension relays the
+    # consent of the one person it fills for.
+    (
+        r"\b(acknowledg|consent|certif|agree|privacy notice|terms and conditions|arbitration)",
+        "consent",
+    ),
     (r"\b(previous|prior|last) (employer|company)\b", "previous_company"),
     (r"\b(previous|prior|last) (title|role|position)\b", "previous_title"),
     (
@@ -191,7 +202,14 @@ _RULES: tuple[tuple[str, str], ...] = (
     (r"\b(location|located|based|reside|residence|where do you live)\b", "location"),
 )
 
-YESNO_FACTS = {"work_authorized", "needs_sponsorship", "willing_to_relocate", "willing_onsite"}
+YESNO_FACTS = {
+    "work_authorized",
+    "needs_sponsorship",
+    "willing_to_relocate",
+    "willing_onsite",
+    "consent",
+    "yes",
+}
 YES = re.compile(r"^(yes|y|true)\b", re.I)
 NO = re.compile(r"^(no|n|false)\b", re.I)
 DECLINED = re.compile(
@@ -207,8 +225,21 @@ def rule_for(label: str) -> str | None:
     return None
 
 
+CONSENT = "Yes | I agree | I accept | I acknowledge | I consent | I confirm | I certify"
+
+
 def profile_value(profile: Profile, fact: str) -> str:
-    """The profile's answer for a fact, "" when it has none."""
+    """The profile's answer for a fact, "" when it has none. A few facts are
+    not on the profile: consent (always given), today's date, "yes" (a
+    config-driven reader's over-18 check), the phone as digits."""
+    if fact == "consent":
+        return CONSENT
+    if fact == "yes":
+        return "Yes"
+    if fact == "today":
+        return datetime.datetime.now(datetime.UTC).date().isoformat()
+    if fact == "phone_digits":
+        return re.sub(r"\D", "", profile.phone)
     if fact in ("full_name", "location"):
         return getattr(profile, fact)
     if fact in ("current_company", "current_title", "previous_company", "previous_title"):
@@ -322,6 +353,9 @@ def resolve(user_id: int, job_id: int | None, fields: list[Field_]) -> list[dict
             )
         elif norm in bank:
             rung, value = "bank", bank[norm]["value"]
+        elif f.fact and f.fact != "resume" and (raw := profile_value(profile, f.fact)):
+            # The reader named the fact; no label to read.
+            rung, value = "profile", raw
         elif (
             (fact := rule_for(f.label))
             and (f.kind != "yesno" or fact in YESNO_FACTS)
@@ -329,6 +363,14 @@ def resolve(user_id: int, job_id: int | None, fields: list[Field_]) -> list[dict
             and (raw := profile_value(profile, fact))
         ):
             rung, value = "profile", raw
+        # A consent with one box is that box, whatever it is called.
+        if (
+            rung == "profile"
+            and value == CONSENT
+            and f.kind == "multiselect"
+            and len(f.options) == 1
+        ):
+            value = f.options[0]
         elif f.key in drafts:
             rung, value = "draft", drafts[f.key]
         elif norm in by_question:
