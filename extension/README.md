@@ -60,6 +60,14 @@ Readers are single-page: a paginated form with a proxy submit button
 (Workday, Taleo, iCIMS and the rest of that tier) is out of scope until
 readers gain a step model.
 
+Every other ATS under `ats/` (49 of them, Workday, SmartRecruiters, iCIMS,
+Jobvite, Workable, Rippling and the rest) is filled by `engine.js` from
+that data: fields that know their fact, custom questions found by
+selector, and forms that span pages, advanced page by page up to the one
+that submits. Consents are filled: the extension relays your consent.
+Workday and the other enterprise systems need you signed in first; the
+panel appears once the form does.
+
 One reader per ATS lives under `readers/`. A reader exposes `ready`,
 `read` (fields with key, label, kind, required, options), `fill`,
 `current`, `submitButton` and `submitted` (the ATS's own confirmation

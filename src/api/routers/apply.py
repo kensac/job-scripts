@@ -92,6 +92,9 @@ def delete_answer(answer_id: int, user: AuthedUser = Depends(require_user)):
 class ResolveBody(BaseModel):
     url: str = Field(min_length=1, max_length=2000)
     fields: list[apply.Field_] = Field(max_length=300)
+    # Which page of a multi-page form this is; the ledger keeps one fill per
+    # page so a Workday application is several rows on one url.
+    step: int = Field(default=0, ge=0, le=50)
 
 
 @router.post("/user/apply/resolve")

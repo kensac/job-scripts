@@ -18541,6 +18541,18 @@
             "type": "array",
             "maxItems": 200,
             "title": "Options"
+          },
+          "fact": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 40
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fact"
           }
         },
         "type": "object",
@@ -19662,6 +19674,13 @@
             "type": "array",
             "maxItems": 300,
             "title": "Fields"
+          },
+          "step": {
+            "type": "integer",
+            "maximum": 50.0,
+            "minimum": 0.0,
+            "title": "Step",
+            "default": 0
           }
         },
         "type": "object",

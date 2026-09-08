@@ -125,7 +125,7 @@
   //
   // On the Yext form, 2026-09-08, a visible tab left every react-select
   // closed to a mousedown on the control, a focus event, ArrowDown and
-  // typing (report 3). Simplify fills the same widgets with one sequence on
+  // typing (report 3). The sequence that works on these widgets goes on
   // the value box: a focus event, mousedown, mouseup, click, and up to
   // eight seconds of patience for the menu; that sequence goes first. The
   // menu's options carry ids of the form react-select-<input id>-option-N,
@@ -163,7 +163,7 @@
     const wants = String(value ?? "").split("|").map((s) => s.trim()).filter(Boolean);
     for (const want of wants) {
       const low = want.toLowerCase();
-      // 1. Simplify's gesture on the value box, with its patience.
+      // 1. The value-box gesture, with patience.
       gesture(valueBox);
       let open = await waitOpen("gesture", 3000);
       // 2. The same on the control, then the focus it hands the input.

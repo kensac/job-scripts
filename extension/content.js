@@ -21,12 +21,17 @@
   // The model is asked about these; free text has the drafts, and a file
   // or a date picker is the person's.
   const ASKABLE = new Set(["text", "number", "select", "yesno", "multiselect"]);
-  // Agreeing to something is the person's click, never the model's.
-  const CONSENT = /acknowledg|consent|agree|certif|arbitration|privacy|terms/i;
-  const askable = (e) => ASKABLE.has(e.kind) && !CONSENT.test(e.label || "");
+  // Consents are filled like everything else: the extension relays the
+  // consent of the one person it fills for, who asked for exactly that.
+  const askable = (e) => ASKABLE.has(e.kind);
 
   let panel = null;
+  let step = 0;
   let fields = [];
+  const clickThrough = (el) => {
+    for (const t of ["mousedown", "mouseup"]) el.dispatchEvent(new MouseEvent(t, { bubbles: true, cancelable: true }));
+    el.click();
+  };
   let fill = null;
   let filled = new Map();
   let lastError = null;
@@ -128,6 +133,7 @@
     const res = await api("user/apply/resolve", "POST", {
       url: location.href,
       fields: fields.map(plain),
+      step: step,
     });
     if (!res.ok) {
       lastError = res;
@@ -167,6 +173,20 @@
     await askModel(fill.fields.filter((e) => !isFilled(e) && askable(e)));
     await verify();
     show();
+    // A form that spans pages: when this page has a Continue and no Submit,
+    // go on to the next page and fill it too, until the page that submits.
+    // Continue is not Submit; the person still clicks that.
+    if (reader.nextButton && !reader.submitButton() && reader.nextButton() && step < 12) {
+      const before = fingerprint();
+      clickThrough(reader.nextButton());
+      for (let i = 0; i < 40 && fingerprint() === before; i++) await sleep(250);
+      await settle();
+      if (reader.ready()) {
+        step += 1;
+        fields = await reader.read();
+        return run();
+      }
+    }
     // Ashby parses an attached resume on its server and, when the answer
     // comes back seconds later, resets the form's own record of its fields
     // while the inputs keep showing what was typed (Clera, 2026-09-07: the
