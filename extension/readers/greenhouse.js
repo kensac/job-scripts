@@ -79,8 +79,33 @@
         list.push({ name: f.name, label: clean(q.label), required: !!q.required, type: f.type, values: (f.values || []).map((v) => v.label) });
       }
     }
+    // The employer's own self-identification questions (gender identity,
+    // transgender, orientation, race, veteran, disability, first generation
+    // on Gusto's form, report 5). They have no field name on the page, so
+    // the control is found by the question's label.
+    for (const q of (j.demographic_questions && j.demographic_questions.questions) || []) {
+      const options = (q.answer_options || []).filter((o) => !o.free_form).map((o) => clean(o.label));
+      list.push({ name: `demographic_${q.id}`, label: clean(q.label), required: !!q.required, type: q.type, values: options, byLabel: true });
+    }
     cached = { key, list };
     return list;
+  }
+
+  // The control under the label that reads like this question.
+  function controlByLabel(label) {
+    const want = clean(label).toLowerCase();
+    for (const lab of document.querySelectorAll(`${FORM} label`)) {
+      const t = clean(lab.innerText).toLowerCase();
+      if (!t || !(t === want || t.startsWith(want.slice(0, 60)) || want.startsWith(t.slice(0, 60)))) continue;
+      const id = lab.getAttribute("for");
+      const byFor = id && document.getElementById(id);
+      if (byFor) return byFor;
+      const inside = lab.querySelector("input:not([type=hidden]), select, textarea");
+      if (inside) return inside;
+      const near = lab.parentElement && lab.parentElement.querySelector("input:not([type=hidden]), select, textarea");
+      if (near) return near;
+    }
+    return null;
   }
 
   function kindOf(f, ctl) {
@@ -95,7 +120,7 @@
   async function read() {
     const out = [];
     for (const f of await questions()) {
-      const ctl = control(f.name);
+      const ctl = f.byLabel ? controlByLabel(f.label) : control(f.name);
       if (!ctl) continue;
       const kind = kindOf(f, ctl);
       out.push({
@@ -189,10 +214,15 @@
         opts = menuOptions();
       }
       trace.push(`options:${opts.length}`);
+      const texts = opts.map((o) => o.innerText.trim().toLowerCase());
+      const parts = wants.map((w) => w.toLowerCase()).flatMap((w) => w.split(",").map((s) => s.trim())).filter((s) => s && s !== low);
       const hit =
-        opts.find((o) => o.innerText.trim().toLowerCase() === low) ||
-        opts.find((o) => o.innerText.trim().toLowerCase().startsWith(low)) ||
-        (search ? opts[0] : null);
+        opts.find((o, i) => texts[i] === low) ||
+        // The result that carries the state or country the person gave,
+        // before the first result that merely starts with the city.
+        (search ? opts.find((o, i) => texts[i].startsWith(low) && parts.some((part) => texts[i].includes(part))) : null) ||
+        opts.find((o, i) => texts[i].startsWith(low)) ||
+        (search ? opts.find((o, i) => parts.some((part) => texts[i].includes(part))) || opts[0] : null);
       if (hit) {
         gesture(hit);
         await sleep(300);

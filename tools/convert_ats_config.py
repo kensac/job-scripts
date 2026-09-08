@@ -90,7 +90,22 @@ FACTS: dict[str, str | None] = {
     "highestDegree": "degree",
     "over18": "yes",
     "resume": "resume",
+    # Repeated groups, filled one entry per profile row.
+    "education": "education",
+    "experience": "experience",
 }
+
+GROUP_KEYS = (
+    "containerPath",
+    "addButtonPath",
+    "confirmAddedPath",
+    "removeExtraButtonPath",
+    "limit",
+    "reverse",
+    "time",
+    "refindPerEntry",
+    "allowReuse",
+)
 
 SKIP_METHODS = {"writeCoverLetter", "uploadCoverLetter", "tptEnableResume", "dijit"}
 
@@ -133,10 +148,11 @@ def _without_constant_answers(node):
     return node
 
 
-def convert_field(name: str, variants: list) -> dict | None:
-    fact = FACTS.get(name)
-    if fact is None and name not in FACTS:
-        return None
+def convert_variants(name: str, variants: list) -> list[dict]:
+    """A field's variants, each a selector list with its method and actions,
+    or a group: a container per entry, an add button, and nested fields
+    converted the same way. A nested field keeps its table name; the engine
+    reads the entry's value and date format off it."""
     out_variants = []
     for raw in variants:
         if isinstance(raw, str):
@@ -146,8 +162,18 @@ def convert_field(name: str, variants: list) -> dict | None:
             continue
         if (raw.get("method") or "default") in SKIP_METHODS:
             continue
-        if "inputSelectors" in raw or "addButtonPath" in raw:
-            # A repeated group (education, experience): a later slice.
+        if "inputSelectors" in raw:
+            group: dict = {"group": True}
+            for k in GROUP_KEYS:
+                if k in raw:
+                    group[k] = raw[k]
+            group["fields"] = [
+                {"name": sub_name, "variants": convert_variants(sub_name, sub_variants)}
+                for sub_name, sub_variants in raw["inputSelectors"]
+            ]
+            group["fields"] = [f for f in group["fields"] if f["variants"]]
+            if group["fields"]:
+                out_variants.append(group)
             continue
         paths = raw.get("path")
         if paths is None:
@@ -164,10 +190,20 @@ def convert_field(name: str, variants: list) -> dict | None:
             "everyValue",
             "hidden",
             "visible",
+            "allowReuse",
+            "valueRequired",
         ):
             if k in v:
                 entry[k] = v[k]
         out_variants.append(entry)
+    return out_variants
+
+
+def convert_field(name: str, variants: list) -> dict | None:
+    fact = FACTS.get(name)
+    if fact is None and name not in FACTS:
+        return None
+    out_variants = convert_variants(name, variants)
     if not out_variants:
         return None
     return {"name": name, "fact": fact, "variants": out_variants}
