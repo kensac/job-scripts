@@ -516,7 +516,15 @@
   const submitEl = () => first(cfg.submit || [], {}, document, true)?.el || null;
 
   function groupPresent(spec, root) {
-    return spec.variants.some((v) => isGroup(v) && (first(v.addButtonPath || [], {}, root) || first(v.containerPath || [], {}, root)));
+    return spec.variants.some((v) => isGroup(v) && (first(v.addButtonPath || [], {}, root) || first(v.containerPath || [], { index: 0 }, root) || countEntries(v) > 0));
+  }
+  // How many entries a group shows: its containers under any number the
+  // page gave them, or the rows its confirm path names.
+  function countEntries(v) {
+    const found = new Set();
+    for (const path of list(v.containerPath)) for (let n = 0; n < 30; n++) for (const el of $x(expand(path, { index: n }))) found.add(el);
+    for (const path of list(v.confirmAddedPath)) for (let n = 0; n < 30; n++) for (const el of $x(expand(path, { index: n }))) found.add(el);
+    return found.size;
   }
   // Steps are the table's flow: open the form, expand a section, save it.
   // They run in table order around the fields they sit between, are never
@@ -683,7 +691,7 @@
     if (field.kind === "group") {
       const n = field._spec.variants
         .filter(isGroup)
-        .reduce((acc, v) => acc + (list(v.containerPath).length ? $x(list(v.containerPath)[0]).length : 0) + (list(v.confirmAddedPath).length ? $x(expand(list(v.confirmAddedPath)[0], { index: 0 })).length : 0), 0);
+        .reduce((acc, v) => acc + countEntries(v), 0);
       return n ? `${n} entries` : "";
     }
     if (field._options && field._options.length) {
@@ -766,24 +774,41 @@
       const item = ordered[i];
       const ctx = { index: i, length: ordered.length, item, fact };
       if (i && cfg.fillInputGroupInterval) await sleep(cfg.fillInputGroupInterval);
-      const containerPath = list(group.containerPath)[0];
-      let containers = containerPath ? $x(expand(containerPath, ctx)) : [];
-      if (containerPath && containers.length <= i) {
+      // The entry containers on the page, in page order, whichever number
+      // the page gave each: the table's path counts 1, 2, 3 in %NUMBER0%,
+      // but Workday numbers a block from a running counter (a fresh block
+      // was workExperience-6, report 8), so every number up to thirty is
+      // tried and the i-th container found is the i-th entry.
+      const containerPaths = list(group.containerPath);
+      const allContainers = () => {
+        const found = new Set();
+        for (const path of containerPaths) {
+          for (let n = 0; n < 30; n++) for (const el of $x(expand(path, { ...ctx, index: n }))) found.add(el);
+        }
+        return [...found].sort((a, b) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1));
+      };
+      let containers = containerPaths.length ? allContainers() : [];
+      if (containerPaths.length && containers.length <= i) {
         const add = first(group.addButtonPath || [], ctx);
-        if (!add) break;
+        if (!add) {
+          note(`${fact} entry ${i + 1}: no add button`);
+          break;
+        }
         clickOn(add.el, { noBlur: true });
         const deadline = Date.now() + (group.time || 4000);
         while (Date.now() < deadline) {
-          containers = $x(expand(containerPath, ctx));
+          containers = allContainers();
           if (containers.length > i) break;
           await sleep(150);
         }
+        if (containers.length <= i) note(`${fact} entry ${i + 1}: add clicked, no container appeared`);
       }
       // Inside the entry's container or not at all: against the document
       // the same selector matches the form's own fields (Workable's
       // Summary box).
       const root = containers[i] || containers[containers.length - 1];
       if (!root) break;
+      note(`${fact} entry ${i + 1}: filling`);
       for (const nested of group.fields || []) {
         // A nested group of one field ("major" holding "name") takes the
         // outer name's value: the inner "name" is the widget, not the fact.
