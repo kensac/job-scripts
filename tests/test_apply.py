@@ -749,3 +749,67 @@ def test_the_tables_facts_all_resolve(client, user_headers):
         == "New York"
     )
     assert apply.pick_option(apply.profile_value(ny, "state"), ["NJ", "NY"]) == "NY"
+
+    same = apply.Profile(**{**_profile(), "preferred_name": "Ada"})
+    assert apply.profile_value(same, "preferred_name") == ""
+    other = apply.Profile(**{**_profile(), "preferred_name": "Countess"})
+    assert apply.profile_value(other, "preferred_name") == "Countess"
+
+
+def test_the_resolve_sends_the_profile_by_decision_not_by_default(client, user_headers):
+    """The resolve carries the profile to the person's own extension. A new
+    Profile field rides along unless excluded, so this list is the decision:
+    a field added to Profile fails here until someone says it may leave the
+    server (homelab's note on the d0953bb roll)."""
+    client.put("/v1/user/profile", json=_profile(), headers=user_headers)
+    res = client.post(
+        "/v1/user/apply/resolve",
+        json={
+            "url": "https://x.test/apply",
+            "fields": [{"key": "n", "label": "First Name", "kind": "text"}],
+        },
+        headers=user_headers,
+    ).json()
+    sent = set(res["profile"])
+    allowed = {
+        "first_name",
+        "middle_name",
+        "last_name",
+        "preferred_name",
+        "pronouns",
+        "email",
+        "phone",
+        "phone_type",
+        "birthday",
+        "address",
+        "address_2",
+        "address_3",
+        "city",
+        "state",
+        "postal_code",
+        "country",
+        "linkedin",
+        "github",
+        "website",
+        "twitter",
+        "behance",
+        "dribbble",
+        "visa_status",
+        "referral_source",
+        "work_authorized",
+        "needs_sponsorship",
+        "willing_to_relocate",
+        "willing_onsite",
+        "years_experience",
+        "desired_salary",
+        "start_date",
+        "gender",
+        "ethnicity",
+        "hispanic",
+        "veteran",
+        "disability",
+        "experience",
+        "education",
+    }
+    assert sent == allowed, sorted(sent ^ allowed)
+    assert "notes" not in sent and "default_resume_id" not in sent
