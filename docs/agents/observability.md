@@ -254,7 +254,12 @@ landed in Sudan, "NY" in Nyala) or lost the menu; a wrong city on a
 submitted application costs more than one box. A group's nested fields are
 filled inside the entry's container or not at all, never against the
 document, where the same selector matches the form's own fields.
-The panel's switch "AI answers every blank box" sends the free-text boxes
+Every fill pass posts its own page capture (fields, traces, what was
+filled, the page) to `application_reports` with a note starting `auto:`,
+and so does a page the form refused; the Report button remains for a note
+in the person's words. Every capture carries the build stamp of the
+extension that made it (content.js `BUILD`); a capture without today's
+stamp is a stale folder, not a defect. The panel's switch "AI answers every blank box" sends the free-text boxes
 to the model as well (the drafts cover the ones the board knew about). The
 panel's preferences (that switch, minimised, the theme) are the person's:
 they live in `user_settings.prefs.apply` through the settings endpoints,
