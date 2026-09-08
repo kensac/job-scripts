@@ -101,6 +101,9 @@ _APP_CONFIG_SEED = [
     # Empty means the built-in text in the code; see the admin registry.
     ("application_draft_instructions", ""),
     ("application_suggest_instructions", ""),
+    # The model never fills these on a form; the person does. One label a
+    # line or comma-separated, whole words in the field's label or key.
+    ("application_ai_never_fills", "location"),
     ("application_drafts_per_cycle", 500),
     # Whether the hourly requirements extraction runs. Off since 2026-09-07:
     # its one consumer is the market table, and the deployed arm was measured

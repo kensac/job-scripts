@@ -23,7 +23,17 @@
   const ASKABLE = new Set(["text", "number", "select", "yesno", "multiselect"]);
   // Consents are filled like everything else: the extension relays the
   // consent of the one person it fills for, who asked for exactly that.
-  const askable = (e) => ASKABLE.has(e.kind);
+  // With the switch on, the free-text boxes go to the model as well (the
+  // drafts cover the ones the board knew about). The admin's never-fill
+  // list (location, for one) is applied by the API, which names the
+  // fields it kept back so the panel lists them as the person's.
+  let aiAll = false;
+  try {
+    aiAll = localStorage.getItem("jt-apply-ai-all") === "1";
+  } catch (_) {
+    aiAll = false;
+  }
+  const askable = (e) => !e.never_ai && (ASKABLE.has(e.kind) || (aiAll && e.kind === "long"));
 
   let panel = null;
   let step = 0;
@@ -50,8 +60,17 @@
       <div class="head"><h3>Job Tracker Apply</h3>
         <button id="jt-min" title="${collapsed ? "Expand" : "Minimise"}">${collapsed ? "+" : "–"}</button></div>
       <div class="body">${html}
+        <label class="muted switch"><input type="checkbox" id="jt-ai-all" ${aiAll ? "checked" : ""}> AI answers every blank box, free text too</label>
         <div id="jt-report"><button id="jt-report-btn">Report this page</button></div></div>`;
     panel.querySelector("#jt-report-btn").onclick = reportForm;
+    panel.querySelector("#jt-ai-all").onchange = (ev) => {
+      aiAll = ev.target.checked;
+      try {
+        localStorage.setItem("jt-apply-ai-all", aiAll ? "1" : "0");
+      } catch (_) {
+        // Nothing to remember it in; it holds for this page.
+      }
+    };
     panel.querySelector("#jt-min").onclick = () => {
       collapsed = !collapsed;
       try {
@@ -150,6 +169,8 @@
     }
     fill = res.json;
     filled = new Map();
+    // A field the reader leaves to the person is never offered to the model.
+    for (const entry of fill.fields) if (fieldByKey(entry.key)?._person) entry.never_ai = true;
     // Repeated groups are filled from the profile's rows, not a value.
     window.__jtProfile = fill.profile || {};
     let file = null;
@@ -276,12 +297,17 @@
     render(`<p class="muted">Asking the model about ${entries.length} fields…</p>`);
     const res = await api("user/apply/suggest", "POST", {
       job_id: fill.job_id,
+      fill_id: fill.fill_id,
       fields: entries.map((e) => ({ key: e.key, label: e.label || e.key, kind: e.kind, options: e.options, hint: e.hint })),
     });
     if (!res.ok) {
       lastError = res;
       fill.ai_error = res.json?.detail?.code || res.status;
       return;
+    }
+    for (const key of res.json.skipped || []) {
+      const entry = entryByKey(key);
+      if (entry) entry.never_ai = true;
     }
     for (const [key, answer] of Object.entries(res.json.answers || {})) {
       const entry = entryByKey(key);
@@ -296,11 +322,11 @@
   function show() {
     const done = fill.fields.filter(isFilled);
     const todo = fill.fields.filter((e) => !isFilled(e));
-    const li = (e, extra = "") => `<li><span>${esc(e.label || e.key)}</span>${extra}</li>`;
+    const li = (e, extra = "") => `<li><span>${esc(e.label || e.key)}</span>${e.ai_note ? `<span class="muted">${esc(e.ai_note)}</span>` : ""}${extra}</li>`;
     render(`
       <p>${fill.job_id ? "On your board." : '<span class="warn">Not a posting on your board, so no drafts.</span>'}</p>
       <p><b>${done.length} filled</b>${todo.length ? `, <b class="todo">${todo.length} for you</b>` : ""}.${fill.ai_error ? ` <span class="warn">Model call failed: ${esc(fill.ai_error)}.</span>` : ""}</p>
-      ${todo.length ? `<ul>${todo.map((e) => li(e, e.kind === "file" ? '<span class="muted">attach the file</span>' : `<button data-ai="${esc(e.key)}">fill with AI</button>`)).join("")}</ul>` : ""}
+      ${todo.length ? `<ul>${todo.map((e) => li(e, e.kind === "file" ? '<span class="muted">attach the file</span>' : e.never_ai ? '<span class="muted">yours to fill</span>' : `<button data-ai="${esc(e.key)}">fill with AI</button>`)).join("")}</ul>` : ""}
       <details><summary class="muted">filled (${done.length})</summary><ul>${done.map((e) => li(e, `<span class="muted">${esc(e.rung)}</span>`)).join("")}</ul></details>
       <details><summary class="muted">how this works</summary><p class="muted">Check the form, then click its own Submit button. What you type or pick, and every model answer you leave in place, is remembered for the next form with the same question; free-text answers are not.</p></details>
       <button id="jt-again">Fill again</button>
@@ -313,7 +339,12 @@
       btn.onclick = async () => {
         btn.disabled = true;
         btn.textContent = "asking…";
-        await askModel([entryByKey(btn.dataset.ai)]);
+        const entry = entryByKey(btn.dataset.ai);
+        await askModel([entry]);
+        if (!isFilled(entry) && !fill.ai_error) {
+          const f = filled.get(entry.key);
+          entry.ai_note = f && f.value ? "the form did not take the answer" : "the model had no answer";
+        }
         show();
       };
     }

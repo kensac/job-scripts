@@ -5,6 +5,7 @@ what to improve next. api.apply holds the resolving itself."""
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -199,6 +200,8 @@ class SuggestField(BaseModel):
 class SuggestBody(BaseModel):
     fields: list[SuggestField] = Field(min_length=1, max_length=100)
     job_id: int | None = None
+    # The fill this belongs to; the model's answers go on its ledger row.
+    fill_id: int | None = None
 
 
 class SuggestedAnswer(BaseModel):
@@ -216,9 +219,23 @@ DEFAULT_SUGGEST = (
     "not invent facts. For a field with options, the answer is exactly one "
     "of the options as written; when a hint is given, it is the person's own "
     "answer and you choose the option that means it. A text field takes a "
-    "short phrase, a number field a number. When the profile and resume do "
-    "not say, answer with an empty string rather than a guess."
+    "short phrase, a number field a number, and a long field a short paragraph "
+    "in the person's own voice drawn from the resume. When the profile and resume "
+    "do not say, answer with an empty string rather than a guess."
 )
+
+
+def never_filled(fields: list[SuggestField]) -> list[str]:
+    """The keys of the fields the admin list keeps from the model."""
+    raw = db.get_config("application_ai_never_fills") or ""
+    words = [w.strip().lower() for w in re.split(r"[\n,]", raw) if w.strip()]
+    if not words:
+        return []
+    return [
+        f.key
+        for f in fields
+        if any(re.search(rf"\b{re.escape(w)}\b", f"{f.label} {f.key}".lower()) for w in words)
+    ]
 
 
 @router.post("/user/apply/suggest")
@@ -227,6 +244,11 @@ async def suggest(body: SuggestBody, user: AuthedUser = Depends(require_user)):
     own model settings. The extension fills the answers; the person still
     sees them in the form before submitting, and an answer left in place
     goes into the bank on submit."""
+    skipped = never_filled(body.fields)
+    fields = [f for f in body.fields if f.key not in skipped]
+    if not fields:
+        _note_on_fill(user.id, body.fill_id, {}, {}, skipped)
+        return {"answers": {}, "skipped": skipped, "model": None}
     profile = apply.load_profile(user.id)
     resume = drafts.resume_text(user.id, profile.default_resume_id) or ""
     ent = budget.get_entitlement(user)
@@ -244,7 +266,7 @@ async def suggest(body: SuggestBody, user: AuthedUser = Depends(require_user)):
     parts = []
     if job:
         parts.append(f"Job: {job['title']} at {job['company']}")
-    parts.append("Fields:\n" + json.dumps([f.model_dump() for f in body.fields], indent=1))
+    parts.append("Fields:\n" + json.dumps([f.model_dump() for f in fields], indent=1))
     if profile.notes:
         parts.append("The person's standing answers, in their own words:\n" + profile.notes)
     parts.append("Profile:\n" + profile.model_dump_json(exclude={"default_resume_id", "notes"}))
@@ -263,18 +285,53 @@ async def suggest(body: SuggestBody, user: AuthedUser = Depends(require_user)):
     )
     if parsed is None:
         raise _bad(502, "NO_ANSWER", "the model returned no usable answer; try again")
-    by_key = {f.key: f for f in body.fields}
+    by_key = {f.key: f for f in fields}
     answers = {}
+    raw = {}
     for a in parsed.answers:
         field = by_key.get(a.key)
         text = a.answer.strip()
         if not field or not text:
             continue
+        raw[a.key] = text
         if field.options:
             text = apply.pick_option(text, field.options) or ""
         if text:
             answers[a.key] = text
-    return {"answers": answers, "model": cfg.model}
+    _note_on_fill(user.id, body.fill_id, answers, raw, skipped)
+    return {"answers": answers, "skipped": skipped, "model": cfg.model}
+
+
+def _note_on_fill(
+    user_id: int, fill_id: int | None, answers: dict, raw: dict, skipped: list[str]
+) -> None:
+    """The model's answers on the fill's ledger row as they return, so a
+    fill nobody submitted still says what the model said: the text as
+    written (ai_answer), the value it became (rung "ai") when an option
+    recognisably held it, and the fields kept from it."""
+    if fill_id is None:
+        return
+    fill = db.query_one(
+        "SELECT fields FROM application_fills WHERE id = %s AND user_id = %s",
+        (fill_id, user_id),
+    )
+    if not fill:
+        return
+    fields = []
+    for read in fill["fields"]:
+        entry = dict(read)
+        key = entry.get("key")
+        if key in raw:
+            entry["ai_answer"] = raw[key]
+        if key in answers:
+            entry["rung"] = "ai"
+            entry["value"] = answers[key]
+        if key in skipped:
+            entry["never_ai"] = True
+        fields.append(entry)
+    db.execute(
+        "UPDATE application_fills SET fields = %s WHERE id = %s", (db.jsonb(fields), fill_id)
+    )
 
 
 class ReportBody(BaseModel):

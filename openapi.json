@@ -20900,6 +20900,17 @@
               }
             ],
             "title": "Job Id"
+          },
+          "fill_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fill Id"
           }
         },
         "type": "object",
