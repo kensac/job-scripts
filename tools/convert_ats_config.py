@@ -9,11 +9,15 @@ extension/manifest.json, so a page loads only its own table. Names after
 --exclude are skipped (the ATSs with hand-written readers).
 
 The table is field-first: each selector says which fact it fills. Field
-names are mapped onto the profile's facts; a field with no fact (cover
-letter, middle name, birthday, a second copy of an email) is dropped,
-and a whole ATS is dropped when it has no url globs a content script can
-match (globs with a query string, like Lever's ?LeverAppId embed, cannot
-be expressed as a match pattern and would need every host).
+names are mapped onto the profile's facts. Nothing is dropped: a name with
+no fact of its own is kept with fact None and resolved by its label on the
+page (the model drafts a cover letter when the person's switch is on); a
+name that is a flow step with no value (begin, save, expand a section,
+wait for the location box) is kept with fact "step" and run in table
+order. A whole ATS is dropped only when it has no url globs at all
+(Homerun, PhenomPeople, Teamtailor live on employers' own domains and need
+a page detector, which is a separate decision); an all-host glob with a
+distinctive path (BrassRing's /TGnewUI/) becomes an all-host match pattern.
 """
 
 from __future__ import annotations
@@ -89,11 +93,128 @@ FACTS: dict[str, str | None] = {
     "current_company_name": "current_company",
     "highestDegree": "degree",
     "over18": "yes",
+    "over21": "yes",
+    "hasExperience": "yes",
+    "current_employee": "no",
+    "in_country": "yes",
+    "armed_forces": "veteran",
+    "visible_minority": "decline",
+    "salary_requirements": "desired_salary",
+    "phone_extension": None,
     "resume": "resume",
     # Repeated groups, filled one entry per profile row.
     "education": "education",
     "experience": "experience",
+    # Second and third copies of a field, other names for one fact.
+    "work_auth_2": "work_authorized",
+    "work_auth_3": "work_authorized",
+    "work_auth_us": "work_authorized",
+    "sponsorship_3": "needs_sponsorship",
+    "gender_3": "gender",
+    "multiple_ethnicities": "ethnicity",
+    "linkedin_2": "linkedin",
+    "linkedin_3": "linkedin",
+    "additional_url_2": "website",
+    "additional_url_3": "website",
+    "home_phone": "phone",
+    "phone_stripped_2": "phone_digits",
+    "preferred_first_name_2": "preferred_name",
+    "preferred_last_name": "last_name",
+    "legal_name": "full_name",
+    "source_2": "referral_source",
+    "source_other": "referral_source",
+    "source_description": "referral_source",
+    "current_job_title": "current_title",
+    "title": "current_title",
+    "currently_working": "yes",
+    # Profile fields added for the table (2026-09-08).
+    "middle_name": "middle_name",
+    "address_2": "address_2",
+    "address_3": "address_3",
+    "behance": "behance",
+    "dribbble": "dribbble",
+    "pronouns": "pronouns",
+    "phone_type": "phone_type",
+    "phone_country": "phone_country",
+    "phone_country_2": "phone_country",
+    "phone_country_3": "phone_country",
+    "phone_country_4": "phone_country",
+    "birthday_M": "birthday",
+    "birthday_MM": "birthday",
+    "birthday_D": "birthday",
+    "birthday_DD": "birthday",
+    "birthday_YYYY": "birthday",
+    "birthday_slashes_MDYYYY": "birthday",
+    # Dates of today in the form's format; the engine formats by the name.
+    "current_date_MM": "today",
+    "current_date_YYYY": "today",
+    "current_date_D": "today",
+    "current_date_DD": "today",
+    "current_date_slashes_MMDDYYYY": "today",
+    "current_date_slashes_MDDYY": "today",
+    # Self-identification the profile does not hold: declined.
+    "transgender": "decline",
+    "lgbt_v2": "decline",
+    "lgbt_v2_2": "decline",
+    "lgbt_v2_3": "decline",
+    # Resolved by label, drafted by the model when the switch is on.
+    "coverLetter": None,
+    "cover_letter": None,
+    "education_summary": None,
+    "experience_summary": None,
+    "language": None,
+    "languages": None,
+    "languages_text": None,
+    "language_preferred": None,
+    "skill": None,
+    "skills": None,
+    "referred_by": None,
+    "preferred_contact_method": None,
+    "has_drivers_license": None,
+    "username": None,
 }
+
+# Flow steps: a click or a wait with no value, run in table order.
+STEPS = {
+    "begin",
+    "resume_begin",
+    "begin_education",
+    "begin_experience",
+    "save",
+    "save_education",
+    "save_experience",
+    "save_contact_section",
+    "save_personal_section",
+    "save_preferences_section",
+    "save_websites",
+    "expand_contact_section",
+    "expand_personal_info_section",
+    "expand_preferences_section",
+    "wait_for_location_loaded",
+    "confirm_resume",
+    "mark_relevant",
+    "mark_resume",
+    "done",
+    "delay",
+    "delete_extra",
+    "clear_profile",
+    "cover_letter_method_fallback",
+}
+
+# Behaviour the engine reads under the table's own names.
+TOP_KEYS = (
+    "applyButtonPaths",
+    "urlsExcluded",
+    "pathsExcluded",
+    "embeddedPaths",
+    "containerRequired",
+    "fillInputInterval",
+    "fillInputGroupInterval",
+    "orderByDomPosition",
+    "deferSubmissionModalPaths",
+    "validationScopePaths",
+    "applyOptionPaths",
+)
 
 GROUP_KEYS = (
     "containerPath",
@@ -107,7 +228,7 @@ GROUP_KEYS = (
     "allowReuse",
 )
 
-SKIP_METHODS = {"writeCoverLetter", "uploadCoverLetter", "tptEnableResume", "dijit"}
+SKIP_METHODS = {"uploadCoverLetter", "tptEnableResume", "dijit"}
 
 
 def glob_to_match(glob: str) -> str | None:
@@ -117,7 +238,10 @@ def glob_to_match(glob: str) -> str | None:
         return None
     g = re.sub(r"\*{2,}", "*", glob.replace("*://", "https://"))
     if g.startswith("https://*/"):
-        return None
+        # Every host, so only with a path that names the ATS (BrassRing's
+        # /TGnewUI/); a bare "https://*/*" would run on the whole web.
+        path = g[len("https://*") :]
+        return f"https://*{path}" if len(path.strip("/*")) >= 6 else None
     m = re.match(r"^https://([^/]+)(/.*)?$", g)
     if not m:
         return None
@@ -192,6 +316,12 @@ def convert_variants(name: str, variants: list) -> list[dict]:
             "visible",
             "allowReuse",
             "valueRequired",
+            "array",
+            "optionsSource",
+            "valuePathMap",
+            "manual",
+            "valueElementTime",
+            "time",
         ):
             if k in v:
                 entry[k] = v[k]
@@ -200,9 +330,7 @@ def convert_variants(name: str, variants: list) -> list[dict]:
 
 
 def convert_field(name: str, variants: list) -> dict | None:
-    fact = FACTS.get(name)
-    if fact is None and name not in FACTS:
-        return None
+    fact = "step" if name in STEPS else FACTS.get(name)
     out_variants = convert_variants(name, variants)
     if not out_variants:
         return None
@@ -227,7 +355,15 @@ def convert(ats: dict, name: str) -> dict | None:
         "defaultMethod": ats.get("defaultMethod") or "default",
         "defaultEventOptions": ats.get("defaultEventOptions") or {},
     }
+    for k in TOP_KEYS:
+        if k in ats:
+            out[k] = ats[k]
     return out
+
+
+# A variant's `values` may name one of the table's shared maps instead of
+# carrying its own; the engine resolves the name through these.
+VALUE_MAPS = ("countryAbbreviationsToNames", "stateAbbreviationsToNames")
 
 
 def main(argv: list[str]) -> int:
@@ -235,13 +371,16 @@ def main(argv: list[str]) -> int:
     rest = argv[2:]
     excluded = set(rest[rest.index("--exclude") + 1 :]) if "--exclude" in rest else set()
     wanted = set(rest[: rest.index("--exclude")] if "--exclude" in rest else rest)
-    table = json.loads(source.read_text())["ATS"]
+    whole = json.loads(source.read_text())
+    table = whole["ATS"]
+    value_maps = {k: whole[k] for k in VALUE_MAPS if k in whole}
     configs = []
     for name, ats in table.items():
         if not isinstance(ats, dict) or (wanted and name not in wanted) or name in excluded:
             continue
         converted = convert(ats, name)
         if converted:
+            converted["valueMaps"] = value_maps
             configs.append(converted)
     configs.sort(key=lambda c: c["name"])
     out_dir = ROOT / "extension" / "ats"

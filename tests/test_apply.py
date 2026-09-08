@@ -718,3 +718,34 @@ def test_a_field_the_form_reveals_joins_the_open_fill(client, user_headers):
         headers=user_headers,
     ).json()
     assert third["fill_id"] != first["fill_id"]
+
+
+def test_the_tables_facts_all_resolve(client, user_headers):
+    """The selector table's field names all map to a fact now; each fact has a
+    value: the profile's own new fields, the derived phone country, the
+    constant no, and a step that carries nothing."""
+    assert apply.rule_for("Middle Name") == "middle_name"
+    assert apply.rule_for("Address Line 2") == "address_2"
+    assert apply.rule_for("Apartment, suite, etc.") == "address_2"
+    assert apply.rule_for("Street Address") == "address"
+    assert apply.rule_for("Behance URL") == "behance"
+    assert apply.rule_for("Phone Type") == "phone_type"
+    assert apply.rule_for("Date of Birth") == "birthday"
+    assert apply.rule_for("Pronouns (optional)") == "pronouns"
+    profile = apply.Profile(**{**_profile(), "middle_name": "Byron", "birthday": "1815-12-10"})
+    assert apply.profile_value(profile, "middle_name") == "Byron"
+    assert apply.profile_value(profile, "birthday") == "1815-12-10"
+    assert apply.profile_value(profile, "phone_type") == "Mobile"
+    assert apply.profile_value(profile, "phone_country") == "United Kingdom"
+    assert apply.profile_value(profile, "no") == "No"
+    assert apply.profile_value(profile, "step") == ""
+    assert apply.pick_option(apply.profile_value(profile, "no"), ["Yes", "No"]) == "No"
+
+    assert apply.rule_for("Where you found us") == "referral_source"
+    ny = apply.Profile(**{**_profile(), "state": "NY"})
+    assert apply.profile_value(ny, "state") == "NY | New York"
+    assert (
+        apply.pick_option(apply.profile_value(ny, "state"), ["New Jersey", "New York"])
+        == "New York"
+    )
+    assert apply.pick_option(apply.profile_value(ny, "state"), ["NJ", "NY"]) == "NY"

@@ -179,6 +179,25 @@
     },
     {
       "matches": [
+        "https://*/TGnewUI/Search/home/Home*",
+        "https://*/TGnewUI/Search/Home/Home*",
+        "https://*/TGNewUI/Search/home/Home*",
+        "https://*/TGNewUI/Search/Home/Home*",
+        "https://*/TGNewUI/Profile/Home/ProfileBuilder*"
+      ],
+      "js": [
+        "ats/BrassRing.js",
+        "engine.js",
+        "content.js"
+      ],
+      "css": [
+        "panel.css"
+      ],
+      "all_frames": true,
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
         "https://*.breezy.hr/p/*",
         "https://*.breezy.hr/*/apply*"
       ],
@@ -553,7 +572,11 @@
       "matches": [
         "https://*.oraclecloud.com/*/CandidateExperience/*/sites/*/*/preview/*",
         "https://*.oraclecloud.com/*/CandidateExperience/*/sites/*/job/*",
-        "https://*.oraclecloud.com/*/sites/*/job/*"
+        "https://*/*/CandidateExperience/*/sites/*/*/preview/*",
+        "https://*/*/CandidateExperience/*/sites/*/job/*",
+        "https://*/*/sites/*/jobs/preview/*/apply/*",
+        "https://*.oraclecloud.com/*/sites/*/job/*",
+        "https://*/*/sites/CX*/job/*"
       ],
       "js": [
         "ats/OracleCloud.js",

@@ -39,13 +39,33 @@
   // drafts cover the ones the board knew about). The admin's never-fill
   // list (location, for one) is applied by the API, which names the
   // fields it kept back so the panel lists them as the person's.
-  let aiAll = false;
-  try {
-    aiAll = localStorage.getItem("jt-apply-ai-all") === "1";
-  } catch (_) {
-    aiAll = false;
-  }
-  const askable = (e) => !e.never_ai && (ASKABLE.has(e.kind) || (aiAll && e.kind === "long"));
+  // The panel's preferences: minimised, the AI switch, the theme. In
+  // chrome.storage.local, which every ATS host shares, so a panel minimised
+  // on one board stays minimised on the next; localStorage was per origin
+  // and forgot between hosts (job-scripts-5c, 2026-09-08). Read before the
+  // first paint so the panel never flashes the default.
+  const prefs = { collapsed: false, aiAll: false, theme: null };
+  const loadPrefs = async () => {
+    try {
+      const got = await new Promise((r) => chrome.storage.local.get(["collapsed", "aiAll", "theme"], r));
+      if (got && typeof got.collapsed === "boolean") prefs.collapsed = got.collapsed;
+      else prefs.collapsed = localStorage.getItem("jt-apply-collapsed") === "1";
+      if (got && typeof got.aiAll === "boolean") prefs.aiAll = got.aiAll;
+      else prefs.aiAll = localStorage.getItem("jt-apply-ai-all") === "1";
+      prefs.theme = got && (got.theme === "light" || got.theme === "dark") ? got.theme : null;
+    } catch (_) {
+      // Nothing stored or no storage: the defaults hold.
+    }
+  };
+  const savePref = (key, value) => {
+    try {
+      chrome.storage.local.set({ [key]: value });
+    } catch (_) {
+      // Nothing to remember it in; it holds for this page.
+    }
+  };
+  await loadPrefs();
+  const askable = (e) => !e.never_ai && (ASKABLE.has(e.kind) || (prefs.aiAll && e.kind === "long"));
 
   let panel = null;
   let step = 0;
@@ -58,40 +78,50 @@
   let filled = new Map();
   let lastError = null;
   let mountedFor = null;
-  let collapsed = false;
-  try {
-    collapsed = localStorage.getItem("jt-apply-collapsed") === "1";
-  } catch (_) {
-    collapsed = false;
-  }
+
+  // The theme: data-jt-theme="light" or "dark" for an explicit choice, and
+  // no attribute at all for "system", which follows prefers-color-scheme in
+  // panel.css. The button cycles light, dark, system and names the next.
+  const THEME_NEXT = { light: "dark", dark: null, null: "light" };
+  const themeLabel = (t) => (t === "light" ? "Light" : t === "dark" ? "Dark" : "System");
+  const applyTheme = () => {
+    if (!panel) return;
+    if (prefs.theme) panel.setAttribute("data-jt-theme", prefs.theme);
+    else panel.removeAttribute("data-jt-theme");
+    const btn = panel.querySelector("#jt-theme");
+    if (btn) {
+      btn.title = `Theme: ${themeLabel(prefs.theme)}. Switch to ${themeLabel(THEME_NEXT[String(prefs.theme)])}`;
+      btn.textContent = prefs.theme === "light" ? "☀" : prefs.theme === "dark" ? "☾" : "◐";
+    }
+  };
 
   const render = (html) => {
     if (!panel) return;
-    panel.classList.toggle("collapsed", collapsed);
+    panel.classList.toggle("collapsed", prefs.collapsed);
     panel.innerHTML = `
       <div class="head"><h3>Job Tracker Apply</h3>
-        <button id="jt-min" title="${collapsed ? "Expand" : "Minimise"}">${collapsed ? "+" : "–"}</button></div>
+        <button id="jt-theme"></button>
+        <button id="jt-min" title="${prefs.collapsed ? "Expand" : "Minimise"}">${prefs.collapsed ? "+" : "–"}</button></div>
       <div class="body">${html}
-        <label class="muted switch"><input type="checkbox" id="jt-ai-all" ${aiAll ? "checked" : ""}> AI answers every blank box, free text too</label>
+        <label class="muted switch"><input type="checkbox" id="jt-ai-all" ${prefs.aiAll ? "checked" : ""}> AI answers every blank box, free text too</label>
         <div id="jt-report"><button id="jt-report-btn">Report this page</button></div></div>`;
+    applyTheme();
     panel.querySelector("#jt-report-btn").onclick = reportForm;
     panel.querySelector("#jt-ai-all").onchange = (ev) => {
-      aiAll = ev.target.checked;
-      try {
-        localStorage.setItem("jt-apply-ai-all", aiAll ? "1" : "0");
-      } catch (_) {
-        // Nothing to remember it in; it holds for this page.
-      }
+      prefs.aiAll = ev.target.checked;
+      savePref("aiAll", prefs.aiAll);
+    };
+    panel.querySelector("#jt-theme").onclick = () => {
+      prefs.theme = THEME_NEXT[String(prefs.theme)];
+      savePref("theme", prefs.theme);
+      applyTheme();
     };
     panel.querySelector("#jt-min").onclick = () => {
-      collapsed = !collapsed;
-      try {
-        localStorage.setItem("jt-apply-collapsed", collapsed ? "1" : "0");
-      } catch (_) {
-        // Nothing to remember it in; the panel still toggles.
-      }
-      panel.classList.toggle("collapsed", collapsed);
-      panel.querySelector("#jt-min").textContent = collapsed ? "+" : "–";
+      prefs.collapsed = !prefs.collapsed;
+      savePref("collapsed", prefs.collapsed);
+      panel.classList.toggle("collapsed", prefs.collapsed);
+      panel.querySelector("#jt-min").textContent = prefs.collapsed ? "+" : "–";
+      panel.querySelector("#jt-min").title = prefs.collapsed ? "Expand" : "Minimise";
     };
   };
 
@@ -125,6 +155,26 @@
         document.body.appendChild(panel);
       }
       offer();
+    } else if (!fill && reader.applyButton && reader.applyButton()) {
+      // The posting page, with the button that opens the form on it (the
+      // selector table clicks it on 25 ATSs). Offered, never pressed unasked;
+      // once the form appears the tick above takes over.
+      if (mountedFor === here + "#open" && panel) return;
+      mountedFor = here + "#open";
+      if (!panel) {
+        panel = document.createElement("div");
+        panel.id = "jt-apply";
+        document.body.appendChild(panel);
+      }
+      render(`
+        <p>This is the posting. The application form is a click away.</p>
+        <button id="jt-open" class="primary">Open the application</button>
+      `);
+      panel.querySelector("#jt-open").onclick = () => {
+        const btn = reader.applyButton();
+        if (btn) clickThrough(btn);
+        mountedFor = null;
+      };
     } else if (panel && !fill) {
       // No form and nothing recorded on it: the posting page, or a page
       // away from the form. A panel after a submit stays for its message.

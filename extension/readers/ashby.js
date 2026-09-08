@@ -2,20 +2,31 @@
 //
 // Three shapes of field, measured on live forms 2026-09-07. A wrapper
 // (.ashby-application-form-field-entry) carries a label and one control:
-// text, email, tel, url, number, textarea, file, a date picker, a yes/no
-// pair of buttons, or the location search box. A choice question with a
+// text, email, tel, url, number, textarea, file, a date picker, a row of
+// choice buttons (the yes/no pair, or more), or a combobox: the location
+// search box, a country list, a school search. A choice question with a
 // few options is a fieldset of radios, the options' text in the radio
 // labels. A choice question with many options is a fieldset holding a
-// searchable dropdown: ArrowDown opens the full list as
-// .ashby-application-form-input-autocomplete-popup-result elements, and
-// a pointer sequence on one of them picks it. The location search box is
-// the same widget with an unbounded list, filled by typing and taking
-// the first result. In wrappers, the control's id is the key the API's
-// form reader stores drafts under; a radio group's key is its radios'
-// shared name, which is unique per question (the prefix is not).
+// searchable dropdown: ArrowDown opens the full list, whose results are
+// .ashby-application-form-input-autocomplete-popup-result elements on
+// one rendering and div[role=option] in a floating-ui portal on the
+// other; a pointer sequence on one of them picks it. The location search
+// box is the same widget with an unbounded list, filled by typing and
+// taking the first result. In wrappers, the control's id is the key the
+// API's form reader stores drafts under; a radio group's key is its
+// radios' shared name, which is unique per question (the prefix is not).
+//
+// Education is a repeated widget of its own: one repeatableEducationEntry
+// per school with a school search, a degree list, a field of study and
+// month/year selects for the dates, and an add button for the next. The
+// reader offers it as one group field filled from the profile's rows.
 (() => {
   const WRAP = ".ashby-application-form-field-entry";
   const RESULT = ".ashby-application-form-input-autocomplete-popup-result";
+  const PORTAL_RESULT = '[id^="floating-ui-"] [role="option"], [data-floating-ui-portal] [role="option"]';
+  const EDU_ENTRY = '[class*="repeatableEducationEntry"]';
+  const EDU_ADD = 'button[class*="repeatableEducationAddButton"]';
+  const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
   function setNative(el, value) {
@@ -33,9 +44,23 @@
   };
 
   const control = (box) => box.querySelector("input:not([type=hidden]), textarea, select");
-  const isAuto = (ctl) => !!ctl && /autocomplete/.test(ctl.className);
-  const yesno = (box) =>
-    [...box.querySelectorAll("button")].filter((b) => /^(yes|no)$/i.test(b.innerText.trim()));
+  // A combobox by any of the marks Ashby has given it: the class, the
+  // role, the aria hint, or the "Start typing..." placeholder.
+  const isAuto = (ctl) =>
+    !!ctl &&
+    (/autocomplete/.test(ctl.className) ||
+      ctl.getAttribute("role") === "combobox" ||
+      ctl.getAttribute("aria-autocomplete") === "list" ||
+      (!ctl.type || ctl.type === "text") && ctl.placeholder === "Start typing...");
+  // A row of choice buttons: the yes/no pair, or any set of two or more
+  // in a wrapper with no other control. The combobox toggle is not one.
+  const choiceButtons = (box) =>
+    [...box.querySelectorAll("button")].filter(
+      (b) => !/toggleButton|clear/i.test(b.className) && b.innerText.trim() && !/^(add|remove|replace|upload|browse|choose)/i.test(b.innerText.trim()),
+    );
+  const yesno = (box) => choiceButtons(box).filter((b) => /^(yes|no)$/i.test(b.innerText.trim()));
+  const isOn = (b) =>
+    b.getAttribute("aria-pressed") === "true" || b.getAttribute("aria-checked") === "true" || /_active_|selected|checked|active/.test(b.className);
   const choices = (box) =>
     [...box.querySelectorAll("input[type=radio], input[type=checkbox]")].map((input) => ({
       input,
@@ -43,13 +68,14 @@
     }));
   const clean = (s) => (s || "").replace(/\s+/g, " ").replace(/\s*\*$/, "").trim();
   const labelOf = (box) => clean(box.querySelector("label, legend")?.innerText);
+  const results = () => [...document.querySelectorAll(`${RESULT}, ${PORTAL_RESULT}`)];
 
   // The dropdown's full list, read once at read time: open, collect, close.
   async function listOptions(ctl) {
     ctl.focus();
     keydown(ctl, "ArrowDown", 40);
     await sleep(350);
-    const texts = [...document.querySelectorAll(RESULT)].map((o) => o.innerText.trim()).filter(Boolean);
+    const texts = results().map((o) => o.innerText.trim()).filter(Boolean);
     keydown(ctl, "Escape", 27);
     ctl.blur();
     await sleep(100);
@@ -58,6 +84,7 @@
 
   function kindOf(box, ctl) {
     if (yesno(box).length === 2) return "yesno";
+    if (!ctl && choiceButtons(box).length >= 2) return "select";
     if (!ctl) return "unknown";
     if (ctl.tagName === "TEXTAREA") return "long";
     if (ctl.tagName === "SELECT" || isAuto(ctl)) return "select";
@@ -75,7 +102,7 @@
   async function read() {
     const out = [];
     const boxes = [...document.querySelectorAll(`${WRAP}, fieldset`)].filter(
-      (b) => !b.parentElement.closest(`${WRAP}, fieldset`),
+      (b) => !b.parentElement.closest(`${WRAP}, fieldset`) && !b.closest(EDU_ENTRY),
     );
     for (const box of boxes) {
       const text = labelOf(box);
@@ -98,6 +125,7 @@
       const kind = kindOf(box, ctl);
       let options = [];
       if (kind === "yesno") options = yesno(box).map((b) => b.innerText.trim());
+      else if (!ctl && kind === "select") options = choiceButtons(box).map((b) => b.innerText.trim());
       else if (ctl && ctl.tagName === "SELECT") options = [...ctl.options].map((o) => o.text).filter(Boolean);
       // A dropdown in a fieldset is a fixed list worth reading; the location
       // box in a wrapper searches the world and is filled by typing.
@@ -109,26 +137,109 @@
         required: !!(ctl && (ctl.required || ctl.getAttribute("aria-required") === "true")),
         options,
         _box: box,
+        _buttons: !ctl && kind === "select",
       });
+    }
+    // The education widget, once, filled from the profile's rows.
+    const add = document.querySelector(EDU_ADD);
+    const entry = document.querySelector(EDU_ENTRY);
+    if (add || entry) {
+      const box = (add || entry).closest(WRAP) || (add || entry).parentElement;
+      out.push({ key: "education", label: "Education", kind: "group", fact: "education", required: false, options: [], _box: box, _edu: true });
     }
     return out;
   }
 
+  // ---- education -----------------------------------------------------------
+  function parseDate(s) {
+    if (!s) return null;
+    const t = String(s).trim();
+    let m = t.match(/^(\d{4})-(\d{1,2})(?:-(\d{1,2}))?$/);
+    if (m) return { y: +m[1], m: +m[2] };
+    m = t.match(/^(\d{1,2})\/(?:(\d{1,2})\/)?(\d{4})$/);
+    if (m) return { y: +m[3], m: +m[1] };
+    m = t.match(/^([A-Za-z]{3,9})\.?\s+(\d{4})$/);
+    if (m) {
+      const idx = MONTHS.findIndex((n) => n.toLowerCase().startsWith(m[1].slice(0, 3).toLowerCase()));
+      if (idx >= 0) return { y: +m[2], m: idx + 1 };
+    }
+    m = t.match(/^(\d{4})$/);
+    if (m) return { y: +m[1], m: 1 };
+    return null;
+  }
+  function chooseSelect(sel, wants) {
+    const low = wants.filter(Boolean).map((w) => String(w).toLowerCase());
+    const opt = [...sel.options].find((o) => low.includes(o.text.trim().toLowerCase()) || low.includes(o.value.toLowerCase()));
+    if (!opt) return false;
+    sel.value = opt.value;
+    sel.dispatchEvent(new Event("change", { bubbles: true }));
+    return true;
+  }
+  // The month and year selects that follow the date's label in an entry.
+  function setDate(entry, which, d) {
+    if (!d) return;
+    const lab = entry.querySelector(`label[for*="education_history-${which}"]`);
+    const after = [...entry.querySelectorAll("select")].filter((s) => !lab || lab.compareDocumentPosition(s) & Node.DOCUMENT_POSITION_FOLLOWING);
+    const [month, year] = after;
+    if (month) chooseSelect(month, [MONTHS[d.m - 1], String(d.m), String(d.m).padStart(2, "0")]);
+    if (year) chooseSelect(year, [String(d.y)]);
+  }
+  const schoolBox = (entry) => {
+    const lab = entry.querySelector('label[for*="education_history-school"]');
+    const combos = [...entry.querySelectorAll('input[role="combobox"], input[id*="education_history-school"]')];
+    return combos.find((c) => !lab || lab.compareDocumentPosition(c) & Node.DOCUMENT_POSITION_FOLLOWING) || combos[0] || null;
+  };
+  const eduRows = () => ((window.__jtProfile || {}).education || []).filter((r) => r && r.school);
+
+  function eduCurrent() {
+    const n = [...document.querySelectorAll(EDU_ENTRY)].filter((e) => schoolBox(e)?.value).length;
+    return n ? `${n} entries` : "";
+  }
+
+  async function fillEducation(rows) {
+    let filled = 0;
+    for (let i = 0; i < rows.length; i++) {
+      let entries = [...document.querySelectorAll(EDU_ENTRY)];
+      if (entries.length <= i) {
+        const add = document.querySelector(EDU_ADD);
+        if (!add) break;
+        add.click();
+        for (let t = 0; t < 20 && document.querySelectorAll(EDU_ENTRY).length <= i; t++) await sleep(150);
+        entries = [...document.querySelectorAll(EDU_ENTRY)];
+        if (entries.length <= i) break;
+      }
+      const entry = entries[i];
+      const row = rows[i];
+      const school = schoolBox(entry);
+      // The school list is a search over institutions: only a result that
+      // is the school, never the first thing offered.
+      if (school && !school.value) await pickFromList(school, row.school, true);
+      const degree = entry.querySelector('input[id*="education_history-degree"], select[id*="education_history-degree"]');
+      if (degree && row.degree) {
+        if (degree.tagName === "SELECT") chooseSelect(degree, [row.degree]);
+        else if (isAuto(degree)) await pickFromList(degree, row.degree, false);
+        else setNative(degree, row.degree);
+      }
+      const major = entry.querySelector('input[id*="education_history-major"]');
+      if (major && row.field) setNative(major, row.field);
+      setDate(entry, "startDate", parseDate(row.start));
+      setDate(entry, "endDate", parseDate(row.end));
+      filled++;
+    }
+    return filled > 0;
+  }
+
   function current(field) {
     const box = field._box;
+    if (field._edu) return eduCurrent();
     if (field._group) {
       return choices(box)
         .filter((o) => o.input.checked)
         .map((o) => o.text)
         .join(" | ");
     }
-    if (field.kind === "yesno") {
-      const on = yesno(box).find(
-        (b) =>
-          b.getAttribute("aria-pressed") === "true" ||
-          b.getAttribute("aria-checked") === "true" ||
-          /_active_|selected|checked/.test(b.className),
-      );
+    if (field.kind === "yesno" || field._buttons) {
+      const on = choiceButtons(box).find(isOn);
       return on ? on.innerText.trim() : "";
     }
     const ctl = control(box);
@@ -139,8 +250,9 @@
 
   // Type into a dropdown or search box and take a result. Alternatives
   // ("New York, NY, United States | New York") are tried in order until
-  // one produces a result; a fixed list wants the exact option text.
-  async function pickFromList(ctl, value) {
+  // one produces a result; a fixed list wants the exact option text. With
+  // strict set, only a result that is the text or starts with it is taken.
+  async function pickFromList(ctl, value, strict = false) {
     const wants = String(value ?? "")
       .split("|")
       .map((s) => s.trim())
@@ -150,16 +262,16 @@
       setNative(ctl, want);
       // The location box geocodes on the network; results take up to a
       // second or two, or never come for a phrasing it does not know.
-      let results = [];
-      for (let i = 0; i < 10 && !results.length; i++) {
+      let found = [];
+      for (let i = 0; i < 10 && !found.length; i++) {
         await sleep(250);
-        results = [...document.querySelectorAll(RESULT)];
+        found = results();
       }
       const low = want.toLowerCase();
       const hit =
-        results.find((o) => o.innerText.trim().toLowerCase() === low) ||
-        results.find((o) => o.innerText.trim().toLowerCase().startsWith(low)) ||
-        results[0];
+        found.find((o) => o.innerText.trim().toLowerCase() === low) ||
+        found.find((o) => o.innerText.trim().toLowerCase().startsWith(low)) ||
+        (strict ? null : found[0]);
       if (hit) {
         pointer(hit);
         await sleep(300);
@@ -175,6 +287,7 @@
   async function fill(field, value, file) {
     const box = field._box;
     const want = String(value ?? "").trim().toLowerCase();
+    if (field._edu) return fillEducation(eduRows());
     if (field._group) {
       let took = false;
       for (const part of want.split("|").map((s) => s.trim()).filter(Boolean)) {
@@ -186,8 +299,9 @@
       }
       return took;
     }
-    if (field.kind === "yesno") {
-      const btn = yesno(box).find((b) => b.innerText.trim().toLowerCase() === want);
+    if (field.kind === "yesno" || field._buttons) {
+      const wants = want.split("|").map((s) => s.trim()).filter(Boolean);
+      const btn = choiceButtons(box).find((b) => wants.includes(b.innerText.trim().toLowerCase()));
       if (!btn) return false;
       btn.click();
       return true;
@@ -223,6 +337,9 @@
       [...document.querySelectorAll("button")].find((b) => /submit application/i.test(b.innerText))
     );
   }
+  // The posting page's link to its own form, for a page that has not
+  // opened it yet.
+  const applyButton = () => [...document.querySelectorAll('a[href$="/application"]')].find((a) => a.offsetParent) || null;
 
   // The confirmation screen Ashby shows once the application is in. The
   // form is gone by then, so the values are read before the click lands.
@@ -235,6 +352,7 @@
     fill,
     current,
     submitButton,
+    applyButton,
     submitted,
   };
 })();

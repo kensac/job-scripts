@@ -19203,6 +19203,12 @@
             "title": "First Name",
             "default": ""
           },
+          "middle_name": {
+            "type": "string",
+            "maxLength": 100,
+            "title": "Middle Name",
+            "default": ""
+          },
           "last_name": {
             "type": "string",
             "maxLength": 100,
@@ -19233,10 +19239,34 @@
             "title": "Phone",
             "default": ""
           },
+          "phone_type": {
+            "type": "string",
+            "maxLength": 20,
+            "title": "Phone Type",
+            "default": "Mobile"
+          },
+          "birthday": {
+            "type": "string",
+            "maxLength": 10,
+            "title": "Birthday",
+            "default": ""
+          },
           "address": {
             "type": "string",
             "maxLength": 200,
             "title": "Address",
+            "default": ""
+          },
+          "address_2": {
+            "type": "string",
+            "maxLength": 200,
+            "title": "Address 2",
+            "default": ""
+          },
+          "address_3": {
+            "type": "string",
+            "maxLength": 200,
+            "title": "Address 3",
             "default": ""
           },
           "city": {
@@ -19285,6 +19315,18 @@
             "type": "string",
             "maxLength": 300,
             "title": "Twitter",
+            "default": ""
+          },
+          "behance": {
+            "type": "string",
+            "maxLength": 300,
+            "title": "Behance",
+            "default": ""
+          },
+          "dribbble": {
+            "type": "string",
+            "maxLength": 300,
+            "title": "Dribbble",
             "default": ""
           },
           "visa_status": {
