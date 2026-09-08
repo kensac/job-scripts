@@ -285,6 +285,17 @@
       if (entry.rung !== "resume" && entry.value != null) await put(entry, entry.value, null);
     }
     await revealed(file);
+    // A search-backed picker that showed options nothing matched: the
+    // model chooses among what was on offer, with the profile's value as
+    // the hint, and its pick goes back through the reader as an exact.
+    for (const entry of fill.fields) {
+      const f = fieldByKey(entry.key);
+      if (!isFilled(entry) && f && f._seen && f._seen.length) {
+        entry.options = f._seen;
+        entry.hint = entry.hint || entry.value || undefined;
+        if (entry.kind === "text") entry.kind = "select";
+      }
+    }
     await askModel(fill.fields.filter((e) => !isFilled(e) && askable(e)));
     await verify();
     show();

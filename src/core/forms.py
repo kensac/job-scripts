@@ -210,7 +210,9 @@ def posting_urls(url: str) -> list[str]:
                 f"https://{h}{eu}.greenhouse.io/{board}/jobs/{job}"
                 for h in ("job-boards", "boards")
             ]
-    path = re.sub(r"/(application|apply)/?$", "", parts.path)
+    # Workday's form is /apply/applyManually (or /apply/autofillWithResume)
+    # under the posting; Ashby's is /application, Lever's /apply.
+    path = re.sub(r"/(application|apply)(/[A-Za-z]+)?/?$", "", parts.path)
     base = urlunsplit((parts.scheme, parts.netloc, path, "", ""))
     # The board keeps the url the listing gave; Workable's carry a trailing
     # slash (2,005 of 2,462 rows) and the form page's /apply/ hid it.

@@ -437,6 +437,12 @@ def test_the_form_page_maps_back_to_the_posting_on_every_host():
     ]
     # Workable lists its postings with a trailing slash; the form's /apply/
     # comes off and the slash stays a candidate.
+    assert posting_urls(
+        "https://fis.wd5.myworkdayjobs.com/en-CA/searchjobs/job/US-FL/Engineer_JR03/apply/applyManually"
+    ) == [
+        "https://fis.wd5.myworkdayjobs.com/en-CA/searchjobs/job/US-FL/Engineer_JR03",
+        "https://fis.wd5.myworkdayjobs.com/en-CA/searchjobs/job/US-FL/Engineer_JR03/",
+    ]
     assert posting_urls("https://apply.workable.com/eqltech/j/B2593F22F8/apply/") == [
         "https://apply.workable.com/eqltech/j/B2593F22F8",
         "https://apply.workable.com/eqltech/j/B2593F22F8/",

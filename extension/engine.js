@@ -90,14 +90,25 @@
 
   // ---- fill methods, one per name the table uses ---------------------------
   const events = (extra) => ({ bubbles: true, cancelable: true, ...(cfg.defaultEventOptions || {}), ...(extra || {}) });
+  // Only an input or a textarea takes a value; a button or a div found by
+  // a selector meant for one throws "Illegal invocation" from the native
+  // setter (Workday's experience page, report 8), which aborted the fill.
+  const takesValue = (el) => !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable);
   function setValue(el, value) {
+    if (!takesValue(el)) return false;
+    if (el.isContentEditable && el.tagName !== "INPUT" && el.tagName !== "TEXTAREA") {
+      el.textContent = value;
+      return true;
+    }
     const proto = el.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
     const setter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
     if (setter) setter.call(el, value);
     else el.value = value;
     el.setAttribute("value", value);
+    return true;
   }
   function typeInto(el, value, opts, blur) {
+    if (!takesValue(el)) return false;
     const t = events(opts);
     el.dispatchEvent(new FocusEvent("focus", t));
     setValue(el, value);
@@ -290,8 +301,50 @@
   // skips itself on a failed `condition` or an empty value it needs, and
   // either fires an event, waits for its path to be removed, picks the
   // option its `valuePath` names, or runs a method on what it found.
+  let trace = null;
+  const note = (msg) => {
+    if (trace) trace.push(msg);
+  };
+  let seenOptions = null;
+
+  // The closest option on screen to a value, for a picker whose list is a
+  // search the table matches by string: Workday spells a school its own
+  // way ("Pennsylvania State University-Main Campus"), a degree list may
+  // not carry "Bachelor of Science" as written, a field of study may only
+  // offer "Applied Mathematics". Tokens of the value (stems of five
+  // letters, stop words dropped) are looked for in each option; the part
+  // of the value after a comma is a preference, not a requirement, so
+  // "..., University Park" picks that campus among several. Close enough
+  // is most of the tokens present; ties go to the shorter option.
+  const STOP = new Set(["the", "of", "and", "at", "in", "a", "an"]);
+  const stems = (t) =>
+    String(t || "")
+      .toLowerCase()
+      .replace(/[^a-z0-9 ]+/g, " ")
+      .split(/\s+/)
+      .filter((w) => w && !STOP.has(w))
+      .map((w) => w.slice(0, 5));
+  function closest(options, value) {
+    const [main, ...rest] = String(value || "").split(",");
+    const want = stems(main);
+    const prefer = stems(rest.join(" "));
+    if (!want.length) return null;
+    let best = null;
+    for (const el of options) {
+      const label = clean(text(el) || el.getAttribute("data-automation-label") || "");
+      const have = new Set(stems(label));
+      const hit = want.filter((w) => have.has(w)).length / want.length;
+      if (hit < 0.6) continue;
+      const bonus = prefer.length ? prefer.filter((w) => have.has(w)).length / prefer.length : 0;
+      const score = hit + bonus * 0.5;
+      if (!best || score > best.score || (score === best.score && label.length < best.label.length)) best = { el, label, score };
+    }
+    return best;
+  }
+  const OPTION_SELECTORS = '[role="option"], [data-automation-id="promptLeafNode"], [data-automation-id="promptOption"], [class*="select__option"], li[role="menuitem"]';
+  const optionsOnScreen = () => [...document.querySelectorAll(OPTION_SELECTORS)].filter(visible);
   async function runActions(actions, ctx, root, fallbackEl, value, file) {
-    for (const a of actions || []) {
+    for (const [i, a] of (actions || []).entries()) {
       if (a.delay) await sleep(a.delay);
       if (a.condition && !list(a.condition).some((c) => $x(expand(c, ctx), root).length)) continue;
       const cands = candidates(a, ctx, value);
@@ -305,8 +358,21 @@
       }
       let target = a.path ? null : { el: fallbackEl, path: ctx.inputPath };
       if (!target) target = await waitFirst(a.path, actx, root, a.hidden === true, a.time || 0);
+      const picksOption = list(a.path).some((p) => /%(UPPER|LOWER)?(UNMAPPED)?VALUE%/.test(p));
+      if (!target && picksOption) {
+        const shown = optionsOnScreen();
+        const best = closest(shown, ctx.raw ?? actx.value);
+        if (best) {
+          note(`action ${i}: closest option "${best.label}" for "${actx.value}"`);
+          target = { el: best.el, path: "closest" };
+        } else if (shown.length) {
+          seenOptions = shown.map((el) => clean(text(el) || el.getAttribute("data-automation-label") || "")).filter(Boolean).slice(0, 60);
+          note(`action ${i}: ${shown.length} options shown, none close to "${actx.value}"`);
+        }
+      }
       if (!target) {
         if (a.allowFailure) continue;
+        note(`action ${i} (${a.method || a.event || "path"}): nothing at its path for "${actx.value}"`);
         return false;
       }
       if (a.event) {
@@ -322,7 +388,10 @@
             break;
           }
         }
-        if (!picked && !a.allowFailure) return false;
+        if (!picked && !a.allowFailure) {
+          note(`action ${i}: no option for "${cands.join(" | ")}"`);
+          return false;
+        }
         continue;
       }
       await runMethod(a.method || "click", target.el, cands[0] ?? "", file, a.eventOptions);
@@ -495,11 +564,43 @@
     });
     return out;
   }
+  // The containers the repeated groups on this page own (work experience 1,
+  // 2, ...; education 1, ...): the inputs inside them are the group's, not
+  // questions. Read as questions they took the block's heading as their
+  // label and the resolve answered "Job Title" into company, dates and
+  // description alike (Workday, report 8).
+  function groupContainers(root) {
+    const out = [];
+    for (const f of cfg.fields) {
+      for (const v of f.variants) {
+        if (!isGroup(v)) continue;
+        for (const path of list(v.containerPath)) {
+          for (let n = 0; n < 15; n++) out.push(...$x(expand(path, { index: n, length: 15 }), root));
+        }
+      }
+    }
+    return out;
+  }
+  // A section's name: the element its aria-labelledby points at, a heading
+  // itself, or the first heading inside it; never its whole text.
+  function sectionName(el) {
+    if (!el) return "";
+    const ids = (el.getAttribute && el.getAttribute("aria-labelledby")) || "";
+    for (const id of ids.split(/\s+/).filter(Boolean)) {
+      const t = clean(text(document.getElementById(id)));
+      if (t) return t.slice(0, 80);
+    }
+    if (/^H[1-6]$/.test(el.tagName)) return clean(text(el)).slice(0, 80);
+    const h = el.querySelector && el.querySelector("h1, h2, h3, h4, h5, h6, legend");
+    return h ? clean(text(h)).slice(0, 80) : "";
+  }
   function questionFields(taken, root) {
     const out = [];
+    const owned = groupContainers(root);
     for (const q of cfg.questions || []) {
       for (const box of list(q.fieldPath).flatMap((p) => $x(p, root))) {
         if (!visible(box)) continue;
+        if (owned.some((c) => c !== box && c.contains(box))) continue;
         const input = list(q.inputPath).map((p) => $x(p, box)[0]).find(Boolean);
         const optionEls = list(q.optionsPath).flatMap((p) => $x(p, box));
         if (!input && !optionEls.length) continue;
@@ -520,7 +621,7 @@
         if (!label) continue;
         // The section the question sits under names it too ("Education:
         // Degree" is not "Degree" on its own).
-        const section = clean(list(q.sectionPath).map((p) => text($x(p, box)[0])).find((t) => t && t.trim()));
+        const section = list(q.sectionPath).map((p) => sectionName($x(p, box)[0])).find((t) => t);
         if (section && !label.toLowerCase().startsWith(section.toLowerCase())) label = `${section}: ${label}`;
         let kind = "text";
         if (input && input.tagName === "TEXTAREA") kind = "long";
@@ -620,16 +721,35 @@
           if (!paths) continue;
           const vctx = { ...ctx, value: candidate, raw: want };
           const found = await waitFirst(paths, vctx, root, v.hidden === true, v.time || 0);
-          if (!found) continue;
+          if (!found) {
+            note(`variant ${variants.indexOf(v)}: anchor not on page for "${candidate}"`);
+            continue;
+          }
           let ok;
+          try {
           if (v.valuePath) {
             const opt = await waitFirst(v.valuePath, { ...vctx, inputPath: found.path }, root, true, v.valueElementTime || 300);
             ok = opt ? pickOption(opt.el) : false;
+          } else if (!v.method && v.actions && v.actions.length) {
+            // A variant with actions and no method of its own: the anchor is
+            // only the %INPUTPATH% the actions refer to, and the actions do
+            // all the work. Clicking it first opened Workday's dropdown so
+            // the recipe's own click closed it again (2026-09-08).
+            ok = true;
           } else {
             ok = await runMethod(v.method, found.el, candidate, file, v.eventOptions);
           }
           const acted = await runActions(v.actions, { ...vctx, inputPath: found.path }, root, found.el, candidate, file);
-          if (ok && acted) return true;
+          if (ok && acted) {
+            note(`variant ${variants.indexOf(v)}: took "${candidate}"`);
+            return true;
+          }
+          note(`variant ${variants.indexOf(v)}: ${ok ? "actions failed" : "method failed"} for "${candidate}"`);
+          } catch (e) {
+            // One variant's error is that variant's; the next may work, and
+            // the trace says what happened.
+            note(`variant ${variants.indexOf(v)}: ${String(e)}`);
+          }
         }
       }
     }
@@ -673,7 +793,13 @@
           if (isGroup(v)) await fillGroup({ ...v, containerPath: v.containerPath || [] }, [item], file, fact, asName || nested.name);
         }
         const plain = nested.variants.filter((v) => !isGroup(v));
-        if (plain.length) await fillVariants(plain, value, file, root, ctx);
+        if (plain.length) {
+          try {
+            await fillVariants(plain, value, file, root, ctx);
+          } catch (e) {
+            note(`${nested.name}: ${String(e)}`);
+          }
+        }
         if (cfg.fillInputInterval) await sleep(cfg.fillInputInterval);
       }
       filledAny = true;
@@ -687,6 +813,17 @@
 
   async function fill(field, value, file) {
     const root = scope() || document;
+    trace = field._trace = [];
+    seenOptions = null;
+    try {
+      return await fillInner(field, value, file, root);
+    } finally {
+      // The options a search showed and nothing matched: the panel's model
+      // call gets them and its pick comes back through fill as an exact.
+      if (seenOptions && seenOptions.length) field._seen = seenOptions;
+    }
+  }
+  async function fillInner(field, value, file, root) {
     if (field._spec) {
       // The flow steps the table puts before this field, then the field,
       // then the steps that close the form when this is its last field.
