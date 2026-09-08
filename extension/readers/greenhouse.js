@@ -123,14 +123,23 @@
 
   // Open the menu, wait for its options, click the one that matches.
   //
-  // react-select opens its menu from a real focus after a mousedown on the
-  // control, from ArrowDown on the input, or from typing into it. Which of
-  // those a scripted event achieves depends on the page and the tab, so
-  // each is tried in turn and the trace of what was tried and what it did
-  // rides on the field, into the page report, so the next form teaches the
-  // reader which one works.
+  // On the Yext form, 2026-09-08, a visible tab left every react-select
+  // closed to a mousedown on the control, a focus event, ArrowDown and
+  // typing (report 3). Simplify fills the same widgets with one sequence on
+  // the value box: a focus event, mousedown, mouseup, click, and up to
+  // eight seconds of patience for the menu; that sequence goes first. The
+  // menu's options carry ids of the form react-select-<input id>-option-N,
+  // so they are found by id anywhere in the document, portal or not. The
+  // trace of every attempt rides on the field into the page report.
   const keydown = (el, key, keyCode) =>
-    el.dispatchEvent(new KeyboardEvent("keydown", { key, code: key, keyCode, which: keyCode, bubbles: true, cancelable: true, view: window }));
+    el.dispatchEvent(new KeyboardEvent("keydown", { key, code: key, keyCode, which: keyCode, bubbles: true, cancelable: true }));
+  const gesture = (el) => {
+    const t = { bubbles: true, cancelable: true };
+    el.dispatchEvent(new FocusEvent("focus", t));
+    el.dispatchEvent(new MouseEvent("mousedown", t));
+    el.dispatchEvent(new MouseEvent("mouseup", t));
+    el.click();
+  };
 
   async function pickReactSelect(field, ctl, value, search) {
     const shell = shellOf(ctl);
@@ -141,38 +150,39 @@
       return false;
     }
     const controlEl = shell.querySelector(".select__control") || shell;
-    const menuOptions = () => [...shell.querySelectorAll('[class*="select__option"]')];
+    const valueBox = shell.querySelector('[class*="select__value-container"]') || controlEl;
+    const menuOptions = () => [
+      ...document.querySelectorAll(`[id^="react-select-${CSS.escape(ctl.id)}-option-"], [class*="select__option"]`),
+    ].filter((o) => shell.contains(o) || o.id.startsWith(`react-select-${ctl.id}-option-`));
     const opened = () => ctl.getAttribute("aria-expanded") === "true" || menuOptions().length > 0;
-    const waitOpen = async (label) => {
-      for (let i = 0; i < 6 && !opened(); i++) await sleep(150);
+    const waitOpen = async (label, ms) => {
+      for (let i = 0; i < ms / 150 && !opened(); i++) await sleep(150);
       trace.push(`${label}:${opened() ? "open" : "closed"}`);
       return opened();
     };
     const wants = String(value ?? "").split("|").map((s) => s.trim()).filter(Boolean);
     for (const want of wants) {
       const low = want.toLowerCase();
-      // 1. The user's gesture: mousedown on the control, then the focus it
-      //    hands the input.
-      mouse(controlEl, ["mousedown"]);
-      ctl.focus();
-      let open = await waitOpen("mousedown+focus");
-      // 2. A focus event of our own, for a tab the browser will not focus.
+      // 1. Simplify's gesture on the value box, with its patience.
+      gesture(valueBox);
+      let open = await waitOpen("gesture", 3000);
+      // 2. The same on the control, then the focus it hands the input.
       if (!open) {
-        ctl.dispatchEvent(new FocusEvent("focus", { view: window }));
-        ctl.dispatchEvent(new FocusEvent("focusin", { bubbles: true, view: window }));
-        mouse(controlEl, ["mousedown"]);
-        open = await waitOpen("focusevent+mousedown");
+        gesture(controlEl);
+        ctl.focus();
+        open = await waitOpen("control+focus", 1500);
       }
       // 3. The keyboard: ArrowDown opens a closed menu.
       if (!open) {
         keydown(ctl, "ArrowDown", 40);
-        open = await waitOpen("arrowdown");
+        open = await waitOpen("arrowdown", 900);
       }
-      // 4. Typing filters the list and opens it.
+      // 4. Typing filters the list and opens it; the search box needs it.
       if (!open || search) {
         setNative(ctl, want);
-        open = await waitOpen("typed");
+        open = await waitOpen("typed", 1200);
       }
+      trace.push(`active:${document.activeElement === ctl}`);
       let opts = [];
       for (let i = 0; i < 10 && !opts.length; i++) {
         await sleep(200);
@@ -184,7 +194,7 @@
         opts.find((o) => o.innerText.trim().toLowerCase().startsWith(low)) ||
         (search ? opts[0] : null);
       if (hit) {
-        mouse(hit, ["mousedown", "mouseup", "click"]);
+        gesture(hit);
         await sleep(300);
         if (current({ _ctl: ctl, kind: "select" })) {
           trace.push("clicked:took");
@@ -192,8 +202,7 @@
         }
         trace.push("clicked:not taken");
       }
-      // 5. With the text typed, Enter takes the first match react-select
-      //    has focused, whether or not its menu rendered where we look.
+      // 5. With text typed, Enter takes the option react-select has focused.
       if (ctl.value) {
         keydown(ctl, "Enter", 13);
         await sleep(300);
