@@ -331,7 +331,7 @@
     if (!want.length) return null;
     let best = null;
     for (const el of options) {
-      const label = clean(text(el) || el.getAttribute("data-automation-label") || "");
+      const label = shownLabel(el);
       const have = new Set(stems(label));
       const hit = want.filter((w) => have.has(w)).length / want.length;
       if (hit < 0.6) continue;
@@ -341,6 +341,17 @@
     }
     return best;
   }
+  // An option's text: its own, or the label attribute Workday puts on the
+  // option itself or on a child (capture 14: 45 options read as empty and
+  // none could score).
+  const shownLabel = (el) =>
+    clean(
+      text(el) ||
+        el.getAttribute("data-automation-label") ||
+        el.getAttribute("aria-label") ||
+        el.querySelector("[data-automation-label]")?.getAttribute("data-automation-label") ||
+        "",
+    );
   const OPTION_SELECTORS = '[role="option"], [data-automation-id="promptLeafNode"], [data-automation-id="promptOption"], [class*="select__option"], li[role="menuitem"]';
   const optionsOnScreen = () => [...document.querySelectorAll(OPTION_SELECTORS)].filter(visible);
   async function runActions(actions, ctx, root, fallbackEl, value, file) {
@@ -366,8 +377,8 @@
           note(`action ${i}: closest option "${best.label}" for "${actx.value}"`);
           target = { el: best.el, path: "closest" };
         } else if (shown.length) {
-          seenOptions = shown.map((el) => clean(text(el) || el.getAttribute("data-automation-label") || "")).filter(Boolean).slice(0, 60);
-          note(`action ${i}: ${shown.length} options shown, none close to "${actx.value}"`);
+          seenOptions = [...new Set(shown.map(shownLabel).filter(Boolean))].slice(0, 60);
+          note(`action ${i}: ${shown.length} options shown, none close to "${actx.value}": ${seenOptions.slice(0, 6).join(" / ")}`);
         }
       }
       if (!target) {
@@ -824,8 +835,14 @@
         const plain = nested.variants.filter((v) => !isGroup(v));
         if (plain.length) {
           try {
-            const took = await fillVariants(plain, value, file, root, ctx);
-            note(`${nested.name} = "${String(value).slice(0, 40)}": ${took ? "took" : "not taken"}`);
+            // A widget that takes several values (Workday's field of study
+            // is a multi-select: two majors, two picks) takes every
+            // alternative; any other takes the first that lands.
+            const multi = plain.some((v) => list(v.paths).some((p) => /multiselect/i.test(p)));
+            const parts = multi ? String(value).split("|").map((x) => x.trim()).filter(Boolean) : [String(value)];
+            let took = false;
+            for (const part of parts) took = (await fillVariants(plain, part, file, root, ctx)) || took;
+            note(`${nested.name} = "${String(value).slice(0, 40)}": ${took ? "took" : "not taken"}${multi ? ` (${parts.length} picks)` : ""}`);
           } catch (e) {
             note(`${nested.name}: ${String(e)}`);
           }
