@@ -219,9 +219,16 @@ carries the profile's rows for it. Ashby, Greenhouse and Lever keep their
 hand-written readers, which own their hosts; the engine steps back when
 one is present. The Greenhouse reader also reads the employer's own
 self-identification questions from the form API's demographic block, finds
-their controls by label, and prefers the location result that carries the
-person's state or country over the first the geocoder offers ("New York"
-alone landed in Sudan, report 5).
+their controls by label, and reads the page's own Country box, which the
+API never lists. A location result must name the place and is preferred
+when it also carries the person's state or country; the geocoder answers
+late and the menu reports closed meanwhile, so the reader waits for the
+options themselves, up to eight seconds ("New York" landed in Sudan, then
+"NY" in Nyala, Gusto). A group's nested fields are
+filled inside the entry's container or not at all, never against the
+document, where the same selector matches the form's own fields.
+The form page maps back to the posting with and without a trailing slash,
+which Workable's listings carry.
 
 The extension calls the frontend's proxy from its background worker, which
 rides the site's session cookie; the API's service token never leaves the

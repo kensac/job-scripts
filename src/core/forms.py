@@ -211,7 +211,10 @@ def posting_urls(url: str) -> list[str]:
                 for h in ("job-boards", "boards")
             ]
     path = re.sub(r"/(application|apply)/?$", "", parts.path)
-    return [urlunsplit((parts.scheme, parts.netloc, path, "", ""))]
+    base = urlunsplit((parts.scheme, parts.netloc, path, "", ""))
+    # The board keeps the url the listing gave; Workable's carry a trailing
+    # slash (2,005 of 2,462 rows) and the form page's /apply/ hid it.
+    return [base, base + "/"]
 
 
 def budget_host(url: str) -> str:

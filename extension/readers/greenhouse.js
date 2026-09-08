@@ -123,6 +123,13 @@
       const ctl = f.byLabel ? controlByLabel(f.label) : control(f.name);
       if (!ctl) continue;
       const kind = kindOf(f, ctl);
+      // The page pairs the API's location question with a Country box of
+      // its own that the API never lists (Gusto, 2026-09-08). It goes
+      // first: the city search is scoped to the country.
+      if (f.name === "location") {
+        const country = document.getElementById("country");
+        if (country) out.push({ key: "country", label: "Country", kind: "select", required: true, options: [], _ctl: country });
+      }
       out.push({
         key: f.name,
         label: f.label,
@@ -186,43 +193,66 @@
       return opened();
     };
     const wants = String(value ?? "").split("|").map((s) => s.trim()).filter(Boolean);
+    // A search box (the location) asks a geocoder: its menu reports closed
+    // and shows no notice while the answer is on its way, only a spinner
+    // for a moment, and the answer can take seconds (Gusto, 2026-09-08).
+    // So it is typed into at once, and the options are waited for until
+    // they come, or the spinner has come and gone with none, or eight
+    // seconds pass; two seconds at least.
+    const loading = () =>
+      !!shell.querySelector('[class*="loading-indicator"]') ||
+      [...document.querySelectorAll('[class*="select__menu-notice"]')].some((n) => /loading/i.test(n.innerText));
     for (const want of wants) {
       const low = want.toLowerCase();
-      // 1. The value-box gesture, with patience.
-      gesture(valueBox);
-      let open = await waitOpen("gesture", 3000);
-      // 2. The same on the control, then the focus it hands the input.
-      if (!open) {
-        gesture(controlEl);
-        ctl.focus();
-        open = await waitOpen("control+focus", 1500);
-      }
-      // 3. The keyboard: ArrowDown opens a closed menu.
-      if (!open) {
-        keydown(ctl, "ArrowDown", 40);
-        open = await waitOpen("arrowdown", 900);
+      let open = false;
+      if (search) {
+        gesture(valueBox);
+        await sleep(150);
+      } else {
+        // 1. The value-box gesture, with patience.
+        gesture(valueBox);
+        open = await waitOpen("gesture", 3000);
+        // 2. The same on the control, then the focus it hands the input.
+        if (!open) {
+          gesture(controlEl);
+          ctl.focus();
+          open = await waitOpen("control+focus", 1500);
+        }
+        // 3. The keyboard: ArrowDown opens a closed menu.
+        if (!open) {
+          keydown(ctl, "ArrowDown", 40);
+          open = await waitOpen("arrowdown", 900);
+        }
       }
       // 4. Typing filters the list and opens it; the search box needs it.
       if (!open || search) {
         setNative(ctl, want);
-        open = await waitOpen("typed", 1200);
+        if (!search) open = await waitOpen("typed", 1200);
       }
       trace.push(`active:${document.activeElement === ctl}`);
       let opts = [];
-      for (let i = 0; i < 10 && !opts.length; i++) {
+      let sawLoading = false;
+      for (let i = 0; i < 40 && !opts.length; i++) {
         await sleep(200);
         opts = menuOptions();
+        const busy = loading();
+        sawLoading = sawLoading || busy;
+        if (i >= 10 && !busy && (sawLoading || !search)) break;
       }
-      trace.push(`options:${opts.length}`);
+      trace.push(`options:${opts.length}${sawLoading ? " after loading" : ""}`);
       const texts = opts.map((o) => o.innerText.trim().toLowerCase());
       const parts = wants.map((w) => w.toLowerCase()).flatMap((w) => w.split(",").map((s) => s.trim())).filter((s) => s && s !== low);
+      // The place itself: the first part of the fullest alternative.
+      const place = (wants[0] || "").split(",")[0].trim().toLowerCase();
       const hit =
         opts.find((o, i) => texts[i] === low) ||
-        // The result that carries the state or country the person gave,
-        // before the first result that merely starts with the city.
-        (search ? opts.find((o, i) => texts[i].startsWith(low) && parts.some((part) => texts[i].includes(part))) : null) ||
-        opts.find((o, i) => texts[i].startsWith(low)) ||
-        (search ? opts.find((o, i) => parts.some((part) => texts[i].includes(part))) || opts[0] : null);
+        // A search result must name the place; "NY" typed into the world's
+        // places brought Nyala, Sudan (Gusto, 2026-09-08). The result that
+        // also carries the state or country the person gave comes first.
+        (search
+          ? opts.find((o, i) => texts[i].includes(place) && parts.some((part) => texts[i].includes(part))) ||
+            opts.find((o, i) => texts[i].includes(place))
+          : opts.find((o, i) => texts[i].startsWith(low)));
       if (hit) {
         gesture(hit);
         await sleep(300);

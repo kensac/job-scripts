@@ -434,7 +434,11 @@
           await sleep(150);
         }
       }
-      const root = containers[i] || containers[containers.length - 1] || document;
+      // Inside the entry's container or not at all: against the document
+      // the same selector matches the form's own fields (Workable's
+      // Summary box).
+      const root = containers[i] || containers[containers.length - 1];
+      if (!root) break;
       for (const nested of group.fields) {
         // A nested group of one field ("major" holding "name") takes the
         // outer name's value: the inner "name" is the widget, not the fact.
