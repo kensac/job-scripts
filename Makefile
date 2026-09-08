@@ -17,6 +17,7 @@ check:          ## everything CI gates on: lint, format, types, compile, tests
 	pyright
 	python -m compileall -q src
 	@if git grep -InF -e "—" -e "\\u2014" -- . ':!Makefile' ':!extension/ats/*' ; then echo "em dash found: write a comma, a colon, or a new sentence"; exit 1; fi
+	node --test tests/extension/*.test.cjs
 	pytest -q tests
 
 lint:           ## report lint findings (add ARGS=--fix to apply)
@@ -29,6 +30,7 @@ types:          ## type-check the live code (src/api, src/core)
 	pyright
 
 test:           ## run the test suite
+	node --test tests/extension/*.test.cjs
 	pytest -q tests
 
 schema:         ## regenerate openapi.json (commit it)

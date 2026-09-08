@@ -441,7 +441,8 @@
         return false;
       }
       if (a.event) {
-        target.el.dispatchEvent(new Event(a.event, events(a.eventOptions)));
+        const EventType = /^(keydown|keypress|keyup)$/.test(a.event) ? KeyboardEvent : Event;
+        target.el.dispatchEvent(new EventType(a.event, events(a.eventOptions)));
         continue;
       }
       if (a.valuePath) {
@@ -851,8 +852,12 @@
       // number is the one that matches, not the entry's position.
       const numberOf = new Map();
       const allContainers = () => {
+        numberOf.clear();
+        // Paths are alternatives, not separate entries. Combining them can
+        // count both an entry and its wrapper as two profile rows.
         for (const path of containerPaths) {
           for (let n = 0; n < 30; n++) for (const el of $x(expand(path, { ...ctx, index: n }))) if (!numberOf.has(el)) numberOf.set(el, n);
+          if (numberOf.size) break;
         }
         return [...numberOf.keys()].sort((a, b) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1));
       };
@@ -874,12 +879,15 @@
           if (containers.length > i) break;
           await sleep(150);
         }
-        if (containers.length <= i) note(`${fact} entry ${i + 1}: add clicked, no container appeared`);
+        if (containers.length <= i) {
+          note(`${fact} entry ${i + 1}: add clicked, no container appeared`);
+          break;
+        }
       }
       // Inside the entry's container or not at all: against the document
       // the same selector matches the form's own fields (Workable's
       // Summary box).
-      const root = containers[i] || containers[containers.length - 1];
+      const root = containers[i];
       if (!root) break;
       const pageNumber = entryNumber ?? numberOf.get(root) ?? i;
       const entryCtx = { ...ctx, index: pageNumber };
