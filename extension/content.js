@@ -8,10 +8,47 @@
 // back so the bank and the ledger learn. It never clicks submit itself.
 // The report button sends the page as the extension saw it, with a note.
 (async () => {
+  // THE PANEL LIVES IN A SHADOW ROOT, not in the host page's DOM.
+  //
+  // panel.css is scoped by #jt-apply, which is a convention the page does not
+  // have to honour: the panel is in the page's tree, so the page's selectors
+  // reach it. Workday's stylesheet put a collapsed line-height on its spans
+  // and the two-line labels drew over themselves. A reset answers the
+  // properties someone thought of; this answers all of them, on all 53 sites,
+  // including the ones nobody has hit yet.
+  //
+  // `host` is the element in the page. `panel` is the div inside the shadow
+  // root and keeps the id, so every panel.querySelector in this file and every
+  // #jt-apply rule in panel.css work unchanged.
+  //
+  // The stylesheet is linked rather than inlined so panel.css stays one file
+  // that a person can read; it is in web_accessible_resources for that.
+  let host = null;
+
+  function mountPanel() {
+    host = document.createElement("div");
+    host.id = "jt-apply-host";
+    const root = host.attachShadow({ mode: "open" });
+    const link = document.createElement("link");
+    link.rel = "stylesheet";
+    link.href = chrome.runtime.getURL("panel.css");
+    const el = document.createElement("div");
+    el.id = "jt-apply";
+    root.append(link, el);
+    document.body.appendChild(host);
+    return el;
+  }
+
+  // The host is what the page can remove, so it is what "still there" asks
+  // about: a hydrating app (Greenhouse's board is a Remix app) throws it out
+  // with the markup it did not render, and panel.isConnected would be true
+  // for a panel inside a shadow root whose host is gone.
+  const mounted = () => host && host.isConnected;
+
   const reader = window.__jtReader || { ready: () => false, submitButton: () => null, submitted: () => false };
   // Stamped into every report, so a report from a build the person has not
   // reloaded yet is told apart from a bug (reports 9 to 11, 2026-09-08).
-  const BUILD = "2026-09-08 03:35";
+  const BUILD = "2026-09-08 shadow-root";
 
   // A message to the extension's background worker. After the extension is
   // reloaded, a page that was already open keeps the old script, whose
@@ -194,6 +231,13 @@
   // types. Recorded after a fill pass; a change means a page the person
   // moved to by hand, and the panel offers Autofill for it.
   const pageSignature = () =>
+    // The #jt-apply filter is belt and braces now rather than the mechanism: a
+    // document query does not cross a shadow boundary, so the panel's own
+    // switches and textarea are not in this list at all. It stays because it
+    // costs nothing and tests/extension/panel.test.cjs encodes the bug it was
+    // written for - opening the report box counted as the page changing and
+    // reset the flow - and that guarantee should not come to depend on one
+    // subtle fact about where the panel is mounted.
     [...document.querySelectorAll("input, textarea, select")].filter((e) => !e.closest("#jt-apply")).map((e) => e.id || e.name || e.type).join("|");
   let pageSig = null;
   function mount() {
@@ -203,7 +247,7 @@
       // A page that hydrates after load (Greenhouse's board is a Remix app)
       // can throw the panel out of the body with the rest of the markup it
       // did not render; put it back rather than believing it is there.
-      if (panel && !panel.isConnected) document.body.appendChild(panel);
+      if (panel && !mounted()) document.body.appendChild(host);
       if (mountedFor === here && panel && fill && pageSig && pageSignature() !== pageSig) {
         pageSig = null;
         step += 1;
@@ -218,11 +262,7 @@
       fields = [];
       fill = null;
       filled = new Map();
-      if (!panel) {
-        panel = document.createElement("div");
-        panel.id = "jt-apply";
-        document.body.appendChild(panel);
-      }
+      if (!panel) panel = mountPanel();
       offer();
     } else if (!fill && reader.applyButton && reader.applyButton()) {
       // The posting page, with the button that opens the form on it (the
@@ -230,11 +270,7 @@
       // once the form appears the tick above takes over.
       if (mountedFor === here + "#open" && panel) return;
       mountedFor = here + "#open";
-      if (!panel) {
-        panel = document.createElement("div");
-        panel.id = "jt-apply";
-        document.body.appendChild(panel);
-      }
+      if (!panel) panel = mountPanel();
       render(`
         <p>This is the posting. The application form is a click away.</p>
         <button id="jt-open" class="primary">Open the application</button>
@@ -646,11 +682,8 @@
 
   function showSubmission() {
     if (!submission) return;
-    if (!panel) {
-      panel = document.createElement("div");
-      panel.id = "jt-apply";
-      document.body.appendChild(panel);
-    } else if (!panel.isConnected) document.body.appendChild(panel);
+    if (!panel) panel = mountPanel();
+    else if (!mounted()) document.body.appendChild(host);
     // The earlier watcher stopped at 30 seconds. Keep watching after that
     // point, but offer the person a way to confirm a missed success signal.
     const overdue = Date.now() - submission.startedAt >= 30000;

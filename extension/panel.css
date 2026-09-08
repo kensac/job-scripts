@@ -1,4 +1,33 @@
-/* Shared job-app tokens; the injected panel owns its layout and controls. */
+/* The panel, in a shadow root.
+ *
+ * :host is the div in the page; everything below it is behind a shadow
+ * boundary, so no page selector can match a panel element. That is most of
+ * the isolation, but NOT all of it: a shadow boundary blocks matching, it does
+ * not block INHERITANCE. line-height, font, color, letter-spacing,
+ * text-transform, white-space and visibility all inherit through it from the
+ * host element, so a page that sets line-height on body still reaches in - the
+ * exact Workday bug (2026-09-08) that the two resets below were written for.
+ *
+ * `all: initial` on the host stops inheritance at the boundary. It needs the
+ * !important, and this is the part that is easy to get wrong: for the HOST
+ * element, a normal declaration in the outer page beats a normal declaration in
+ * :host. Workday's `div { white-space: nowrap }` matches #jt-apply-host from
+ * outside and wins, so a plain `all: initial` measured as white-space nowrap
+ * and line-height 9.6px on the host and inherited straight through - the same
+ * bug, with a shadow root in front of it. The order reverses for important
+ * declarations, which is why this one holds.
+ *
+ * Between the boundary and this line, nothing on any of the 53 sites this
+ * loads on can reach the panel, and the resets stop being a list that grows by
+ * one every time someone reports a new site.
+ *
+ * The panel re-declares its own font and colour immediately below, because
+ * `all: initial` has just taken the browser defaults away too.
+ */
+:host {
+  all: initial !important;
+}
+
 #jt-apply {
   /* Light. Values are --x-* from admin.css, not approximations of them. */
   --x-card: #ffffff;
@@ -90,14 +119,13 @@
   scrollbar-color: var(--x-smoke) transparent;
   isolation: isolate;
 }
+/* box-sizing and min-width are the panel's own layout, not a defence: a flex
+   child that will not shrink below its content is what min-width: 0 fixes, and
+   the page was never involved. The rest of what stood here - letter-spacing,
+   text-transform, text-align, box-shadow, float, font-family - defended
+   against page rules that can no longer match. */
 #jt-apply *, #jt-apply *::before, #jt-apply *::after {
   box-sizing: border-box;
-  font-family: inherit;
-  letter-spacing: normal;
-  text-transform: none;
-  text-align: left;
-  box-shadow: none;
-  float: none;
   min-width: 0;
 }
 #jt-apply { box-sizing: border-box; }
@@ -181,18 +209,12 @@
   #jt-apply.collapsed { width: 248px; }
 }
 
-/* The panel sits in the host page's DOM, so the host's stylesheet reaches
-   it: on Workday (2026-09-08) a leaked line-height collapsed every span,
-   two-line labels drew over themselves and the tags became a line through
-   their text. Every element in the panel states the typographic basics the
-   page may have taken away; the specific rules above still win. */
+/* The panel's own typographic baseline. It reads as a reset and is not one any
+   more: nothing outside can set these. It stays because the panel wants a
+   consistent line-height on every element it renders, and because `all:
+   initial` on the host means there is nothing to inherit from. */
 #jt-apply * {
   line-height: 1.5;
-  letter-spacing: normal;
-  text-transform: none;
-  text-decoration: none;
-  box-sizing: border-box;
-  float: none;
 }
 #jt-apply .tag,
 #jt-apply .count {

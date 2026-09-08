@@ -23,9 +23,6 @@
         "readers/ashby.js",
         "content.js"
       ],
-      "css": [
-        "panel.css"
-      ],
       "all_frames": true,
       "run_at": "document_idle"
     },
@@ -40,9 +37,6 @@
         "readers/greenhouse.js",
         "content.js"
       ],
-      "css": [
-        "panel.css"
-      ],
       "all_frames": true,
       "run_at": "document_idle"
     },
@@ -54,9 +48,6 @@
       "js": [
         "readers/lever.js",
         "content.js"
-      ],
-      "css": [
-        "panel.css"
       ],
       "all_frames": true,
       "run_at": "document_idle"
@@ -71,9 +62,6 @@
         "engine.js",
         "content.js"
       ],
-      "css": [
-        "panel.css"
-      ],
       "all_frames": true,
       "run_at": "document_idle"
     },
@@ -85,9 +73,6 @@
         "ats/ADP2.js",
         "engine.js",
         "content.js"
-      ],
-      "css": [
-        "panel.css"
       ],
       "all_frames": true,
       "run_at": "document_idle"
@@ -101,9 +86,6 @@
         "engine.js",
         "content.js"
       ],
-      "css": [
-        "panel.css"
-      ],
       "all_frames": true,
       "run_at": "document_idle"
     },
@@ -116,9 +98,6 @@
         "ats/Apple.js",
         "engine.js",
         "content.js"
-      ],
-      "css": [
-        "panel.css"
       ],
       "all_frames": true,
       "run_at": "document_idle"
@@ -155,9 +134,6 @@
         "engine.js",
         "content.js"
       ],
-      "css": [
-        "panel.css"
-      ],
       "all_frames": true,
       "run_at": "document_idle"
     },
@@ -170,9 +146,6 @@
         "ats/BambooHR.js",
         "engine.js",
         "content.js"
-      ],
-      "css": [
-        "panel.css"
       ],
       "all_frames": true,
       "run_at": "document_idle"
@@ -190,9 +163,6 @@
         "engine.js",
         "content.js"
       ],
-      "css": [
-        "panel.css"
-      ],
       "all_frames": true,
       "run_at": "document_idle"
     },
@@ -205,9 +175,6 @@
         "ats/BreezyHR.js",
         "engine.js",
         "content.js"
-      ],
-      "css": [
-        "panel.css"
       ],
       "all_frames": true,
       "run_at": "document_idle"
@@ -224,9 +191,6 @@
         "engine.js",
         "content.js"
       ],
-      "css": [
-        "panel.css"
-      ],
       "all_frames": true,
       "run_at": "document_idle"
     },
@@ -240,9 +204,6 @@
         "engine.js",
         "content.js"
       ],
-      "css": [
-        "panel.css"
-      ],
       "all_frames": true,
       "run_at": "document_idle"
     },
@@ -254,9 +215,6 @@
         "ats/Cursor.js",
         "engine.js",
         "content.js"
-      ],
-      "css": [
-        "panel.css"
       ],
       "all_frames": true,
       "run_at": "document_idle"
@@ -271,9 +229,6 @@
         "engine.js",
         "content.js"
       ],
-      "css": [
-        "panel.css"
-      ],
       "all_frames": true,
       "run_at": "document_idle"
     },
@@ -285,9 +240,6 @@
         "ats/Dover.js",
         "engine.js",
         "content.js"
-      ],
-      "css": [
-        "panel.css"
       ],
       "all_frames": true,
       "run_at": "document_idle"
@@ -301,9 +253,6 @@
         "engine.js",
         "content.js"
       ],
-      "css": [
-        "panel.css"
-      ],
       "all_frames": true,
       "run_at": "document_idle"
     },
@@ -316,9 +265,6 @@
         "engine.js",
         "content.js"
       ],
-      "css": [
-        "panel.css"
-      ],
       "all_frames": true,
       "run_at": "document_idle"
     },
@@ -330,9 +276,6 @@
         "ats/Google.js",
         "engine.js",
         "content.js"
-      ],
-      "css": [
-        "panel.css"
       ],
       "all_frames": true,
       "run_at": "document_idle"
@@ -347,9 +290,6 @@
         "engine.js",
         "content.js"
       ],
-      "css": [
-        "panel.css"
-      ],
       "all_frames": true,
       "run_at": "document_idle"
     },
@@ -361,9 +301,6 @@
         "ats/Gusto.js",
         "engine.js",
         "content.js"
-      ],
-      "css": [
-        "panel.css"
       ],
       "all_frames": true,
       "run_at": "document_idle"
@@ -377,9 +314,6 @@
         "ats/IBM.js",
         "engine.js",
         "content.js"
-      ],
-      "css": [
-        "panel.css"
       ],
       "all_frames": true,
       "run_at": "document_idle"
@@ -406,9 +340,6 @@
         "engine.js",
         "content.js"
       ],
-      "css": [
-        "panel.css"
-      ],
       "all_frames": true,
       "run_at": "document_idle"
     },
@@ -421,9 +352,6 @@
         "engine.js",
         "content.js"
       ],
-      "css": [
-        "panel.css"
-      ],
       "all_frames": true,
       "run_at": "document_idle"
     },
@@ -435,9 +363,6 @@
         "ats/JazzHR.js",
         "engine.js",
         "content.js"
-      ],
-      "css": [
-        "panel.css"
       ],
       "all_frames": true,
       "run_at": "document_idle"
@@ -453,9 +378,6 @@
         "engine.js",
         "content.js"
       ],
-      "css": [
-        "panel.css"
-      ],
       "all_frames": true,
       "run_at": "document_idle"
     },
@@ -468,9 +390,6 @@
         "ats/Jobvite.js",
         "engine.js",
         "content.js"
-      ],
-      "css": [
-        "panel.css"
       ],
       "all_frames": true,
       "run_at": "document_idle"
@@ -485,9 +404,6 @@
         "engine.js",
         "content.js"
       ],
-      "css": [
-        "panel.css"
-      ],
       "all_frames": true,
       "run_at": "document_idle"
     },
@@ -499,9 +415,6 @@
         "ats/Mechanize.js",
         "engine.js",
         "content.js"
-      ],
-      "css": [
-        "panel.css"
       ],
       "all_frames": true,
       "run_at": "document_idle"
@@ -516,9 +429,6 @@
         "engine.js",
         "content.js"
       ],
-      "css": [
-        "panel.css"
-      ],
       "all_frames": true,
       "run_at": "document_idle"
     },
@@ -532,9 +442,6 @@
         "engine.js",
         "content.js"
       ],
-      "css": [
-        "panel.css"
-      ],
       "all_frames": true,
       "run_at": "document_idle"
     },
@@ -547,9 +454,6 @@
         "engine.js",
         "content.js"
       ],
-      "css": [
-        "panel.css"
-      ],
       "all_frames": true,
       "run_at": "document_idle"
     },
@@ -561,9 +465,6 @@
         "ats/Okta.js",
         "engine.js",
         "content.js"
-      ],
-      "css": [
-        "panel.css"
       ],
       "all_frames": true,
       "run_at": "document_idle"
@@ -583,9 +484,6 @@
         "engine.js",
         "content.js"
       ],
-      "css": [
-        "panel.css"
-      ],
       "all_frames": true,
       "run_at": "document_idle"
     },
@@ -598,9 +496,6 @@
         "ats/Paylocity.js",
         "engine.js",
         "content.js"
-      ],
-      "css": [
-        "panel.css"
       ],
       "all_frames": true,
       "run_at": "document_idle"
@@ -615,9 +510,6 @@
         "engine.js",
         "content.js"
       ],
-      "css": [
-        "panel.css"
-      ],
       "all_frames": true,
       "run_at": "document_idle"
     },
@@ -630,9 +522,6 @@
         "engine.js",
         "content.js"
       ],
-      "css": [
-        "panel.css"
-      ],
       "all_frames": true,
       "run_at": "document_idle"
     },
@@ -644,9 +533,6 @@
         "ats/Recruitee.js",
         "engine.js",
         "content.js"
-      ],
-      "css": [
-        "panel.css"
       ],
       "all_frames": true,
       "run_at": "document_idle"
@@ -662,9 +548,6 @@
         "engine.js",
         "content.js"
       ],
-      "css": [
-        "panel.css"
-      ],
       "all_frames": true,
       "run_at": "document_idle"
     },
@@ -677,9 +560,6 @@
         "ats/Roblox.js",
         "engine.js",
         "content.js"
-      ],
-      "css": [
-        "panel.css"
       ],
       "all_frames": true,
       "run_at": "document_idle"
@@ -695,9 +575,6 @@
         "engine.js",
         "content.js"
       ],
-      "css": [
-        "panel.css"
-      ],
       "all_frames": true,
       "run_at": "document_idle"
     },
@@ -710,9 +587,6 @@
         "ats/SmartRecruiters.js",
         "engine.js",
         "content.js"
-      ],
-      "css": [
-        "panel.css"
       ],
       "all_frames": true,
       "run_at": "document_idle"
@@ -727,9 +601,6 @@
         "engine.js",
         "content.js"
       ],
-      "css": [
-        "panel.css"
-      ],
       "all_frames": true,
       "run_at": "document_idle"
     },
@@ -742,9 +613,6 @@
         "ats/TalNet.js",
         "engine.js",
         "content.js"
-      ],
-      "css": [
-        "panel.css"
       ],
       "all_frames": true,
       "run_at": "document_idle"
@@ -762,9 +630,6 @@
         "engine.js",
         "content.js"
       ],
-      "css": [
-        "panel.css"
-      ],
       "all_frames": true,
       "run_at": "document_idle"
     },
@@ -776,9 +641,6 @@
         "ats/Tesla.js",
         "engine.js",
         "content.js"
-      ],
-      "css": [
-        "panel.css"
       ],
       "all_frames": true,
       "run_at": "document_idle"
@@ -797,9 +659,6 @@
         "engine.js",
         "content.js"
       ],
-      "css": [
-        "panel.css"
-      ],
       "all_frames": true,
       "run_at": "document_idle"
     },
@@ -812,9 +671,6 @@
         "engine.js",
         "content.js"
       ],
-      "css": [
-        "panel.css"
-      ],
       "all_frames": true,
       "run_at": "document_idle"
     },
@@ -826,9 +682,6 @@
         "ats/Uber.js",
         "engine.js",
         "content.js"
-      ],
-      "css": [
-        "panel.css"
       ],
       "all_frames": true,
       "run_at": "document_idle"
@@ -850,9 +703,6 @@
         "engine.js",
         "content.js"
       ],
-      "css": [
-        "panel.css"
-      ],
       "all_frames": true,
       "run_at": "document_idle"
     },
@@ -866,9 +716,6 @@
         "engine.js",
         "content.js"
       ],
-      "css": [
-        "panel.css"
-      ],
       "all_frames": true,
       "run_at": "document_idle"
     },
@@ -880,9 +727,6 @@
         "ats/Workable.js",
         "engine.js",
         "content.js"
-      ],
-      "css": [
-        "panel.css"
       ],
       "all_frames": true,
       "run_at": "document_idle"
@@ -897,14 +741,169 @@
         "engine.js",
         "content.js"
       ],
-      "css": [
-        "panel.css"
-      ],
       "all_frames": true,
       "run_at": "document_idle"
     }
   ],
   "action": {
     "default_title": "Job Tracker Apply"
-  }
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "panel.css"
+      ],
+      "matches": [
+        "https://*.amazon.jobs/*/*",
+        "https://*.applytojob.com/apply/*/*",
+        "https://*.avature.net/*/ApplicationForm*",
+        "https://*.avature.net/*/ApplicationMethods*",
+        "https://*.avature.net/*/ApplicationQuestions*",
+        "https://*.avature.net/*/ApplicationReview*",
+        "https://*.avature.net/*/External/JobDetail*",
+        "https://*.avature.net/*/GeneralInfo*",
+        "https://*.avature.net/*/Register*",
+        "https://*.avature.net/*/careers/JobDetail/*",
+        "https://*.avature.net/*/careers/LocationAndProfile/*",
+        "https://*.avature.net/*/careers/Success*",
+        "https://*.avature.net/campusApply*",
+        "https://*.avature.net/careers/JobDetail/*",
+        "https://*.avature.net/careers/LocationAndProfile/*",
+        "https://*.avature.net/careers/Success*",
+        "https://*.bamboohr.com/careers*",
+        "https://*.bamboohr.com/jobs*",
+        "https://*.breezy.hr/*/apply*",
+        "https://*.breezy.hr/p/*",
+        "https://*.comeet.co/jobs/*/*/apply*",
+        "https://*.comeet.com/jobs/*/*/*/*",
+        "https://*.eightfold.ai/careers*",
+        "https://*.facebookcareers.com/*",
+        "https://*.freshteam.com/jobs/*",
+        "https://*.google.com/about/careers/applications/apply/*",
+        "https://*.governmentjobs.com/careers/*/jobs/*",
+        "https://*.governmentjobs.com/jobs/*",
+        "https://*.icims.com/forms*",
+        "https://*.icims.com/jobs/*/*/candidate*",
+        "https://*.icims.com/jobs/*/*/eeo*",
+        "https://*.icims.com/jobs/*/*/form*",
+        "https://*.icims.com/jobs/*/*/job*",
+        "https://*.icims.com/jobs/*/*/questions*",
+        "https://*.icims.com/jobs/candidate*",
+        "https://*.jibeapply.com/forms*",
+        "https://*.jibeapply.com/jobs/*/*/candidate*",
+        "https://*.jibeapply.com/jobs/*/*/eeo*",
+        "https://*.jibeapply.com/jobs/*/*/form*",
+        "https://*.jibeapply.com/jobs/*/*/job*",
+        "https://*.jibeapply.com/jobs/*/*/questions*",
+        "https://*.jibeapply.com/jobs/candidate*",
+        "https://*.linkedin.com/jobs/*currentJobId=*",
+        "https://*.linkedin.com/jobs/view/*",
+        "https://*.mechanize.work/apply/*",
+        "https://*.metacareers.com/*",
+        "https://*.myworkdayjobs.com/*",
+        "https://*.myworkdaysite.com/*",
+        "https://*.naukri.com/job-listings-*",
+        "https://*.naukri.com/registration/createAccount*",
+        "https://*.oraclecloud.com/*/CandidateExperience/*/sites/*/*/preview/*",
+        "https://*.oraclecloud.com/*/CandidateExperience/*/sites/*/job/*",
+        "https://*.oraclecloud.com/*/sites/*/job/*",
+        "https://*.paylocity.com/Recruiting/*",
+        "https://*.paylocity.com/recruiting/*",
+        "https://*.pinpointhq.com/*/postings/*",
+        "https://*.pinpointhq.com/postings/*",
+        "https://*.rec.pro.ukg.net/*/JobBoard/*/Account/Register*",
+        "https://*.rec.pro.ukg.net/*/JobBoard/*/OpportunityApply*",
+        "https://*.rec.pro.ukg.net/*/JobBoard/*/OpportunityDetail*",
+        "https://*.recruitee.com/*/*",
+        "https://*.rippling-ats.com/job/*/*",
+        "https://*.rippling-ats.com/jobs/eop_survey/*",
+        "https://*.seek.co.nz/job/*",
+        "https://*.seek.com.au/job/*",
+        "https://*.seek.com/job/*",
+        "https://*.successfactors.com/*",
+        "https://*.successfactors.eu/*",
+        "https://*.tal.net/*/candidate*",
+        "https://*.tal.net/*/opp/*",
+        "https://*.taleo.net/*/application.jss*",
+        "https://*.taleo.net/*/ats/careers/*",
+        "https://*.taleo.net/*/flow.jsf*",
+        "https://*.taleo.net/*/htmlResourceViewer.jss*",
+        "https://*.taleo.net/*/jobapply*",
+        "https://*.tesla.com/careers/*",
+        "https://*.uber.com/careers/apply*",
+        "https://*.ultipro.ca/*/JobBoard/*/Account/Register*",
+        "https://*.ultipro.ca/*/JobBoard/*/OpportunityApply*",
+        "https://*.ultipro.ca/*/JobBoard/*/OpportunityDetail*",
+        "https://*.ultipro.com/*/JobBoard/*/Account/Register*",
+        "https://*.ultipro.com/*/JobBoard/*/OpportunityApply*",
+        "https://*.ultipro.com/*/JobBoard/*/OpportunityDetail*",
+        "https://*/*/CandidateExperience/*/sites/*/*/preview/*",
+        "https://*/*/CandidateExperience/*/sites/*/job/*",
+        "https://*/*/sites/*/jobs/preview/*/apply/*",
+        "https://*/*/sites/CX*/job/*",
+        "https://*/TGNewUI/Profile/Home/ProfileBuilder*",
+        "https://*/TGNewUI/Search/Home/Home*",
+        "https://*/TGNewUI/Search/home/Home*",
+        "https://*/TGnewUI/Search/Home/Home*",
+        "https://*/TGnewUI/Search/home/Home*",
+        "https://app.dover.com/apply/*",
+        "https://app.trinethire.com/companies/*/jobs/*",
+        "https://apply.workable.com/*",
+        "https://ats.rippling.com/*/jobs/*",
+        "https://boards.eu.greenhouse.io/*",
+        "https://boards.greenhouse.io/*",
+        "https://careers.bain.com/jobs/*",
+        "https://careers.ibm.com/*/careers/JobDetail*",
+        "https://careers.ibm.com/job/*",
+        "https://careers.jacobs.com/*/careers/JobDetail/*",
+        "https://careers.jacobs.com/*/careers/Register*",
+        "https://careers.jobscore.com/*/*/*apply*job_id=*",
+        "https://careers.jobscore.com/apply_flow/*",
+        "https://careers.jobscore.com/careers/*/jobs/*",
+        "https://careers.roblox.com/jobs/*",
+        "https://careers.tql.com/*/ApplicationForm*",
+        "https://careers.tql.com/*/ApplicationMethods*",
+        "https://careers.tql.com/*/ApplicationQuestions*",
+        "https://careers.tql.com/*/ApplicationReview*",
+        "https://careers.tql.com/*/GeneralInfo*",
+        "https://careers.tql.com/*/JobDetail*",
+        "https://careers.tql.com/*/Register*",
+        "https://careers.withwaymo.com/jobs/*",
+        "https://cursor.com/careers/*",
+        "https://explore.jobs.netflix.net/careers*",
+        "https://job-boards.eu.greenhouse.io/*",
+        "https://job-boards.greenhouse.io/*",
+        "https://jobs.apple.com/*/*",
+        "https://jobs.apple.com/app/*/apply/*",
+        "https://jobs.ashbyhq.com/*",
+        "https://jobs.bytedance.com/*/*/*/apply*",
+        "https://jobs.bytedance.com/*/*/*/detail*",
+        "https://jobs.bytedance.com/*/*/applied*",
+        "https://jobs.dayforcehcm.com/*/jobs/*",
+        "https://jobs.dayforcehcm.com/*/jobs/*/apply*",
+        "https://jobs.eu.lever.co/*",
+        "https://jobs.gusto.com/postings/*",
+        "https://jobs.jobvite.com/*/apply*",
+        "https://jobs.jobvite.com/*/job/*",
+        "https://jobs.lever.co/*",
+        "https://jobs.polymer.co/*/*",
+        "https://jobs.roblox.com/careers*",
+        "https://jobs.smartrecruiters.com/*/*",
+        "https://jobs.smartrecruiters.com/oneclick-ui/company/*",
+        "https://joinbytedance.com/search/*",
+        "https://lifeattiktok.com/create-account*",
+        "https://lifeattiktok.com/createaccount*",
+        "https://lifeattiktok.com/login*",
+        "https://lifeattiktok.com/position/*/detail*",
+        "https://lifeattiktok.com/resume/*/apply*",
+        "https://lifeattiktok.com/search/*",
+        "https://myjobs.adp.com/*/cx/*",
+        "https://recruiting.adp.com/srccar/public/*",
+        "https://smartapply.indeed.com/beta/indeedapply/form/*",
+        "https://waymo.com/joinus/*",
+        "https://workforcenow.adp.com/mascsr/*/*/recruitment/*",
+        "https://www.okta.com/company/careers/*/*"
+      ]
+    }
+  ]
 }
