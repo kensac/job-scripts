@@ -766,7 +766,7 @@
 
   // One entry per profile row: add a container when the page has fewer than
   // the row needs, then every nested field the row has a value for.
-  async function fillGroup(group, items, file, fact, asName = null) {
+  async function fillGroup(group, items, file, fact, asName = null, parentRoot = null) {
     const rows = group.limit ? items.slice(0, group.limit) : items;
     const ordered = group.reverse ? [...rows].reverse() : rows;
     let filledAny = false;
@@ -787,7 +787,11 @@
         }
         return [...found].sort((a, b) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1));
       };
-      let containers = containerPaths.length ? allContainers() : [];
+      // A nested group of one widget (company inside an experience, school
+      // inside an education) has no container of its own: it fills inside
+      // its parent's entry (report 12: company, school and field of study
+      // never ran because it had none).
+      let containers = containerPaths.length ? allContainers() : parentRoot ? [parentRoot] : [];
       if (containerPaths.length && containers.length <= i) {
         const add = first(group.addButtonPath || [], ctx);
         if (!add) {
@@ -815,7 +819,7 @@
         const value = entryValue(asName || nested.name, item, fact);
         if (value === null) continue;
         for (const v of nested.variants) {
-          if (isGroup(v)) await fillGroup({ ...v, containerPath: v.containerPath || [] }, [item], file, fact, asName || nested.name);
+          if (isGroup(v)) await fillGroup({ ...v, containerPath: v.containerPath || [] }, [item], file, fact, asName || nested.name, root);
         }
         const plain = nested.variants.filter((v) => !isGroup(v));
         if (plain.length) {
@@ -865,7 +869,10 @@
         let v = value;
         if (field.fact === "today") v = formatDate(field._spec.name, parseDate(value) || todayParts());
         else if (field.fact === "birthday") v = formatDate(field._spec.name, parseDate(value));
-        ok = v == null ? false : await fillVariants(field._spec.variants, v, file, root, {});
+        // A file field carries the file, not a value; its recipe runs with
+        // the file (report 12: the resume never ran on a null value).
+        if (field.kind === "file") ok = file ? await fillVariants(field._spec.variants, "", file, root, {}) : false;
+        else ok = v == null ? false : await fillVariants(field._spec.variants, v, file, root, {});
       }
       if (field._index === lastFieldIndex()) await stepsBefore(cfg.fields.length, root);
       if (cfg.fillInputInterval) await sleep(cfg.fillInputInterval);
