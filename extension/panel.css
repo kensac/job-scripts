@@ -86,8 +86,20 @@
   text-transform: none;
 }
 
+/* Three states, not two. An explicit choice is data-jt-theme on the panel;
+   absent means follow the OS. The media query is guarded with
+   :not([data-jt-theme="light"]) so an explicit light choice beats a dark OS,
+   and the attribute selector repeats the tokens so an explicit dark choice
+   beats a light OS. Setting data-jt-theme="system" would be a bug: it falls
+   through to the light branch. Absent is how "system" is spelled.
+
+   The apps resolve this from data-x-theme plus localStorage on our origin,
+   which a content script on greenhouse.io cannot read - hence the panel's own
+   attribute, written by content.js from chrome.storage rather than
+   localStorage, because localStorage is per-origin and a preference set on one
+   ATS would not exist on the next. */
 @media (prefers-color-scheme: dark) {
-  #jt-apply {
+  #jt-apply:not([data-jt-theme="light"]) {
     --x-card: #201e1a;
     --x-hair: #34312b;
     --x-wash: #282520;
@@ -106,6 +118,26 @@
 
     color-scheme: dark;
   }
+}
+
+#jt-apply[data-jt-theme="dark"] {
+    --x-card: #201e1a;
+    --x-hair: #34312b;
+    --x-wash: #282520;
+    --x-ink: #ebe7e0;
+    --x-slate: #b6afa4;
+    --x-ash: #968f84;
+    --x-smoke: #55504a;
+    --x-accent: #9c8cff;
+    --x-on-accent: #171512;
+    --x-good: #3fbf7d;
+    --x-danger: #f08075;
+    /* A 5% wash reads on bone and is invisible on a dark ground, so the mix
+       strengths are tokens too. */
+    --x-line-mix: 45%;
+    --x-wash-mix: 15%;
+
+    color-scheme: dark;
 }
 
 /* The host page styles its own buttons, lists and paragraphs, and those rules
@@ -158,6 +190,7 @@
   flex: none;
 }
 
+#jt-apply #jt-theme,
 #jt-apply #jt-min {
   flex: none;
   margin: 0;
@@ -173,6 +206,7 @@
   color: var(--x-ash);
 }
 
+#jt-apply #jt-theme:hover,
 #jt-apply #jt-min:hover {
   background: var(--x-wash);
   color: var(--x-ink);

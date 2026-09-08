@@ -12,7 +12,7 @@ from urllib.parse import urlsplit
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from api import ai, apply, budget, db
+from api import ai, apply, budget, db, telemetry
 from api.auth import AuthedUser, require_user
 from api.routers.jobs import _write_board_row
 from api.tasks import application as drafts
@@ -102,6 +102,23 @@ class ResolveBody(BaseModel):
     fill_id: int | None = None
 
 
+def _seen(event: str, user: AuthedUser, **props: Any) -> None:
+    """One event per thing the extension did, keyed to the person.
+
+    distinct_id is the IdP subject, which is what the API already uses for
+    exceptions (app.py) and what the frontend identifies with: auth.js mints a
+    fresh token.sub at every sign-in, so it surfaces the stable idp_sub to
+    PostHog instead. Anything else here would put the extension's funnel on a
+    different person from the same person's web session.
+
+    Properties carry counts and the ATS host, never a field label, a question
+    or an answer. What someone was asked and what they replied is the content
+    of their application; the shape of it is what tells us whether a reader
+    works.
+    """
+    telemetry.capture(event, distinct_id=user.sub, properties=props)
+
+
 @router.post("/user/apply/resolve")
 def resolve_form(body: ResolveBody, user: AuthedUser = Depends(require_user)):
     """What goes in each field. Opens a fill in the ledger; the extension
@@ -142,6 +159,16 @@ def resolve_form(body: ResolveBody, user: AuthedUser = Depends(require_user)):
         )
         if profile.default_resume_id
         else None
+    )
+    _seen(
+        "apply_form_resolved",
+        user,
+        host=urlsplit(body.url).netloc,
+        matched_job=job_id is not None,
+        fields=len(fields),
+        filled=sum(1 for f in fields if f.get("value") not in (None, "")),
+        reused_fill=open_fill is not None,
+        has_resume=resume is not None,
     )
     return {
         "fill_id": fill["id"],
@@ -205,6 +232,13 @@ def fill_submitted(fill_id: int, body: SubmittedBody, user: AuthedUser = Depends
     )
     if fill["job_id"] is not None:
         _write_board_row(user.id, fill["job_id"], {"status": SUBMITTED_STATUS})
+    _seen(
+        "apply_form_submitted",
+        user,
+        matched_job=fill["job_id"] is not None,
+        fields=len(fields),
+        changed=sum(1 for f in fields if f["changed"]),
+    )
     return {"ok": True, "job_id": fill["job_id"], "fields": fields}
 
 
@@ -272,6 +306,7 @@ async def suggest(body: SuggestBody, user: AuthedUser = Depends(require_user)):
     fields = [f for f in body.fields if f.key not in skipped]
     if not fields:
         _note_on_fill(user.id, body.fill_id, {}, {}, skipped)
+        _seen("apply_ai_suggested", user, asked=0, answered=0, skipped=len(skipped), model=None)
         return {"answers": {}, "skipped": skipped, "model": None}
     profile = apply.load_profile(user.id)
     resume = drafts.resume_text(user.id, profile.default_resume_id) or ""
@@ -323,6 +358,14 @@ async def suggest(body: SuggestBody, user: AuthedUser = Depends(require_user)):
         if text:
             answers[a.key] = text
     _note_on_fill(user.id, body.fill_id, answers, raw, skipped)
+    _seen(
+        "apply_ai_suggested",
+        user,
+        asked=len(fields),
+        answered=len(answers),
+        skipped=len(skipped),
+        model=cfg.model,
+    )
     return {"answers": answers, "skipped": skipped, "model": cfg.model}
 
 
@@ -373,11 +416,21 @@ def create_report(body: ReportBody, user: AuthedUser = Depends(require_user)):
     triage. Capped so one page cannot fill the table by itself."""
     if len(json.dumps(body.page)) > MAX_REPORT_BYTES:
         raise _bad(413, "REPORT_TOO_LARGE", "the page capture is over 2 MB")
-    return db.query_one(
+    report = db.query_one(
         "INSERT INTO application_reports (user_id, url, host, note, page) "
         "VALUES (%s, %s, %s, %s, %s) RETURNING id, created_at",
         (user.id, body.url, urlsplit(body.url).netloc, body.note.strip(), db.jsonb(body.page)),
     )
+    # The one event that says a reader did not work on a real page. The note is
+    # a person's own words about their own application, so only whether there
+    # was one ships; the host is what says where to look.
+    _seen(
+        "apply_page_reported",
+        user,
+        host=urlsplit(body.url).netloc,
+        has_note=bool(body.note.strip()),
+    )
+    return report
 
 
 @router.get("/user/apply/reports")
