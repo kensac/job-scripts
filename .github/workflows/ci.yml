@@ -121,6 +121,7 @@ jobs:
           JOBTRACKER_SERVICE_TOKEN: ci
         run: |
           export APP_ENCRYPTION_KEY=$(python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
+          node --test tests/extension/*.test.cjs
           pytest -q tests
       - name: Models match migrations (autogen must be empty)
         if: steps.autofix.outputs.changed != 'true'
