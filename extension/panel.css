@@ -127,7 +127,6 @@
 #jt-apply.collapsed .head { border: 0; padding: 12px; }
 #jt-apply.collapsed .body { display: none; }
 #jt-apply .source-strip { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 12px; color: var(--x-ash); font-size: 11px; }
-#jt-apply .source-strip span::before { content: "✓"; margin-right: 4px; }
 #jt-apply .metrics { display: grid; grid-template-columns: 1fr 1fr; margin-top: 16px; background: var(--x-wash); border: 1px solid var(--x-hair); border-radius: 6px; }
 #jt-apply .metrics > div { padding: 12px; }
 #jt-apply .metrics > div + div { border-left: 1px solid var(--x-hair); }

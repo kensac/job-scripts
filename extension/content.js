@@ -527,7 +527,7 @@
     render(`
       <div class="result-heading"><span class="eyebrow">This page</span><h4>${!fill.fields.length ? "No fields detected" : todo.length ? "A few things to review" : "Ready for your review"}</h4><p>${!fill.fields.length ? "Open the application form, then try again." : "Check your answers on the form before continuing."}</p></div>
       <div class="metrics" aria-label="Autofill results"><div><strong>${done.length}</strong><span>Items filled</span></div><div><strong>${todo.length}</strong><span>Need attention</span></div></div>
-      <p class="board-note">${fill.job_id ? "Matched to your Job Tracker board." : "Not on your board. Profile and saved answers are available; job drafts are not."}</p>
+      <p class="board-note">${fill.job_id ? "Matched to a Job Tracker posting." : "No matching Job Tracker posting. Profile and saved answers are available; job drafts are not."}</p>
       ${fill.ai_error ? `<p class="notice warn" role="alert">Could not prepare AI answers: ${esc(fill.ai_error)}.</p>` : ""}
       ${fill.stopped ? `<p class="notice warn" role="alert">${esc(fill.stopped)}</p>` : ""}
       <button id="jt-again" class="primary">Fill again <span aria-hidden="true">↻</span></button>
