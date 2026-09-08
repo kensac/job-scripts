@@ -11,7 +11,7 @@
   const reader = window.__jtReader || { ready: () => false, submitButton: () => null, submitted: () => false };
   // Stamped into every report, so a report from a build the person has not
   // reloaded yet is told apart from a bug (reports 9 to 11, 2026-09-08).
-  const BUILD = "2026-09-08 apply-panel";
+  const BUILD = "2026-09-08 03:35";
 
   // A message to the extension's background worker. After the extension is
   // reloaded, a page that was already open keeps the old script, whose

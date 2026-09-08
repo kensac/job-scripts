@@ -180,3 +180,45 @@
   #jt-apply { top: 8px; right: 8px; width: calc(100vw - 16px); max-height: calc(100dvh - 16px); }
   #jt-apply.collapsed { width: 248px; }
 }
+
+/* The panel sits in the host page's DOM, so the host's stylesheet reaches
+   it: on Workday (2026-09-08) a leaked line-height collapsed every span,
+   two-line labels drew over themselves and the tags became a line through
+   their text. Every element in the panel states the typographic basics the
+   page may have taken away; the specific rules above still win. */
+#jt-apply * {
+  line-height: 1.5;
+  letter-spacing: normal;
+  text-transform: none;
+  text-decoration: none;
+  box-sizing: border-box;
+  float: none;
+}
+#jt-apply .tag,
+#jt-apply .count {
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+/* Disclosure marks: the same plus and minus as the minimise button, not
+   the browser's triangle. */
+#jt-apply summary {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+#jt-apply summary::-webkit-details-marker {
+  display: none;
+}
+#jt-apply summary::before {
+  content: "+";
+  display: inline-block;
+  width: 14px;
+  text-align: center;
+  color: var(--x-ash);
+  font-size: 13px;
+}
+#jt-apply details[open] > summary::before {
+  content: "\2013";
+}
