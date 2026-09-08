@@ -265,6 +265,11 @@ def profile_value(profile: Profile, fact: str) -> str:
         return f"{len(rows)} entries" if rows else ""
     if fact == "yes":
         return "Yes"
+    # A preferred name that is the first name is no preferred name: Workday
+    # ticked "I have a preferred name" and filled it (2026-09-08).
+    if fact == "preferred_name":
+        pref = profile.preferred_name.strip()
+        return "" if pref.lower() == profile.first_name.strip().lower() else pref
     if fact == "no":
         return "No"
     # A flow step in a config-driven reader (a begin or save button, a wait)

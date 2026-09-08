@@ -292,10 +292,27 @@
     // go on to the next page and fill it too, until the page that submits.
     // Continue is not Submit; the person still clicks that.
     if (reader.nextButton && !reader.submitButton() && reader.nextButton() && step < 12) {
+      // Only a complete page is advanced: a required field still blank is
+      // the person's to fill first (Workday, 2026-09-08: Continue pressed
+      // with five required fields blank, and the page listed them).
+      const blank = fill.fields.filter((e) => e.required && !isFilled(e) && e.kind !== "group");
+      if (blank.length) {
+        fill.stopped = `This page still needs ${blank.length} required field${blank.length === 1 ? "" : "s"}; fill them and press Continue yourself, or Fill again.`;
+        show();
+        return;
+      }
       const before = fingerprint();
       clickThrough(reader.nextButton());
       for (let i = 0; i < 40 && fingerprint() === before; i++) await sleep(250);
       await settle();
+      // The page's own verdict: a reader that can read the validation
+      // scope lists the fields the form refused, and the loop stops there.
+      const errors = reader.errors ? reader.errors() : [];
+      if (errors.length) {
+        fill.stopped = `The form refused the page: ${errors.slice(0, 6).join("; ")}.`;
+        show();
+        return;
+      }
       if (reader.ready()) {
         step += 1;
         fields = await reader.read();
@@ -445,6 +462,7 @@
     render(`
       <p>${fill.job_id ? "On your board." : '<span class="warn">Not a posting on your board, so no drafts.</span>'}</p>
       <p><b>${done.length} filled</b>${todo.length ? `, <b class="todo">${todo.length} for you</b>` : ""}.${fill.ai_error ? ` <span class="warn">Model call failed: ${esc(fill.ai_error)}.</span>` : ""}</p>
+      ${fill.stopped ? `<p class="warn">${esc(fill.stopped)}</p>` : ""}
       ${todo.length ? `<ul>${todo.map((e) => li(e, e.kind === "file" ? '<span class="muted">attach the file</span>' : e.never_ai ? '<span class="muted">yours to fill</span>' : `<button data-ai="${esc(e.key)}">fill with AI</button>`)).join("")}</ul>` : ""}
       <details><summary class="muted">filled (${done.length})</summary><ul>${done.map((e) => li(e, `<span class="muted">${esc(e.rung)}</span>`)).join("")}</ul></details>
       <details><summary class="muted">how this works</summary><p class="muted">Check the form, then click its own Submit button. What you type or pick, and every model answer you leave in place, is remembered for the next form with the same question; free-text answers are not.</p></details>
