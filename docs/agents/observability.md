@@ -255,8 +255,12 @@ submitted application costs more than one box. A group's nested fields are
 filled inside the entry's container or not at all, never against the
 document, where the same selector matches the form's own fields.
 The panel's switch "AI answers every blank box" sends the free-text boxes
-to the model as well (the drafts cover the ones the board knew about); it
-is the person's own setting, kept in the browser. The admin list
+to the model as well (the drafts cover the ones the board knew about). The
+panel's preferences (that switch, minimised, the theme) are the person's:
+they live in `user_settings.prefs.apply` through the settings endpoints,
+read at start and written on every change with the row's other prefs
+kept, and `chrome.storage.local` is the cache that paints first and is
+shared across every ATS host. The admin list
 `application_ai_never_fills` (location, by default) names the fields the
 model never fills: the suggest call drops them and names them in its
 reply, and the panel lists them as the person's. The model's answers go
