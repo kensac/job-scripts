@@ -133,8 +133,14 @@
       el.getAttribute("aria-autocomplete") === "list");
   async function typeSlowly(el, value, opts) {
     const t = events(opts);
+    // The click that opens the widget and puts the caret in the box: the
+    // recipe's own click lands on the field's frame, and the measured
+    // sequence clicked the input itself (captures 16 to 20).
     el.focus();
     el.dispatchEvent(new FocusEvent("focus", t));
+    if (typeof el.click === "function") el.click();
+    await sleep(250);
+    note(`typing "${String(value).slice(0, 30)}" into ${el.id || el.name || "search"} one key at a time`);
     setValue(el, "");
     el.dispatchEvent(new InputEvent("input", { ...t, inputType: "deleteContentBackward" }));
     let typed = "";
