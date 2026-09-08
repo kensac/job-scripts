@@ -820,7 +820,8 @@
         const plain = nested.variants.filter((v) => !isGroup(v));
         if (plain.length) {
           try {
-            await fillVariants(plain, value, file, root, ctx);
+            const took = await fillVariants(plain, value, file, root, ctx);
+            note(`${nested.name} = "${String(value).slice(0, 40)}": ${took ? "took" : "not taken"}`);
           } catch (e) {
             note(`${nested.name}: ${String(e)}`);
           }
