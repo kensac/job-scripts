@@ -428,10 +428,18 @@ def test_the_form_page_maps_back_to_the_posting_on_every_host():
     from core.forms import posting_urls
 
     assert posting_urls("https://jobs.ashbyhq.com/rogo/abc/application?utm=x") == [
-        "https://jobs.ashbyhq.com/rogo/abc"
+        "https://jobs.ashbyhq.com/rogo/abc",
+        "https://jobs.ashbyhq.com/rogo/abc/",
     ]
     assert posting_urls("https://jobs.lever.co/shieldai/41c5/apply") == [
-        "https://jobs.lever.co/shieldai/41c5"
+        "https://jobs.lever.co/shieldai/41c5",
+        "https://jobs.lever.co/shieldai/41c5/",
+    ]
+    # Workable lists its postings with a trailing slash; the form's /apply/
+    # comes off and the slash stays a candidate.
+    assert posting_urls("https://apply.workable.com/eqltech/j/B2593F22F8/apply/") == [
+        "https://apply.workable.com/eqltech/j/B2593F22F8",
+        "https://apply.workable.com/eqltech/j/B2593F22F8/",
     ]
     both = [
         "https://job-boards.greenhouse.io/yext/jobs/8174875",
