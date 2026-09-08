@@ -301,7 +301,12 @@
       }
       return took;
     }
-    if (isReactSelect(ctl)) return pickReactSelect(field, ctl, value, field.key === "location" || !field.options.length);
+    // The city search is left to the person for now: on Gusto's form,
+    // 2026-09-08, three attempts at its geocoder each chose wrong or lost the
+    // menu, and a wrong city on a submitted application costs more than a
+    // box to type in. It stays on the todo list the panel shows.
+    if (field.key === "location") return false;
+    if (isReactSelect(ctl)) return pickReactSelect(field, ctl, value, !field.options.length);
     if (ctl.tagName === "SELECT") {
       const opt = [...ctl.options].find((o) => o.text.trim().toLowerCase() === want);
       if (!opt) return false;

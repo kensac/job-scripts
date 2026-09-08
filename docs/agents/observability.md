@@ -220,11 +220,11 @@ hand-written readers, which own their hosts; the engine steps back when
 one is present. The Greenhouse reader also reads the employer's own
 self-identification questions from the form API's demographic block, finds
 their controls by label, and reads the page's own Country box, which the
-API never lists. A location result must name the place and is preferred
-when it also carries the person's state or country; the geocoder answers
-late and the menu reports closed meanwhile, so the reader waits for the
-options themselves, up to eight seconds ("New York" landed in Sudan, then
-"NY" in Nyala, Gusto). A group's nested fields are
+API never lists. The city search box is left to the person and listed as
+theirs to type: its geocoder answers late with the menu reporting closed,
+and three attempts at it on Gusto's form each chose wrong ("New York"
+landed in Sudan, "NY" in Nyala) or lost the menu; a wrong city on a
+submitted application costs more than one box. A group's nested fields are
 filled inside the entry's container or not at all, never against the
 document, where the same selector matches the form's own fields.
 The form page maps back to the posting with and without a trailing slash,
