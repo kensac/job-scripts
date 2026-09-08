@@ -218,9 +218,18 @@ wants, `start_date_slashes_MMYYYY`), the save step; the resolve response
 carries the profile's rows for it. Ashby, Greenhouse and Lever keep their
 hand-written readers, which own their hosts; the engine steps back when
 one is present. The Greenhouse reader also reads the employer's own
-self-identification questions from the form API's demographic block, finds
-their controls by label, and reads the page's own Country box, which the
-API never lists. The city search box is left to the person and listed as
+self-identification questions from the form API's demographic block and
+matches them by label. **The page is the form**: every labelled control on
+it is a field, its kind read off the widget (a react-select with one value
+or several, checkboxes, radios, a native select, a textarea, a file, text),
+and the API adds labels, required flags and option lists for the fields
+it knows; a control the API never lists (Country, "Are you
+Hispanic/Latino?") is a field all the same. The kind only tells the model
+what shape of answer to give; the fill goes by the widget. A form reveals
+fields as it is filled (race appears once Hispanic/Latino is answered), so
+after a fill pass the form is read again and what appeared is resolved
+onto the same ledger row (`fill_id` on the resolve) and filled, up to
+three rounds. The city search box is left to the person and listed as
 theirs to type: its geocoder answers late with the menu reporting closed,
 and three attempts at it on Gusto's form each chose wrong ("New York"
 landed in Sudan, "NY" in Nyala) or lost the menu; a wrong city on a

@@ -19681,6 +19681,17 @@
             "minimum": 0.0,
             "title": "Step",
             "default": 0
+          },
+          "fill_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fill Id"
           }
         },
         "type": "object",

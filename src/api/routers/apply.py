@@ -96,6 +96,10 @@ class ResolveBody(BaseModel):
     # Which page of a multi-page form this is; the ledger keeps one fill per
     # page so a Workday application is several rows on one url.
     step: int = Field(default=0, ge=0, le=50)
+    # An open fill to add these fields to: a form reveals fields as it is
+    # filled (the EEO race question appears once Hispanic/Latino is
+    # answered), and they belong on the same ledger row.
+    fill_id: int | None = None
 
 
 @router.post("/user/apply/resolve")
@@ -105,11 +109,29 @@ def resolve_form(body: ResolveBody, user: AuthedUser = Depends(require_user)):
     job = db.query_one("SELECT id FROM jobs WHERE url = ANY(%s) LIMIT 1", (posting_urls(body.url),))
     job_id = job["id"] if job else None
     fields = apply.resolve(user.id, job_id, body.fields)
-    fill = db.query_one(
-        "INSERT INTO application_fills (user_id, job_id, url, host, fields) "
-        "VALUES (%s, %s, %s, %s, %s) RETURNING id",
-        (user.id, job_id, body.url, urlsplit(body.url).netloc, db.jsonb(fields)),
+    open_fill = (
+        db.query_one(
+            "SELECT id, fields FROM application_fills WHERE id = %s AND user_id = %s "
+            "AND submitted_at IS NULL",
+            (body.fill_id, user.id),
+        )
+        if body.fill_id is not None
+        else None
     )
+    if open_fill:
+        have = {f["key"] for f in open_fill["fields"]}
+        merged = [*open_fill["fields"], *[f for f in fields if f["key"] not in have]]
+        db.execute(
+            "UPDATE application_fills SET fields = %s WHERE id = %s",
+            (db.jsonb(merged), open_fill["id"]),
+        )
+        fill = open_fill
+    else:
+        fill = db.query_one(
+            "INSERT INTO application_fills (user_id, job_id, url, host, fields) "
+            "VALUES (%s, %s, %s, %s, %s) RETURNING id",
+            (user.id, job_id, body.url, urlsplit(body.url).netloc, db.jsonb(fields)),
+        )
     assert fill
     profile = apply.load_profile(user.id)
     resume = (
@@ -220,8 +242,12 @@ DEFAULT_SUGGEST = (
     "of the options as written; when a hint is given, it is the person's own "
     "answer and you choose the option that means it. A text field takes a "
     "short phrase, a number field a number, and a long field a short paragraph "
-    "in the person's own voice drawn from the resume. When the profile and resume "
-    "do not say, answer with an empty string rather than a guess."
+    "in the person's own voice drawn from the resume. The resume and profile are "
+    "the person's whole record: a question about their own history with this "
+    "employer or its people (worked here before, applied before, referred by or "
+    "related to an employee, a current or former contractor) is answered No when "
+    "neither shows it. A fact only they could know (a postal code, a date) is "
+    "left as an empty string rather than guessed."
 )
 
 

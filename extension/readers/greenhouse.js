@@ -46,8 +46,14 @@
   // The API's name for the location question is "location"; the page's
   // control is "candidate-location".
   const ALIAS = { location: "candidate-location" };
+  // The widget is read off the page, never assumed from the name: a "[]"
+  // multi-value question is a row of checkboxes on one form and a
+  // react-select whose input carries the name as its id on another
+  // (Bloomreach's "Where did you hear about us?", report 6).
   function control(name) {
-    if (name.endsWith("[]")) return document.querySelector(`${FORM} input[name="${CSS.escape(name)}"]`);
+    if (name.endsWith("[]")) {
+      return document.getElementById(name) || document.querySelector(`${FORM} input[name="${CSS.escape(name)}"]`);
+    }
     return (
       document.getElementById(name) ||
       (ALIAS[name] && document.getElementById(ALIAS[name])) ||
@@ -91,67 +97,87 @@
     return list;
   }
 
-  // The control under the label that reads like this question.
-  function controlByLabel(label) {
-    const want = clean(label).toLowerCase();
-    for (const lab of document.querySelectorAll(`${FORM} label`)) {
-      const t = clean(lab.innerText).toLowerCase();
-      if (!t || !(t === want || t.startsWith(want.slice(0, 60)) || want.startsWith(t.slice(0, 60)))) continue;
-      const id = lab.getAttribute("for");
-      const byFor = id && document.getElementById(id);
-      if (byFor) return byFor;
-      const inside = lab.querySelector("input:not([type=hidden]), select, textarea");
-      if (inside) return inside;
-      const near = lab.parentElement && lab.parentElement.querySelector("input:not([type=hidden]), select, textarea");
-      if (near) return near;
-    }
-    return null;
-  }
-
-  function kindOf(f, ctl) {
-    if (f.type === "input_file") return "file";
-    if (f.type === "textarea") return "long";
-    if (f.type === "multi_value_multi_select") return "multiselect";
-    if (f.type === "multi_value_single_select") return "select";
-    if (f.name === "location" || (ctl && isReactSelect(ctl))) return "select";
+  // The page is the form. Every labelled control on it is a field, in page
+  // order; the API's list adds the label, the required flag and the option
+  // list for the ones it knows about, and the demographic block is matched
+  // by label text since the page gives it no names. A control the API never
+  // lists (Country beside the location search, "Are you Hispanic/Latino?"
+  // in the EEO block, Bloomreach 2026-09-08) is a field all the same, with
+  // its kind read off the widget and its options learned by the fill.
+  const same = (a, b) => {
+    const x = clean(a).toLowerCase();
+    const y = clean(b).toLowerCase();
+    return !!x && !!y && (x === y || x.startsWith(y.slice(0, 60)) || y.startsWith(x.slice(0, 60)));
+  };
+  const isMulti = (ctl) => !!shellOf(ctl)?.querySelector('[class*="value-container--is-multi"]');
+  function widgetKind(ctl) {
+    if (ctl.type === "file") return "file";
+    if (ctl.tagName === "TEXTAREA") return "long";
+    if (isReactSelect(ctl)) return isMulti(ctl) ? "multiselect" : "select";
+    if (ctl.tagName === "SELECT") return "select";
+    if (ctl.type === "checkbox") return "multiselect";
+    if (ctl.type === "radio") return "select";
+    if (ctl.type === "number") return "number";
     return "text";
   }
 
   async function read() {
+    const api = await questions();
+    const byName = new Map(api.filter((f) => !f.byLabel).map((f) => [f.name, f]));
+    const byLabel = api.filter((f) => f.byLabel);
     const out = [];
-    for (const f of await questions()) {
-      const ctl = f.byLabel ? controlByLabel(f.label) : control(f.name);
-      if (!ctl) continue;
-      const kind = kindOf(f, ctl);
-      // The page pairs the API's location question with a Country box of
-      // its own that the API never lists (Gusto, 2026-09-08). It goes
-      // first: the city search is scoped to the country.
-      if (f.name === "location") {
-        const country = document.getElementById("country");
-        if (country) out.push({ key: "country", label: "Country", kind: "select", required: true, options: [], _ctl: country });
-      }
+    const seen = new Set();
+    for (const lab of document.querySelectorAll(`${FORM} label[for]`)) {
+      const ctl = document.getElementById(lab.getAttribute("for"));
+      if (!ctl || ctl.type === "hidden") continue;
+      // A row of boxes shares a name and is one field.
+      const groupKey = ctl.type === "checkbox" || ctl.type === "radio" ? ctl.name : null;
+      if (seen.has(ctl) || (groupKey && seen.has(groupKey))) continue;
+      seen.add(ctl);
+      if (groupKey) seen.add(groupKey);
+      const text = clean(lab.innerText);
+      const name = ctl.id === ALIAS.location ? "location" : groupKey || ctl.id;
+      const f = byName.get(name) || byLabel.find((q) => same(q.label, text));
+      if (f && SKIP.has(f.name)) continue;
+      const kind = widgetKind(ctl);
+      const options = f ? f.values : groupKey ? boxes(groupKey).map(boxLabel) : [];
       out.push({
-        key: f.name,
-        label: f.label,
+        key: f ? f.name : name,
+        label: f ? f.label : text,
         kind,
-        required: f.required,
-        options: kind === "multiselect" || kind === "select" ? f.values : [],
+        required: f ? f.required : /\*\s*$/.test(lab.innerText) || ctl.required,
+        options: kind === "select" || kind === "multiselect" ? options : [],
         _ctl: ctl,
         // The city search is the person's (see fill); the panel says so.
-        _person: f.name === "location",
+        _person: name === "location",
       });
+    }
+    // What the API lists and the page shows without a label (the file input).
+    for (const f of api) {
+      if (f.byLabel || SKIP.has(f.name) || out.some((o) => o.key === f.name)) continue;
+      const ctl = control(f.name);
+      if (!ctl || seen.has(ctl)) continue;
+      seen.add(ctl);
+      const kind = widgetKind(ctl);
+      out.push({ key: f.name, label: f.label, kind, required: f.required, options: kind === "select" || kind === "multiselect" ? f.values : [], _ctl: ctl });
     }
     return out;
   }
 
-  const boxes = (name) => [...document.querySelectorAll(`${FORM} input[type=checkbox][name="${CSS.escape(name)}"]`)];
+  const boxes = (name) => [...document.querySelectorAll(`${FORM} input[name="${CSS.escape(name)}"]`)].filter((b) => b.type === "checkbox" || b.type === "radio");
   const boxLabel = (box) => clean(document.querySelector(`label[for="${CSS.escape(box.id)}"]`)?.innerText);
 
   function current(field) {
     const ctl = field._ctl;
-    if (field.kind === "multiselect") return boxes(field.key).filter((b) => b.checked).map(boxLabel).join(" | ");
-    if (field.kind === "file") return ctl.files && ctl.files.length ? ctl.files[0].name : "";
-    if (isReactSelect(ctl)) return shellOf(ctl)?.querySelector('[class*="select__single-value"]')?.innerText.trim() || "";
+    if (!ctl) return "";
+    if (ctl.type === "file") return ctl.files && ctl.files.length ? ctl.files[0].name : "";
+    if (isReactSelect(ctl)) {
+      const shell = shellOf(ctl);
+      const chips = shell ? [...shell.querySelectorAll('[class*="select__multi-value__label"]')].map((c) => c.innerText.trim()) : [];
+      if (chips.length) return chips.join(" | ");
+      return shell?.querySelector('[class*="select__single-value"]')?.innerText.trim() || "";
+    }
+    if (ctl.type === "checkbox" || ctl.type === "radio") return boxes(field.key).filter((b) => b.checked).map(boxLabel).join(" | ");
     return ctl.value || "";
   }
 
@@ -281,10 +307,21 @@
     return false;
   }
 
+  // Filled by the widget on the page, never by the field's kind: the kind
+  // says what shape of answer to give, the widget says how to put it in.
+  // The same kind renders differently form to form (a multi-value question
+  // is checkboxes on one and a react-select with chips on another).
+  const parts = (value) => String(value ?? "").split("|").map((s) => s.trim()).filter(Boolean);
+
   async function fill(field, value, file) {
     const ctl = field._ctl;
-    const want = String(value ?? "").trim().toLowerCase();
-    if (field.kind === "file") {
+    if (!ctl || !ctl.isConnected) return false;
+    // The city search is left to the person for now: on Gusto's form,
+    // 2026-09-08, three attempts at its geocoder each chose wrong or lost the
+    // menu, and a wrong city on a submitted application costs more than a
+    // box to type in. It stays on the todo list the panel shows.
+    if (field.key === "location") return false;
+    if (ctl.type === "file") {
       if (!file) return false;
       const dt = new DataTransfer();
       dt.items.add(file);
@@ -292,24 +329,31 @@
       ctl.dispatchEvent(new Event("change", { bubbles: true }));
       return true;
     }
-    if (field.kind === "multiselect") {
+    if (isReactSelect(ctl)) {
+      if (!isMulti(ctl)) return pickReactSelect(field, ctl, value, !field.options.length);
+      // Several values: each is picked from the menu and shows as a chip.
       let took = false;
-      for (const part of want.split("|").map((s) => s.trim()).filter(Boolean)) {
+      const have = current(field).toLowerCase().split(" | ");
+      for (const part of parts(value)) {
+        if (have.includes(part.toLowerCase())) continue;
+        took = (await pickReactSelect(field, ctl, part, true)) || took;
+      }
+      return took;
+    }
+    if (ctl.type === "checkbox" || ctl.type === "radio") {
+      let took = false;
+      for (const part of parts(value).map((s) => s.toLowerCase())) {
         const box = boxes(field.key).find((b) => boxLabel(b).toLowerCase() === part);
         if (box && !box.checked) {
           box.click();
           took = true;
+          if (box.type === "radio") break;
         }
       }
       return took;
     }
-    // The city search is left to the person for now: on Gusto's form,
-    // 2026-09-08, three attempts at its geocoder each chose wrong or lost the
-    // menu, and a wrong city on a submitted application costs more than a
-    // box to type in. It stays on the todo list the panel shows.
-    if (field.key === "location") return false;
-    if (isReactSelect(ctl)) return pickReactSelect(field, ctl, value, !field.options.length);
     if (ctl.tagName === "SELECT") {
+      const want = String(value ?? "").trim().toLowerCase();
       const opt = [...ctl.options].find((o) => o.text.trim().toLowerCase() === want);
       if (!opt) return false;
       ctl.value = opt.value;

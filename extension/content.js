@@ -11,10 +11,22 @@
   const reader = window.__jtReader;
   if (!reader) return;
 
-  const api = (path, method, body) =>
-    new Promise((resolve) => chrome.runtime.sendMessage({ path, method, body }, resolve));
-  const pdf = (path) =>
-    new Promise((resolve) => chrome.runtime.sendMessage({ kind: "pdf", path }, resolve));
+  // A message to the extension's background worker. After the extension is
+  // reloaded, a page that was already open keeps the old script, whose
+  // channel to the worker is gone: sendMessage throws "Extension context
+  // invalidated" (Gusto, 2026-09-08). That comes back as a stale result
+  // the panel turns into "reload this page", not an uncaught error.
+  const STALE = { ok: false, stale: true, status: 0, error: "extension reloaded; reload this page" };
+  const send = (msg) =>
+    new Promise((resolve) => {
+      try {
+        chrome.runtime.sendMessage(msg, (res) => resolve(res === undefined ? STALE : res));
+      } catch (_) {
+        resolve(STALE);
+      }
+    });
+  const api = (path, method, body) => send({ path, method, body });
+  const pdf = (path) => send({ kind: "pdf", path });
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const esc = (s) =>
     String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
@@ -156,6 +168,10 @@
     });
     if (!res.ok) {
       lastError = res;
+      if (res.stale) {
+        render(`<p class="warn">Job Tracker Apply was updated. Reload this page to continue.</p>`);
+        return;
+      }
       render(
         res.signin
           ? `<p class="warn">Not signed in. <a href="${res.signin}" target="_blank">Open Job Tracker</a>, sign in, then try again.</p><button id="jt-autofill">Autofill</button>`
@@ -193,6 +209,7 @@
     for (const entry of fill.fields) {
       if (entry.rung !== "resume" && entry.value != null) await put(entry, entry.value, null);
     }
+    await revealed(file);
     await askModel(fill.fields.filter((e) => !isFilled(e) && askable(e)));
     await verify();
     show();
@@ -271,6 +288,33 @@
 
   // What the page holds after everything: a field the page reset is filled
   // once more, from fresh element references.
+  // A form reveals fields as it is filled: Greenhouse's EEO block shows the
+  // race question once Hispanic/Latino is answered (Bloomreach, 2026-09-08).
+  // After a fill pass the form is read again; what appeared is resolved onto
+  // the same ledger row and filled, and a reveal can reveal more, so up to
+  // three rounds.
+  async function revealed(file) {
+    for (let round = 0; round < 3; round++) {
+      await sleep(300);
+      await readFields();
+      const fresh = fields.filter((f) => !entryByKey(f.key));
+      if (!fresh.length) return;
+      const res = await api("user/apply/resolve", "POST", {
+        url: location.href,
+        fields: fresh.map(plain),
+        step: step,
+        fill_id: fill.fill_id,
+      });
+      if (!res.ok) return;
+      for (const entry of res.json.fields) {
+        if (fieldByKey(entry.key)?._person) entry.never_ai = true;
+        fill.fields.push(entry);
+        if (entry.rung === "resume") await put(entry, null, file);
+        else if (entry.value != null) await put(entry, entry.value, null);
+      }
+    }
+  }
+
   async function verify() {
     await sleep(400);
     const lost = fill.fields.filter((e) => {
@@ -302,7 +346,7 @@
     });
     if (!res.ok) {
       lastError = res;
-      fill.ai_error = res.json?.detail?.code || res.status;
+      fill.ai_error = res.stale ? "extension updated, reload this page" : res.json?.detail?.code || res.status;
       return;
     }
     for (const key of res.json.skipped || []) {
