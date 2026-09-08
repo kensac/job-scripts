@@ -12,7 +12,7 @@ from urllib.parse import urlsplit
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from api import ai, apply, budget, db, telemetry
+from api import ai, apply, budget, db, events, telemetry
 from api.auth import AuthedUser, require_user
 from api.routers.jobs import _write_board_row
 from api.tasks import application as drafts
@@ -197,41 +197,56 @@ def fill_submitted(fill_id: int, body: SubmittedBody, user: AuthedUser = Depends
     """The person clicked submit. Every field's final value goes on the
     ledger beside what was filled; a field they asked to remember goes in
     the bank; the board row flips to submitted."""
-    fill = db.query_one(
-        "SELECT id, job_id, fields FROM application_fills WHERE id = %s AND user_id = %s",
-        (fill_id, user.id),
-    )
-    if not fill:
-        raise _bad(404, "NOT_FOUND", "unknown fill")
-    finals = {f.key: f for f in body.fields}
-    fields = []
-    for read in fill["fields"]:
-        sub = finals.get(read["key"])
-        final = sub.final if sub else read.get("value")
-        entry = {**read, "final": final, "changed": (final or "") != (read.get("value") or "")}
-        fields.append(entry)
-        if sub and sub.remember and final and entry["kind"] != "file" and entry["label"]:
-            db.execute(
-                """
-                INSERT INTO application_answer_bank (user_id, label, label_norm, kind, value)
-                VALUES (%s, %s, %s, %s, %s)
-                ON CONFLICT (user_id, label_norm) DO UPDATE
-                    SET value = EXCLUDED.value, kind = EXCLUDED.kind, updated_at = now()
-                """,
-                (user.id, entry["label"], apply.normalize(entry["label"]), entry["kind"], final),
-            )
-        elif entry["rung"] == "bank" and not entry["changed"]:
-            db.execute(
-                "UPDATE application_answer_bank SET times_used = times_used + 1, "
-                "last_used_at = now() WHERE user_id = %s AND label_norm = %s",
-                (user.id, apply.normalize(entry["label"])),
-            )
-    db.execute(
-        "UPDATE application_fills SET fields = %s, submitted_at = now() WHERE id = %s",
-        (db.jsonb(fields), fill_id),
-    )
+    with db.transaction():
+        fill = db.query_one(
+            "SELECT id, job_id, fields, submitted_at FROM application_fills WHERE id = %s AND user_id = %s FOR UPDATE",
+            (fill_id, user.id),
+        )
+        if not fill:
+            raise _bad(404, "NOT_FOUND", "unknown fill")
+        if fill["submitted_at"] is not None:
+            return {"ok": True, "job_id": fill["job_id"], "fields": fill["fields"]}
+        finals = {f.key: f for f in body.fields}
+        fields = []
+        for read in fill["fields"]:
+            sub = finals.get(read["key"])
+            final = sub.final if sub else read.get("value")
+            entry = {**read, "final": final, "changed": (final or "") != (read.get("value") or "")}
+            fields.append(entry)
+            if sub and sub.remember and final and entry["kind"] != "file" and entry["label"]:
+                db.execute(
+                    """
+                    INSERT INTO application_answer_bank (user_id, label, label_norm, kind, value)
+                    VALUES (%s, %s, %s, %s, %s)
+                    ON CONFLICT (user_id, label_norm) DO UPDATE
+                        SET value = EXCLUDED.value, kind = EXCLUDED.kind, updated_at = now()
+                    """,
+                    (
+                        user.id,
+                        entry["label"],
+                        apply.normalize(entry["label"]),
+                        entry["kind"],
+                        final,
+                    ),
+                )
+            elif entry["rung"] == "bank" and not entry["changed"]:
+                db.execute(
+                    "UPDATE application_answer_bank SET times_used = times_used + 1, "
+                    "last_used_at = now() WHERE user_id = %s AND label_norm = %s",
+                    (user.id, apply.normalize(entry["label"])),
+                )
+        db.execute(
+            "UPDATE application_fills SET fields = %s, submitted_at = now() WHERE id = %s",
+            (db.jsonb(fields), fill_id),
+        )
+        if fill["job_id"] is not None:
+            _write_board_row(user.id, fill["job_id"], {"status": SUBMITTED_STATUS}, publish=False)
     if fill["job_id"] is not None:
-        _write_board_row(user.id, fill["job_id"], {"status": SUBMITTED_STATUS})
+        row = db.query_one(
+            "SELECT status, date_applied, hidden FROM user_jobs WHERE user_id = %s AND job_id = %s",
+            (user.id, fill["job_id"]),
+        )
+        events.publish_board_row(user.id, fill["job_id"], row or {})
     _seen(
         "apply_form_submitted",
         user,
