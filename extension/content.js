@@ -12,7 +12,7 @@
   if (!reader) return;
   // Stamped into every report, so a report from a build the person has not
   // reloaded yet is told apart from a bug (reports 9 to 11, 2026-09-08).
-  const BUILD = "2026-09-08 01:45";
+  const BUILD = "2026-09-08 01:55";
 
   // A message to the extension's background worker. After the extension is
   // reloaded, a page that was already open keeps the old script, whose
@@ -47,7 +47,7 @@
   // on one board stays minimised on the next; localStorage was per origin
   // and forgot between hosts (job-scripts-5c, 2026-09-08). Read before the
   // first paint so the panel never flashes the default.
-  const prefs = { collapsed: false, aiAll: false, theme: null };
+  const prefs = { collapsed: false, aiAll: false, theme: null, autoAdvance: false };
   const loadPrefs = async () => {
     try {
       const got = await new Promise((r) => chrome.storage.local.get(["collapsed", "aiAll", "theme"], r));
@@ -56,6 +56,7 @@
       if (got && typeof got.aiAll === "boolean") prefs.aiAll = got.aiAll;
       else prefs.aiAll = localStorage.getItem("jt-apply-ai-all") === "1";
       prefs.theme = got && (got.theme === "light" || got.theme === "dark") ? got.theme : null;
+      if (got && typeof got.autoAdvance === "boolean") prefs.autoAdvance = got.autoAdvance;
     } catch (_) {
       // Nothing stored or no storage: the defaults hold.
     }
@@ -65,14 +66,14 @@
   // to (Kanishk, 2026-09-08). The account's value wins over the browser's
   // cache at start; a change goes to both. Merged on write so the other
   // prefs on the row (auto_draft) keep.
-  const PREF_KEYS = ["collapsed", "aiAll", "theme"];
+  const PREF_KEYS = ["collapsed", "aiAll", "theme", "autoAdvance"];
   const syncPrefsFromAccount = async () => {
     const res = await api("user/settings", "GET");
     const mine = res.ok && res.json && res.json.prefs && res.json.prefs.apply;
     if (!mine || typeof mine !== "object") return;
     for (const k of PREF_KEYS) if (k in mine) prefs[k] = mine[k];
     try {
-      chrome.storage.local.set({ collapsed: prefs.collapsed, aiAll: prefs.aiAll, theme: prefs.theme });
+      chrome.storage.local.set({ collapsed: prefs.collapsed, aiAll: prefs.aiAll, theme: prefs.theme, autoAdvance: prefs.autoAdvance });
     } catch (_) {
       // The cache is a convenience; the account has it.
     }
@@ -80,7 +81,7 @@
   const savePrefsToAccount = async () => {
     const res = await api("user/settings", "GET");
     if (!res.ok || !res.json) return;
-    const all = { ...(res.json.prefs || {}), apply: { collapsed: prefs.collapsed, aiAll: prefs.aiAll, theme: prefs.theme } };
+    const all = { ...(res.json.prefs || {}), apply: { collapsed: prefs.collapsed, aiAll: prefs.aiAll, theme: prefs.theme, autoAdvance: prefs.autoAdvance } };
     await api("user/settings", "PUT", { prefs: all });
   };
   const savePref = (key, value) => {
@@ -132,12 +133,17 @@
         <button id="jt-min" title="${prefs.collapsed ? "Expand" : "Minimise"}">${prefs.collapsed ? "+" : "–"}</button></div>
       <div class="body">${html}
         <label class="muted switch"><input type="checkbox" id="jt-ai-all" ${prefs.aiAll ? "checked" : ""}> AI answers every blank box, free text too</label>
+        <label class="muted switch"><input type="checkbox" id="jt-advance" ${prefs.autoAdvance ? "checked" : ""}> Advance to the next page automatically</label>
         <div id="jt-report"><button id="jt-report-btn">Report this page</button></div></div>`;
     applyTheme();
     panel.querySelector("#jt-report-btn").onclick = reportForm;
     panel.querySelector("#jt-ai-all").onchange = (ev) => {
       prefs.aiAll = ev.target.checked;
       savePref("aiAll", prefs.aiAll);
+    };
+    panel.querySelector("#jt-advance").onchange = (ev) => {
+      prefs.autoAdvance = ev.target.checked;
+      savePref("autoAdvance", prefs.autoAdvance);
     };
     panel.querySelector("#jt-theme").onclick = () => {
       prefs.theme = THEME_NEXT[String(prefs.theme)];
@@ -165,6 +171,13 @@
   // The panel appears when a form is on the page and goes when it is not,
   // so the posting page shows nothing and the form page shows the button
   // without a reload.
+  // The controls on the page by id or name: it changes when the form moves
+  // to its next page under the same url (Workday), not when the person
+  // types. Recorded after a fill pass; a change means a page the person
+  // moved to by hand, and the panel offers Autofill for it.
+  const pageSignature = () =>
+    [...document.querySelectorAll("input, textarea, select")].map((e) => e.id || e.name || e.type).join("|");
+  let pageSig = null;
   function mount() {
     const here = location.href;
     if (reader.ready()) {
@@ -172,6 +185,15 @@
       // can throw the panel out of the body with the rest of the markup it
       // did not render; put it back rather than believing it is there.
       if (panel && !panel.isConnected) document.body.appendChild(panel);
+      if (mountedFor === here && panel && fill && pageSig && pageSignature() !== pageSig) {
+        pageSig = null;
+        step += 1;
+        fields = [];
+        fill = null;
+        filled = new Map();
+        offer("The form moved to a new page.");
+        return;
+      }
       if (mountedFor === here && panel) return;
       mountedFor = here;
       fields = [];
@@ -212,9 +234,9 @@
     }
   }
 
-  function offer() {
+  function offer(lead) {
     render(`
-      <p>Fill this application from your profile, your remembered answers and your drafts.</p>
+      <p>${lead ? esc(lead) + " " : ""}Fill this application from your profile, your remembered answers and your drafts.</p>
       <button id="jt-autofill" class="primary">Autofill</button>
       <p class="muted">You check the form and click its own Submit button.</p>
     `);
@@ -312,7 +334,8 @@
     // A form that spans pages: when this page has a Continue and no Submit,
     // go on to the next page and fill it too, until the page that submits.
     // Continue is not Submit; the person still clicks that.
-    if (reader.nextButton && !reader.submitButton() && reader.nextButton() && step < 12) {
+    pageSig = pageSignature();
+    if (prefs.autoAdvance && reader.nextButton && !reader.submitButton() && reader.nextButton() && step < 12) {
       // Only a complete page is advanced: a required field still blank is
       // the person's to fill first (Workday, 2026-09-08: Continue pressed
       // with five required fields blank, and the page listed them).
