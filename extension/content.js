@@ -57,14 +57,39 @@
       // Nothing stored or no storage: the defaults hold.
     }
   };
+  // The person's copy: user_settings.prefs.apply through the settings
+  // endpoints, so the same panel greets them in every browser they sign in
+  // to (Kanishk, 2026-09-08). The account's value wins over the browser's
+  // cache at start; a change goes to both. Merged on write so the other
+  // prefs on the row (auto_draft) keep.
+  const PREF_KEYS = ["collapsed", "aiAll", "theme"];
+  const syncPrefsFromAccount = async () => {
+    const res = await api("user/settings", "GET");
+    const mine = res.ok && res.json && res.json.prefs && res.json.prefs.apply;
+    if (!mine || typeof mine !== "object") return;
+    for (const k of PREF_KEYS) if (k in mine) prefs[k] = mine[k];
+    try {
+      chrome.storage.local.set({ collapsed: prefs.collapsed, aiAll: prefs.aiAll, theme: prefs.theme });
+    } catch (_) {
+      // The cache is a convenience; the account has it.
+    }
+  };
+  const savePrefsToAccount = async () => {
+    const res = await api("user/settings", "GET");
+    if (!res.ok || !res.json) return;
+    const all = { ...(res.json.prefs || {}), apply: { collapsed: prefs.collapsed, aiAll: prefs.aiAll, theme: prefs.theme } };
+    await api("user/settings", "PUT", { prefs: all });
+  };
   const savePref = (key, value) => {
     try {
       chrome.storage.local.set({ [key]: value });
     } catch (_) {
       // Nothing to remember it in; it holds for this page.
     }
+    savePrefsToAccount();
   };
   await loadPrefs();
+  await syncPrefsFromAccount();
   const askable = (e) => !e.never_ai && (ASKABLE.has(e.kind) || (prefs.aiAll && e.kind === "long"));
 
   let panel = null;
