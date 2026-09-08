@@ -120,7 +120,18 @@ def resolve_form(body: ResolveBody, user: AuthedUser = Depends(require_user)):
         if profile.default_resume_id
         else None
     )
-    return {"fill_id": fill["id"], "job_id": job_id, "fields": fields, "resume": resume}
+    return {
+        "fill_id": fill["id"],
+        "job_id": job_id,
+        "fields": fields,
+        "resume": resume,
+        # The rows a repeated group (education, experience) is filled from;
+        # a config-driven reader takes them one entry at a time.
+        "profile": {
+            "experience": [e.model_dump() for e in profile.experience],
+            "education": [e.model_dump() for e in profile.education],
+        },
+    }
 
 
 class SubmittedField(BaseModel):

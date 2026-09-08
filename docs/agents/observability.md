@@ -211,9 +211,17 @@ submits is left to the person. A field that names its fact is filled from
 the profile without reading its label (`Field_.fact`); consents are
 answered yes and a single-box consent is that box, because the extension
 relays the consent of the one person it fills for, who asked for every
-required field to be filled. Ashby, Greenhouse and Lever keep their
+required field to be filled. Repeated groups (education, experience) are filled one entry per profile
+row: the add button, the entry's container, the nested fields by the
+table's name for each (which also carries the date format the field
+wants, `start_date_slashes_MMYYYY`), the save step; the resolve response
+carries the profile's rows for it. Ashby, Greenhouse and Lever keep their
 hand-written readers, which own their hosts; the engine steps back when
-one is present.
+one is present. The Greenhouse reader also reads the employer's own
+self-identification questions from the form API's demographic block, finds
+their controls by label, and prefers the location result that carries the
+person's state or country over the first the geocoder offers ("New York"
+alone landed in Sudan, report 5).
 
 The extension calls the frontend's proxy from its background worker, which
 rides the site's session cookie; the API's service token never leaves the

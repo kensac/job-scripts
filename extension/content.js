@@ -150,6 +150,8 @@
     }
     fill = res.json;
     filled = new Map();
+    // Repeated groups are filled from the profile's rows, not a value.
+    window.__jtProfile = fill.profile || {};
     let file = null;
     if (fill.resume && fill.resume.has_pdf) {
       const got = await pdf(`user/resumes/${fill.resume.id}/pdf`);
@@ -263,6 +265,9 @@
     const f = filled.get(entry.key);
     return !!(f && f.ok && f.value != null && f.value !== "");
   };
+  // A repeated group is a field the model is never asked about.
+  const ASKABLE_KINDS = ASKABLE;
+  ASKABLE_KINDS.delete("group");
 
   // One call for everything still blank. The answers land in the form
   // like any other rung, marked "ai" so the panel and the ledger say so.

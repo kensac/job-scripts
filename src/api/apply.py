@@ -181,6 +181,9 @@ _RULES: tuple[tuple[str, str], ...] = (
         r"\b(acknowledg|consent|certif|agree|privacy notice|terms and conditions|arbitration)",
         "consent",
     ),
+    # Self-identification the profile does not hold: declined, which every
+    # such question offers as an option.
+    (r"\btransgender\b|\bsexual orientation\b|\bfirst.generation\b|\blgbt", "decline"),
     (r"\b(previous|prior|last) (employer|company)\b", "previous_company"),
     (r"\b(previous|prior|last) (title|role|position)\b", "previous_title"),
     (
@@ -234,6 +237,11 @@ def profile_value(profile: Profile, fact: str) -> str:
     config-driven reader's over-18 check), the phone as digits."""
     if fact == "consent":
         return CONSENT
+    if fact == "decline":
+        return DECLINE
+    if fact in ("experience", "education"):
+        rows = getattr(profile, fact)
+        return f"{len(rows)} entries" if rows else ""
     if fact == "yes":
         return "Yes"
     if fact == "today":

@@ -546,3 +546,43 @@ def test_consents_are_given_and_a_reader_may_name_the_fact(client, user_headers)
     assert got["c3"] == ("profile", "Yes")
     assert got["f1"] == ("profile", "8144410134")
     assert got["f2"] == ("profile", "Yes")
+
+
+def test_the_resolve_carries_the_rows_a_group_is_filled_from(client, user_headers):
+    """Education and experience on a form are repeated groups; the reader
+    fills them one entry at a time from the profile's rows, which ride on
+    the resolve response, and reports the group as filled by entry count."""
+    client.put("/v1/user/profile", json=_profile(), headers=user_headers)
+    res = client.post(
+        "/v1/user/apply/resolve",
+        json={
+            "url": "https://apply.workable.com/acme/j/1/apply/",
+            "fields": [
+                {
+                    "key": "fact:education",
+                    "label": "education",
+                    "kind": "group",
+                    "fact": "education",
+                },
+                {
+                    "key": "fact:experience",
+                    "label": "experience",
+                    "kind": "group",
+                    "fact": "experience",
+                },
+                {
+                    "key": "t",
+                    "label": "I identify as transgender (please select one):",
+                    "kind": "select",
+                    "options": ["Yes", "No", "I don't wish to answer"],
+                },
+            ],
+        },
+        headers=user_headers,
+    ).json()
+    assert res["profile"]["experience"][0]["company"] == "Analytical Engines"
+    assert res["profile"]["education"][0]["school"] == "Home"
+    got = {f["key"]: (f["rung"], f["value"]) for f in res["fields"]}
+    assert got["fact:education"] == ("profile", "1 entries")
+    assert got["fact:experience"] == ("profile", "1 entries")
+    assert got["t"] == ("profile", "I don't wish to answer")

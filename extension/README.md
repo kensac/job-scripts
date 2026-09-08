@@ -64,7 +64,9 @@ Every other ATS under `ats/` (49 of them, Workday, SmartRecruiters, iCIMS,
 Jobvite, Workable, Rippling and the rest) is filled by `engine.js` from
 that data: fields that know their fact, custom questions found by
 selector, and forms that span pages, advanced page by page up to the one
-that submits. Consents are filled: the extension relays your consent.
+that submits. Education and experience sections are filled from the rows on your
+profile, one entry at a time. Consents are filled: the extension relays
+your consent.
 Workday and the other enterprise systems need you signed in first; the
 panel appears once the form does.
 
