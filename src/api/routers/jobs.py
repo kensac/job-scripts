@@ -295,8 +295,11 @@ def _touchable(user: AuthedUser, job_ids: list[int]) -> set[int]:
     return {r["id"] for r in rows}
 
 
-def _write_board_row(user_id: int, job_id: int, patch: dict) -> dict:
-    """Applies one patch to one board row; returns what it filled in itself."""
+def _write_board_row(user_id: int, job_id: int, patch: dict, *, publish: bool = True) -> dict:
+    """Applies one patch to one board row; returns what it filled in itself.
+    publish=False is for a bulk caller that will publish once for all its
+    rows: the per-row publish is a synchronous post, and the bulk endpoint
+    exists so a large selection is one request."""
     fields = dict(patch)
     autofilled = {}
     existing = None
@@ -336,7 +339,8 @@ def _write_board_row(user_id: int, job_id: int, patch: dict) -> dict:
     )
     # Every path that writes a board row ends here, so this is the one place
     # an open board learns of the change without a reload.
-    events.publish_board_row(user_id, job_id, written or fields)
+    if publish:
+        events.publish_board_row(user_id, job_id, written or fields)
     return autofilled
 
 
@@ -364,11 +368,12 @@ def patch_jobs(body: UserJobsBulkPatch, user: AuthedUser = Depends(require_user)
     the page back to one request per row."""
     fields = _patch_fields(body.patch)
     allowed = _touchable(user, body.job_ids)
-    updated = 0
-    for job_id in body.job_ids:
-        if job_id in allowed:
-            _write_board_row(user.id, job_id, fields)
-            updated += 1
+    changed = [j for j in body.job_ids if j in allowed]
+    for job_id in changed:
+        _write_board_row(user.id, job_id, fields, publish=False)
+    # One event for the whole selection, off the per-row path.
+    events.publish_board_rows(user.id, changed, fields)
+    updated = len(changed)
     return {
         "ok": True,
         "updated": updated,

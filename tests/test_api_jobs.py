@@ -573,3 +573,28 @@ def test_the_board_filters_by_ats(client, user_headers):
     assert "ashby" not in facet and facet["lever"] == 1 and page["rows"] == []
     board_wide = client.get("/v1/user/jobs/options", headers=user_headers).json()["ats"]
     assert {a["ats"]: a["count"] for a in board_wide}["ashby"] == 2
+
+
+def test_a_bulk_patch_publishes_one_event_not_one_per_row(client, user_headers, monkeypatch):
+    """The bulk endpoint exists so a large selection is one request; the
+    per-row publish is a synchronous post on the request path, so it must
+    not become one post per row either. One event carries the ids."""
+    from api import events
+
+    published: list[dict] = []
+    monkeypatch.setattr(events, "_publish", lambda channel, data: published.append(data))
+    uid = _uid(user_headers)
+    ids = [_insert_job("src-bulk", f"https://x.test/bulk{i}") for i in range(3)]
+    _subscribe(uid, "src-bulk")
+    for i in range(3):
+        _pass_closed(f"https://x.test/bulk{i}")
+    res = client.patch(
+        "/v1/user/jobs",
+        json={"job_ids": ids, "patch": {"status": "No Longer Interested"}},
+        headers=user_headers,
+    )
+    assert res.status_code == 200 and res.json()["updated"] == 3
+    kinds = [d["type"] for d in published]
+    assert kinds.count("board_rows") == 1 and kinds.count("board_row") == 0
+    event = next(d for d in published if d["type"] == "board_rows")
+    assert sorted(event["job_ids"]) == sorted(ids) and event["status"] == "No Longer Interested"

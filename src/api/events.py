@@ -89,3 +89,23 @@ def publish_board_row(user_id: int, job_id: int, row: dict[str, Any]) -> None:
             "hidden": bool(row.get("hidden", False)),
         },
     )
+
+
+def publish_board_rows(user_id: int, job_ids: list[int], patch: dict[str, Any]) -> None:
+    """One bulk patch changed many rows the same way: one event with the ids
+    and the patch, rather than one event per row. The per-row publish is a
+    synchronous post on the request path, so a 6,000-row selection would
+    have added seconds of publishing to a request built to be one round
+    trip, and 6,000 events on one channel is a flood for the client too."""
+    if not job_ids:
+        return
+    _publish(
+        f"jobtracker:user.{user_id}",
+        {
+            "type": "board_rows",
+            "job_ids": job_ids,
+            "status": patch.get("status"),
+            "date_applied": str(patch["date_applied"]) if patch.get("date_applied") else None,
+            "hidden": patch.get("hidden"),
+        },
+    )
