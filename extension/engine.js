@@ -163,6 +163,18 @@
     await sleep(900);
     return true;
   }
+  // An event of the class its name implies: a recipe's "keydown" with
+  // key Enter must be a KeyboardEvent carrying the key, or the page sees
+  // a key press with no key (capture 25: Workday's field-of-study search
+  // never filtered because its Enter arrived as a bare Event).
+  function eventOf(name, init) {
+    if (/^key/.test(name)) return new KeyboardEvent(name, init);
+    if (/^(mouse|click|dblclick|contextmenu)/.test(name)) return new MouseEvent(name, init);
+    if (/^pointer/.test(name)) return new PointerEvent(name, init);
+    if (/^(focus|blur)/.test(name)) return new FocusEvent(name, init);
+    if (name === "input" || name === "beforeinput") return new InputEvent(name, init);
+    return new Event(name, init);
+  }
   function clickOn(el, opts) {
     const t = events(opts);
     el.dispatchEvent(new FocusEvent("focus", t));
@@ -441,7 +453,7 @@
         return false;
       }
       if (a.event) {
-        target.el.dispatchEvent(new Event(a.event, events(a.eventOptions)));
+        target.el.dispatchEvent(eventOf(a.event, events(a.eventOptions)));
         continue;
       }
       if (a.valuePath) {
@@ -879,8 +891,13 @@
       // Inside the entry's container or not at all: against the document
       // the same selector matches the form's own fields (Workable's
       // Summary box).
-      const root = containers[i] || containers[containers.length - 1];
-      if (!root) break;
+      // The i-th container or nothing: falling back to the last one wrote
+      // the second education into the first block (capture 25).
+      const root = containers[i];
+      if (!root) {
+        note(`${fact} entry ${i + 1}: no container for it, stopping`);
+        break;
+      }
       const pageNumber = entryNumber ?? numberOf.get(root) ?? i;
       const entryCtx = { ...ctx, index: pageNumber };
       note(`${fact} entry ${i + 1}: filling${pageNumber !== i ? ` (page number ${pageNumber + 1})` : ""}`);
