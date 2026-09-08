@@ -118,6 +118,38 @@
     if (blur) el.dispatchEvent(new FocusEvent("blur", t));
     return true;
   }
+  // A search box behind a picker (Workday's selectinput, any input that
+  // says Search or is a combobox) filters on keystrokes, not on a value
+  // that appears whole: measured 2026-09-08 on Workday's country-code
+  // search, a set value with one input event and Enter left the list
+  // unfiltered, while the same text typed one character at a time with key
+  // events, a short pause and Enter filtered it and selected the match.
+  const isSearchInput = (el) =>
+    !!el &&
+    el.tagName === "INPUT" &&
+    (el.getAttribute("data-uxi-widget-type") === "selectinput" ||
+      /search/i.test(el.getAttribute("placeholder") || "") ||
+      el.getAttribute("role") === "combobox" ||
+      el.getAttribute("aria-autocomplete") === "list");
+  async function typeSlowly(el, value, opts) {
+    const t = events(opts);
+    el.focus();
+    el.dispatchEvent(new FocusEvent("focus", t));
+    setValue(el, "");
+    el.dispatchEvent(new InputEvent("input", { ...t, inputType: "deleteContentBackward" }));
+    let typed = "";
+    for (const ch of String(value ?? "")) {
+      el.dispatchEvent(new KeyboardEvent("keydown", { ...t, key: ch }));
+      el.dispatchEvent(new KeyboardEvent("keypress", { ...t, key: ch }));
+      typed += ch;
+      setValue(el, typed);
+      el.dispatchEvent(new InputEvent("input", { ...t, data: ch, inputType: "insertText" }));
+      el.dispatchEvent(new KeyboardEvent("keyup", { ...t, key: ch }));
+      await sleep(25);
+    }
+    await sleep(400);
+    return true;
+  }
   function clickOn(el, opts) {
     const t = events(opts);
     el.dispatchEvent(new FocusEvent("focus", t));
@@ -237,6 +269,7 @@
         const blur = m === "default";
         if (el.tagName === "SELECT") return chooseNative(el, value);
         if (el.type === "checkbox" || el.type === "radio") return checkOrRadio(el, true);
+        if (isSearchInput(el) && value) return typeSlowly(el, value, opts);
         if (el.tagName === "INPUT" || el.tagName === "TEXTAREA") return typeInto(el, value, opts, blur);
         return clickOn(el, opts);
       }
