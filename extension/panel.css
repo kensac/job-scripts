@@ -1,29 +1,4 @@
-/* The apply panel, on the job apps' design system.
- *
- * Tokens, names and values are lifted from personal-portfolio
- * app/job-scripts/ui/admin.css so the panel reads as the same product as the
- * board it reports to. app/job-scripts/DESIGN.md is the prescriptive
- * reference: Ramp surfaces, Stripe voice. Indigo means "you can act", green
- * means healthy, crimson means wrong, and no other hues.
- *
- * Two things differ from the apps, because this panel is injected into
- * someone else's page rather than mounted in ours:
- *
- * - Theme resolves from prefers-color-scheme, not from the apps' explicit
- *   data-x-theme attribute. That attribute and its localStorage key live on
- *   our origin; a content script on greenhouse.io cannot read either. So the
- *   panel follows the OS, and an explicit light choice in the app does not
- *   reach it.
- *
- * - Inter Tight is used only if the machine already has it (local()).
- *   Shipping the file would mean a web_accessible_resources entry in the
- *   manifest, which is a bigger change than a stylesheet; the fallback stack
- *   is the platform UI face, which is what the panel used before.
- *
- * Every selector here matches markup content.js already emits. Nothing in
- * this file requires a change there.
- */
-
+/* Shared job-app tokens; the injected panel owns its layout and controls. */
 #jt-apply {
   /* Light. Values are --x-* from admin.css, not approximations of them. */
   --x-card: #ffffff;
@@ -53,51 +28,7 @@
      hex. The same failure exists in the app (kit.tsx:574); see the PR. */
   --jt-accent-hover: color-mix(in oklab, var(--x-accent) 88%, var(--x-ink));
 
-  position: fixed;
-  top: 16px;
-  right: 16px;
-  z-index: 2147483647;
-  width: 340px;
-  max-height: calc(100vh - 32px);
-  overflow: auto;
-  box-sizing: border-box;
-  padding: 16px;
-
-  background: var(--x-card);
-  color: var(--x-ink);
-  /* Elevation is hairline borders and background-tint shifts, never a
-     box-shadow. The panel floats over a page we do not control, so it takes
-     a second hairline in smoke rather than the drop shadow it used to have:
-     one border disappears against a card-colored host page, and two do not. */
-  border: 1px solid var(--x-hair);
-  outline: 1px solid var(--x-smoke);
-  outline-offset: -2px;
-  border-radius: 8px;
-
-  font-family: "Inter Tight", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-    Helvetica, Arial, sans-serif;
-  font-size: 14px;
-  font-weight: 400;
-  line-height: 1.45;
-  /* Digits line up: counts change in place as fields resolve. */
-  font-variant-numeric: tabular-nums;
-  text-align: left;
-  letter-spacing: normal;
-  text-transform: none;
 }
-
-/* Three states, not two. An explicit choice is data-jt-theme on the panel;
-   absent means follow the OS. The media query is guarded with
-   :not([data-jt-theme="light"]) so an explicit light choice beats a dark OS,
-   and the attribute selector repeats the tokens so an explicit dark choice
-   beats a light OS. Setting data-jt-theme="system" would be a bug: it falls
-   through to the light branch. Absent is how "system" is spelled.
-
-   The apps resolve this from data-x-theme plus localStorage on our origin,
-   which a content script on greenhouse.io cannot read - hence the panel's own
-   attribute, written by content.js from chrome.storage rather than
-   localStorage, because localStorage is per-origin and a preference set on one
-   ATS would not exist on the next. */
 @media (prefers-color-scheme: dark) {
   #jt-apply:not([data-jt-theme="light"]) {
     --x-card: #201e1a;
@@ -140,12 +71,26 @@
     color-scheme: dark;
 }
 
-/* The host page styles its own buttons, lists and paragraphs, and those rules
-   reach in here. Every element the panel renders is reset to the panel's own
-   register rather than trusting what it inherits. */
-#jt-apply *,
-#jt-apply *::before,
-#jt-apply *::after {
+#jt-apply {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 2147483647;
+  width: min(360px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  overflow: auto;
+  background: var(--x-card);
+  color: var(--x-ink);
+  border: 1px solid var(--x-smoke);
+  border-radius: 8px;
+  font: 400 14px/1.5 "Inter Tight", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-variant-numeric: tabular-nums;
+  text-align: left;
+  color-scheme: light;
+  scrollbar-color: var(--x-smoke) transparent;
+  isolation: isolate;
+}
+#jt-apply *, #jt-apply *::before, #jt-apply *::after {
   box-sizing: border-box;
   font-family: inherit;
   letter-spacing: normal;
@@ -153,375 +98,85 @@
   text-align: left;
   box-shadow: none;
   float: none;
-}
-
-/* -- header ------------------------------------------------------------- */
-
-#jt-apply .head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-/* The label register: 11px tracked uppercase ash, the same as a table header
-   in the apps. Hierarchy is size and tone, so the title is the quietest thing
-   in the panel and the content below it is the loudest. */
-#jt-apply h3 {
-  margin: 0;
-  font-size: 11px;
-  font-weight: 400;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--x-ash);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-/* Green is healthy and live, never an action. */
-#jt-apply h3::before {
-  content: "";
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--x-good);
-  display: inline-block;
-  flex: none;
-}
-
-#jt-apply #jt-theme,
-#jt-apply #jt-min {
-  flex: none;
-  margin: 0;
-  padding: 0;
-  width: 24px;
-  height: 24px;
-  line-height: 22px;
-  font-size: 14px;
-  text-align: center;
-  border: 1px solid transparent;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--x-ash);
-}
-
-#jt-apply #jt-theme:hover,
-#jt-apply #jt-min:hover {
-  background: var(--x-wash);
-  color: var(--x-ink);
-}
-
-#jt-apply .body {
-  margin-top: 12px;
-}
-
-#jt-apply.collapsed {
-  width: auto;
-  padding: 12px;
-}
-
-#jt-apply.collapsed .body {
-  display: none;
-}
-
-/* -- text --------------------------------------------------------------- */
-
-/* Whole 4px steps only. Two registers, so something leads: a sentence is the
-   secondary clause at 12px slate, and the line carrying the counts is the fact
-   at 14px. Selected by :has(b) rather than by a class, because <b> is already
-   how content.js marks the counts and this needs no markup change. */
-#jt-apply p {
-  margin: 8px 0 0;
-  font-size: 12px;
-  color: var(--x-slate);
-}
-
-#jt-apply p:has(b) {
-  font-size: 14px;
-}
-
-#jt-apply p:first-child {
-  margin-top: 0;
-}
-
-#jt-apply b {
-  font-weight: 400;
-  color: var(--x-ink);
-}
-
-#jt-apply .muted {
-  color: var(--x-ash);
-}
-
-/* The standing note - what gets remembered between forms - is the same words
-   every time and the largest block on the panel. It is reference, so it reads
-   as a footnote under a rule rather than as the body: separated from the
-   status above it, 11px, and last in the reading order before the actions. */
-/* :not(:first-child) matters. content.js also renders a lone muted paragraph
-   as the whole body while work is in flight ("Resolving 5 fields...", "Asking
-   the model about 3 fields..."). That is the only thing on the panel at the
-   time and must not be demoted to a footnote; the standing note always follows
-   something. */
-#jt-apply .body > p.muted:not(:first-child) {
-  margin-top: 12px;
-  font-size: 11px;
-  line-height: 1.5;
-}
-
-/* Crimson is "wrong": a failed resolve, a model call that did not land, a
-   sign-in that is missing. content.js also uses .warn for the count of fields
-   left to the person, which is not an error - see the note in the PR. */
-#jt-apply .warn {
-  color: var(--x-danger);
-}
-
-#jt-apply a {
-  color: var(--x-accent);
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-
-/* Hover thickens the rule rather than lightening the text: the lighter indigo
-   reads as hover but drops link contrast to 3.11:1 on card in light. */
-#jt-apply a:hover {
-  text-decoration-thickness: 2px;
-}
-
-/* -- field lists -------------------------------------------------------- */
-
-#jt-apply ul {
-  margin: 8px 0 0;
-  padding: 0;
-  list-style: none;
-}
-
-/* Ledger rows: hairline separated, no zebra, no card per row. */
-#jt-apply li {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 8px 0;
-  border-top: 1px solid var(--x-hair);
-  color: var(--x-ink);
-}
-
-#jt-apply li:first-child {
-  border-top: 0;
-}
-
-#jt-apply li > span.muted,
-#jt-apply li > span.warn {
-  flex: none;
-  font-size: 11px;
-}
-
-/* Grouped by space, not by a rule. Three hairlines in a 340px panel read as
-   more structure rather than more clarity; the only rule left is the one that
-   closes the content off from the footer. */
-#jt-apply details {
-  margin: 12px 0 0;
-}
-
-/* The standing note lives behind "how this works" rather than in front of the
-   counts. Prose inside a disclosure is reference: 11px, and the same footnote
-   register the note had when it sat in the body.
-   .todo, the count of fields left to the person, deliberately has no rule.
-   Crimson is wrong, green is success, indigo is action and amber is health
-   warnings only, so a count of outstanding work carries no hue: it falls
-   through to <b> and renders ink, like the filled count beside it. Dropping
-   class="warn" from that span was the whole fix. */
-#jt-apply details > p.muted {
-  margin: 8px 0 0;
-  font-size: 11px;
-  line-height: 1.5;
-}
-
-#jt-apply summary {
-  cursor: pointer;
-  user-select: none;
-  color: var(--x-ash);
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-#jt-apply summary:hover {
-  color: var(--x-ink);
-}
-
-/* The default marker sits hard against the label with no space. Chrome-only
-   is fine here; this stylesheet only ever loads in the extension. */
-#jt-apply summary::marker {
-  content: "\25B8\00A0";
-}
-
-#jt-apply details[open] summary::marker {
-  content: "\25BE\00A0";
-}
-
-/* -- controls ----------------------------------------------------------- */
-
-#jt-apply button {
-  font: inherit;
-  font-size: 12px;
-  font-weight: 400;
-  padding: 4px 8px;
-  margin: 0;
-  cursor: pointer;
-  border: 1px solid var(--x-smoke);
-  border-radius: 4px;
-  background: var(--x-card);
-  color: var(--x-ink);
-}
-
-#jt-apply button:hover {
-  background: var(--x-wash);
-}
-
-#jt-apply button:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
-
-/* Indigo is the one thing on the panel that says "you can act". */
-#jt-apply button.primary {
-  display: block;
-  width: 100%;
-  margin: 12px 0 0;
-  padding: 8px 12px;
-  font-size: 14px;
-  background: var(--x-accent);
-  border-color: var(--x-accent);
-  color: var(--x-on-accent);
-}
-
-#jt-apply button.primary:hover {
-  background: var(--jt-accent-hover);
-  border-color: var(--jt-accent-hover);
-}
-
-/* Every panel-level action is a full-width block, so there is one place to
-   look for what to do next. #jt-again is the primary action of the state it
-   appears in (a fill has run) but is a repeat rather than a first move, so it
-   takes the shape without the indigo. */
-/* :not(.primary) because the two rules tie on specificity and this one is
-   later in the file, so without it the primary button silently took 13px
-   instead of the 14px its own rule sets. */
-#jt-apply .body > button:not(.primary) {
-  display: block;
-  width: 100%;
-  margin-top: 12px;
-  padding: 8px 12px;
-  font-size: 13px;
-  text-align: center;
-}
-
-/* Row actions stay inline: they belong to their field, not to the panel.
- *
- * Indigo, because the outstanding list holds two kinds of row and they read
- * identically without it: one the panel can finish for you, and one only you
- * can ("attach the file" is a file input, which no extension may set). The
- * tint is the kit's own treatment for that - border accent-line, bg
- * accent-wash, text accent (ui/kit.tsx:1257) - rather than a solid fill, which
- * is reserved for the panel's one primary action.
- *
- * The rows you must handle yourself keep ash: nothing to click is not a
- * failure, so it takes no tone, and the contrast between the two is the guide.
- */
-#jt-apply li button {
-  flex: none;
-  display: inline-block;
-  width: auto;
-  margin-top: 0;
-  padding: 2px 8px;
-  font-size: 11px;
-  text-align: center;
-  border-color: var(--x-accent-line);
-  background: var(--x-accent-wash);
-  color: var(--x-accent);
-}
-
-#jt-apply li button:hover {
-  border-color: var(--x-accent);
-  background: var(--x-accent-wash);
-}
-
-#jt-apply textarea {
-  display: block;
-  width: 100%;
-  margin: 0 0 8px;
-  padding: 8px;
-  font: inherit;
-  font-size: 12px;
-  color: var(--x-ink);
-  background: var(--x-card);
-  border: 1px solid var(--x-smoke);
-  border-radius: 4px;
-  resize: vertical;
-}
-
-#jt-apply textarea::placeholder {
-  color: var(--x-ash);
-}
-
-/* One focus treatment, indigo, on everything focusable. */
-#jt-apply button:focus-visible,
-#jt-apply textarea:focus-visible,
-#jt-apply summary:focus-visible,
-#jt-apply a:focus-visible {
-  outline: 2px solid var(--x-accent);
-  outline-offset: 1px;
-}
-
-#jt-apply textarea:focus {
-  border-color: var(--x-accent);
-  outline: none;
-}
-
-/* -- report ------------------------------------------------------------- */
-
-#jt-apply #jt-report {
-  margin-top: 16px;
-  padding-top: 12px;
-  border-top: 1px solid var(--x-hair);
-}
-
-#jt-apply #jt-report > button {
-  padding-left: 0;
-  border-color: transparent;
-  background: transparent;
-  color: var(--x-ash);
-}
-
-#jt-apply #jt-report > button:hover {
-  background: transparent;
-  color: var(--x-ink);
-}
-
-#jt-apply #jt-send {
-  margin-right: 8px;
-}
-
-/* The panel scrolls on a short viewport; the scrollbar takes the theme so it
-   does not paint a light track on a dark panel. */
-#jt-apply {
-  scrollbar-color: var(--x-smoke) transparent;
-}
-
-/* An error body or a long option label is one unbroken token; it wraps
-   inside the panel rather than pushing past it. */
-#jt-apply .body,
-#jt-apply .body * {
-  overflow-wrap: anywhere;
   min-width: 0;
 }
-
+#jt-apply { box-sizing: border-box; }
+#jt-apply h3, #jt-apply h4, #jt-apply h5, #jt-apply p, #jt-apply ul { margin: 0; padding: 0; }
+#jt-apply h3 { font-size: 15px; font-weight: 400; line-height: 1.3; color: var(--x-ink); }
+#jt-apply h4 { font-size: 22px; font-weight: 400; line-height: 1.25; letter-spacing: -0.02em; color: var(--x-ink); margin: 4px 0 8px; }
+#jt-apply h5 { font-size: 13px; font-weight: 400; color: var(--x-ink); }
+#jt-apply p { font-size: 12px; color: var(--x-slate); line-height: 1.6; }
+#jt-apply .muted { color: var(--x-ash); font-size: 12px; }
+#jt-apply .eyebrow { display: block; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--x-ash); }
+#jt-apply .head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px; position: sticky; top: 0; background: var(--x-card); z-index: 1; border-bottom: 1px solid var(--x-hair); }
+#jt-apply .brand, #jt-apply .head-actions { display: flex; align-items: center; gap: 8px; }
+#jt-apply .brand-mark { display: grid; place-items: center; width: 32px; height: 32px; border: 1px solid var(--x-smoke); border-radius: 6px; background: var(--x-wash); font-size: 24px; }
+#jt-apply .brand .eyebrow { margin-top: 4px; }
+#jt-apply .application-context { padding: 16px; background: var(--x-wash); border-bottom: 1px solid var(--x-hair); overflow-wrap: anywhere; }
+#jt-apply .application-title { font-size: 14px; margin: 4px 0; line-height: 1.4; }
+#jt-apply .workspace { padding: 20px 16px 16px; overflow-wrap: anywhere; }
+#jt-apply button { appearance: none; display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 32px; margin: 0; padding: 4px 12px; border: 1px solid var(--x-smoke); border-radius: 4px; background: var(--x-card); color: var(--x-ink); font: inherit; font-size: 12px; cursor: pointer; text-align: center; }
+#jt-apply button:hover { background: var(--x-wash); }
+#jt-apply button:disabled { opacity: 0.6; cursor: wait; }
+#jt-apply button.primary { display: flex; justify-content: space-between; width: 100%; min-height: 44px; margin-top: 16px; padding: 8px 12px; background: var(--x-accent); border-color: var(--x-accent); color: var(--x-on-accent); font-size: 14px; }
+#jt-apply button.primary:hover { background: var(--jt-accent-hover); border-color: var(--jt-accent-hover); }
+#jt-apply .workspace > button:not(.primary) { width: 100%; margin-top: 16px; }
+#jt-apply #jt-theme, #jt-apply #jt-min { width: 32px; padding: 0; border-color: transparent; background: transparent; font-size: 18px; color: var(--x-slate); }
+#jt-apply #jt-theme:hover, #jt-apply #jt-min:hover { background: var(--x-wash); }
+#jt-apply.collapsed { width: 248px; }
+#jt-apply.collapsed .head { border: 0; padding: 12px; }
+#jt-apply.collapsed .body { display: none; }
+#jt-apply .source-strip { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 12px; color: var(--x-ash); font-size: 11px; }
+#jt-apply .metrics { display: grid; grid-template-columns: 1fr 1fr; margin-top: 16px; background: var(--x-wash); border: 1px solid var(--x-hair); border-radius: 6px; }
+#jt-apply .metrics > div { padding: 12px; }
+#jt-apply .metrics > div + div { border-left: 1px solid var(--x-hair); }
+#jt-apply .metrics strong { display: block; font-size: 28px; line-height: 1.2; font-weight: 400; color: var(--x-ink); }
+#jt-apply .metrics span { display: block; margin-top: 4px; font-size: 11px; color: var(--x-slate); }
+#jt-apply .board-note { margin-top: 12px; font-size: 11px; }
+#jt-apply .field-section { margin-top: 20px; border-top: 1px solid var(--x-hair); padding-top: 12px; }
+#jt-apply .count { display: inline-block; margin-left: 4px; padding: 0 6px; background: var(--x-wash); border: 1px solid var(--x-hair); border-radius: 4px; font-size: 11px; color: var(--x-slate); }
+#jt-apply ul { list-style: none; margin-top: 8px; }
+#jt-apply li { display: flex; align-items: flex-start; gap: 8px; padding: 12px 0; border-bottom: 1px solid var(--x-hair); font-size: 12px; }
+#jt-apply li:last-child { border-bottom: 0; padding-bottom: 0; }
+#jt-apply .field-copy { flex: 1; }
+#jt-apply .field-label { display: block; color: var(--x-ink); }
+#jt-apply .field-value { display: block; margin-top: 4px; color: var(--x-slate); font-size: 11px; max-height: 6em; overflow: auto; }
+#jt-apply .tag { flex: none; max-width: 100px; border: 1px solid var(--x-hair); border-radius: 4px; padding: 2px 6px; font-size: 10px; color: var(--x-slate); }
+#jt-apply .tag.success { color: var(--x-good); border-color: color-mix(in oklab, var(--x-good) var(--x-line-mix), transparent); background: color-mix(in oklab, var(--x-good) var(--x-wash-mix), transparent); }
+#jt-apply li button { flex: none; max-width: 104px; padding: 4px 8px; color: var(--x-accent); border-color: var(--x-accent-line); background: var(--x-accent-wash); font-size: 11px; }
+#jt-apply summary { cursor: pointer; color: var(--x-slate); font-size: 12px; list-style-position: inside; }
+#jt-apply summary:hover { color: var(--x-ink); }
+#jt-apply .field-section > summary { color: var(--x-ink); font-size: 13px; }
+#jt-apply .help { margin-top: 16px; }
+#jt-apply details > p { margin-top: 8px; }
+#jt-apply .settings { padding: 16px; border-top: 1px solid var(--x-hair); }
+#jt-apply .switch { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 16px 0 0; cursor: pointer; }
+#jt-apply .setting-title { display: block; font-size: 12px; color: var(--x-ink); }
+#jt-apply .setting-description { display: block; font-size: 11px; color: var(--x-slate); margin-top: 4px; }
+#jt-apply input[role="switch"] { appearance: none; flex: none; position: relative; width: 32px; height: 20px; margin: 0; padding: 0; border: 1px solid var(--x-smoke); border-radius: 12px; background: var(--x-wash); cursor: pointer; }
+#jt-apply input[role="switch"]::after { content: ""; display: block; position: absolute; left: 3px; top: 3px; width: 12px; height: 12px; border-radius: 50%; background: var(--x-slate); }
+#jt-apply input[role="switch"]:checked { background: var(--x-accent); border-color: var(--x-accent); }
+#jt-apply input[role="switch"]:checked::after { left: 15px; background: var(--x-on-accent); }
+#jt-apply .panel-footer { padding: 12px 16px; border-top: 1px solid var(--x-hair); display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+#jt-apply .panel-footer > .muted { font-size: 10px; }
+#jt-apply #jt-report:has(textarea) { flex-basis: 100%; }
+#jt-apply #jt-report-btn { border: 0; padding: 0; min-height: 24px; color: var(--x-slate); font-size: 11px; background: transparent; }
+#jt-apply #jt-report textarea { display: block; width: 100%; margin: 8px 0; padding: 8px; border: 1px solid var(--x-smoke); border-radius: 4px; background: var(--x-card); color: var(--x-ink); font: inherit; font-size: 12px; resize: vertical; }
+#jt-apply .warn { color: var(--x-danger); }
+#jt-apply .notice { margin-top: 12px; padding: 12px; border: 1px solid var(--x-danger-line); border-radius: 4px; background: var(--x-danger-wash); }
+#jt-apply a { color: var(--x-accent); text-decoration: underline; text-underline-offset: 2px; }
+#jt-apply :is(button, input, textarea, summary, a):focus-visible { outline: 2px solid var(--x-accent); outline-offset: 2px; }
+#jt-apply .working { display: flex; gap: 12px; padding: 12px 0; }
+#jt-apply .working h4 { font-size: 18px; margin: 0 0 8px; }
+#jt-apply .spinner { flex: none; width: 20px; height: 20px; border: 2px solid var(--x-hair); border-top-color: var(--x-accent); border-radius: 50%; }
 @media (prefers-reduced-motion: no-preference) {
-  #jt-apply button,
-  #jt-apply textarea,
-  #jt-apply a {
-    transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
-  }
+  #jt-apply .spinner { animation: jt-spin 1s linear infinite; }
+  #jt-apply button { transition: background-color 120ms ease, border-color 120ms ease; }
+}
+@keyframes jt-spin { to { transform: rotate(360deg); } }
+#jt-apply[data-jt-theme="dark"] { color-scheme: dark; }
+@media (prefers-color-scheme: dark) { #jt-apply:not([data-jt-theme="light"]) { color-scheme: dark; } }
+@media (max-width: 480px) {
+  #jt-apply { top: 8px; right: 8px; width: calc(100vw - 16px); max-height: calc(100dvh - 16px); }
+  #jt-apply.collapsed { width: 248px; }
 }

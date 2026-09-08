@@ -1,0 +1,22 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Software Engineer · Example Company</title><link rel="stylesheet" href="../../extension/panel.css"><style>body{margin:0;background:#f4f2f0;font:16px system-ui;color:#1f1e1c}main{max-width:540px;margin:60px 420px 60px 60px;padding:32px;background:white;border:1px solid #e7e5e2}label{display:block;margin:20px 0}input,textarea{display:block;padding:12px;border:1px solid #d6d4d1;border-radius:4px;width:90%}h1{font-weight:400}@media(max-width:700px){main{margin:24px;padding:20px}}</style></head><body><main><form id="demo-form"><small>EXAMPLE COMPANY</small><h1>Software Engineer</h1><p>Application preview with fictional data.</p><label>Full name<input id="name"></label><label>Email address<input id="email"></label><label>LinkedIn profile<input id="linkedin"></label><label>Why are you interested?<textarea id="interest"></textarea></label><label>Portfolio URL<input id="portfolio"></label><label>Resume<input id="resume" type="file"></label><button id="demo-submit" type="submit">Submit demo application</button></form></main><script src="../../extension/submissions.js"></script><script>
+const mode=new URLSearchParams(location.search).get('state');
+const entries=[{key:'name',label:'Full name',kind:'text',rung:'profile',value:'Alex Morgan'},{key:'email',label:'Email address',kind:'text',rung:'profile',value:'alex@example.com'},{key:'linkedin',label:'LinkedIn profile',kind:'text',rung:'bank',value:'https://www.linkedin.com/in/example'},{key:'interest',label:'Why are you interested in joining our team?',kind:'long',rung:'draft',value:'I enjoy building reliable tools that make everyday work easier. This role brings together product engineering and the chance to learn from a collaborative team.'},{key:'portfolio',label:'Portfolio URL',kind:'text',value:null},{key:'resume',label:'Resume / CV',kind:'file',value:null}];
+if(new URLSearchParams(location.search).has('reset'))sessionStorage.clear();
+const memory={get:async key=>({[key]:JSON.parse(sessionStorage.getItem(key)||'null')}),set:async values=>{for(const [k,v]of Object.entries(values))sessionStorage.setItem(k,JSON.stringify(v));},remove:async key=>sessionStorage.removeItem(key)};
+const request=async msg=>{
+ if(msg.path==='user/settings')return {ok:true,json:{prefs:{}}};
+ if(msg.path==='user/apply/resolve'){
+  if(mode==='loading')return new Promise(()=>{});
+  if(mode==='error')return {ok:false,status:503,error:'Service unavailable'};
+  return {ok:true,json:{fill_id:1,job_id:20,fields:mode==='empty'?[]:msg.body.fields.length?entries:[],profile:{}}};
+ }
+ if(msg.path.endsWith('/submitted'))return new URLSearchParams(location.search).has('fail')?{ok:false,status:503}:{ok:true,json:{job_id:20,fields:[]}};
+ if(msg.path==='user/apply/suggest')return {ok:true,json:{answers:{}}};
+ return {ok:true,json:{id:1}};
+};
+const store=new SubmissionStore(memory,request);
+window.chrome={storage:{local:{get:(_keys,cb)=>cb({theme:new URLSearchParams(location.search).get('theme')||'light'}),set:()=>{}}},runtime:{sendMessage:(msg,cb)=>{(msg.kind==='submission'?store.handle(msg,{tab:{id:1},frameId:0,url:location.href}):request(msg)).then(cb);}}};
+window.__jtReader={ready:()=>mode!=='confirmed',read:async()=>mode==='empty'?[]:entries.map(e=>({...e,_el:document.getElementById(e.key)})),fill:async(f,v)=>{if(f.kind==='file')return false;f._el.value=v;return true;},current:f=>f._el?.value||'',submitButton:()=>document.getElementById('demo-submit'),submitted:()=>mode==='confirmed'};
+document.getElementById('demo-form').onsubmit=event=>{event.preventDefault();setTimeout(()=>location.href=location.pathname+'?state=confirmed&fail=1',100);};
+if(mode==='confirmed')document.querySelector('main').innerHTML='<h1>Thank you for applying!</h1><p>Your application has been received.</p>';
+</script><script src="../../extension/content.js"></script></body></html>

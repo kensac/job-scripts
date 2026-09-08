@@ -8,11 +8,10 @@
 // back so the bank and the ledger learn. It never clicks submit itself.
 // The report button sends the page as the extension saw it, with a note.
 (async () => {
-  const reader = window.__jtReader;
-  if (!reader) return;
+  const reader = window.__jtReader || { ready: () => false, submitButton: () => null, submitted: () => false };
   // Stamped into every report, so a report from a build the person has not
   // reloaded yet is told apart from a bug (reports 9 to 11, 2026-09-08).
-  const BUILD = "2026-09-08 workday-events-groups";
+  const BUILD = "2026-09-08 apply-panel";
 
   // A message to the extension's background worker. After the extension is
   // reloaded, a page that was already open keeps the old script, whose
@@ -30,6 +29,15 @@
     });
   const api = (path, method, body) => send({ path, method, body });
   const pdf = (path) => send({ kind: "pdf", path });
+  let submission = (await send({ kind: "submission", action: "get" })).state || null;
+  if (submission && submission.status !== "confirmed" && reader.ready() && new URL(submission.url).pathname !== location.pathname) {
+    await send({ kind: "submission", action: "clear", fillId: submission.fillId });
+    submission = null;
+  }
+  if (!window.__jtReader && !submission) return;
+  let submissionBusy = false;
+  let submissionView = null;
+  let clearingSubmission = false;
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const esc = (s) =>
     String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
@@ -50,7 +58,7 @@
   const prefs = { collapsed: false, aiAll: false, theme: null, autoAdvance: false };
   const loadPrefs = async () => {
     try {
-      const got = await new Promise((r) => chrome.storage.local.get(["collapsed", "aiAll", "theme"], r));
+      const got = await new Promise((r) => chrome.storage.local.get(["collapsed", "aiAll", "theme", "autoAdvance"], r));
       if (got && typeof got.collapsed === "boolean") prefs.collapsed = got.collapsed;
       else prefs.collapsed = localStorage.getItem("jt-apply-collapsed") === "1";
       if (got && typeof got.aiAll === "boolean") prefs.aiAll = got.aiAll;
@@ -120,6 +128,7 @@
     const btn = panel.querySelector("#jt-theme");
     if (btn) {
       btn.title = `Theme: ${themeLabel(prefs.theme)}. Switch to ${themeLabel(THEME_NEXT[String(prefs.theme)])}`;
+      btn.setAttribute("aria-label", btn.title);
       btn.textContent = prefs.theme === "light" ? "☀" : prefs.theme === "dark" ? "☾" : "◐";
     }
   };
@@ -128,13 +137,20 @@
     if (!panel) return;
     panel.classList.toggle("collapsed", prefs.collapsed);
     panel.innerHTML = `
-      <div class="head"><h3>Job Tracker Apply</h3>
-        <button id="jt-theme"></button>
-        <button id="jt-min" title="${prefs.collapsed ? "Expand" : "Minimise"}">${prefs.collapsed ? "+" : "–"}</button></div>
-      <div class="body">${html}
-        <label class="muted switch"><input type="checkbox" id="jt-ai-all" ${prefs.aiAll ? "checked" : ""}> AI answers every blank box, free text too</label>
-        <label class="muted switch"><input type="checkbox" id="jt-advance" ${prefs.autoAdvance ? "checked" : ""}> Advance to the next page automatically</label>
-        <div id="jt-report"><button id="jt-report-btn">Report this page</button></div></div>`;
+      <div class="head">
+        <div class="brand"><span class="brand-mark" aria-hidden="true">↗</span><div><h3>Job Tracker</h3><span class="eyebrow">Apply assistant</span></div></div>
+        <div class="head-actions"><button id="jt-theme" aria-label="Change theme"></button>
+        <button id="jt-min" aria-label="${prefs.collapsed ? "Expand panel" : "Minimise panel"}" aria-expanded="${!prefs.collapsed}" title="${prefs.collapsed ? "Expand" : "Minimise"}">${prefs.collapsed ? "+" : "−"}</button></div>
+      </div>
+      <div class="body">
+        <div class="application-context"><span class="eyebrow">Current application</span><div class="application-title">${esc(submission?.title || document.title || "Application form")}</div><span class="muted">${esc(location.hostname)}</span></div>
+        <div class="workspace">${html}</div>
+        <details class="settings"><summary>Autofill preferences</summary>
+          <label class="switch"><span><span class="setting-title">Draft unanswered text</span><span class="setting-description">Use AI for free-text questions too. Review before submitting.</span></span><input type="checkbox" role="switch" id="jt-ai-all" ${prefs.aiAll ? "checked" : ""}></label>
+          <label class="switch"><span><span class="setting-title">Continue between pages</span><span class="setting-description">Advance after filling. Always stop before Submit.</span></span><input type="checkbox" role="switch" id="jt-advance" ${prefs.autoAdvance ? "checked" : ""}></label>
+        </details>
+        <div class="panel-footer"><span class="muted">You review. You submit.</span><div id="jt-report"><button id="jt-report-btn">Report an issue</button></div></div>
+      </div>`;
     applyTheme();
     panel.querySelector("#jt-report-btn").onclick = reportForm;
     panel.querySelector("#jt-ai-all").onchange = (ev) => {
@@ -154,8 +170,10 @@
       prefs.collapsed = !prefs.collapsed;
       savePref("collapsed", prefs.collapsed);
       panel.classList.toggle("collapsed", prefs.collapsed);
-      panel.querySelector("#jt-min").textContent = prefs.collapsed ? "+" : "–";
+      panel.querySelector("#jt-min").textContent = prefs.collapsed ? "+" : "−";
       panel.querySelector("#jt-min").title = prefs.collapsed ? "Expand" : "Minimise";
+      panel.querySelector("#jt-min").setAttribute("aria-label", prefs.collapsed ? "Expand panel" : "Minimise panel");
+      panel.querySelector("#jt-min").setAttribute("aria-expanded", String(!prefs.collapsed));
     };
   };
 
@@ -176,9 +194,10 @@
   // types. Recorded after a fill pass; a change means a page the person
   // moved to by hand, and the panel offers Autofill for it.
   const pageSignature = () =>
-    [...document.querySelectorAll("input, textarea, select")].map((e) => e.id || e.name || e.type).join("|");
+    [...document.querySelectorAll("input, textarea, select")].filter((e) => !e.closest("#jt-apply")).map((e) => e.id || e.name || e.type).join("|");
   let pageSig = null;
   function mount() {
+    if (submission) return;
     const here = location.href;
     if (reader.ready()) {
       // A page that hydrates after load (Greenhouse's board is a Remix app)
@@ -236,9 +255,9 @@
 
   function offer(lead) {
     render(`
-      <p>${lead ? esc(lead) + " " : ""}Fill this application from your profile, your remembered answers and your drafts.</p>
-      <button id="jt-autofill" class="primary">Autofill</button>
-      <p class="muted">You check the form and click its own Submit button.</p>
+      <div class="intro"><span class="eyebrow">Ready when you are</span><h4>Less typing. More progress.</h4><p>${lead ? esc(lead) + " " : ""}Bring your profile, saved answers and job-specific drafts into this form.</p></div>
+      <button id="jt-autofill" class="primary">Autofill this page <span aria-hidden="true">↗</span></button>
+      <div class="source-strip"><span>Profile details</span><span>Saved answers</span><span>Drafts</span></div>
     `);
     panel.querySelector("#jt-autofill").onclick = async () => {
       await readFields();
@@ -266,7 +285,7 @@
   }
 
   async function run() {
-    render(`<p class="muted">Resolving ${fields.length} fields…</p>`);
+    render(`<div class="working" role="status"><span class="spinner" aria-hidden="true"></span><div><h4>Filling your application</h4><p>Matching ${fields.length} form items with your profile and saved answers…</p></div></div>`);
     const res = await api("user/apply/resolve", "POST", {
       url: location.href,
       fields: fields.map(plain),
@@ -280,8 +299,8 @@
       }
       render(
         res.signin
-          ? `<p class="warn">Not signed in. <a href="${res.signin}" target="_blank">Open Job Tracker</a>, sign in, then try again.</p><button id="jt-autofill">Autofill</button>`
-          : `<p class="warn">Could not resolve the form (${esc(res.status)}): ${esc(JSON.stringify(res.json || res.error))}</p><button id="jt-autofill">Try again</button>`,
+          ? `<div class="result-heading"><span class="eyebrow">Sign-in needed</span><h4>Connect to Job Tracker</h4><p><a href="${esc(res.signin)}" target="_blank" rel="noopener noreferrer">Open Job Tracker</a> and sign in, then return here.</p></div><button id="jt-autofill" class="primary">Try again</button>`
+          : `<div class="result-heading"><span class="eyebrow">Could not fill this page</span><h4>Let's try that again</h4><p>Job Tracker could not load your answers. Your application is still here.</p></div><button id="jt-autofill" class="primary">Try again</button><details class="help"><summary>Error details</summary><p class="warn">${esc(res.status)}: ${esc(JSON.stringify(res.json || res.error))}</p></details>`,
       );
       panel.querySelector("#jt-autofill").onclick = async () => {
         await readFields();
@@ -475,7 +494,7 @@
   // like any other rung, marked "ai" so the panel and the ledger say so.
   async function askModel(entries) {
     if (!entries.length) return;
-    render(`<p class="muted">Asking the model about ${entries.length} fields…</p>`);
+    render(`<div class="working" role="status"><span class="spinner" aria-hidden="true"></span><div><h4>Preparing answers</h4><p>Working through ${entries.length} unanswered form items…</p></div></div>`);
     const res = await api("user/apply/suggest", "POST", {
       job_id: fill.job_id,
       fill_id: fill.fill_id,
@@ -503,15 +522,18 @@
   function show() {
     const done = fill.fields.filter(isFilled);
     const todo = fill.fields.filter((e) => !isFilled(e));
-    const li = (e, extra = "") => `<li><span>${esc(e.label || e.key)}</span>${e.ai_note ? `<span class="muted">${esc(e.ai_note)}</span>` : ""}${extra}</li>`;
+    const sourceLabel = { profile: "Profile", bank: "Saved answer", draft: "Job draft", ai: "AI answer" };
+    const li = (e, extra = "", preview = false) => `<li><div class="field-copy"><span class="field-label">${esc(e.label || e.key)}</span>${preview ? `<span class="field-value">${esc(e.kind === "group" ? "Entries filled; review each on the form" : filled.get(e.key)?.value)}</span>` : ""}${e.ai_note ? `<span class="field-value">${esc(e.ai_note)}</span>` : ""}</div>${extra}</li>`;
     render(`
-      <p>${fill.job_id ? "On your board." : '<span class="warn">Not a posting on your board, so no drafts.</span>'}</p>
-      <p><b>${done.length} filled</b>${todo.length ? `, <b class="todo">${todo.length} for you</b>` : ""}.${fill.ai_error ? ` <span class="warn">Model call failed: ${esc(fill.ai_error)}.</span>` : ""}</p>
-      ${fill.stopped ? `<p class="warn">${esc(fill.stopped)}</p>` : ""}
-      ${todo.length ? `<ul>${todo.map((e) => li(e, e.kind === "file" ? '<span class="muted">attach the file</span>' : e.never_ai ? '<span class="muted">yours to fill</span>' : `<button data-ai="${esc(e.key)}">fill with AI</button>`)).join("")}</ul>` : ""}
-      <details><summary class="muted">filled (${done.length})</summary><ul>${done.map((e) => li(e, `<span class="muted">${esc(e.rung)}</span>`)).join("")}</ul></details>
-      <details><summary class="muted">how this works</summary><p class="muted">Check the form, then click its own Submit button. What you type or pick, and every model answer you leave in place, is remembered for the next form with the same question; free-text answers are not.</p></details>
-      <button id="jt-again">Fill again</button>
+      <div class="result-heading"><span class="eyebrow">This page</span><h4>${!fill.fields.length ? "No fields detected" : todo.length ? "A few things to review" : "Ready for your review"}</h4><p>${!fill.fields.length ? "Open the application form, then try again." : "Check your answers on the form before continuing."}</p></div>
+      <div class="metrics" aria-label="Autofill results"><div><strong>${done.length}</strong><span>Items filled</span></div><div><strong>${todo.length}</strong><span>Need attention</span></div></div>
+      <p class="board-note">${fill.job_id ? "Matched to a Job Tracker posting." : "No matching Job Tracker posting. Profile and saved answers are available; job drafts are not."}</p>
+      ${fill.ai_error ? `<p class="notice warn" role="alert">Could not prepare AI answers: ${esc(fill.ai_error)}.</p>` : ""}
+      ${fill.stopped ? `<p class="notice warn" role="alert">${esc(fill.stopped)}</p>` : ""}
+      <button id="jt-again" class="primary">Fill again <span aria-hidden="true">↻</span></button>
+      ${todo.length ? `<section class="field-section"><h5>Needs your attention <span class="count">${todo.length}</span></h5><ul>${todo.map((e) => li(e, e.kind === "file" ? '<span class="tag">Attach file</span>' : e.never_ai || !askable(e) ? '<span class="tag">Fill on form</span>' : `<button data-ai="${esc(e.key)}" aria-label="Prepare an AI answer for ${esc(e.label || e.key)}">Draft answer</button>`)).join("")}</ul></section>` : ""}
+      ${done.length ? `<details class="field-section"><summary>Filled items <span class="count">${done.length}</span></summary><ul>${done.map((e) => li(e, `<span class="tag success">${esc(sourceLabel[e.rung] || "Filled")}</span>`, true)).join("")}</ul></details>` : ""}
+      <details class="help"><summary>What gets remembered?</summary><p>After you submit, choices and short answers you keep can be reused for the same question. Free-text answers stay specific to the application.</p></details>
     `);
     panel.querySelector("#jt-again").onclick = async () => {
       await readFields();
@@ -596,10 +618,10 @@
     const box = panel.querySelector("#jt-report");
     if (!fields.length && reader.ready()) await readFields();
     box.innerHTML = `
-      <textarea id="jt-note" rows="3" placeholder="What went wrong? (optional)"></textarea>
+      <label for="jt-note" class="setting-title">What went wrong?</label><p class="muted">Includes a capture of this page and its form values.</p><textarea id="jt-note" rows="3" placeholder="Add a note (optional)"></textarea>
       <button id="jt-send">Send report</button> <button id="jt-cancel">Cancel</button>`;
     box.querySelector("#jt-cancel").onclick = () => {
-      box.innerHTML = `<button id="jt-report-btn">Report this page</button>`;
+      box.innerHTML = `<button id="jt-report-btn">Report an issue</button>`;
       box.querySelector("#jt-report-btn").onclick = reportForm;
     };
     box.querySelector("#jt-send").onclick = async () => {
@@ -615,45 +637,106 @@
     };
   }
 
-  // The form is gone and the page says so, in the words every ATS uses.
-  // The fallback for a reader without its own signal, and for the day an
-  // ATS renames the class the reader looks for.
   const CONFIRMED = /thank you for (applying|your application)|application (has been )?(received|submitted)|we('ve| have) received your application|we got your application|successfully submitted/i;
-  const confirmedByText = () => !reader.ready() && CONFIRMED.test(document.body.innerText);
+  const confirmationVisible = () => {
+    if (reader.submitted()) return true;
+    const pageText = document.body.innerText.replace(panel?.innerText || "", "");
+    return !reader.ready() && CONFIRMED.test(pageText);
+  };
 
-  // Recorded only once the ATS confirms. The values are read at the click,
-  // because the confirmation screen replaces the form; if no confirmation
-  // comes, the person can record it by hand or try again.
-  async function record(values) {
-    const res = await api(`user/apply/fills/${fill.fill_id}/submitted`, "POST", { fields: values });
-    render(
-      res.ok
-        ? `<p>Recorded.${res.json.job_id ? " The board row is marked submitted." : ""}</p>`
-        : `<p class="warn">Could not record the submit (${esc(res.status)}).</p>`,
-    );
+  function showSubmission() {
+    if (!submission) return;
+    if (!panel) {
+      panel = document.createElement("div");
+      panel.id = "jt-apply";
+      document.body.appendChild(panel);
+    } else if (!panel.isConnected) document.body.appendChild(panel);
+    // The earlier watcher stopped at 30 seconds. Keep watching after that
+    // point, but offer the person a way to confirm a missed success signal.
+    const overdue = Date.now() - submission.startedAt >= 30000;
+    const view = `${submission.status}:${overdue}:${submission.result?.status || ""}`;
+    if (view === submissionView) return;
+    submissionView = view;
+    if (submission.status === "recorded") {
+      render(`<div class="result-heading"><span class="eyebrow">Submission recorded</span><h4>${submission.result.json.job_id ? "Saved to your board" : "Application recorded"}</h4><p>${submission.result.json.job_id ? "Your job is marked Application Submitted." : "This submission is saved in your application history. No matching board job was found, so no board status changed."}</p></div>`);
+    } else if (submission.status === "confirmed") {
+      render(`<div class="result-heading"><span class="eyebrow">Submitted · not yet recorded</span><h4>Save your submission</h4><p>The application was confirmed, but Job Tracker has not saved it yet. Retrying will not submit the application again.</p></div><button id="jt-retry-record" class="primary">Retry saving</button>${submission.result?.signin ? `<p><a href="${esc(submission.result.signin)}" target="_blank" rel="noopener noreferrer">Sign in to Job Tracker</a>, then retry.</p>` : ""}`);
+      panel.querySelector("#jt-retry-record").onclick = () => confirmSubmission("retry");
+    } else {
+      render(`<div class="working" role="status"><span class="spinner" aria-hidden="true"></span><div><h4>${overdue ? "Still awaiting confirmation" : "Checking your submission"}</h4><p>${overdue ? "If the form shows errors, correct them and submit again. If it succeeded, you can confirm it below." : "Waiting for the application site to confirm success. Your board has not changed yet."}</p></div></div><button id="jt-confirm-record" class="primary">I submitted this application</button><button id="jt-dismiss-attempt">Back to autofill</button>`);
+      panel.querySelector("#jt-confirm-record").onclick = () => confirmSubmission("confirm");
+      panel.querySelector("#jt-dismiss-attempt").onclick = async () => {
+        const res = await send({ kind: "submission", action: "clear", fillId: submission.fillId });
+        if (!res.ok) return;
+        submission = null;
+        submissionView = null;
+        mountedFor = null;
+        mount();
+      };
+    }
   }
 
-  document.addEventListener(
-    "click",
-    async (ev) => {
-      const btn = reader.submitButton();
-      if (!fill || !btn || !btn.contains(ev.target)) return;
-      // The click goes through to the form untouched.
-      const values = finals();
-      for (let i = 0; i < 150; i++) {
-        await sleep(200);
-        if (reader.submitted() || confirmedByText()) return record(values);
+  async function confirmSubmission(action) {
+    if (!submission || submissionBusy) return;
+    submissionBusy = true;
+    for (const button of panel?.querySelectorAll("#jt-retry-record, #jt-confirm-record") || []) button.disabled = true;
+    const res = await send({ kind: "submission", action, fillId: submission.fillId });
+    submissionBusy = false;
+    if (res.ok) submission = res.state;
+    else {
+      // The worker may have saved the receipt before its reply was lost.
+      const saved = await send({ kind: "submission", action: "get" });
+      if (saved.ok && saved.state) submission = saved.state;
+      else {
+        render(`<p class="warn">Could not reach the extension. Reload this page to recover the saved submission attempt.</p>`);
+        return;
       }
-      render(`
-        <p class="warn">The form did not confirm the submit within 30 seconds, so nothing was recorded.</p>
-        <button id="jt-record">It did submit, record it</button>`);
-      panel.querySelector("#jt-record").onclick = () => record(values);
-    },
-    true,
-  );
+    }
+    submissionView = null;
+    showSubmission();
+  }
+
+  const armSubmission = async () => {
+    if (submissionBusy) return;
+    submissionBusy = true;
+    const res = await send({ kind: "submission", action: "arm", fillId: fill?.fill_id || null, url: location.href, title: document.title, fields: fill ? finals() : [] });
+    submissionBusy = false;
+    if (res.ok) {
+      submission = res.state;
+      submissionView = null;
+      showSubmission();
+    } else {
+      render(`<p class="warn">Could not start submission tracking. ${res.stale ? "Reload this page to reconnect the extension." : "Your application can still submit, but its board status may need updating manually."}</p>`);
+    }
+  };
+  document.addEventListener("click", (ev) => {
+    const button = reader.submitButton();
+    if (button?.contains(ev.target)) armSubmission();
+  }, true);
+  document.addEventListener("submit", (ev) => {
+    const button = reader.submitButton();
+    if (button && ev.target === button.form) armSubmission();
+  }, true);
 
   // A single-page app changes the url and the page without a load, so the
   // form is watched for rather than assumed at load time.
-  mount();
-  setInterval(mount, 700);
+  if (submission) {
+    showSubmission();
+    if (submission.status === "confirmed") confirmSubmission("retry");
+  } else mount();
+  setInterval(async () => {
+    if (submission && submission.status !== "confirmed" && reader.ready() && new URL(submission.url).pathname !== location.pathname) {
+      if (clearingSubmission || submissionBusy) return;
+      clearingSubmission = true;
+      await send({ kind: "submission", action: "clear", fillId: submission.fillId });
+      submission = null;
+      submissionView = null;
+      mountedFor = null;
+      clearingSubmission = false;
+    }
+    if (submission) {
+      if (submission.status === "watching" && confirmationVisible()) confirmSubmission("confirm");
+      else showSubmission();
+    } else mount();
+  }, 700);
 })();

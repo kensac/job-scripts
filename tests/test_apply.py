@@ -819,3 +819,68 @@ def test_the_resolve_sends_the_profile_by_decision_not_by_default(client, user_h
     }
     assert sent == allowed, sorted(sent ^ allowed)
     assert "notes" not in sent and "default_resume_id" not in sent
+
+
+def test_submission_retry_keeps_original_receipt_and_later_board_status(client, user_headers):
+    uid = _uid(user_headers)
+    job_id = _insert_job("retry", "https://jobs.ashbyhq.com/retry/abc")
+    fill = client.post(
+        "/v1/user/apply/resolve",
+        json={"url": "https://jobs.ashbyhq.com/retry/abc/application", "fields": []},
+        headers=user_headers,
+    ).json()
+    url = f"/v1/user/apply/fills/{fill['fill_id']}/submitted"
+    assert client.post(url, json={"fields": []}, headers=user_headers).status_code == 200
+    before = db.query_one(
+        "SELECT submitted_at FROM application_fills WHERE id = %s", (fill["fill_id"],)
+    )
+    db.execute(
+        "UPDATE user_jobs SET status = 'Interview' WHERE user_id = %s AND job_id = %s",
+        (uid, job_id),
+    )
+    assert client.post(url, json={"fields": []}, headers=user_headers).status_code == 200
+    assert (
+        db.query_one("SELECT submitted_at FROM application_fills WHERE id = %s", (fill["fill_id"],))
+        == before
+    )
+    assert (
+        db.query_one(
+            "SELECT status FROM user_jobs WHERE user_id = %s AND job_id = %s", (uid, job_id)
+        )["status"]
+        == "Interview"
+    )
+
+
+def test_submission_failure_rolls_back_receipt_and_saved_answers(client, user_headers, monkeypatch):
+    from api.routers import apply as router
+
+    uid = _uid(user_headers)
+    _insert_job("atomic", "https://jobs.ashbyhq.com/atomic/abc")
+    fill = client.post(
+        "/v1/user/apply/resolve",
+        json={
+            "url": "https://jobs.ashbyhq.com/atomic/abc/application",
+            "fields": [{"key": "q", "label": "Office preference", "kind": "text"}],
+        },
+        headers=user_headers,
+    ).json()
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("board unavailable")
+
+    monkeypatch.setattr(router, "_write_board_row", fail)
+    import pytest
+
+    with pytest.raises(RuntimeError, match="board unavailable"):
+        client.post(
+            f"/v1/user/apply/fills/{fill['fill_id']}/submitted",
+            json={"fields": [{"key": "q", "final": "Remote", "remember": True}]},
+            headers=user_headers,
+        )
+    assert (
+        db.query_one(
+            "SELECT submitted_at FROM application_fills WHERE id = %s", (fill["fill_id"],)
+        )["submitted_at"]
+        is None
+    )
+    assert not db.query("SELECT id FROM application_answer_bank WHERE user_id = %s", (uid,))

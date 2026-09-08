@@ -33,9 +33,40 @@ A profile value may list alternatives in order of preference, such as
 "South Asian | Asian" for ethnicity: a choice field takes the first
 alternative the form offers, a text box takes the first alternative.
 
-"Report this page" sends the page as the extension saw it, with a note,
+"Report an issue" sends the page as the extension saw it, with a note,
 for triage: use it whenever a field was read wrong, filled wrong, or not
 filled at all.
+
+## Submission tracking
+
+The panel separates an attempted submission, a confirmed application, and a
+submission saved to your board. It watches the supported form's Submit
+button and native form submission, including when you did not use Autofill.
+An attempt survives redirects within the same tab, frame and origin while
+the browser session stays open. The extension must run on the destination
+page to observe its confirmation.
+
+A confirmed submission that could not be saved offers Retry saving. That
+retries the Job Tracker receipt, never the employer's Submit button. If no
+confirmation appears, I submitted this application lets you confirm the
+outcome yourself. A saved submission without a matching catalog job says
+that no board status changed. Nothing infers success from a button click
+alone.
+
+Autofill preferences holds the free-text drafting and automatic page
+advance switches. Filled items shows answer previews and their sources;
+repeated sections still need review on the form. Theme and minimise controls
+stay in the header.
+
+## Local panel preview
+
+Run `python -m http.server 8768` at the repository root, then open
+`http://localhost:8768/tests/extension/panel-preview.html?reset=1`.
+The fixture uses fictional values and replaces every extension API call.
+`state=error`, `state=empty`, and `state=loading` exercise resolve states.
+Submitting the demo navigates to a confirmation page with a failed save;
+remove `fail=1` from that URL to exercise recovery. No real application is
+submitted. Run `node --test tests/extension/*.test.cjs` for regressions.
 
 ## Supported
 

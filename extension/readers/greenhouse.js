@@ -368,7 +368,7 @@
   const submitButton = () => document.querySelector(`${FORM} button[type=submit]`);
   // The confirmation Greenhouse shows in place of the form.
   const submitted = () =>
-    !document.querySelector(FORM) && /thank you for applying|application has been submitted|application received/i.test(document.body.innerText);
+    !document.querySelector(FORM)?.getClientRects().length && /thank you for applying|application has been submitted|application received/i.test(document.body.innerText);
 
   window.__jtReader = {
     host: "greenhouse",

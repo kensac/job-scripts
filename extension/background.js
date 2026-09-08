@@ -46,8 +46,16 @@ async function get({ url }) {
   return { ok: res.ok, status: res.status, json: res.ok ? await res.json() : null };
 }
 
-chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
-  (msg.kind === "pdf" ? pdf : msg.kind === "get" ? get : call)(msg)
+importScripts("submissions.js");
+const submissions = new SubmissionStore(chrome.storage.session, call);
+chrome.tabs.onRemoved.addListener(async (tabId) => {
+  const all = await chrome.storage.session.get(null);
+  const keys = Object.keys(all).filter((key) => key.startsWith(`submission:${tabId}:`));
+  if (keys.length) await chrome.storage.session.remove(keys);
+});
+
+chrome.runtime.onMessage.addListener((msg, sender, reply) => {
+  (msg.kind === "submission" ? submissions.handle(msg, sender) : (msg.kind === "pdf" ? pdf : msg.kind === "get" ? get : call)(msg))
     .then(reply)
     .catch((e) => reply({ ok: false, status: 0, error: String(e) }));
   return true;

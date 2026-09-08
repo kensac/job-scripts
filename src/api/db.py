@@ -3,9 +3,13 @@ from __future__ import annotations
 import datetime
 import decimal
 import json
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any, LiteralString, cast
 
 import dotenv
+from psycopg import Connection
 from psycopg.types.json import Jsonb
 
 dotenv.load_dotenv()
@@ -215,26 +219,52 @@ def _as_query(sql: str) -> LiteralString:
     return cast("LiteralString", sql)
 
 
+_transaction_connection: ContextVar[Connection[dict[str, Any]] | None] = ContextVar(
+    "transaction_connection", default=None
+)
+
+
+@contextmanager
+def _connection() -> Iterator[Connection[dict[str, Any]]]:
+    active = _transaction_connection.get()
+    if active is not None:
+        yield active
+    else:
+        with pool.connection() as conn:
+            yield conn
+
+
+@contextmanager
+def transaction() -> Iterator[None]:
+    """Keep helper calls and nested board writes on one atomic connection."""
+    with _connection() as conn, conn.transaction():
+        token = _transaction_connection.set(conn)
+        try:
+            yield
+        finally:
+            _transaction_connection.reset(token)
+
+
 def query(sql: str, params: Any = None) -> list[dict[str, Any]]:
-    with pool.connection() as conn:
+    with _connection() as conn:
         return [dict(r) for r in conn.execute(_as_query(sql), params).fetchall()]
 
 
 def query_one(sql: str, params: Any = None) -> dict[str, Any] | None:
-    with pool.connection() as conn:
+    with _connection() as conn:
         row = conn.execute(_as_query(sql), params).fetchone()
     return dict(row) if row else None
 
 
 def execute(sql: str, params: Any = None) -> None:
-    with pool.connection() as conn:
+    with _connection() as conn:
         conn.execute(_as_query(sql), params)
 
 
 def execute_count(sql: str, params: Any = None) -> int:
     """execute(), but returns how many rows it touched - for the callers whose
     whole purpose is that number (the reaper counting requeues, say)."""
-    with pool.connection() as conn:
+    with _connection() as conn:
         return conn.execute(_as_query(sql), params).rowcount
 
 
