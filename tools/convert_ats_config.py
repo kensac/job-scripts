@@ -403,7 +403,10 @@ def main(argv: list[str]) -> int:
             {
                 "matches": c["matches"],
                 "js": [f"ats/{c['name']}.js", "engine.js", "content.js"],
-                "css": ["panel.css"],
+                # No "css": the panel lives in a shadow root and links
+                # panel.css itself from web_accessible_resources. Injecting it
+                # into the document would style nothing and leak the panel's
+                # rules onto the page.
                 "all_frames": True,
                 "run_at": "document_idle",
             }
