@@ -54,12 +54,20 @@ class Profile(BaseModel):
     guessing. EEO answers default to declining."""
 
     first_name: str = Field(default="", max_length=100)
+    middle_name: str = Field(default="", max_length=100)
     last_name: str = Field(default="", max_length=100)
     preferred_name: str = Field(default="", max_length=100)
     pronouns: str = Field(default="", max_length=40)
     email: str = Field(default="", max_length=200)
     phone: str = Field(default="", max_length=40)
+    # "Mobile", "Home", "Work": the phone type pickers on the older ATSs.
+    phone_type: str = Field(default="Mobile", max_length=20)
+    # YYYY-MM-DD; asked by government and enterprise forms, never required
+    # here. The engine formats it by the field's name.
+    birthday: str = Field(default="", max_length=10)
     address: str = Field(default="", max_length=200)
+    address_2: str = Field(default="", max_length=200)
+    address_3: str = Field(default="", max_length=200)
     city: str = Field(default="", max_length=100)
     state: str = Field(default="", max_length=100)
     postal_code: str = Field(default="", max_length=20)
@@ -68,6 +76,8 @@ class Profile(BaseModel):
     github: str = Field(default="", max_length=300)
     website: str = Field(default="", max_length=300)
     twitter: str = Field(default="", max_length=300)
+    behance: str = Field(default="", max_length=300)
+    dribbble: str = Field(default="", max_length=300)
     # Free text: "U.S. citizen", "F-1 OPT", "H-1B"; forms ask it beside
     # authorisation and sponsorship.
     visa_status: str = Field(default="", max_length=120)
@@ -136,10 +146,15 @@ _RULES: tuple[tuple[str, str], ...] = (
     (r"\b(last|family) name\b|\bsurname\b", "last_name"),
     (r"^(full |legal |your )?name$|\bfull name\b|\blegal name\b", "full_name"),
     (r"\be ?mail\b", "email"),
+    # The type picker before the number rule takes its label.
+    (r"\bphone type\b|\btype of phone\b", "phone_type"),
     (r"\b(phone|mobile|cell|telephone|contact number)\b", "phone"),
     (r"\blinked ?in\b", "linkedin"),
     (r"\bgit ?hub\b", "github"),
     (r"\btwitter\b|\bx (handle|profile|url)\b", "twitter"),
+    # Named portfolios before the generic url rule takes them.
+    (r"\bbehance\b", "behance"),
+    (r"\bdribbble\b", "dribbble"),
     (r"\b(portfolio|website|personal site|web site|url|links?)\b", "website"),
     # Questions before places: "authorized to work in the country where the
     # job is located" is about authorisation, not a country.
@@ -151,7 +166,8 @@ _RULES: tuple[tuple[str, str], ...] = (
     ),
     (r"\bvisa (status|type)\b|\bimmigration status\b", "visa_status"),
     (
-        r"\b(hear|heard|find out|learn|discover)\b.*\babout\b|\bhow did you (find|discover)\b",
+        r"\b(hear|heard|find out|learn|discover)\b.*\babout\b|\bhow did you (find|discover)\b"
+        r"|\bwhere (did )?you (found|find)\b",
         "referral_source",
     ),
     (
@@ -198,7 +214,11 @@ _RULES: tuple[tuple[str, str], ...] = (
     (r"\bgpa\b|\bgrade point\b", "gpa"),
     (r"\bgraduat", "graduation"),
     (r"\b(postal|zip) ?code\b|\bpostcode\b", "postal_code"),
+    (r"\baddress (line )?2\b|\bapartment\b|\bsuite\b|\bunit\b|\baddress 2\b", "address_2"),
+    (r"\baddress (line )?3\b", "address_3"),
     (r"\bstreet\b|\baddress\b", "address"),
+    (r"\bmiddle (name|initial)\b", "middle_name"),
+    (r"\b(date of birth|birth ?date|birthday|born)\b", "birthday"),
     (r"\bcity\b|\btown\b", "city"),
     (r"\bstate\b|\bprovince\b", "state"),
     (r"\bcountry\b", "country"),
@@ -212,6 +232,7 @@ YESNO_FACTS = {
     "willing_onsite",
     "consent",
     "yes",
+    "no",
 }
 YES = re.compile(r"^(yes|y|true)\b", re.I)
 NO = re.compile(r"^(no|n|false)\b", re.I)
@@ -244,12 +265,29 @@ def profile_value(profile: Profile, fact: str) -> str:
         return f"{len(rows)} entries" if rows else ""
     if fact == "yes":
         return "Yes"
+    if fact == "no":
+        return "No"
+    # A flow step in a config-driven reader (a begin or save button, a wait)
+    # carries no value; the engine runs it at its place in the order.
+    if fact == "step":
+        return ""
+    # The phone's country picker: the person's country.
+    if fact == "phone_country":
+        return profile.country
     if fact == "today":
         return datetime.datetime.now(datetime.UTC).date().isoformat()
     if fact == "phone_digits":
         return re.sub(r"\D", "", profile.phone)
     if fact in ("full_name", "location"):
         return getattr(profile, fact)
+    # A state box may list abbreviations or full names; offer both.
+    if fact == "state" and profile.state:
+        full = US_STATES.get(profile.state.upper())
+        return (
+            f"{profile.state} | {full}"
+            if full and full.lower() != profile.state.lower()
+            else profile.state
+        )
     if fact in ("current_company", "current_title", "previous_company", "previous_title"):
         index = 0 if fact.startswith("current") else 1
         if len(profile.experience) <= index:
@@ -269,6 +307,61 @@ def profile_value(profile: Profile, fact: str) -> str:
         }[fact] or ""
     return str(getattr(profile, fact, "") or "")
 
+
+US_STATES = {
+    "AL": "Alabama",
+    "AK": "Alaska",
+    "AZ": "Arizona",
+    "AR": "Arkansas",
+    "CA": "California",
+    "CO": "Colorado",
+    "CT": "Connecticut",
+    "DE": "Delaware",
+    "DC": "District of Columbia",
+    "FL": "Florida",
+    "GA": "Georgia",
+    "HI": "Hawaii",
+    "ID": "Idaho",
+    "IL": "Illinois",
+    "IN": "Indiana",
+    "IA": "Iowa",
+    "KS": "Kansas",
+    "KY": "Kentucky",
+    "LA": "Louisiana",
+    "ME": "Maine",
+    "MD": "Maryland",
+    "MA": "Massachusetts",
+    "MI": "Michigan",
+    "MN": "Minnesota",
+    "MS": "Mississippi",
+    "MO": "Missouri",
+    "MT": "Montana",
+    "NE": "Nebraska",
+    "NV": "Nevada",
+    "NH": "New Hampshire",
+    "NJ": "New Jersey",
+    "NM": "New Mexico",
+    "NY": "New York",
+    "NC": "North Carolina",
+    "ND": "North Dakota",
+    "OH": "Ohio",
+    "OK": "Oklahoma",
+    "OR": "Oregon",
+    "PA": "Pennsylvania",
+    "RI": "Rhode Island",
+    "SC": "South Carolina",
+    "SD": "South Dakota",
+    "TN": "Tennessee",
+    "TX": "Texas",
+    "UT": "Utah",
+    "VT": "Vermont",
+    "VA": "Virginia",
+    "WA": "Washington",
+    "WV": "West Virginia",
+    "WI": "Wisconsin",
+    "WY": "Wyoming",
+    "PR": "Puerto Rico",
+}
 
 NEGATED = re.compile(r"\b(not|no|never|don t|do not|none)\b", re.I)
 

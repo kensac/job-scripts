@@ -148,12 +148,10 @@ def resolve_form(body: ResolveBody, user: AuthedUser = Depends(require_user)):
         "job_id": job_id,
         "fields": fields,
         "resume": resume,
-        # The rows a repeated group (education, experience) is filled from;
-        # a config-driven reader takes them one entry at a time.
-        "profile": {
-            "experience": [e.model_dump() for e in profile.experience],
-            "education": [e.model_dump() for e in profile.education],
-        },
+        # The profile itself: a config-driven reader fills a repeated group
+        # (education, experience) one row at a time, and a selector that
+        # names another fact (valueKey) reads the scalar from it.
+        "profile": profile.model_dump(exclude={"default_resume_id", "notes"}),
     }
 
 

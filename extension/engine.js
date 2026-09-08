@@ -2,37 +2,37 @@
 // tools/convert_ats_config.py) describes one ATS as data: url match
 // patterns, fields that name the fact they take and the selectors and fill
 // method that take it, repeated groups (education, experience) with an add
-// button and nested fields, the selectors that find custom questions and
-// how to answer them, and the continue, submit and success paths. This file
+// button and nested fields, flow steps (open the form, expand a section,
+// save it), the selectors that find custom questions and how to answer
+// them, and the apply, continue, submit and success paths. This file
 // interprets that data for the matching ATS and exposes the same reader
 // interface the hand-written readers do, plus a step model for forms that
 // span pages.
 (() => {
   if (window.__jtReader) return; // a hand-written reader owns this host
   const configs = window.__jtATS || [];
+
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const clean = (s) => (s || "").replace(/\s+/g, " ").replace(/[*✱]\s*$/, "").trim();
+  const list = (x) => (Array.isArray(x) ? x : x ? [x] : []);
   const matchesPattern = (pattern, url) => {
     const re = new RegExp(
       "^" + pattern.split("*").map((s) => s.replace(/[.+?^${}()|[\]\\]/g, "\\$&")).join(".*") + "$",
     );
     return re.test(url);
   };
-  const cfg = configs.find((c) => c.matches.some((m) => matchesPattern(m, location.href)));
-  if (!cfg) return;
-
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-  const clean = (s) => (s || "").replace(/\s+/g, " ").replace(/[*✱]\s*$/, "").trim();
-  const list = (x) => (Array.isArray(x) ? x : x ? [x] : []);
 
   // XPath with the table's placeholders: %INPUTPATH% is the field's own
   // path, %VALUE% and its cases the value being filled, %NUMBER0% and
   // %INDEX0% the entry of a repeated group, one- and zero-based.
   function expand(path, ctx) {
-    const v = ctx.value || "";
+    const v = String(ctx.value ?? "");
+    const raw = String(ctx.raw ?? v);
     return path
       .replaceAll("%INPUTPATH%", ctx.inputPath || "")
-      .replaceAll("%UPPERUNMAPPEDVALUE%", (ctx.raw || v).toUpperCase())
-      .replaceAll("%LOWERUNMAPPEDVALUE%", (ctx.raw || v).toLowerCase())
-      .replaceAll("%UNMAPPEDVALUE%", ctx.raw || v)
+      .replaceAll("%UPPERUNMAPPEDVALUE%", raw.toUpperCase())
+      .replaceAll("%LOWERUNMAPPEDVALUE%", raw.toLowerCase())
+      .replaceAll("%UNMAPPEDVALUE%", raw)
       .replaceAll("%UPPERVALUE%", v.toUpperCase())
       .replaceAll("%LOWERVALUE%", v.toLowerCase())
       .replaceAll("%VALUE%", v)
@@ -53,13 +53,40 @@
   }
   const text = (node) => (node && node.nodeType === Node.TEXT_NODE ? node.textContent : node ? node.innerText || node.textContent : "");
   const visible = (el) => !!el && (el.nodeType !== Node.ELEMENT_NODE || el.offsetParent !== null || el.getClientRects().length > 0 || el.type === "file" || el.type === "hidden");
-  function first(paths, ctx = {}, root = document) {
+  // A variant marked hidden may fill an element the page does not show (a
+  // radio behind a styled label); everything else must be visible.
+  function first(paths, ctx = {}, root = document, allowHidden = false) {
     for (const p of list(paths)) {
-      const hit = $x(expand(p, ctx), root).find(visible);
+      const hit = $x(expand(p, ctx), root).find((el) => allowHidden || visible(el));
       if (hit) return { el: hit, path: expand(p, ctx) };
     }
     return null;
   }
+  async function waitFirst(paths, ctx, root, allowHidden, ms) {
+    const deadline = Date.now() + (ms || 0);
+    for (;;) {
+      const hit = first(paths, ctx, root, allowHidden);
+      if (hit || Date.now() >= deadline) return hit;
+      await sleep(150);
+    }
+  }
+  // Nested lists of paths: every path in an inner list must match for the
+  // inner list to count, any inner list matching is a match.
+  const anyGroup = (groups) => list(groups).some((g) => list(g).length && list(g).every((p) => $x(p).length));
+
+  // The config for this page: by url, or by the marks an embedded form
+  // leaves on a host of its own (an iframe or a form posting to the ATS).
+  // A url the table excludes (a confirmation page, a listing) gets nothing.
+  const cfg =
+    configs.find((c) => c.matches.some((m) => matchesPattern(m, location.href))) ||
+    configs.find((c) => anyGroup(c.embeddedPaths));
+  if (!cfg) return;
+  if (list(cfg.urlsExcluded).some((g) => matchesPattern(g, location.href))) return;
+
+  // Fields live inside the container when the table says so (a Greenhouse
+  // form beside a job board, a Workday frame beside its chrome).
+  const container = () => first(cfg.container || [], {}, document, true)?.el || null;
+  const scope = () => container() || (cfg.containerRequired ? null : document);
 
   // ---- fill methods, one per name the table uses ---------------------------
   const events = (extra) => ({ bubbles: true, cancelable: true, ...(cfg.defaultEventOptions || {}), ...(extra || {}) });
@@ -90,21 +117,28 @@
     if (!(opts && opts.noBlur)) el.dispatchEvent(new FocusEvent("blur", t));
     return true;
   }
+  function chooseOption(opt) {
+    const sel = opt.closest("select");
+    if (!sel) return clickOn(opt, { noBlur: true });
+    const t = events();
+    sel.dispatchEvent(new FocusEvent("focus", t));
+    sel.value = opt.value;
+    sel.dispatchEvent(new InputEvent("input", t));
+    sel.dispatchEvent(new Event("change", t));
+    sel.dispatchEvent(new FocusEvent("blur", t));
+    return true;
+  }
   function chooseNative(el, value) {
     const wants = String(value).split("|").map((s) => s.trim().toLowerCase()).filter(Boolean);
     const opts = [...el.options];
     const opt =
       opts.find((o) => wants.includes(o.text.trim().toLowerCase()) || wants.includes(o.value.toLowerCase())) ||
       opts.find((o) => wants.some((w) => o.text.trim().toLowerCase().startsWith(w)));
-    if (!opt) return false;
-    const t = events();
-    el.dispatchEvent(new FocusEvent("focus", t));
-    el.value = opt.value;
-    el.dispatchEvent(new InputEvent("input", t));
-    el.dispatchEvent(new Event("change", t));
-    el.dispatchEvent(new FocusEvent("blur", t));
-    return true;
+    return opt ? chooseOption(opt) : false;
   }
+  // An option element the table pointed at: a native <option> is chosen
+  // through its select, anything else (a listbox row) is clicked.
+  const pickOption = (el) => (el.tagName === "OPTION" ? chooseOption(el) : clickOn(el, { noBlur: true }));
   function checkOrRadio(el, on) {
     const t = events();
     if (Boolean(el.checked) === Boolean(on)) return true;
@@ -127,6 +161,24 @@
     el.dispatchEvent(new Event("change", events()));
     return true;
   }
+  // A rich-text editor hides its textarea behind an iframe named after it;
+  // the page's editor object is out of a content script's reach, so the
+  // editable body is written directly and the textarea kept in step.
+  function richText(el, value) {
+    const frame = document.getElementById(`${el.id}_ifr`) || el.parentElement?.querySelector("iframe");
+    const body = frame?.contentDocument?.body;
+    if (body) {
+      body.innerHTML = String(value ?? "")
+        .split(/\n{2,}/)
+        .map((p) => `<p>${p.replace(/\n/g, "<br>")}</p>`)
+        .join("");
+      body.dispatchEvent(new InputEvent("input", { bubbles: true }));
+      body.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+    setValue(el, value);
+    el.dispatchEvent(new Event("change", events()));
+    return true;
+  }
   async function runMethod(method, el, value, file, opts) {
     const m = method || cfg.defaultMethod || "default";
     switch (m) {
@@ -139,6 +191,23 @@
         return checkOrRadio(el, true);
       case "clearValue":
         return typeInto(el, "", opts, false);
+      case "setValueOnly":
+        setValue(el, value);
+        return true;
+      case "vanillaWithBlur":
+        return typeInto(el, value, opts, true);
+      case "ui5": {
+        // A UI5 input commits on Enter and on focus leaving, and reads the
+        // value back off the element on both.
+        typeInto(el, value, opts, false);
+        el.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", code: "Enter", keyCode: 13, bubbles: true }));
+        el.dispatchEvent(new KeyboardEvent("keyup", { key: "Enter", code: "Enter", keyCode: 13, bubbles: true }));
+        el.dispatchEvent(new FocusEvent("blur", events(opts)));
+        el.dispatchEvent(new FocusEvent("focusout", events(opts)));
+        return true;
+      }
+      case "tinyMCE":
+        return richText(el, value);
       case "blur":
         el.dispatchEvent(new FocusEvent("blur", events(opts)));
         return true;
@@ -163,39 +232,12 @@
     }
   }
 
-  // The table's action list: each step waits up to `time` for its path,
-  // skips itself on a failed `condition`, and either fires an event, waits
-  // for its path to be removed, or runs a method on what it found.
-  async function runActions(actions, ctx, root, fallbackEl, value, file) {
-    for (const a of actions || []) {
-      if (a.delay) await sleep(a.delay);
-      if (a.condition && !$x(expand(a.condition, ctx), root).length) continue;
-      if (a.valueRequired && !value) continue;
-      if (a.removed) {
-        const deadline = Date.now() + (a.time || 1000);
-        while (Date.now() < deadline && first(a.path || ["."], ctx, root)) await sleep(100);
-        continue;
-      }
-      let target = a.path ? null : { el: fallbackEl, path: ctx.inputPath };
-      const deadline = Date.now() + (a.time || 0);
-      while (!target) {
-        target = first(a.path, ctx, root);
-        if (target || Date.now() >= deadline) break;
-        await sleep(150);
-      }
-      if (!target) {
-        if (a.allowFailure) continue;
-        return false;
-      }
-      if (a.event) target.el.dispatchEvent(new Event(a.event, events(a.eventOptions)));
-      else await runMethod(a.method || "click", target.el, value, file, a.eventOptions);
-    }
-    return true;
-  }
-
+  // ---- values --------------------------------------------------------------
   // A `values` map in the table names answers by code and lists the option
   // texts each code may appear as; our text picks the code whose texts it
-  // matches, and those texts are tried in turn.
+  // matches, and those texts are tried in turn. A map named by a string
+  // (a country or state abbreviation table) is not carried, so the value
+  // stands as it is.
   function mapValues(values, ours) {
     if (!values || typeof values !== "object" || !ours) return [ours];
     const low = ours.toLowerCase();
@@ -207,13 +249,93 @@
     }
     return [ours];
   }
+  const YES = /^(yes|true|y)\b/i;
+  const NO = /^(no|false|n)\b/i;
+  // A `valuePathMap` names a path per value: the radio for "African
+  // American", the box for "true". Ours picks the key it means.
+  function mapPath(valuePathMap, ours) {
+    const low = String(ours ?? "").toLowerCase();
+    const keys = Object.keys(valuePathMap);
+    const key =
+      keys.find((k) => k.toLowerCase() === low) ||
+      keys.find((k) => low && (low.startsWith(k.toLowerCase()) || k.toLowerCase().startsWith(low))) ||
+      (YES.test(low) ? keys.find((k) => /^(true|yes)$/i.test(k)) : null) ||
+      (NO.test(low) ? keys.find((k) => /^(false|no)$/i.test(k)) : null);
+    return key ? valuePathMap[key] : null;
+  }
+  // The value an action or variant asks for by name: a group entry's own
+  // attribute inside a group, a date for today's-date names, otherwise a
+  // scalar the profile carries under that name.
+  function factValue(key, ctx) {
+    if (ctx.item) {
+      const v = entryValue(key, ctx.item, ctx.fact);
+      if (v !== null && v !== "") return v;
+    }
+    if (/^(current_date|disability_date|today)/.test(key)) return formatDate(key, todayParts());
+    const p = window.__jtProfile || {};
+    return typeof p[key] === "string" || typeof p[key] === "number" ? String(p[key]) : null;
+  }
+  // The candidates an action or variant fills with: its own constant, the
+  // fact it names, or the field's value, through its own values map.
+  function candidates(spec, ctx, value) {
+    let v = value;
+    if (spec.valueKey) v = factValue(spec.valueKey, ctx) ?? v;
+    if (spec.value !== undefined) v = spec.value === true ? "true" : spec.value === false ? "false" : spec.value;
+    if (Array.isArray(v)) return v.map(String).filter(Boolean);
+    const s = v == null ? "" : String(v);
+    return s ? mapValues(spec.values, s) : [""];
+  }
+
+  // The table's action list: each step waits up to `time` for its path,
+  // skips itself on a failed `condition` or an empty value it needs, and
+  // either fires an event, waits for its path to be removed, picks the
+  // option its `valuePath` names, or runs a method on what it found.
+  async function runActions(actions, ctx, root, fallbackEl, value, file) {
+    for (const a of actions || []) {
+      if (a.delay) await sleep(a.delay);
+      if (a.condition && !list(a.condition).some((c) => $x(expand(c, ctx), root).length)) continue;
+      const cands = candidates(a, ctx, value);
+      const have = cands.some(Boolean);
+      if ((a.skipOnEmptyValue || a.valueRequired) && !have) continue;
+      const actx = { ...ctx, value: cands[0] || "" };
+      if (a.removed) {
+        const deadline = Date.now() + (a.removedTime || a.time || 1000);
+        while (Date.now() < deadline && first(a.path || ["."], actx, root, true)) await sleep(100);
+        continue;
+      }
+      let target = a.path ? null : { el: fallbackEl, path: ctx.inputPath };
+      if (!target) target = await waitFirst(a.path, actx, root, a.hidden === true, a.time || 0);
+      if (!target) {
+        if (a.allowFailure) continue;
+        return false;
+      }
+      if (a.event) {
+        target.el.dispatchEvent(new Event(a.event, events(a.eventOptions)));
+        continue;
+      }
+      if (a.valuePath) {
+        let picked = false;
+        for (const cand of cands) {
+          const opt = await waitFirst(a.valuePath, { ...ctx, inputPath: target.path, value: cand, raw: value }, root, true, a.valueElementTime || 300);
+          if (opt) {
+            picked = pickOption(opt.el);
+            break;
+          }
+        }
+        if (!picked && !a.allowFailure) return false;
+        continue;
+      }
+      await runMethod(a.method || "click", target.el, cands[0] ?? "", file, a.eventOptions);
+    }
+    return true;
+  }
 
   // ---- dates and entry values for repeated groups --------------------------
   const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
   function parseDate(s) {
     if (!s) return null;
     const t = String(s).trim();
-    let m = t.match(/^(\d{4})-(\d{1,2})(?:-(\d{1,2}))?$/);
+    let m = t.match(/^(\d{4})-(\d{1,2})(?:-(\d{1,2}))?/);
     if (m) return { y: +m[1], m: +m[2], d: +(m[3] || 1) };
     m = t.match(/^(\d{1,2})\/(?:(\d{1,2})\/)?(\d{4})$/);
     if (m) return { y: +m[3], m: +m[1], d: +(m[2] || 1) };
@@ -226,15 +348,25 @@
     if (m) return { y: +m[1], m: 1, d: 1 };
     return null;
   }
+  const todayParts = () => {
+    const n = new Date();
+    return { y: n.getFullYear(), m: n.getMonth() + 1, d: n.getDate() };
+  };
   const pad = (n) => String(n).padStart(2, "0");
+  // The table names a date field by the format it takes; a name with no
+  // format takes a month and year for a start or end, a full date for
+  // today's date or a birthday.
   function formatDate(name, d) {
     if (!d) return null;
     if (/month_text/.test(name)) return MONTHS[d.m - 1];
     if (/month_abbr/.test(name)) return MONTHS[d.m - 1].slice(0, 3);
     if (/_month$/.test(name)) return `${d.m} | ${pad(d.m)} | ${MONTHS[d.m - 1]}`;
-    if (/_year$/.test(name)) return String(d.y);
+    if (/_(year|YYYY)$/.test(name)) return String(d.y);
     if (/_(day|D)$/.test(name)) return String(d.d);
+    if (/_DD$/.test(name)) return pad(d.d);
+    if (/_M$/.test(name)) return String(d.m);
     if (/slashes_MMDDYYYY|_MMDDYYYY$/.test(name)) return `${pad(d.m)}/${pad(d.d)}/${d.y}`;
+    if (/slashes_MDDYY/.test(name)) return `${d.m}/${pad(d.d)}/${String(d.y).slice(-2)}`;
     if (/slashes_MDYYYY/.test(name)) return `${d.m}/${d.d}/${d.y}`;
     if (/slashes_MMYYYY|_MMYYYY$/.test(name)) return `${pad(d.m)}/${d.y}`;
     if (/dashes_YYYYMMDD/.test(name)) return `${d.y}-${pad(d.m)}-${pad(d.d)}`;
@@ -243,6 +375,7 @@
     if (/dashes_MMYYYY/.test(name)) return `${pad(d.m)}-${d.y}`;
     if (/month_DD_comma_YYYY/.test(name)) return `${MONTHS[d.m - 1]} ${pad(d.d)}, ${d.y}`;
     if (/_MM$/.test(name)) return pad(d.m);
+    if (/^(current_date|disability_date|today|birthday)/.test(name)) return `${pad(d.m)}/${pad(d.d)}/${d.y}`;
     return `${pad(d.m)}/${d.y}`;
   }
   // What a nested field takes from one profile row, by the table's name for
@@ -300,31 +433,72 @@
   }
 
   // ---- fields --------------------------------------------------------------
-  const KIND = (fact) =>
-    fact === "resume" ? "file" : /^(education|experience)$/.test(fact || "") ? "group" : /^(work_authorized|needs_sponsorship|yes|consent)$/.test(fact || "") ? "yesno" : /^(gender|ethnicity|hispanic|veteran|disability|referral_source|country|state|degree)$/.test(fact || "") ? "select" : "text";
+  const KIND = (fact) => {
+    if (fact === "resume") return "file";
+    if (fact === "step") return "step";
+    if (/^(education|experience)$/.test(fact || "")) return "group";
+    if (/^(work_authorized|needs_sponsorship|yes|no|consent)$/.test(fact || "")) return "yesno";
+    if (/^(gender|ethnicity|hispanic|veteran|disability|referral_source|country|state|degree|phone_type|phone_country)$/.test(fact || "")) return "select";
+    return "text";
+  };
+  const isGroup = (v) => !!(v.group || v.array || v.inputSelectors);
+  const isManual = (spec) => spec.variants.length > 0 && spec.variants.every((v) => v.manual);
+  const plainPaths = (spec) => spec.variants.filter((v) => !isGroup(v)).flatMap((v) => v.paths || []);
+  const submitEl = () => first(cfg.submit || [], {}, document, true)?.el || null;
 
-  function groupPresent(spec) {
-    return spec.variants.some((v) => v.group && (first(v.addButtonPath || [], {}) || first(v.containerPath || [], {})));
+  function groupPresent(spec, root) {
+    return spec.variants.some((v) => isGroup(v) && (first(v.addButtonPath || [], {}, root) || first(v.containerPath || [], {}, root)));
   }
-  function factFields() {
-    const out = [];
-    for (const f of cfg.fields) {
-      const kind = KIND(f.fact);
-      if (kind === "group") {
-        if (!groupPresent(f)) continue;
-        out.push({ key: `fact:${f.name}`, label: f.name.replace(/_/g, " "), kind, required: false, options: [], fact: f.fact, _spec: f, _el: null });
-        continue;
-      }
-      const probe = first(f.variants.filter((v) => !v.group).flatMap((v) => v.paths || []), { value: "" });
-      if (!probe) continue;
-      out.push({ key: `fact:${f.name}`, label: f.name.replace(/_/g, " "), kind, required: false, options: [], fact: f.fact, _spec: f, _el: probe.el });
+  // Steps are the table's flow: open the form, expand a section, save it.
+  // They run in table order around the fields they sit between, are never
+  // read to the panel and never asked of the model, and a step whose path
+  // is not on the page is skipped.
+  const ranSteps = new Set();
+  async function runStep(spec, root) {
+    ranSteps.add(spec.name);
+    for (const v of spec.variants) {
+      if (isGroup(v) || v.manual) continue;
+      const found = first(v.paths, { value: "" }, root, v.hidden === true);
+      if (!found || found.el === submitEl()) continue;
+      await runMethod(v.method, found.el, "", null, v.eventOptions);
+      await runActions(v.actions, { inputPath: found.path, value: "" }, root, found.el, "", null);
+      return true;
     }
+    return false;
+  }
+  async function stepsBefore(index, root) {
+    for (let i = 0; i < index; i++) {
+      const f = cfg.fields[i];
+      if (KIND(f.fact) === "step" && !ranSteps.has(f.name)) await runStep(f, root);
+    }
+  }
+  const lastFieldIndex = () => {
+    let last = -1;
+    cfg.fields.forEach((f, i) => {
+      if (KIND(f.fact) !== "step") last = i;
+    });
+    return last;
+  };
+
+  function factFields(root) {
+    const out = [];
+    cfg.fields.forEach((f, i) => {
+      const kind = KIND(f.fact);
+      if (kind === "step") return;
+      const base = { key: `fact:${f.name}`, label: f.name.replace(/_/g, " "), kind, required: false, options: [], fact: f.fact, _spec: f, _index: i, _person: isManual(f) };
+      if (kind === "group") {
+        if (groupPresent(f, root)) out.push({ ...base, _el: null });
+        return;
+      }
+      const probe = first(plainPaths(f), { value: "" }, root, f.variants.some((v) => v.hidden === true));
+      if (probe) out.push({ ...base, _el: probe.el });
+    });
     return out;
   }
-  function questionFields(taken) {
+  function questionFields(taken, root) {
     const out = [];
     for (const q of cfg.questions || []) {
-      for (const box of list(q.fieldPath).flatMap((p) => $x(p))) {
+      for (const box of list(q.fieldPath).flatMap((p) => $x(p, root))) {
         if (!visible(box)) continue;
         const input = list(q.inputPath).map((p) => $x(p, box)[0]).find(Boolean);
         const optionEls = list(q.optionsPath).flatMap((p) => $x(p, box));
@@ -337,13 +511,17 @@
         let options = optionEls.map(optionText).filter(Boolean);
         // The question's label is the first candidate that is not one of its
         // own options; a group's option labels share the label selector.
-        const label = clean(
+        let label = clean(
           list(q.labelPath)
             .flatMap((p) => $x(p, box).map(text))
             .map(clean)
             .find((t) => t && !options.includes(t)),
         );
         if (!label) continue;
+        // The section the question sits under names it too ("Education:
+        // Degree" is not "Degree" on its own).
+        const section = clean(list(q.sectionPath).map((p) => text($x(p, box)[0])).find((t) => t && t.trim()));
+        if (section && !label.toLowerCase().startsWith(section.toLowerCase())) label = `${section}: ${label}`;
         let kind = "text";
         if (input && input.tagName === "TEXTAREA") kind = "long";
         else if (input && input.type === "file") kind = "file";
@@ -351,7 +529,7 @@
           kind = "select";
           options = [...input.options].map((o) => o.text.trim()).filter(Boolean);
         } else if (optionEls.length) kind = optionEls[0].type === "checkbox" ? "multiselect" : "select";
-        else if (input && input.getAttribute("role") === "combobox") kind = "select";
+        else if (input && (input.getAttribute("role") === "combobox" || q.optionsSource)) kind = "select";
         out.push({
           key: (input && (input.name || input.id)) || (optionEls[0] && optionEls[0].name) || `label:${label}`,
           label,
@@ -362,27 +540,63 @@
           _box: box,
           _el: input || null,
           _options: optionEls.map((el, i) => ({ el, text: options[i] || "" })),
+          _selectedPath: q.optionsSelectedPath || null,
+          _textPath: q.inputTextPath || null,
+          _fillEmpty: q.valueRequired === false,
         });
       }
     }
     return out;
   }
+  // A form behind an Apply button (or an "apply manually" choice): the
+  // button is clicked and the fields waited for. Never a submit.
+  async function openForm() {
+    for (const paths of [cfg.applyOptionPaths, cfg.applyButtonPaths]) {
+      const btn = first(paths || [], {}, document, false);
+      if (!btn || btn.el === submitEl()) continue;
+      clickOn(btn.el, { noBlur: true });
+      const deadline = Date.now() + 8000;
+      while (Date.now() < deadline && !anyField()) await sleep(200);
+    }
+  }
+  const excluded = () => anyGroup(cfg.pathsExcluded);
+  const domOrder = (a, b) => {
+    const x = a._el || a._box;
+    const y = b._el || b._box;
+    if (!x || !y || x === y) return 0;
+    return x.compareDocumentPosition(y) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1;
+  };
   async function read() {
-    const facts = factFields();
-    return [...facts, ...questionFields(new Set(facts.map((f) => f._el).filter(Boolean)))];
+    ranSteps.clear();
+    if (excluded()) return [];
+    if (!anyField()) await openForm();
+    const root = scope();
+    if (!root) return [];
+    const facts = factFields(root);
+    const out = [...facts, ...questionFields(new Set(facts.map((f) => f._el).filter(Boolean)), root)];
+    return cfg.orderByDomPosition === false ? out : out.sort(domOrder);
   }
 
   const optionLabel = (i) => clean(i.closest("label")?.innerText || document.querySelector(`label[for="${CSS.escape(i.id)}"]`)?.innerText || i.value);
   function current(field) {
     if (field.kind === "group") {
       const n = field._spec.variants
-        .filter((v) => v.group)
+        .filter(isGroup)
         .reduce((acc, v) => acc + (list(v.containerPath).length ? $x(list(v.containerPath)[0]).length : 0) + (list(v.confirmAddedPath).length ? $x(expand(list(v.confirmAddedPath)[0], { index: 0 })).length : 0), 0);
       return n ? `${n} entries` : "";
     }
     if (field._options && field._options.length) {
-      const on = field._options.filter((o) => o.el.checked || o.el.getAttribute("aria-selected") === "true");
+      const selected = (o) =>
+        field._selectedPath
+          ? list(field._selectedPath).some((p) => $x(p, o.el).length)
+          : o.el.checked || o.el.getAttribute("aria-selected") === "true" || o.el.getAttribute("aria-checked") === "true";
+      const on = field._options.filter(selected);
       if (on.length || !field._el) return on.map((o) => o.text).join(" | ");
+    }
+    // A custom widget shows its value somewhere other than an input.
+    if (field._textPath && field._box) {
+      const t = list(field._textPath).map((p) => text($x(p, field._box)[0])).find((s) => s && s.trim());
+      if (t) return clean(t);
     }
     const el = field._el;
     if (!el || !el.isConnected) return "";
@@ -399,12 +613,22 @@
     const wants = String(value ?? "").split("|").map((s) => s.trim()).filter(Boolean);
     for (const want of wants.length ? wants : [""]) {
       for (const v of variants) {
-        if (v.group) continue;
-        for (const candidate of mapValues(v.values, want)) {
-          const found = first(v.paths, { ...ctx, value: candidate, raw: want }, root);
+        if (isGroup(v) || v.manual) continue;
+        for (const candidate of candidates(v, ctx, want)) {
+          // A path per value, or the one path with the value in it.
+          const paths = v.valuePathMap ? mapPath(v.valuePathMap, candidate) : v.paths;
+          if (!paths) continue;
+          const vctx = { ...ctx, value: candidate, raw: want };
+          const found = await waitFirst(paths, vctx, root, v.hidden === true, v.time || 0);
           if (!found) continue;
-          const ok = await runMethod(v.method, found.el, candidate, file, v.eventOptions);
-          const acted = await runActions(v.actions, { ...ctx, inputPath: found.path, value: candidate, raw: want }, root, found.el, candidate, file);
+          let ok;
+          if (v.valuePath) {
+            const opt = await waitFirst(v.valuePath, { ...vctx, inputPath: found.path }, root, true, v.valueElementTime || 300);
+            ok = opt ? pickOption(opt.el) : false;
+          } else {
+            ok = await runMethod(v.method, found.el, candidate, file, v.eventOptions);
+          }
+          const acted = await runActions(v.actions, { ...vctx, inputPath: found.path }, root, found.el, candidate, file);
           if (ok && acted) return true;
         }
       }
@@ -420,7 +644,8 @@
     let filledAny = false;
     for (let i = 0; i < ordered.length; i++) {
       const item = ordered[i];
-      const ctx = { index: i, length: ordered.length };
+      const ctx = { index: i, length: ordered.length, item, fact };
+      if (i && cfg.fillInputGroupInterval) await sleep(cfg.fillInputGroupInterval);
       const containerPath = list(group.containerPath)[0];
       let containers = containerPath ? $x(expand(containerPath, ctx)) : [];
       if (containerPath && containers.length <= i) {
@@ -439,16 +664,17 @@
       // Summary box).
       const root = containers[i] || containers[containers.length - 1];
       if (!root) break;
-      for (const nested of group.fields) {
+      for (const nested of group.fields || []) {
         // A nested group of one field ("major" holding "name") takes the
         // outer name's value: the inner "name" is the widget, not the fact.
         const value = entryValue(asName || nested.name, item, fact);
         if (value === null) continue;
         for (const v of nested.variants) {
-          if (v.group) await fillGroup({ ...v, containerPath: v.containerPath || [] }, [item], file, fact, asName || nested.name);
+          if (isGroup(v)) await fillGroup({ ...v, containerPath: v.containerPath || [] }, [item], file, fact, asName || nested.name);
         }
-        const plain = nested.variants.filter((v) => !v.group);
+        const plain = nested.variants.filter((v) => !isGroup(v));
         if (plain.length) await fillVariants(plain, value, file, root, ctx);
+        if (cfg.fillInputInterval) await sleep(cfg.fillInputInterval);
       }
       filledAny = true;
       if (list(group.confirmAddedPath).length) {
@@ -460,21 +686,36 @@
   }
 
   async function fill(field, value, file) {
-    if (field.kind === "group") {
-      const items = ((window.__jtProfile || {})[field.fact] || []).filter((x) => x && (x.company || x.school));
-      if (!items.length) return false;
+    const root = scope() || document;
+    if (field._spec) {
+      // The flow steps the table puts before this field, then the field,
+      // then the steps that close the form when this is its last field.
+      await stepsBefore(field._index, root);
       let ok = false;
-      for (const v of field._spec.variants) if (v.group) ok = (await fillGroup(v, items, file, field.fact)) || ok;
+      if (field._person) ok = false;
+      else if (field.kind === "group") {
+        const items = ((window.__jtProfile || {})[field.fact] || []).filter((x) => x && (x.company || x.school));
+        if (items.length) for (const v of field._spec.variants) if (isGroup(v)) ok = (await fillGroup(v, items, file, field.fact)) || ok;
+      } else {
+        // A date the field names a format for: today's date is ours to
+        // supply, a birthday must come with the value.
+        let v = value;
+        if (field.fact === "today") v = formatDate(field._spec.name, parseDate(value) || todayParts());
+        else if (field.fact === "birthday") v = formatDate(field._spec.name, parseDate(value));
+        ok = v == null ? false : await fillVariants(field._spec.variants, v, file, root, {});
+      }
+      if (field._index === lastFieldIndex()) await stepsBefore(cfg.fields.length, root);
+      if (cfg.fillInputInterval) await sleep(cfg.fillInputInterval);
       return ok;
     }
-    if (field._spec) return fillVariants(field._spec.variants, value, file, document, {});
     const wants = String(value ?? "").split("|").map((s) => s.trim()).filter(Boolean);
-    if (field._q && field._q.fillActions && field._options?.length && !field._el?.tagName?.match(/SELECT|TEXTAREA/)) {
+    if (field._q && field._q.fillActions && (field._options?.length || field._fillEmpty) && !field._el?.tagName?.match(/SELECT|TEXTAREA/)) {
       // A custom choice with its own recipe: open the list, click the option.
-      for (const want of wants) {
+      // A recipe that needs no value (a "today" button) runs once with none.
+      for (const want of wants.length ? wants : field._fillEmpty ? [""] : []) {
         if (await runActions(field._q.fillActions, { value: want }, field._box, field._el, want, file)) {
           await sleep(200);
-          if (current(field)) return true;
+          if (current(field) || field._fillEmpty) return true;
         }
       }
     }
@@ -491,29 +732,50 @@
     }
     const el = field._el;
     if (!el || !el.isConnected) return false;
-    if (field.kind === "file") return uploadFile(el, file);
-    if (el.tagName === "SELECT") return chooseNative(el, value);
-    if (el.type === "radio" || el.type === "checkbox") return checkOrRadio(el, true);
-    return typeInto(el, wants[0] ?? "", null, cfg.defaultMethod === "default");
+    let ok;
+    if (field.kind === "file") ok = uploadFile(el, file);
+    else if (el.tagName === "SELECT") ok = chooseNative(el, value);
+    else if (el.type === "radio" || el.type === "checkbox") ok = checkOrRadio(el, true);
+    else ok = typeInto(el, wants[0] ?? "", null, cfg.defaultMethod === "default");
+    if (cfg.fillInputInterval) await sleep(cfg.fillInputInterval);
+    return ok;
   }
 
   const nextButton = () => first(cfg.continue || [])?.el || null;
   const submitButton = () => first(cfg.submit || [])?.el || null;
-  const submitted = () => (cfg.success || []).some((p) => $x(p).length > 0);
-  const anyField = () =>
-    !!first(cfg.fields.flatMap((f) => f.variants.filter((v) => !v.group).flatMap((v) => v.paths || [])), { value: "" }) ||
-    cfg.fields.some((f) => KIND(f.fact) === "group" && groupPresent(f)) ||
-    (cfg.questions || []).some((q) => list(q.fieldPath).some((p) => $x(p).some(visible)));
+  // A modal the ATS raises after submit (a chatbot with more questions)
+  // means the application is not in yet.
+  const submitted = () => !first(cfg.deferSubmissionModalPaths || []) && (cfg.success || []).some((p) => $x(p).length > 0);
+  // The fields the page marks invalid, within the scope the table names.
+  const errors = () => {
+    const roots = list(cfg.validationScopePaths).flatMap((p) => $x(p));
+    const within = roots.length ? roots : [document];
+    return within
+      .flatMap((r) => [...r.querySelectorAll('[aria-invalid="true"], .error input, .has-error input')])
+      .map((el) => clean(el.labels?.[0]?.innerText || el.getAttribute("aria-label") || el.name || el.id));
+  };
+  const anyField = () => {
+    const root = scope();
+    if (!root) return false;
+    return (
+      !!first(cfg.fields.filter((f) => KIND(f.fact) !== "step").flatMap(plainPaths), { value: "" }, root) ||
+      cfg.fields.some((f) => KIND(f.fact) === "group" && groupPresent(f, root)) ||
+      (cfg.questions || []).some((q) => list(q.fieldPath).some((p) => $x(p, root).some(visible)))
+    );
+  };
+  const applyButton = () => !!first(cfg.applyButtonPaths || [], {}, document, false) || !!first(cfg.applyOptionPaths || [], {}, document, false);
+  const ready = () => !excluded() && (anyField() || applyButton());
 
   window.__jtReader = {
     host: cfg.name.toLowerCase(),
-    ready: anyField,
+    ready,
     read,
     fill,
     current,
     submitButton,
     nextButton,
     submitted,
+    errors,
     proxySubmit: !!cfg.proxySubmit,
   };
 })();
