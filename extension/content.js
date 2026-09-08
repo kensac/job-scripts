@@ -12,7 +12,7 @@
   if (!reader) return;
   // Stamped into every report, so a report from a build the person has not
   // reloaded yet is told apart from a bug (reports 9 to 11, 2026-09-08).
-  const BUILD = "2026-09-08 01:33";
+  const BUILD = "2026-09-08 01:45";
 
   // A message to the extension's background worker. After the extension is
   // reloaded, a page that was already open keeps the old script, whose
@@ -308,6 +308,7 @@
     await askModel(fill.fields.filter((e) => !isFilled(e) && askable(e)));
     await verify();
     show();
+    await autoReport(`filled page ${step + 1}`);
     // A form that spans pages: when this page has a Continue and no Submit,
     // go on to the next page and fill it too, until the page that submits.
     // Continue is not Submit; the person still clicks that.
@@ -331,6 +332,7 @@
       if (errors.length) {
         fill.stopped = `The form refused the page: ${errors.slice(0, 6).join("; ")}.`;
         show();
+        await autoReport("page refused");
         return;
       }
       if (reader.ready()) {
@@ -552,6 +554,19 @@
       error: lastError,
       html: clean((root || document.body).outerHTML, 400000),
     };
+  }
+
+  // Every fill pass posts its own capture, tagged automatic, so a page can
+  // be read the way a report is without the person pressing anything
+  // (Kanishk, 2026-09-08: "stream all pages back with traces"). The button
+  // stays for a note in the person's words. Failures are silent: the
+  // capture is for triage, never in the person's way.
+  async function autoReport(reason) {
+    try {
+      await api("user/apply/reports", "POST", { url: location.href, note: `auto: ${reason}`, page: capture() });
+    } catch (_) {
+      // Nothing to do; the next pass captures again.
+    }
   }
 
   async function reportForm() {
