@@ -71,6 +71,7 @@ def enqueue(
         payload["filter_id"] = filter_id
     if policy == "scheduled":
         payload["batched"] = True
+        payload["scheduled"] = True
     with db.transaction():
         # A user row exists even when no task does. Locking it makes checking
         # and enqueueing serial across API processes and scheduling workers.

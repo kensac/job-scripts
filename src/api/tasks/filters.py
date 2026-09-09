@@ -8,9 +8,10 @@ from typing import Any
 
 from api import ai, budget, db, events, metrics, verdicts
 from api.batch_results import progress_counts
+from api.tasks import batch_policy
 from api.tasks.board import (
     candidates_for,
-    content_ready_urls,
+    content_attempted_urls,
     decided_urls,
     in_flight_urls,
     materialize_passing,
@@ -34,7 +35,7 @@ from api.tasks.runtime import (
     update_parent_progress,
 )
 from core.filters import build_custom_input, build_custom_instructions
-from core.store import get_content, get_custom_result
+from core.store import get_content, get_contents, get_custom_result
 
 logger = logging.getLogger("jobtracker_worker")
 
@@ -171,26 +172,21 @@ async def _run_filters(
     batched: bool = False,
     ignore_budget: bool = False,
 ) -> None:
-    """Splitter: compute the undecided work, then shard it. Scheduled (batched)
-    runs send content-ready jobs through the half-price Batch API in large
-    centralized chunks; jobs still needing a scrape go through live fleet
-    chunks as usual (sharded parsing, centralized batching)."""
+    """Shard scheduled work for content preparation and batching; interactive work stays live."""
     ent, cfg = load_config(user_id, ignore_budget)
+    use_batch = batched and batch_policy.transport(task_id, cfg) == "batch"
     held = in_flight_urls(user_id)
     candidates = [j for j in candidates_for(user_id) if j["url"] not in held]
     urls = [j["url"] for j in candidates]
-    use_batch = batched and cfg.key_source == "owner" and cfg.provider == "openai"
     units: list[tuple] = []
     for flt in filters:
         decided = decided_urls(urls, flt["prompt_hash"], cfg.model)
         todo = [j for j in candidates if j["url"] not in decided]
         metrics.CACHED_VERDICTS.inc(len(candidates) - len(todo))
         if use_batch and todo:
-            ready = content_ready_urls([j["url"] for j in todo])
-            batchable = [j for j in todo if j["url"] in ready]
-            todo = [j for j in todo if j["url"] not in ready]
-            for start in range(0, len(batchable), BATCH_CHUNK_SIZE):
-                units.append(("batch", flt, batchable[start : start + BATCH_CHUNK_SIZE]))
+            for start in range(0, len(todo), BATCH_CHUNK_SIZE):
+                units.append(("batch", flt, todo[start : start + BATCH_CHUNK_SIZE]))
+            todo = []
         for start in range(0, len(todo), CHUNK_SIZE):
             units.append(("live", flt, todo[start : start + CHUNK_SIZE]))
     if not units:
@@ -212,6 +208,7 @@ async def _run_filters(
                 "filter": {k: flt[k] for k in ("name", "prompt", "on_ambiguous", "prompt_hash")},
                 "jobs": jobs,
                 "ignore_budget": ignore_budget,
+                "scheduled": batched,
             },
         )
     db.execute(
@@ -225,6 +222,9 @@ async def _run_filters(
 
 
 async def handle_run_filter_chunk(task_id: int, payload: dict[str, Any]) -> None:
+    if batch_policy.scheduled(payload):
+        await handle_run_filter_batch_chunk(task_id, payload)
+        return
     ent, cfg = load_config(payload["user_id"], bool(payload.get("ignore_budget")))
     await _process_jobs(
         task_id,
@@ -235,6 +235,44 @@ async def handle_run_filter_chunk(task_id: int, payload: dict[str, Any]) -> None
         payload["jobs"],
         parent_id=payload["parent_id"],
     )
+
+
+def _result_label(unavailable: int, name: str) -> str:
+    return f"{name}; {unavailable} without content, awaiting a later cycle" if unavailable else name
+
+
+async def _prepare_content(task_id: int, jobs: list[dict[str, Any]]) -> tuple[dict[str, str], int]:
+    contents = get_contents([job["url"] for job in jobs])
+    missing = [job for job in jobs if job["url"] not in contents]
+    attempted = content_attempted_urls([job["url"] for job in missing])
+    pending = [job for job in missing if job["url"] not in attempted]
+    semaphore = asyncio.Semaphore(SCRAPE_CONCURRENCY)
+
+    async def fetch(job: dict[str, Any]) -> None:
+        async with semaphore:
+            if cancelled(task_id):
+                return
+            try:
+                content, _closure = await verdicts.refresh_content(
+                    job["url"],
+                    company=job.get("company") or "",
+                    job_title=job.get("title") or "",
+                    context="filter-prepare",
+                )
+                if content:
+                    contents[job["url"]] = content
+            except Exception:
+                logger.warning(
+                    "filter content preparation failed for %s", job["url"], exc_info=True
+                )
+
+    await asyncio.gather(*(fetch(job) for job in pending))
+    unavailable = sum(job["url"] not in contents for job in jobs)
+    db.execute(
+        "UPDATE tasks SET payload = payload || %s WHERE id = %s",
+        (db.jsonb({"content_unavailable": unavailable}), task_id),
+    )
+    return contents, unavailable
 
 
 async def handle_run_filter_batch_chunk(task_id: int, payload: dict[str, Any]) -> None:
@@ -251,11 +289,19 @@ async def handle_run_filter_batch_chunk(task_id: int, payload: dict[str, Any]) -
     parent_id = payload["parent_id"]
     existing = has_batch_work(task_id)
     cfg = None
+    contents = {}
+    unavailable = int(payload.get("content_unavailable") or 0)
     if not existing:
         ent, cfg = load_config(user_id, bool(payload.get("ignore_budget")))
-        if cfg.key_source != "owner" or cfg.provider != "openai":
+        if batch_policy.scheduled(payload) and batch_policy.transport(task_id, cfg) == "batch":
+            contents, unavailable = await _prepare_content(task_id, jobs)
+            if cancelled(task_id) or (parent_id and parent_cancelled(parent_id)):
+                return
+        elif cfg.key_source != "owner" or cfg.provider != "openai":
             await _process_jobs(task_id, user_id, ent, cfg, flt, jobs, parent_id=parent_id)
             return
+        else:
+            contents = get_contents([job["url"] for job in jobs])
     instructions = build_custom_instructions(flt["prompt"], flt["on_ambiguous"])
     schema = to_strict_json_schema(FilterVerdict)
     specs, by_url = [], {}
@@ -264,7 +310,7 @@ async def handle_run_filter_batch_chunk(task_id: int, payload: dict[str, Any]) -
             # The original content is not snapshotted in legacy task payloads.
             by_url[job["url"]] = (job, None)
             continue
-        content = get_content(job["url"])
+        content = contents.pop(job["url"], None)
         if not content:
             continue
         input_text = build_custom_input(job["company"], job["title"], content)
@@ -288,7 +334,7 @@ async def handle_run_filter_batch_chunk(task_id: int, payload: dict[str, Any]) -
         by_url[job["url"]] = (job, input_text)
     total = len(jobs)
     if not specs and not existing:
-        set_progress(task_id, total, total, "no content-ready jobs")
+        set_progress(task_id, 0, total, "no content-ready jobs; waiting for a later cycle")
         if parent_id:
             update_parent_progress(parent_id)
         return
@@ -374,10 +420,12 @@ async def handle_run_filter_batch_chunk(task_id: int, payload: dict[str, Any]) -
             budget.record_tokens(user_id, "owner", "filter", res.model, usage, batched=True)
             receipt.outcome = "written" if parsed else "failed"
         if done % 50 == 0:
-            set_progress(task_id, *progress_counts(task_id), flt["name"])
+            set_progress(
+                task_id, *progress_counts(task_id), _result_label(unavailable, flt["name"])
+            )
             if parent_id:
                 update_parent_progress(parent_id)
-    set_progress(task_id, *progress_counts(task_id), flt["name"])
+    set_progress(task_id, *progress_counts(task_id), _result_label(unavailable, flt["name"]))
     if parent_id:
         # See _process_jobs: publish this chunk's passes without waiting on
         # the siblings still parked at the provider.
@@ -396,7 +444,7 @@ async def handle_run_filter(task_id: int, payload: dict[str, Any]) -> None:
         task_id,
         flt["user_id"],
         [flt],
-        batched=payload.get("batched", False),
+        batched=batch_policy.scheduled(payload),
         ignore_budget=bool(payload.get("ignore_budget")),
     )
 
@@ -411,6 +459,6 @@ async def handle_run_all_filters(task_id: int, payload: dict[str, Any]) -> None:
             task_id,
             payload["user_id"],
             filters,
-            batched=payload.get("batched", False),
+            batched=batch_policy.scheduled(payload),
             ignore_budget=bool(payload.get("ignore_budget")),
         )
