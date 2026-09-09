@@ -39,19 +39,16 @@ async def handle_extract_upload(payload: dict[str, Any]) -> None:
         content[:60000],
         JobExtract,
     )
-    if not parsed:
-        db.execute("UPDATE jobs SET extraction_status = 'failed' WHERE id = %s", (job["id"],))
-        raise RuntimeError("extraction returned no parsed output")
-
-    budget.record_usage(
+    budget.record_tokens(
         payload["user_id"],
         cfg.key_source,
         "extract",
         cfg.model,
-        usage["prompt_tokens"],
-        usage["completion_tokens"],
-        usage["total_tokens"],
+        usage,
     )
+    if not parsed:
+        db.execute("UPDATE jobs SET extraction_status = 'failed' WHERE id = %s", (job["id"],))
+        raise RuntimeError("extraction returned no parsed output")
     db.execute(
         """
         UPDATE jobs SET company = %s, title = %s, locations = %s, terms = %s,

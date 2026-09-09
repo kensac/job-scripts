@@ -472,15 +472,13 @@ async def improve_prompt(body: ImprovePromptRequest, user: AuthedUser = Depends(
         _ImprovedPrompt,
         timeout=60.0,
     )
-    if not parsed:
-        raise HTTPException(502, detail={"code": "AI_ERROR", "message": "no response from model"})
-    budget.record_usage(
+    budget.record_tokens(
         user.id,
         cfg.key_source,
         "improve_prompt",
         cfg.model,
-        usage["prompt_tokens"],
-        usage["completion_tokens"],
-        usage["total_tokens"],
+        usage,
     )
+    if not parsed:
+        raise HTTPException(502, detail={"code": "AI_ERROR", "message": "no response from model"})
     return {"improved": parsed.improved, "rationale": parsed.rationale}
