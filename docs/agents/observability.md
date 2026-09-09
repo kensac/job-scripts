@@ -447,3 +447,17 @@ request applies its current vectors and acknowledges its receipt in one
 transaction; newer content prevents an older vector replacing it. Progress
 counts packed requests. Fleet usage is exact per provider request; per-posting
 usage remains an approximate equal share, and absent provider usage is NULL.
+
+## Scheduled filter transport
+
+Scheduled filter admission persists `scheduled=true`; older `batched=true`
+parents retain the same meaning for their child chunks. Missing content is
+fetched before submission, never used as a reason to make a live model call.
+Failed fetches respect the content retry window and remain undecided for a
+later eligible cycle; they are not immediately requeued inside the run.
+
+`api.tasks.batch_policy` separates supported credential transport from the
+configured model's batch capability. Unsupported scheduled configurations fail
+with `BATCH_UNSUPPORTED` in task progress/error, rather than falling back to
+live requests. Existing batch receipts are collected before current settings
+are consulted. Interactive filter runs keep their live path.

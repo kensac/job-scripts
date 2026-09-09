@@ -378,6 +378,23 @@ VERIFIED_OPEN = """
 """
 
 
+# Custom verdicts contain wrapped input, so they cannot supply raw page text.
+_RAW_CONTENT = "check_type != 'custom' AND input_content IS NOT NULL AND input_content != ''"
+
+
+def get_contents(urls: list[str]) -> dict[str, str]:
+    """Newest raw cached content per URL, with the same eligibility as get_content."""
+    if not urls:
+        return {}
+    with connection() as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT ON (url) url, input_content FROM ai_queries "
+            "WHERE url = ANY(%s) AND " + _RAW_CONTENT + " ORDER BY url, id DESC",
+            (urls,),
+        ).fetchall()
+    return {row["url"]: row["input_content"] for row in rows}
+
+
 def get_content(url: str) -> str | None:
     """Most recent non-empty raw scraped content stored for a url.
 
@@ -388,9 +405,7 @@ def get_content(url: str) -> str | None:
     with connection() as conn:
         row = conn.execute(
             "SELECT input_content FROM ai_queries WHERE url = %s "
-            "AND check_type != 'custom' "
-            "AND input_content IS NOT NULL AND input_content != '' "
-            "ORDER BY id DESC LIMIT 1",
+            "AND " + _RAW_CONTENT + " ORDER BY id DESC LIMIT 1",
             (url,),
         ).fetchone()
     return row["input_content"] if row else None

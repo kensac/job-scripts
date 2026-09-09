@@ -97,6 +97,22 @@ async def test_a_chunk_publishes_its_passes_before_the_parent_finishes(monkeypat
 
     monkeypatch.setattr(fetching, "fetch_page", no_network)
     monkeypatch.setattr(ai, "parse", fake_parse)
+
+    async def fake_batch(task_id, specs, *args):
+        from tests.factories import make_batch_result
+
+        return [
+            make_batch_result(
+                task_id,
+                spec,
+                model="gpt-5-nano",
+                text='{"should_filter":false,"reason":"test"}',
+                error=None,
+            )
+            for spec in specs
+        ]
+
+    monkeypatch.setattr(tasks_filters, "submit_or_collect", fake_batch)
     uid = _user_id()
     _entitle(uid)
     url = "https://jobs.example.com/job-1"
