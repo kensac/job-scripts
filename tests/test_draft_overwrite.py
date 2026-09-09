@@ -5,7 +5,6 @@ import pytest
 from api import ai, budget, db
 from api.routers import application as routes
 from api.tasks import application
-from core.batch import BatchResult
 
 
 @pytest.mark.asyncio
@@ -48,14 +47,14 @@ async def test_parked_sweep_cannot_overwrite_newer_answer(f, monkeypatch, interv
             routes.put_answer(
                 jid, "why", routes.AnswerPut(draft=expected or ""), SimpleNamespace(id=uid)
             )
-        return {
-            f"{jid}|why": BatchResult(
-                "result",
-                text='{"answer":"Stale automatic draft"}',
-                usage={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
-                batch_id="batch-test",
-            )
-        }, SimpleNamespace(model=cfg.model)
+        result = f.make_batch_result(
+            tid,
+            args[2][0],
+            text='{"answer":"Stale automatic draft"}',
+            usage={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+            model=cfg.model,
+        )
+        return [result], SimpleNamespace(model=cfg.model)
 
     monkeypatch.setattr(application, "run_batched", provider_returns_after_newer_write)
     written = await application.draft_rows(
@@ -268,9 +267,8 @@ async def test_draft_uses_question_read_under_reservation(f, monkeypatch):
         specs = args[2]
         assert "Current question" in specs[0].input
         assert "Old selection question" not in specs[0].input
-        return {
-            f"{jid}|why": BatchResult("result", text='{"answer":"Fresh"}', batch_id="batch-test")
-        }, SimpleNamespace(model=cfg.model)
+        result = f.make_batch_result(tid, specs[0], text='{"answer":"Fresh"}', model=cfg.model)
+        return [result], SimpleNamespace(model=cfg.model)
 
     monkeypatch.setattr(application, "run_batched", provider)
     assert (
@@ -279,3 +277,71 @@ async def test_draft_uses_question_read_under_reservation(f, monkeypatch):
         )
         == 1
     )
+
+
+def test_recorded_failed_live_result_is_not_submitted_again_on_task_retry(f):
+    from api import application_writes
+
+    uid = f.make_user()
+    jid = f.make_job()
+    application.ensure_answer_rows(uid, jid, [{"key": "why", "label": "Why us?"}])
+    tid = f.make_task("application_draft", {"user_id": uid, "job_id": jid}, status="running")
+    rows = [{"job_id": jid, "key": "why"}]
+    assert application_writes.reserve_task(tid, uid, rows)
+    assert (
+        application_writes.record_result(
+            tid,
+            uid,
+            f"{jid}|why",
+            None,
+            {"total_tokens": 3, "prompt_tokens": 2, "completion_tokens": 1},
+            "byo",
+            "gpt-5-mini",
+            "draft",
+            batched=False,
+        )
+        == 0
+    )
+    assert application_writes.reserve_task(tid, uid, rows) == {}
+
+
+@pytest.mark.asyncio
+async def test_application_receipt_rolls_back_usage_and_answer_until_acknowledged(f, monkeypatch):
+    from api import application_writes
+    from core.batch import BatchSpec
+
+    uid = f.make_user()
+    jid = f.make_job()
+    application.ensure_answer_rows(uid, jid, [{"key": "why", "label": "Why us?"}])
+    payload = {"user_id": uid, "job_id": jid}
+    tid = f.make_task("application_draft", payload, status="running")
+    key = f"{jid}|why"
+    request = application_writes.reserve_task(tid, uid, [{"job_id": jid, "key": "why"}])[key]
+    f.make_batch_result(
+        tid,
+        BatchSpec(key, "original instructions", "original input", "Draft", {}, context=request),
+        text='{"answer":"Paid answer"}',
+        usage={"input_tokens": 10, "output_tokens": 2, "total_tokens": 12},
+        model="gpt-5-mini",
+    )
+    execute = db.execute
+
+    def fail_ack(sql, params=None):
+        if "UPDATE batch_result_receipts SET outcome" in sql:
+            raise RuntimeError("ack failed")
+        return execute(sql, params)
+
+    monkeypatch.setattr(db, "execute", fail_ack)
+    with pytest.raises(RuntimeError, match="ack failed"):
+        await application.handle_application_draft(tid, payload)
+    assert db.query_one("SELECT count(*) AS n FROM api_usage")["n"] == 0
+    assert db.query_one("SELECT draft FROM application_answers")["draft"] is None
+    assert db.query_one("SELECT consumed_at FROM batch_result_receipts")["consumed_at"] is None
+    monkeypatch.setattr(db, "execute", execute)
+    for _ in range(2):
+        await application.handle_application_draft(tid, payload)
+    row = db.query_one("SELECT draft,turns FROM application_answers")
+    assert row["draft"] == "Paid answer" and len(row["turns"]) == 1
+    assert db.query_one("SELECT count(*) AS n FROM api_usage")["n"] == 1
+    assert db.query_one("SELECT outcome FROM batch_result_receipts")["outcome"] == "written"
+    assert "1 written" in application_writes.outcome_note(tid)

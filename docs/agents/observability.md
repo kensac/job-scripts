@@ -419,3 +419,11 @@ finished with work in front of it and none completed, a task kind failing
 three times in three hours, a task the reaper keeps handing back, an open
 alert never mailed, and a pattern that admits every posting. A batched sweep
 counts a line as done only when its row lands.
+
+Application drafts carry a reserved answer ID and revision from submission to
+collection. A result applies only while that reservation still owns the answer;
+question changes and newer user intent invalidate it. Results without an
+original reservation are accounted for but never assigned a guessed revision.
+Task progress reports written, superseded, failed and unknown-request outcomes
+separately. Persist result acknowledgement with answer changes and usage in one
+transaction so a replay cannot append duplicate turns or charge the ledger twice.

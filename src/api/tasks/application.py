@@ -9,7 +9,7 @@ person is waiting for it (routers/application.py).
 
 Two tasks write drafts. The sweep (application_sweep, hourly per person
 with a resume) reads the forms of the postings on their board and drafts
-every question that has no draft yet, so the answer is ready when they open
+every untouched question that has no draft yet, so the answer is ready when they open
 the posting and the whole day's work rides one half-price batch. The
 on-demand task (application_draft) is the button: one posting, drafted or
 re-drafted now.
@@ -25,8 +25,9 @@ from pydantic import BaseModel
 from api import ai, application_writes, db, hosts, visibility
 from api.tasks.runtime import (
     Deferred,
+    consume_result,
+    has_batch_work,
     load_config,
-    pending_batch_ids,
     run_batched,
     set_progress,
 )
@@ -250,57 +251,43 @@ def auto_draft(user_id: int) -> bool:
     return (row or {}).get("v") != "false"
 
 
-def _record_draft(
-    task_id: int,
-    user_id: int,
-    custom_id: str,
-    parsed: Draft | None,
-    usage: dict[str, int],
-    key_source: str,
-    model: str | None,
-    kind: str,
-    *,
-    batched: bool,
-) -> int:
-    return application_writes.record_result(
-        task_id,
-        user_id,
-        custom_id,
-        parsed.answer if parsed is not None else None,
-        usage,
-        key_source,
-        model,
-        kind,
-        batched=batched,
-    )
-
-
 async def _batch_drafts(
     task_id: int, user_id: int, specs: list, kind: str, *, resumed: bool
 ) -> int:
     results, chosen = await run_batched(task_id, APPLICATION_TASK, specs, charged_to_user=True)
     done = 0
-    for custom_id, res in results.items():
-        job_id, _, key = custom_id.partition("|")
-        parsed = None
-        if res.error or not res.text:
-            logger.warning(f"application draft {key} for job {job_id}: {res.error or 'empty'}")
-        else:
-            try:
-                parsed = Draft.model_validate_json(res.text)
-            except ValueError:
-                logger.warning(f"application draft {key} for job {job_id}: unparsable")
-        done += _record_draft(
-            task_id,
-            user_id,
-            custom_id,
-            parsed,
-            ai.batch_usage(res.usage),
-            "owner",
-            res.model if resumed else chosen.model,
-            kind,
-            batched=True,
-        )
+    for res in results:
+        with consume_result(task_id, res) as receipt:
+            if not receipt.pending:
+                continue
+            parsed = None
+            if res.error or not res.text:
+                logger.warning("application draft %s: %s", res.custom_id, res.error or "empty")
+            else:
+                try:
+                    parsed = Draft.model_validate_json(res.text)
+                except ValueError:
+                    logger.warning("application draft %s: unparsable", res.custom_id)
+            request = res.request.context if res.request is not None else None
+            if request is None:
+                # Earlier submissions may have an original task reservation
+                # without a full request snapshot. Never invent a generation.
+                task = db.query_one(
+                    "SELECT payload->'draft_requests' AS requests FROM tasks WHERE id = %s",
+                    (task_id,),
+                )
+                request = ((task or {}).get("requests") or {}).get(res.custom_id)
+            receipt.outcome = application_writes.apply_result(
+                user_id,
+                request,
+                parsed.answer if parsed is not None else None,
+                ai.batch_usage(res.usage),
+                "owner",
+                res.model if resumed else chosen.model,
+                kind,
+                batched=True,
+            )
+            done += int(receipt.outcome == "written")
     return done
 
 
@@ -320,7 +307,7 @@ async def draft_rows(
 
     from core.batch import BatchSpec
 
-    if pending_batch_ids(task_id):
+    if has_batch_work(task_id):
         return await _batch_drafts(task_id, user_id, [], kind, resumed=True)
     resume = resume_text(user_id, resume_id)
     if not resume:
@@ -349,6 +336,7 @@ async def draft_rows(
                 ),
                 "Draft",
                 schema,
+                context=reserved[f"{r['job_id']}|{r['key']}"],
             )
         )
     if not specs:
@@ -367,11 +355,11 @@ async def draft_rows(
         # live call per question, the way their filters run.
         for spec in specs:
             parsed, usage = await ai.parse(cfg, spec.instructions, spec.input, Draft)
-            done += _record_draft(
+            done += application_writes.record_result(
                 task_id,
                 user_id,
                 spec.custom_id,
-                parsed,
+                parsed.answer if parsed is not None else None,
                 usage,
                 cfg.key_source,
                 cfg.model,
@@ -387,7 +375,7 @@ async def handle_application_draft(task_id: int, payload: dict[str, Any]) -> Non
     these questions), refresh (re-read the form). Drafts every question of
     the posting, drafted before or not."""
     user_id, job_id = payload["user_id"], payload["job_id"]
-    if pending_batch_ids(task_id):
+    if has_batch_work(task_id):
         done = await draft_rows(task_id, user_id, [], payload.get("resume_id"))
         set_progress(
             task_id, done, done, "drafts collected" + application_writes.outcome_note(task_id)
@@ -433,7 +421,7 @@ async def handle_application_sweep(task_id: int, payload: dict[str, Any]) -> Non
     open a row for every paragraph question, and draft every row without a
     draft in one batch. Nothing is re-drafted: the button does that."""
     user_id = payload["user_id"]
-    if pending_batch_ids(task_id):
+    if has_batch_work(task_id):
         done = await draft_rows(task_id, user_id, [], kind="sweep")
         set_progress(
             task_id, done, done, "drafts collected" + application_writes.outcome_note(task_id)

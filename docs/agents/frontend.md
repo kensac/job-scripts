@@ -108,3 +108,16 @@ beside a real control it reads as a caption.
 An action whose effect reaches beyond the row must say so before it is taken,
 and its response must report what it actually touched rather than acknowledging
 success.
+
+## Application answer updates
+
+A manual draft request reserves the selected answer generations when queued;
+it supersedes older automatic work. Edits, clears and refinements invalidate
+older results. A refinement that loses this race returns `409 ANSWER_CHANGED`:
+keep the newer answer and reload it instead of replacing it with the response
+from an earlier request. The model call can still have consumed usage.
+
+Automatic drafting only fills untouched answers. An explicit clear remains a
+person's edit and must not be treated as a request for another automatic draft.
+The request and write rules live in `api/application_writes.py` and
+`api/routers/application.py`; do not reproduce generation checks in the client.

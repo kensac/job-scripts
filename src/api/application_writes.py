@@ -43,6 +43,8 @@ def reserve_task(task_id: int, user_id: int, rows: list[dict] | None = None) -> 
             if (answer["job_id"], answer["key"]) not in wanted:
                 continue
             custom_id = f"{answer['job_id']}|{answer['key']}"
+            if custom_id in (payload.get("draft_results") or {}):
+                continue
             if custom_id in requests:
                 saved = requests[custom_id]
                 if (
@@ -78,6 +80,43 @@ def reserve_task(task_id: int, user_id: int, rows: list[dict] | None = None) -> 
         return selected
 
 
+def apply_result(
+    user_id: int,
+    request: dict | None,
+    answer: str | None,
+    usage: dict[str, int],
+    key_source: str,
+    model: str | None,
+    kind: str,
+    *,
+    batched: bool,
+) -> str:
+    """Book consumed usage and apply only the reserved answer generation.
+
+    The consumer's transaction must also acknowledge its result identity.
+    This nested transaction participates in that same database connection.
+    """
+    with db.transaction():
+        budget.record_tokens(user_id, key_source, PURPOSE, model, usage, batched=batched)
+        if answer is None:
+            return "failed"
+        if not request or "answer_id" not in request or "revision" not in request:
+            return "unknown_request"
+        turn = {
+            "role": "assistant",
+            "kind": kind,
+            "text": answer,
+            "at": datetime.datetime.now(datetime.UTC).isoformat(),
+        }
+        written = db.execute_count(
+            "UPDATE application_answers SET draft = %s, model = %s, turns = turns || %s::jsonb, "
+            "updated_at = now(), draft_revision = draft_revision + 1 "
+            "WHERE id = %s AND user_id = %s AND draft_revision = %s",
+            (answer, model, db.jsonb([turn]), request["answer_id"], user_id, request["revision"]),
+        )
+        return "written" if written else "superseded"
+
+
 def record_result(
     task_id: int,
     user_id: int,
@@ -98,34 +137,10 @@ def record_result(
         recorded = dict(payload.get("draft_results") or {})
         if custom_id in recorded:
             return 0
-        budget.record_tokens(user_id, key_source, PURPOSE, model, usage, batched=batched)
         request = (payload.get("draft_requests") or {}).get(custom_id)
-        outcome = (
-            "failed" if answer is None else "unknown_request" if request is None else "superseded"
+        outcome = apply_result(
+            user_id, request, answer, usage, key_source, model, kind, batched=batched
         )
-        written = 0
-        if answer is not None and request is not None:
-            turn = {
-                "role": "assistant",
-                "kind": kind,
-                "text": answer,
-                "at": datetime.datetime.now(datetime.UTC).isoformat(),
-            }
-            written = db.execute_count(
-                "UPDATE application_answers SET draft = %s, model = %s, turns = turns || %s::jsonb, "
-                "updated_at = now(), draft_revision = draft_revision + 1 "
-                "WHERE id = %s AND user_id = %s AND draft_revision = %s",
-                (
-                    answer,
-                    model,
-                    db.jsonb([turn]),
-                    request["answer_id"],
-                    user_id,
-                    request["revision"],
-                ),
-            )
-            if written:
-                outcome = "written"
         recorded[custom_id] = outcome
         db.execute(
             "UPDATE tasks SET payload = jsonb_set(payload, '{draft_results}', %s) WHERE id = %s",
@@ -133,7 +148,7 @@ def record_result(
         )
     if outcome in {"unknown_request", "superseded"}:
         logger.info("Draft task %s result %s was not applied: %s", task_id, custom_id, outcome)
-    return written
+    return int(outcome == "written")
 
 
 def outcome_note(task_id: int) -> str:
@@ -141,11 +156,17 @@ def outcome_note(task_id: int) -> str:
         "SELECT payload->'draft_results' AS results FROM tasks WHERE id = %s", (task_id,)
     )
     results = (task or {}).get("results") or {}
-    if not results:
-        return ""
     counts = {}
     for value in results.values():
         counts[value] = counts.get(value, 0) + 1
+    for row in db.query(
+        "SELECT outcome, count(*) AS n FROM batch_result_receipts "
+        "WHERE task_id = %s AND consumed_at IS NOT NULL GROUP BY outcome",
+        (task_id,),
+    ):
+        counts[row["outcome"]] = counts.get(row["outcome"], 0) + row["n"]
+    if not counts:
+        return ""
     return "; " + ", ".join(
         f"{count} {outcome.replace('_', ' ')}" for outcome, count in sorted(counts.items())
     )
