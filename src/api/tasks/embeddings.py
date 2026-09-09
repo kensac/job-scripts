@@ -132,6 +132,10 @@ async def handle_embed_postings_batch(task_id: int, payload: dict[str, Any]) -> 
             (task_id, list(ACTIVE_STATUSES)),
         )
         if earlier:
+            # One embedding batch in flight at a time. A cycle therefore waits
+            # for the previous batch to come back before it submits, so a
+            # backfill drains one provider turnaround per cycle, not hourly;
+            # the hourly cadence holds only once the backlog is gone.
             set_progress(task_id, 0, 0, f"embedding task {earlier['id']} is still in flight")
             return
         candidates = rescrape.drop_unchanged(

@@ -297,7 +297,13 @@ def test_every_batched_call_site_goes_through_the_standard_caller():
     # verify.py reattaches before fetching its rows, so its in-flight check has
     # to happen earlier than run_batched performs it. Folding it in would make
     # a resumed chunk re-read the catalog to reach a batch it already has.
-    KNOWN = {"filters.py", "verify.py", "runtime.py"}
+    #
+    # embeddings.py is not a Responses call: it packs inputs for the
+    # embeddings endpoint, has no TaskShape, no reasoning effort and no output
+    # cap, so run_batched has nothing to resolve for it. Its spend still lands
+    # in the ledger through the same batch_event_hook under purpose
+    # "embedding" (2026-09-09).
+    KNOWN = {"filters.py", "verify.py", "runtime.py", "embeddings.py"}
     root = pathlib.Path(__file__).resolve().parent.parent / "src" / "api" / "tasks"
     offenders = [
         path.name
