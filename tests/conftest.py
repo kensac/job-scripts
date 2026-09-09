@@ -95,21 +95,10 @@ def _start_scratch_postgres() -> str:
 
 
 def _assert_disposable(url: str) -> str:
-    """Refuse to run against a database whose name does not mark it disposable.
+    """The autouse fixture truncates tables, so validate before opening the pool."""
+    from core.disposable_db import require_disposable_dsn
 
-    The autouse fixture below TRUNCATEs every mutable table between tests. A
-    mistyped TEST_DATABASE_URL pointed at production would therefore erase it,
-    with no confirmation step anywhere. The database name is the one thing a
-    caller cannot get wrong by accident, so it is what we gate on.
-    """
-    from urllib.parse import urlparse
-
-    name = (urlparse(url).path or "").lstrip("/")
-    if not (name.endswith(("_test", "_ci")) or name.startswith("test_")):
-        raise RuntimeError(
-            f"refusing to run tests against database {name!r}: the test suite "
-            "truncates every table between tests. Name it *_test or *_ci."
-        )
+    require_disposable_dsn(url)
     return url
 
 

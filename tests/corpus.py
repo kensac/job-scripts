@@ -37,9 +37,9 @@ import random
 import string
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
 
 from api import db
+from core.disposable_db import require_disposable_dsn
 
 PROFILE_PATH = Path(__file__).resolve().parent / "production_profile.json"
 
@@ -723,12 +723,7 @@ def _refuse_to_destroy_anything_that_matters() -> None:
     data, and the run would be green. conftest already carries a note that
     this fixture silently did exactly that once.
     """
-    name = (urlparse(os.environ["DATABASE_URL"]).path or "").lstrip("/")
-    if not (name.endswith(("_test", "_ci")) or name.startswith("test_")):
-        raise RuntimeError(
-            f"refusing to build a corpus in {name!r}: building truncates every "
-            "table. Name it *_test or *_ci."
-        )
+    name = require_disposable_dsn(os.environ["DATABASE_URL"])
     if holds_real_data():
         raise RuntimeError(
             f"{name!r} holds a synced copy of production, and building the corpus "

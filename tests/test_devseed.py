@@ -51,7 +51,7 @@ def test_it_refuses_to_seed_a_database_not_named_disposable(client, monkeypatch)
     """A dev API that can reach production is worse than no dev API, and the
     database NAME is the one thing a caller cannot get wrong by accident."""
     monkeypatch.setattr(db, "query_one", lambda *a, **k: {"name": "jobtracker"})
-    with pytest.raises(RuntimeError, match="refusing to seed"):
+    with pytest.raises(RuntimeError, match="refusing database"):
         seed()
 
 
