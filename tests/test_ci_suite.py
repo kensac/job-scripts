@@ -115,6 +115,7 @@ def test_manifest_requires_complete_same_revision_execution(pytester, monkeypatc
 
     monkeypatch.setenv("TEST_REVISION", "manifest-revision")
     monkeypatch.setenv("TEST_LANE", "shard-0")
+    monkeypatch.setenv("TEST_REPETITION", "1")
     pytester.makepyfile(test_sample="def test_ok(): pass")
     manifest_path = pytester.path / "manifest.json"
     execution_path = pytester.path / "timing.json"
