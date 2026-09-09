@@ -55,6 +55,19 @@ that worker; keep tasks short and let the queue carry the volume.
 Scheduled work batches at half price and parks rather than holding a worker.
 A human waiting is the only reason to call a model synchronously.
 
+Filter request inputs live in `core.filters.build_custom_input`, shared by live,
+batch and experiment callers. `api.verdicts.record_ai_verdict` persists their
+common verdict shape; transport exceptions and retries remain the caller's concern.
+Application drafts share request construction and result persistence in
+`api.tasks.application.draft_rows`.
+
+For these user-charged paths, `api.ai.batch_usage` normalises provider usage and
+`api.budget.record_tokens` writes the user ledger with explicit batch pricing
+and cached-token counts, including consumed calls that produced no valid answer.
+The batch event hook must use `charged_to_user=True` to avoid booking the same
+call to the fleet. Historical user ledger rows have no request or batch linkage;
+do not infer their transport from timestamps or rewrite their prices on read.
+
 **A batch is submitted whole and fails whole.** All requests failing means the
 submission was rejected on grounds that applied to every one of them; some
 failing means bad inputs. Different causes, and only the first is certainly a

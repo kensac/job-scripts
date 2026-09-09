@@ -249,13 +249,23 @@ def store_draft(
     )
 
 
-def _usage_of(res: Any) -> dict[str, int]:
-    u = res.usage or {}
-    return {
-        "prompt_tokens": u.get("input_tokens", 0),
-        "completion_tokens": u.get("output_tokens", 0),
-        "total_tokens": u.get("total_tokens", 0),
-    }
+def _record_draft(
+    user_id: int,
+    custom_id: str,
+    parsed: Draft | None,
+    usage: dict[str, int],
+    key_source: str,
+    model: str,
+    kind: str,
+    *,
+    batched: bool,
+) -> int:
+    budget.record_tokens(user_id, key_source, PURPOSE, model, usage, batched=batched)
+    if parsed is None:
+        return 0
+    job_id, _, key = custom_id.partition("|")
+    store_draft(user_id, int(job_id), key, parsed.answer, model, kind)
+    return 1
 
 
 async def draft_rows(
@@ -305,45 +315,39 @@ async def draft_rows(
         results, chosen = await run_batched(task_id, APPLICATION_TASK, specs, charged_to_user=True)
         for custom_id, res in results.items():
             job_id, _, key = custom_id.partition("|")
-            usage = _usage_of(res)
-            if usage["total_tokens"]:
-                budget.record_usage(
-                    user_id,
-                    cfg.key_source,
-                    PURPOSE,
-                    chosen.model,
-                    usage["prompt_tokens"],
-                    usage["completion_tokens"],
-                    usage["total_tokens"],
-                )
+            parsed = None
             if res.error or not res.text:
                 logger.warning(f"application draft {key} for job {job_id}: {res.error or 'empty'}")
-                continue
-            try:
-                answer = Draft.model_validate_json(res.text).answer
-            except Exception:
-                logger.warning(f"application draft {key} for job {job_id}: unparsable")
-                continue
-            store_draft(user_id, int(job_id), key, answer, chosen.model, kind)
-            done += 1
+            else:
+                try:
+                    parsed = Draft.model_validate_json(res.text)
+                except ValueError:
+                    logger.warning(f"application draft {key} for job {job_id}: unparsable")
+            done += _record_draft(
+                user_id,
+                custom_id,
+                parsed,
+                ai.batch_usage(res.usage),
+                cfg.key_source,
+                chosen.model,
+                kind,
+                batched=True,
+            )
     else:
         # A person's own key has no batch endpoint we can bill to them; one
         # live call per question, the way their filters run.
         for spec in specs:
-            job_id, _, key = spec.custom_id.partition("|")
             parsed, usage = await ai.parse(cfg, spec.instructions, spec.input, Draft)
-            budget.record_usage(
+            done += _record_draft(
                 user_id,
+                spec.custom_id,
+                parsed,
+                usage,
                 cfg.key_source,
-                PURPOSE,
                 cfg.model,
-                usage.get("prompt_tokens", 0),
-                usage.get("completion_tokens", 0),
-                usage.get("total_tokens", 0),
+                kind,
+                batched=False,
             )
-            if parsed:
-                store_draft(user_id, int(job_id), key, parsed.answer, cfg.model, kind)
-                done += 1
             set_progress(task_id, done, total, "drafting")
     return done
 

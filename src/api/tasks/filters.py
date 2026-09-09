@@ -31,8 +31,8 @@ from api.tasks.runtime import (
     submit_or_collect,
     update_parent_progress,
 )
-from core.filters import build_custom_instructions
-from core.store import add_ai_result, get_content, get_custom_result
+from core.filters import build_custom_input, build_custom_instructions
+from core.store import get_content, get_custom_result
 
 logger = logging.getLogger("jobtracker_worker")
 
@@ -62,7 +62,7 @@ async def _check_filter(
         url=url,
         check_type="custom",
         instructions=instructions,
-        input_text=f"Company: {company}\nJob Title: {title}\n\nJob Content:\n{content}",
+        input_text=build_custom_input(company, title, content),
         response_model=FilterVerdict,
         verdict_of=lambda p: (p.should_filter, p.reason),
         company=company,
@@ -132,16 +132,8 @@ async def _process_jobs(
                 logger.exception(f"Filter check failed for {job['url']}")
                 continue
             limiter.record()
-            if usage and usage["total_tokens"]:
-                budget.record_usage(
-                    user_id,
-                    cfg.key_source,
-                    "filter",
-                    cfg.model,
-                    usage["prompt_tokens"],
-                    usage["completion_tokens"],
-                    usage["total_tokens"],
-                )
+            if usage:
+                budget.record_tokens(user_id, cfg.key_source, "filter", cfg.model, usage)
             if done % 5 == 0:
                 set_progress(task_id, done, total, flt["name"])
                 if parent_id:
@@ -246,8 +238,6 @@ async def handle_run_filter_batch_chunk(task_id: int, payload: dict[str, Any]) -
     """Centralized half-price path: one worker submits the whole chunk to the
     OpenAI Batch API (core/batch.py enforces the enqueued-token budget in
     waves) and records every verdict when results land."""
-    import json as _json
-
     from openai.lib._pydantic import to_strict_json_schema
 
     from core.batch import BatchSpec
@@ -268,9 +258,7 @@ async def handle_run_filter_batch_chunk(task_id: int, payload: dict[str, Any]) -
         content = get_content(job["url"])
         if not content:
             continue
-        input_text = (
-            f"Company: {job['company']}\nJob Title: {job['title']}\n\nJob Content:\n{content}"
-        )
+        input_text = build_custom_input(job["company"], job["title"], content)
         specs.append(BatchSpec(job["url"], instructions, input_text, "FilterVerdict", schema))
         by_url[job["url"]] = (job, input_text)
     total = len(jobs)
@@ -311,56 +299,22 @@ async def handle_run_filter_batch_chunk(task_id: int, payload: dict[str, Any]) -
             )
     finally:
         hb.cancel()
-    done = 0
-    for url, res in results.items():
-        done += 1
+    for done, (url, res) in enumerate(results.items(), start=1):
         job, input_text = by_url[url]
-        usage = {
-            "prompt_tokens": (res.usage or {}).get("input_tokens", 0),
-            "completion_tokens": (res.usage or {}).get("output_tokens", 0),
-            "total_tokens": (res.usage or {}).get("total_tokens", 0),
-        }
-        if res.error or not res.text:
-            add_ai_result(
-                url,
-                "failed",
-                f"batch: {res.error or 'no output'}",
-                "custom",
-                model=cfg.model,
-                filter_name=f"user{user_id}:{flt['name']}",
-                prompt_hash=flt["prompt_hash"],
-                company=job["company"],
-                job_title=job["title"],
-                config_name="filter-batch",
-                error=res.error,
-                batch_id=res.batch_id,
-            )
-            metrics.CHECKS.labels("custom", "failed").inc()
-            metrics.AI_CALLS.labels(cfg.provider, cfg.model, "error").inc()
-            continue
-        try:
-            parsed = FilterVerdict(**_json.loads(res.text))
-        except Exception:
-            add_ai_result(
-                url,
-                "failed",
-                "batch: unparsable output",
-                "custom",
-                model=cfg.model,
-                prompt_hash=flt["prompt_hash"],
-                company=job["company"],
-                job_title=job["title"],
-                config_name="filter-batch",
-                batch_id=res.batch_id,
-            )
-            metrics.CHECKS.labels("custom", "failed").inc()
-            continue
+        usage = ai.batch_usage(res.usage)
+        parsed = None
+        reason = f"batch: {res.error or 'no output'}"
+        if not res.error and res.text:
+            try:
+                parsed = FilterVerdict.model_validate_json(res.text)
+            except ValueError:
+                reason = "batch: unparsable output"
         verdicts.record_ai_verdict(
             url=url,
             check_type="custom",
-            rejected=parsed.should_filter,
-            reason=parsed.reason,
-            parsed_json=res.text,
+            rejected=parsed.should_filter if parsed else None,
+            reason=parsed.reason if parsed else reason,
+            parsed_json=res.text if parsed else None,
             usage=usage,
             model=cfg.model,
             provider=cfg.provider,
@@ -374,17 +328,10 @@ async def handle_run_filter_batch_chunk(task_id: int, payload: dict[str, Any]) -
             context="filter-batch",
             batched=True,
             batch_id=res.batch_id,
+            error=res.error,
+            reasoning_effort=cfg.params.get("reasoning_effort") or cfg.params.get("effort"),
         )
-        if usage["total_tokens"]:
-            budget.record_usage(
-                user_id,
-                cfg.key_source,
-                "filter",
-                cfg.model,
-                usage["prompt_tokens"],
-                usage["completion_tokens"],
-                usage["total_tokens"],
-            )
+        budget.record_tokens(user_id, cfg.key_source, "filter", cfg.model, usage, batched=True)
         if done % 50 == 0:
             set_progress(task_id, done, total, flt["name"])
             if parent_id:

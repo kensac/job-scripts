@@ -185,6 +185,19 @@ def _usage_tuple(
     }
 
 
+def batch_usage(usage: dict | None) -> dict[str, int]:
+    if not usage:
+        return {}
+    values = usage
+    return _usage_tuple(
+        values.get("input_tokens", 0),
+        values.get("output_tokens", 0),
+        values.get("total_tokens", 0),
+        (values.get("input_tokens_details") or {}).get("cached_tokens", 0),
+        (values.get("output_tokens_details") or {}).get("reasoning_tokens", 0),
+    )
+
+
 def _detail(usage: Any, container: str, field: str) -> int:
     """Providers nest the cached/reasoning counts one level down and omit the
     container entirely when the count is zero."""

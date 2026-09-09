@@ -47,7 +47,9 @@ def _filter_instructions(params: dict[str, Any]) -> str:
 
 
 def _posting_input(r: dict[str, Any]) -> str:
-    return f"Company: {r['company']}\nJob Title: {r['title']}\n\nJob Content:\n{r['input_content']}"
+    from core.filters import build_custom_input
+
+    return build_custom_input(r["company"], r["title"], r["input_content"])
 
 
 def _filter_fields(p: dict[str, Any]) -> dict[str, Any]:
