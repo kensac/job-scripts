@@ -48,6 +48,14 @@ async function get({ url }) {
 
 importScripts("submissions.js");
 const submissions = new SubmissionStore(chrome.storage.session, call);
+// The server's feature switches, from a fixed public route (no session,
+// no identity): the content script names an adapter and gets back a
+// validated configuration or unavailable. See policy.js.
+importScripts("policy.js");
+const policy = new PolicyStore(chrome.storage.local, fetch, `${SITE}/api/extension/config`);
+// The published table for a config-driven reader, decoded and checked
+// against its digest; 404 means the bundled table applies. See policy.js.
+const recipes = new RecipeStore(chrome.storage.local, fetch, `${SITE}/api/extension/recipe`);
 chrome.tabs.onRemoved.addListener(async (tabId) => {
   const all = await chrome.storage.session.get(null);
   const keys = Object.keys(all).filter((key) => key.startsWith(`submission:${tabId}:`));
@@ -55,7 +63,10 @@ chrome.tabs.onRemoved.addListener(async (tabId) => {
 });
 
 chrome.runtime.onMessage.addListener((msg, sender, reply) => {
-  (msg.kind === "submission" ? submissions.handle(msg, sender) : (msg.kind === "pdf" ? pdf : msg.kind === "get" ? get : call)(msg))
+  (msg.kind === "submission" ? submissions.handle(msg, sender)
+    : msg.kind === "policy" ? policy.resolve(msg.adapter)
+    : msg.kind === "recipe" ? recipes.resolve(msg.adapter)
+    : (msg.kind === "pdf" ? pdf : msg.kind === "get" ? get : call)(msg))
     .then(reply)
     .catch((e) => reply({ ok: false, status: 0, error: String(e) }));
   return true;
