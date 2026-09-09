@@ -11,7 +11,7 @@ from core import pricing
 
 
 @pytest.mark.parametrize("kind", ["explain", "suggest", "improve", "upload"])
-@pytest.mark.parametrize("usable", [True, False])
+@pytest.mark.parametrize("usable", [True, False, "paid_error"])
 def test_live_usage_is_recorded_once_with_cache_even_without_usable_output(
     client, user_headers, f, monkeypatch, kind, usable
 ):
@@ -26,6 +26,8 @@ def test_live_usage_is_recorded_once_with_cache_even_without_usable_output(
     }
 
     async def response(*args, **kwargs):
+        if usable == "paid_error":
+            raise ai.PaidParseError("paid invalid response", usage)
         parsed = (
             SimpleNamespace(
                 improved="remote roles",
@@ -48,7 +50,10 @@ def test_live_usage_is_recorded_once_with_cache_even_without_usable_output(
     f.make_board_row(uid, job_id)
     if kind == "upload":
         monkeypatch.setattr(uploads, "load_config", lambda user_id: (None, cfg))
-        if usable:
+        if usable == "paid_error":
+            with pytest.raises(ai.PaidParseError, match="paid invalid response"):
+                asyncio.run(uploads.handle_extract_upload({"job_id": job_id, "user_id": uid}))
+        elif usable:
             asyncio.run(uploads.handle_extract_upload({"job_id": job_id, "user_id": uid}))
         else:
             with pytest.raises(RuntimeError, match="no parsed output"):
@@ -71,8 +76,12 @@ def test_live_usage_is_recorded_once_with_cache_even_without_usable_output(
             )
         else:
             path, body, purpose = "/v1/ai/improve-prompt", {"prompt": "remote"}, "improve_prompt"
-        result = client.post(path, json=body, headers=user_headers)
-        assert result.status_code == (200 if usable else 502), result.text
+        if usable == "paid_error":
+            with pytest.raises(ai.PaidParseError, match="paid invalid response"):
+                client.post(path, json=body, headers=user_headers)
+        else:
+            result = client.post(path, json=body, headers=user_headers)
+            assert result.status_code == (200 if usable else 502), result.text
     rows = db.query(
         "SELECT user_id, key_source, purpose, cached_tokens, total_tokens, batched, cost_usd FROM api_usage"
     )

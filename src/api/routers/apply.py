@@ -349,7 +349,8 @@ async def suggest(body: SuggestBody, user: AuthedUser = Depends(require_user)):
     if resume:
         parts.append("Resume:\n" + resume)
     rules = (db.get_config("application_suggest_instructions") or "").strip() or DEFAULT_SUGGEST
-    parsed, usage = await ai.parse(cfg, rules, "\n\n".join(parts), Suggestions)
+    with budget.record_parse_failures(user.id, cfg.key_source, drafts.PURPOSE, cfg.model):
+        parsed, usage = await ai.parse(cfg, rules, "\n\n".join(parts), Suggestions)
     budget.record_tokens(
         user.id,
         cfg.key_source,

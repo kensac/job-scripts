@@ -28,17 +28,18 @@ async def handle_extract_upload(payload: dict[str, Any]) -> None:
         db.execute("UPDATE jobs SET extraction_status = 'failed' WHERE id = %s", (job["id"],))
         raise RuntimeError("could not extract page content")
 
-    parsed, usage = await ai.parse(
-        cfg,
-        (
-            "Extract job posting metadata from the page content. "
-            "company: employer name. title: role title. locations: list of locations "
-            "(empty if remote/unknown). terms: application seasons like 'Summer 2026' "
-            "if stated, else empty. Use empty strings/lists when a field is absent."
-        ),
-        content[:60000],
-        JobExtract,
-    )
+    with budget.record_parse_failures(payload["user_id"], cfg.key_source, "extract", cfg.model):
+        parsed, usage = await ai.parse(
+            cfg,
+            (
+                "Extract job posting metadata from the page content. "
+                "company: employer name. title: role title. locations: list of locations "
+                "(empty if remote/unknown). terms: application seasons like 'Summer 2026' "
+                "if stated, else empty. Use empty strings/lists when a field is absent."
+            ),
+            content[:60000],
+            JobExtract,
+        )
     budget.record_tokens(
         payload["user_id"],
         cfg.key_source,
