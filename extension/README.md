@@ -69,7 +69,19 @@ cached disablement is never replaced by enabled defaults because a refresh
 failed. With nothing valid to hand, Autofill pauses and offers Try again,
 while reporting, manual Submit and submission tracking keep working. Page
 advance needs the server's switch and your own. Selectors, event dispatch
-and navigation never arrive this way; a new form operation is a release.
+and navigation never arrive through the switches; a new form operation is a
+release.
+
+The one exception, chosen for developer-mode and self-hosted installs, is the
+table a config-driven reader runs from (the `ats/` files). Before each
+Autofill the extension also asks the public recipe route for this adapter's
+published table; if one comes back and decodes to the digest the server
+named, that table is pinned for the fill, otherwise the bundled table is
+used. A publish fixes a site whose form changed without a new package;
+rollback is server-side. The payload is compressed and encoded, which keeps
+the tables out of casual view and stops nobody who reads this decoder. The
+Chrome Web Store's policy treats such a table as remote logic, so an install
+from the store would run with this route switched off.
 
 ## Local panel preview
 

@@ -154,6 +154,8 @@
   // The server's switches, pinned per fill (docs/agents/frontend.md, #494):
   // refreshed before each Autofill, held for that fill, nothing without it.
   let policy = null;
+  // Which recipe table this fill ran from: the published revision, or "bundled".
+  let recipeRevision = "bundled";
   const allowed = (name) => !!(policy && policy.features && policy.features[name] && policy.features[name].allowed);
   const VERSION = (() => { try { return chrome.runtime.getManifest().version; } catch (_) { return "unknown"; } })();
   let mountedFor = null;
@@ -341,6 +343,17 @@
       const why = policy.features.autofill.reason === "ADAPTER_DISABLED" ? "for this job site" : "for now";
       render(`<div class="result-heading"><span class="eyebrow">Autofill switched off</span><h4>Autofill is turned off ${why}</h4><p>Job Tracker has paused automatic filling here. You can complete the form yourself; reporting and submission tracking still work.</p></div>`);
       return;
+    }
+    // A config-driven reader runs from the table the API published for this
+    // adapter when there is one, pinned for this fill; otherwise, and on any
+    // failure, from the table bundled with the extension.
+    recipeRevision = "bundled";
+    if (reader.useConfig) {
+      const rec = await send({ kind: "recipe", adapter: reader.host });
+      if (rec.ok && reader.useConfig(rec.config.recipe)) {
+        recipeRevision = rec.config.revision.slice(0, 12);
+        await readFields();
+      }
     }
     render(`<div class="working" role="status"><span class="spinner" aria-hidden="true"></span><div><h4>Filling your application</h4><p>Matching ${fields.length} form items with your profile and saved answers…</p></div></div>`);
     const res = await api("user/apply/resolve", "POST", {
@@ -671,7 +684,7 @@
   async function autoReport(reason) {
     try {
       const pinned = policy && policy.revision ? policy.revision.slice(0, 12) : "none";
-      await api("user/apply/reports", "POST", { url: location.href, note: `auto: ${reason} [ext ${VERSION} ${reader.host || "unknown"} schema 1 rev ${pinned}]`, page: capture() });
+      await api("user/apply/reports", "POST", { url: location.href, note: `auto: ${reason} [ext ${VERSION} ${reader.host || "unknown"} schema 1 rev ${pinned} recipe ${recipeRevision}]`, page: capture() });
     } catch (_) {
       // Nothing to do; the next pass captures again.
     }

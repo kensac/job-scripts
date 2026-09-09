@@ -4,8 +4,17 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
 
-const Store = vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../../extension/policy.js'), 'utf8') + '; PolicyStore', { URL });
+const zlib = require('node:zlib');
+const nodeCrypto = require('node:crypto');
+
+// The worker's globals the decoder needs: base64, streams, digest.
+const context = { URL, atob, Blob, Response, DecompressionStream, TextDecoder, crypto: globalThis.crypto };
+const { PolicyStore: Store, RecipeStore } = vm.runInNewContext(
+  fs.readFileSync(path.join(__dirname, '../../extension/policy.js'), 'utf8') + '; ({ PolicyStore, RecipeStore })',
+  context,
+);
 const BASE = 'https://www.kanishksachdev.com/api/extension/config';
+const RECIPES = 'https://www.kanishksachdev.com/api/extension/recipe';
 
 function storage() {
   const data = {};
@@ -94,6 +103,53 @@ test('max_age 0 permits the fresh operation only, with nothing kept for reuse', 
   assert.equal(got.ok, true);
   assert.equal(saved.data['policy:1:greenhouse'], undefined);
   assert.equal((await new Store(saved, async () => { throw new Error('offline'); }, BASE, () => 1001).resolve('greenhouse')).ok, false);
+});
+
+// A recipe response the way the API builds it: canonical JSON, deflated,
+// base64, with the sha256 of the canonical bytes as revision and digest.
+function encodedRecipe(table, overrides = {}) {
+  const raw = Buffer.from(JSON.stringify(table));
+  const digest = nodeCrypto.createHash('sha256').update(raw).digest('hex');
+  return {
+    schema_version: 1,
+    adapter: 'workday',
+    revision: digest,
+    max_age_seconds: 300,
+    encoding: 'deflate+base64',
+    payload: zlib.deflateSync(raw).toString('base64'),
+    digest,
+    ...overrides,
+  };
+}
+const table = { name: 'Workday', matches: ['https://*.myworkdayjobs.com/*'], fields: [{ name: 'email', variants: [] }] };
+
+test('a published recipe decodes to the table, checked against its digest, and is cached as received', async () => {
+  const saved = storage();
+  const got = await new RecipeStore(saved, responder(200, encodedRecipe(table)).fetchFn, RECIPES, () => 1000).resolve('workday');
+  assert.equal(got.ok, true);
+  assert.deepEqual(JSON.parse(JSON.stringify(got.config.recipe)), table);
+  assert.equal(got.config.revision.length, 64);
+  assert.equal(saved.data['recipe:1:workday'].config.encoding, 'deflate+base64');
+  const offline = async () => { throw new Error('offline'); };
+  const again = await new RecipeStore(saved, offline, RECIPES, () => 1000 + 10_000).resolve('workday');
+  assert.equal(again.cached, true);
+  assert.equal(again.config.recipe.name, 'Workday');
+});
+
+test('a recipe that does not decode, does not match its digest, or is not this adapter is no recipe', async () => {
+  const wrongDigest = encodedRecipe(table);
+  wrongDigest.revision = wrongDigest.digest = 'b'.repeat(64);
+  const otherAdapter = encodedRecipe({ ...table, name: 'Lever' });
+  const noMatches = encodedRecipe({ ...table, matches: [] });
+  const garbage = encodedRecipe(table, { payload: Buffer.from('not deflate').toString('base64') });
+  for (const bad of [wrongDigest, otherAdapter, noMatches, garbage, { ...encodedRecipe(table), extra: 1 }]) {
+    const got = await new RecipeStore(storage(), responder(200, bad).fetchFn, RECIPES).resolve('workday');
+    assert.equal(got.ok, false);
+    assert.equal(got.reason, 'INVALID_RESPONSE');
+  }
+  const none = await new RecipeStore(storage(), responder(404, {}).fetchFn, RECIPES).resolve('workday');
+  assert.equal(none.ok, false);
+  assert.equal(none.reason, 'NOT_PUBLISHED');
 });
 
 test('concurrent refreshes for one adapter share a single request', async () => {

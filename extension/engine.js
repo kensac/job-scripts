@@ -77,7 +77,11 @@
   // The config for this page: by url, or by the marks an embedded form
   // leaves on a host of its own (an iframe or a form posting to the ATS).
   // A url the table excludes (a confirmation page, a listing) gets nothing.
-  const cfg =
+  // `let`, not `const`: the bundled table is the fallback, and the content
+  // script may swap in the table the API published for this adapter before a
+  // fill (useConfig below). Every reader function reads cfg when called, so
+  // a swap takes effect on the next read of the form.
+  let cfg =
     configs.find((c) => c.matches.some((m) => matchesPattern(m, location.href))) ||
     configs.find((c) => anyGroup(c.embeddedPaths));
   if (!cfg) return;
@@ -1032,5 +1036,15 @@
     submitted,
     errors,
     proxySubmit: !!cfg.proxySubmit,
+    // A published table for THIS adapter replaces the bundled one for the
+    // fills that follow; any other table is refused and the bundled copy
+    // stays. Returns whether the swap happened.
+    useConfig(next) {
+      if (!next || typeof next !== "object" || typeof next.name !== "string") return false;
+      if (next.name.toLowerCase() !== cfg.name.toLowerCase()) return false;
+      if (!Array.isArray(next.matches) || !Array.isArray(next.fields)) return false;
+      cfg = next;
+      return true;
+    },
   };
 })();
