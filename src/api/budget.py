@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from contextlib import contextmanager
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, Literal
@@ -470,3 +471,14 @@ def record_tokens(
         usage.get("cached_tokens", 0),
         batched=batched,
     )
+
+
+@contextmanager
+def record_parse_failures(user_id: int, key_source: str, purpose: str, model: str | None):
+    from api.ai import PaidParseError
+
+    try:
+        yield
+    except PaidParseError as exc:
+        record_tokens(user_id, key_source, purpose, model, exc.usage)
+        raise

@@ -204,6 +204,14 @@ def _detail(usage: Any, container: str, field: str) -> int:
     return getattr(getattr(usage, container, None), field, 0) or 0
 
 
+class PaidParseError(ValueError):
+    """An unusable provider response whose reported usage must still be recorded."""
+
+    def __init__(self, message: str, usage: dict[str, int]):
+        super().__init__(message)
+        self.usage = usage
+
+
 async def parse[T: BaseModel](
     cfg: AIConfig,
     instructions: str,
@@ -312,14 +320,18 @@ async def _parse_json_object[T: BaseModel](
         return None, usage
     truncated = declared.output.truncation_finish_reason
     if truncated is not None and choice.finish_reason == truncated:
-        raise ValueError(
+        raise PaidParseError(
             f"{cfg.model} stopped at the output limit "
-            f"({kwargs['max_tokens']} tokens); the response is incomplete"
+            f"({kwargs['max_tokens']} tokens); the response is incomplete",
+            usage,
         )
     content = choice.message.content
     if not content:
         return None, usage
-    return response_model.model_validate_json(content), usage
+    try:
+        return response_model.model_validate_json(content), usage
+    except ValueError as exc:
+        raise PaidParseError(str(exc), usage) from exc
 
 
 async def _parse[T: BaseModel](
