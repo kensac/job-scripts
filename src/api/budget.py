@@ -35,7 +35,7 @@ AccessReason = Literal["NO_API_KEY", "NO_MODEL", "BUDGET_EXCEEDED"]
 class AIAccessError(Exception):
     def __init__(self, reason: AccessReason, entitlement: Entitlement):
         super().__init__(reason)
-        self.reason = reason
+        self.reason: AccessReason = reason
         self.entitlement = entitlement
 
     @property
