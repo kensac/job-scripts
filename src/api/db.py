@@ -40,6 +40,36 @@ _APP_CONFIG_SEED = [
     # (2026-09-08), so for everyone else an edit waits for the hourly
     # sweep at batch price. "*" opens it to everyone.
     ("filter_rejudge_on_change_groups", []),
+    # The board a person sees before they touch a column: Kanishk's own
+    # layout on 2026-09-09 (order, hidden columns, pins, widths; no sort,
+    # the lenses own that). Served by GET /user/settings when the row
+    # holds no layout, so a new account and a reset both start here; the
+    # column chooser still shows any hidden column.
+    (
+        "board_default_column_layout",
+        [
+            {"colId": "company", "hide": False, "pinned": "left", "width": 160},
+            {"colId": "size", "hide": True, "width": 120},
+            {"colId": "location", "hide": False, "width": 150},
+            {"colId": "comp", "hide": False, "width": 130},
+            {"colId": "source", "hide": True, "width": 120},
+            {"colId": "ats", "hide": True, "width": 130},
+            {"colId": "url", "hide": False, "width": 110},
+            {"colId": "title", "hide": False, "width": 210},
+            {"colId": "terms", "hide": True, "width": 170},
+            {"colId": "recruiter", "hide": True, "width": 140},
+            {"colId": "connection1", "hide": True, "width": 150},
+            {"colId": "connection2", "hide": True, "width": 150},
+            {"colId": "documents", "hide": True, "width": 140},
+            {"colId": "added_at", "hide": False, "width": 130},
+            {"colId": "date_posted", "hide": False, "width": 130},
+            {"colId": "date_applied", "hide": False, "width": 140},
+            {"colId": "waiting", "hide": True, "width": 110},
+            {"colId": "status", "hide": False, "width": 220},
+            {"colId": "notes", "hide": True, "width": 200},
+            {"colId": "row_actions", "hide": False, "pinned": "right", "width": 44},
+        ],
+    ),
     # How long a posting whose page fetch came back empty waits before any
     # ingest or backfill tries it again. The hourly cycle used to be the
     # retry: 24 attempts a day at the same dead URL from every worker.

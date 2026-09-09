@@ -262,6 +262,11 @@ def get_settings(user: AuthedUser = Depends(require_user)):
         (user.id,),
     )
     settings = {**(row or _SETTINGS_DEFAULTS)}
+    # No saved layout means the default board, not every column shown
+    # (Kanishk, 2026-09-09): a new account starts on the admin's layout and
+    # a reset returns to it.
+    if settings.get("column_layout") is None:
+        settings["column_layout"] = db.get_config("board_default_column_layout") or None
     # Criteria in their full shape, defaults filled, whatever the row holds:
     # a client that reads support for a criterion by the key's presence
     # must not depend on what this user happened to save before the key
@@ -361,7 +366,10 @@ def put_settings(body: SettingsPut, user: AuthedUser = Depends(require_user)):
                 COALESCE(%(bypass)s, TRUE), COALESCE(%(criteria)s, '{}'::jsonb),
                 COALESCE(%(digest)s, FALSE), NULLIF(%(style)s, ''), now())
         ON CONFLICT (user_id) DO UPDATE SET
-            column_layout = COALESCE(EXCLUDED.column_layout, user_settings.column_layout),
+            -- Absent keeps it; an explicit null clears it, which is the board's
+            -- reset. COALESCE here kept the old layout on reset until 2026-09-09.
+            column_layout = CASE WHEN %(layout_set)s THEN EXCLUDED.column_layout
+                                 ELSE user_settings.column_layout END,
             prefs = COALESCE(%(prefs)s, user_settings.prefs),
             ai_model = COALESCE(%(model)s, user_settings.ai_model),
             ai_params = COALESCE(%(params)s, user_settings.ai_params),
@@ -376,6 +384,7 @@ def put_settings(body: SettingsPut, user: AuthedUser = Depends(require_user)):
         {
             "uid": user.id,
             "layout": db.jsonb(body.column_layout) if body.column_layout is not None else None,
+            "layout_set": "column_layout" in body.model_fields_set,
             "prefs": db.jsonb(body.prefs) if body.prefs is not None else None,
             "model": body.ai_model,
             "params": db.jsonb(body.ai_params) if body.ai_params is not None else None,
