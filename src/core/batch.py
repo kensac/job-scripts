@@ -6,8 +6,8 @@ import json
 import logging
 import os
 from collections.abc import Callable
-from dataclasses import dataclass
-from typing import TypedDict
+from dataclasses import dataclass, field
+from typing import Literal, TypedDict
 
 from openai import AsyncOpenAI
 from openai.types import Batch
@@ -42,7 +42,10 @@ def _client() -> AsyncOpenAI | None:
     return _batch_client
 
 
-BATCH_ENDPOINT = "/v1/responses"
+BatchEndpoint = Literal["/v1/responses", "/v1/embeddings"]
+BATCH_ENDPOINT: BatchEndpoint = "/v1/responses"
+# https://developers.openai.com/api/reference/resources/batches
+BATCH_MAX_REQUESTS = 50_000
 BATCH_COMPLETION_WINDOW = "24h"
 BATCH_TOKEN_BUDGET = 1_800_000
 
@@ -81,11 +84,13 @@ def batch_enabled() -> bool:
 @dataclass
 class BatchSpec:
     custom_id: str
-    instructions: str
-    input: str
-    schema_name: str
-    schema: dict
+    instructions: str = ""
+    input: str = ""
+    schema_name: str = ""
+    schema: dict = field(default_factory=dict)
     context: dict | None = None
+    endpoint: BatchEndpoint = BATCH_ENDPOINT
+    inputs: list[str] | None = None
 
 
 @dataclass
@@ -97,25 +102,38 @@ class BatchResult:
     batch_id: str | None = None
     model: str | None = None
     request: BatchSpec | None = None
+    embedding_vectors: list[list[float]] | None = None
 
 
 def _estimate_tokens(spec: BatchSpec, max_output_tokens: int) -> int:
-    chars = len(spec.instructions) + len(spec.input)
-    return chars // BATCH_CHARS_PER_TOKEN + max_output_tokens
+    chars = len(spec.instructions) + (
+        sum(map(len, spec.inputs)) if spec.inputs is not None else len(spec.input)
+    )
+    return chars // BATCH_CHARS_PER_TOKEN + (
+        max_output_tokens if spec.endpoint == "/v1/responses" else 0
+    )
 
 
 def _chunk_specs(specs: list[BatchSpec], max_output_tokens: int) -> list[list[BatchSpec]]:
     chunks: list[list[BatchSpec]] = []
     current: list[BatchSpec] = []
-    running = 0
+    running = inputs = 0
     for spec in specs:
+        count = len(spec.inputs) if spec.inputs is not None else 1
+        if count > BATCH_MAX_REQUESTS:
+            raise ValueError("one request exceeds the provider embedding input limit")
         cost = _estimate_tokens(spec, max_output_tokens)
-        if current and running + cost > BATCH_TOKEN_BUDGET:
+        if current and (
+            running + cost > BATCH_TOKEN_BUDGET
+            or len(current) >= BATCH_MAX_REQUESTS
+            or inputs + count > BATCH_MAX_REQUESTS
+        ):
             chunks.append(current)
             current = []
-            running = 0
+            running = inputs = 0
         current.append(spec)
         running += cost
+        inputs += count
     if current:
         chunks.append(current)
     return chunks
@@ -131,10 +149,23 @@ def prompt_cache_key(instructions: str) -> str:
 
 
 def _build_line(spec: BatchSpec, model: str, reasoning_effort: str, max_output_tokens: int) -> dict:
+    if spec.endpoint == "/v1/embeddings":
+        return {
+            "custom_id": spec.custom_id,
+            "method": "POST",
+            "url": spec.endpoint,
+            "body": {
+                "model": model,
+                "input": spec.inputs if spec.inputs is not None else spec.input,
+                "encoding_format": "float",
+            },
+        }
+    if spec.endpoint != "/v1/responses":
+        raise ValueError(f"unsupported batch endpoint: {spec.endpoint}")
     return {
         "custom_id": spec.custom_id,
         "method": "POST",
-        "url": BATCH_ENDPOINT,
+        "url": spec.endpoint,
         "body": {
             "model": model,
             "instructions": spec.instructions,
@@ -250,7 +281,7 @@ async def _collect_batch(
 ) -> dict[str, BatchResult]:
     if batch.status != "completed":
         for result in results.values():
-            if result.text is None and result.error is None:
+            if result.text is None and result.embedding_vectors is None and result.error is None:
                 result.error = f"batch {batch.status}"
         if not batch.output_file_id:
             for result in results.values():
@@ -277,11 +308,35 @@ async def _collect_batch(
                 result.error = str(err or (resp or {}).get("status_code") or "unknown")
                 continue
             body = resp.get("body", {})
-            text = _extract_output_text(body)
-            result.text = text
             result.usage = body.get("usage")
-            if text is None:
-                result.error = "no output text"
+            if getattr(batch, "endpoint", BATCH_ENDPOINT) == "/v1/embeddings":
+                if result.usage is not None:
+                    result.usage = {
+                        "input_tokens": result.usage.get("prompt_tokens", 0),
+                        "output_tokens": 0,
+                        "total_tokens": result.usage.get("total_tokens", 0),
+                    }
+                data = body.get("data") or []
+                if (
+                    isinstance(data, list)
+                    and data
+                    and all(
+                        isinstance(item, dict) and type(item.get("index")) is int for item in data
+                    )
+                    and {item["index"] for item in data} == set(range(len(data)))
+                ):
+                    vectors = [
+                        item.get("embedding")
+                        for item in sorted(data, key=lambda item: item["index"])
+                    ]
+                    if all(isinstance(vector, list) for vector in vectors):
+                        result.embedding_vectors = vectors
+                if result.embedding_vectors is None:
+                    result.error = "invalid embedding vector indices"
+            else:
+                result.text = _extract_output_text(body)
+                if result.text is None:
+                    result.error = "no output text"
 
     if batch.error_file_id:
         try:
@@ -294,7 +349,7 @@ async def _collect_batch(
                 result = results.get(custom_id)
                 if result is None and create_missing and custom_id:
                     result = results.setdefault(custom_id, BatchResult(custom_id))
-                if result is not None and result.text is None:
+                if result is not None and result.text is None and result.embedding_vectors is None:
                     result.error = str(obj.get("error") or "batch error")
         except Exception as exc:
             logger.warning(f"Failed to read batch error file: {exc}")
@@ -320,7 +375,12 @@ def _record_errors(batch: Batch, results: dict[str, BatchResult]) -> None:
     messages = [getattr(e, "message", None) or str(e) for e in batch_errors]
     placeholder = f"batch {batch.status}"
     for result in results.values():
-        if result.text is None and messages and result.error in (None, "", placeholder):
+        if (
+            result.text is None
+            and result.embedding_vectors is None
+            and messages
+            and result.error in (None, "", placeholder)
+        ):
             result.error = "; ".join(messages)
     errors = {cid: r.error for cid, r in results.items() if r.error and r.batch_id == batch.id}
     if messages and not errors:
@@ -342,6 +402,10 @@ async def _submit_chunk(
     on_event: BatchEventHook = None,
 ) -> str:
     """Uploads one wave and returns its provider batch id."""
+    endpoints = {spec.endpoint for spec in specs}
+    if len(endpoints) != 1:
+        raise ValueError("a provider batch must contain exactly one endpoint")
+    endpoint = specs[0].endpoint
     payload = "\n".join(
         json.dumps(_build_line(spec, model, reasoning_effort, max_output_tokens)) for spec in specs
     ).encode("utf-8")
@@ -351,7 +415,7 @@ async def _submit_chunk(
     )
     batch = await client.batches.create(
         input_file_id=upload.id,
-        endpoint=BATCH_ENDPOINT,
+        endpoint=endpoint,
         completion_window=BATCH_COMPLETION_WINDOW,
     )
     logger.info(f"Submitted batch {batch.id} with {len(specs)} requests")
@@ -374,7 +438,7 @@ async def _run_chunk(
     on_event: BatchEventHook = None,
 ) -> dict[str, BatchResult]:
     """Submit-and-wait, retained for callers that genuinely need a result in
-    hand. The scheduled paths use submit_responses_batches + collect_finished_batches
+    hand. The scheduled paths use submit_batches + collect_finished_batches
     instead so they do not hold a worker while the provider queues."""
     results: dict[str, BatchResult] = {
         spec.custom_id: BatchResult(spec.custom_id) for spec in specs
@@ -388,7 +452,7 @@ async def _run_chunk(
     return collected
 
 
-async def submit_responses_batches(
+async def submit_batches(
     specs: list[BatchSpec],
     model: str,
     reasoning_effort: str,
@@ -406,6 +470,8 @@ async def submit_responses_batches(
     client = _client()
     if not client or not specs:
         return []
+    if len({spec.endpoint for spec in specs}) != 1:
+        raise ValueError("a provider submission must contain exactly one endpoint")
     chunks = _chunk_specs(specs, max_output_tokens)
     logger.info(f"Submitting {len(specs)} requests as {len(chunks)} batch(es)")
     ids: list[str] = []
@@ -564,3 +630,7 @@ async def collect_finished_batches(
         )
         results.extend(collected.values())
     return results, unfinished
+
+
+# Existing response callers and integrations retain their public entry point.
+submit_responses_batches = submit_batches

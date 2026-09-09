@@ -14,7 +14,7 @@ from api.tasks.board import handle_recompute_board
 from api.tasks.comp import handle_extract_comp
 from api.tasks.content import handle_fetch_missing_content
 from api.tasks.digests import handle_send_digests
-from api.tasks.embeddings import handle_embed_postings
+from api.tasks.embeddings import handle_embed_postings, handle_embed_postings_batch
 from api.tasks.experiments import handle_run_experiment
 from api.tasks.filters import (
     handle_run_all_filters,
@@ -79,6 +79,7 @@ HANDLERS = {
     "classify_locations": handle_classify_locations,
     "recompute_board": handle_recompute_board,
     "embed_postings": handle_embed_postings,
+    "embed_postings_batch": handle_embed_postings_batch,
     "send_digests": handle_send_digests,
     "data_health": handle_data_health,
     "poll_batches": handle_poll_batches,
