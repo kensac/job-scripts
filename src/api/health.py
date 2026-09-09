@@ -522,6 +522,7 @@ SWEEP_KINDS = frozenset(
         "classify_locations",
         "classify_mail",
         "embed_postings",
+        "embed_postings_batch",
         "fetch_missing_content",
     }
 )

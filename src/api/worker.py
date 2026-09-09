@@ -310,10 +310,10 @@ def schedule_ingest_cycle() -> None:
         "AND status IN ('pending', 'running', 'waiting', 'awaiting_batch') LIMIT 1"
     ):
         enqueue("classify_locations", {"cycle": cycle}, dedupe_key=f"locations:{cycle}")
-    # No cross-cycle guard, unlike the two batched extractions: this pass is
-    # synchronous and bounded to minutes, so it cannot still be running an hour
-    # later for the next one to stack on top of. The dedupe key is enough.
-    enqueue("embed_postings", {"cycle": cycle}, dedupe_key=f"embed:{cycle}")
+    # The cycle key bounds queued work; the handler refuses fresh submission
+    # while an earlier embedding batch is active. The new kind keeps older
+    # images from claiming paid snapshots with the former live handler.
+    enqueue("embed_postings_batch", {"cycle": cycle}, dedupe_key=f"embed-batch:{cycle}")
     enqueue("send_digests", {"cycle": day}, dedupe_key=f"digest:{day}")
     enqueue("data_health", {"cycle": cycle}, dedupe_key=f"health:{cycle}")
     # Polling gets its OWN bucket, far finer than the ingest cycle. Sharing the

@@ -12,11 +12,16 @@ def snapshot_specs(task_id: int, specs: list[BatchSpec]) -> list[BatchSpec]:
     frozen = []
     with db.transaction():
         for spec in specs:
+            snapshot = dataclasses.asdict(spec)
+            if spec.endpoint == "/v1/responses":
+                snapshot.pop("endpoint")
+            if spec.inputs is None:
+                snapshot.pop("inputs")
             row = db.query_one(
                 "INSERT INTO batch_requests (task_id, custom_id, snapshot) VALUES (%s,%s,%s) "
                 "ON CONFLICT (task_id,custom_id) DO UPDATE SET snapshot=batch_requests.snapshot "
                 "RETURNING snapshot",
-                (task_id, spec.custom_id, db.jsonb(dataclasses.asdict(spec))),
+                (task_id, spec.custom_id, db.jsonb(snapshot)),
             )
             if not row or row["snapshot"] is None:
                 raise RuntimeError("cannot resubmit a legacy request without its original snapshot")
@@ -29,6 +34,9 @@ def checkpoint(task_id: int, results: list[BatchResult], unfinished: list[str]) 
         for result in results:
             if not result.batch_id:
                 raise ValueError("a collected result must identify its provider batch")
+            response = {"text": result.text, "usage": result.usage, "error": result.error}
+            if result.embedding_vectors is not None:
+                response["embedding_vectors"] = result.embedding_vectors
             db.execute(
                 "INSERT INTO batch_result_receipts (provider_batch_id, custom_id, task_id, response, model) "
                 "VALUES (%s,%s,%s,%s,%s) ON CONFLICT (provider_batch_id, custom_id) DO NOTHING",
@@ -36,7 +44,7 @@ def checkpoint(task_id: int, results: list[BatchResult], unfinished: list[str]) 
                     result.batch_id,
                     result.custom_id,
                     task_id,
-                    db.jsonb({"text": result.text, "usage": result.usage, "error": result.error}),
+                    db.jsonb(response),
                     result.model,
                 ),
             )

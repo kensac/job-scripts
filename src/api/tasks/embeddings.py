@@ -3,12 +3,22 @@
 from __future__ import annotations
 
 import logging
+import math
 import os
 from typing import Any
 
-from api import db
+from api import batch_results, db
+from api.task_admission import ACTIVE_STATUSES
 from api.tasks import rescrape
-from api.tasks.runtime import set_progress
+from api.tasks.runtime import (
+    batch_event_hook,
+    consume_result,
+    enqueue,
+    has_batch_work,
+    set_progress,
+    submit_or_collect,
+)
+from core.batch import BatchSpec
 from core.embeddings import (
     EMBEDDING_BATCH_SIZE,
     EMBEDDING_DIMENSIONS,
@@ -21,20 +31,13 @@ from core.store import AI_ELIGIBLE_JOB, CONTENT_LATERAL
 logger = logging.getLogger("jobtracker_worker")
 
 
-# Synchronous, not batched, and that is a deliberate exception to the rule that
-# scheduled work parks on the Batch API at half price. The whole corpus costs
-# $0.47 sync against $0.23 batched, and collecting the difference would mean
-# making core/batch.py's BATCH_ENDPOINT per-spec - it is hardcoded to
-# /v1/responses and embeddings are /v1/embeddings. That path is days old and
-# has already produced one production defect, so twenty-four cents is not a
-# reason to widen it. No worker is held for long either: an embeddings call
-# returns in about a second, where a batch takes hours.
-#
-# Bounded per cycle so one pass cannot hold a worker indefinitely, and sized
-# from what the pass actually does rather than picked round: 2,000 postings is
-# 20 requests of EMBEDDING_BATCH_SIZE, and at roughly a second a request that
-# is well under the HEARTBEAT_TIMEOUT_MINUTES window even if every request
-# retries. The whole corpus drains in 11 hourly cycles.
+# The original synchronous exception was measured at $0.47 for the corpus
+# versus $0.23 batched, with calls returning in about a second. It avoided
+# widening the then response-only batch collector for twenty-four cents.
+# The shared collector now preserves endpoint-specific snapshots and results;
+# scheduled embeddings use it so the worker can release its slot while waiting.
+# Keep the measured 2,000-posting cycle bound: at 100 inputs per provider
+# request this is 20 requests and the original corpus drained in 11 cycles.
 EMBED_POSTINGS_PER_CYCLE = int(os.environ.get("JOBTRACKER_EMBED_POSTINGS_PER_CYCLE", "2000"))
 
 
@@ -85,101 +88,136 @@ _CANDIDATES = f"""
 """
 
 
-def _store(rows: list[dict[str, Any]]) -> None:
-    """One statement per wave rather than per posting.
-
-    ON CONFLICT rather than a plain insert so a wave that is retried after a
-    partial write - the request succeeded, the process died before the commit -
-    re-embeds rather than raising, which is the same idempotent-by-re-sweep
-    contract the batched passes have.
-    """
-    with db.pool.connection() as conn:
-        conn.cursor().executemany(
-            """
-            INSERT INTO job_embeddings (url, embedding, model, content_hash,
-                                        content_row_id, input_tokens, cost_usd)
-            VALUES (%(url)s, %(embedding)s, %(model)s, %(hash)s, %(row_id)s,
-                    %(tokens)s, %(cost)s)
-            ON CONFLICT (url) DO UPDATE SET
-                embedding = EXCLUDED.embedding, model = EXCLUDED.model,
-                content_hash = EXCLUDED.content_hash,
-                content_row_id = EXCLUDED.content_row_id,
-                input_tokens = EXCLUDED.input_tokens, cost_usd = EXCLUDED.cost_usd,
-                created_at = now()
-            """,
-            rows,
+def _store(rows: list[dict[str, Any]]) -> int:
+    return db.execute_count(
+        """
+        INSERT INTO job_embeddings (url, embedding, model, content_hash,
+                                    content_row_id, input_tokens, cost_usd)
+        SELECT r.url, r.embedding::vector, r.model, r.hash, r.row_id, r.tokens, r.cost
+        FROM jsonb_to_recordset(%s) AS r(
+            url text, embedding text, model text, hash text, row_id bigint,
+            tokens bigint, cost numeric
         )
+        ON CONFLICT (url) DO UPDATE SET
+            embedding = EXCLUDED.embedding, model = EXCLUDED.model,
+            content_hash = EXCLUDED.content_hash,
+            content_row_id = EXCLUDED.content_row_id,
+            input_tokens = EXCLUDED.input_tokens, cost_usd = EXCLUDED.cost_usd,
+            created_at = now()
+        WHERE job_embeddings.content_row_id IS NULL
+           OR job_embeddings.content_row_id <= EXCLUDED.content_row_id
+        """,
+        (db.jsonb(rows),),
+    )
 
 
 async def handle_embed_postings(task_id: int, payload: dict[str, Any]) -> None:
-    from openai import AsyncOpenAI
-
-    key = os.environ.get("OPENAI_API_KEY")
-    if not key:
-        # Not an error: a host without a server key simply does no embedding,
-        # the same way the batched sweeps no-op without one.
-        set_progress(task_id, 0, 0, "no api key")
-        return
-
-    candidates = rescrape.drop_unchanged(
-        db.query(_CANDIDATES, {"cap": EMBED_POSTINGS_PER_CYCLE}),
-        table="job_embeddings",
-        limit=EMBEDDING_INPUT_CHARS,
+    # Older images know only this kind. The new kind keeps them from claiming
+    # paid embedding snapshots with the former synchronous implementation.
+    child = enqueue(
+        "embed_postings_batch", payload, dedupe_key=f"embed-batch:{payload.get('cycle', task_id)}"
     )
-    if not candidates:
-        set_progress(task_id, 0, 0, "nothing to embed")
-        return
+    set_progress(task_id, 0, 0, f"queued embedding batch task {child}")
 
-    client = AsyncOpenAI(api_key=key)
-    total = len(candidates)
-    done = 0
-    set_progress(task_id, 0, total, "embedding postings")
-    for start in range(0, total, EMBEDDING_BATCH_SIZE):
-        wave = candidates[start : start + EMBEDDING_BATCH_SIZE]
-        texts = [r["input_content"][:EMBEDDING_INPUT_CHARS] for r in wave]
-        try:
-            response = await client.embeddings.create(model=EMBEDDING_MODEL, input=texts)
-        except Exception as exc:
-            # The unembedded urls stay unembedded and the next cycle picks them
-            # up; losing the waves already paid for would be the worse failure.
-            logger.warning(f"embedding wave failed at offset {start}: {exc}")
-            continue
-        if len(response.data) != len(wave):
-            # The provider returns one vector per input, in order. If that ever
-            # stops being true, zipping them would attach every vector to the
-            # wrong posting - silently, and permanently.
-            logger.error(
-                f"embedding wave returned {len(response.data)} vectors "
-                f"for {len(wave)} inputs; skipping the wave"
-            )
-            continue
-        # Usage is reported per request, so the per-posting share is the only
-        # honest split available; it is recorded so the spend is attributable
-        # at all rather than because the split is exact.
-        tokens = response.usage.total_tokens if response.usage else 0
-        per_posting = tokens // len(wave)
-        cost = estimate_cost_usd(EMBEDDING_MODEL, per_posting, 0)
-        rows = []
-        for row, item in zip(wave, response.data, strict=True):
-            if len(item.embedding) != EMBEDDING_DIMENSIONS:
-                logger.error(
-                    f"embedding for {row['url']} has {len(item.embedding)} dimensions, "
-                    f"expected {EMBEDDING_DIMENSIONS}; skipping"
+
+async def handle_embed_postings_batch(task_id: int, payload: dict[str, Any]) -> None:
+    specs = []
+    if not has_batch_work(task_id):
+        if not os.environ.get("OPENAI_API_KEY"):
+            set_progress(task_id, 0, 0, "no api key")
+            return
+        earlier = db.query_one(
+            "SELECT id FROM tasks WHERE kind='embed_postings_batch' AND id<%s "
+            "AND status=ANY(%s) ORDER BY id LIMIT 1",
+            (task_id, list(ACTIVE_STATUSES)),
+        )
+        if earlier:
+            set_progress(task_id, 0, 0, f"embedding task {earlier['id']} is still in flight")
+            return
+        candidates = rescrape.drop_unchanged(
+            db.query(_CANDIDATES, {"cap": EMBED_POSTINGS_PER_CYCLE}),
+            table="job_embeddings",
+            limit=EMBEDDING_INPUT_CHARS,
+        )
+        for start in range(0, len(candidates), EMBEDDING_BATCH_SIZE):
+            wave = candidates[start : start + EMBEDDING_BATCH_SIZE]
+            specs.append(
+                BatchSpec(
+                    f"embeddings:{start // EMBEDDING_BATCH_SIZE}",
+                    inputs=[row["input_content"][:EMBEDDING_INPUT_CHARS] for row in wave],
+                    endpoint="/v1/embeddings",
+                    context={
+                        "dimensions": EMBEDDING_DIMENSIONS,
+                        "rows": [
+                            {
+                                "url": row["url"],
+                                "content_row_id": row["content_row_id"],
+                                "content_hash": row["content_hash"],
+                            }
+                            for row in wave
+                        ],
+                    },
                 )
-                continue
-            rows.append(
-                {
-                    "url": row["url"],
-                    "embedding": str(item.embedding),
-                    "model": EMBEDDING_MODEL,
-                    "hash": row["content_hash"],
-                    "row_id": row["content_row_id"],
-                    "tokens": per_posting,
-                    "cost": cost,
-                }
             )
-        if rows:
-            _store(rows)
-        done += len(wave)
-        set_progress(task_id, done, total, "embedding postings")
-    set_progress(task_id, done, total, "postings embedded")
+        if not specs:
+            set_progress(task_id, 0, 0, "nothing to embed")
+            return
+        set_progress(task_id, 0, len(specs), "embedding requests submitted")
+
+    hook = batch_event_hook(task_id, "embedding", EMBEDDING_MODEL)
+    results = await submit_or_collect(task_id, specs, EMBEDDING_MODEL, "", 0, hook)
+    for result in results:
+        with consume_result(task_id, result) as receipt:
+            if not receipt.pending:
+                continue
+            request = result.request
+            context = request.context if request else None
+            if request is None or not context or request.endpoint != "/v1/embeddings":
+                receipt.outcome = "unknown_request"
+                continue
+            vectors = result.embedding_vectors
+            originals = context["rows"]
+            if result.error or vectors is None or len(vectors) != len(originals):
+                receipt.outcome = "failed"
+                continue
+            current = {
+                row["url"]: row["id"]
+                for row in db.query(
+                    "SELECT page.url,q.id FROM unnest(%s::text[]) AS page(url) "
+                    + CONTENT_LATERAL.format(url="page.url", columns="id"),
+                    ([row["url"] for row in originals],),
+                )
+            }
+            # Provider usage is exact for the packed request, recorded by the
+            # fleet hook. Per-posting fields remain approximate equal shares,
+            # as on the live path; the provider does not report individual usage.
+            tokens = (result.usage or {}).get("input_tokens")
+            per_posting = tokens // len(originals) if tokens is not None else None
+            cost = (
+                estimate_cost_usd(result.model, per_posting, 0, batched=True)
+                if per_posting is not None
+                else None
+            )
+            rows = []
+            for original, vector in zip(originals, vectors, strict=True):
+                if len(vector) != context["dimensions"] or any(
+                    not isinstance(v, (int, float)) or not math.isfinite(v) for v in vector
+                ):
+                    continue
+                if current.get(original["url"]) != original["content_row_id"]:
+                    continue
+                rows.append(
+                    {
+                        "url": original["url"],
+                        "embedding": str(vector),
+                        "model": result.model,
+                        "hash": original["content_hash"],
+                        "row_id": original["content_row_id"],
+                        "tokens": per_posting,
+                        "cost": cost,
+                    }
+                )
+            written = _store(rows) if rows else 0
+            receipt.outcome = "written" if written else "discarded"
+    done, total = batch_results.progress_counts(task_id)
+    set_progress(task_id, done, total, "embedding requests applied")

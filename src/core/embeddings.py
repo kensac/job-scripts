@@ -43,4 +43,6 @@ EMBEDDING_INPUT_CHARS = 20000
 # request at 300,000 tokens; at the corpus mean of 1,132 tokens a posting that
 # ceiling is 265, and 100 leaves room for the long tail without splitting a
 # request server-side.
+# This sizes by the measured mean, not a hard per-request token guarantee.
+# Provider limit failures remain failed batch receipts; there is no live fallback.
 EMBEDDING_BATCH_SIZE = 100

@@ -176,9 +176,9 @@ class JobEmbedding(Base):
     # detoast of the corpus; the hash above then decides whether the text
     # actually changed and the work needs paying for again.
     content_row_id: Mapped[int | None] = mapped_column(BigInteger)
-    input_tokens: Mapped[int] = mapped_column(Integer, server_default=text("0"))
-    # NULL means the model had no published price, which must stay distinct
-    # from a call that genuinely cost nothing. Ten decimal places rather than
+    input_tokens: Mapped[int | None] = mapped_column(Integer, server_default=text("0"))
+    # NULL means usage or a published model price was unavailable, which must
+    # stay distinct from a call that cost nothing. Ten decimal places rather than
     # the six elsewhere: one embedding costs $0.0000226, which six places
     # rounds up by 1.6% every time - see the migration.
     cost_usd: Mapped[Any | None] = mapped_column(Numeric(14, 10))
