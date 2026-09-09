@@ -269,17 +269,7 @@ _SYNCED_AT = db.query_one("SELECT value FROM app_config WHERE key = 'testdb_sync
 
 def _reseed() -> None:
     db._seed_sources()
-    for group, tokens in db._GROUP_BUDGET_SEED:
-        db.execute(
-            "INSERT INTO group_budgets (group_name, weekly_token_budget) "
-            "VALUES (%s, %s) ON CONFLICT (group_name) DO NOTHING",
-            (group, tokens),
-        )
-    for key, value in db._APP_CONFIG_SEED:
-        db.execute(
-            "INSERT INTO app_config (key, value) VALUES (%s, %s) ON CONFLICT (key) DO NOTHING",
-            (key, db.jsonb(value)),
-        )
+    db.seed_defaults()
 
 
 @pytest.fixture(autouse=True)

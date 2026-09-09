@@ -175,16 +175,21 @@ def init_schema() -> None:
         finally:
             conn.execute("SELECT pg_advisory_unlock(%s)", (_SCHEMA_LOCK_KEY,))
     _seed_sources()
-    for group, tokens in _GROUP_BUDGET_SEED:
-        execute(
+    seed_defaults()
+
+
+def seed_defaults() -> None:
+    # Share startup and test defaults. One transaction preserves existing
+    # overrides and prevents a failed batch leaving only one table seeded.
+    with transaction(), _connection() as conn, conn.cursor() as cursor:
+        cursor.executemany(
             "INSERT INTO group_budgets (group_name, weekly_token_budget) "
             "VALUES (%s, %s) ON CONFLICT (group_name) DO NOTHING",
-            (group, tokens),
+            _GROUP_BUDGET_SEED,
         )
-    for key, value in _APP_CONFIG_SEED:
-        execute(
+        cursor.executemany(
             "INSERT INTO app_config (key, value) VALUES (%s, %s) ON CONFLICT (key) DO NOTHING",
-            (key, jsonb(value)),
+            [(key, jsonb(value)) for key, value in _APP_CONFIG_SEED],
         )
 
 
@@ -192,7 +197,7 @@ def get_config(key: str, default: Any = None) -> Any:
     """A seeded key's declared value IS its default, so an unseeded row behaves
     exactly like a seeded one.
 
-    The seed runs after `_migrate()`, in separate transactions and outside the
+    The seed runs after `_migrate()`, in its own transaction and outside the
     advisory lock. A container that migrates and then dies before reaching it
     leaves alembic reporting head with the row absent - and every caller that
     passed its own fallback silently getting that fallback instead. For a
