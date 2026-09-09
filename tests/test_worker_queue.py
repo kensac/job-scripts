@@ -437,7 +437,7 @@ async def test_chunked_run_all_filters_lifecycle(monkeypatch, user_headers):
     async def fake_parse(cfg, instructions, input_text, response_model, timeout=120.0):
         should_filter = "REJECT_ME" in input_text
         usage = {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
-        return response_model(should_filter=should_filter, reason="test"), usage
+        return response_model(should_filter=should_filter), usage
 
     monkeypatch.setattr(ai, "parse", fake_parse)
 
@@ -492,16 +492,16 @@ async def test_chunked_run_all_filters_lifecycle(monkeypatch, user_headers):
     }
     assert board_urls == set(urls) - rejected_urls
 
-    # The live custom path must persist the model's reason too, not just the
-    # batched one - verdict_of previously discarded it, so a filter could
-    # empty a board with no record anywhere of what it objected to.
+    # This previously guarded against unintentionally discarding explanations
+    # when a filter emptied the board. Decision-only output is now explicit:
+    # preserve missing evidence as NULL, with reasons available through Explain.
     custom_reasons = {
         r["reason"]
         for r in db.query(
             "SELECT reason FROM ai_queries WHERE check_type = 'custom' AND status = 'rejected'"
         )
     }
-    assert custom_reasons == {"test"}
+    assert custom_reasons == {None}
 
 
 # ---------------------------------------------------------------------------
