@@ -74,11 +74,18 @@ jobs:
           # Migrate before exporting: importing the app runs the legacy
           # IF NOT EXISTS DDL in core.store, and a later migration that adds
           # one of those columns then fails as a duplicate.
-          python -m alembic upgrade head
-          python -m api.export_schema > openapi.json
+          schema_status=0
+          schema_file=$(mktemp)
+          if python -m alembic upgrade head && python -m api.export_schema > "$schema_file"; then
+            mv "$schema_file" openapi.json
+          else
+            schema_status=1
+          fi
+          # Preserve lint and format fixes even when schema generation fails.
+          # The dispatched run checks migrations and the schema independently.
           if git diff --quiet -- src tests openapi.json; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
-            exit 0
+            exit "$schema_status"
           fi
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
