@@ -8,6 +8,7 @@ import os
 from typing import Any
 
 from api import ai, db, events, verdicts
+from api.batch_results import progress_counts
 from api.tasks.board import UNTOUCHED, demote_closed
 from api.tasks.models import _VERIFY_INSTRUCTIONS, JobClosedVerdict, VerifyVerdict
 from api.tasks.runtime import (
@@ -17,9 +18,11 @@ from api.tasks.runtime import (
     batch_event_hook,
     cancelled,
     collect_pending,
+    consume_result,
     enqueue,
+    has_batch_work,
     parent_cancelled,
-    pending_batch_ids,
+    run_batched,
     set_progress,
     submit_or_collect,
     update_parent_progress,
@@ -37,99 +40,57 @@ REVERIFY_DAYS = int(os.environ.get("JOBTRACKER_REVERIFY_DAYS", "7"))
 REVERIFY_PER_CYCLE = int(os.environ.get("JOBTRACKER_REVERIFY_PER_CYCLE", "0"))  # 0 = all stale
 
 
-def _evidence_superseded(results: dict[str, Any]) -> set[str]:
-    """Urls whose closed verdict was settled AFTER the evidence in hand.
-
-    A batched reverify scrapes a page, submits, and parks; poll_batches
-    resumes it whenever the provider finishes, which can be hours later. The
-    page text in that batch is therefore as old as the submission, and in the
-    meantime another path (ATS gone-detection, a fresh sweep) may have recorded
-    a closure from newer evidence. Verdicts are append-only and the latest row
-    wins, so writing ours last would overturn that with a stale page and put a
-    dead posting back on people's boards.
-
-    The batch's own submitted_at is the age of the evidence: everything in the
-    request was gathered before it. A url with no batch id or no registry row
-    cannot be dated, so it records as before rather than being dropped on a
-    suspicion.
-    """
-    urls = [u for u, res in results.items() if res.text and not res.error]
-    if not urls:
-        return set()
-    batch_ids = list({res.batch_id for res in results.values() if res.batch_id})
-    submitted = {
-        row["provider_batch_id"]: row["submitted_at"]
-        for row in db.query(
-            "SELECT provider_batch_id, submitted_at FROM ai_batches "
-            "WHERE provider_batch_id = ANY(%s)",
-            (batch_ids,),
+def _newer_closed_evidence(result) -> bool:
+    if not result.batch_id:
+        return False
+    return bool(
+        db.query_one(
+            "SELECT 1 FROM ai_queries q JOIN ai_batches b ON b.provider_batch_id = %s "
+            "WHERE q.url = %s AND q.check_type = 'closed' "
+            "AND q.status IN ('passed', 'rejected') AND q.created_at > b.submitted_at LIMIT 1",
+            (result.batch_id, result.custom_id),
         )
-    }
-    settled = {
-        row["url"]: row["created_at"]
-        for row in db.query(
-            "SELECT DISTINCT ON (url) url, created_at FROM ai_queries "
-            "WHERE url = ANY(%s) AND check_type = 'closed' "
-            "AND status IN ('passed', 'rejected') ORDER BY url, id DESC",
-            (urls,),
-        )
-    }
-    superseded = set()
-    for url in urls:
-        evidence_at = submitted.get(results[url].batch_id or "")
-        latest = settled.get(url)
-        if evidence_at is not None and latest is not None and latest > evidence_at:
-            superseded.add(url)
-    return superseded
+    )
 
 
-def _record_reverify_results(
-    results: dict[str, Any], by_url: dict[str, dict[str, Any]], model: str
-) -> int:
-    """Turns batch lines into closed verdicts. Only parseable lines record.
-    Anything failed or missing simply stays stale and the next daily sweep
-    picks it up, which is what makes the whole task idempotent.
-
-    Recording is guarded at the point of the write rather than in the caller,
-    because a resumed chunk reattaches to its batch and returns before the
-    caller's staleness filter ever runs. Guarding here covers every path into
-    this function by construction.
-    """
-    superseded = _evidence_superseded(results)
-    if superseded:
-        logger.info(
-            f"reverify: {len(superseded)} url(s) settled by newer evidence "
-            "while the batch was in flight; leaving those verdicts alone"
-        )
+def _record_reverify_results(task_id: int, results: list) -> int:
     recorded = 0
-    for url, res in results.items():
-        job = by_url.get(url)
-        if job is None or res.error or not res.text or url in superseded:
-            continue
-        try:
-            parsed = JobClosedVerdict.model_validate_json(res.text)
-        except Exception:
-            logger.warning(f"reverify: unparsable batch output for {url}")
-            continue
-        verdicts.record_ai_verdict(
-            url=url,
-            check_type="closed",
-            rejected=parsed.is_closed,
-            reason=parsed.reason,
-            parsed_json=res.text,
-            model=model,
-            usage={
-                "prompt_tokens": (res.usage or {}).get("input_tokens", 0),
-                "completion_tokens": (res.usage or {}).get("output_tokens", 0),
-                "total_tokens": (res.usage or {}).get("total_tokens", 0),
-            },
-            company=job["company"],
-            job_title=job["title"],
-            context="reverify",
-            batched=True,
-            batch_id=res.batch_id,
-        )
-        recorded += 1
+    for res in results:
+        with consume_result(task_id, res) as receipt:
+            if not receipt.pending:
+                continue
+            job = res.request.context if res.request else None
+            if not job:
+                receipt.outcome = "unknown_request"
+                continue
+            if res.error or not res.text:
+                receipt.outcome = "failed"
+                continue
+            if _newer_closed_evidence(res):
+                receipt.outcome = "superseded"
+                continue
+            try:
+                parsed = JobClosedVerdict.model_validate_json(res.text)
+            except ValueError:
+                logger.warning("reverify: unparsable batch output for %s", res.custom_id)
+                receipt.outcome = "invalid_output"
+                continue
+            verdicts.record_ai_verdict(
+                url=res.custom_id,
+                check_type="closed",
+                rejected=parsed.is_closed,
+                reason=parsed.reason,
+                parsed_json=res.text,
+                model=res.model,
+                usage=ai.batch_usage(res.usage),
+                company=job["company"],
+                job_title=job["title"],
+                context="reverify",
+                batched=True,
+                batch_id=res.batch_id,
+            )
+            receipt.outcome = "written"
+            recorded += 1
     return recorded
 
 
@@ -147,23 +108,19 @@ async def _reverify_jobs(
     from core.batch import BatchSpec
     from core.checks import CLOSED_INSTRUCTIONS
 
+    if has_batch_work(task_id):
+        results = await collect_pending(task_id, batch_event_hook(task_id, "reverify", None))
+        _record_reverify_results(task_id, results)
+        done, total = progress_counts(task_id)
+        set_progress(task_id, done, total, "reverified")
+        if parent_id:
+            update_parent_progress(parent_id)
+        return
     if not ai.server_key("openai"):
         raise LookupError("no server OpenAI key for reverification")
     model = resolve(VERIFY_TASK).model
     by_url = {r["url"]: r for r in rows}
     hook = batch_event_hook(task_id, "reverify", model)
-
-    # A chunk requeued after submitting reattaches to its live batch instead
-    # of rescraping and paying again.
-    existing = pending_batch_ids(task_id)
-    if existing:
-        logger.info(f"Task {task_id}: reattaching to {len(existing)} reverify batch(es)")
-        results = await collect_pending(task_id, hook)
-        _record_reverify_results(results, by_url, model)
-        set_progress(task_id, len(rows), len(rows), "reverified")
-        if parent_id:
-            update_parent_progress(parent_id)
-        return
 
     # Resumability: a requeued chunk skips rows already re-verified this cycle.
     # A forced sweep skips nothing. The point is to overturn existing verdicts.
@@ -241,7 +198,14 @@ async def _reverify_jobs(
             update_parent_progress(parent_id)
         schema = to_strict_json_schema(JobClosedVerdict)
         specs = [
-            BatchSpec(url, CLOSED_INSTRUCTIONS, content[:20000], "JobClosedVerdict", schema)
+            BatchSpec(
+                url,
+                CLOSED_INSTRUCTIONS,
+                content[:20000],
+                "JobClosedVerdict",
+                schema,
+                context=by_url[url],
+            )
             for url, content in needs_ai
         ]
         results = await submit_or_collect(
@@ -252,7 +216,7 @@ async def _reverify_jobs(
             VERIFY_TASK.max_output_tokens,
             hook,
         )
-        _record_reverify_results(results, by_url, model)
+        _record_reverify_results(task_id, results)
     set_progress(task_id, total, total, "reverified")
     if parent_id:
         update_parent_progress(parent_id)
@@ -292,6 +256,10 @@ async def handle_reverify_open(task_id: int, payload: dict[str, Any]) -> None:
     staleness, board membership and the per-cycle cap, for when the evidence
     behind existing verdicts is itself suspect (e.g. verdicts taken before the
     fetcher could tell a redirect from a live page)."""
+    if has_batch_work(task_id):
+        await _reverify_jobs(task_id, [], force=bool(payload.get("full")))
+        demote_closed()
+        return
     if payload.get("full"):
         # Source-gated like every other sweep. The staleness path below reads
         # user_jobs and is reachable by construction; this one reads `jobs`
@@ -368,106 +336,106 @@ async def handle_verify_new(task_id: int, payload: dict[str, Any]) -> None:
 
     from core.batch import BatchSpec
 
-    rows = db.query(
-        f"""
-        SELECT j.url, j.company, j.title, q.input_content,
-               NOT EXISTS (
-                   SELECT 1 FROM ai_queries c WHERE c.url = j.url
-                     AND c.check_type = 'closed'
-                     AND c.status IN ('passed', 'rejected')) AS needs_closed,
-               NOT EXISTS (
-                   SELECT 1 FROM ai_queries c WHERE c.url = j.url
-                     AND c.check_type = 'clearance'
-                     AND c.status IN ('passed', 'rejected')) AS needs_clearance
-        FROM jobs j
-        {CONTENT_LATERAL.format(url="j.url", columns="input_content")}
-        WHERE j.active AND {AI_ELIGIBLE_JOB.format(job="j")} AND (
-            NOT EXISTS (
-                SELECT 1 FROM ai_queries c WHERE c.url = j.url
-                  AND c.check_type = 'closed' AND c.status IN ('passed', 'rejected'))
-            -- Short-circuited pipelines (and any upstream verdict that later
-            -- flips to passing) leave downstream checks MISSING, not false;
-            -- a job invisible for want of a clearance verdict never heals
-            -- unless the sweep looks for holes in every check, not just the
-            -- first one.
-            OR NOT EXISTS (
-                SELECT 1 FROM ai_queries c WHERE c.url = j.url
-                  AND c.check_type = 'clearance' AND c.status IN ('passed', 'rejected'))
-        )
-        LIMIT 4000
-        """
-    )
-    if not rows:
-        set_progress(task_id, 0, 0, "nothing to verify")
-        return
-    schema = to_strict_json_schema(VerifyVerdict)
-    specs = [
-        BatchSpec(
-            r["url"], _VERIFY_INSTRUCTIONS, r["input_content"][:20000], "VerifyVerdict", schema
-        )
-        for r in rows
-    ]
-    by_url = {r["url"]: r for r in rows}
-    set_progress(task_id, 0, len(specs), "verify batch submitted (half price)")
-    model = resolve(VERIFY_TASK).model
-    hook = batch_event_hook(task_id, "verify", model)
-    existing = pending_batch_ids(task_id)
-    if existing:
-        results = await collect_pending(task_id, hook)
-    else:
-        results = await submit_or_collect(task_id, specs, model, "low", 1000, hook)
-    done = 0
-    for url, res in results.items():
-        job = by_url.get(url)
-        if job is None or res.error or not res.text:
-            continue
-        try:
-            parsed = VerifyVerdict.model_validate_json(res.text)
-        except Exception:
-            logger.warning(f"verify_new: unparsable batch output for {url}")
-            continue
-        usage = {
-            "prompt_tokens": (res.usage or {}).get("input_tokens", 0),
-            "completion_tokens": (res.usage or {}).get("output_tokens", 0),
-            "total_tokens": (res.usage or {}).get("total_tokens", 0),
-        }
-        # Write ONLY the verdicts this job was actually missing. A job is
-        # selected when EITHER check has a hole, but the text we just read is
-        # whatever was last cached, which can predate a closure that another
-        # path already recorded. Writing both would let a stale page overturn
-        # a fresh 'closed' rejection, and latest-row-wins would put the dead
-        # posting back on people's boards.
-        if job["needs_closed"]:
-            verdicts.record_ai_verdict(
-                url=url,
-                check_type="closed",
-                rejected=parsed.is_closed,
-                reason=parsed.closed_reason,
-                parsed_json=res.text,
-                model=model,
-                company=job["company"],
-                job_title=job["title"],
-                context="verify-batch",
-                usage=usage,
-                batched=True,
-                batch_id=res.batch_id,
+    specs = []
+    if not has_batch_work(task_id):
+        rows = db.query(
+            f"""
+            SELECT j.url, j.company, j.title, q.input_content,
+                   NOT EXISTS (
+                       SELECT 1 FROM ai_queries c WHERE c.url = j.url
+                         AND c.check_type = 'closed'
+                         AND c.status IN ('passed', 'rejected')) AS needs_closed,
+                   NOT EXISTS (
+                       SELECT 1 FROM ai_queries c WHERE c.url = j.url
+                         AND c.check_type = 'clearance'
+                         AND c.status IN ('passed', 'rejected')) AS needs_clearance
+            FROM jobs j
+            {CONTENT_LATERAL.format(url="j.url", columns="input_content")}
+            WHERE j.active AND {AI_ELIGIBLE_JOB.format(job="j")} AND (
+                NOT EXISTS (
+                    SELECT 1 FROM ai_queries c WHERE c.url = j.url
+                      AND c.check_type = 'closed' AND c.status IN ('passed', 'rejected'))
+                -- Short-circuited pipelines (and any upstream verdict that later
+                -- flips to passing) leave downstream checks MISSING, not false;
+                -- a job invisible for want of a clearance verdict never heals
+                -- unless the sweep looks for holes in every check, not just the
+                -- first one.
+                OR NOT EXISTS (
+                    SELECT 1 FROM ai_queries c WHERE c.url = j.url
+                      AND c.check_type = 'clearance' AND c.status IN ('passed', 'rejected'))
             )
-        if job["needs_clearance"]:
-            verdicts.record_ai_verdict(
-                url=url,
-                check_type="clearance",
-                rejected=parsed.requires_clearance_or_restrictions,
-                reason=parsed.clearance_reason,
-                parsed_json=res.text,
-                model=model,
-                company=job["company"],
-                job_title=job["title"],
-                context="verify-batch",
-                usage=usage if not job["needs_closed"] else {},
-                batched=True,
-                batch_id=res.batch_id,
+            LIMIT 4000
+            """
+        )
+        if not rows:
+            set_progress(task_id, 0, 0, "nothing to verify")
+            return
+        schema = to_strict_json_schema(VerifyVerdict)
+        specs = [
+            BatchSpec(
+                r["url"],
+                _VERIFY_INSTRUCTIONS,
+                r["input_content"][:20000],
+                "VerifyVerdict",
+                schema,
+                context={
+                    key: r[key] for key in ("company", "title", "needs_closed", "needs_clearance")
+                },
             )
-        done += 1
-        if done % 200 == 0:
-            set_progress(task_id, done, len(specs), "verified")
-    set_progress(task_id, done, len(specs), "verified")
+            for r in rows
+        ]
+        set_progress(task_id, 0, len(specs), "verify batch submitted")
+    results, _ = await run_batched(task_id, VERIFY_TASK, specs)
+    for res in results:
+        with consume_result(task_id, res) as receipt:
+            if not receipt.pending:
+                continue
+            job = res.request.context if res.request else None
+            if not job:
+                receipt.outcome = "unknown_request"
+                continue
+            if res.error or not res.text:
+                receipt.outcome = "failed"
+                continue
+            try:
+                parsed = VerifyVerdict.model_validate_json(res.text)
+            except ValueError:
+                logger.warning("verify_new: unparsable batch output for %s", res.custom_id)
+                receipt.outcome = "invalid_output"
+                continue
+            # A verdict settled after submission takes precedence over this
+            # missing-check request, even if its original snapshot asked for it.
+            settled = {
+                row["check_type"]
+                for row in db.query(
+                    "SELECT DISTINCT check_type FROM ai_queries WHERE url = %s "
+                    "AND check_type IN ('closed', 'clearance') AND status IN ('passed', 'rejected')",
+                    (res.custom_id,),
+                )
+            }
+            usage = ai.batch_usage(res.usage)
+            written = False
+            for check, rejected, reason in (
+                ("closed", parsed.is_closed, parsed.closed_reason),
+                ("clearance", parsed.requires_clearance_or_restrictions, parsed.clearance_reason),
+            ):
+                if job.get(f"needs_{check}") and check not in settled:
+                    verdicts.record_ai_verdict(
+                        url=res.custom_id,
+                        check_type=check,
+                        rejected=rejected,
+                        reason=reason,
+                        parsed_json=res.text,
+                        model=res.model,
+                        company=job["company"],
+                        job_title=job["title"],
+                        context="verify-batch",
+                        usage=usage,
+                        batched=True,
+                        batch_id=res.batch_id,
+                    )
+                    usage = {}
+                    written = True
+            receipt.outcome = "written" if written else "superseded"
+    done, total = progress_counts(task_id)
+    set_progress(task_id, done, total, "verified")

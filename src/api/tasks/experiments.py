@@ -18,14 +18,18 @@ import logging
 from decimal import Decimal
 from typing import Any
 
-from api import budget, db
+from api import db
+from api.batch_results import progress_counts
 from api.tasks.runtime import (
     AwaitingBatch,
     _park_awaiting_batch,
     batch_event_hook,
     collect_pending,
+    consume_result,
+    has_batch_work,
     pending_batch_ids,
     set_progress,
+    snapshot_specs,
 )
 from core import pricing, providers
 from core.store import AI_ELIGIBLE_JOB, CONTENT_LATERAL, VERIFIED_OPEN
@@ -163,26 +167,6 @@ def _usage(res: Any) -> dict[str, int]:
         "output_tokens": u.get("output_tokens", 0),
         "reasoning_tokens": (u.get("output_tokens_details") or {}).get("reasoning_tokens", 0),
     }
-
-
-def _model_of_batch(batch_id: str) -> str | None:
-    row = db.query_one("SELECT model FROM ai_batches WHERE provider_batch_id = %s", (batch_id,))
-    return row["model"] if row else None
-
-
-def _hook(task_id: int):
-    """One hook for a task whose batches ran on several models: each event is
-    priced with the model its batch was submitted on, read back from the
-    batch row, rather than one model for all."""
-    hooks: dict[str, Any] = {}
-
-    def on_event(batch_id: str, status: str, counts: dict[str, int]) -> None:
-        model = _model_of_batch(batch_id) or ""
-        if model not in hooks:
-            hooks[model] = batch_event_hook(task_id, PURPOSE, model)
-        hooks[model](batch_id, status, counts)
-
-    return on_event
 
 
 def deployed_verdicts(purpose: str, urls: list[str], params: dict[str, Any]) -> dict[str, dict]:
@@ -345,7 +329,21 @@ def summarise(experiment_id: int) -> dict[str, Any]:
             a["pass_rate"] = round(
                 sum(1 for f in mine.values() if not f.get("should_filter")) / len(mine), 3
             )
-    return {"reference": reference, "arms": by_arm, "postings": len(urls)}
+    skipped = exp["params"].get("skipped") or {}
+    expected_arms = {
+        arm_name(arm["model"], arm["effort"]) for arm in exp["params"].get("arms", [])
+    } - set(skipped)
+    sampled = exp["params"].get("sampled")
+    expected = sampled * len(expected_arms) if sampled is not None else None
+    return {
+        "reference": reference,
+        "arms": by_arm,
+        "postings": len(urls),
+        "expected_results": expected,
+        "received_results": len(rows),
+        "missing_results": max(0, expected - len(rows)) if expected is not None else None,
+        "missing_arms": sorted(expected_arms - set(by_arm)),
+    }
 
 
 async def handle_run_experiment(task_id: int, payload: dict[str, Any]) -> None:
@@ -385,11 +383,14 @@ async def _run(task_id: int, payload: dict[str, Any]) -> None:
         "UPDATE ai_experiments SET status = 'running', task_id = %s WHERE id = %s",
         (task_id, experiment_id),
     )
-    hook = _hook(task_id)
-    if not pending_batch_ids(task_id):
+    if not has_batch_work(task_id):
         rows = sample(int(params.get("sample") or 100), str(params.get("seed") or experiment_id))
         if not rows:
             raise RuntimeError("no eligible postings to sample")
+        db.execute(
+            "UPDATE ai_experiments SET params = params || %s::jsonb WHERE id = %s",
+            (json.dumps({"sampled": len(rows)}), experiment_id),
+        )
         instructions = step["instructions"](params)
         schema = to_strict_json_schema(step["model"])
         ids: list[str] = []
@@ -407,11 +408,21 @@ async def _run(task_id: int, payload: dict[str, Any]) -> None:
                     step["input"](r),
                     step["model"].__name__,
                     schema,
+                    context={
+                        "experiment_id": experiment_id,
+                        "purpose": exp["purpose"],
+                        "arm": arm_name(model, effort),
+                        "url": r["url"],
+                    },
                 )
                 for r in rows
             ]
             ids += await submit_responses_batches(
-                specs, model, effort, step["max_output_tokens"], on_event=hook
+                snapshot_specs(task_id, specs),
+                model,
+                effort,
+                step["max_output_tokens"],
+                on_event=batch_event_hook(task_id, PURPOSE, model),
             )
         db.execute(
             "UPDATE ai_experiments SET params = params || %s::jsonb WHERE id = %s",
@@ -433,50 +444,62 @@ async def _run(task_id: int, payload: dict[str, Any]) -> None:
             )
         raise AwaitingBatch()
 
-    results = await collect_pending(task_id, hook)
-    stored = 0
-    for custom_id, res in results.items():
-        arm, _, url = custom_id.partition("|")
-        model = arm.split("@", 1)[0]
-        usage = _usage(res)
-        cost = pricing.estimate_cost_usd(
-            model, usage["input_tokens"], usage["output_tokens"], batched=True
-        )
-        if usage["input_tokens"] or usage["output_tokens"]:
-            budget.record_fleet_usage(PURPOSE, model, usage["input_tokens"], usage["output_tokens"])
-        output = None
-        error = res.error
-        if res.text and not res.error:
-            try:
-                output = step["model"].model_validate_json(res.text).model_dump(mode="json")
-            except Exception as exc:
-                error = f"unparsable: {str(exc)[:200]}"
-        db.execute(
-            """
-            INSERT INTO ai_experiment_results (experiment_id, arm, url, output, usage, cost_usd, error)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
-            ON CONFLICT (experiment_id, arm, url) DO UPDATE
-                SET output = EXCLUDED.output, usage = EXCLUDED.usage,
-                    cost_usd = EXCLUDED.cost_usd, error = EXCLUDED.error
-            """,
-            (
-                experiment_id,
-                arm,
-                url,
-                db.jsonb(output) if output is not None else None,
-                db.jsonb(usage),
-                Decimal(cost) if cost is not None else None,
-                error,
-            ),
-        )
-        stored += 1
+    results = await collect_pending(task_id, batch_event_hook(task_id, PURPOSE, None))
+    for res in results:
+        with consume_result(task_id, res) as receipt:
+            if not receipt.pending:
+                continue
+            context = res.request.context if res.request else None
+            if not context:
+                receipt.outcome = "unknown_request"
+                continue
+            if context.get("experiment_id") != experiment_id:
+                receipt.outcome = "subject_mismatch"
+                continue
+            original_step = steps().get(context["purpose"])
+            if original_step is None:
+                receipt.outcome = "unknown_request"
+                continue
+            usage = _usage(res)
+            cost = pricing.estimate_cost_usd(
+                res.model, usage["input_tokens"], usage["output_tokens"], batched=True
+            )
+            output = None
+            error = res.error
+            if res.text and not res.error:
+                try:
+                    output = (
+                        original_step["model"].model_validate_json(res.text).model_dump(mode="json")
+                    )
+                except ValueError as exc:
+                    error = f"unparsable: {str(exc)[:200]}"
+            db.execute(
+                """
+                INSERT INTO ai_experiment_results (experiment_id, arm, url, output, usage, cost_usd, error)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (experiment_id, arm, url) DO UPDATE
+                    SET output = EXCLUDED.output, usage = EXCLUDED.usage,
+                        cost_usd = EXCLUDED.cost_usd, error = EXCLUDED.error
+                """,
+                (
+                    experiment_id,
+                    context["arm"],
+                    context["url"],
+                    db.jsonb(output) if output is not None else None,
+                    db.jsonb(usage),
+                    Decimal(cost) if cost is not None else None,
+                    error,
+                ),
+            )
+            receipt.outcome = "written" if output is not None else "failed"
+    stored, total = progress_counts(task_id, successful=("written", "failed"))
     if pending_batch_ids(task_id):
         # Stragglers still out: the worker parks again; the summary waits.
-        set_progress(task_id, stored, stored, "collected some batches, waiting on the rest")
+        set_progress(task_id, stored, total, "collected some batches, waiting on the rest")
         return
     summary = summarise(experiment_id)
     db.execute(
         "UPDATE ai_experiments SET status = 'done', summary = %s, finished_at = %s WHERE id = %s",
         (db.jsonb(summary), datetime.datetime.now(datetime.UTC), experiment_id),
     )
-    set_progress(task_id, stored, stored, "scored")
+    set_progress(task_id, stored, total, "scored")
