@@ -17,7 +17,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from api import db, metrics
+from api import board_eligibility, criteria, db, metrics
 
 logger = logging.getLogger("jobtracker_worker")
 
@@ -40,44 +40,19 @@ def materialize_passing(user_id: int) -> int:
     row. Existing rows (including hidden ones) are untouched, so deleting a
     row means 'bring it back next run if it still passes' while hiding is
     permanent."""
-    from api import criteria as crit
-
-    settings = db.query_one(
-        "SELECT bypass_sponsorship_filter, criteria FROM user_settings WHERE user_id = %s",
-        (user_id,),
-    )
-    params = {
-        "uid": user_id,
-        "bypass": settings["bypass_sponsorship_filter"] if settings else True,
-        **crit.params(settings),
-    }
+    params = board_eligibility.settings_params(user_id)
     with db.pool.connection() as conn:
         result = conn.execute(
             f"""
             WITH enabled AS (
-                -- DISTINCT for the same reason as visibility.FULL: duplicate
-                -- prompt_hashes cancel out in this query's symmetric counts,
-                -- but the two predicates must stay spelled the same way or
-                -- the read path and the write path drift apart again.
-                SELECT DISTINCT prompt_hash FROM user_filters
-                WHERE user_id = %(uid)s AND enabled
+                {board_eligibility.ENABLED_FILTERS}
             ),
-            latest_check AS (
-                SELECT DISTINCT ON (url, check_type) url, check_type, status
-                FROM ai_queries
-                WHERE check_type IN ('closed', 'clearance') AND status IN ('passed', 'rejected')
-                ORDER BY url, check_type, id DESC
-            ),
+            {board_eligibility.LATEST_CHECK},
             pass_all AS (
                 SELECT j.id FROM jobs j
-                WHERE (j.source IN (SELECT source FROM user_sources WHERE user_id = %(uid)s)
+                WHERE ({board_eligibility.SUBSCRIBED}
                        OR j.source = 'sheet_import' OR j.uploaded_by = %(uid)s)
-                  AND j.active
-                  {crit.SQL}
-                  AND EXISTS (SELECT 1 FROM latest_check lc WHERE lc.url = j.url
-                              AND lc.check_type = 'closed' AND lc.status = 'passed')
-                  AND (%(bypass)s OR EXISTS (SELECT 1 FROM latest_check lc WHERE lc.url = j.url
-                              AND lc.check_type = 'clearance' AND lc.status = 'passed'))
+                  AND {board_eligibility.STRUCTURAL.format(criteria=criteria.SQL)}
                   AND (SELECT COUNT(*) FROM enabled) > 0
                   AND (SELECT COUNT(*) FROM enabled e WHERE (
                         SELECT status FROM ai_queries q WHERE q.url = j.url
@@ -99,37 +74,15 @@ def materialize_passing(user_id: int) -> int:
 
 
 def candidates_for(user_id: int) -> list[dict[str, Any]]:
-    from api import criteria
-
-    settings = db.query_one(
-        "SELECT bypass_sponsorship_filter, criteria FROM user_settings WHERE user_id = %s",
-        (user_id,),
-    )
     return db.query(
         f"""
-        WITH latest_check AS (
-            SELECT DISTINCT ON (url, check_type) url, check_type, status
-            FROM ai_queries
-            WHERE check_type IN ('closed', 'clearance') AND status IN ('passed', 'rejected')
-            ORDER BY url, check_type, id DESC
-        )
+        WITH {board_eligibility.LATEST_CHECK}
         SELECT j.url, j.company, j.title FROM jobs j
-        WHERE j.active
-          AND (j.source IN (SELECT source FROM user_sources WHERE user_id = %(uid)s)
-               OR j.uploaded_by = %(uid)s)
-          {criteria.SQL}
-          AND EXISTS (SELECT 1 FROM latest_check lc
-                      WHERE lc.url = j.url AND lc.check_type = 'closed' AND lc.status = 'passed')
-          AND (%(bypass)s
-               OR EXISTS (SELECT 1 FROM latest_check lc
-                          WHERE lc.url = j.url AND lc.check_type = 'clearance' AND lc.status = 'passed'))
+        WHERE {board_eligibility.STRUCTURAL.format(criteria=criteria.SQL)}
+          AND ({board_eligibility.SUBSCRIBED} OR j.uploaded_by = %(uid)s)
         ORDER BY j.id DESC
         """,
-        {
-            "uid": user_id,
-            "bypass": settings["bypass_sponsorship_filter"] if settings else True,
-            **criteria.params(settings),
-        },
+        board_eligibility.settings_params(user_id),
     )
 
 
