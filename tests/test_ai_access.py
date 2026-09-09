@@ -45,3 +45,28 @@ def test_filter_admission_refuses_missing_owner_provider_key(client, user_header
     response = client.post("/v1/user/filters/run-all", headers=user_headers)
     assert response.status_code == 402
     assert response.json()["detail"]["code"] == "NO_API_KEY"
+
+
+def test_missing_model_refuses_draft_before_any_task_is_queued(client, user_headers, f):
+    uid = db.query_one("SELECT id FROM users WHERE sub = 'test-user'")["id"]
+    job_id = f.make_job()
+    f.make_board_row(uid, job_id, status="Saved")
+    resume = client.post(
+        "/v1/user/resumes",
+        json={"name": "main", "text": "Python experience."},
+        headers=user_headers,
+    )
+    assert resume.status_code == 201
+    db.execute(
+        "UPDATE user_settings SET api_key_enc = %s, ai_provider = 'openai_compatible', "
+        "ai_model = NULL WHERE user_id = %s",
+        (crypto.encrypt("test-key"), uid),
+    )
+    response = client.post(
+        f"/v1/user/jobs/{job_id}/application/draft", json={}, headers=user_headers
+    )
+    assert response.status_code == 402
+    assert response.json()["detail"]["code"] == "NO_MODEL"
+    assert (
+        db.query_one("SELECT count(*) AS n FROM tasks WHERE kind = 'application_draft'")["n"] == 0
+    )

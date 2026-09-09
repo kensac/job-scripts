@@ -301,11 +301,7 @@ def request_drafts(job_id: int, body: DraftRequest, user: AuthedUser = Depends(r
             raise _bad(404, "NOT_FOUND", "unknown resume")
     elif not db.query_one("SELECT 1 FROM user_resumes WHERE user_id = %s", (user.id,)):
         raise _bad(400, "NO_RESUME", "add a resume under settings first")
-    ent = budget.get_entitlement(user)
-    if ent.key_source is None:
-        raise _bad(
-            402, "BUDGET_EXCEEDED" if ent.owner_key else "NO_API_KEY", "no key to draft with"
-        )
+    ai_access.require_config(user)
     running = _inflight(user.id, job_id)
     if running:
         raise HTTPException(

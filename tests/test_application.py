@@ -14,6 +14,12 @@ from api import db
 from api.tasks import application as drafts
 from core import forms
 
+
+@pytest.fixture(autouse=True)
+def _available_owner_key(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-owner-test")
+
+
 GREENHOUSE = json.dumps(
     {
         "questions": [
