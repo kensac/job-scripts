@@ -303,6 +303,7 @@ def test_ledger_breakdowns_reconcile_without_verdicts_and_keep_unknown_price(cli
         totals["unknown_model_calls"],
     ) == (3, 2, 1, 1)
     assert totals["cost_usd"] == Decimal("1.25")
+    assert totals["ledger_rows"] == 3
     assert body["totals"]["calls"] == 0
     for rows in (ledger["by_model"], ledger["by_day"], body["by_purpose"]):
         assert sum(row["cost_usd"] for row in rows) == totals["cost_usd"]

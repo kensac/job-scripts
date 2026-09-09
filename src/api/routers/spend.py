@@ -33,29 +33,45 @@ def _scalars(sql: str, params: dict) -> dict[str, Any]:
 
 
 def _ledger_breakdowns(params: dict) -> dict[str, Any]:
-    # One statement gives every grouping the same population and snapshot.
+    # One snapshot keeps the breakdowns reconcilable. Reduce to daily model
+    # groups before rolling up: DISTINCT model across raw grouping sets caused
+    # a 160 ms ledger query on 99,831 duplicated corpus rows versus 54 ms for the old
+    # purpose-only query. Keep that volume in view when changing this plan.
     rows = db.query(
         f"""
-        WITH scoped AS (
-            SELECT *, (created_at AT TIME ZONE 'UTC')::date AS day
+        WITH daily_models AS (
+            SELECT purpose, model, (created_at AT TIME ZONE 'UTC')::date AS day,
+                   COUNT(*) AS calls,
+                   COUNT(*) FILTER (WHERE cost_usd IS NOT NULL) AS priced_calls,
+                   COUNT(*) FILTER (WHERE cost_usd IS NULL) AS unpriced_calls,
+                   COUNT(*) FILTER (WHERE model IS NULL) AS unknown_model_calls,
+                   COALESCE(SUM(cost_usd), 0) AS cost_usd,
+                   COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+                   COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
+                   COALESCE(SUM(total_tokens), 0) AS total_tokens,
+                   COALESCE(SUM(cached_tokens), 0) AS cached_tokens,
+                   COUNT(*) FILTER (WHERE batched) AS batched_calls,
+                   MIN(created_at) AS first_call,
+                   MAX(created_at) AS last_call
             FROM api_usage WHERE {_WINDOW}
+            GROUP BY 1, 2, 3
         )
         SELECT purpose, model, day, GROUPING(purpose, model, day) AS grouping,
-               COUNT(*) AS calls,
-               COUNT(*) AS ledger_rows,
-               COUNT(*) FILTER (WHERE cost_usd IS NOT NULL) AS priced_calls,
-               COUNT(*) FILTER (WHERE cost_usd IS NULL) AS unpriced_calls,
-               COUNT(*) FILTER (WHERE model IS NULL) AS unknown_model_calls,
+               COALESCE(SUM(calls), 0)::bigint AS calls,
+               COALESCE(SUM(calls), 0)::bigint AS ledger_rows,
+               COALESCE(SUM(priced_calls), 0)::bigint AS priced_calls,
+               COALESCE(SUM(unpriced_calls), 0)::bigint AS unpriced_calls,
+               COALESCE(SUM(unknown_model_calls), 0)::bigint AS unknown_model_calls,
                COALESCE(SUM(cost_usd), 0) AS cost_usd,
                COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
                COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
                COALESCE(SUM(total_tokens), 0) AS total_tokens,
                COALESCE(SUM(cached_tokens), 0) AS cached_tokens,
-               COUNT(*) FILTER (WHERE batched) AS batched_calls,
+               COALESCE(SUM(batched_calls), 0)::bigint AS batched_calls,
                COUNT(DISTINCT model) AS models,
-               MIN(created_at) AS first_call,
-               MAX(created_at) AS last_call
-        FROM scoped
+               MIN(first_call) AS first_call,
+               MAX(last_call) AS last_call
+        FROM daily_models
         GROUP BY GROUPING SETS ((), (purpose), (model), (day))
         """,
         params,
