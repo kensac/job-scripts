@@ -256,10 +256,6 @@ async def _collect_batch(
             if text is None:
                 result.error = "no output text"
 
-    for result in results.values():
-        if result.batch_id is None:
-            result.batch_id = batch.id
-
     if batch.error_file_id:
         try:
             err_content = await client.files.content(batch.error_file_id)
@@ -275,6 +271,10 @@ async def _collect_batch(
                     result.error = str(obj.get("error") or "batch error")
         except Exception as exc:
             logger.warning(f"Failed to read batch error file: {exc}")
+
+    for result in results.values():
+        if result.batch_id is None:
+            result.batch_id = batch.id
 
     _record_errors(batch, results)
     return results
