@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -285,8 +286,37 @@ _SETTINGS_DEFAULTS = {
 }
 
 
+# A person who is not an admin keeps postings at most this many days old:
+# 30 when they set nothing, never more (Kanishk, 2026-09-08). Checked where
+# the criteria are written; the same groups gate the admin routes.
+MAX_AGE_CAP_DAYS = 30
+_ADMIN_GROUPS = {
+    g.strip()
+    for g in os.environ.get("JOBTRACKER_ADMIN_GROUPS", "infra-admins").split(",")
+    if g.strip()
+}
+
+
+def _is_admin(groups: list[str] | None) -> bool:
+    return bool(_ADMIN_GROUPS.intersection(groups or []))
+
+
 @router.put("/user/settings")
 def put_settings(body: SettingsPut, user: AuthedUser = Depends(require_user)):
+    if body.criteria is not None and not _is_admin(user.groups):
+        if (body.criteria.max_age_days or 0) > MAX_AGE_CAP_DAYS:
+            raise HTTPException(
+                400,
+                detail={
+                    "code": "MAX_AGE_DAYS",
+                    "message": (
+                        f"Postings older than {MAX_AGE_CAP_DAYS} days are not kept on your "
+                        f"board; {MAX_AGE_CAP_DAYS} is the most your account can set."
+                    ),
+                },
+            )
+        if body.criteria.max_age_days is None:
+            body.criteria.max_age_days = MAX_AGE_CAP_DAYS
     row = None
     if body.ai_params is not None or body.ai_model is not None:
         row = db.query_one(

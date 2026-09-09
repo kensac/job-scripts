@@ -37,6 +37,48 @@ def _validate_ambiguous(value: str) -> str:
     return value
 
 
+def _refuse_second_enabled(user_id: int, except_id: int | None = None) -> None:
+    """One enabled filter per person (Kanishk, 2026-09-08): a new account's
+    three filters judged the whole catalog three times over, and one prompt
+    can hold every condition. Enabling a second is refused with the name of
+    the one that is on, so the person folds the two into one."""
+    other = db.query_one(
+        "SELECT id, name FROM user_filters WHERE user_id = %s AND enabled "
+        "AND (%s::bigint IS NULL OR id <> %s) ORDER BY id LIMIT 1",
+        (user_id, except_id, except_id),
+    )
+    if other:
+        raise HTTPException(
+            409,
+            detail={
+                "code": "ONE_FILTER",
+                "message": (
+                    f'One filter runs at a time, and "{other["name"]}" is on. '
+                    "Turn it off first, or fold this into it: one prompt can hold "
+                    "every condition you want."
+                ),
+                "enabled_filter_id": other["id"],
+            },
+        )
+
+
+def _blocked_message(user: AuthedUser, blocked: str | None) -> str | None:
+    return _budget_message(budget.get_entitlement(user)) if blocked else None
+
+
+def _budget_message(ent) -> str:
+    """The honest sentence for a spent shared budget: the numbers, and the
+    way past it."""
+    if not ent.owner_key:
+        return "There is no key to run on. Add your own OpenAI key under AI & keys."
+    cap = ent.weekly_token_budget or 0
+    return (
+        f"The shared weekly AI budget is used up: {ent.spent_this_week:,} of {cap:,} tokens "
+        "spent this week. It resets weekly. To keep going now, add your own OpenAI key under "
+        "AI & keys; your own key has no cap and is billed to you."
+    )
+
+
 def _running(user_id: int, kind: str, filter_id: int | None = None) -> dict | None:
     """The run of this kind still in flight for this person (for one filter
     when given), if any. A parent that split into chunks is 'waiting', not
@@ -107,6 +149,8 @@ def create_filter(body: FilterCreate, user: AuthedUser = Depends(require_user)):
         raise HTTPException(
             409, detail={"code": "DUPLICATE_NAME", "message": "filter name already exists"}
         )
+    if body.enabled:
+        _refuse_second_enabled(user.id)
     row = db.query_one(
         f"""
         INSERT INTO user_filters (user_id, name, prompt, on_ambiguous, fail_closed, enabled, prompt_hash)
@@ -130,7 +174,12 @@ def create_filter(body: FilterCreate, user: AuthedUser = Depends(require_user)):
             user, "run_filter", {"user_id": user.id, "filter_id": row["id"]}
         )
     visibility.request_refresh(user.id)
-    return {**row, "task_id": task_id, "run_blocked": blocked}
+    return {
+        **row,
+        "task_id": task_id,
+        "run_blocked": blocked,
+        "run_blocked_message": _blocked_message(user, blocked),
+    }
 
 
 @router.patch("/user/filters/{filter_id}")
@@ -145,6 +194,8 @@ def patch_filter(filter_id: int, body: FilterPatch, user: AuthedUser = Depends(r
         raise HTTPException(400, detail={"code": "EMPTY_PATCH", "message": "no fields to update"})
     if "on_ambiguous" in fields:
         _validate_ambiguous(fields["on_ambiguous"])
+    if fields.get("enabled") and not existing["enabled"]:
+        _refuse_second_enabled(user.id, filter_id)
     prompt = fields.get("prompt", existing["prompt"])
     on_ambiguous = fields.get("on_ambiguous", existing["on_ambiguous"])
     fields["prompt_hash"] = _hash(prompt, on_ambiguous)
@@ -169,7 +220,12 @@ def patch_filter(filter_id: int, body: FilterPatch, user: AuthedUser = Depends(r
             user, "run_filter", {"user_id": user.id, "filter_id": filter_id}
         )
     visibility.request_refresh(user.id)
-    return {**row, "task_id": task_id, "run_blocked": blocked}
+    return {
+        **row,
+        "task_id": task_id,
+        "run_blocked": blocked,
+        "run_blocked_message": _blocked_message(user, blocked),
+    }
 
 
 @router.delete("/user/filters/{filter_id}")
@@ -191,11 +247,7 @@ def run_filter(filter_id: int, user: AuthedUser = Depends(require_user)):
     task_id, blocked = _enqueue(user, "run_filter", {"user_id": user.id, "filter_id": filter_id})
     if blocked:
         raise HTTPException(
-            402,
-            detail={
-                "code": blocked,
-                "message": "add your own API key or wait for the weekly budget to reset",
-            },
+            402, detail={"code": blocked, "message": _budget_message(budget.get_entitlement(user))}
         )
     return {"task_id": task_id}
 
@@ -206,11 +258,7 @@ def run_all_filters(user: AuthedUser = Depends(require_user)):
     task_id, blocked = _enqueue(user, "run_all_filters", {"user_id": user.id})
     if blocked:
         raise HTTPException(
-            402,
-            detail={
-                "code": blocked,
-                "message": "add your own API key or wait for the weekly budget to reset",
-            },
+            402, detail={"code": blocked, "message": _budget_message(budget.get_entitlement(user))}
         )
     return {"task_id": task_id}
 
@@ -339,6 +387,7 @@ def adopt_preset(preset_id: int, user: AuthedUser = Depends(require_user)):
             409,
             detail={"code": "ALREADY_ADOPTED", "message": "this preset is already in your filters"},
         )
+    _refuse_second_enabled(user.id)
     row = db.query_one(
         f"""
         INSERT INTO user_filters
@@ -359,7 +408,12 @@ def adopt_preset(preset_id: int, user: AuthedUser = Depends(require_user)):
     assert row is not None
     task_id, blocked = _enqueue(user, "run_filter", {"user_id": user.id, "filter_id": row["id"]})
     visibility.request_refresh(user.id)
-    return {**row, "task_id": task_id, "run_blocked": blocked}
+    return {
+        **row,
+        "task_id": task_id,
+        "run_blocked": blocked,
+        "run_blocked_message": _blocked_message(user, blocked),
+    }
 
 
 class _ImprovedPrompt(BaseModel):
