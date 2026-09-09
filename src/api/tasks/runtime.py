@@ -749,16 +749,19 @@ async def collect_pending(task_id: int, hook) -> list[BatchResult]:
         metadata = _batch_metadata(task_id, existing)
         results, unfinished = await collect_finished_batches(existing, hook)
         for result in results:
-            result.model = metadata.get(result.batch_id, {}).get("model") if result.batch_id else None
+            result.model = (
+                metadata.get(result.batch_id, {}).get("model") if result.batch_id else None
+            )
         batch_results.checkpoint(task_id, results, unfinished)
         samples: dict[int, list[BatchResult]] = {}
         for result in results:
-            if result.batch_id and (prompt_id := metadata.get(result.batch_id, {}).get("prompt_id")):
+            if result.batch_id and (
+                prompt_id := metadata.get(result.batch_id, {}).get("prompt_id")
+            ):
                 samples.setdefault(prompt_id, []).append(result)
         for prompt_id, sampled in samples.items():
             _record_prompt_samples(prompt_id, sampled)
     return batch_results.unconsumed(task_id)
-
 
 
 def repark_if_unfinished(task_id: int) -> bool:
