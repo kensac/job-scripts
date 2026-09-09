@@ -9,7 +9,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from api import db
+from api import batch_results, db
 from api.tasks import rescrape
 from api.tasks.runtime import (
     consume_result,
@@ -480,5 +480,5 @@ async def handle_extract_requirements(task_id: int, payload: dict[str, Any]) -> 
             receipt.outcome = "written"
             done += 1
         if done % 200 == 0:
-            set_progress(task_id, done, len(results), "requirements extracted")
-    set_progress(task_id, done, len(results), "requirements extracted")
+            set_progress(task_id, *batch_results.progress_counts(task_id), "requirements extracted")
+    set_progress(task_id, *batch_results.progress_counts(task_id), "requirements extracted")

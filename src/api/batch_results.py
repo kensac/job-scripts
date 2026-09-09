@@ -97,3 +97,24 @@ def consume_result(task_id: int, result: BatchResult) -> Iterator[Receipt]:
                 "WHERE provider_batch_id=%s AND custom_id=%s AND task_id=%s",
                 (receipt.outcome, result.batch_id, result.custom_id, task_id),
             )
+
+
+def outcome_counts(task_id: int) -> dict[str, int]:
+    return {
+        row["outcome"]: row["count"]
+        for row in db.query(
+            "SELECT outcome, COUNT(*) AS count FROM batch_result_receipts "
+            "WHERE task_id=%s AND consumed_at IS NOT NULL GROUP BY outcome",
+            (task_id,),
+        )
+    }
+
+
+def progress_counts(task_id: int, successful: tuple[str, ...] = ("written",)) -> tuple[int, int]:
+    counts = outcome_counts(task_id)
+    submitted = db.query_one(
+        "SELECT COUNT(*) AS count FROM batch_requests WHERE task_id=%s", (task_id,)
+    )
+    return sum(counts.get(outcome, 0) for outcome in successful), max(
+        sum(counts.values()), submitted["count"] if submitted else 0
+    )

@@ -8,7 +8,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
-from api import db
+from api import batch_results, db
 from api.tasks import rescrape
 from api.tasks.runtime import (
     consume_result,
@@ -229,5 +229,5 @@ async def handle_extract_comp(task_id: int, payload: dict[str, Any]) -> None:
             )
             done += int(parsed_ok and bool(written))
         if done % 200 == 0:
-            set_progress(task_id, done, len(results), "comp extracted")
-    set_progress(task_id, done, len(results), "comp extracted")
+            set_progress(task_id, *batch_results.progress_counts(task_id), "comp extracted")
+    set_progress(task_id, *batch_results.progress_counts(task_id), "comp extracted")

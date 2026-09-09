@@ -75,8 +75,9 @@ async def test_saved_extraction_result_collects_without_new_candidates(
         row = db.query_one(
             "SELECT yoe_min, model, content_row_id FROM job_requirements WHERE url = %s", (url,)
         )
-        assert (
-            row is None
+        expected = (
+            None
             if changed
-            else row == {"yoe_min": 5, "model": "submitted-model", "content_row_id": content_row}
+            else {"yoe_min": 5, "model": "submitted-model", "content_row_id": content_row}
         )
+        assert row == expected

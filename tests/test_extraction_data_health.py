@@ -61,7 +61,9 @@ async def test_existing_negative_years_are_reextracted_even_when_the_page_hash_m
         pytest.fail("A repaired unchanged posting must not be extracted again")
 
     monkeypatch.setattr(requirements, "run_batched", must_not_repeat)
-    await requirements.handle_extract_requirements(task_id, {})
+    await requirements.handle_extract_requirements(
+        f.make_task("extract_requirements", status="running"), {}
+    )
 
 
 @pytest.mark.asyncio
@@ -113,7 +115,7 @@ async def test_legacy_annual_compensation_is_repaired_from_the_cached_posting_on
         pytest.fail("A repaired compensation record must not be extracted again")
 
     monkeypatch.setattr(comp, "run_batched", must_not_repeat)
-    await comp.handle_extract_comp(task_id, {})
+    await comp.handle_extract_comp(f.make_task("extract_comp", status="running"), {})
 
 
 @pytest.mark.asyncio
