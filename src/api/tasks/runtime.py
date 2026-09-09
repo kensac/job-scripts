@@ -449,7 +449,10 @@ def batch_event_hook(
             )
             cost = round(float(est), 6) if est is not None else None
             # Provider totals are snapshots. Recollecting unchanged totals
-            # must not append another ledger entry.
+            # must not append another ledger entry. The pre-checkpoint audit
+            # found 92 batched tasks at attempts=2 (ordinary park/resume), none
+            # at attempts=3 (collect/fail/recollect). Double booking was then
+            # a reachable risk, not an observed incident; retain the distinction.
             written = db.execute_count(
                 "UPDATE ai_batches SET input_tokens = %s, output_tokens = %s, "
                 "est_cost_usd = %s, updated_at = now() "
@@ -658,7 +661,9 @@ async def run_batched(
         specs,
         chosen.model,
         # An override may reject the shape's default effort. Use the effort
-        # resolved for the model actually being submitted.
+        # resolved for the model actually being submitted. An override once
+        # sent the shape's "none" to a model that rejected it: requirements
+        # received HTTP 400 for 21,525 lines on 2026-09-04 and 112 on 09-05.
         str(chosen.params.get("reasoning_effort") or shape.resolved_effort() or ""),
         shape.max_output_tokens,
         hook,
