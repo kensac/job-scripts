@@ -69,6 +69,13 @@ The batch event hook must use `charged_to_user=True` to avoid booking the same
 call to the fleet. Historical user ledger rows have no request or batch linkage;
 do not infer their transport from timestamps or rewrite their prices on read.
 
+On resume, `collect_pending` attaches model provenance from each `ai_batches`
+row. `run_batched` resolves routing only for new submissions; absent persisted
+model metadata stays unknown. Filter and application handlers collect paid work
+before checking current keys, resumes, or automatic-draft settings. Original
+filter input content is not retained in legacy task payloads, so resumed verdicts
+leave that field unknown rather than attributing today's page to an earlier call.
+
 **A batch is submitted whole and fails whole.** All requests failing means the
 submission was rejected on grounds that applied to every one of them; some
 failing means bad inputs. Different causes, and only the first is certainly a

@@ -111,13 +111,13 @@ def record_ai_verdict(
     reason: str,
     parsed_json: str | None,
     usage: dict[str, int],
-    model: str,
+    model: str | None,
     provider: str = "openai",
     key_source: str = "owner",
     company: str = "",
     job_title: str = "",
     instructions: str = "",
-    input_text: str = "",
+    input_text: str | None = "",
     filter_name: str | None = None,
     prompt_hash: str | None = None,
     context: str = "worker",
@@ -161,7 +161,9 @@ def record_ai_verdict(
     metrics.CHECKS.labels(check_type, status).inc()
     if not record_call_metrics:
         return
-    metrics.AI_CALLS.labels(provider, model, "error" if rejected is None else "ok").inc()
+    metrics.AI_CALLS.labels(
+        provider, model or "unknown", "error" if rejected is None else "ok"
+    ).inc()
     if not usage:
         return
     cost = pricing.estimate_cost_usd(
@@ -172,7 +174,7 @@ def record_ai_verdict(
         batched=batched,
     )
     if cost is not None:
-        metrics.AI_COST_USD.labels(provider, model, key_source).inc(float(cost))
+        metrics.AI_COST_USD.labels(provider, model or "unknown", key_source).inc(float(cost))
 
 
 def host_paced(url: str) -> bool:

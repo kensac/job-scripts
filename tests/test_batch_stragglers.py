@@ -19,6 +19,7 @@ import pytest
 from api import db, worker
 from api.tasks import batches as tasks_batches
 from api.tasks import runtime
+from core import batch
 from core.batch import BatchProgress
 from tests.factories import make_task
 
@@ -84,7 +85,7 @@ async def test_collect_pending_rewrites_payload_to_what_is_still_running(monkeyp
     tid = make_task("run_filter", {"batch_ids": ["a", "b"]}, status="running")
 
     async def fake(ids, on_event=None):
-        return {"u1": object()}, ["b"]
+        return {"u1": batch.BatchResult("u1", batch_id="a")}, ["b"]
 
     monkeypatch.setattr("core.batch.collect_finished_batches", fake)
     assert list(await runtime.collect_pending(tid, None)) == ["u1"]

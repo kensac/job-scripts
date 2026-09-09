@@ -398,10 +398,26 @@ def set_progress(
     events.publish_task(task_id)
 
 
+@dataclasses.dataclass(frozen=True)
+class BatchProvenance:
+    model: str | None
+
+
+def _batch_metadata(task_id: int, batch_ids: list[str]) -> dict[str, dict]:
+    return {
+        row["provider_batch_id"]: row
+        for row in db.query(
+            "SELECT provider_batch_id, model, prompt_id FROM ai_batches "
+            "WHERE task_id = %s AND provider_batch_id = ANY(%s)",
+            (task_id, batch_ids),
+        )
+    }
+
+
 def batch_event_hook(
     task_id: int,
     purpose: str,
-    model: str,
+    model: str | None,
     prompt_id: int | None = None,
     *,
     charged_to_user: bool = False,
@@ -418,12 +434,18 @@ def batch_event_hook(
     and let one person's usage consume the fleet's weekly ceiling.
     """
 
+    resumed_ids = set(pending_batch_ids(task_id))
+    metadata = _batch_metadata(task_id, list(resumed_ids)) if resumed_ids else {}
+
     def on_event(batch_id: str, status: str, counts: dict[str, int]) -> None:
+        persisted = metadata.get(batch_id, {})
+        event_model = persisted.get("model") if batch_id in resumed_ids else model
+        event_prompt_id = persisted.get("prompt_id") if batch_id in resumed_ids else prompt_id
         if "input_tokens" in counts or "output_tokens" in counts:
             # Terminal usage report: real token totals -> half-price batch cost.
             inp = counts.get("input_tokens", 0)
             out = counts.get("output_tokens", 0)
-            est = pricing.estimate_cost_usd(model, inp, out, batched=True)
+            est = pricing.estimate_cost_usd(event_model, inp, out, batched=True)
             cost = round(float(est), 6) if est is not None else None
             # SET, not +=. A batch's usage is a fact about that batch, and
             # this reports the totals for the whole batch every time it is
@@ -457,7 +479,7 @@ def batch_event_hook(
             # cannot be used without a purpose, and that is all the grouping
             # needs.
             if not charged_to_user:
-                budget.record_fleet_usage(purpose, model, inp, out, batched=True)
+                budget.record_fleet_usage(purpose, event_model, inp, out, batched=True)
             events.publish_task(task_id)
             return
         db.execute(
@@ -483,13 +505,13 @@ def batch_event_hook(
                 "bid": batch_id,
                 "tid": task_id,
                 "purpose": purpose,
-                "model": model,
+                "model": event_model,
                 "requests": counts.get("requests", 0),
                 "completed": counts.get("completed", 0),
                 "failed": counts.get("failed", 0),
                 "status": status,
                 "est": counts.get("est_tokens", 0),
-                "prompt_id": prompt_id,
+                "prompt_id": event_prompt_id,
             },
         )
         _record_batch_ids(task_id, [batch_id])
@@ -596,38 +618,24 @@ async def run_batched(
     specs: list,
     *,
     charged_to_user: bool = False,
-) -> tuple[dict[str, Any], Choice]:
-    """The one way a scheduled handler runs a batch.
+) -> tuple[dict[str, Any], Choice | BatchProvenance]:
+    """Submit using current routing, or collect using persisted batch provenance.
 
-    Every batch call site had the same ten lines: resolve, build a hook,
-    check for in-flight ids, reattach or submit. Four copies, and they had
-    already drifted - one passed `SHAPE.effort or "low"`, another
-    `SHAPE.resolved_effort() or A_CONSTANT`, so the same declaration produced
-    different requests depending on which file you were in.
-
-    Taking the shape rather than a model, an effort and a token cap removes the
-    chance to disagree with it. The shape is the single declaration of what the
-    work needs; unpacking it at four call sites is what let them diverge.
-
-    The purpose every ledger groups by comes from the SHAPE rather than beside
-    it, so a handler cannot name one purpose while running another's shape -
-    and so the key that configures a task is the same key that reports it.
-    A handler cannot run a batch without its cost, tokens and model landing in
-    analytics.
-    Anything recorded here in future - prompt identity, output samples - lands
-    for every caller at once rather than being added to four files and missed
-    in a fifth.
-
-    `charged_to_user` is for a shape run on one person's behalf (application
-    drafts): the handler books every result against them with
-    budget.record_usage, so the hook must not book the same tokens against
-    the fleet, and the fleet ceiling does not apply - their weekly entitlement
-    is the ceiling on their own spend, the way it is for their filters.
+    Collection never resolves current routing or applies a new-spend gate.
+    A result's model comes from its own batch row; missing metadata remains
+    unknown. User-charged callers book their results instead of the fleet hook.
     """
     purpose = shape.purpose
     existing = pending_batch_ids(task_id)
+    if existing:
+        metadata = _batch_metadata(task_id, existing)
+        models = {metadata.get(batch_id, {}).get("model") for batch_id in existing}
+        provenance = BatchProvenance(next(iter(models)) if len(models) == 1 else None)
+        hook = batch_event_hook(task_id, purpose, None, charged_to_user=charged_to_user)
+        results = await collect_pending(task_id, hook)
+        return results, provenance
     chosen = resolve(shape, override=configured_model(purpose))
-    if not existing and not charged_to_user:
+    if not charged_to_user:
         # Only when about to SUBMIT. A resuming task is collecting work the
         # provider has already been paid for, and refusing that would discard
         # it - the ceiling exists to stop new spend, not to strand old.
@@ -647,26 +655,19 @@ async def run_batched(
     hook = batch_event_hook(
         task_id, purpose, chosen.model, prompt_id=prompt_id, charged_to_user=charged_to_user
     )
-    if existing:
-        logger.info(f"Task {task_id}: reattaching to {len(existing)} in-flight batch(es)")
-        results = await collect_pending(task_id, hook)
-    else:
-        results = await submit_or_collect(
-            task_id,
-            specs,
-            chosen.model,
-            # The effort the router chose FOR THE MODEL IT CHOSE. The shape's
-            # own resolved_effort() answers for its sanctioned candidate only,
-            # so under an override it sent luna's "none" to nano: every line
-            # of every requirements batch on nano died on a 400 for it, on
-            # 2026-09-04 (21,525 lines) and again on 2026-09-05 (112).
-            str(chosen.params.get("reasoning_effort") or shape.resolved_effort() or ""),
-            shape.max_output_tokens,
-            hook,
-        )
-    # One exit, so the reattach path cannot quietly skip what the submit path
-    # records. A requeued sweep is the case that would lose its provenance,
-    # and it is the harder one to notice missing.
+    results = await submit_or_collect(
+        task_id,
+        specs,
+        chosen.model,
+        # The effort the router chose FOR THE MODEL IT CHOSE. The shape's
+        # own resolved_effort() answers for its sanctioned candidate only,
+        # so under an override it sent luna's "none" to nano: every line
+        # of every requirements batch on nano died on a 400 for it, on
+        # 2026-09-04 (21,525 lines) and again on 2026-09-05 (112).
+        str(chosen.params.get("reasoning_effort") or shape.resolved_effort() or ""),
+        shape.max_output_tokens,
+        hook,
+    )
     _record_prompt_samples(prompt_id, results)
     return results, chosen
 
@@ -756,7 +757,16 @@ async def collect_pending(task_id: int, hook) -> dict[str, Any]:
     existing = pending_batch_ids(task_id)
     if not existing:
         return {}
+    metadata = _batch_metadata(task_id, existing)
     results, unfinished = await collect_finished_batches(existing, hook)
+    samples: dict[int, dict] = {}
+    for custom_id, result in results.items():
+        persisted = metadata.get(result.batch_id, {})
+        result.model = persisted.get("model")
+        if prompt_id := persisted.get("prompt_id"):
+            samples.setdefault(prompt_id, {})[custom_id] = result
+    for prompt_id, sampled in samples.items():
+        _record_prompt_samples(prompt_id, sampled)
     if unfinished != existing:
         _set_batch_ids(task_id, unfinished)
     if unfinished:

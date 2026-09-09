@@ -208,7 +208,7 @@ def _normalised(place: Place) -> dict[str, str | None] | None:
     }
 
 
-def store(text: str, parsed: LocationExtract, model: str) -> None:
+def store(text: str, parsed: LocationExtract, model: str | None) -> None:
     code = text.strip().upper()
     if code in _CODES:
         parsed = LocationExtract(country=_CODES[code], region=code)
@@ -269,7 +269,11 @@ async def handle_classify_locations(task_id: int, payload: dict[str, Any]) -> No
             continue
         try:
             answer = LocationAnswer.model_validate_json(res.text)
-            store(text, LocationExtract(places=answer.places, remote=answer.remote), chosen.model)
+            store(
+                text,
+                LocationExtract(places=answer.places, remote=answer.remote),
+                getattr(res, "model", chosen.model),
+            )
             done += 1
         except Exception:
             # No row, so the next cycle asks again: the same re-sweep contract

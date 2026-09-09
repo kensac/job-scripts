@@ -82,6 +82,7 @@ class BatchResult:
     usage: dict | None = None
     error: str | None = None
     batch_id: str | None = None
+    model: str | None = None
 
 
 def _estimate_tokens(spec: BatchSpec, max_output_tokens: int) -> int:

@@ -452,7 +452,7 @@ def record_tokens(
     user_id: int,
     key_source: str,
     purpose: str,
-    model: str,
+    model: str | None,
     usage: dict[str, int],
     *,
     batched: bool = False,

@@ -231,7 +231,7 @@ def auto_draft(user_id: int) -> bool:
 
 
 def store_draft(
-    user_id: int, job_id: int, key: str, answer: str, model: str, kind: str = "draft"
+    user_id: int, job_id: int, key: str, answer: str, model: str | None, kind: str = "draft"
 ) -> None:
     turn = {
         "role": "assistant",
@@ -255,7 +255,7 @@ def _record_draft(
     parsed: Draft | None,
     usage: dict[str, int],
     key_source: str,
-    model: str,
+    model: str | None,
     kind: str,
     *,
     batched: bool,
@@ -266,6 +266,34 @@ def _record_draft(
     job_id, _, key = custom_id.partition("|")
     store_draft(user_id, int(job_id), key, parsed.answer, model, kind)
     return 1
+
+
+async def _batch_drafts(
+    task_id: int, user_id: int, specs: list, kind: str, *, resumed: bool
+) -> int:
+    results, chosen = await run_batched(task_id, APPLICATION_TASK, specs, charged_to_user=True)
+    done = 0
+    for custom_id, res in results.items():
+        job_id, _, key = custom_id.partition("|")
+        parsed = None
+        if res.error or not res.text:
+            logger.warning(f"application draft {key} for job {job_id}: {res.error or 'empty'}")
+        else:
+            try:
+                parsed = Draft.model_validate_json(res.text)
+            except ValueError:
+                logger.warning(f"application draft {key} for job {job_id}: unparsable")
+        done += _record_draft(
+            user_id,
+            custom_id,
+            parsed,
+            ai.batch_usage(res.usage),
+            "owner",
+            res.model if resumed else chosen.model,
+            kind,
+            batched=True,
+        )
+    return done
 
 
 async def draft_rows(
@@ -284,6 +312,8 @@ async def draft_rows(
 
     from core.batch import BatchSpec
 
+    if pending_batch_ids(task_id):
+        return await _batch_drafts(task_id, user_id, [], kind, resumed=True)
     resume = resume_text(user_id, resume_id)
     if not resume:
         raise RuntimeError("no resume on file; add one under settings first")
@@ -312,27 +342,7 @@ async def draft_rows(
         # any other step; the tokens are the person's, booked below, so the
         # standard caller is told not to book them against the fleet as well.
         set_progress(task_id, 0, total, f"{total} draft(s) submitted (half price)")
-        results, chosen = await run_batched(task_id, APPLICATION_TASK, specs, charged_to_user=True)
-        for custom_id, res in results.items():
-            job_id, _, key = custom_id.partition("|")
-            parsed = None
-            if res.error or not res.text:
-                logger.warning(f"application draft {key} for job {job_id}: {res.error or 'empty'}")
-            else:
-                try:
-                    parsed = Draft.model_validate_json(res.text)
-                except ValueError:
-                    logger.warning(f"application draft {key} for job {job_id}: unparsable")
-            done += _record_draft(
-                user_id,
-                custom_id,
-                parsed,
-                ai.batch_usage(res.usage),
-                cfg.key_source,
-                chosen.model,
-                kind,
-                batched=True,
-            )
+        done = await _batch_drafts(task_id, user_id, specs, kind, resumed=False)
     else:
         # A person's own key has no batch endpoint we can bill to them; one
         # live call per question, the way their filters run.
@@ -357,6 +367,10 @@ async def handle_application_draft(task_id: int, payload: dict[str, Any]) -> Non
     these questions), refresh (re-read the form). Drafts every question of
     the posting, drafted before or not."""
     user_id, job_id = payload["user_id"], payload["job_id"]
+    if pending_batch_ids(task_id):
+        done = await draft_rows(task_id, user_id, [], payload.get("resume_id"))
+        set_progress(task_id, done, done, "drafts collected")
+        return
     job = db.query_one("SELECT id, url, company, title FROM jobs WHERE id = %s", (job_id,))
     if not job:
         raise LookupError("unknown job")
@@ -394,6 +408,10 @@ async def handle_application_sweep(task_id: int, payload: dict[str, Any]) -> Non
     open a row for every paragraph question, and draft every row without a
     draft in one batch. Nothing is re-drafted: the button does that."""
     user_id = payload["user_id"]
+    if pending_batch_ids(task_id):
+        done = await draft_rows(task_id, user_id, [], kind="sweep")
+        set_progress(task_id, done, done, "drafts collected")
+        return
     # One sweep per person at a time. A parked sweep frees its worker, so
     # the next hourly one was claimed while a manual full-board sweep sat on
     # its batch (2026-09-07 00:00Z): both selected the same undrafted rows,
@@ -427,28 +445,18 @@ async def handle_application_sweep(task_id: int, payload: dict[str, Any]) -> Non
     reads_cap = int(db.get_config("application_form_reads_per_cycle"))
     drafts_cap = int(db.get_config("application_drafts_per_cycle"))
 
-    # A task back from the provider's batch collects and stores; it does
-    # not read another cap of forms first. The first sweep did (113 forms
-    # on the way out, 114 more on the way back, 2026-09-06), which spent
-    # two cycles of reads on one cycle and reported 60 of 158 done.
-    resumed = bool(pending_batch_ids(task_id))
-
     # "On their board" is the board's own membership predicate
     # (api.visibility.FAST), not a fresh spelling of it.
-    unread = (
-        []
-        if resumed
-        else db.query(
-            visibility.FAST.format(
-                columns="j.url",
-                extra=(
-                    "AND j.active AND NOT EXISTS "
-                    "(SELECT 1 FROM application_forms f WHERE f.url = j.url) "
-                    "ORDER BY j.created_at DESC LIMIT %(n)s"
-                ),
+    unread = db.query(
+        visibility.FAST.format(
+            columns="j.url",
+            extra=(
+                "AND j.active AND NOT EXISTS "
+                "(SELECT 1 FROM application_forms f WHERE f.url = j.url) "
+                "ORDER BY j.created_at DESC LIMIT %(n)s"
             ),
-            {"uid": user_id, "n": reads_cap},
-        )
+        ),
+        {"uid": user_id, "n": reads_cap},
     )
     read = skipped = failed = 0
     for r in unread:
@@ -468,25 +476,21 @@ async def handle_application_sweep(task_id: int, payload: dict[str, Any]) -> Non
 
     # A row for every paragraph question on a board posting whose form is
     # read and that this person has no rows for yet.
-    for r in (
-        []
-        if resumed
-        else db.query(
-            visibility.FAST.format(
-                columns=(
-                    "j.id AS job_id, (SELECT f.questions FROM application_forms f "
-                    "WHERE f.url = j.url) AS questions"
-                ),
-                extra=(
-                    "AND j.active "
-                    "AND EXISTS (SELECT 1 FROM application_forms f "
-                    "            WHERE f.url = j.url AND f.questions IS NOT NULL) "
-                    "AND NOT EXISTS (SELECT 1 FROM application_answers a "
-                    "                WHERE a.user_id = %(uid)s AND a.job_id = j.id)"
-                ),
+    for r in db.query(
+        visibility.FAST.format(
+            columns=(
+                "j.id AS job_id, (SELECT f.questions FROM application_forms f "
+                "WHERE f.url = j.url) AS questions"
             ),
-            {"uid": user_id},
-        )
+            extra=(
+                "AND j.active "
+                "AND EXISTS (SELECT 1 FROM application_forms f "
+                "            WHERE f.url = j.url AND f.questions IS NOT NULL) "
+                "AND NOT EXISTS (SELECT 1 FROM application_answers a "
+                "                WHERE a.user_id = %(uid)s AND a.job_id = j.id)"
+            ),
+        ),
+        {"uid": user_id},
     ):
         ensure_answer_rows(
             user_id, r["job_id"], [q for q in r["questions"] if q.get("kind") == "long"]
@@ -514,11 +518,7 @@ async def handle_application_sweep(task_id: int, payload: dict[str, Any]) -> Non
         """,
         (user_id, on_board, drafts_cap),
     )
-    # Collection must be reachable when there is nothing new to submit: a
-    # resumed task goes on to run_batched with an empty selection so the
-    # batch it parked on is collected, even if every row it drafted has
-    # since left the board.
-    if not rows and not resumed:
+    if not rows:
         set_progress(task_id, 0, 0, "nothing new to draft" + note)
         return
     done = await draft_rows(task_id, user_id, rows, kind="sweep")

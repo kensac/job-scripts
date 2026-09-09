@@ -246,15 +246,21 @@ async def handle_run_filter_batch_chunk(task_id: int, payload: dict[str, Any]) -
     flt = payload["filter"]
     jobs = payload["jobs"]
     parent_id = payload["parent_id"]
-    ent, cfg = load_config(user_id, bool(payload.get("ignore_budget")))
-    if cfg.key_source != "owner" or cfg.provider != "openai":
-        # Entitlement changed since split (e.g. BYO key added): run live.
-        await _process_jobs(task_id, user_id, ent, cfg, flt, jobs, parent_id=parent_id)
-        return
+    existing = pending_batch_ids(task_id)
+    cfg = None
+    if not existing:
+        ent, cfg = load_config(user_id, bool(payload.get("ignore_budget")))
+        if cfg.key_source != "owner" or cfg.provider != "openai":
+            await _process_jobs(task_id, user_id, ent, cfg, flt, jobs, parent_id=parent_id)
+            return
     instructions = build_custom_instructions(flt["prompt"], flt["on_ambiguous"])
     schema = to_strict_json_schema(FilterVerdict)
     specs, by_url = [], {}
     for job in jobs:
+        if existing:
+            # The original content is not snapshotted in legacy task payloads.
+            by_url[job["url"]] = (job, None)
+            continue
         content = get_content(job["url"])
         if not content:
             continue
@@ -262,12 +268,17 @@ async def handle_run_filter_batch_chunk(task_id: int, payload: dict[str, Any]) -
         specs.append(BatchSpec(job["url"], instructions, input_text, "FilterVerdict", schema))
         by_url[job["url"]] = (job, input_text)
     total = len(jobs)
-    if not specs:
+    if not specs and not existing:
         set_progress(task_id, total, total, "no content-ready jobs")
         if parent_id:
             update_parent_progress(parent_id)
         return
-    set_progress(task_id, 0, total, f"batch of {len(specs)} submitted (half price)")
+    label = (
+        "collecting submitted batches"
+        if existing
+        else f"batch of {len(specs)} submitted (half price)"
+    )
+    set_progress(task_id, 0, total, label)
     if parent_id:
         update_parent_progress(parent_id)
 
@@ -282,13 +293,13 @@ async def handle_run_filter_batch_chunk(task_id: int, payload: dict[str, Any]) -
     # charged_to_user: the loop below books every result against this
     # user with budget.record_usage, so the hook must not book the same
     # tokens again against the fleet.
-    hook = batch_event_hook(task_id, "filter", cfg.model, charged_to_user=True)
+    hook = batch_event_hook(task_id, "filter", cfg.model if cfg else None, charged_to_user=True)
     try:
-        existing = pending_batch_ids(task_id)
         if existing:
             logger.info(f"Task {task_id}: reattaching to {len(existing)} in-flight batch(es)")
             results = await collect_pending(task_id, hook)
         else:
+            assert cfg is not None
             results = await submit_or_collect(
                 task_id,
                 specs,
@@ -301,6 +312,7 @@ async def handle_run_filter_batch_chunk(task_id: int, payload: dict[str, Any]) -
         hb.cancel()
     for done, (url, res) in enumerate(results.items(), start=1):
         job, input_text = by_url[url]
+        model = res.model if existing else cfg.model if cfg else None
         usage = ai.batch_usage(res.usage)
         parsed = None
         reason = f"batch: {res.error or 'no output'}"
@@ -316,9 +328,9 @@ async def handle_run_filter_batch_chunk(task_id: int, payload: dict[str, Any]) -
             reason=parsed.reason if parsed else reason,
             parsed_json=res.text if parsed else None,
             usage=usage,
-            model=cfg.model,
-            provider=cfg.provider,
-            key_source=cfg.key_source,
+            model=model,
+            provider="openai",
+            key_source="owner",
             company=job["company"],
             job_title=job["title"],
             instructions=instructions,
@@ -329,9 +341,11 @@ async def handle_run_filter_batch_chunk(task_id: int, payload: dict[str, Any]) -
             batched=True,
             batch_id=res.batch_id,
             error=res.error,
-            reasoning_effort=cfg.params.get("reasoning_effort") or cfg.params.get("effort"),
+            reasoning_effort=(cfg.params.get("reasoning_effort") or cfg.params.get("effort"))
+            if cfg
+            else None,
         )
-        budget.record_tokens(user_id, cfg.key_source, "filter", cfg.model, usage, batched=True)
+        budget.record_tokens(user_id, "owner", "filter", model, usage, batched=True)
         if done % 50 == 0:
             set_progress(task_id, done, total, flt["name"])
             if parent_id:
