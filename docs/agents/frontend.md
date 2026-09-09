@@ -139,3 +139,25 @@ unique calls; current source reach is not historical reach. The legacy
 `batching.unrealized_savings_usd` is a hypothetical half-cost scenario. Missing
 batch IDs and recorded batch flags do not establish historical transport, and
 superseded verdicts do not establish wasted spend.
+
+## Extension configuration
+
+`GET /v1/extension/config?schema_version=1&adapter=<reader.host>` is public,
+nonsecret configuration. The typed response grants bundled features only;
+permission never overrides a person's preference. Admins replace the single
+`extension_policy` object through the validated config registry. Rollback
+replaces it with earlier settings; the content-derived revision returns with
+those settings. Revisions are identities, not ordered counters.
+
+The background worker owns the cache. Refresh before each fill, pin the
+validated response during it, and use an unexpired compatible cache only when
+refresh fails. Expired or invalid configuration pauses new automation; it must
+never re-enable a cached disablement. Keep manual submission and receipt
+recovery available. Report schema, revision, adapter and extension versions
+with outcomes, not field values. Older extensions without this protocol ignore
+these controls and require a packaged update first.
+
+All selectors, DOM operations, conditions and navigation stay bundled. Never
+serve the current ATS action recipes as remote configuration. New browser
+operations require a store release; remote answers and feature switches do not
+establish store approval or adapter stability.

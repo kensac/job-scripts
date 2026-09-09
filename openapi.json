@@ -3212,6 +3212,56 @@
         }
       }
     },
+    "/v1/extension/config": {
+      "get": {
+        "summary": "Extension Config",
+        "operationId": "extension_config_v1_extension_config_get",
+        "parameters": [
+          {
+            "name": "adapter",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+              "title": "Adapter"
+            }
+          },
+          {
+            "name": "schema_version",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Schema Version"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExtensionConfig"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/user/profile": {
       "get": {
         "summary": "Get Profile",
@@ -18697,6 +18747,92 @@
           "check"
         ],
         "title": "ExplainBody"
+      },
+      "ExtensionAvailability": {
+        "properties": {
+          "autofill": {
+            "$ref": "#/components/schemas/FeatureAvailability"
+          },
+          "ai_suggestions": {
+            "$ref": "#/components/schemas/FeatureAvailability"
+          },
+          "resume_upload": {
+            "$ref": "#/components/schemas/FeatureAvailability"
+          },
+          "auto_advance": {
+            "$ref": "#/components/schemas/FeatureAvailability"
+          }
+        },
+        "type": "object",
+        "required": [
+          "autofill",
+          "ai_suggestions",
+          "resume_upload",
+          "auto_advance"
+        ],
+        "title": "ExtensionAvailability"
+      },
+      "ExtensionConfig": {
+        "properties": {
+          "schema_version": {
+            "type": "integer",
+            "const": 1,
+            "title": "Schema Version",
+            "default": 1
+          },
+          "revision": {
+            "type": "string",
+            "title": "Revision"
+          },
+          "adapter": {
+            "type": "string",
+            "title": "Adapter"
+          },
+          "max_age_seconds": {
+            "type": "integer",
+            "title": "Max Age Seconds"
+          },
+          "features": {
+            "$ref": "#/components/schemas/ExtensionAvailability"
+          }
+        },
+        "type": "object",
+        "required": [
+          "revision",
+          "adapter",
+          "max_age_seconds",
+          "features"
+        ],
+        "title": "ExtensionConfig"
+      },
+      "FeatureAvailability": {
+        "properties": {
+          "allowed": {
+            "type": "boolean",
+            "title": "Allowed"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "FEATURE_DISABLED",
+                  "ADAPTER_DISABLED"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "allowed",
+          "reason"
+        ],
+        "title": "FeatureAvailability"
       },
       "Field_": {
         "properties": {
