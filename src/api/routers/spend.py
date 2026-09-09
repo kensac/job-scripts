@@ -1,16 +1,4 @@
-"""AI spend: where the money goes, and what it would take to spend less.
-
-Split out of admin.py rather than added to it - that module is already 1466
-lines and sixty endpoints.
-
-One thing this surface has to be honest about: a check_type is NOT a cost
-centre. verify_new asks one batched question that yields both a closed and a
-clearance verdict, and the usage is booked entirely to the closed row so the
-call is not counted twice (tasks/verify.py:373). Clearance therefore looks
-nearly free. Rather than hide that, every breakdown carries `joint_call_rows`
-- decided verdicts whose cost sits on a sibling row - so the number explains
-its own shape.
-"""
+"""Recorded usage estimates and separately labelled posting-verdict diagnostics."""
 
 from __future__ import annotations
 
@@ -26,10 +14,7 @@ from core.store import AI_ELIGIBLE_JOB
 
 router = APIRouter()
 
-# Contexts where a human is waiting on the answer. CLAUDE.md's rule is that
-# only these may run synchronously; everything else batches at half price. So
-# unbatched spend outside this set is not a fact about the workload, it is
-# money left on the table, and the endpoint reports it as such.
+# Legacy batching diagnostics classify contexts, not verified transport history.
 INTERACTIVE_CONTEXTS = ("explain", "manual")
 
 _WINDOW = "created_at >= now() - make_interval(days => %(days)s)"
@@ -38,6 +23,65 @@ _WINDOW = "created_at >= now() - make_interval(days => %(days)s)"
 def _scalars(sql: str, params: dict) -> dict[str, Any]:
     row = db.query_one(sql, params)
     return dict(row) if row else {}
+
+
+def _ledger_breakdowns(params: dict) -> dict[str, Any]:
+    # One statement gives every grouping the same population and snapshot.
+    rows = db.query(
+        f"""
+        WITH scoped AS (
+            SELECT *, (created_at AT TIME ZONE 'UTC')::date AS day
+            FROM api_usage WHERE {_WINDOW}
+        )
+        SELECT purpose, model, day, GROUPING(purpose, model, day) AS grouping,
+               COUNT(*) AS calls,
+               COUNT(*) FILTER (WHERE cost_usd IS NOT NULL) AS priced_calls,
+               COUNT(*) FILTER (WHERE cost_usd IS NULL) AS unpriced_calls,
+               COUNT(*) FILTER (WHERE model IS NULL) AS unknown_model_calls,
+               COALESCE(SUM(cost_usd), 0) AS cost_usd,
+               COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+               COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
+               COALESCE(SUM(total_tokens), 0) AS total_tokens,
+               COALESCE(SUM(cached_tokens), 0) AS cached_tokens,
+               COUNT(*) FILTER (WHERE batched) AS batched_calls,
+               COUNT(DISTINCT model) AS models,
+               MIN(created_at) AS first_call,
+               MAX(created_at) AS last_call
+        FROM scoped
+        GROUP BY GROUPING SETS ((), (purpose), (model), (day))
+        """,
+        params,
+    )
+    result: dict[str, Any] = {
+        "source": "api_usage",
+        "basis": "recorded_estimate",
+        "timezone": "UTC",
+        "window_days": params["days"],
+        "note": (
+            "Costs sum stored estimates for recorded usage, not provider invoices or "
+            "proof that every call was recorded. Unpriced rows are excluded from costs "
+            "and counted separately. Batched flags are recorded metadata, not verified "
+            "historical transport provenance."
+        ),
+        "by_purpose": [],
+        "by_model": [],
+        "by_day": [],
+    }
+    dimensions = {3: "purpose", 5: "model", 6: "day"}
+    for row in rows:
+        grouping = row.pop("grouping")
+        dimension = dimensions.get(grouping)
+        for name in ("purpose", "model", "day"):
+            if name != dimension:
+                row.pop(name)
+        if dimension:
+            result[f"by_{dimension}"].append(row)
+        else:
+            result["totals"] = row
+    for name in ("purpose", "model"):
+        result[f"by_{name}"].sort(key=lambda row: (-row["cost_usd"], row[name] or ""))
+    result["by_day"].sort(key=lambda row: row["day"])
+    return result
 
 
 @router.get("/admin/spend")
@@ -63,9 +107,7 @@ def spend(
         params,
     )
 
-    # Batch coverage, and the specific dollars that coverage would recover.
-    # Halving is exact rather than an estimate: the Batch API bills at half the
-    # synchronous rate for identical tokens.
+    # Retained compatibility estimate; missing batch IDs do not prove sync use.
     batching = _scalars(
         f"""
         SELECT COUNT(*) FILTER (WHERE batch_id IS NOT NULL) AS batched_calls,
@@ -131,9 +173,7 @@ def spend(
         params,
     )
 
-    # Spend that bought nothing. Failures are the obvious half; the subtler
-    # half is verdicts already superseded by a later one on the same
-    # (url, check_type) - work that was paid for and then overwritten.
+    # Supersession is a diagnostic, not proof that earlier work was unnecessary.
     waste = _scalars(
         f"""
         WITH scoped AS (
@@ -158,26 +198,7 @@ def spend(
         params,
     )
 
-    # What the bill bought that nobody can open.
-    #
-    # The sweeps that spend tokens selected postings with no reference to who
-    # subscribes to what, so 21.7M of a 99.7M-token 30-day bill went to boards
-    # no user had enabled and to one an admin had switched off. The gate is
-    # fixed (core/store.py AI_ELIGIBLE_JOB); this is how it stays fixed,
-    # because the only symptom was a number in a bill nobody attributed.
-    #
-    # Measured 2026-09-03. The ticket's own figure was 31.6%, counting
-    # `sheet_import` as unsubscribed; it is reachable, so the honest share is
-    # 21.8%.
-    #
-    # Three buckets, not two. 'no_posting' is a call whose url has no jobs row,
-    # and it is deliberate rather than unexplained: the requirements and
-    # embeddings sweeps are url-keyed so they still reach the fifth of the
-    # corpus whose posting row is gone and whose page can never be scraped
-    # again. That work cannot be attributed to a source, which is a different
-    # fact from being unwanted - folding it into 'unreachable' would report
-    # deliberate work as waste. Unpriced calls are counted, never summed as
-    # zero: a NULL cost is a rate nobody looked up, not a free call.
+    # Reach reflects current posting/subscription state, not historical reach.
     by_source_reach = db.query(
         f"""
         SELECT COALESCE(j.source, '') AS source,
@@ -210,64 +231,44 @@ def spend(
         for k in ("calls", "unpriced_calls", "cost_usd", "total_tokens"):
             acc[k] += row[k]
 
-    # Every AI caller, grouped by the purpose it already declares.
-    #
-    # The rest of this endpoint reads ai_queries, which is the VERDICT log -
-    # URL-keyed, and so structurally blind to any work that is not about a
-    # posting. Mail classification is $18.49 of real spend and writes no
-    # verdict row, so it was invisible here while being the largest line item
-    # in the system.
-    #
-    # api_usage is the ledger of record for spend and every path writes it: the
-    # sync path through record_usage, the batched path through the one hook
-    # every task already passes a purpose to. A new caller appears here with no
-    # wiring, because it cannot make a batched call without naming a purpose.
-    by_purpose = db.query(
-        """
-        SELECT purpose,
-               COUNT(*) AS calls,
-               COUNT(*) FILTER (WHERE cost_usd IS NULL) AS unpriced_calls,
-               COALESCE(SUM(cost_usd), 0) AS cost_usd,
-               COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
-               COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
-               COUNT(*) FILTER (WHERE batched) AS batched_calls,
-               COUNT(DISTINCT model) AS models,
-               MIN(created_at) AS first_call,
-               MAX(created_at) AS last_call
-        FROM api_usage
-        WHERE created_at >= now() - make_interval(days => %(days)s)
-        GROUP BY purpose ORDER BY 4 DESC
-        """,
-        {"days": days},
+    ledger = _ledger_breakdowns(params)
+    by_purpose = ledger["by_purpose"]
+    batching["basis"] = "verdict_metadata_hypothesis"
+    batching["note"] = (
+        "Missing batch IDs do not establish synchronous transport. "
+        "unrealized_savings_usd is a legacy half-cost scenario, not verified savings."
     )
-    ledger_total = sum((r["cost_usd"] or 0) for r in by_purpose)
+    diagnostics = {
+        "source": "ai_queries",
+        "basis": "recorded_verdict_estimate",
+        "note": (
+            "Rows are posting verdicts, not unique provider calls. Joint-call rows, "
+            "unknown historical transport and current reach limit interpretation; "
+            "superseded verdicts do not prove wasted spend."
+        ),
+        "totals": totals,
+        "batching": batching,
+        "by_check_type": by_check_type,
+        "by_reach": sorted(by_reach.values(), key=lambda r: r["calls"], reverse=True),
+        "by_source_reach": by_source_reach,
+        "by_model": by_model,
+        "by_day": by_day,
+        "waste": waste,
+    }
 
     return {
         "window": {"days": days, "from": totals.get("first_call"), "to": totals.get("last_call")},
         "totals": totals,
         "by_purpose": by_purpose,
-        # The two ledgers answer different questions and will not agree:
-        # ai_queries prices per URL and cannot see non-posting work; api_usage
-        # prices every call and cannot say which posting it was about. Stating
-        # both, labelled, beats printing one and calling it the total.
-        # Where spend sits against its ceiling, not just what it totals. The
-        # ceiling existed only inside the check that enforced it, so the first
-        # time anyone saw it was when scheduled work stopped - a control nobody
-        # can see is a control that only ever surprises.
         "fleet_budget": budget.fleet_budget_status(),
         "ledger": {
-            "spend_total_usd": ledger_total,
+            **ledger,
+            "spend_total_usd": ledger["totals"]["cost_usd"],
             "verdict_total_usd": totals.get("cost_usd"),
-            "note": (
-                "spend_total_usd covers every AI call by purpose; verdict_total_usd "
-                "covers only work that produced a posting verdict"
-            ),
         },
+        "verdict_diagnostics": diagnostics,
         "batching": batching,
         "by_check_type": by_check_type,
-        # Spend that reached a person, spend that could not, and spend whose
-        # posting is unknown - with the sources behind each, so the answer to
-        # "why is this not zero" is on the same screen as the number.
         "by_reach": sorted(by_reach.values(), key=lambda r: r["calls"], reverse=True),
         "by_source_reach": by_source_reach,
         "by_model": by_model,
@@ -291,18 +292,7 @@ def spend_calls(
     offset: int = Query(default=0, ge=0),
     user: AuthedUser = Depends(require_admin),
 ):
-    """The calls behind a purpose.
-
-    `by_purpose` was a dead end by construction: nothing anywhere renders
-    `api_usage` rows, so a purpose's total could be read and never opened. The
-    Responses page is over `ai_queries`, which is the verdict log and cannot
-    see work that produced no verdict - which is most of the bill.
-
-    `unpriced` is its own filter rather than a cost sort, because a NULL cost
-    is not a cheap call. It means nobody looked the rate up, and the set of
-    calls we cannot price is a different question from the set that was
-    inexpensive.
-    """
+    """Recorded usage rows; null cost means unknown price, not a free call."""
     where = ["created_at >= now() - make_interval(days => %(days)s)"]
     params: dict[str, Any] = {"days": days, "limit": limit, "offset": offset}
     if purpose:
