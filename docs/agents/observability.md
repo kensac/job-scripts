@@ -78,7 +78,8 @@ leave that field unknown rather than attributing today's page to an earlier call
 
 Batch requests retain their immutable input, instructions and consumer context in
 `batch_requests`. Collection checkpoints each provider batch/custom ID receipt
-before removing pending batch IDs. Consumers use `consume_result` to commit domain
+before removing pending batch IDs. A task payload marker retains empty terminal
+collections too; request snapshots alone never imply accepted submission. Consumers use `consume_result` to commit domain
 writes, user usage and acknowledgment in one transaction; replay skips acknowledged
 receipts. Fleet totals and their ledger entry share a transaction in the event hook.
 Use receipt outcome counts for cumulative progress across partial collection and

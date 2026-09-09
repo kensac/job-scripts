@@ -47,7 +47,8 @@ def checkpoint(task_id: int, results: list[BatchResult], unfinished: list[str]) 
             if owner is None or owner["task_id"] != task_id:
                 raise ValueError("batch result receipt belongs to another task")
         db.execute(
-            "UPDATE tasks SET payload=jsonb_set(COALESCE(payload,'{}'::jsonb),'{batch_ids}',%s) WHERE id=%s",
+            "UPDATE tasks SET payload=jsonb_set(COALESCE(payload,'{}'::jsonb),'{batch_ids}',%s) "
+            "|| '{\"batch_collection_checkpointed\":true}'::jsonb WHERE id=%s",
             (db.jsonb(unfinished), task_id),
         )
 

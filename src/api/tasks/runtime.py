@@ -629,7 +629,7 @@ async def run_batched(
     """
     purpose = shape.purpose
     existing = pending_batch_ids(task_id)
-    if existing or batch_results.has_results(task_id):
+    if has_batch_work(task_id):
         metadata = _batch_metadata(task_id, existing)
         models = {metadata.get(batch_id, {}).get("model") for batch_id in existing}
         provenance = BatchProvenance(next(iter(models)) if len(models) == 1 else None)
@@ -697,7 +697,7 @@ async def submit_or_collect(
     from core.batch import submit_responses_batches
 
     existing = pending_batch_ids(task_id)
-    if existing or batch_results.has_results(task_id):
+    if has_batch_work(task_id):
         logger.info(f"Task {task_id}: collecting {len(existing)} batch(es)")
         return await collect_pending(task_id, hook)
 
@@ -737,7 +737,14 @@ def resume_parked(task_id: int) -> None:
 
 
 def has_batch_work(task_id: int) -> bool:
-    return bool(pending_batch_ids(task_id)) or batch_results.has_results(task_id)
+    row = db.query_one(
+        "SELECT payload->'batch_ids' AS ids, "
+        "payload->'batch_collection_checkpointed' AS collected FROM tasks WHERE id=%s",
+        (task_id,),
+    )
+    return bool(row and (row["ids"] or row["collected"] is True)) or batch_results.has_results(
+        task_id
+    )
 
 
 async def collect_pending(task_id: int, hook) -> list[BatchResult]:

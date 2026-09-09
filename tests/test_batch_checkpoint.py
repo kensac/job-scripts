@@ -137,5 +137,29 @@ def test_request_snapshot_retries_and_collected_input_use_original_bytes(f):
     changed = BatchSpec("url", "new prompt", "new page", "Verdict", {}, context={"version": 2})
     assert snapshot_specs(tid, [original]) == [original]
     assert snapshot_specs(tid, [changed]) == [original]
+    assert not runtime.has_batch_work(tid)
     checkpoint(tid, [BatchResult("url", batch_id="paid")], [])
     assert unconsumed(tid)[0].request == original
+
+
+@pytest.mark.asyncio
+async def test_empty_terminal_collection_survives_crash_without_resubmitting(f, monkeypatch):
+    from api.tasks.application import APPLICATION_TASK
+
+    tid = f.make_task("application_draft", {"batch_ids": ["failed-batch"]}, status="running")
+
+    async def empty_terminal(ids, hook):
+        assert ids == ["failed-batch"]
+        return [], []
+
+    def no_new_submission(*args, **kwargs):
+        raise AssertionError("an already collected terminal batch must not resolve or resubmit")
+
+    monkeypatch.setattr("core.batch.collect_finished_batches", empty_terminal)
+    assert await runtime.collect_pending(tid, None) == []
+    assert runtime.pending_batch_ids(tid) == []
+    monkeypatch.setattr(runtime, "resolve", no_new_submission)
+    assert runtime.has_batch_work(tid)
+    results, _ = await runtime.run_batched(tid, APPLICATION_TASK, [])
+    assert results == []
+    assert await runtime.submit_or_collect(tid, [], "unused", "", 1, None) == []
