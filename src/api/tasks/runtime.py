@@ -16,6 +16,7 @@ Anything genuinely internal to this module keeps its underscore.
 
 from __future__ import annotations
 
+import dataclasses
 import datetime
 import logging
 import os
@@ -776,7 +777,12 @@ def repark_if_unfinished(task_id: int) -> bool:
     return _park_awaiting_batch(task_id, remaining)
 
 
-def load_config(user_id: int) -> tuple[Entitlement, ai.AIConfig]:
+def load_config(user_id: int, ignore_budget: bool = False) -> tuple[Entitlement, ai.AIConfig]:
+    """The person's entitlement and model config for a task. With
+    ignore_budget the shared weekly cap is lifted for this task only (an
+    admin queued it that way): the spend is still recorded, the cap itself
+    does not move (Kanishk, 2026-09-08: raising it and putting it back for
+    one run was the wrong tool)."""
     user = db.query_one("SELECT id, sub, email, name, groups FROM users WHERE id = %s", (user_id,))
     if not user:
         raise LookupError("unknown user")
@@ -790,4 +796,6 @@ def load_config(user_id: int) -> tuple[Entitlement, ai.AIConfig]:
         groups=user["groups"] or [],
     )
     ent = budget.get_entitlement(authed)
+    if ignore_budget and ent.owner_key:
+        ent = dataclasses.replace(ent, weekly_token_budget=None)
     return ent, budget.resolve_ai_config(user_id, ent)

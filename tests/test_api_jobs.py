@@ -182,16 +182,23 @@ def test_criteria_excluded_locations_match_places(client, user_headers):
 
 
 def test_criteria_date_posted_after_hides_older(client, user_headers):
+    # Dates inside the 30-day window a non-admin's criteria carry by default,
+    # so this exercises the date criterion alone.
     uid = _uid(user_headers)
-    old_id = _insert_job("src-e", "https://x.test/e1", date_posted=datetime.date(2024, 1, 1))
-    new_id = _insert_job("src-e", "https://x.test/e2", date_posted=datetime.date(2024, 8, 1))
+    today = datetime.date.today()
+    old_id = _insert_job(
+        "src-e", "https://x.test/e1", date_posted=today - datetime.timedelta(days=20)
+    )
+    new_id = _insert_job(
+        "src-e", "https://x.test/e2", date_posted=today - datetime.timedelta(days=5)
+    )
     _subscribe(uid, "src-e")
     _pass_closed("https://x.test/e1")
     _pass_closed("https://x.test/e2")
 
     put = client.put(
         "/v1/user/settings",
-        json={"criteria": {"date_posted_after": "2024-06-01"}},
+        json={"criteria": {"date_posted_after": (today - datetime.timedelta(days=10)).isoformat()}},
         headers=user_headers,
     )
     assert put.status_code == 200

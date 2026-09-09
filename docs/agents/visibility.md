@@ -48,6 +48,35 @@ are shared across people. The rolling window reads the date the board gave
 the posting and falls back to the day the catalog first saw it, so an
 undated posting still expires.
 
+**One enabled filter per person.** Enabling a second is refused (409
+`ONE_FILTER`, naming the one that is on) on create, on turning it on and on
+adopting a preset; a disabled second may exist. One prompt holds every
+condition, and a new account's first pass judges the whole open catalog
+once per enabled filter (23,000 postings and 10 dollars for one account on
+2026-09-08), so the rule is a cost rule as much as a product one. When the
+shared weekly budget is spent, every refusal says so in numbers (spent of
+cap, resets weekly) and names the way past it: the person's own key,
+under AI & keys, which has no cap and is billed to them; the frontend's
+onboarding checklist carries that as its fifth step.
+
+**A non-admin's board keeps postings at most 30 days old.** The age window
+(`criteria.max_age_days`) is 30 when a non-admin saves criteria without one
+and 30 at most; a wider value is refused at the write (400 `MAX_AGE_DAYS`)
+by `PUT /user/settings`, and every non-admin row was set to 30 on
+2026-09-08. Admins (the `JOBTRACKER_ADMIN_GROUPS` groups) keep the full
+range. Checked at the write only, by Kanishk's choice; a stored value is
+what applies.
+
+**A run may go past the shared cap without the cap moving.** `POST
+/admin/filters/run` `{user_id, filter_id?, ignore_budget}` queues a
+`run_filter` (or `run_all_filters`) task for any person; with
+`ignore_budget: true` the task, and the chunks it splits into, load their
+entitlement with the weekly cap lifted for that run alone, the spend still
+recorded in `api_usage`. Only an admin can queue it (the person's own run
+endpoints never set the flag), and the same flag on a task row written by
+hand works the same way. Raising `group_budgets.weekly_token_budget` for a
+run and putting it back is not the tool for this.
+
 ## Location criteria match places, not words
 
 Every distinct location string a board writes is one row of `locations`,

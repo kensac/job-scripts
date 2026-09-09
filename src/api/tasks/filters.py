@@ -170,13 +170,17 @@ async def _process_jobs(
 
 
 async def _run_filters(
-    task_id: int, user_id: int, filters: list[dict[str, Any]], batched: bool = False
+    task_id: int,
+    user_id: int,
+    filters: list[dict[str, Any]],
+    batched: bool = False,
+    ignore_budget: bool = False,
 ) -> None:
     """Splitter: compute the undecided work, then shard it. Scheduled (batched)
     runs send content-ready jobs through the half-price Batch API in large
     centralized chunks; jobs still needing a scrape go through live fleet
     chunks as usual (sharded parsing, centralized batching)."""
-    ent, cfg = load_config(user_id)
+    ent, cfg = load_config(user_id, ignore_budget)
     held = in_flight_urls(user_id)
     candidates = [j for j in candidates_for(user_id) if j["url"] not in held]
     urls = [j["url"] for j in candidates]
@@ -212,6 +216,7 @@ async def _run_filters(
                 "user_id": user_id,
                 "filter": {k: flt[k] for k in ("name", "prompt", "on_ambiguous", "prompt_hash")},
                 "jobs": jobs,
+                "ignore_budget": ignore_budget,
             },
         )
     db.execute(
@@ -225,7 +230,7 @@ async def _run_filters(
 
 
 async def handle_run_filter_chunk(task_id: int, payload: dict[str, Any]) -> None:
-    ent, cfg = load_config(payload["user_id"])
+    ent, cfg = load_config(payload["user_id"], bool(payload.get("ignore_budget")))
     await _process_jobs(
         task_id,
         payload["user_id"],
@@ -251,7 +256,7 @@ async def handle_run_filter_batch_chunk(task_id: int, payload: dict[str, Any]) -
     flt = payload["filter"]
     jobs = payload["jobs"]
     parent_id = payload["parent_id"]
-    ent, cfg = load_config(user_id)
+    ent, cfg = load_config(user_id, bool(payload.get("ignore_budget")))
     if cfg.key_source != "owner" or cfg.provider != "openai":
         # Entitlement changed since split (e.g. BYO key added): run live.
         await _process_jobs(task_id, user_id, ent, cfg, flt, jobs, parent_id=parent_id)
@@ -399,7 +404,13 @@ async def handle_run_filter(task_id: int, payload: dict[str, Any]) -> None:
     )
     if not flt:
         raise LookupError("unknown filter")
-    await _run_filters(task_id, flt["user_id"], [flt], batched=payload.get("batched", False))
+    await _run_filters(
+        task_id,
+        flt["user_id"],
+        [flt],
+        batched=payload.get("batched", False),
+        ignore_budget=bool(payload.get("ignore_budget")),
+    )
 
 
 async def handle_run_all_filters(task_id: int, payload: dict[str, Any]) -> None:
@@ -409,5 +420,9 @@ async def handle_run_all_filters(task_id: int, payload: dict[str, Any]) -> None:
     )
     if filters:
         await _run_filters(
-            task_id, payload["user_id"], filters, batched=payload.get("batched", False)
+            task_id,
+            payload["user_id"],
+            filters,
+            batched=payload.get("batched", False),
+            ignore_budget=bool(payload.get("ignore_budget")),
         )

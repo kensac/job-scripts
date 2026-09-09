@@ -59,7 +59,7 @@ def test_adopt_preset_creates_user_filter(client, admin_headers, user_headers):
     preset_id = created.json()["id"]
 
     adopted = client.post(f"/v1/filter-presets/{preset_id}/adopt", headers=user_headers)
-    assert adopted.status_code == 200
+    assert adopted.status_code == 200, adopted.text
     body = adopted.json()
     assert body["name"] == "Junior Friendly"
     assert body["enabled"] is True
@@ -91,9 +91,11 @@ def test_adopt_preset_creates_user_filter(client, admin_headers, user_headers):
         client.post(f"/v1/filter-presets/{preset_id}/adopt", headers=user_headers).status_code
         == 409
     )
+    # One filter runs at a time and the adopted one is on, so a hand-written
+    # second one comes in disabled.
     own = client.post(
         "/v1/user/filters",
-        json={"name": "hand written", "prompt": "no agencies"},
+        json={"name": "hand written", "prompt": "no agencies", "enabled": False},
         headers=user_headers,
     )
     assert own.status_code == 200 and own.json()["preset_id"] is None
@@ -295,3 +297,116 @@ def test_two_filter_names_sharing_a_prompt_are_one_row(client, user_headers, f):
     assert len(rows) == 1
     assert sorted(x["name"] for x in rows[0]["filters"]) == ["default", "general"]
     assert rows[0]["totals"]["rejected"] == 1
+
+
+def test_one_filter_is_enabled_at_a_time(client, user_headers, admin_headers):
+    """A person runs one filter (Kanishk, 2026-09-08: a new account's three
+    filters judged the whole catalog three times over). A second enabled
+    filter is refused on create, on turning it on, and on adopting a
+    preset, with the name of the one that is on; a disabled second is fine,
+    and turning the first off frees the slot."""
+    first = client.post(
+        "/v1/user/filters",
+        json={"name": "one", "prompt": "remote only"},
+        headers=user_headers,
+    ).json()
+    assert first["enabled"] is True
+
+    second = client.post(
+        "/v1/user/filters",
+        json={"name": "two", "prompt": "pays well"},
+        headers=user_headers,
+    )
+    assert second.status_code == 409
+    assert second.json()["detail"]["code"] == "ONE_FILTER"
+    assert second.json()["detail"]["enabled_filter_id"] == first["id"]
+    assert '"one" is on' in second.json()["detail"]["message"]
+    assert "fold this into it" in second.json()["detail"]["message"]
+
+    parked = client.post(
+        "/v1/user/filters",
+        json={"name": "two", "prompt": "pays well", "enabled": False},
+        headers=user_headers,
+    ).json()
+    assert parked["enabled"] is False
+    turn_on = client.patch(
+        f"/v1/user/filters/{parked['id']}", json={"enabled": True}, headers=user_headers
+    )
+    assert turn_on.status_code == 409 and turn_on.json()["detail"]["code"] == "ONE_FILTER"
+
+    # Editing the one that is on, or re-sending enabled on it, is not a second.
+    assert (
+        client.patch(
+            f"/v1/user/filters/{first['id']}",
+            json={"enabled": True, "prompt": "remote only, please"},
+            headers=user_headers,
+        ).status_code
+        == 200
+    )
+
+    preset_id = client.post(
+        "/v1/admin/filter-presets",
+        json={"name": "Remote Only", "prompt": "must be fully remote"},
+        headers=admin_headers,
+    ).json()["id"]
+    adopt = client.post(f"/v1/filter-presets/{preset_id}/adopt", headers=user_headers)
+    assert adopt.status_code == 409 and adopt.json()["detail"]["code"] == "ONE_FILTER"
+
+    assert (
+        client.patch(
+            f"/v1/user/filters/{first['id']}", json={"enabled": False}, headers=user_headers
+        ).status_code
+        == 200
+    )
+    assert (
+        client.patch(
+            f"/v1/user/filters/{parked['id']}", json={"enabled": True}, headers=user_headers
+        ).status_code
+        == 200
+    )
+
+
+def test_an_admin_queues_a_run_past_the_cap_for_one_run_only(
+    client, user_headers, admin_headers, monkeypatch
+):
+    """The shared weekly cap is a group setting; a run an admin queues with
+    ignore_budget goes past it for that run alone, the spend still recorded,
+    and the cap never moves. The person's own endpoints cannot set it."""
+    from api import budget, db
+    from api.tasks import runtime
+
+    flt = client.post(
+        "/v1/user/filters",
+        json={"name": "one", "prompt": "remote only", "enabled": False},
+        headers=user_headers,
+    ).json()
+    uid = db.query_one("SELECT id FROM users WHERE sub = %s", (user_headers["X-User-Sub"],))["id"]
+
+    forbidden = client.post(
+        "/v1/admin/filters/run",
+        json={"user_id": uid, "filter_id": flt["id"], "ignore_budget": True},
+        headers=user_headers,
+    )
+    assert forbidden.status_code == 403
+
+    queued = client.post(
+        "/v1/admin/filters/run",
+        json={"user_id": uid, "filter_id": flt["id"], "ignore_budget": True},
+        headers=admin_headers,
+    )
+    assert queued.status_code == 200, queued.text
+    task = db.query_one(
+        "SELECT kind, payload FROM tasks WHERE id = %s", (queued.json()["task_id"],)
+    )
+    assert task["kind"] == "run_filter" and task["payload"]["ignore_budget"] is True
+
+    # A spent cap blocks the ordinary load and not the flagged one.
+    spent = budget.Entitlement(
+        owner_key=True, weekly_token_budget=100, spent_this_week=1_000, has_byo_key=False, groups=[]
+    )
+    monkeypatch.setattr(budget, "get_entitlement", lambda authed: spent)
+    monkeypatch.setattr(budget, "resolve_ai_config", lambda user_id, ent: ("cfg", ent.key_source))
+    assert runtime.load_config(uid)[0].key_source is None
+    lifted, _ = runtime.load_config(uid, ignore_budget=True)
+    assert lifted.key_source == "owner" and lifted.weekly_token_budget is None
+    assert spent.weekly_token_budget == 100

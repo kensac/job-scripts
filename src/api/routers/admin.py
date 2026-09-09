@@ -148,6 +148,45 @@ def admin_list_presets(user: AuthedUser = Depends(require_admin)):
     return {"presets": db.query("SELECT * FROM filter_presets ORDER BY name")}
 
 
+class FilterRunBody(BaseModel):
+    user_id: int
+    # One filter, or every enabled filter of the person when absent.
+    filter_id: int | None = None
+    # Past the shared weekly cap, for this run only; the spend is recorded.
+    ignore_budget: bool = False
+
+
+@router.post("/filters/run")
+def admin_run_filter(body: FilterRunBody, user: AuthedUser = Depends(require_admin)):
+    """Queue a filter run for a person. With ignore_budget the run goes past
+    the shared weekly cap for that run alone, so the cap never has to be
+    raised and put back (Kanishk, 2026-09-08). The person's own run endpoint
+    cannot set the flag."""
+    from api.tasks.runtime import enqueue
+
+    if not db.query_one("SELECT 1 FROM users WHERE id = %s", (body.user_id,)):
+        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown user"})
+    if body.filter_id is not None:
+        if not db.query_one(
+            "SELECT 1 FROM user_filters WHERE id = %s AND user_id = %s",
+            (body.filter_id, body.user_id),
+        ):
+            raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown filter"})
+        task_id = enqueue(
+            "run_filter",
+            {
+                "user_id": body.user_id,
+                "filter_id": body.filter_id,
+                "ignore_budget": body.ignore_budget,
+            },
+        )
+    else:
+        task_id = enqueue(
+            "run_all_filters", {"user_id": body.user_id, "ignore_budget": body.ignore_budget}
+        )
+    return {"task_id": task_id, "ignore_budget": body.ignore_budget}
+
+
 @router.post("/filter-presets")
 def create_preset(body: PresetBody, user: AuthedUser = Depends(require_admin)):
     if not body.name or not body.prompt:

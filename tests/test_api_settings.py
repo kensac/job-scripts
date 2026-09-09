@@ -327,10 +327,34 @@ def test_put_settings_echoes_the_saved_settings_in_get_shape(client, user_header
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["ok"] is True
+    # A non-admin who leaves the window unset gets the 30-day default.
     assert body["criteria"] == {
         "date_posted_after": None,
-        "max_age_days": None,
+        "max_age_days": 30,
         "excluded_locations": [],
         "included_locations": ["United States", "Remote"],
     }
     assert body == {"ok": True, **client.get("/v1/user/settings", headers=user_headers).json()}
+
+
+def test_a_non_admin_keeps_postings_at_most_30_days_old(client, user_headers, admin_headers):
+    """The window is 30 by default and 30 at most for a person who is not an
+    admin, checked where the criteria are written; an admin keeps the full
+    range (Kanishk, 2026-09-08)."""
+    too_wide = client.put(
+        "/v1/user/settings", json={"criteria": {"max_age_days": 60}}, headers=user_headers
+    )
+    assert too_wide.status_code == 400 and too_wide.json()["detail"]["code"] == "MAX_AGE_DAYS"
+    assert "30 is the most" in too_wide.json()["detail"]["message"]
+    ok = client.put(
+        "/v1/user/settings", json={"criteria": {"max_age_days": 14}}, headers=user_headers
+    )
+    assert ok.status_code == 200 and ok.json()["criteria"]["max_age_days"] == 14
+    unset = client.put(
+        "/v1/user/settings", json={"criteria": {"excluded_locations": []}}, headers=user_headers
+    )
+    assert unset.status_code == 200 and unset.json()["criteria"]["max_age_days"] == 30
+    admin = client.put(
+        "/v1/user/settings", json={"criteria": {"max_age_days": 90}}, headers=admin_headers
+    )
+    assert admin.status_code == 200 and admin.json()["criteria"]["max_age_days"] == 90
