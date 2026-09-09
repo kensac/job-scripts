@@ -124,3 +124,18 @@ def test_checkpoint_refuses_receipt_owned_by_another_task(f):
     with pytest.raises(ValueError, match="another task"):
         batch_results.checkpoint(second, [result], [])
     assert runtime.pending_batch_ids(second) == ["same"]
+
+
+def test_request_snapshot_retries_and_collected_input_use_original_bytes(f):
+    from api.batch_results import checkpoint, snapshot_specs, unconsumed
+    from core.batch import BatchSpec
+
+    tid = f.make_task("run_filter_batch_chunk", {}, status="running")
+    original = BatchSpec(
+        "url", "original prompt", "original page", "Verdict", {}, context={"version": 1}
+    )
+    changed = BatchSpec("url", "new prompt", "new page", "Verdict", {}, context={"version": 2})
+    assert snapshot_specs(tid, [original]) == [original]
+    assert snapshot_specs(tid, [changed]) == [original]
+    checkpoint(tid, [BatchResult("url", batch_id="paid")], [])
+    assert unconsumed(tid)[0].request == original

@@ -373,7 +373,7 @@ async def handle_run_filter_batch_chunk(task_id: int, payload: dict[str, Any]) -
             budget.record_tokens(user_id, "owner", "filter", res.model, usage, batched=True)
             receipt.outcome = "written" if parsed else "failed"
         if done % 50 == 0:
-            set_progress(task_id, done, total, flt["name"])
+            set_progress(task_id, *progress_counts(task_id), flt["name"])
             if parent_id:
                 update_parent_progress(parent_id)
     set_progress(task_id, *progress_counts(task_id), flt["name"])
