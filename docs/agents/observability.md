@@ -59,6 +59,12 @@ Price the actual transport with `core.pricing`, not a blanket batch discount.
 Filter request inputs live in `core.filters.build_custom_input`, shared by live,
 batch and experiment callers. `api.verdicts.record_ai_verdict` persists their
 common verdict shape; transport exceptions and retries remain the caller's concern.
+Ordinary custom filters request only `FilterDecision.should_filter`; missing
+reason text is stored as NULL. `FilterResult` still reads older paid responses
+with reasons, and the explicit explanation endpoint retains `FilterVerdict`.
+`compute_filter_hash` preserves the historical explanation-prompt identity while
+`build_custom_decision_instructions` changes only the requested output. Editing
+output presentation must not force existing criteria to be judged again.
 Application drafts share request construction and result persistence in
 `api.tasks.application.draft_rows`.
 

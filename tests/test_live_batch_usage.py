@@ -31,11 +31,7 @@ async def test_every_consumed_result_records_transport_and_cached_usage(
     job_id = f.make_job()
     job = db.query_one("SELECT id, url, company, title FROM jobs WHERE id = %s", (job_id,))
     f.make_verdict(job["url"], "closed", content="Build useful software.")
-    text = (
-        '{"should_filter": false, "reason": "fits"}'
-        if family == "filter"
-        else '{"answer": "Fits."}'
-    )
+    text = '{"should_filter": false}' if family == "filter" else '{"answer": "Fits."}'
     if outcome == "empty":
         text = None
     elif outcome == "invalid":
@@ -97,6 +93,8 @@ async def test_every_consumed_result_records_transport_and_cached_usage(
     if family == "filter":
         verdict = db.query_one("SELECT * FROM ai_queries WHERE check_type = 'custom'")
         assert verdict["status"] == ("passed" if outcome == "success" else "failed")
+        if outcome == "success":
+            assert verdict["reason"] is None
         assert verdict["total_tokens"] == 1100
         assert verdict["cached_tokens"] == 400
         assert verdict["cost_usd"] == row["cost_usd"]

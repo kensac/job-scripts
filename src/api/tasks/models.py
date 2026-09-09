@@ -12,6 +12,20 @@ class JobExtract(BaseModel):
     terms: list[str]
 
 
+class FilterDecision(BaseModel):
+    should_filter: bool
+
+
+class FilterResult(FilterDecision):
+    """Read old paid responses without inventing evidence for decision-only calls."""
+
+    reason: str | None = None
+
+
+# This explanation schema retains its historical description verbatim because
+# providers receive it in requests. The eleven-cent estimate below motivated
+# the earlier reason-preserving policy; ordinary filtering is now explicitly
+# decision-only. Keep that evidence without changing the explanation wire format.
 class FilterVerdict(BaseModel):
     """The verdict shape for every custom-filter call, batched or live.
 
