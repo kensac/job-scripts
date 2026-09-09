@@ -169,6 +169,22 @@ def _enqueue(user: AuthedUser, filter_id: int | None, *, defer_conflict: bool = 
     return result.task_id, None
 
 
+def _after_filter_change(user: AuthedUser, row: dict, previous: dict | None) -> dict:
+    needs_judgement = row["enabled"] and (
+        previous is None
+        or not previous["enabled"]
+        or row["prompt_hash"] != previous["prompt_hash"]
+    )
+    task_id, blocked = _enqueue_on_change(user, row["id"]) if needs_judgement else (None, None)
+    visibility.request_refresh(user.id)
+    return {
+        **row,
+        "task_id": task_id,
+        "run_blocked": blocked,
+        "run_blocked_message": _blocked_message(user, blocked),
+    }
+
+
 @router.post("/user/filters")
 def create_filter(body: FilterCreate, user: AuthedUser = Depends(require_user)):
     with db.transaction():
@@ -200,16 +216,7 @@ def create_filter(body: FilterCreate, user: AuthedUser = Depends(require_user)):
             ),
         )
         assert row is not None
-    task_id, blocked = (None, None)
-    if body.enabled:
-        task_id, blocked = _enqueue_on_change(user, row["id"])
-    visibility.request_refresh(user.id)
-    return {
-        **row,
-        "task_id": task_id,
-        "run_blocked": blocked,
-        "run_blocked_message": _blocked_message(user, blocked),
-    }
+    return _after_filter_change(user, row, None)
 
 
 @router.patch("/user/filters/{filter_id}")
@@ -247,17 +254,7 @@ def patch_filter(filter_id: int, body: FilterPatch, user: AuthedUser = Depends(r
                 409, detail={"code": "DUPLICATE_NAME", "message": "filter name already exists"}
             ) from exc
         assert row is not None
-    task_id, blocked = (None, None)
-    hash_changed = row["prompt_hash"] != existing["prompt_hash"]
-    if row["enabled"] and (hash_changed or fields.get("enabled")):
-        task_id, blocked = _enqueue_on_change(user, filter_id)
-    visibility.request_refresh(user.id)
-    return {
-        **row,
-        "task_id": task_id,
-        "run_blocked": blocked,
-        "run_blocked_message": _blocked_message(user, blocked),
-    }
+    return _after_filter_change(user, row, existing)
 
 
 @router.delete("/user/filters/{filter_id}")
@@ -439,14 +436,7 @@ def adopt_preset(preset_id: int, user: AuthedUser = Depends(require_user)):
             ),
         )
         assert row is not None
-    task_id, blocked = _enqueue_on_change(user, row["id"])
-    visibility.request_refresh(user.id)
-    return {
-        **row,
-        "task_id": task_id,
-        "run_blocked": blocked,
-        "run_blocked_message": _blocked_message(user, blocked),
-    }
+    return _after_filter_change(user, row, None)
 
 
 class _ImprovedPrompt(BaseModel):
