@@ -275,3 +275,34 @@ def finished(collector):
         return await collector(batch_ids, on_event), []
 
     return _collect
+
+
+def make_batch_result(
+    task_id: int,
+    spec,
+    *,
+    text: str | None = None,
+    error: str | None = None,
+    usage: dict | None = None,
+    model: str | None = None,
+    batch_id: str | None = None,
+):
+    from api import batch_results
+    from core.batch import BatchResult
+
+    batch_id = batch_id or f"batch-{task_id}"
+    batch_results.snapshot_specs(task_id, [spec])
+    batch_results.checkpoint(
+        task_id,
+        [
+            BatchResult(
+                spec.custom_id, text=text, error=error, usage=usage, model=model, batch_id=batch_id
+            )
+        ],
+        [],
+    )
+    return next(
+        result
+        for result in batch_results.unconsumed(task_id)
+        if result.batch_id == batch_id and result.custom_id == spec.custom_id
+    )

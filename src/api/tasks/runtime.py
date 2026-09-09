@@ -25,10 +25,13 @@ from contextvars import ContextVar
 from decimal import Decimal
 from typing import Any, LiteralString, NamedTuple
 
-from api import ai, budget, db, events, metrics
+from api import ai, batch_results, budget, db, events, metrics
+from api.batch_results import consume_result as consume_result
+from api.batch_results import snapshot_specs as snapshot_specs
 from api.budget import Entitlement
 from api.tasks.board import demote_closed, materialize_passing
 from core import pricing
+from core.batch import BatchResult
 from core.prompts import PROMPT_SAMPLE_SIZE, prompt_hash
 from core.routing import Choice, TaskShape, resolve
 
@@ -574,7 +577,7 @@ def _record_prompt(purpose: str, instructions: str) -> int | None:
         return None
 
 
-def _record_prompt_samples(prompt_id: int | None, results: dict[str, Any]) -> None:
+def _record_prompt_samples(prompt_id: int | None, results: list[BatchResult]) -> None:
     """Up to PROMPT_SAMPLE_SIZE outputs per prompt version, never more.
 
     The cap is per prompt rather than per sweep, so a prompt running hourly for
@@ -597,10 +600,7 @@ def _record_prompt_samples(prompt_id: int | None, results: dict[str, Any]) -> No
         room = PROMPT_SAMPLE_SIZE - ((held or {}).get("n") or 0)
         if room <= 0:
             return
-        rows = [
-            (prompt_id, custom_id, res.text, res.error)
-            for custom_id, res in list(results.items())[:room]
-        ]
+        rows = [(prompt_id, res.custom_id, res.text, res.error) for res in results[:room]]
         if rows:
             with db.pool.connection() as conn:
                 conn.cursor().executemany(
@@ -618,7 +618,7 @@ async def run_batched(
     specs: list,
     *,
     charged_to_user: bool = False,
-) -> tuple[dict[str, Any], Choice | BatchProvenance]:
+) -> tuple[list[BatchResult], Choice | BatchProvenance]:
     """Submit using current routing, or collect using persisted batch provenance.
 
     Collection never resolves current routing or applies a new-spend gate.
@@ -627,13 +627,14 @@ async def run_batched(
     """
     purpose = shape.purpose
     existing = pending_batch_ids(task_id)
-    if existing:
+    if existing or batch_results.has_results(task_id):
         metadata = _batch_metadata(task_id, existing)
         models = {metadata.get(batch_id, {}).get("model") for batch_id in existing}
         provenance = BatchProvenance(next(iter(models)) if len(models) == 1 else None)
         hook = batch_event_hook(task_id, purpose, None, charged_to_user=charged_to_user)
         results = await collect_pending(task_id, hook)
         return results, provenance
+    specs = snapshot_specs(task_id, specs)
     chosen = resolve(shape, override=configured_model(purpose))
     if not charged_to_user:
         # Only when about to SUBMIT. A resuming task is collecting work the
@@ -679,7 +680,7 @@ async def submit_or_collect(
     reasoning_effort: str,
     max_output_tokens: int,
     hook,
-) -> dict[str, Any]:
+) -> list[BatchResult]:
     """The one way a scheduled handler runs a batch.
 
     First call submits and raises AwaitingBatch, freeing the worker. When
@@ -694,12 +695,13 @@ async def submit_or_collect(
     from core.batch import submit_responses_batches
 
     existing = pending_batch_ids(task_id)
-    if existing:
+    if existing or batch_results.has_results(task_id):
         logger.info(f"Task {task_id}: collecting {len(existing)} batch(es)")
         return await collect_pending(task_id, hook)
 
+    specs = snapshot_specs(task_id, specs)
     if not specs:
-        return {}
+        return []
     ids = await submit_responses_batches(
         specs, model, reasoning_effort, max_output_tokens, on_event=hook
     )
@@ -732,49 +734,29 @@ def resume_parked(task_id: int) -> None:
     events.publish_task(task_id)
 
 
-def _set_batch_ids(task_id: int, batch_ids: list[str]) -> None:
-    """Replaces the batches a task still waits on. _record_batch_ids only ever
-    adds; after a partial collection the collected ids must go, or the next
-    resume would download and re-record them."""
-    db.execute(
-        "UPDATE tasks SET payload = jsonb_set(COALESCE(payload, '{}'::jsonb), '{batch_ids}', %s) "
-        "WHERE id = %s",
-        (db.jsonb(batch_ids), task_id),
-    )
+def has_batch_work(task_id: int) -> bool:
+    return bool(pending_batch_ids(task_id)) or batch_results.has_results(task_id)
 
 
-async def collect_pending(task_id: int, hook) -> dict[str, Any]:
-    """The one way a resumed handler collects the batches it parked on.
-
-    Takes what has finished and leaves the rest on the payload, so a handler
-    that returns while its payload still names batches is parked again by the
-    worker (repark_if_unfinished) rather than finished. One straggler no
-    longer holds every finished batch beside it, and it no longer holds a
-    worker: the previous collector waited each id out in turn.
-    """
+async def collect_pending(task_id: int, hook) -> list[BatchResult]:
+    """Checkpoint paid responses before clearing provider IDs; replay until consumed."""
     from core.batch import collect_finished_batches
 
     existing = pending_batch_ids(task_id)
-    if not existing:
-        return {}
-    metadata = _batch_metadata(task_id, existing)
-    results, unfinished = await collect_finished_batches(existing, hook)
-    samples: dict[int, dict] = {}
-    for custom_id, result in results.items():
-        persisted = metadata.get(result.batch_id, {}) if result.batch_id is not None else {}
-        result.model = persisted.get("model")
-        if prompt_id := persisted.get("prompt_id"):
-            samples.setdefault(prompt_id, {})[custom_id] = result
-    for prompt_id, sampled in samples.items():
-        _record_prompt_samples(prompt_id, sampled)
-    if unfinished != existing:
-        _set_batch_ids(task_id, unfinished)
-    if unfinished:
-        logger.info(
-            f"Task {task_id}: collected {len(existing) - len(unfinished)} batch(es), "
-            f"{len(unfinished)} still running; will park again"
-        )
-    return results
+    if existing:
+        metadata = _batch_metadata(task_id, existing)
+        results, unfinished = await collect_finished_batches(existing, hook)
+        for result in results:
+            result.model = metadata.get(result.batch_id, {}).get("model") if result.batch_id else None
+        batch_results.checkpoint(task_id, results, unfinished)
+        samples: dict[int, list[BatchResult]] = {}
+        for result in results:
+            if result.batch_id and (prompt_id := metadata.get(result.batch_id, {}).get("prompt_id")):
+                samples.setdefault(prompt_id, []).append(result)
+        for prompt_id, sampled in samples.items():
+            _record_prompt_samples(prompt_id, sampled)
+    return batch_results.unconsumed(task_id)
+
 
 
 def repark_if_unfinished(task_id: int) -> bool:

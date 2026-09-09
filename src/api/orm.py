@@ -836,6 +836,30 @@ class AiBatch(Base):
     completed_at: Mapped[datetime.datetime | None]
 
 
+class BatchRequest(Base):
+    __tablename__ = "batch_requests"
+
+    task_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("tasks.id", ondelete="CASCADE"), primary_key=True
+    )
+    custom_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    snapshot: Mapped[dict | None] = mapped_column(JSONB)
+
+
+class BatchResultReceipt(Base):
+    __tablename__ = "batch_result_receipts"
+    __table_args__ = (Index("idx_batch_result_receipts_task", "task_id", "consumed_at"),)
+
+    provider_batch_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    custom_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    task_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("tasks.id", ondelete="CASCADE"))
+    response: Mapped[dict] = mapped_column(JSONB)
+    model: Mapped[str | None] = mapped_column(Text)
+    outcome: Mapped[str | None] = mapped_column(Text)
+    received_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+    consumed_at: Mapped[datetime.datetime | None]
+
+
 class AiBatchError(Base):
     """Every per-request error a provider batch returned, as the provider
     wrote it. The batch row says how many failed; this says why, which is

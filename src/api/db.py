@@ -3,13 +3,9 @@ from __future__ import annotations
 import datetime
 import decimal
 import json
-from collections.abc import Iterator
-from contextlib import contextmanager
-from contextvars import ContextVar
 from typing import Any, LiteralString, cast
 
 import dotenv
-from psycopg import Connection
 from psycopg.types.json import Jsonb
 
 from api.config import CONFIG_KEYS
@@ -19,7 +15,8 @@ dotenv.load_dotenv()
 # The pool and the instrumentation that must precede it live in core/pool.py,
 # which core/store.py and core/catalog.py share. See that module for why
 # there used to be two.
-from core.pool import pool  # noqa: E402
+from core.pool import connection as _connection  # noqa: E402
+from core.pool import pool, transaction  # noqa: E402
 
 # Weekly owner-key token budgets by Authentik group. Seeded once with ON
 # CONFLICT DO NOTHING so runtime edits via /v1/admin/group-budgets stick;
@@ -138,32 +135,6 @@ def _as_query(sql: str) -> LiteralString:
     return cast("LiteralString", sql)
 
 
-_transaction_connection: ContextVar[Connection[dict[str, Any]] | None] = ContextVar(
-    "transaction_connection", default=None
-)
-
-
-@contextmanager
-def _connection() -> Iterator[Connection[dict[str, Any]]]:
-    active = _transaction_connection.get()
-    if active is not None:
-        yield active
-    else:
-        with pool.connection() as conn:
-            yield conn
-
-
-@contextmanager
-def transaction() -> Iterator[None]:
-    """Keep helper calls and nested board writes on one atomic connection."""
-    with _connection() as conn, conn.transaction():
-        token = _transaction_connection.set(conn)
-        try:
-            yield
-        finally:
-            _transaction_connection.reset(token)
-
-
 def query(sql: str, params: Any = None) -> list[dict[str, Any]]:
     with _connection() as conn:
         return [dict(r) for r in conn.execute(_as_query(sql), params).fetchall()]
@@ -201,3 +172,8 @@ def _json_default(value: Any) -> Any:
 
 def jsonb(value: Any) -> Jsonb:
     return Jsonb(value, dumps=lambda v: json.dumps(v, default=_json_default))
+
+
+def executemany(sql: str, params: Any) -> None:
+    with _connection() as conn:
+        conn.cursor().executemany(_as_query(sql), params)

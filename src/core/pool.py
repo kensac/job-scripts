@@ -19,8 +19,13 @@ from __future__ import annotations
 
 import atexit
 import os
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
+from typing import Any
 
 import dotenv
+from psycopg import Connection
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
@@ -58,3 +63,29 @@ pool = ConnectionPool(
     open=True,
 )
 atexit.register(pool.close)
+
+
+_transaction_connection: ContextVar[Connection[dict[str, Any]] | None] = ContextVar(
+    "transaction_connection", default=None
+)
+
+
+@contextmanager
+def connection() -> Iterator[Connection[dict[str, Any]]]:
+    active = _transaction_connection.get()
+    if active is not None:
+        yield active
+    else:
+        with pool.connection() as conn:
+            yield conn
+
+
+@contextmanager
+def transaction() -> Iterator[None]:
+    """Keep helper calls and nested board writes on one atomic connection."""
+    with connection() as conn, conn.transaction():
+        token = _transaction_connection.set(conn)
+        try:
+            yield
+        finally:
+            _transaction_connection.reset(token)

@@ -73,6 +73,7 @@ class BatchSpec:
     input: str
     schema_name: str
     schema: dict
+    context: dict | None = None
 
 
 @dataclass
@@ -83,6 +84,7 @@ class BatchResult:
     error: str | None = None
     batch_id: str | None = None
     model: str | None = None
+    request: BatchSpec | None = None
 
 
 def _estimate_tokens(spec: BatchSpec, max_output_tokens: int) -> int:
@@ -495,7 +497,7 @@ async def run_responses_batch(
 
 async def collect_finished_batches(
     batch_ids: list[str], on_event: BatchEventHook = None
-) -> tuple[dict[str, BatchResult], list[str]]:
+) -> tuple[list[BatchResult], list[str]]:
     """Collect the batches that have reached a terminal state and report the
     ones that have not, without waiting on any of them.
 
@@ -509,8 +511,8 @@ async def collect_finished_batches(
     """
     client = _client()
     if not client:
-        return {}, list(batch_ids)
-    results: dict[str, BatchResult] = {}
+        return [], list(batch_ids)
+    results: list[BatchResult] = []
     unfinished: list[str] = []
     for batch_id in batch_ids:
         try:
@@ -525,12 +527,13 @@ async def collect_finished_batches(
         if batch.status not in _TERMINAL_STATES:
             unfinished.append(batch_id)
             continue
-        before = set(results)
-        await _collect_batch(client, batch, results, create_missing=True)
+        collected: dict[str, BatchResult] = {}
+        await _collect_batch(client, batch, collected, create_missing=True)
         _emit_usage(
             on_event,
             batch.id,
             batch.status,
-            {k: v for k, v in results.items() if k not in before},
+            collected,
         )
+        results.extend(collected.values())
     return results, unfinished
