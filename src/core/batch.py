@@ -7,14 +7,26 @@ import logging
 import os
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import TypedDict
 
 from openai import AsyncOpenAI
 from openai.types import Batch
 
-from core import store
+from core import pricing, store
 
-# on_event(batch_id, status, {"requests": n, "completed": x, "failed": y})
-BatchEventHook = Callable[[str, str, dict[str, int]], None] | None
+
+class BatchEventCounts(TypedDict, total=False):
+    requests: int
+    completed: int
+    failed: int
+    est_tokens: int
+    input_tokens: int
+    output_tokens: int
+    cached_tokens: int
+    request_usage: list[pricing.RequestTokens]
+
+
+BatchEventHook = Callable[[str, str, BatchEventCounts], None] | None
 
 logger = logging.getLogger("job_tracker")
 
@@ -165,16 +177,31 @@ def _emit_usage(
 ) -> None:
     if on_event is None:
         return
-    input_tokens = output_tokens = 0
+    input_tokens = output_tokens = cached_tokens = 0
+    request_usage: list[pricing.RequestTokens] = []
     for r in results.values():
         if r.usage:
             input_tokens += r.usage.get("input_tokens", 0) or 0
             output_tokens += r.usage.get("output_tokens", 0) or 0
+            cached = (r.usage.get("input_tokens_details") or {}).get("cached_tokens", 0) or 0
+            cached_tokens += cached
+            request_usage.append(
+                {
+                    "input_tokens": r.usage.get("input_tokens", 0) or 0,
+                    "output_tokens": r.usage.get("output_tokens", 0) or 0,
+                    "cached_tokens": cached,
+                }
+            )
     try:
         on_event(
             batch_id,
             status,
-            {"input_tokens": input_tokens, "output_tokens": output_tokens},
+            {
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "cached_tokens": cached_tokens,
+                "request_usage": request_usage,
+            },
         )
     except Exception:
         logger.exception("batch event hook failed")
