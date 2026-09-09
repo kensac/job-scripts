@@ -303,16 +303,18 @@ class TestDrafting:
 
         async def fake_run_batched(task_id, shape, specs, *, charged_to_user=False):
             submitted.append((shape.purpose, charged_to_user))
-            return {
-                s.custom_id: SimpleNamespace(
+            return [
+                f.make_batch_result(
+                    task_id,
+                    s,
                     text=json.dumps({"answer": f"Because {s.custom_id.partition('|')[2]}."}),
                     error=None,
                     usage={"input_tokens": 100, "output_tokens": 20, "total_tokens": 120},
-                    batch_id="b1",
+                    model="gpt-5.6-luna",
                 )
                 for s in specs
                 if "Blunt." in s.instructions and "Alice. Python." in s.input
-            }, SimpleNamespace(model="gpt-5.6-luna")
+            ], SimpleNamespace(model="gpt-5.6-luna")
 
         monkeypatch.setattr(drafts, "run_batched", fake_run_batched)
         r = client.post(f"/v1/user/jobs/{job_id}/application/draft", json={}, headers=user_headers)
@@ -371,12 +373,12 @@ class TestDrafting:
         _owner_config(monkeypatch)
 
         async def fake_run_batched(task_id, shape, specs, *, charged_to_user=False):
-            return {
-                s.custom_id: SimpleNamespace(
-                    text=json.dumps({"answer": "GPUs."}), error=None, usage=None, batch_id="b"
+            return [
+                f.make_batch_result(
+                    task_id, s, text=json.dumps({"answer": "GPUs."}), model="gpt-5.6-luna"
                 )
                 for s in specs
-            }, SimpleNamespace(model="gpt-5.6-luna")
+            ], SimpleNamespace(model="gpt-5.6-luna")
 
         monkeypatch.setattr(drafts, "run_batched", fake_run_batched)
         r = client.post(f"/v1/user/jobs/{job_id}/application/draft", json={}, headers=user_headers)
