@@ -18,11 +18,51 @@ from __future__ import annotations
 
 import datetime
 from decimal import Decimal
+from typing import TypedDict
 
 from core import providers
 from core.providers.spec import Rates, Tier
 
 _PER_MTOK = Decimal(1_000_000)
+
+
+class RequestTokens(TypedDict):
+    input_tokens: int
+    output_tokens: int
+    cached_tokens: int
+
+
+def estimate_usage_cost_usd(
+    model: str | None,
+    prompt_tokens: int,
+    completion_tokens: int,
+    *,
+    cached_tokens: int = 0,
+    batched: bool = False,
+    requests: list[RequestTokens] | None = None,
+) -> Decimal | None:
+    """Price request boundaries when supplied; aggregate tiered usage is unknown."""
+    if requests is None:
+        if is_tiered(model):
+            return None
+        return estimate_cost_usd(
+            model, prompt_tokens, completion_tokens, cached_tokens=cached_tokens, batched=batched
+        )
+    if rates_for(model) is None:
+        return None
+    total = Decimal(0)
+    for usage in requests:
+        cost = estimate_cost_usd(
+            model,
+            usage["input_tokens"],
+            usage["output_tokens"],
+            cached_tokens=usage["cached_tokens"],
+            batched=batched,
+        )
+        if cost is None:
+            return None
+        total += cost
+    return total
 
 
 def rates_for(model: str | None) -> Rates | None:

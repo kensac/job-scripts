@@ -373,6 +373,8 @@ def record_fleet_usage(
     completion_tokens: int,
     *,
     batched: bool = True,
+    cached_tokens: int = 0,
+    request_usage: list[pricing.RequestTokens] | None = None,
 ) -> None:
     """Scheduled work, charged to the fleet rather than to a person.
 
@@ -395,15 +397,23 @@ def record_fleet_usage(
     db.execute(
         "INSERT INTO api_usage (user_id, key_source, purpose, model, prompt_tokens, "
         "completion_tokens, total_tokens, cached_tokens, batched, cost_usd) "
-        "VALUES (NULL, 'server', %s, %s, %s, %s, %s, 0, %s, %s)",
+        "VALUES (NULL, 'server', %s, %s, %s, %s, %s, %s, %s, %s)",
         (
             purpose,
             model,
             prompt_tokens,
             completion_tokens,
             prompt_tokens + completion_tokens,
+            cached_tokens,
             batched,
-            pricing.estimate_cost_usd(model, prompt_tokens, completion_tokens, batched=batched),
+            pricing.estimate_usage_cost_usd(
+                model,
+                prompt_tokens,
+                completion_tokens,
+                cached_tokens=cached_tokens,
+                batched=batched,
+                requests=request_usage,
+            ),
         ),
     )
 
