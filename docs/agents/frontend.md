@@ -121,3 +121,21 @@ Automatic drafting only fills untouched answers. An explicit clear remains a
 person's edit and must not be treated as a request for another automatic draft.
 The request and write rules live in `api/application_writes.py` and
 `api/routers/application.py`; do not reproduce generation checks in the client.
+
+## Spend reporting
+
+Use `/admin/spend`'s `ledger.totals`, `ledger.by_model`, `ledger.by_day`, and
+`ledger.by_purpose` for recorded usage estimates. They share one population;
+daily buckets are UTC. `ledger_rows` counts usage records, which may contain
+batch aggregates; the legacy `calls` field is the same record count. Show
+`priced_calls`, `unpriced_calls`, and
+`unknown_model_calls` alongside costs: a zero known subtotal can still have
+unknown cost. The basis is `recorded_estimate`, not an invoice or proof that all
+provider calls were recorded.
+
+The old top-level totals and breakdowns remain compatibility fields for
+`verdict_diagnostics`, not ledger spend. Verdict rows need not correspond to
+unique calls; current source reach is not historical reach. The legacy
+`batching.unrealized_savings_usd` is a hypothetical half-cost scenario. Missing
+batch IDs and recorded batch flags do not establish historical transport, and
+superseded verdicts do not establish wasted spend.
