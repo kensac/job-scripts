@@ -23,6 +23,8 @@ from cryptography.fernet import InvalidToken
 from psycopg import Connection
 
 from api import crypto, db
+from api.config import ALL_GROUPS as ALL_GROUPS
+from api.config import group_access_allowed
 
 logger = logging.getLogger("jobtracker_api")
 
@@ -78,11 +80,6 @@ _DEAD_GRANT_ERROR = "invalid_grant"
 # PUT /v1/admin/config/{key}, not a deploy - which is the whole reason this is
 # not the hardcoded group set that routers/admin.py uses.
 CONNECT_GROUPS_KEY = "gmail_connect_groups"
-
-# Sentinel inside that list meaning "any signed-in user", so the feature can be
-# opened to everyone without inventing a second config key whose interaction
-# with the first has to be reasoned about.
-ALL_GROUPS = "*"
 
 
 class OAuthError(Exception):
@@ -152,11 +149,7 @@ def redirect_uris() -> list[str]:
 
 
 def connect_allowed(groups: list[str]) -> bool:
-    allowed = db.get_config(CONNECT_GROUPS_KEY, [])
-    if not isinstance(allowed, list):
-        logger.warning("%s is not a list, refusing access", CONNECT_GROUPS_KEY)
-        return False
-    return ALL_GROUPS in allowed or bool(set(allowed) & set(groups))
+    return group_access_allowed(CONNECT_GROUPS_KEY, groups)
 
 
 @dataclass(frozen=True)

@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 from api import ai, budget, db, filter_runs, visibility
 from api.auth import AuthedUser, require_user
+from api.config import group_access_allowed
 from api.models import FilterCreate, FilterPatch, ImprovePromptRequest
 from core.filters import ON_AMBIGUOUS_VALUES, build_custom_instructions, compute_prompt_hash
 
@@ -70,12 +71,7 @@ DEFERRED_MESSAGE = (
 
 
 def _rejudge_on_change(user: AuthedUser) -> bool:
-    """Whether this person's filter save re-judges the board at once. Same
-    shape as oauth.connect_allowed: a config list of groups, "*" for all."""
-    allowed = db.get_config(REJUDGE_GROUPS_KEY, [])
-    if not isinstance(allowed, list):
-        return False
-    return "*" in allowed or bool(set(allowed) & set(user.groups))
+    return group_access_allowed(REJUDGE_GROUPS_KEY, user.groups)
 
 
 def _enqueue_on_change(user: AuthedUser, filter_id: int) -> tuple:

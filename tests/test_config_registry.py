@@ -25,3 +25,52 @@ def test_every_key_is_served_with_its_type_help_and_choices(client, admin_header
 def test_every_seeded_key_is_in_the_registry_and_the_reverse():
     seeded = {key for key, _ in db._APP_CONFIG_SEED}
     assert seeded == set(admin._CONFIG_KEYS)
+
+
+def test_seeded_layout_round_trips_through_admin(client, admin_headers):
+    layout = db.get_config("board_default_column_layout")
+    response = client.put(
+        "/v1/admin/config/board_default_column_layout",
+        headers=admin_headers,
+        json={"value": layout},
+    )
+    assert response.status_code == 200, response.text
+    assert db.get_config("board_default_column_layout") == layout
+
+
+def test_unrestricted_text_can_be_written(client, admin_headers):
+    response = client.put(
+        "/v1/admin/config/application_draft_instructions",
+        headers=admin_headers,
+        json={"value": "Use the person's experience."},
+    )
+    assert response.status_code == 200, response.text
+    assert db.get_config("application_draft_instructions") == "Use the person's experience."
+
+
+def test_host_limits_reject_boolean_rates_without_coercion(client, admin_headers):
+    response = client.put(
+        "/v1/admin/config/fetch_host_limits",
+        headers=admin_headers,
+        json={"value": {"example.com": True}},
+    )
+    assert response.status_code == 400, response.text
+    assert db.get_config("fetch_host_limits") == {}
+
+
+def test_malformed_stored_group_flags_fail_closed():
+    from api import oauth
+    from api.auth import AuthedUser
+    from api.routers import filters
+
+    for key in ("gmail_connect_groups", "filter_rejudge_on_change_groups"):
+        db.execute("UPDATE app_config SET value = %s WHERE key = %s", (db.jsonb([{}]), key))
+    assert oauth.connect_allowed(["infra-admins"]) is False
+    assert (
+        filters._rejudge_on_change(
+            AuthedUser(
+                id=1, sub="test", name="Test", email="test@example.com", groups=["infra-admins"]
+            )
+        )
+        is False
+    )

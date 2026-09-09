@@ -18127,30 +18127,7 @@
       "ConfigPut": {
         "properties": {
           "value": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "integer"
-              },
-              {
-                "type": "string"
-              },
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "additionalProperties": {
-                  "type": "integer"
-                },
-                "type": "object"
-              }
-            ],
-            "title": "Value"
+            "$ref": "#/components/schemas/JsonValue"
           }
         },
         "type": "object",
@@ -18946,6 +18923,7 @@
         "type": "object",
         "title": "JobCorrection"
       },
+      "JsonValue": {},
       "LocationPlace": {
         "properties": {
           "country": {
