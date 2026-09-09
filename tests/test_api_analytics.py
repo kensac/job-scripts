@@ -99,12 +99,12 @@ def test_dead_on_arrival_reads_the_first_verdict_not_the_latest(client, admin_he
 def test_custom_filters_report_job_level_and_evaluation_level_denominators(
     client, admin_headers, f
 ):
-    """A job judged by two filters is two evaluations but one job, and it only
-    passes the board if it passed both."""
+    """Retiring a filter preserves its historical evaluations: two judgments
+    of one posting count as two evaluations but one evaluated posting."""
     f.make_source("filtered")
     user_id = f.make_user()
-    first = f.make_filter(user_id, name="a", prompt="backend")
-    second = f.make_filter(user_id, name="b", prompt="remote")
+    first = f.make_filter(user_id, name="a", prompt="backend", enabled=True)
+    second = f.make_filter(user_id, name="b", prompt="remote", enabled=False)
 
     _, both_pass = f.make_ready_job(source="filtered")
     f.make_verdict(both_pass, "custom", "passed", prompt_hash=first["prompt_hash"])

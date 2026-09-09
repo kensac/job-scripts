@@ -11,11 +11,12 @@ is reproducible and never depends on a build\'s private wording.
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from psycopg.errors import UniqueViolation
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints, field_validator
+from pydantic.json_schema import SkipJsonSchema
 
 from api import db
 from api.auth import AuthedUser, require_user
@@ -28,18 +29,36 @@ _MAX_STATE_BYTES = 32_000
 _COLS = "id, page, name, state, is_default, position, created_at, updated_at"
 
 
+ViewName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=80)]
+
+
 class ViewCreate(BaseModel):
     page: str = Field(min_length=1, max_length=80)
-    name: str = Field(min_length=1, max_length=80)
+    name: ViewName
     state: dict[str, Any] = Field(default_factory=dict)
     is_default: bool = False
 
 
 class ViewPatch(BaseModel):
-    name: str | None = Field(default=None, min_length=1, max_length=80)
-    state: dict[str, Any] | None = None
-    is_default: bool | None = None
-    position: int | None = Field(default=None, ge=0)
+    name: ViewName | SkipJsonSchema[None] = None
+    state: dict[str, Any] | SkipJsonSchema[None] = None
+    is_default: bool | SkipJsonSchema[None] = None
+    position: Annotated[int, Field(ge=0)] | SkipJsonSchema[None] = None
+
+    @field_validator("name", "state", "is_default", "position", mode="before")
+    @classmethod
+    def reject_null(cls, value: Any) -> Any:
+        # None marks omission internally, but clearing these non-null database
+        # fields is not an API operation. Validators run on supplied fields only.
+        if value is None:
+            raise ValueError("field may be omitted but must not be null")
+        return value
+
+
+def _lock_owner(user_id: int) -> None:
+    # A view row cannot serialize the first create on an empty page. The
+    # owner exists before any views and protects creation, ordering and delete.
+    db.query_one("SELECT id FROM users WHERE id = %s FOR NO KEY UPDATE", (user_id,))
 
 
 def _check_state(state: dict[str, Any]) -> None:
@@ -64,7 +83,7 @@ def _own(view_id: int, user: AuthedUser) -> dict[str, Any]:
 
 def _clear_default(user_id: int, page: str, keep: int | None) -> None:
     db.execute(
-        "UPDATE saved_views SET is_default = false WHERE user_id = %s AND page = %s AND id IS DISTINCT FROM %s",
+        "UPDATE saved_views SET is_default = false, updated_at = now() WHERE is_default AND user_id = %s AND page = %s AND id IS DISTINCT FROM %s",
         (user_id, page, keep),
     )
 
@@ -83,26 +102,30 @@ def list_views(page: str | None = None, user: AuthedUser = Depends(require_user)
 @router.post("", status_code=201)
 def create_view(body: ViewCreate, user: AuthedUser = Depends(require_user)):
     _check_state(body.state)
-    if body.is_default:
-        _clear_default(user.id, body.page, None)
     try:
-        row = db.query_one(
-            f"""
-            INSERT INTO saved_views (user_id, page, name, state, is_default, position)
-            VALUES (%(uid)s, %(page)s, %(name)s, %(state)s, %(default)s,
-                    (SELECT COALESCE(MAX(position), -1) + 1 FROM saved_views
-                     WHERE user_id = %(uid)s AND page = %(page)s))
-            RETURNING {_COLS}
-            """,
-            {
-                "uid": user.id,
-                "page": body.page,
-                "name": body.name.strip(),
-                "state": db.jsonb(body.state),
-                "default": body.is_default,
-            },
-        )
-    except UniqueViolation:
+        with db.transaction():
+            _lock_owner(user.id)
+            if body.is_default:
+                _clear_default(user.id, body.page, None)
+            row = db.query_one(
+                f"""
+                INSERT INTO saved_views (user_id, page, name, state, is_default, position)
+                VALUES (%(uid)s, %(page)s, %(name)s, %(state)s, %(default)s,
+                        (SELECT COALESCE(MAX(position), -1) + 1 FROM saved_views
+                         WHERE user_id = %(uid)s AND page = %(page)s))
+                RETURNING {_COLS}
+                """,
+                {
+                    "uid": user.id,
+                    "page": body.page,
+                    "name": body.name,
+                    "state": db.jsonb(body.state),
+                    "default": body.is_default,
+                },
+            )
+    except UniqueViolation as exc:
+        if exc.diag.constraint_name != "uq_saved_views_user_page_name":
+            raise
         raise HTTPException(
             409,
             detail={
@@ -116,25 +139,27 @@ def create_view(body: ViewCreate, user: AuthedUser = Depends(require_user)):
 @router.patch("/{view_id}")
 def patch_view(view_id: int, body: ViewPatch, user: AuthedUser = Depends(require_user)):
     """Rename, restate, reorder, or make default; a field left out is left alone."""
-    current = _own(view_id, user)
     fields = body.model_dump(exclude_unset=True)
     if not fields:
         raise HTTPException(400, detail={"code": "EMPTY_PATCH", "message": "no fields to update"})
     if "state" in fields:
         _check_state(fields["state"])
         fields["state"] = db.jsonb(fields["state"])
-    if "name" in fields:
-        fields["name"] = fields["name"].strip()
-    if fields.get("is_default"):
-        _clear_default(user.id, current["page"], view_id)
     cols = ", ".join(f"{k} = %({k})s" for k in fields)
     try:
-        row = db.query_one(
-            f"UPDATE saved_views SET {cols}, updated_at = now() WHERE id = %(id)s AND user_id = %(uid)s "
-            f"RETURNING {_COLS}",
-            {**fields, "id": view_id, "uid": user.id},
-        )
-    except UniqueViolation:
+        with db.transaction():
+            _lock_owner(user.id)
+            current = _own(view_id, user)
+            if fields.get("is_default"):
+                _clear_default(user.id, current["page"], view_id)
+            row = db.query_one(
+                f"UPDATE saved_views SET {cols}, updated_at = now() WHERE id = %(id)s AND user_id = %(uid)s "
+                f"RETURNING {_COLS}",
+                {**fields, "id": view_id, "uid": user.id},
+            )
+    except UniqueViolation as exc:
+        if exc.diag.constraint_name != "uq_saved_views_user_page_name":
+            raise
         raise HTTPException(
             409,
             detail={
@@ -147,6 +172,8 @@ def patch_view(view_id: int, body: ViewPatch, user: AuthedUser = Depends(require
 
 @router.delete("/{view_id}")
 def delete_view(view_id: int, user: AuthedUser = Depends(require_user)):
-    _own(view_id, user)
-    db.execute("DELETE FROM saved_views WHERE id = %s AND user_id = %s", (view_id, user.id))
+    with db.transaction():
+        _lock_owner(user.id)
+        _own(view_id, user)
+        db.execute("DELETE FROM saved_views WHERE id = %s AND user_id = %s", (view_id, user.id))
     return {"deleted": view_id}

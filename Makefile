@@ -125,10 +125,7 @@ dev-api:        ## run the API against the throwaway copy (needs JOBTRACKER_DEV_
 	  echo "Create the role and copy first:"; \
 	  echo "  python scripts/sync_testdb.py --name jobtracker_test --dev-role jobtracker_dev"; \
 	  exit 1; }
-	@case "$$JOBTRACKER_DEV_DATABASE_URL" in \
-	  *_test*|*_dev*|*_ci*) ;; \
-	  *) echo "refusing: JOBTRACKER_DEV_DATABASE_URL must name a disposable database"; exit 1;; \
-	esac
+	@python -m core.disposable_db --env JOBTRACKER_DEV_DATABASE_URL --allow-dev
 	DATABASE_URL="$$JOBTRACKER_DEV_DATABASE_URL" JOBTRACKER_SERVICE_TOKEN=dev-token \
 	  uvicorn api.app:app --port $(DEV_API_PORT) --reload
 

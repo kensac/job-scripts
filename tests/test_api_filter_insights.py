@@ -246,14 +246,15 @@ def test_counts_are_decisions_and_distinct_jobs_differ(client, admin_headers):
 def test_owner_states_resolved_shared_and_unknown(client, admin_headers, f):
     one = f.make_user(email="one@example.test")
     two = f.make_user(email="two@example.test")
-    for user_id, name, phash in (
-        (one, "solo", "hash_solo"),
-        (one, "shared", "hash_shared"),
-        (two, "shared_too", "hash_shared"),
+    for user_id, name, phash, enabled in (
+        (one, "solo", "hash_solo", True),
+        (one, "shared", "hash_shared", False),
+        (two, "shared_too", "hash_shared", True),
     ):
         db.execute(
-            "INSERT INTO user_filters (user_id, name, prompt, prompt_hash) VALUES (%s, %s, %s, %s)",
-            (user_id, name, "p", phash),
+            "INSERT INTO user_filters (user_id, name, prompt, prompt_hash, enabled) "
+            "VALUES (%s, %s, %s, %s, %s)",
+            (user_id, name, "p", phash, enabled),
         )
     _reject("https://j.test/1", "No pay disclosed.", "hash_solo", "solo")
     _reject("https://j.test/2", "No pay disclosed.", "hash_shared", "shared")

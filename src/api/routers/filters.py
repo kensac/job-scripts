@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from psycopg.errors import UniqueViolation
 from pydantic import BaseModel
 
-from api import ai, budget, db, events, visibility
+from api import ai, budget, db, filter_runs, visibility
 from api.auth import AuthedUser, require_user
 from api.models import FilterCreate, FilterPatch, ImprovePromptRequest
 from core.filters import ON_AMBIGUOUS_VALUES, build_custom_instructions, compute_prompt_hash
@@ -84,7 +84,7 @@ def _enqueue_on_change(user: AuthedUser, filter_id: int) -> tuple:
     stop recomputing whenever a filter changes, behind a flag)."""
     if not _rejudge_on_change(user):
         return None, "DEFERRED"
-    return _enqueue(user, "run_filter", {"user_id": user.id, "filter_id": filter_id})
+    return _enqueue(user, filter_id, defer_conflict=True)
 
 
 def _blocked_message(user: AuthedUser, blocked: str | None) -> str | None:
@@ -149,52 +149,57 @@ def list_filters(user: AuthedUser = Depends(require_user)):
     )
     for row in rows:
         row["task"] = _running(user.id, "run_filter", row["id"])
-    return {"filters": rows, "run_all_task": _running(user.id, "run_all_filters")}
+        row["run_admission"] = filter_runs.admission(user.id, row["id"])
+    return {
+        "filters": rows,
+        "run_all_task": _running(user.id, "run_all_filters"),
+        "run_all_admission": filter_runs.admission(user.id, None),
+    }
 
 
-def _enqueue(user: AuthedUser, kind: str, payload: dict) -> tuple:
-    """Returns (task_id, blocked_code). Never fails the enclosing save."""
+def _enqueue(user: AuthedUser, filter_id: int | None, *, defer_conflict: bool = False) -> tuple:
     ent = budget.get_entitlement(user)
     if ent.key_source is None:
         return None, ("BUDGET_EXCEEDED" if ent.owner_key else "NO_API_KEY")
-    row = db.query_one(
-        "INSERT INTO tasks (kind, payload) VALUES (%s, %s) RETURNING id",
-        (kind, db.jsonb(payload)),
-    )
-    assert row is not None
-    events.publish_task(row["id"])
-    return row["id"], None
+    result = filter_runs.enqueue(user.id, filter_id, policy="interactive")
+    if result.conflict:
+        if defer_conflict:
+            return None, "DEFERRED"
+        _refuse_second_run(result.conflict)
+    return result.task_id, None
 
 
 @router.post("/user/filters")
 def create_filter(body: FilterCreate, user: AuthedUser = Depends(require_user)):
-    _validate_ambiguous(body.on_ambiguous)
-    if db.query_one(
-        "SELECT id FROM user_filters WHERE user_id = %s AND name = %s",
-        (user.id, body.name),
-    ):
-        raise HTTPException(
-            409, detail={"code": "DUPLICATE_NAME", "message": "filter name already exists"}
+    with db.transaction():
+        db.query_one("SELECT id FROM users WHERE id = %s FOR UPDATE", (user.id,))
+        _validate_ambiguous(body.on_ambiguous)
+        if db.query_one(
+            "SELECT id FROM user_filters WHERE user_id = %s AND name = %s",
+            (user.id, body.name),
+        ):
+            raise HTTPException(
+                409, detail={"code": "DUPLICATE_NAME", "message": "filter name already exists"}
+            )
+        if body.enabled:
+            _refuse_second_enabled(user.id)
+        row = db.query_one(
+            f"""
+            INSERT INTO user_filters (user_id, name, prompt, on_ambiguous, fail_closed, enabled, prompt_hash)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            RETURNING {_FILTER_COLS}
+            """,
+            (
+                user.id,
+                body.name,
+                body.prompt,
+                body.on_ambiguous,
+                body.fail_closed,
+                body.enabled,
+                _hash(body.prompt, body.on_ambiguous),
+            ),
         )
-    if body.enabled:
-        _refuse_second_enabled(user.id)
-    row = db.query_one(
-        f"""
-        INSERT INTO user_filters (user_id, name, prompt, on_ambiguous, fail_closed, enabled, prompt_hash)
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
-        RETURNING {_FILTER_COLS}
-        """,
-        (
-            user.id,
-            body.name,
-            body.prompt,
-            body.on_ambiguous,
-            body.fail_closed,
-            body.enabled,
-            _hash(body.prompt, body.on_ambiguous),
-        ),
-    )
-    assert row is not None
+        assert row is not None
     task_id, blocked = (None, None)
     if body.enabled:
         task_id, blocked = _enqueue_on_change(user, row["id"])
@@ -209,35 +214,39 @@ def create_filter(body: FilterCreate, user: AuthedUser = Depends(require_user)):
 
 @router.patch("/user/filters/{filter_id}")
 def patch_filter(filter_id: int, body: FilterPatch, user: AuthedUser = Depends(require_user)):
-    existing = db.query_one(
-        "SELECT * FROM user_filters WHERE id = %s AND user_id = %s", (filter_id, user.id)
-    )
-    if not existing:
-        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown filter"})
-    fields = body.model_dump(exclude_unset=True)
-    if not fields:
-        raise HTTPException(400, detail={"code": "EMPTY_PATCH", "message": "no fields to update"})
-    if "on_ambiguous" in fields:
-        _validate_ambiguous(fields["on_ambiguous"])
-    if fields.get("enabled") and not existing["enabled"]:
-        _refuse_second_enabled(user.id, filter_id)
-    prompt = fields.get("prompt", existing["prompt"])
-    on_ambiguous = fields.get("on_ambiguous", existing["on_ambiguous"])
-    fields["prompt_hash"] = _hash(prompt, on_ambiguous)
-    cols = ", ".join(f"{k} = %({k})s" for k in fields)
-    try:
-        row = db.query_one(
-            f"UPDATE user_filters SET {cols}, updated_at = now() "
-            f"WHERE id = %(fid)s AND user_id = %(uid)s RETURNING {_FILTER_COLS}",
-            {"fid": filter_id, "uid": user.id, **fields},
+    with db.transaction():
+        db.query_one("SELECT id FROM users WHERE id = %s FOR UPDATE", (user.id,))
+        existing = db.query_one(
+            "SELECT * FROM user_filters WHERE id = %s AND user_id = %s", (filter_id, user.id)
         )
-    except UniqueViolation as exc:
-        # create_filter pre-checks the name; renaming has to answer the same
-        # way rather than letting user_filters_user_id_name_key escape as a 500.
-        raise HTTPException(
-            409, detail={"code": "DUPLICATE_NAME", "message": "filter name already exists"}
-        ) from exc
-    assert row is not None
+        if not existing:
+            raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown filter"})
+        fields = body.model_dump(exclude_unset=True)
+        if not fields:
+            raise HTTPException(
+                400, detail={"code": "EMPTY_PATCH", "message": "no fields to update"}
+            )
+        if "on_ambiguous" in fields:
+            _validate_ambiguous(fields["on_ambiguous"])
+        if fields.get("enabled") and not existing["enabled"]:
+            _refuse_second_enabled(user.id, filter_id)
+        prompt = fields.get("prompt", existing["prompt"])
+        on_ambiguous = fields.get("on_ambiguous", existing["on_ambiguous"])
+        fields["prompt_hash"] = _hash(prompt, on_ambiguous)
+        cols = ", ".join(f"{k} = %({k})s" for k in fields)
+        try:
+            row = db.query_one(
+                f"UPDATE user_filters SET {cols}, updated_at = now() "
+                f"WHERE id = %(fid)s AND user_id = %(uid)s RETURNING {_FILTER_COLS}",
+                {"fid": filter_id, "uid": user.id, **fields},
+            )
+        except UniqueViolation as exc:
+            # create_filter pre-checks the name; renaming has to answer the same
+            # way rather than letting user_filters_user_id_name_key escape as a 500.
+            raise HTTPException(
+                409, detail={"code": "DUPLICATE_NAME", "message": "filter name already exists"}
+            ) from exc
+        assert row is not None
     task_id, blocked = (None, None)
     hash_changed = row["prompt_hash"] != existing["prompt_hash"]
     if row["enabled"] and (hash_changed or fields.get("enabled")):
@@ -264,10 +273,7 @@ def run_filter(filter_id: int, user: AuthedUser = Depends(require_user)):
         "SELECT id FROM user_filters WHERE id = %s AND user_id = %s", (filter_id, user.id)
     ):
         raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown filter"})
-    _refuse_second_run(
-        _running(user.id, "run_filter", filter_id) or _running(user.id, "run_all_filters")
-    )
-    task_id, blocked = _enqueue(user, "run_filter", {"user_id": user.id, "filter_id": filter_id})
+    task_id, blocked = _enqueue(user, filter_id)
     if blocked:
         raise HTTPException(
             402, detail={"code": blocked, "message": _budget_message(budget.get_entitlement(user))}
@@ -277,8 +283,7 @@ def run_filter(filter_id: int, user: AuthedUser = Depends(require_user)):
 
 @router.post("/user/filters/run-all")
 def run_all_filters(user: AuthedUser = Depends(require_user)):
-    _refuse_second_run(_running(user.id, "run_all_filters"))
-    task_id, blocked = _enqueue(user, "run_all_filters", {"user_id": user.id})
+    task_id, blocked = _enqueue(user, None)
     if blocked:
         raise HTTPException(
             402, detail={"code": blocked, "message": _budget_message(budget.get_entitlement(user))}
@@ -395,40 +400,45 @@ def _coverage(row: dict | None, eligible: int) -> dict:
 
 @router.post("/filter-presets/{preset_id}/adopt")
 def adopt_preset(preset_id: int, user: AuthedUser = Depends(require_user)):
-    preset = db.query_one("SELECT * FROM filter_presets WHERE id = %s AND active", (preset_id,))
-    if not preset:
-        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown preset"})
-    name = preset["name"]
-    # Adopted is a fact on the row (preset_id), not a guess from the name: a
-    # renamed adopted filter is still adopted, and a hand-written filter that
-    # happens to share the name still blocks, because the name is unique.
-    if db.query_one(
-        "SELECT id FROM user_filters WHERE user_id = %s AND (preset_id = %s OR name = %s)",
-        (user.id, preset_id, name),
-    ):
-        raise HTTPException(
-            409,
-            detail={"code": "ALREADY_ADOPTED", "message": "this preset is already in your filters"},
+    with db.transaction():
+        db.query_one("SELECT id FROM users WHERE id = %s FOR UPDATE", (user.id,))
+        preset = db.query_one("SELECT * FROM filter_presets WHERE id = %s AND active", (preset_id,))
+        if not preset:
+            raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown preset"})
+        name = preset["name"]
+        # Adopted is a fact on the row (preset_id), not a guess from the name: a
+        # renamed adopted filter is still adopted, and a hand-written filter that
+        # happens to share the name still blocks, because the name is unique.
+        if db.query_one(
+            "SELECT id FROM user_filters WHERE user_id = %s AND (preset_id = %s OR name = %s)",
+            (user.id, preset_id, name),
+        ):
+            raise HTTPException(
+                409,
+                detail={
+                    "code": "ALREADY_ADOPTED",
+                    "message": "this preset is already in your filters",
+                },
+            )
+        _refuse_second_enabled(user.id)
+        row = db.query_one(
+            f"""
+            INSERT INTO user_filters
+                (user_id, name, prompt, on_ambiguous, fail_closed, enabled, prompt_hash, preset_id)
+            VALUES (%s, %s, %s, %s, %s, TRUE, %s, %s)
+            RETURNING {_FILTER_COLS}
+            """,
+            (
+                user.id,
+                name,
+                preset["prompt"],
+                preset["on_ambiguous"],
+                preset["fail_closed"],
+                _hash(preset["prompt"], preset["on_ambiguous"]),
+                preset_id,
+            ),
         )
-    _refuse_second_enabled(user.id)
-    row = db.query_one(
-        f"""
-        INSERT INTO user_filters
-            (user_id, name, prompt, on_ambiguous, fail_closed, enabled, prompt_hash, preset_id)
-        VALUES (%s, %s, %s, %s, %s, TRUE, %s, %s)
-        RETURNING {_FILTER_COLS}
-        """,
-        (
-            user.id,
-            name,
-            preset["prompt"],
-            preset["on_ambiguous"],
-            preset["fail_closed"],
-            _hash(preset["prompt"], preset["on_ambiguous"]),
-            preset_id,
-        ),
-    )
-    assert row is not None
+        assert row is not None
     task_id, blocked = _enqueue_on_change(user, row["id"])
     visibility.request_refresh(user.id)
     return {

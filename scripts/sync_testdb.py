@@ -36,9 +36,13 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import psycopg
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+from core.disposable_db import require_disposable_name
 
 # Which tables get copied is read from the SOURCE at run time, not listed
 # here. A constant WAS listed here, and it had drifted eleven populated tables
@@ -183,7 +187,15 @@ def _check_the_two_lists_agree() -> None:
 
 def _swap_db(url: str, name: str) -> str:
     parts = urlparse(url)
-    return urlunparse(parts._replace(path=f"/{name}"))
+    # libpq gives query-string dbname precedence over the path.
+    query = urlencode(
+        [
+            (key, value)
+            for key, value in parse_qsl(parts.query, keep_blank_values=True)
+            if key != "dbname"
+        ]
+    )
+    return urlunparse(parts._replace(path=f"/{name}", query=query))
 
 
 def _columns(conn: psycopg.Connection, table: str) -> list[str]:
@@ -222,8 +234,10 @@ def main() -> int:
     if not src_url:
         print("DATABASE_URL is not set", file=sys.stderr)
         return 1
-    if not (args.name.endswith(("_test", "_ci")) or args.name.startswith("test_")):
-        print(f"refusing to target {args.name!r}: name it *_test or *_ci", file=sys.stderr)
+    try:
+        require_disposable_name(args.name)
+    except RuntimeError as exc:
+        print(str(exc), file=sys.stderr)
         return 1
 
     dst_url = _swap_db(src_url, args.name)

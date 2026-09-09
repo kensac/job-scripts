@@ -36,30 +36,19 @@ import datetime
 from typing import Any
 
 from api import db
+from core.disposable_db import require_disposable_name
 
 DEV_SUB = "dev-user"
 DEV_EMAIL = "dev@example.test"
 
 
 def _assert_disposable() -> str:
-    """Refuse to seed anything whose name does not mark it disposable.
-
-    Same rule the test harness uses, and for a stronger reason: this writes
-    fabricated rows. A dev API that can reach the production database is worse
-    than no dev API, and the database NAME is the one thing a caller cannot
-    get wrong by accident.
-    """
     # Asked of the connection rather than parsed from a URL: the connection is
     # the thing that will actually be written to, and a URL can be overridden
     # anywhere between here and the socket.
     row = db.query_one("SELECT current_database() AS name")
     name = row["name"] if row else ""
-    if not (name.endswith(("_dev", "_test", "_ci")) or name.startswith(("dev_", "test_"))):
-        raise RuntimeError(
-            f"refusing to seed database {name!r}: it writes fabricated rows. "
-            "Name it *_dev, *_test or *_ci."
-        )
-    return name
+    return require_disposable_name(name, allow_dev=True)
 
 
 def _days_ago(n: int) -> datetime.datetime:

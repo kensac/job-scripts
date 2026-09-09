@@ -162,28 +162,28 @@ def admin_run_filter(body: FilterRunBody, user: AuthedUser = Depends(require_adm
     the shared weekly cap for that run alone, so the cap never has to be
     raised and put back (Kanishk, 2026-09-08). The person's own run endpoint
     cannot set the flag."""
-    from api.tasks.runtime import enqueue
+    from api import filter_runs
 
     if not db.query_one("SELECT 1 FROM users WHERE id = %s", (body.user_id,)):
         raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown user"})
-    if body.filter_id is not None:
-        if not db.query_one(
-            "SELECT 1 FROM user_filters WHERE id = %s AND user_id = %s",
-            (body.filter_id, body.user_id),
-        ):
-            raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown filter"})
-        task_id = enqueue(
-            "run_filter",
-            {
-                "user_id": body.user_id,
-                "filter_id": body.filter_id,
-                "ignore_budget": body.ignore_budget,
+    if body.filter_id is not None and not db.query_one(
+        "SELECT 1 FROM user_filters WHERE id = %s AND user_id = %s",
+        (body.filter_id, body.user_id),
+    ):
+        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown filter"})
+    result = filter_runs.enqueue(
+        body.user_id, body.filter_id, policy="interactive", ignore_budget=body.ignore_budget
+    )
+    if result.conflict:
+        raise HTTPException(
+            409,
+            detail={
+                "code": "IN_PROGRESS",
+                "message": "this run is already in progress",
+                "task_id": result.conflict["id"],
             },
         )
-    else:
-        task_id = enqueue(
-            "run_all_filters", {"user_id": body.user_id, "ignore_budget": body.ignore_budget}
-        )
+    task_id = result.task_id
     return {"task_id": task_id, "ignore_budget": body.ignore_budget}
 
 
