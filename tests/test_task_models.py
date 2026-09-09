@@ -288,7 +288,7 @@ class TestTakesEffect:
 
         async def fake_submit(task_id, specs, model, effort, max_tokens, hook):
             sent.update(model=model, effort=effort, max_tokens=max_tokens)
-            return {}
+            return []
 
         monkeypatch.setattr(runtime, "submit_or_collect", fake_submit)
         _put(client, admin_headers, "requirements", model="gpt-5-nano")

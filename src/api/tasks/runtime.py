@@ -440,7 +440,7 @@ def batch_event_hook(
     resumed_ids = set(pending_batch_ids(task_id))
     metadata = _batch_metadata(task_id, list(resumed_ids)) if resumed_ids else {}
 
-    def on_event(batch_id: str, status: str, counts: dict[str, int]) -> None:
+    def record_event(batch_id: str, status: str, counts: dict[str, int]) -> None:
         persisted = metadata.get(batch_id, {})
         event_model = persisted.get("model") if batch_id in resumed_ids else model
         event_prompt_id = persisted.get("prompt_id") if batch_id in resumed_ids else prompt_id
@@ -474,7 +474,6 @@ def batch_event_hook(
                 # Already recorded with these exact totals: this is a repeat
                 # collection of a batch that has not changed, so the ledger
                 # must not gain a second row for it either.
-                events.publish_task(task_id)
                 return
             # The same numbers into the spend ledger. Every batched caller
             # passes through here and already names a purpose, so a new AI
@@ -483,7 +482,6 @@ def batch_event_hook(
             # needs.
             if not charged_to_user:
                 budget.record_fleet_usage(purpose, event_model, inp, out, batched=True)
-            events.publish_task(task_id)
             return
         db.execute(
             """
@@ -518,6 +516,10 @@ def batch_event_hook(
             },
         )
         _record_batch_ids(task_id, [batch_id])
+
+    def on_event(batch_id: str, status: str, counts: dict[str, int]) -> None:
+        with db.transaction():
+            record_event(batch_id, status, counts)
         events.publish_task(task_id)
 
     return on_event

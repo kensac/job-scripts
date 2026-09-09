@@ -7,6 +7,7 @@ import logging
 from typing import Any
 
 from api import ai, budget, db, events, metrics, verdicts
+from api.batch_results import progress_counts
 from api.tasks.board import (
     candidates_for,
     content_ready_urls,
@@ -23,10 +24,11 @@ from api.tasks.runtime import (
     batch_event_hook,
     cancelled,
     collect_pending,
+    consume_result,
     enqueue,
+    has_batch_work,
     load_config,
     parent_cancelled,
-    pending_batch_ids,
     set_progress,
     submit_or_collect,
     update_parent_progress,
@@ -151,7 +153,7 @@ async def _process_jobs(
             for t in pending:
                 t.cancel()
             raise PermissionError(f"BUDGET_EXCEEDED after {done}/{total} checks")
-    set_progress(task_id, total, total, flt["name"])
+    set_progress(task_id, *progress_counts(task_id), flt["name"])
     if parent_id:
         # Each chunk publishes what it decided. The parent materializes again
         # when it finalizes, but a parent waits on its slowest chunk, and a
@@ -246,7 +248,7 @@ async def handle_run_filter_batch_chunk(task_id: int, payload: dict[str, Any]) -
     flt = payload["filter"]
     jobs = payload["jobs"]
     parent_id = payload["parent_id"]
-    existing = pending_batch_ids(task_id)
+    existing = has_batch_work(task_id)
     cfg = None
     if not existing:
         ent, cfg = load_config(user_id, bool(payload.get("ignore_budget")))
@@ -265,7 +267,23 @@ async def handle_run_filter_batch_chunk(task_id: int, payload: dict[str, Any]) -
         if not content:
             continue
         input_text = build_custom_input(job["company"], job["title"], content)
-        specs.append(BatchSpec(job["url"], instructions, input_text, "FilterVerdict", schema))
+        specs.append(
+            BatchSpec(
+                job["url"],
+                instructions,
+                input_text,
+                "FilterVerdict",
+                schema,
+                context={
+                    "job": job,
+                    "filter": flt,
+                    "reasoning_effort": cfg.params.get("reasoning_effort")
+                    or cfg.params.get("effort")
+                    if cfg
+                    else None,
+                },
+            )
+        )
         by_url[job["url"]] = (job, input_text)
     total = len(jobs)
     if not specs and not existing:
@@ -296,7 +314,7 @@ async def handle_run_filter_batch_chunk(task_id: int, payload: dict[str, Any]) -
     hook = batch_event_hook(task_id, "filter", cfg.model if cfg else None, charged_to_user=True)
     try:
         if existing:
-            logger.info(f"Task {task_id}: reattaching to {len(existing)} in-flight batch(es)")
+            logger.info(f"Task {task_id}: collecting previously submitted results")
             results = await collect_pending(task_id, hook)
         else:
             assert cfg is not None
@@ -310,47 +328,55 @@ async def handle_run_filter_batch_chunk(task_id: int, payload: dict[str, Any]) -
             )
     finally:
         hb.cancel()
-    for done, (url, res) in enumerate(results.items(), start=1):
-        job, input_text = by_url[url]
-        model = res.model if existing else cfg.model if cfg else None
-        usage = ai.batch_usage(res.usage)
-        parsed = None
-        reason = f"batch: {res.error or 'no output'}"
-        if not res.error and res.text:
-            try:
-                parsed = FilterVerdict.model_validate_json(res.text)
-            except ValueError:
-                reason = "batch: unparsable output"
-        verdicts.record_ai_verdict(
-            url=url,
-            check_type="custom",
-            rejected=parsed.should_filter if parsed else None,
-            reason=parsed.reason if parsed else reason,
-            parsed_json=res.text if parsed else None,
-            usage=usage,
-            model=model,
-            provider="openai",
-            key_source="owner",
-            company=job["company"],
-            job_title=job["title"],
-            instructions=instructions,
-            input_text=input_text,
-            filter_name=f"user{user_id}:{flt['name']}",
-            prompt_hash=flt["prompt_hash"],
-            context="filter-batch",
-            batched=True,
-            batch_id=res.batch_id,
-            error=res.error,
-            reasoning_effort=(cfg.params.get("reasoning_effort") or cfg.params.get("effort"))
-            if cfg
-            else None,
-        )
-        budget.record_tokens(user_id, "owner", "filter", model, usage, batched=True)
+    for done, res in enumerate(results, start=1):
+        with consume_result(task_id, res) as receipt:
+            if not receipt.pending:
+                continue
+            url = res.custom_id
+            context = (res.request.context or {}) if res.request else {}
+            stored_filter = context.get("filter") or flt
+            job = context.get("job") or (by_url.get(url) or (None, None))[0]
+            usage = ai.batch_usage(res.usage)
+            if job is None:
+                budget.record_tokens(user_id, "owner", "filter", res.model, usage, batched=True)
+                receipt.outcome = "unknown_request"
+                continue
+            parsed = None
+            reason = f"batch: {res.error or 'no output'}"
+            if not res.error and res.text:
+                try:
+                    parsed = FilterVerdict.model_validate_json(res.text)
+                except ValueError:
+                    reason = "batch: unparsable output"
+            verdicts.record_ai_verdict(
+                url=url,
+                check_type="custom",
+                rejected=parsed.should_filter if parsed else None,
+                reason=parsed.reason if parsed else reason,
+                parsed_json=res.text if parsed else None,
+                usage=usage,
+                model=res.model,
+                provider="openai",
+                key_source="owner",
+                company=job["company"],
+                job_title=job["title"],
+                instructions=res.request.instructions if res.request else None,
+                input_text=res.request.input if res.request else None,
+                filter_name=f"user{user_id}:{stored_filter['name']}",
+                prompt_hash=stored_filter["prompt_hash"],
+                context="filter-batch",
+                batched=True,
+                batch_id=res.batch_id,
+                error=res.error,
+                reasoning_effort=context.get("reasoning_effort"),
+            )
+            budget.record_tokens(user_id, "owner", "filter", res.model, usage, batched=True)
+            receipt.outcome = "written" if parsed else "failed"
         if done % 50 == 0:
             set_progress(task_id, done, total, flt["name"])
             if parent_id:
                 update_parent_progress(parent_id)
-    set_progress(task_id, total, total, flt["name"])
+    set_progress(task_id, *progress_counts(task_id), flt["name"])
     if parent_id:
         # See _process_jobs: publish this chunk's passes without waiting on
         # the siblings still parked at the provider.

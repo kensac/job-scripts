@@ -116,7 +116,7 @@ def record_ai_verdict(
     key_source: str = "owner",
     company: str = "",
     job_title: str = "",
-    instructions: str = "",
+    instructions: str | None = "",
     input_text: str | None = "",
     filter_name: str | None = None,
     prompt_hash: str | None = None,

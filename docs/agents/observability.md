@@ -76,6 +76,15 @@ before checking current keys, resumes, or automatic-draft settings. Original
 filter input content is not retained in legacy task payloads, so resumed verdicts
 leave that field unknown rather than attributing today's page to an earlier call.
 
+Batch requests retain their immutable input, instructions and consumer context in
+`batch_requests`. Collection checkpoints each provider batch/custom ID receipt
+before removing pending batch IDs. Consumers use `consume_result` to commit domain
+writes, user usage and acknowledgment in one transaction; replay skips acknowledged
+receipts. Fleet totals and their ledger entry share a transaction in the event hook.
+Use receipt outcome counts for cumulative progress across partial collection and
+replay. Both checkpoint tables expire with their owning task. Legacy requests
+without a snapshot retain unknown input rather than using a current page.
+
 **A batch is submitted whole and fails whole.** All requests failing means the
 submission was rejected on grounds that applied to every one of them; some
 failing means bad inputs. Different causes, and only the first is certainly a

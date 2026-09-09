@@ -75,7 +75,7 @@ async def test_collect_finished_batches_takes_terminal_and_reports_the_rest(monk
         batch, "_client", lambda: _FakeClient({"a": "completed", "b": "in_progress", "c": "boom"})
     )
     results, unfinished = await batch.collect_finished_batches(["a", "b", "c"])
-    assert results["u1"].text == "ok" and results["u1"].batch_id == "a"
+    assert results[0].text == "ok" and results[0].batch_id == "a"
     # Unreadable counts as unfinished: a provider blip delays, never drops.
     assert unfinished == ["b", "c"]
 
@@ -85,14 +85,14 @@ async def test_collect_pending_rewrites_payload_to_what_is_still_running(monkeyp
     tid = make_task("run_filter", {"batch_ids": ["a", "b"]}, status="running")
 
     async def fake(ids, on_event=None):
-        return {"u1": batch.BatchResult("u1", batch_id="a")}, ["b"]
+        return [batch.BatchResult("u1", batch_id="a")], ["b"]
 
     monkeypatch.setattr("core.batch.collect_finished_batches", fake)
-    assert list(await runtime.collect_pending(tid, None)) == ["u1"]
+    assert [r.custom_id for r in await runtime.collect_pending(tid, None)] == ["u1"]
     assert runtime.pending_batch_ids(tid) == ["b"]
 
     async def all_done(ids, on_event=None):
-        return {}, []
+        return [], []
 
     monkeypatch.setattr("core.batch.collect_finished_batches", all_done)
     await runtime.collect_pending(tid, None)
@@ -193,3 +193,11 @@ async def test_a_batch_row_nothing_will_collect_expires_after_the_window(monkeyp
     assert rows["young"] == "in_progress" and rows["parked"] == "in_progress"
     label = db.query_one("SELECT progress->>%s AS l FROM tasks WHERE id = %s", ("label", poll))["l"]
     assert "1 orphaned batch row(s) expired" in label
+
+
+@pytest.mark.asyncio
+async def test_same_custom_id_in_distinct_provider_batches_preserves_both_calls(monkeypatch):
+    monkeypatch.setattr(batch, "_client", lambda: _FakeClient({"a": "completed", "b": "completed"}))
+    results, unfinished = await batch.collect_finished_batches(["a", "b"])
+    assert unfinished == []
+    assert [(r.batch_id, r.custom_id) for r in results] == [("a", "u1"), ("b", "u1")]

@@ -5,7 +5,6 @@ import pytest
 from api import ai, budget, db
 from api.tasks import application, filters
 from core import pricing
-from core.batch import BatchResult
 
 MODEL = "gpt-5-mini"
 RAW_USAGE = {
@@ -53,7 +52,6 @@ async def test_every_consumed_result_records_transport_and_cached_usage(
         }
 
     monkeypatch.setattr(ai, "parse", parsed_live)
-    result = BatchResult("result", text=text, usage=RAW_USAGE, batch_id="batch-test")
     if family == "filter":
         flt = f.make_filter(uid, on_ambiguous="keep")
         payload = {"user_id": uid, "filter": flt, "jobs": [job], "parent_id": None}
@@ -61,7 +59,9 @@ async def test_every_consumed_result_records_transport_and_cached_usage(
         monkeypatch.setattr(filters, "load_config", lambda *args: (ent, cfg))
 
         async def submitted(*args):
-            return {job["url"]: result}
+            return [
+                f.make_batch_result(task_id, args[1][0], text=text, usage=RAW_USAGE, model=MODEL)
+            ]
 
         monkeypatch.setattr(filters, "submit_or_collect", submitted)
         if batched:
@@ -77,7 +77,9 @@ async def test_every_consumed_result_records_transport_and_cached_usage(
         monkeypatch.setattr(application, "load_config", lambda *args: (ent, cfg))
 
         async def drafted(*args, **kwargs):
-            return {f"{job_id}|why": result}, SimpleNamespace(model=MODEL)
+            return [
+                f.make_batch_result(task_id, args[2][0], text=text, usage=RAW_USAGE, model=MODEL)
+            ], SimpleNamespace(model=MODEL)
 
         monkeypatch.setattr(application, "run_batched", drafted)
         await application.draft_rows(

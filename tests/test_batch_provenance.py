@@ -24,14 +24,14 @@ def _collector(monkeypatch, custom_id, text):
         assert ids == ["batch-old"]
         hook("batch-old", "completed", {"requests": 1, "completed": 1})
         hook("batch-old", "completed", {"input_tokens": 1000, "output_tokens": 100})
-        return {
-            custom_id: BatchResult(
+        return [
+            BatchResult(
                 custom_id,
                 text=text,
                 usage={"input_tokens": 1000, "output_tokens": 100, "total_tokens": 1100},
                 batch_id="batch-old",
             )
-        }, []
+        ], []
 
     monkeypatch.setattr(batch, "collect_finished_batches", collect)
 
@@ -54,7 +54,7 @@ async def test_resume_prices_persisted_model_without_resolving_current_configura
         application.APPLICATION_TASK,
         [BatchSpec("new", "changed prompt", "changed input", "Draft", {})],
     )
-    assert results["answer"].model == model
+    assert results[0].model == model
     assert provenance.model == model
     ledger = db.query("SELECT model, cost_usd FROM api_usage")
     assert len(ledger) == 1

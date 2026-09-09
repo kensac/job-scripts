@@ -40,14 +40,14 @@ async def test_replaying_consumed_filter_result_does_not_duplicate_user_usage(f,
     )
 
     async def collect(ids, hook):
-        return {
-            job["url"]: BatchResult(
+        return [
+            BatchResult(
                 job["url"],
                 text='{"should_filter":false,"reason":"fits"}',
                 usage={"input_tokens": 100, "output_tokens": 10, "total_tokens": 110},
                 batch_id="paid",
             )
-        }, []
+        ], []
 
     monkeypatch.setattr("core.batch.collect_finished_batches", collect)
     await filters.handle_run_filter_batch_chunk(task_id, payload)
@@ -87,3 +87,40 @@ def test_receipt_transaction_rolls_back_verdict_usage_and_ack_together(f):
     with batch_results.consume_result(task_id, result) as replay:
         assert replay.pending is False
     assert db.query_one("SELECT count(*) AS n FROM api_usage")["n"] == 1
+
+
+def test_fleet_usage_and_batch_totals_rollback_together(f, monkeypatch):
+    from api import budget
+
+    task_id = f.make_task("extract_comp", {})
+    hook = runtime.batch_event_hook(task_id, "comp", "gpt-5-mini")
+    hook("fleet", "submitted", {"requests": 1})
+    original = budget.record_fleet_usage
+
+    def crash(*args, **kwargs):
+        raise RuntimeError("ledger unavailable")
+
+    monkeypatch.setattr(budget, "record_fleet_usage", crash)
+    with pytest.raises(RuntimeError, match="ledger unavailable"):
+        hook("fleet", "completed", {"input_tokens": 100, "output_tokens": 10})
+    assert (
+        db.query_one("SELECT input_tokens FROM ai_batches WHERE provider_batch_id='fleet'")[
+            "input_tokens"
+        ]
+        == 0
+    )
+    monkeypatch.setattr(budget, "record_fleet_usage", original)
+    hook("fleet", "completed", {"input_tokens": 100, "output_tokens": 10})
+    assert db.query_one("SELECT count(*) AS n FROM api_usage")["n"] == 1
+
+
+def test_checkpoint_refuses_receipt_owned_by_another_task(f):
+    from api import batch_results
+
+    first = f.make_task("extract_comp", {})
+    second = f.make_task("extract_comp", {"batch_ids": ["same"]})
+    result = BatchResult("url", batch_id="same")
+    batch_results.checkpoint(first, [result], [])
+    with pytest.raises(ValueError, match="another task"):
+        batch_results.checkpoint(second, [result], [])
+    assert runtime.pending_batch_ids(second) == ["same"]
