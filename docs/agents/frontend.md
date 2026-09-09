@@ -75,6 +75,21 @@ change, and will disagree with the server in the meantime.
 resolves an unset `column_layout` from `board_default_column_layout` in
 `app_config`. Render the returned layout for both a new account and a reset.
 
+**A config-driven reader's table can be published, and the bundled copy is
+the fallback.** `GET /v1/extension/recipe?schema_version=1&adapter=<id>`
+serves the newest enabled publish for an adapter as a zlib-compressed,
+base64-encoded canonical table with its sha256 as `revision` and `digest`, or
+404 `NO_RECIPE` when only the bundled table exists. The extension pins a
+revision per fill, keeps an unexpired copy through an outage, and runs from
+the bundled table when nothing is published. Publish with
+`tools/publish_recipes.py` (every `extension/ats/*.js`, or one adapter) or
+`PUT /v1/admin/extension/recipes/{adapter}`; `POST .../rollback` re-enables the
+publish before; `GET /v1/admin/extension/recipes` is the history. The encoding
+keeps selector tables out of casual view and out of a public diff and stops
+nobody who reads the decoder. This channel is for a developer-mode or
+self-hosted install: the Chrome Web Store's MV3 policy treats a
+behaviour-driving config as remote logic (Kanishk chose remote, 2026-09-09).
+
 ### Updates and resets
 
 Do not infer update semantics from the HTTP verb or a nullable request type.

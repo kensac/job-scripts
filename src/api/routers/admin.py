@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import time
 from decimal import Decimal
 from typing import Any
@@ -9,7 +10,18 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, JsonValue
 
-from api import ai, db, events, health, hosts, pagination, scoping, sorting, task_admission
+from api import (
+    ai,
+    db,
+    events,
+    extension_recipes,
+    health,
+    hosts,
+    pagination,
+    scoping,
+    sorting,
+    task_admission,
+)
 from api import params as params_
 from api.auth import AuthedUser, require_user
 from api.config import CONFIG_KEYS
@@ -2077,3 +2089,37 @@ def _compute_stats() -> dict[str, Any]:
         "by_day": by_day,
         "by_model": by_model,
     }
+
+
+class RecipePut(BaseModel):
+    recipe: JsonValue
+
+
+@router.get("/extension/recipes")
+def list_extension_recipes(user: AuthedUser = Depends(require_admin)):
+    """Every publish, newest first per adapter; the enabled row is what the
+    extension fetches (api.extension_recipes)."""
+    return {"recipes": extension_recipes.history()}
+
+
+@router.put("/extension/recipes/{adapter}")
+def publish_extension_recipe(
+    adapter: str, body: RecipePut, user: AuthedUser = Depends(require_admin)
+):
+    if not re.fullmatch(r"[a-z][a-z0-9_-]{0,63}", adapter):
+        raise HTTPException(400, detail={"code": "INVALID_RECIPE", "message": "bad adapter id"})
+    try:
+        revision = extension_recipes.publish(adapter, body.recipe, user.email or user.sub)
+    except ValueError as exc:
+        raise HTTPException(400, detail={"code": "INVALID_RECIPE", "message": str(exc)}) from exc
+    return {"adapter": adapter, "revision": revision}
+
+
+@router.post("/extension/recipes/{adapter}/rollback")
+def rollback_extension_recipe(adapter: str, user: AuthedUser = Depends(require_admin)):
+    revision = extension_recipes.rollback(adapter)
+    if revision is None:
+        raise HTTPException(
+            404, detail={"code": "NO_PREVIOUS_RECIPE", "message": "nothing earlier to go back to"}
+        )
+    return {"adapter": adapter, "revision": revision}

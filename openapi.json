@@ -3262,6 +3262,57 @@
         }
       }
     },
+    "/v1/extension/recipe": {
+      "get": {
+        "summary": "Extension Recipe",
+        "description": "The published table for a config-driven reader, or 404 when only the\nbundled copy exists. Same public terms as /extension/config: no profile,\nanswers or credentials; the extension pins a revision per fill and keeps\nthe bundled table as its fallback (api.extension_recipes).",
+        "operationId": "extension_recipe_v1_extension_recipe_get",
+        "parameters": [
+          {
+            "name": "adapter",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+              "title": "Adapter"
+            }
+          },
+          {
+            "name": "schema_version",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Schema Version"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecipeConfig"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/user/profile": {
       "get": {
         "summary": "Get Profile",
@@ -10904,6 +10955,269 @@
         "description": "Lifetime totals over ai_queries, served from a per-process cache for\nadmin_stats_cache_seconds. Every call is five full scans of the largest\ntable, and the dashboard asks on every worker event; the totals move by\na few rows an hour. ponytail: per-process cache, so each api replica\nscans once per window; shared cache if replicas multiply.",
         "operationId": "stats_v1_admin_stats_get",
         "parameters": [
+          {
+            "name": "x-service-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-Service-Token"
+            }
+          },
+          {
+            "name": "x-user-sub",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Sub"
+            }
+          },
+          {
+            "name": "x-user-email",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Email"
+            }
+          },
+          {
+            "name": "x-user-name",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Name"
+            }
+          },
+          {
+            "name": "x-user-groups",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Groups"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/extension/recipes": {
+      "get": {
+        "summary": "List Extension Recipes",
+        "description": "Every publish, newest first per adapter; the enabled row is what the\nextension fetches (api.extension_recipes).",
+        "operationId": "list_extension_recipes_v1_admin_extension_recipes_get",
+        "parameters": [
+          {
+            "name": "x-service-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-Service-Token"
+            }
+          },
+          {
+            "name": "x-user-sub",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Sub"
+            }
+          },
+          {
+            "name": "x-user-email",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Email"
+            }
+          },
+          {
+            "name": "x-user-name",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Name"
+            }
+          },
+          {
+            "name": "x-user-groups",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Groups"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/extension/recipes/{adapter}": {
+      "put": {
+        "summary": "Publish Extension Recipe",
+        "operationId": "publish_extension_recipe_v1_admin_extension_recipes__adapter__put",
+        "parameters": [
+          {
+            "name": "adapter",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Adapter"
+            }
+          },
+          {
+            "name": "x-service-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-Service-Token"
+            }
+          },
+          {
+            "name": "x-user-sub",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Sub"
+            }
+          },
+          {
+            "name": "x-user-email",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Email"
+            }
+          },
+          {
+            "name": "x-user-name",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Name"
+            }
+          },
+          {
+            "name": "x-user-groups",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Groups"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecipePut"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/extension/recipes/{adapter}/rollback": {
+      "post": {
+        "summary": "Rollback Extension Recipe",
+        "operationId": "rollback_extension_recipe_v1_admin_extension_recipes__adapter__rollback_post",
+        "parameters": [
+          {
+            "name": "adapter",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Adapter"
+            }
+          },
           {
             "name": "x-service-token",
             "in": "header",
@@ -19868,6 +20182,64 @@
           "question"
         ],
         "title": "QuestionAdd"
+      },
+      "RecipeConfig": {
+        "properties": {
+          "schema_version": {
+            "type": "integer",
+            "title": "Schema Version",
+            "default": 1
+          },
+          "adapter": {
+            "type": "string",
+            "title": "Adapter"
+          },
+          "revision": {
+            "type": "string",
+            "title": "Revision"
+          },
+          "max_age_seconds": {
+            "type": "integer",
+            "title": "Max Age Seconds"
+          },
+          "encoding": {
+            "type": "string",
+            "title": "Encoding",
+            "default": "deflate+base64"
+          },
+          "payload": {
+            "type": "string",
+            "title": "Payload",
+            "description": "the canonical table, zlib-compressed and base64-encoded"
+          },
+          "digest": {
+            "type": "string",
+            "title": "Digest",
+            "description": "sha256 of the canonical table; equals revision"
+          }
+        },
+        "type": "object",
+        "required": [
+          "adapter",
+          "revision",
+          "max_age_seconds",
+          "payload",
+          "digest"
+        ],
+        "title": "RecipeConfig",
+        "description": "What the extension fetches: the identity and the encoded table."
+      },
+      "RecipePut": {
+        "properties": {
+          "recipe": {
+            "$ref": "#/components/schemas/JsonValue"
+          }
+        },
+        "type": "object",
+        "required": [
+          "recipe"
+        ],
+        "title": "RecipePut"
       },
       "Reclassification": {
         "properties": {

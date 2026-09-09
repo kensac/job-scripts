@@ -930,6 +930,28 @@ class WorkerStatus(Base):
     release: Mapped[str | None] = mapped_column(Text)
 
 
+class ExtensionRecipe(Base):
+    """One publish of a config-driven reader's table (api.extension_recipes):
+    the newest enabled row per adapter is what the extension fetches; the
+    copy bundled in the extension is its fallback."""
+
+    __tablename__ = "extension_recipes"
+    __table_args__ = (
+        UniqueConstraint("adapter", "revision", name="uq_extension_recipes_adapter_revision"),
+        Index("idx_extension_recipes_adapter_enabled", "adapter", "enabled"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
+    adapter: Mapped[str] = mapped_column(Text)
+    revision: Mapped[str] = mapped_column(Text)
+    body: Mapped[Any] = mapped_column(JSONB)
+    published_by: Mapped[str | None] = mapped_column(Text)
+    published_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=_now
+    )
+    enabled: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
+
+
 class HealthAlert(Base):
     __tablename__ = "health_alerts"
     __table_args__ = (
