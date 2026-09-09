@@ -6,7 +6,7 @@ import logging
 import os
 from typing import Any
 
-from api import db
+from api import budget, db
 from api.tasks import rescrape
 from api.tasks.runtime import set_progress
 from core.embeddings import (
@@ -144,6 +144,10 @@ async def handle_embed_postings(task_id: int, payload: dict[str, Any]) -> None:
             # up; losing the waves already paid for would be the worse failure.
             logger.warning(f"embedding wave failed at offset {start}: {exc}")
             continue
+        if response.usage:
+            budget.record_fleet_usage(
+                "embedding", EMBEDDING_MODEL, response.usage.total_tokens, 0, batched=False
+            )
         if len(response.data) != len(wave):
             # The provider returns one vector per input, in order. If that ever
             # stops being true, zipping them would attach every vector to the

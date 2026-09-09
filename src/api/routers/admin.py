@@ -9,7 +9,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, JsonValue
 
-from api import ai, db, events, health, hosts, pagination, scoping, sorting, task_admission
+from api import ai, budget, db, events, health, hosts, pagination, scoping, sorting, task_admission
 from api import params as params_
 from api.auth import AuthedUser, require_user
 from api.config import CONFIG_KEYS
@@ -1218,20 +1218,37 @@ async def run_single_check(body: RunCheckBody, user: AuthedUser = Depends(requir
         model=model,
         params={"reasoning_effort": "medium" if body.with_reason else "low"},
     )
-    parsed, usage = await _verdicts.run_check(
-        cfg,
-        url=job["url"],
-        check_type=check,
-        instructions=instructions,
-        input_text=content["input_content"][:60000],
-        response_model=model_cls,
-        verdict_of=verdict_of,
-        company=job["company"],
-        job_title=job["title"],
-        filter_name=filter_name,
-        prompt_hash=prompt_hash,
-        context="manual",
-    )
+    with budget.record_parse_failures(None, cfg.key_source, "recheck", cfg.model):
+        parsed, usage = await _verdicts.run_check(
+            cfg,
+            url=job["url"],
+            check_type=check,
+            instructions=instructions,
+            input_text=content["input_content"][:60000],
+            response_model=model_cls,
+            verdict_of=verdict_of,
+            company=job["company"],
+            job_title=job["title"],
+            filter_name=filter_name,
+            prompt_hash=prompt_hash,
+            context="manual",
+        )
+    if usage:
+        budget.record_fleet_usage(
+            "recheck",
+            cfg.model,
+            usage.get("prompt_tokens", 0),
+            usage.get("completion_tokens", 0),
+            cached_tokens=usage.get("cached_tokens", 0),
+            batched=False,
+            request_usage=[
+                pricing.RequestTokens(
+                    input_tokens=usage.get("prompt_tokens", 0),
+                    output_tokens=usage.get("completion_tokens", 0),
+                    cached_tokens=usage.get("cached_tokens", 0),
+                )
+            ],
+        )
     if parsed is None:
         raise HTTPException(
             502,

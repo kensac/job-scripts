@@ -125,7 +125,8 @@ async def _process_jobs(
             job = pending.pop(t)
             done += 1
             try:
-                usage = t.result()
+                with budget.record_parse_failures(user_id, cfg.key_source, "filter", cfg.model):
+                    usage = t.result()
             except Exception as exc:
                 # One bad job must not kill the run; the failed verdict is
                 # recorded and retried later. Rate limits shrink concurrency.

@@ -71,7 +71,7 @@ async def run_check[T: BaseModel](
             rejected=None,
             reason=f"{check_type} check failed: {str(exc)[:100]}",
             parsed_json=None,
-            usage={},
+            usage=exc.usage if isinstance(exc, ai.PaidParseError) else {},
             error=str(exc),
             **common,
         )

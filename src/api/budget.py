@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from contextlib import contextmanager
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, Literal
@@ -480,3 +481,31 @@ def record_tokens(
         usage.get("cached_tokens", 0),
         batched=batched,
     )
+
+
+@contextmanager
+def record_parse_failures(user_id: int | None, key_source: str, purpose: str, model: str | None):
+    from api.ai import PaidParseError
+
+    try:
+        yield
+    except PaidParseError as exc:
+        if user_id is None:
+            record_fleet_usage(
+                purpose,
+                model,
+                exc.usage.get("prompt_tokens", 0),
+                exc.usage.get("completion_tokens", 0),
+                cached_tokens=exc.usage.get("cached_tokens", 0),
+                batched=False,
+                request_usage=[
+                    pricing.RequestTokens(
+                        input_tokens=exc.usage.get("prompt_tokens", 0),
+                        output_tokens=exc.usage.get("completion_tokens", 0),
+                        cached_tokens=exc.usage.get("cached_tokens", 0),
+                    )
+                ],
+            )
+        else:
+            record_tokens(user_id, key_source, purpose, model, exc.usage)
+        raise
