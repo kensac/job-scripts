@@ -10,6 +10,8 @@ on:
   # workflow on the branch explicitly instead, so the fixed commit is checked.
   workflow_dispatch:
 
+# Pull requests run without production credentials. Forks receive only a
+# read-only workflow token; neither collection nor test lanes may read secrets.
 jobs:
   prepare:
     runs-on: ubuntu-latest
