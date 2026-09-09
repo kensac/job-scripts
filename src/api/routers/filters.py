@@ -62,7 +62,34 @@ def _refuse_second_enabled(user_id: int, except_id: int | None = None) -> None:
         )
 
 
+REJUDGE_GROUPS_KEY = "filter_rejudge_on_change_groups"
+DEFERRED_MESSAGE = (
+    "The board is re-judged under the new prompt at the next hourly sweep, at batch price, "
+    "and fills back in as verdicts land. Press Run to re-evaluate now."
+)
+
+
+def _rejudge_on_change(user: AuthedUser) -> bool:
+    """Whether this person's filter save re-judges the board at once. Same
+    shape as oauth.connect_allowed: a config list of groups, "*" for all."""
+    allowed = db.get_config(REJUDGE_GROUPS_KEY, [])
+    if not isinstance(allowed, list):
+        return False
+    return "*" in allowed or bool(set(allowed) & set(user.groups))
+
+
+def _enqueue_on_change(user: AuthedUser, filter_id: int) -> tuple:
+    """A save that would run the filter: runs it when the person's group
+    re-judges on change, otherwise says the sweep will (Kanishk, 2026-09-09:
+    stop recomputing whenever a filter changes, behind a flag)."""
+    if not _rejudge_on_change(user):
+        return None, "DEFERRED"
+    return _enqueue(user, "run_filter", {"user_id": user.id, "filter_id": filter_id})
+
+
 def _blocked_message(user: AuthedUser, blocked: str | None) -> str | None:
+    if blocked == "DEFERRED":
+        return DEFERRED_MESSAGE
     return _budget_message(budget.get_entitlement(user)) if blocked else None
 
 
@@ -170,9 +197,7 @@ def create_filter(body: FilterCreate, user: AuthedUser = Depends(require_user)):
     assert row is not None
     task_id, blocked = (None, None)
     if body.enabled:
-        task_id, blocked = _enqueue(
-            user, "run_filter", {"user_id": user.id, "filter_id": row["id"]}
-        )
+        task_id, blocked = _enqueue_on_change(user, row["id"])
     visibility.request_refresh(user.id)
     return {
         **row,
@@ -216,9 +241,7 @@ def patch_filter(filter_id: int, body: FilterPatch, user: AuthedUser = Depends(r
     task_id, blocked = (None, None)
     hash_changed = row["prompt_hash"] != existing["prompt_hash"]
     if row["enabled"] and (hash_changed or fields.get("enabled")):
-        task_id, blocked = _enqueue(
-            user, "run_filter", {"user_id": user.id, "filter_id": filter_id}
-        )
+        task_id, blocked = _enqueue_on_change(user, filter_id)
     visibility.request_refresh(user.id)
     return {
         **row,
@@ -406,7 +429,7 @@ def adopt_preset(preset_id: int, user: AuthedUser = Depends(require_user)):
         ),
     )
     assert row is not None
-    task_id, blocked = _enqueue(user, "run_filter", {"user_id": user.id, "filter_id": row["id"]})
+    task_id, blocked = _enqueue_on_change(user, row["id"])
     visibility.request_refresh(user.id)
     return {
         **row,

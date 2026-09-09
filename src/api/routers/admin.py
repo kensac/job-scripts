@@ -1502,6 +1502,12 @@ class _Key(NamedTuple):
 _CONFIG_KEYS: dict[str, _Key] = {
     "signups_enabled": _Key(bool, "Whether new accounts can be created."),
     "gmail_connect_groups": _Key(list, "Authentik groups whose members may connect a mailbox."),
+    # Read by routers/filters._rejudge_on_change.
+    "filter_rejudge_on_change_groups": _Key(
+        list,
+        "Authentik groups whose filter saves re-judge the whole board at once; "
+        'everyone else waits for the hourly sweep. "*" means everyone.',
+    ),
     # Read by api.tasks.board.fetch_retry_interval.
     "fetch_retry_after_hours": _Key(
         int,

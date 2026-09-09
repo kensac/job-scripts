@@ -410,3 +410,52 @@ def test_an_admin_queues_a_run_past_the_cap_for_one_run_only(
     lifted, _ = runtime.load_config(uid, ignore_budget=True)
     assert lifted.key_source == "owner" and lifted.weekly_token_budget is None
     assert spent.weekly_token_budget == 100
+
+
+def test_a_filter_save_waits_for_the_sweep_unless_the_group_rejudges_on_change(
+    client, user_headers
+):
+    """Seeded closed: a save returns DEFERRED with the sentence the page shows
+    and queues nothing; the hourly sweep judges the board. With "*" in
+    filter_rejudge_on_change_groups the save queues the run as before, or
+    names the budget (Kanishk, 2026-09-09)."""
+    from api.routers.filters import DEFERRED_MESSAGE, REJUDGE_GROUPS_KEY
+
+    def gate(groups):
+        db.execute(
+            "INSERT INTO app_config (key, value) VALUES (%s, %s) "
+            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+            (REJUDGE_GROUPS_KEY, db.jsonb(groups)),
+        )
+
+    try:
+        gate([])
+        deferred = client.post(
+            "/v1/user/filters",
+            json={"name": "deferred", "prompt": "robotics only"},
+            headers=user_headers,
+        ).json()
+        assert deferred["task_id"] is None and deferred["run_blocked"] == "DEFERRED"
+        assert deferred["run_blocked_message"] == DEFERRED_MESSAGE
+        edited = client.patch(
+            f"/v1/user/filters/{deferred['id']}",
+            json={"prompt": "robotics or embedded only"},
+            headers=user_headers,
+        ).json()
+        assert edited["task_id"] is None and edited["run_blocked"] == "DEFERRED"
+        assert not db.query_one(
+            "SELECT 1 FROM tasks WHERE kind = 'run_filter' "
+            "AND (payload->>'filter_id')::bigint = %s",
+            (deferred["id"],),
+        )
+
+        gate(["*"])
+        at_once = client.patch(
+            f"/v1/user/filters/{deferred['id']}",
+            json={"prompt": "embedded only"},
+            headers=user_headers,
+        ).json()
+        assert at_once["run_blocked"] != "DEFERRED"
+        assert at_once["task_id"] is not None or at_once["run_blocked"] is not None
+    finally:
+        gate([])
