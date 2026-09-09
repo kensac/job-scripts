@@ -126,7 +126,9 @@ The request and write rules live in `api/application_writes.py` and
 
 Use `/admin/spend`'s `ledger.totals`, `ledger.by_model`, `ledger.by_day`, and
 `ledger.by_purpose` for recorded usage estimates. They share one population;
-daily buckets are UTC. Show `priced_calls`, `unpriced_calls`, and
+daily buckets are UTC. `ledger_rows` counts usage records, which may contain
+batch aggregates; the legacy `calls` field is the same record count. Show
+`priced_calls`, `unpriced_calls`, and
 `unknown_model_calls` alongside costs: a zero known subtotal can still have
 unknown cost. The basis is `recorded_estimate`, not an invoice or proof that all
 provider calls were recorded.
