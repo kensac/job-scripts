@@ -36,12 +36,16 @@ async def test_existing_negative_years_are_reextracted_even_when_the_page_hash_m
     )
 
     async def answer(task_id, shape, specs):
-        return {
-            spec.custom_id: SimpleNamespace(
-                text=json.dumps({"has_requirements": True, "yoe_min": 5}), error=None
+        return [
+            f.make_batch_result(
+                task_id,
+                spec,
+                model="test-model",
+                text=json.dumps({"has_requirements": True, "yoe_min": 5}),
+                error=None,
             )
             for spec in specs
-        }, SimpleNamespace(model="test-model")
+        ], SimpleNamespace(model="test-model")
 
     monkeypatch.setattr(requirements, "run_batched", answer)
     task_id = f.make_task("extract_requirements", status="running")
@@ -69,8 +73,11 @@ async def test_legacy_annual_compensation_is_repaired_from_the_cached_posting_on
     )
 
     async def answer(task_id, shape, specs):
-        return {
-            spec.custom_id: SimpleNamespace(
+        return [
+            f.make_batch_result(
+                task_id,
+                spec,
+                model="test-model",
                 text=json.dumps(
                     {
                         "has_comp": True,
@@ -85,7 +92,7 @@ async def test_legacy_annual_compensation_is_repaired_from_the_cached_posting_on
                 error=None,
             )
             for spec in specs
-        }, SimpleNamespace(model="test-model")
+        ], SimpleNamespace(model="test-model")
 
     monkeypatch.setattr(comp, "run_batched", answer)
     task_id = f.make_task("extract_comp", status="running")
@@ -114,13 +121,16 @@ async def test_a_nonfinite_compensation_answer_does_not_mark_extraction_complete
     job_id, _ = f.make_ready_job()
 
     async def answer(task_id, shape, specs):
-        return {
-            spec.custom_id: SimpleNamespace(
+        return [
+            f.make_batch_result(
+                task_id,
+                spec,
+                model="test-model",
                 text='{"has_comp":true,"comp_min":NaN,"period":"yearly","currency":"USD"}',
                 error=None,
             )
             for spec in specs
-        }, SimpleNamespace(model="test-model")
+        ], SimpleNamespace(model="test-model")
 
     monkeypatch.setattr(comp, "run_batched", answer)
     task_id = f.make_task("extract_comp", status="running")

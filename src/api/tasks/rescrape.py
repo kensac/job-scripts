@@ -22,6 +22,7 @@ import logging
 from typing import Any, LiteralString
 
 from api import db
+from core.store import CONTENT_LATERAL
 
 logger = logging.getLogger("jobtracker_worker")
 
@@ -64,3 +65,14 @@ def drop_unchanged(rows: list[dict[str, Any]], *, table: str, limit: int) -> lis
             f"{len(unchanged)} page(s) re-scraped without changing; {table} rows re-stamped"
         )
     return changed
+
+
+def content_is_current(url: str, content_row_id: int | None) -> bool:
+    if content_row_id is None:
+        return False
+    row = db.query_one(
+        "SELECT q.id FROM (VALUES (%s::text)) AS page(url) "
+        + CONTENT_LATERAL.format(url="page.url", columns="id"),
+        (url,),
+    )
+    return row is not None and row["id"] == content_row_id

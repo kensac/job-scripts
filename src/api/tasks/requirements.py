@@ -12,6 +12,8 @@ from pydantic import BaseModel
 from api import db
 from api.tasks import rescrape
 from api.tasks.runtime import (
+    consume_result,
+    has_batch_work,
     run_batched,
     set_progress,
 )
@@ -348,12 +350,16 @@ def _years(parsed: RequirementsExtract) -> tuple[int | None, int | None]:
 
 
 def _store(
-    url: str, parsed: RequirementsExtract, content_hash: str, content_row_id: int | None
+    url: str,
+    parsed: RequirementsExtract,
+    content_hash: str,
+    content_row_id: int | None,
+    model: str | None = None,
 ) -> None:
     yoe_min, yoe_max = _years(parsed)
     stated = parsed.has_requirements
-    with db.pool.connection() as conn:
-        conn.execute(
+    with db.transaction():
+        db.execute(
             """
             INSERT INTO job_requirements (
                 url, has_requirements, yoe_min, yoe_max, degree_min, degree_required,
@@ -393,7 +399,7 @@ def _store(
                 "clr": in_vocabulary(parsed.clearance, CLEARANCE_LEVELS) if stated else None,
                 "cit": bool(parsed.citizenship_required) and stated,
                 "spon": in_vocabulary(parsed.sponsorship, SPONSORSHIPS) if stated else None,
-                "model": REQUIREMENTS_MODEL,
+                "model": model,
                 "hash": content_hash,
                 "row_id": content_row_id,
             },
@@ -401,7 +407,7 @@ def _store(
         # Replaced wholesale rather than merged: a re-extraction that drops a
         # skill means the posting no longer asks for it, and a left-over row
         # would keep answering the market query with a requirement that is gone.
-        conn.execute("DELETE FROM job_skills WHERE url = %s", (url,))
+        db.execute("DELETE FROM job_skills WHERE url = %s", (url,))
         rows = []
         if stated:
             for kind, raw_list in (
@@ -416,7 +422,7 @@ def _store(
             # A posting can write the same skill twice ("Python", "python");
             # both collapse onto one canonical row, and the primary key is on
             # the raw text, so the duplicate has to be dropped here.
-            conn.cursor().executemany(
+            db.executemany(
                 "INSERT INTO job_skills (url, kind, skill, skill_raw) VALUES (%s, %s, %s, %s) "
                 "ON CONFLICT (url, kind, skill_raw) DO NOTHING",
                 rows,
@@ -428,9 +434,10 @@ async def handle_extract_requirements(task_id: int, payload: dict[str, Any]) -> 
 
     from core.batch import BatchSpec
 
-    rows = db.query(_CANDIDATES, {"cap": EXTRACT_REQUIREMENTS_PER_CYCLE})
+    resumed = has_batch_work(task_id)
+    rows = [] if resumed else db.query(_CANDIDATES, {"cap": EXTRACT_REQUIREMENTS_PER_CYCLE})
     rows = rescrape.drop_unchanged(rows, table="job_requirements", limit=REQUIREMENTS_INPUT_CHARS)
-    if not rows:
+    if not rows and not resumed:
         set_progress(task_id, 0, 0, "nothing to extract")
         return
     schema = to_strict_json_schema(RequirementsExtract)
@@ -441,36 +448,37 @@ async def handle_extract_requirements(task_id: int, payload: dict[str, Any]) -> 
             r["input_content"][:REQUIREMENTS_INPUT_CHARS],
             "RequirementsExtract",
             schema,
+            context={"content_hash": r["content_hash"], "content_row_id": r["content_row_id"]},
         )
         for r in rows
     ]
-    # The hash is of exactly the text that was sent, so a later pass can tell a
-    # row extracted from today's page from one extracted from a page that has
-    # since been re-scraped.
-    by_url = {r["url"]: r for r in rows}
-    set_progress(task_id, 0, len(specs), "requirements batch submitted (half price)")
+    set_progress(task_id, 0, len(specs), "requirements batch")
     results, _ = await run_batched(task_id, REQUIREMENTS_TASK, specs)
     done = 0
-    for url, res in results.items():
-        row = by_url.get(url)
-        if row is None:
-            continue
-        if res.text and not res.error:
+    for res in results:
+        url = res.custom_id
+        with consume_result(task_id, res) as receipt:
+            if not receipt.pending:
+                continue
+            context = res.request.context if res.request else None
+            if not context or not context.get("content_hash") or not context.get("content_row_id"):
+                receipt.outcome = "unknown_request"
+                continue
+            if not rescrape.content_is_current(url, context["content_row_id"]):
+                receipt.outcome = "superseded"
+                continue
+            if res.error or not res.text:
+                receipt.outcome = "failed"
+                continue
             try:
-                _store(
-                    url,
-                    RequirementsExtract.model_validate_json(res.text),
-                    row["content_hash"],
-                    row["content_row_id"],
-                )
-            except Exception:
-                # No row is written, so the next sweep picks the url up again -
-                # the same idempotent-by-re-sweep contract every batched pass has.
-                logger.warning(f"requirements parse failed for {url}")
-            else:
-                # Only a written row counts as done, so a sweep whose every
-                # line failed reads done == 0 rather than done == total.
-                done += 1
+                parsed = RequirementsExtract.model_validate_json(res.text)
+            except ValueError:
+                logger.warning("requirements parse failed for %s", url)
+                receipt.outcome = "failed"
+                continue
+            _store(url, parsed, context["content_hash"], context["content_row_id"], res.model)
+            receipt.outcome = "written"
+            done += 1
         if done % 200 == 0:
-            set_progress(task_id, done, len(specs), "requirements extracted")
-    set_progress(task_id, done, len(specs), "requirements extracted")
+            set_progress(task_id, done, len(results), "requirements extracted")
+    set_progress(task_id, done, len(results), "requirements extracted")
