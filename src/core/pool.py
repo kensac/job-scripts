@@ -1,18 +1,9 @@
-"""The one connection pool, and the instrumentation that has to precede it.
+"""Shared database pool and transaction-aware connections.
 
-There were two. core/store.py opened one and api/db.py opened another, both
-against the same DATABASE_URL, both min_size=1 max_size=10, and both are
-imported by the API and by every worker: instrumenting ConnectionPool.__init__
-while importing api.app showed two pools built with identical arguments. So a
-process configured for ten connections could hold twenty, and core/catalog.py
-reached for the private one by name (`from core.store import _pool as pool`)
-because there was no shared one to ask for.
-
-max_size is the sum of the two it replaces, not a new judgement about how many
-connections this application needs. Nothing measures pool usage today, so
-picking a smaller number here would be a capacity change smuggled into a
-structural fix. JOBTRACKER_DB_POOL_MAX exists so it can come down once someone
-has looked.
+Use connection() for reads and writes that must join an existing transaction.
+Use transaction() around atomic domain writes, usage and receipt acknowledgement.
+Keep provider calls outside database transactions. Pool capacity is configurable
+through JOBTRACKER_DB_POOL_MAX; changing it requires a separate measurement.
 """
 
 from __future__ import annotations
@@ -33,7 +24,7 @@ dotenv.load_dotenv()
 
 DATABASE_URL = os.environ["DATABASE_URL"]
 
-# The sum of the two pools this replaces. See the module docstring.
+# Preserve the combined capacity of the original API and storage pools.
 MAX_SIZE = int(os.environ.get("JOBTRACKER_DB_POOL_MAX", "20"))
 
 # Instrumented BEFORE the pool opens its first connection: the instrumentor

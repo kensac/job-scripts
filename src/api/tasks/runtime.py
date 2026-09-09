@@ -425,16 +425,10 @@ def batch_event_hook(
     *,
     charged_to_user: bool = False,
 ):
-    """Registers every provider batch in ai_batches as it progresses, and
-    stores submitted batch ids on the task payload so a requeued attempt
-    reattaches instead of resubmitting (double spend + orphaned results).
+    """Register provider progress and atomically record fleet usage.
 
-    `charged_to_user` says the caller already books these tokens against a
-    person, so this must not book them again against the fleet. Filter runs are
-    the case: the batched sweep records every result with budget.record_usage(user_id)
-    and this hook was recording the same tokens a second time with user_id NULL.
-    Two rows for one call made /admin/spend read filter work at double its cost
-    and let one person's usage consume the fleet's weekly ceiling.
+    User-charged callers account for individual receipts instead; the hook
+    must not book those same calls against the fleet.
     """
 
     resumed_ids = set(pending_batch_ids(task_id))
@@ -450,19 +444,8 @@ def batch_event_hook(
             out = counts.get("output_tokens", 0)
             est = pricing.estimate_cost_usd(event_model, inp, out, batched=True)
             cost = round(float(est), 6) if est is not None else None
-            # SET, not +=. A batch's usage is a fact about that batch, and
-            # this reports the totals for the whole batch every time it is
-            # collected - so adding meant a second collection doubled it.
-            #
-            # Reachable: a task that collects and then fails keeps its
-            # batch_ids, is requeued, reattaches and collects the same batch
-            # again. Checked before changing it - 92 batched tasks sit at
-            # attempts=2, which is the ordinary park-and-resume, and none is at
-            # attempts=3, which is what a collect-fail-recollect needs. Unfired,
-            # and it stops being unfired at exactly the wrong moment.
-            #
-            # The same reasoning applies to the ledger row below, which is why
-            # it is keyed on the batch rather than appended.
+            # Provider totals are snapshots. Recollecting unchanged totals
+            # must not append another ledger entry.
             written = db.execute_count(
                 "UPDATE ai_batches SET input_tokens = %s, output_tokens = %s, "
                 "est_cost_usd = %s, updated_at = now() "
@@ -662,11 +645,8 @@ async def run_batched(
         task_id,
         specs,
         chosen.model,
-        # The effort the router chose FOR THE MODEL IT CHOSE. The shape's
-        # own resolved_effort() answers for its sanctioned candidate only,
-        # so under an override it sent luna's "none" to nano: every line
-        # of every requirements batch on nano died on a 400 for it, on
-        # 2026-09-04 (21,525 lines) and again on 2026-09-05 (112).
+        # An override may reject the shape's default effort. Use the effort
+        # resolved for the model actually being submitted.
         str(chosen.params.get("reasoning_effort") or shape.resolved_effort() or ""),
         shape.max_output_tokens,
         hook,
@@ -683,16 +663,10 @@ async def submit_or_collect(
     max_output_tokens: int,
     hook,
 ) -> list[BatchResult]:
-    """The one way a scheduled handler runs a batch.
+    """Submit frozen requests and park, or return persisted results for consumption.
 
-    First call submits and raises AwaitingBatch, freeing the worker. When
-    poll_batches sees every batch reach a terminal state it flips the task back
-    to pending; the handler then re-runs, lands here again, finds the ids in
-    its payload and collects the results without resubmitting.
-
-    Callers must build their specs before calling and be safe to re-run from
-    the top, which they already are - every batched sweep was written to be
-    idempotent by re-sweep.
+    A retry collects existing work before considering new submission. Request
+    snapshots alone remain retryable when no provider batch was accepted.
     """
     from core.batch import submit_responses_batches
 
