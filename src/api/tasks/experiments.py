@@ -40,14 +40,14 @@ PURPOSE = "experiment"
 
 
 def _filter_instructions(params: dict[str, Any]) -> str:
-    from core.filters import build_custom_instructions
+    from core.filters import build_custom_decision_instructions
 
     row = db.query_one(
         "SELECT prompt, on_ambiguous FROM user_filters WHERE id = %s", (params.get("filter_id"),)
     )
     if not row:
         raise LookupError("experiment on filter needs filter_id of an existing filter")
-    return build_custom_instructions(row["prompt"], row["on_ambiguous"])
+    return build_custom_decision_instructions(row["prompt"], row["on_ambiguous"])
 
 
 def _posting_input(r: dict[str, Any]) -> str:
@@ -93,12 +93,12 @@ def steps() -> dict[str, dict[str, Any]]:
     its answer are compared. Imported lazily so this module does not pull
     every task module in at import."""
     from api.tasks import comp, requirements, verify
-    from api.tasks.models import FilterVerdict, VerifyVerdict
+    from api.tasks.models import FilterDecision, VerifyVerdict
 
     return {
         "filter": {
             "instructions": _filter_instructions,
-            "model": FilterVerdict,
+            "model": FilterDecision,
             "input": _posting_input,
             "max_output_tokens": 6000,
             "fields": _filter_fields,

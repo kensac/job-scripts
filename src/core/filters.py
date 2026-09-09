@@ -33,18 +33,38 @@ def build_custom_input(company: str, title: str, content: str) -> str:
     return f"Company: {company}\nJob Title: {title}\n\nJob Content:\n{content}"
 
 
-def build_custom_instructions(prompt: str, on_ambiguous: str = "keep") -> str:
-    if not prompt:
-        return ""
+def _custom_criteria_instructions(prompt: str, on_ambiguous: str) -> str:
     return f"""Evaluate a job against the user criteria below and decide whether to filter it out.
 
 <user_criteria>
 {prompt}
 </user_criteria>
 
-{AMBIGUITY_RULES.get(on_ambiguous, AMBIGUITY_RULES["keep"])}
+{AMBIGUITY_RULES.get(on_ambiguous, AMBIGUITY_RULES["keep"])}"""
 
-reason: <=25 words citing the deciding factor (company/role/skills)."""
+
+def build_custom_instructions(prompt: str, on_ambiguous: str = "keep") -> str:
+    """Explanation prompt and historical cache identity; preserve its bytes."""
+    if not prompt:
+        return ""
+    return (
+        _custom_criteria_instructions(prompt, on_ambiguous)
+        + "\n\nreason: <=25 words citing the deciding factor (company/role/skills)."
+    )
+
+
+def build_custom_decision_instructions(prompt: str, on_ambiguous: str = "keep") -> str:
+    if not prompt:
+        return ""
+    return (
+        _custom_criteria_instructions(prompt, on_ambiguous)
+        + '\n\nReturn only a JSON object with the boolean field "should_filter". Do not include a reason.'
+    )
+
+
+def compute_filter_hash(prompt: str, on_ambiguous: str = "keep") -> str:
+    # Output presentation does not change which criteria a verdict answers.
+    return compute_prompt_hash(build_custom_instructions(prompt, on_ambiguous))
 
 
 @dataclass(frozen=True)

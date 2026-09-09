@@ -120,7 +120,7 @@ def prefetch(
 def add_ai_result(
     url: str,
     status: str,
-    reason: str = "",
+    reason: str | None = "",
     check_type: str = "",
     prompt_tokens: int | None = None,
     completion_tokens: int | None = None,
