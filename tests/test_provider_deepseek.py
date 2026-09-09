@@ -337,8 +337,9 @@ class TestJsonObjectPath:
         json_object response that does not match the model asked for has to be
         caught here, because nothing upstream enforced it."""
         fake = _FakeCompletions('{"wrong_field": 1}')
-        with pytest.raises(ValidationError):
+        with pytest.raises(ai.PaidParseError) as exc:
             await self._run(fake)
+        assert isinstance(exc.value.__cause__, ValidationError)
 
     @pytest.mark.asyncio
     async def test_a_truncated_response_is_refused_not_parsed(self):

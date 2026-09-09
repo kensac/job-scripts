@@ -22,7 +22,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from api import ai, application_writes, db, hosts, visibility
+from api import ai, application_writes, budget, db, hosts, visibility
 from api.tasks.runtime import (
     Deferred,
     consume_result,
@@ -359,7 +359,8 @@ async def draft_rows(
         # A person's own key has no batch endpoint we can bill to them; one
         # live call per question, the way their filters run.
         for spec in specs:
-            parsed, usage = await ai.parse(cfg, spec.instructions, spec.input, Draft)
+            with budget.record_parse_failures(user_id, cfg.key_source, PURPOSE, cfg.model):
+                parsed, usage = await ai.parse(cfg, spec.instructions, spec.input, Draft)
             done += application_writes.record_result(
                 task_id,
                 user_id,

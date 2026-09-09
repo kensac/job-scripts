@@ -367,21 +367,22 @@ async def refine_answer(
     )
     if row is None:
         raise _bad(404, "NOT_FOUND", "unknown question")
-    parsed, usage = await ai.parse(
-        cfg,
-        drafts.instructions(drafts.writing_style(user.id)),
-        drafts.question_input(
-            row["question"],
-            job["company"],
-            job["title"],
-            get_content(job["url"]) or "",
-            resume,
-            draft=row["draft"],
-            turns=row["turns"][:-1],
-            instruction=body.instruction,
-        ),
-        drafts.Draft,
-    )
+    with budget.record_parse_failures(user.id, cfg.key_source, drafts.PURPOSE, cfg.model):
+        parsed, usage = await ai.parse(
+            cfg,
+            drafts.instructions(drafts.writing_style(user.id)),
+            drafts.question_input(
+                row["question"],
+                job["company"],
+                job["title"],
+                get_content(job["url"]) or "",
+                resume,
+                draft=row["draft"],
+                turns=row["turns"][:-1],
+                instruction=body.instruction,
+            ),
+            drafts.Draft,
+        )
     budget.record_tokens(user.id, cfg.key_source, drafts.PURPOSE, cfg.model, usage)
     if parsed is None:
         raise _bad(502, "NO_ANSWER", "the model returned no usable answer; try again")
