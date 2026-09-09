@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-from api import db, events
+from api import budget, db, events
 
 AdmissionPolicy = Literal["interactive", "scheduled"]
 ACTIVE_STATUSES = ("pending", "running", "awaiting_batch", "waiting")
@@ -26,20 +26,36 @@ def conflict(user_id: int, filter_id: int | None, *, policy: AdmissionPolicy) ->
     )
 
 
-def admission(user_id: int, filter_id: int | None) -> dict:
-    blocked = conflict(user_id, filter_id, policy="interactive")
-    return {
-        "allowed": blocked is None,
-        "reason": "IN_PROGRESS" if blocked else None,
-        "message": "An overlapping filter run is already in progress." if blocked else None,
-        "task_id": blocked["id"] if blocked else None,
-    }
-
-
 @dataclass(frozen=True)
 class RunAdmission:
     task_id: int | None
     conflict: dict | None = None
+    access_failure: budget.AIAccessError | None = None
+
+    def as_dict(self) -> dict:
+        if self.access_failure:
+            return {
+                "allowed": False,
+                "reason": self.access_failure.reason,
+                "message": self.access_failure.message,
+                "task_id": None,
+            }
+        return {
+            "allowed": self.conflict is None,
+            "reason": "IN_PROGRESS" if self.conflict else None,
+            "message": "An overlapping filter run is already in progress."
+            if self.conflict
+            else None,
+            "task_id": self.conflict["id"] if self.conflict else self.task_id,
+        }
+
+
+def admission(
+    user_id: int, filter_id: int | None, *, access_failure: budget.AIAccessError | None
+) -> RunAdmission:
+    if access_failure:
+        return RunAdmission(None, access_failure=access_failure)
+    return RunAdmission(None, conflict(user_id, filter_id, policy="interactive"))
 
 
 def enqueue(

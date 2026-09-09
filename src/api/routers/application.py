@@ -18,7 +18,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from api import ai, budget, db, events
+from api import ai, ai_access, budget, db, events
 from api.auth import AuthedUser, require_user
 from api.job_access import require_visible_job
 from api.tasks import application as drafts
@@ -301,11 +301,7 @@ def request_drafts(job_id: int, body: DraftRequest, user: AuthedUser = Depends(r
             raise _bad(404, "NOT_FOUND", "unknown resume")
     elif not db.query_one("SELECT 1 FROM user_resumes WHERE user_id = %s", (user.id,)):
         raise _bad(400, "NO_RESUME", "add a resume under settings first")
-    ent = budget.get_entitlement(user)
-    if ent.key_source is None:
-        raise _bad(
-            402, "BUDGET_EXCEEDED" if ent.owner_key else "NO_API_KEY", "no key to draft with"
-        )
+    ai_access.require_config(user)
     running = _inflight(user.id, job_id)
     if running:
         raise HTTPException(
@@ -387,13 +383,7 @@ async def refine_answer(
     resume = drafts.resume_text(user.id, body.resume_id)
     if not resume:
         raise _bad(400, "NO_RESUME", "add a resume under settings first")
-    ent = budget.get_entitlement(user)
-    try:
-        cfg = budget.resolve_ai_config(user.id, ent)
-    except PermissionError as exc:
-        raise _bad(402, "BUDGET_EXCEEDED", "weekly budget spent") from exc
-    except LookupError as exc:
-        raise _bad(402, "NO_API_KEY", "no key to draft with") from exc
+    cfg = ai_access.require_config(user)
     parsed, usage = await ai.parse(
         cfg,
         drafts.instructions(drafts.writing_style(user.id)),

@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Any
+from typing import Any, Literal
 
 from api import crypto, db
 from api.auth import AuthedUser
@@ -27,6 +27,49 @@ class Entitlement:
         ):
             return "owner"
         return None
+
+
+AccessReason = Literal["NO_API_KEY", "NO_MODEL", "BUDGET_EXCEEDED"]
+
+
+class AIAccessError(Exception):
+    def __init__(self, reason: AccessReason, entitlement: Entitlement):
+        super().__init__(reason)
+        self.reason: AccessReason = reason
+        self.entitlement = entitlement
+
+    @property
+    def message(self) -> str:
+        return access_message(self.reason, self.entitlement)
+
+
+class AIConfigUnavailable(AIAccessError, LookupError):
+    pass
+
+
+class AIBudgetExceeded(AIAccessError, PermissionError):
+    pass
+
+
+def access_message(reason: AccessReason, ent: Entitlement) -> str:
+    if reason == "NO_MODEL":
+        return "Choose a model for your provider under AI & keys."
+    if reason == "NO_API_KEY":
+        return "There is no available key to run on. Add your own API key under AI & keys."
+    cap = ent.weekly_token_budget or 0
+    return (
+        f"The shared weekly AI budget is used up: {ent.spent_this_week:,} of {cap:,} tokens "
+        "spent this week. It resets weekly. To keep going now, add your own API key under "
+        "AI & keys; your own key has no cap and is billed to you."
+    )
+
+
+def access_failure(user: AuthedUser) -> AIAccessError | None:
+    try:
+        resolve_ai_config(user.id, get_entitlement(user))
+    except AIAccessError as exc:
+        return exc
+    return None
 
 
 def _owner_budget(groups: list[str]) -> tuple[bool, int | None]:
@@ -98,7 +141,7 @@ def owner_allowed_models(groups: list[str]) -> list[str]:
 
 
 def resolve_ai_config(user_id: int, entitlement: Entitlement):
-    """Returns an ai.AIConfig or raises LookupError / PermissionError."""
+    """Resolve the effective model and credentials or a typed access refusal."""
 
     from api import ai
 
@@ -116,7 +159,7 @@ def resolve_ai_config(user_id: int, entitlement: Entitlement):
         provider = settings.get("ai_provider") or "openai"
         model = settings.get("ai_model") or ai.DEFAULT_MODELS.get(provider)
         if not model:
-            raise LookupError("NO_MODEL")
+            raise AIConfigUnavailable("NO_MODEL", entitlement)
         return ai.AIConfig(
             provider=provider,
             api_key=crypto.decrypt(settings["api_key_enc"]),
@@ -130,7 +173,7 @@ def resolve_ai_config(user_id: int, entitlement: Entitlement):
             entitlement.weekly_token_budget is not None
             and entitlement.spent_this_week >= entitlement.weekly_token_budget
         ):
-            raise PermissionError("BUDGET_EXCEEDED")
+            raise AIBudgetExceeded("BUDGET_EXCEEDED", entitlement)
         allowed = owner_allowed_models(entitlement.groups or [])
         chosen = settings.get("ai_model")
         model = chosen
@@ -161,7 +204,7 @@ def resolve_ai_config(user_id: int, entitlement: Entitlement):
                 substituted_from=substituted_from,
                 substitution_reason=reason,
             )
-    raise LookupError("NO_API_KEY")
+    raise AIConfigUnavailable("NO_API_KEY", entitlement)
 
 
 # A week's fleet ceiling, expressed as "this many full sweeps of every task at

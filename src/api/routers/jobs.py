@@ -6,7 +6,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from api import db, events, signals, sorting, visibility
+from api import ai_access, db, events, signals, sorting, visibility
 from api.auth import AuthedUser, require_user
 from api.job_access import require_visible_job
 from api.models import UploadRequest, UserJobPatch, UserJobsBulkIds, UserJobsBulkPatch
@@ -500,8 +500,7 @@ async def explain_check(job_id: int, body: ExplainBody, user: AuthedUser = Depen
             detail={"code": "NO_CONTENT", "message": "could not fetch this posting just now"},
         )
     content_row = {"input_content": fresh}
-    ent = budget.get_entitlement(user)
-    cfg = budget.resolve_ai_config(user.id, ent)
+    cfg = ai_access.require_config(user)
     cfg = dataclasses.replace(cfg, params={**cfg.params, "reasoning_effort": "medium"})
 
     check = body.check

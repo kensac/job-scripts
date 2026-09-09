@@ -7,6 +7,11 @@ from psycopg.errors import UniqueViolation
 from api import db
 
 
+@pytest.fixture(autouse=True)
+def _available_owner_key(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-owner-test")
+
+
 def test_database_refuses_multiple_enabled_filters(f):
     uid = f.make_user()
     f.make_filter(uid, name="first", enabled=True)
@@ -194,3 +199,22 @@ def test_migration_refuses_ambiguous_choices_without_changing_them(f):
                 outer.rollback()
     finally:
         engine.dispose()
+
+
+def test_repeating_enabled_filter_save_does_not_queue_another_judgement(client, user_headers, f):
+    uid = db.query_one("SELECT id FROM users WHERE sub = 'test-user'")["id"]
+    flt = f.make_filter(uid, enabled=True)
+    db.execute(
+        "UPDATE app_config SET value = %s WHERE key = 'filter_rejudge_on_change_groups'",
+        (db.jsonb(["*"]),),
+    )
+    response = client.patch(
+        f"/v1/user/filters/{flt['id']}",
+        json={"enabled": True, "prompt": flt["prompt"]},
+        headers=user_headers,
+    )
+    assert response.status_code == 200
+    assert response.json()["task_id"] is None
+    assert response.json()["run_blocked"] is None
+    assert response.json()["prompt_hash"] == flt["prompt_hash"]
+    assert db.query_one("SELECT count(*) AS n FROM tasks WHERE kind = 'run_filter'")["n"] == 0

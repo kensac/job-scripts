@@ -14,6 +14,12 @@ from api import db
 from api.tasks import application as drafts
 from core import forms
 
+
+@pytest.fixture(autouse=True)
+def _available_owner_key(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-owner-test")
+
+
 GREENHOUSE = json.dumps(
     {
         "questions": [
@@ -506,7 +512,7 @@ class TestRefining:
         ).json()["key"]
 
         def no_key(user_id, ent):
-            raise LookupError("NO_API_KEY")
+            raise budget.AIAccessError("NO_API_KEY", ent)
 
         monkeypatch.setattr(budget, "resolve_ai_config", no_key)
         r = client.post(

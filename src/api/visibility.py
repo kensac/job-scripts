@@ -23,27 +23,17 @@ from __future__ import annotations
 
 import datetime
 import logging
-from typing import Any
 
-from api import criteria, db
+from api import board_eligibility, criteria, db
+from api.board_eligibility import settings_params
 
 logger = logging.getLogger("jobtracker_api")
 
-FULL = """
+FULL = f"""
 WITH enabled_filters AS (
-    -- DISTINCT is load-bearing: two enabled filters can share a prompt_hash
-    -- (same prompt text under different names - adopting a preset and then
-    -- pasting the same prompt does it). filter_pass dedupes per hash, so
-    -- without this the passed_count could never reach COUNT(*) and the board
-    -- would silently go empty.
-    SELECT DISTINCT prompt_hash FROM user_filters WHERE user_id = %(uid)s AND enabled
+    {board_eligibility.ENABLED_FILTERS}
 ),
-latest_check AS (
-    SELECT DISTINCT ON (url, check_type) url, check_type, status
-    FROM ai_queries
-    WHERE check_type IN ('closed', 'clearance') AND status IN ('passed', 'rejected')
-    ORDER BY url, check_type, id DESC
-),
+{board_eligibility.LATEST_CHECK},
 filter_pass AS (
     -- The hashes go in as an array, not a join. Joined, the planner sorted
     -- 26,000 (url, hash) rows under the locale collation before the DISTINCT
@@ -58,7 +48,7 @@ filter_pass AS (
         ORDER BY q.url, q.prompt_hash, q.id DESC
     ) t WHERE t.status = 'passed' GROUP BY url
 )
-SELECT {columns}
+SELECT {{columns}}
 FROM jobs j
 LEFT JOIN user_jobs uj ON uj.job_id = j.id AND uj.user_id = %(uid)s
 -- Joined once, not looked up per row: as a correlated subquery this ran
@@ -79,20 +69,14 @@ WHERE (
         AND (COALESCE(uj.status, '') <> '' OR COALESCE(uj.notes, '') <> ''
              OR uj.date_applied IS NOT NULL))
     OR (
-        j.active
-        AND j.source IN (SELECT source FROM user_sources WHERE user_id = %(uid)s)
-        {criteria}
-        AND EXISTS (SELECT 1 FROM latest_check lc
-                    WHERE lc.url = j.url AND lc.check_type = 'closed' AND lc.status = 'passed')
-        AND (%(bypass_sponsorship)s
-             OR EXISTS (SELECT 1 FROM latest_check lc
-                        WHERE lc.url = j.url AND lc.check_type = 'clearance' AND lc.status = 'passed'))
+        {board_eligibility.STRUCTURAL}
+        AND {board_eligibility.SUBSCRIBED}
         AND ((SELECT COUNT(*) FROM enabled_filters) = 0
              OR COALESCE(fp.passed_count, 0)
                 = (SELECT COUNT(*) FROM enabled_filters))
     )
 )
-{extra}
+{{extra}}
 """
 
 FAST = """
@@ -108,18 +92,6 @@ WHERE (
 )
 {extra}
 """
-
-
-def settings_params(user_id: int) -> dict[str, Any]:
-    settings = db.query_one(
-        "SELECT bypass_sponsorship_filter, criteria FROM user_settings WHERE user_id = %s",
-        (user_id,),
-    )
-    return {
-        "uid": user_id,
-        "bypass_sponsorship": settings["bypass_sponsorship_filter"] if settings else True,
-        **criteria.params(settings),
-    }
 
 
 def member_ids(user_id: int) -> list[int]:

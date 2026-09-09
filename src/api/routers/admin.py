@@ -4,14 +4,15 @@ import logging
 import os
 import time
 from decimal import Decimal
-from typing import Any, NamedTuple
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, JsonValue
 
 from api import ai, db, events, health, hosts, scoping, sorting
 from api import params as params_
 from api.auth import AuthedUser, require_user
+from api.config import CONFIG_KEYS
 from api.routers.jobs import report_kinds
 from core import pricing, reason_taxonomy
 
@@ -1488,147 +1489,7 @@ def host_budgets(user: AuthedUser = Depends(require_admin)):
     return {"budgets": rows, "deferred": deferred}
 
 
-class _Key(NamedTuple):
-    """One tunable: the type its value must have, what it means, and the
-    values a string key accepts. Served by GET /admin/config, so the admin
-    page renders any key from here and a new tunable is one entry, not one
-    entry here and one in the frontend. The comments name who reads it."""
-
-    type: type
-    help: str
-    choices: tuple[str, ...] = ()
-
-
-_CONFIG_KEYS: dict[str, _Key] = {
-    "signups_enabled": _Key(bool, "Whether new accounts can be created."),
-    "gmail_connect_groups": _Key(list, "Authentik groups whose members may connect a mailbox."),
-    # Read by routers/users.get_settings.
-    "board_default_column_layout": _Key(
-        list,
-        "Column state a board starts with before the person changes a column: "
-        "AG Grid column state entries (colId, hide, pinned, width).",
-    ),
-    # Read by routers/filters._rejudge_on_change.
-    "filter_rejudge_on_change_groups": _Key(
-        list,
-        "Authentik groups whose filter saves re-judge the whole board at once; "
-        'everyone else waits for the hourly sweep. "*" means everyone.',
-    ),
-    # Read by api.tasks.board.fetch_retry_interval.
-    "fetch_retry_after_hours": _Key(
-        int,
-        "Hours a posting whose page fetch came back empty waits before any "
-        "ingest or backfill tries it again.",
-    ),
-    # Read by the queue detectors in api.health; seeded in api.db.
-    "queue_stall_minutes": _Key(
-        int,
-        "Minutes an idle worker may sit beside pending work before the queue counts as stalled.",
-    ),
-    "ingest_backlog_cycles": _Key(
-        int, "Pending ingests older than this many hourly cycles mean the fleet is behind."
-    ),
-    # Read by core.catalog.record_listings.
-    "screened_retention_days": _Key(
-        int,
-        "Days a posting a title pattern screened out stays on record after its "
-        "board stops listing it.",
-    ),
-    # Read by api.tasks.batches.
-    "batch_straggler_hours": _Key(
-        int,
-        "Hours a still-running provider batch may lag its finished siblings "
-        "before the task collects those and parks again on it.",
-    ),
-    # Read by api.verdicts.host_paced.
-    "fetch_host_limits": _Key(
-        dict,
-        "Host to page fetches per hour, fleet-wide. A host that blocks bursts is "
-        "drip-fed at this rate instead of being pulled off; the fetch-failure "
-        "alert names the host.",
-    ),
-    # Read by core.boards through the ingest task.
-    "ingest_host_pace_seconds": _Key(
-        dict,
-        "Host to the smallest gap in seconds between pulls from one address, "
-        "and between pages inside a pull. The fleet learns the actual gap per "
-        "host and address from refusals (GET /admin/host-budgets); this is the "
-        "floor it never goes under, not a ceiling.",
-    ),
-    # Read by api.verdicts.refresh_content.
-    "fetch_engine": _Key(
-        str,
-        "Which engine fetches a posting page after the ATS resolvers decline. "
-        "static_first tries a browserless fetch and falls back to the browser "
-        "unless the page came back whole; chromium goes straight to the browser.",
-        ("chromium", "static_first"),
-    ),
-    # Read by api.fetching.fetch_static.
-    "static_fetch_min_chars": _Key(
-        int,
-        "Characters of text a browserless fetch must return to be served instead of the browser.",
-    ),
-    # Seeded in api.db.
-    "admin_stats_cache_seconds": _Key(int, "Seconds GET /admin/stats serves the same answer."),
-    # Read by api.health._detect_fleet.
-    "fleet_roll_minutes": _Key(
-        int,
-        "Minutes a worker may run a different release from the api before it counts as a "
-        "host that did not deploy.",
-    ),
-    # Read by api.tasks.locations.handle_classify_locations.
-    "classify_locations_per_cycle": _Key(
-        int, "Distinct location strings the hourly classification cycle sends to the model."
-    ),
-    # Read by api.worker.schedule_ingest_cycle.
-    "board_refresh_minutes": _Key(
-        int,
-        "Minutes between recomputes of every person's board; a preference change recomputes sooner.",
-    ),
-    "application_form_reads_per_cycle": _Key(
-        int,
-        "Application forms the hourly sweep reads per person per cycle, newest postings "
-        "first, one request each to the ATS under the host budget.",
-    ),
-    "application_draft_instructions": _Key(
-        str,
-        "The rules the model drafts application answers under, before the person's own "
-        "writing style. Empty means the built-in text in api.tasks.application; a change "
-        "here takes effect on the next draft, with no roll. Read by application_draft, "
-        "application_sweep and the refine endpoint.",
-    ),
-    "application_suggest_instructions": _Key(
-        str,
-        "The rules the model fills the rest of an application form under (the fields the "
-        "profile and drafts did not). Empty means the built-in text in api.routers.apply. "
-        "Read by POST /user/apply/suggest.",
-    ),
-    "application_ai_never_fills": _Key(
-        str,
-        "Fields the model never fills on an application form, left to the person: one "
-        "label a line or comma-separated, matched as whole words in the field's label or "
-        "key. Read by POST /user/apply/suggest, which drops them before the call and names "
-        "them in its reply so the extension lists them as the person's. Empty is not off: "
-        "an empty list lets the model fill every field, the location box included.",
-    ),
-    "resumes_per_user": _Key(
-        int,
-        "Resumes one person may keep. Each holds its PDF (5 MB at most) in the database, "
-        "and the database is dumped and archived daily, so this bounds four copies of "
-        "every upload.",
-    ),
-    "application_drafts_per_cycle": _Key(
-        int,
-        "Missing application answers the hourly sweep drafts per person per cycle, in one "
-        "half-price batch; about $0.0005 each on the sanctioned model.",
-    ),
-    "requirements_extraction_enabled": _Key(
-        bool,
-        "Whether the hourly requirements extraction runs. Off since 2026-09-07: its one "
-        "consumer is the market table and the deployed arm measured poorly; pick an arm "
-        "with an experiment before turning it on.",
-    ),
-}
+_CONFIG_KEYS = CONFIG_KEYS
 
 
 @router.get("/config")
@@ -1644,7 +1505,7 @@ def get_config(user: AuthedUser = Depends(require_admin)):
 
 
 class ConfigPut(BaseModel):
-    value: bool | int | str | list[str] | dict[str, int]
+    value: JsonValue
 
 
 @router.put("/config/{key}")
@@ -1655,59 +1516,19 @@ def put_config(key: str, body: ConfigPut, user: AuthedUser = Depends(require_adm
             400,
             detail={"code": "UNKNOWN_KEY", "message": f"key must be one of {sorted(_CONFIG_KEYS)}"},
         )
-    # bool is an int to isinstance, so an int key checks the exact type and
-    # refuses zero and below: a retry window of 0 hours is the hourly
-    # hammering this key exists to stop.
-    expected = spec.type
-    if expected is int:
-        if type(body.value) is not int or body.value < 1:
-            raise HTTPException(
-                400,
-                detail={
-                    "code": "INVALID_VALUE",
-                    "message": f"{key} takes a whole number of 1 or more",
-                },
-            )
-    elif expected is str:
-        choices = spec.choices
-        if not isinstance(body.value, str) or body.value not in choices:
-            raise HTTPException(
-                400,
-                detail={
-                    "code": "INVALID_VALUE",
-                    "message": f"{key} takes one of {', '.join(choices)}",
-                },
-            )
-    elif expected is dict:
-        # Host -> whole number per hour. A host is the netloc as the posting
-        # URL carries it; an empty host or a rate below 1 would mean "never
-        # fetch", which is a source switch, not a pace.
-        hosts = body.value if isinstance(body.value, dict) else None
-        if hosts is None or any(
-            not k.strip() or type(v) is not int or v < 1 for k, v in hosts.items()
-        ):
-            raise HTTPException(
-                400,
-                detail={
-                    "code": "INVALID_VALUE",
-                    "message": f"{key} takes host names mapped to whole numbers of 1 or more",
-                },
-            )
-        body.value = {k.strip().lower(): v for k, v in hosts.items()}
-    elif not isinstance(body.value, expected):
+    try:
+        value = spec.validate(body.value)
+    except ValueError as exc:
         raise HTTPException(
             400,
-            detail={
-                "code": "INVALID_VALUE",
-                "message": f"{key} takes a {expected.__name__}",
-            },
-        )
+            detail={"code": "INVALID_VALUE", "message": f"{key}: {exc}"},
+        ) from exc
     db.execute(
         "INSERT INTO app_config (key, value) VALUES (%s, %s) "
         "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
-        (key, db.jsonb(body.value)),
+        (key, db.jsonb(value)),
     )
-    return {"key": key, "value": body.value}
+    return {"key": key, "value": value}
 
 
 @router.get("/reports")

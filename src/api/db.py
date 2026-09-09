@@ -12,6 +12,8 @@ import dotenv
 from psycopg import Connection
 from psycopg.types.json import Jsonb
 
+from api.config import CONFIG_KEYS
+
 dotenv.load_dotenv()
 
 # The pool and the instrumentation that must precede it live in core/pool.py,
@@ -28,130 +30,7 @@ _GROUP_BUDGET_SEED = [
 ]
 
 
-# Groups allowed to connect a mailbox. A list rather than a bool because the
-# gate is "who", not "whether", and seeded closed to everyone but infra-admins
-# so the Testing-mode OAuth client is not exposed to users who would hit its
-# 100-test-user cap. oauth.ALL_GROUPS opens it to everyone.
-_APP_CONFIG_SEED = [
-    ("signups_enabled", True),
-    ("gmail_connect_groups", ["infra-admins"]),
-    # Groups whose filter saves re-judge the board at once. Seeded closed:
-    # three edits on one new account cost 10.27 dollars in a day
-    # (2026-09-08), so for everyone else an edit waits for the hourly
-    # sweep at batch price. "*" opens it to everyone.
-    ("filter_rejudge_on_change_groups", []),
-    # The board a person sees before they touch a column: Kanishk's own
-    # layout on 2026-09-09 (order, hidden columns, pins, widths; no sort,
-    # the lenses own that). Served by GET /user/settings when the row
-    # holds no layout, so a new account and a reset both start here; the
-    # column chooser still shows any hidden column.
-    (
-        "board_default_column_layout",
-        [
-            {"colId": "company", "hide": False, "pinned": "left", "width": 160},
-            {"colId": "size", "hide": True, "width": 120},
-            {"colId": "location", "hide": False, "width": 150},
-            {"colId": "comp", "hide": False, "width": 130},
-            {"colId": "source", "hide": True, "width": 120},
-            {"colId": "ats", "hide": True, "width": 130},
-            {"colId": "url", "hide": False, "width": 110},
-            {"colId": "title", "hide": False, "width": 210},
-            {"colId": "terms", "hide": True, "width": 170},
-            {"colId": "recruiter", "hide": True, "width": 140},
-            {"colId": "connection1", "hide": True, "width": 150},
-            {"colId": "connection2", "hide": True, "width": 150},
-            {"colId": "documents", "hide": True, "width": 140},
-            {"colId": "added_at", "hide": False, "width": 130},
-            {"colId": "date_posted", "hide": False, "width": 130},
-            {"colId": "date_applied", "hide": False, "width": 140},
-            {"colId": "waiting", "hide": True, "width": 110},
-            {"colId": "status", "hide": False, "width": 220},
-            {"colId": "notes", "hide": True, "width": 200},
-            {"colId": "row_actions", "hide": False, "pinned": "right", "width": 44},
-        ],
-    ),
-    # How long a posting whose page fetch came back empty waits before any
-    # ingest or backfill tries it again. The hourly cycle used to be the
-    # retry: 24 attempts a day at the same dead URL from every worker.
-    ("fetch_retry_after_hours", 24),
-    # An idle worker beside pending work for this long is a stall: a claim
-    # takes one poll (JOBTRACKER_WORKER_POLL, 5s), so ten minutes is not
-    # latency. Kinds allowlists (JOBTRACKER_WORKER_KINDS) are the one
-    # legitimate reason, and the alert names them.
-    ("queue_stall_minutes", 10),
-    # Pending ingests older than this many ingest cycles mean the fleet is
-    # behind the hour; one cycle is the normal wait.
-    ("ingest_backlog_cycles", 2),
-    # How long a posting a title pattern screened out stays on record after
-    # its board stops listing it. Long enough to evaluate a new pattern
-    # against a month of what the boards actually posted.
-    ("screened_retention_days", 30),
-    # A parked task resumes once every batch is terminal, or once the ones
-    # still running are older than this while others have finished: the
-    # finished ones are collected and the task parks again on the rest.
-    # Provider batches normally land within the hour; the stragglers seen
-    # on 2026-09-04 sat 14 hours at a few requests short.
-    ("batch_straggler_hours", 4),
-    # Host -> page fetches per hour, fleet-wide. Empty means no host is paced;
-    # a host that blocks bursts (www.tesla.com blocked 19 of 32 in a day
-    # after 12 in an hour) is added here, from the alert, at the rate it
-    # tolerates. Hosts are data, so none is written into code.
-    ("fetch_host_limits", {}),
-    # Host -> seconds between LISTING requests per worker process. Workable
-    # limits by address and two workers share hetzner's; six seconds was not
-    # enough, twenty holds. Read by core.boards through the ingest task.
-    ("ingest_host_pace_seconds", {"apply.workable.com": 20}),
-    # Which engine fetches a posting page after the ATS resolvers decline.
-    # static_first tries a browserless fetch with a real Chrome fingerprint
-    # and falls through to the browser unless the page plainly came back
-    # whole; chromium goes straight to the browser as before. Switchable
-    # without a roll, so the share each engine serves can be read off the
-    # content rows (reason 'static' vs 'scraped') and the choice revisited.
-    ("fetch_engine", "static_first"),
-    # The text-length gate under static_first; see api.fetching.fetch_static
-    # for the measurement behind 1,500.
-    ("static_fetch_min_chars", 1500),
-    # How long GET /admin/stats serves the same answer. The dashboard refetches
-    # it on every worker event: 642 calls a day at 583 ms each, five full
-    # scans of ai_queries per call, a quarter of all server time on the box
-    # for lifetime totals that move once an hour. 1 is as good as off.
-    ("admin_stats_cache_seconds", 60),
-    # Minutes a worker may heartbeat on a release other than the api's before
-    # that is a host that did not deploy. A lockstep roll finishes inside ten,
-    # but gcp-vps is deployed by hand until its runner exists, so the window
-    # covers a person noticing a roll request; tighten it when every host
-    # self-deploys. gcp-vps ran an hour behind on 2026-09-04 unnoticed.
-    ("fleet_roll_minutes", 120),
-    # Distinct location strings classified per hourly cycle. The backlog is
-    # 8,735 strings; set low for a first look at GET /admin/locations, then
-    # raised to clear it in one cycle.
-    ("classify_locations_per_cycle", 10000),
-    # Minutes between recomputes of every person's board membership. A
-    # preference write recomputes within a minute regardless; this is how
-    # long a new verdict waits to reach a board. Kanishk: minutes, never a day.
-    ("board_refresh_minutes", 3),
-    # The hourly application sweep, per person: how many unread forms it
-    # reads (one request each to the ATS, under the host budget; 1,307
-    # readable postings were on the board on 2026-09-06, so the first pass
-    # takes a working day at this rate and the ATSs see a trickle) and how
-    # many missing drafts it batches (about $0.0005 each on luna).
-    ("application_form_reads_per_cycle", 150),
-    ("resumes_per_user", 10),
-    # Empty means the built-in text in the code; see the admin registry.
-    ("application_draft_instructions", ""),
-    ("application_suggest_instructions", ""),
-    # The model never fills these on a form; the person does. One label a
-    # line or comma-separated, whole words in the field's label or key.
-    ("application_ai_never_fills", "location"),
-    ("application_drafts_per_cycle", 500),
-    # Whether the hourly requirements extraction runs. Off since 2026-09-07:
-    # its one consumer is the market table, and the deployed arm was measured
-    # at a third of the reference's skills with seniority mostly blank. Turn
-    # on from the admin config page after choosing a model worth paying for.
-    ("requirements_extraction_enabled", False),
-]
-# One source of truth for a seeded key's value: the seed writes it, and
-# get_config falls back to it when the row is missing.
+_APP_CONFIG_SEED = [(key, spec.default) for key, spec in CONFIG_KEYS.items()]
 _APP_CONFIG_DEFAULTS = dict(_APP_CONFIG_SEED)
 
 

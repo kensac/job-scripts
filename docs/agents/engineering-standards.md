@@ -47,12 +47,11 @@ State the scale a constant depends on. A value derived from one user's data
 should say so.
 
 **A value an administrator might want to change lives in `app_config`, not
-in code.** Retry windows, caps, cycle sizes: seed the default in
-`api/db.py` (`_APP_CONFIG_SEED`), declare its type, help text and choices in
-the admin config route (`_CONFIG_KEYS`), and read it at the point of use with
-`db.get_config`. GET /admin/config serves that registry beside the values and
-the admin config page renders every key from it, so a new key needs no
-frontend entry; four keys in one evening each needed one before it did. A
+in code.** Retry windows, caps, cycle sizes: declare the default, typed
+validation, help text and choices in `api/config.py` (`CONFIG_KEYS`), and read
+it at the point of use with `db.get_config`. Database seeding and
+GET /admin/config derive from that registry; the admin config page renders
+every key from its metadata, so a new key needs no frontend entry; four keys in one evening each needed one before it did. A
 constant in code needs a deploy to
 change; a row changes on the next cycle. The seed is the default, so the
 comment explaining the number goes beside the seed, not beside a literal

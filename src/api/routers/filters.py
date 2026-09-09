@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import os
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from psycopg.errors import UniqueViolation
 from pydantic import BaseModel
 
-from api import ai, budget, db, filter_runs, visibility
+from api import ai, ai_access, budget, db, filter_runs, visibility
 from api.auth import AuthedUser, require_user
+from api.config import group_access_allowed
 from api.models import FilterCreate, FilterPatch, ImprovePromptRequest
 from core.filters import ON_AMBIGUOUS_VALUES, build_custom_instructions, compute_prompt_hash
 
@@ -70,12 +72,7 @@ DEFERRED_MESSAGE = (
 
 
 def _rejudge_on_change(user: AuthedUser) -> bool:
-    """Whether this person's filter save re-judges the board at once. Same
-    shape as oauth.connect_allowed: a config list of groups, "*" for all."""
-    allowed = db.get_config(REJUDGE_GROUPS_KEY, [])
-    if not isinstance(allowed, list):
-        return False
-    return "*" in allowed or bool(set(allowed) & set(user.groups))
+    return group_access_allowed(REJUDGE_GROUPS_KEY, user.groups)
 
 
 def _enqueue_on_change(user: AuthedUser, filter_id: int) -> tuple:
@@ -87,23 +84,12 @@ def _enqueue_on_change(user: AuthedUser, filter_id: int) -> tuple:
     return _enqueue(user, filter_id, defer_conflict=True)
 
 
-def _blocked_message(user: AuthedUser, blocked: str | None) -> str | None:
+def _blocked_message(
+    user: AuthedUser, blocked: budget.AccessReason | Literal["DEFERRED"] | None
+) -> str | None:
     if blocked == "DEFERRED":
         return DEFERRED_MESSAGE
-    return _budget_message(budget.get_entitlement(user)) if blocked else None
-
-
-def _budget_message(ent) -> str:
-    """The honest sentence for a spent shared budget: the numbers, and the
-    way past it."""
-    if not ent.owner_key:
-        return "There is no key to run on. Add your own OpenAI key under AI & keys."
-    cap = ent.weekly_token_budget or 0
-    return (
-        f"The shared weekly AI budget is used up: {ent.spent_this_week:,} of {cap:,} tokens "
-        "spent this week. It resets weekly. To keep going now, add your own OpenAI key under "
-        "AI & keys; your own key has no cap and is billed to you."
-    )
+    return budget.access_message(blocked, budget.get_entitlement(user)) if blocked else None
 
 
 def _running(user_id: int, kind: str, filter_id: int | None = None) -> dict | None:
@@ -147,26 +133,49 @@ def list_filters(user: AuthedUser = Depends(require_user)):
         f"SELECT {_FILTER_COLS} FROM user_filters WHERE user_id = %s ORDER BY id",
         (user.id,),
     )
+    access_failure = budget.access_failure(user)
     for row in rows:
         row["task"] = _running(user.id, "run_filter", row["id"])
-        row["run_admission"] = filter_runs.admission(user.id, row["id"])
+        row["run_admission"] = filter_runs.admission(
+            user.id, row["id"], access_failure=access_failure
+        ).as_dict()
     return {
         "filters": rows,
         "run_all_task": _running(user.id, "run_all_filters"),
-        "run_all_admission": filter_runs.admission(user.id, None),
+        "run_all_admission": filter_runs.admission(
+            user.id, None, access_failure=access_failure
+        ).as_dict(),
     }
 
 
 def _enqueue(user: AuthedUser, filter_id: int | None, *, defer_conflict: bool = False) -> tuple:
-    ent = budget.get_entitlement(user)
-    if ent.key_source is None:
-        return None, ("BUDGET_EXCEEDED" if ent.owner_key else "NO_API_KEY")
-    result = filter_runs.enqueue(user.id, filter_id, policy="interactive")
+    decision = filter_runs.admission(user.id, filter_id, access_failure=budget.access_failure(user))
+    if decision.access_failure:
+        return None, decision.access_failure.reason
+    result = (
+        decision
+        if decision.conflict
+        else filter_runs.enqueue(user.id, filter_id, policy="interactive")
+    )
     if result.conflict:
         if defer_conflict:
             return None, "DEFERRED"
         _refuse_second_run(result.conflict)
     return result.task_id, None
+
+
+def _after_filter_change(user: AuthedUser, row: dict, previous: dict | None) -> dict:
+    needs_judgement = row["enabled"] and (
+        previous is None or not previous["enabled"] or row["prompt_hash"] != previous["prompt_hash"]
+    )
+    task_id, blocked = _enqueue_on_change(user, row["id"]) if needs_judgement else (None, None)
+    visibility.request_refresh(user.id)
+    return {
+        **row,
+        "task_id": task_id,
+        "run_blocked": blocked,
+        "run_blocked_message": _blocked_message(user, blocked),
+    }
 
 
 @router.post("/user/filters")
@@ -200,16 +209,7 @@ def create_filter(body: FilterCreate, user: AuthedUser = Depends(require_user)):
             ),
         )
         assert row is not None
-    task_id, blocked = (None, None)
-    if body.enabled:
-        task_id, blocked = _enqueue_on_change(user, row["id"])
-    visibility.request_refresh(user.id)
-    return {
-        **row,
-        "task_id": task_id,
-        "run_blocked": blocked,
-        "run_blocked_message": _blocked_message(user, blocked),
-    }
+    return _after_filter_change(user, row, None)
 
 
 @router.patch("/user/filters/{filter_id}")
@@ -247,17 +247,7 @@ def patch_filter(filter_id: int, body: FilterPatch, user: AuthedUser = Depends(r
                 409, detail={"code": "DUPLICATE_NAME", "message": "filter name already exists"}
             ) from exc
         assert row is not None
-    task_id, blocked = (None, None)
-    hash_changed = row["prompt_hash"] != existing["prompt_hash"]
-    if row["enabled"] and (hash_changed or fields.get("enabled")):
-        task_id, blocked = _enqueue_on_change(user, filter_id)
-    visibility.request_refresh(user.id)
-    return {
-        **row,
-        "task_id": task_id,
-        "run_blocked": blocked,
-        "run_blocked_message": _blocked_message(user, blocked),
-    }
+    return _after_filter_change(user, row, existing)
 
 
 @router.delete("/user/filters/{filter_id}")
@@ -276,7 +266,7 @@ def run_filter(filter_id: int, user: AuthedUser = Depends(require_user)):
     task_id, blocked = _enqueue(user, filter_id)
     if blocked:
         raise HTTPException(
-            402, detail={"code": blocked, "message": _budget_message(budget.get_entitlement(user))}
+            402, detail={"code": blocked, "message": _blocked_message(user, blocked)}
         )
     return {"task_id": task_id}
 
@@ -286,7 +276,7 @@ def run_all_filters(user: AuthedUser = Depends(require_user)):
     task_id, blocked = _enqueue(user, None)
     if blocked:
         raise HTTPException(
-            402, detail={"code": blocked, "message": _budget_message(budget.get_entitlement(user))}
+            402, detail={"code": blocked, "message": _blocked_message(user, blocked)}
         )
     return {"task_id": task_id}
 
@@ -439,14 +429,7 @@ def adopt_preset(preset_id: int, user: AuthedUser = Depends(require_user)):
             ),
         )
         assert row is not None
-    task_id, blocked = _enqueue_on_change(user, row["id"])
-    visibility.request_refresh(user.id)
-    return {
-        **row,
-        "task_id": task_id,
-        "run_blocked": blocked,
-        "run_blocked_message": _blocked_message(user, blocked),
-    }
+    return _after_filter_change(user, row, None)
 
 
 class _ImprovedPrompt(BaseModel):
@@ -456,17 +439,7 @@ class _ImprovedPrompt(BaseModel):
 
 @router.post("/ai/improve-prompt")
 async def improve_prompt(body: ImprovePromptRequest, user: AuthedUser = Depends(require_user)):
-    ent = budget.get_entitlement(user)
-    try:
-        cfg = budget.resolve_ai_config(user.id, ent)
-    except PermissionError as exc:
-        raise HTTPException(
-            402, detail={"code": "BUDGET_EXCEEDED", "message": "weekly budget exhausted"}
-        ) from exc
-    except LookupError as exc:
-        raise HTTPException(
-            402, detail={"code": "NO_API_KEY", "message": "add an API key to use AI features"}
-        ) from exc
+    cfg = ai_access.require_config(user)
 
     if cfg.key_source == "owner":
         cfg.model = IMPROVE_MODEL if IMPROVE_MODEL in ai.OWNER_KEY_MODELS else cfg.model
