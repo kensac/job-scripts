@@ -108,3 +108,34 @@ def test_comparison_rejects_incomplete_or_changed_coverage(defect):
         corpus["reports"] = {}
     with pytest.raises(ValueError):
         compare([baseline, shard, corpus], repetitions=1, shards=1)
+
+
+def test_manifest_requires_complete_same_revision_execution(pytester, monkeypatch):
+    from tools.test_performance import verify_manifest
+
+    monkeypatch.setenv("TEST_REVISION", "manifest-revision")
+    monkeypatch.setenv("TEST_LANE", "shard-0")
+    pytester.makepyfile(test_sample="def test_ok(): pass")
+    manifest_path = pytester.path / "manifest.json"
+    execution_path = pytester.path / "timing.json"
+    assert (
+        pytester.runpytest(
+            "-p", "tests.ci_suite", "--collect-only", f"--test-report={manifest_path}"
+        ).ret
+        == 0
+    )
+    assert pytester.runpytest("-p", "tests.ci_suite", f"--test-report={execution_path}").ret == 0
+    manifest = json.loads(manifest_path.read_text())
+    execution = json.loads(execution_path.read_text())
+    empty_corpus = dict(execution, lane="corpus", selected=[], reports={})
+    reports = [execution, empty_corpus]
+    assert verify_manifest(manifest, reports, shards=1) == {"test_sample.py::test_ok": "passed"}
+    with pytest.raises(ValueError, match="lanes"):
+        verify_manifest(manifest, [execution], shards=1)
+    manifest["revision"] = "stale-revision"
+    with pytest.raises(ValueError, match="revisions"):
+        verify_manifest(manifest, reports, shards=1)
+    manifest["revision"] = execution["revision"]
+    manifest["selected"].append("missing.py::test_missing")
+    with pytest.raises(ValueError, match="partition"):
+        verify_manifest(manifest, reports, shards=1)

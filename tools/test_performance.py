@@ -24,7 +24,7 @@ def outcomes(report):
     return result
 
 
-def compare(reports, *, repetitions, shards):
+def index_reports(reports):
     revisions = {report["revision"] for report in reports}
     if len(revisions) != 1 or None in revisions:
         raise ValueError("All reports must identify the same tested revision")
@@ -40,24 +40,43 @@ def compare(reports, *, repetitions, shards):
         if set(report["selected"]) != set(report["reports"]):
             raise ValueError(f"Selected and executed cases disagree in {key}")
         indexed[key] = report
+    return indexed
+
+
+def partition(selected, reports):
+    counts = collections.Counter(nodeid for report in reports for nodeid in report["selected"])
+    if counts != collections.Counter(selected):
+        raise ValueError("Parallel cases must partition the baseline exactly once")
+    return {nodeid: outcome for report in reports for nodeid, outcome in outcomes(report).items()}
+
+
+def verify_manifest(manifest, reports, *, shards):
+    indexed = index_reports(reports)
+    if manifest["exitstatus"] != 0 or not manifest["selected"]:
+        raise ValueError("A successful nonempty collection manifest is required")
+    if any(report["revision"] != manifest["revision"] for report in reports):
+        raise ValueError("Collection and execution revisions differ")
+    expected = {(1, f"shard-{index}") for index in range(shards)} | {(1, "corpus")}
+    if set(indexed) != expected:
+        raise ValueError("All configured lanes must report exactly once")
+    return partition(manifest["selected"], reports)
+
+
+def compare(reports, *, repetitions, shards):
+    indexed = index_reports(reports)
     comparisons = []
     for repetition in range(1, repetitions + 1):
         baseline = indexed[(repetition, "serial")]
         parallel = [indexed[(repetition, f"shard-{index}")] for index in range(shards)]
         parallel.append(indexed[(repetition, "corpus")])
-        counts = collections.Counter(nodeid for report in parallel for nodeid in report["selected"])
-        if counts != collections.Counter(baseline["selected"]):
-            raise ValueError("Parallel cases must partition the baseline exactly once")
-        parallel_outcomes = {
-            nodeid: outcome for report in parallel for nodeid, outcome in outcomes(report).items()
-        }
+        parallel_outcomes = partition(baseline["selected"], parallel)
         baseline_outcomes = outcomes(baseline)
         if baseline_outcomes != parallel_outcomes:
             raise ValueError("Serial and parallel outcomes differ")
         comparisons.append(
             {
                 "repetition": repetition,
-                "tests": len(counts),
+                "tests": len(parallel_outcomes),
                 "outcomes": dict(collections.Counter(baseline_outcomes.values())),
                 "serial_seconds": baseline["pytest_seconds"],
                 "parallel_seconds": max(report["pytest_seconds"] for report in parallel),
@@ -70,10 +89,21 @@ def compare(reports, *, repetitions, shards):
 def main():
     parser = argparse.ArgumentParser(description="Compare complete, same-revision test runs")
     parser.add_argument("directory", type=Path)
-    parser.add_argument("--repetitions", type=int, required=True)
+    parser.add_argument("--repetitions", type=int)
     parser.add_argument("--shards", type=int, required=True)
+    parser.add_argument(
+        "--manifest", type=Path, help="verify CI execution against complete collection"
+    )
     args = parser.parse_args()
     reports = [json.loads(path.read_text()) for path in args.directory.rglob("timing.json")]
+    if args.manifest:
+        result = verify_manifest(json.loads(args.manifest.read_text()), reports, shards=args.shards)
+        print(
+            f"Verified {len(result)} cases executed exactly once: {dict(collections.Counter(result.values()))}"
+        )
+        return
+    if not args.repetitions or args.repetitions < 1:
+        parser.error("--repetitions must be positive for a benchmark comparison")
     comparisons = compare(reports, repetitions=args.repetitions, shards=args.shards)
     print("# Test performance comparison\n")
     print("All parallel test IDs and outcomes match the serial run exactly.\n")
