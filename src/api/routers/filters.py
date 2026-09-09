@@ -11,7 +11,7 @@ from api import ai, ai_access, budget, db, filter_runs, visibility
 from api.auth import AuthedUser, require_user
 from api.config import group_access_allowed
 from api.models import FilterCreate, FilterPatch, ImprovePromptRequest
-from core.filters import ON_AMBIGUOUS_VALUES, build_custom_instructions, compute_prompt_hash
+from core.filters import ON_AMBIGUOUS_VALUES, compute_filter_hash
 
 router = APIRouter()
 
@@ -24,7 +24,7 @@ _FILTER_COLS = (
 
 
 def _hash(prompt: str, on_ambiguous: str) -> str:
-    return compute_prompt_hash(build_custom_instructions(prompt, on_ambiguous))
+    return compute_filter_hash(prompt, on_ambiguous)
 
 
 def _validate_ambiguous(value: str) -> str:

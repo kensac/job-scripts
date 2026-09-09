@@ -16,7 +16,7 @@ from api.tasks.board import (
     in_flight_urls,
     materialize_passing,
 )
-from api.tasks.models import FilterVerdict
+from api.tasks.models import FilterDecision, FilterResult
 from api.tasks.runtime import (
     BATCH_CHUNK_SIZE,
     CHUNK_SIZE,
@@ -34,7 +34,7 @@ from api.tasks.runtime import (
     submit_or_collect,
     update_parent_progress,
 )
-from core.filters import build_custom_input, build_custom_instructions
+from core.filters import build_custom_decision_instructions, build_custom_input
 from core.store import get_content, get_contents, get_custom_result
 
 logger = logging.getLogger("jobtracker_worker")
@@ -66,8 +66,8 @@ async def _check_filter(
         check_type="custom",
         instructions=instructions,
         input_text=build_custom_input(company, title, content),
-        response_model=FilterVerdict,
-        verdict_of=lambda p: (p.should_filter, p.reason),
+        response_model=FilterDecision,
+        verdict_of=lambda p: (p.should_filter, None),
         company=company,
         job_title=title,
         filter_name=filter_name,
@@ -86,7 +86,7 @@ async def _process_jobs(
     jobs: list[dict[str, Any]],
     parent_id: int | None = None,
 ) -> None:
-    instructions = build_custom_instructions(flt["prompt"], flt["on_ambiguous"])
+    instructions = build_custom_decision_instructions(flt["prompt"], flt["on_ambiguous"])
     total = len(jobs)
     done = 0
     limiter = AdaptiveLimiter()
@@ -302,8 +302,8 @@ async def handle_run_filter_batch_chunk(task_id: int, payload: dict[str, Any]) -
             return
         else:
             contents = get_contents([job["url"] for job in jobs])
-    instructions = build_custom_instructions(flt["prompt"], flt["on_ambiguous"])
-    schema = to_strict_json_schema(FilterVerdict)
+    instructions = build_custom_decision_instructions(flt["prompt"], flt["on_ambiguous"])
+    schema = to_strict_json_schema(FilterDecision)
     specs, by_url = [], {}
     for job in jobs:
         if existing:
@@ -319,7 +319,7 @@ async def handle_run_filter_batch_chunk(task_id: int, payload: dict[str, Any]) -
                 job["url"],
                 instructions,
                 input_text,
-                "FilterVerdict",
+                "FilterDecision",
                 schema,
                 context={
                     "job": job,
@@ -392,7 +392,7 @@ async def handle_run_filter_batch_chunk(task_id: int, payload: dict[str, Any]) -
             reason = f"batch: {res.error or 'no output'}"
             if not res.error and res.text:
                 try:
-                    parsed = FilterVerdict.model_validate_json(res.text)
+                    parsed = FilterResult.model_validate_json(res.text)
                 except ValueError:
                     reason = "batch: unparsable output"
             verdicts.record_ai_verdict(
