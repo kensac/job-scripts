@@ -58,6 +58,14 @@ revision rather than by path:
 git fetch origin && git show origin/main:src/api/routers/resolve.py
 ```
 
+## Repository documentation
+
+Keep committed documentation durable: explain invariants, where to inspect the
+implementation, and how to reproduce a measurement or discover current state.
+Put task reports, benchmark snapshots, completion logs and task-specific plans
+in PR descriptions or external artifacts, not repository docs. Update the
+existing topic document when a change adds a reusable procedure.
+
 ## Reporting
 
 Report conclusions, not narratives. State what you did, what you measured, and
