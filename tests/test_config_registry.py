@@ -1,6 +1,6 @@
 """GET /admin/config serves the registry beside the values: type, help and
 choices per key, so the admin page renders any tunable without a frontend
-entry, and a new key is one entry in api.routers.admin._CONFIG_KEYS."""
+entry, and a new key is one entry in api.config.CONFIG_KEYS."""
 
 from __future__ import annotations
 

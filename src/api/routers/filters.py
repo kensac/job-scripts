@@ -166,9 +166,7 @@ def _enqueue(user: AuthedUser, filter_id: int | None, *, defer_conflict: bool = 
 
 def _after_filter_change(user: AuthedUser, row: dict, previous: dict | None) -> dict:
     needs_judgement = row["enabled"] and (
-        previous is None
-        or not previous["enabled"]
-        or row["prompt_hash"] != previous["prompt_hash"]
+        previous is None or not previous["enabled"] or row["prompt_hash"] != previous["prompt_hash"]
     )
     task_id, blocked = _enqueue_on_change(user, row["id"]) if needs_judgement else (None, None)
     visibility.request_refresh(user.id)
