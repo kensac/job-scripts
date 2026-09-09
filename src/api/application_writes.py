@@ -34,7 +34,7 @@ def reserve_task(task_id: int, user_id: int, rows: list[dict] | None = None) -> 
             )
         wanted = {(r["job_id"], r["key"]) for r in rows}
         answers = db.query(
-            "SELECT id, job_id, key, draft, turns, draft_revision FROM application_answers "
+            "SELECT id, job_id, key, question, draft, turns, draft_revision FROM application_answers "
             "WHERE user_id = %s AND job_id = ANY(%s) ORDER BY id FOR UPDATE",
             (user_id, sorted({job_id for job_id, _ in wanted})),
         )
@@ -49,7 +49,7 @@ def reserve_task(task_id: int, user_id: int, rows: list[dict] | None = None) -> 
                     saved["answer_id"] == answer["id"]
                     and saved["revision"] == answer["draft_revision"]
                 ):
-                    selected[custom_id] = saved
+                    selected[custom_id] = {**saved, "question": answer["question"]}
                 continue
             if task["kind"] == "application_sweep":
                 # An explicit clear is still an edit. Null alone cannot tell
@@ -69,10 +69,8 @@ def reserve_task(task_id: int, user_id: int, rows: list[dict] | None = None) -> 
                 "UPDATE application_answers SET draft_revision = %s WHERE id = %s",
                 (revision, answer["id"]),
             )
-            selected[custom_id] = requests[custom_id] = {
-                "answer_id": answer["id"],
-                "revision": revision,
-            }
+            requests[custom_id] = {"answer_id": answer["id"], "revision": revision}
+            selected[custom_id] = {**requests[custom_id], "question": answer["question"]}
         db.execute(
             "UPDATE tasks SET payload = jsonb_set(payload, '{draft_requests}', %s) WHERE id = %s",
             (db.jsonb(requests), task_id),

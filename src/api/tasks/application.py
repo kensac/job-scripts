@@ -340,7 +340,13 @@ async def draft_rows(
                 # job first, then the key: a key never carries a bar.
                 f"{r['job_id']}|{r['key']}",
                 text,
-                question_input(r["question"], r["company"], r["title"], postings[r["url"]], resume),
+                question_input(
+                    reserved[f"{r['job_id']}|{r['key']}"]["question"],
+                    r["company"],
+                    r["title"],
+                    postings[r["url"]],
+                    resume,
+                ),
                 "Draft",
                 schema,
             )

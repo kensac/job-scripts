@@ -358,10 +358,12 @@ async def refine_answer(
     if not resume:
         raise _bad(400, "NO_RESUME", "add a resume under settings first")
     cfg = ai_access.require_config(user)
+    instruction = {"role": "user", "kind": "instruction", "text": body.instruction, "at": _now()}
     row = db.query_one(
-        "UPDATE application_answers SET draft_revision = draft_revision + 1 "
+        "UPDATE application_answers SET draft_revision = draft_revision + 1, "
+        "turns = turns || %s::jsonb, updated_at = now() "
         "WHERE user_id = %s AND job_id = %s AND key = %s RETURNING *",
-        (user.id, job_id, key),
+        (db.jsonb([instruction]), user.id, job_id, key),
     )
     if row is None:
         raise _bad(404, "NOT_FOUND", "unknown question")
@@ -375,7 +377,7 @@ async def refine_answer(
             get_content(job["url"]) or "",
             resume,
             draft=row["draft"],
-            turns=row["turns"],
+            turns=row["turns"][:-1],
             instruction=body.instruction,
         ),
         drafts.Draft,
@@ -384,7 +386,6 @@ async def refine_answer(
     if parsed is None:
         raise _bad(502, "NO_ANSWER", "the model returned no usable answer; try again")
     turns = [
-        {"role": "user", "kind": "instruction", "text": body.instruction, "at": _now()},
         {"role": "assistant", "kind": "refine", "text": parsed.answer, "at": _now()},
     ]
     updated = db.query_one(

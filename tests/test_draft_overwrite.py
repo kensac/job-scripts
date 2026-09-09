@@ -221,3 +221,61 @@ def test_sweep_never_reserves_over_pending_manual_request_or_explicit_clear(f, m
     monkeypatch.setattr(routes, "_job", lambda *args: {"id": jid})
     routes.put_answer(jid, "why", routes.AnswerPut(draft=""), SimpleNamespace(id=uid))
     assert application_writes.reserve_task(sweep, uid, [{"job_id": jid, "key": "why"}]) == {}
+
+
+@pytest.mark.asyncio
+async def test_sweep_cannot_supersede_pending_refinement(f, monkeypatch):
+    from api import application_writes
+
+    uid = f.make_user()
+    jid = f.make_job()
+    job = db.query_one("SELECT id,url,company,title FROM jobs WHERE id=%s", (jid,))
+    db.execute("INSERT INTO user_resumes(user_id,name,text) VALUES (%s,'main','Python')", (uid,))
+    application.ensure_answer_rows(uid, jid, [{"key": "why", "label": "Why us?"}])
+    cfg = ai.AIConfig(provider="openai", api_key="test", key_source="owner", model="gpt-5-mini")
+    monkeypatch.setattr(routes, "_job", lambda *args: job)
+    monkeypatch.setattr(routes.ai_access, "require_config", lambda *args: cfg)
+
+    async def parsed(*args):
+        sweep = f.make_task("application_sweep", {"user_id": uid}, status="running")
+        assert application_writes.reserve_task(sweep, uid, [{"job_id": jid, "key": "why"}]) == {}
+        return application.Draft(answer="Requested refinement"), {}
+
+    monkeypatch.setattr(ai, "parse", parsed)
+    row = await routes.refine_answer(
+        jid, "why", routes.RefineBody(instruction="Write an answer"), SimpleNamespace(id=uid)
+    )
+    assert row["draft"] == "Requested refinement"
+    assert [turn["kind"] for turn in row["turns"]] == ["instruction", "refine"]
+
+
+@pytest.mark.asyncio
+async def test_draft_uses_question_read_under_reservation(f, monkeypatch):
+    uid = f.make_user()
+    jid = f.make_job()
+    job = db.query_one("SELECT id,url,company,title FROM jobs WHERE id=%s", (jid,))
+    db.execute("INSERT INTO user_resumes(user_id,name,text) VALUES (%s,'main','Python')", (uid,))
+    application.ensure_answer_rows(uid, jid, [{"key": "why", "label": "Current question"}])
+    tid = f.make_task("application_draft", {"user_id": uid, "job_id": jid}, status="running")
+    cfg = ai.AIConfig(provider="openai", api_key="test", key_source="owner", model="gpt-5-mini")
+    monkeypatch.setattr(
+        application,
+        "load_config",
+        lambda *args: (budget.Entitlement(True, None, 0, False, []), cfg),
+    )
+
+    async def provider(*args, **kwargs):
+        specs = args[2]
+        assert "Current question" in specs[0].input
+        assert "Old selection question" not in specs[0].input
+        return {
+            f"{jid}|why": BatchResult("result", text='{"answer":"Fresh"}', batch_id="batch-test")
+        }, SimpleNamespace(model=cfg.model)
+
+    monkeypatch.setattr(application, "run_batched", provider)
+    assert (
+        await application.draft_rows(
+            tid, uid, [{**job, "job_id": jid, "key": "why", "question": "Old selection question"}]
+        )
+        == 1
+    )
