@@ -48,7 +48,7 @@
   const reader = window.__jtReader || { ready: () => false, submitButton: () => null, submitted: () => false };
   // Stamped into every report, so a report from a build the person has not
   // reloaded yet is told apart from a bug (reports 9 to 11, 2026-09-08).
-  const BUILD = "2026-09-08 shadow-root";
+  const BUILD = "2026-09-09 policy-gates";
 
   // A message to the extension's background worker. After the extension is
   // reloaded, a page that was already open keeps the old script, whose
@@ -151,6 +151,11 @@
   let fill = null;
   let filled = new Map();
   let lastError = null;
+  // The server's switches, pinned per fill (docs/agents/frontend.md, #494):
+  // refreshed before each Autofill, held for that fill, nothing without it.
+  let policy = null;
+  const allowed = (name) => !!(policy && policy.features && policy.features[name] && policy.features[name].allowed);
+  const VERSION = (() => { try { return chrome.runtime.getManifest().version; } catch (_) { return "unknown"; } })();
   let mountedFor = null;
 
   // The theme: data-jt-theme="light" or "dark" for an explicit choice, and
@@ -321,6 +326,22 @@
   }
 
   async function run() {
+    render(`<div class="working" role="status"><span class="spinner" aria-hidden="true"></span><div><h4>Checking autofill is on</h4><p>Reading the extension's configuration for this site…</p></div></div>`);
+    const pol = await send({ kind: "policy", adapter: reader.host || "unknown" });
+    if (!pol.ok) {
+      // Nothing valid cached and nothing fresh: new automation pauses, the
+      // person keeps the page, manual Submit tracking and reporting.
+      policy = null;
+      render(`<div class="result-heading"><span class="eyebrow">Autofill paused</span><h4>Could not confirm autofill is enabled</h4><p>Job Tracker could not load the extension's configuration for this site${pol.reason ? ` (${esc(String(pol.reason))})` : ""}. Your application is still here to fill by hand; reporting and submission tracking still work.</p></div><button id="jt-autofill" class="primary">Try again</button>`);
+      panel.querySelector("#jt-autofill").onclick = run;
+      return;
+    }
+    policy = pol.config;
+    if (!allowed("autofill")) {
+      const why = policy.features.autofill.reason === "ADAPTER_DISABLED" ? "for this job site" : "for now";
+      render(`<div class="result-heading"><span class="eyebrow">Autofill switched off</span><h4>Autofill is turned off ${why}</h4><p>Job Tracker has paused automatic filling here. You can complete the form yourself; reporting and submission tracking still work.</p></div>`);
+      return;
+    }
     render(`<div class="working" role="status"><span class="spinner" aria-hidden="true"></span><div><h4>Filling your application</h4><p>Matching ${fields.length} form items with your profile and saved answers…</p></div></div>`);
     const res = await api("user/apply/resolve", "POST", {
       url: location.href,
@@ -351,7 +372,7 @@
     // Repeated groups are filled from the profile's rows, not a value.
     window.__jtProfile = fill.profile || {};
     let file = null;
-    if (fill.resume && fill.resume.has_pdf) {
+    if (fill.resume && fill.resume.has_pdf && allowed("resume_upload")) {
       const got = await pdf(`user/resumes/${fill.resume.id}/pdf`);
       if (got.ok) file = new File([new Uint8Array(got.bytes)], got.name, { type: "application/pdf" });
     }
@@ -382,7 +403,7 @@
         if (entry.kind === "text") entry.kind = "select";
       }
     }
-    await askModel(fill.fields.filter((e) => !isFilled(e) && askable(e)));
+    if (allowed("ai_suggestions")) await askModel(fill.fields.filter((e) => !isFilled(e) && askable(e)));
     await verify();
     show();
     await autoReport(`filled page ${step + 1}`);
@@ -390,7 +411,7 @@
     // go on to the next page and fill it too, until the page that submits.
     // Continue is not Submit; the person still clicks that.
     pageSig = pageSignature();
-    if (prefs.autoAdvance && reader.nextButton && !reader.submitButton() && reader.nextButton() && step < 12) {
+    if (prefs.autoAdvance && allowed("auto_advance") && reader.nextButton && !reader.submitButton() && reader.nextButton() && step < 12) {
       // Only a complete page is advanced: a required field still blank is
       // the person's to fill first (Workday, 2026-09-08: Continue pressed
       // with five required fields blank, and the page listed them).
@@ -580,6 +601,11 @@
         btn.disabled = true;
         btn.textContent = "asking…";
         const entry = entryByKey(btn.dataset.ai);
+        if (!allowed("ai_suggestions")) {
+          entry.ai_note = "AI suggestions are switched off right now";
+          show();
+          return;
+        }
         await askModel([entry]);
         if (!isFilled(entry) && !fill.ai_error) {
           const f = filled.get(entry.key);
@@ -644,7 +670,8 @@
   // capture is for triage, never in the person's way.
   async function autoReport(reason) {
     try {
-      await api("user/apply/reports", "POST", { url: location.href, note: `auto: ${reason}`, page: capture() });
+      const pinned = policy && policy.revision ? policy.revision.slice(0, 12) : "none";
+      await api("user/apply/reports", "POST", { url: location.href, note: `auto: ${reason} [ext ${VERSION} ${reader.host || "unknown"} schema 1 rev ${pinned}]`, page: capture() });
     } catch (_) {
       // Nothing to do; the next pass captures again.
     }

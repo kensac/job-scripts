@@ -58,6 +58,19 @@ advance switches. Filled items shows answer previews and their sources;
 repeated sections still need review on the form. Theme and minimise controls
 stay in the header.
 
+## Server switches
+
+Before each Autofill the extension asks the site's public configuration
+route for this job site's adapter and pins the answer for that fill: four
+switches (autofill, AI suggestions, resume upload, automatic page advance)
+and whether the adapter is disabled. The response is data only, validated to
+the byte, and cached in the browser for the lifetime the server names; a
+cached disablement is never replaced by enabled defaults because a refresh
+failed. With nothing valid to hand, Autofill pauses and offers Try again,
+while reporting, manual Submit and submission tracking keep working. Page
+advance needs the server's switch and your own. Selectors, event dispatch
+and navigation never arrive this way; a new form operation is a release.
+
 ## Local panel preview
 
 Run `python -m http.server 8768` at the repository root, then open
