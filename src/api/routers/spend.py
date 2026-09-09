@@ -342,3 +342,14 @@ def spend_calls(
         ),
         "filterable": ["purpose", "model", "batched", "unpriced", "user"],
     }
+
+
+@router.get("/admin/spend/provider")
+def provider_spend(
+    days: int = Query(30, ge=1, le=365),
+    user: AuthedUser = Depends(require_admin),
+):
+    """Provider-reported costs for completed UTC days, separate from usage estimates."""
+    from core.provider_costs import fetch_costs
+
+    return fetch_costs(days)
