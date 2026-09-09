@@ -1502,6 +1502,12 @@ class _Key(NamedTuple):
 _CONFIG_KEYS: dict[str, _Key] = {
     "signups_enabled": _Key(bool, "Whether new accounts can be created."),
     "gmail_connect_groups": _Key(list, "Authentik groups whose members may connect a mailbox."),
+    # Read by routers/users.get_settings.
+    "board_default_column_layout": _Key(
+        list,
+        "Column state a board starts with before the person changes a column: "
+        "AG Grid column state entries (colId, hide, pinned, width).",
+    ),
     # Read by routers/filters._rejudge_on_change.
     "filter_rejudge_on_change_groups": _Key(
         list,

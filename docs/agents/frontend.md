@@ -71,6 +71,15 @@ declares what is available and why something is not; the client renders that.
 A client that decides what may be offered must be changed every time the rules
 change, and will disagree with the server in the meantime.
 
+**A default is served, not assumed by the client.** `GET /user/settings`
+fills `column_layout` from `board_default_column_layout` (app_config, seeded
+from Kanishk's layout on 2026-09-09: order, hidden columns, pins, widths, no
+sort) whenever the row holds none, so a fresh account and a reset both start
+on the same board and the column chooser can still show any hidden column.
+`PUT /user/settings` with `column_layout: null` clears the saved layout;
+absent keeps it. The upsert COALESCEd a null onto the old value until then,
+so the reset button only ever reset the browser.
+
 ## Actions
 
 One primary action per view. A page of rows each carrying a primary button is a

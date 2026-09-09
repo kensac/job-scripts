@@ -368,3 +368,21 @@ def test_usage_states_the_limits_a_person_runs_under(client, user_headers, admin
     assert mine == {"enabled_filters": 1, "max_age_days": 30}
     theirs = client.get("/v1/user/usage", headers=admin_headers).json()["limits"]
     assert theirs == {"enabled_filters": 1, "max_age_days": None}
+
+
+def test_a_board_without_a_saved_layout_starts_on_the_default(client, user_headers):
+    """A new account sees the default column state (Kanishk's layout: size,
+    source, ats and notes hidden), a saved layout replaces it, and clearing
+    the layout returns to the default rather than to every column shown."""
+    default = client.get("/v1/user/settings", headers=user_headers).json()["column_layout"]
+    hidden = {c["colId"] for c in default if c.get("hide")}
+    assert {"size", "source", "ats", "notes"} <= hidden
+    assert not any("sort" in c for c in default)
+
+    mine = [{"colId": "company", "hide": False}, {"colId": "size", "hide": False}]
+    saved = client.put("/v1/user/settings", json={"column_layout": mine}, headers=user_headers)
+    assert saved.status_code == 200
+    assert client.get("/v1/user/settings", headers=user_headers).json()["column_layout"] == mine
+
+    client.put("/v1/user/settings", json={"column_layout": None}, headers=user_headers)
+    assert client.get("/v1/user/settings", headers=user_headers).json()["column_layout"] == default
