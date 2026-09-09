@@ -143,3 +143,14 @@ subsequent content changes make known older generations eligible again. A null
 source is unknown legacy provenance, not proof that the compensation is current.
 It does not itself trigger extraction, and must not be backfilled by guessing
 from timestamps. Existing unextracted and missing-period repair rules still apply.
+
+## Provider-reported costs
+
+`GET /admin/spend/provider` reads the provider cost service automatically using
+`OPENAI_ADMIN_KEY`. Keep that secret server-side. `OPENAI_BILLING_PROJECT_IDS`
+optionally scopes costs to comma-separated projects; otherwise costs cover the
+organization, not necessarily this application. Completed UTC days are reported
+separately from ledger estimates. Missing configuration or failed reads return
+unavailable costs, never a zero bill. Provider data can arrive late or change;
+do not overwrite historical usage estimates or allocate organization costs to
+users without attribution evidence.
