@@ -31,7 +31,7 @@ from api.batch_results import snapshot_specs as snapshot_specs
 from api.budget import Entitlement
 from api.tasks.board import demote_closed, materialize_passing
 from core import pricing
-from core.batch import BatchResult
+from core.batch import BatchEventCounts, BatchResult
 from core.prompts import PROMPT_SAMPLE_SIZE, prompt_hash
 from core.routing import Choice, TaskShape, resolve
 
@@ -434,15 +434,19 @@ def batch_event_hook(
     resumed_ids = set(pending_batch_ids(task_id))
     metadata = _batch_metadata(task_id, list(resumed_ids)) if resumed_ids else {}
 
-    def record_event(batch_id: str, status: str, counts: dict[str, int]) -> None:
+    def record_event(batch_id: str, status: str, counts: BatchEventCounts) -> None:
         persisted = metadata.get(batch_id, {})
         event_model = persisted.get("model") if batch_id in resumed_ids else model
         event_prompt_id = persisted.get("prompt_id") if batch_id in resumed_ids else prompt_id
         if "input_tokens" in counts or "output_tokens" in counts:
-            # Terminal usage report: real token totals -> half-price batch cost.
+            # Keep request boundaries: pricing tiers apply to individual prompts.
             inp = counts.get("input_tokens", 0)
             out = counts.get("output_tokens", 0)
-            est = pricing.estimate_cost_usd(event_model, inp, out, batched=True)
+            cached = counts.get("cached_tokens", 0)
+            usage = counts.get("request_usage")
+            est = pricing.estimate_usage_cost_usd(
+                event_model, inp, out, cached_tokens=cached, batched=True, requests=usage
+            )
             cost = round(float(est), 6) if est is not None else None
             # Provider totals are snapshots. Recollecting unchanged totals
             # must not append another ledger entry.
@@ -464,7 +468,15 @@ def batch_event_hook(
             # cannot be used without a purpose, and that is all the grouping
             # needs.
             if not charged_to_user:
-                budget.record_fleet_usage(purpose, event_model, inp, out, batched=True)
+                budget.record_fleet_usage(
+                    purpose,
+                    event_model,
+                    inp,
+                    out,
+                    batched=True,
+                    cached_tokens=cached,
+                    request_usage=usage,
+                )
             return
         db.execute(
             """
@@ -500,7 +512,7 @@ def batch_event_hook(
         )
         _record_batch_ids(task_id, [batch_id])
 
-    def on_event(batch_id: str, status: str, counts: dict[str, int]) -> None:
+    def on_event(batch_id: str, status: str, counts: BatchEventCounts) -> None:
         with db.transaction():
             record_event(batch_id, status, counts)
         events.publish_task(task_id)
