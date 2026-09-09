@@ -59,6 +59,11 @@ Price the actual transport with `core.pricing`, not a blanket batch discount.
 Filter request inputs live in `core.filters.build_custom_input`, shared by live,
 batch and experiment callers. `api.verdicts.record_ai_verdict` persists their
 common verdict shape; transport exceptions and retries remain the caller's concern.
+`FilterVerdict.reason` carries concise evidence guidance in its output schema.
+Keep presentation edits out of `build_custom_instructions`: those bytes define
+persisted verdict hashes. Schema-capable transports receive the guidance;
+JSON-object-only providers retain the instruction builder's existing word limit.
+Reasons remain unrestricted strings on read, preserving historical evidence.
 Application drafts share request construction and result persistence in
 `api.tasks.application.draft_rows`.
 

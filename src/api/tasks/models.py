@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class JobExtract(BaseModel):
@@ -13,25 +13,22 @@ class JobExtract(BaseModel):
 
 
 class FilterVerdict(BaseModel):
-    """The verdict shape for every custom-filter call, batched or live.
+    """Evidence remains required for both live and batch decisions.
 
-    `reason` was dropped from the batched path for a while on the reasoning
-    that reason text costs output tokens and is only read when a human debugs
-    one job. Priced afterwards, that saving was about eleven cents a month -
-    and it cost the ability to answer "why is my board empty", because the
-    batch path is where scheduled work goes, so 100% of new verdicts recorded
-    no reason at all. The tokens are worth it; the argument was qualitative
-    and the number was never taken.
-
-    build_custom_instructions already asks for "<=25 words citing the deciding
-    factor", so this field is what the model was being told to produce and the
-    schema was silently discarding. Restoring it changes no instruction text,
-    which matters: prompt_hash is computed over those instructions, and
-    altering them would fork every custom verdict ever recorded.
+    Presentation guidance belongs in the output schema: changing the instruction
+    builder would invalidate persisted verdict hashes without changing criteria.
+    Do not truncate or reject longer historical reasons on read.
     """
 
     should_filter: bool
-    reason: str
+    reason: str = Field(
+        description=(
+            "One short clause naming the deciding criterion and its evidence. "
+            "For missing evidence, name what is unstated; preserve the configured ambiguity policy. "
+            "Do not repeat the verdict, list every criterion, or add introductory wording. "
+            "Keep necessary qualifiers and negation; use at most 25 words."
+        )
+    )
 
 
 class JobClosedVerdict(BaseModel):
