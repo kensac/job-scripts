@@ -35,6 +35,7 @@ def _ledger_breakdowns(params: dict) -> dict[str, Any]:
         )
         SELECT purpose, model, day, GROUPING(purpose, model, day) AS grouping,
                COUNT(*) AS calls,
+               COUNT(*) AS ledger_rows,
                COUNT(*) FILTER (WHERE cost_usd IS NOT NULL) AS priced_calls,
                COUNT(*) FILTER (WHERE cost_usd IS NULL) AS unpriced_calls,
                COUNT(*) FILTER (WHERE model IS NULL) AS unknown_model_calls,
@@ -61,7 +62,8 @@ def _ledger_breakdowns(params: dict) -> dict[str, Any]:
             "Costs sum stored estimates for recorded usage, not provider invoices or "
             "proof that every call was recorded. Unpriced rows are excluded from costs "
             "and counted separately. Batched flags are recorded metadata, not verified "
-            "historical transport provenance."
+            "historical transport provenance. Counts are ledger rows, which may represent "
+            "individual requests or batch aggregates."
         ),
         "by_purpose": [],
         "by_model": [],
