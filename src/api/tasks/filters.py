@@ -174,12 +174,10 @@ async def _run_filters(
 ) -> None:
     """Shard scheduled work for content preparation and batching; interactive work stays live."""
     ent, cfg = load_config(user_id, ignore_budget)
-    if batched:
-        batch_policy.require_config(task_id, cfg)
+    use_batch = batched and batch_policy.transport(task_id, cfg) == "batch"
     held = in_flight_urls(user_id)
     candidates = [j for j in candidates_for(user_id) if j["url"] not in held]
     urls = [j["url"] for j in candidates]
-    use_batch = batched
     units: list[tuple] = []
     for flt in filters:
         decided = decided_urls(urls, flt["prompt_hash"], cfg.model)
@@ -295,8 +293,7 @@ async def handle_run_filter_batch_chunk(task_id: int, payload: dict[str, Any]) -
     unavailable = int(payload.get("content_unavailable") or 0)
     if not existing:
         ent, cfg = load_config(user_id, bool(payload.get("ignore_budget")))
-        if batch_policy.scheduled(payload):
-            batch_policy.require_config(task_id, cfg)
+        if batch_policy.scheduled(payload) and batch_policy.transport(task_id, cfg) == "batch":
             contents, unavailable = await _prepare_content(task_id, jobs)
             if cancelled(task_id) or (parent_id and parent_cancelled(parent_id)):
                 return

@@ -37,6 +37,22 @@ def require_transport(task_id: int, cfg: ai.AIConfig) -> None:
         _unsupported(task_id, cfg)
 
 
+def transport(task_id: int, cfg: ai.AIConfig) -> str:
+    """Which transport a scheduled run takes: "batch" on the shared key, or
+    "live" on a person's own key.
+
+    A person who brought their own key was promised no cap and their own
+    bill (Kanishk, 2026-09-08), and the persisted batch collector only holds
+    the server's OpenAI key, so their hourly sweep runs live, billed to them,
+    rather than not at all. Refusing with BATCH_UNSUPPORTED is reserved for
+    the shared key, where a live fallback would spend the shared budget at
+    full price against the scheduled intent."""
+    if cfg.key_source != "owner":
+        return "live"
+    require_config(task_id, cfg)
+    return "batch"
+
+
 def require_config(task_id: int, cfg: ai.AIConfig) -> None:
     require_transport(task_id, cfg)
     declared = providers.model(cfg.model)

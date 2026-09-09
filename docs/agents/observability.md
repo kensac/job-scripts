@@ -456,8 +456,12 @@ fetched before submission, never used as a reason to make a live model call.
 Failed fetches respect the content retry window and remain undecided for a
 later eligible cycle; they are not immediately requeued inside the run.
 
-`api.tasks.batch_policy` separates supported credential transport from the
-configured model's batch capability. Unsupported scheduled configurations fail
-with `BATCH_UNSUPPORTED` in task progress/error, rather than falling back to
-live requests. Existing batch receipts are collected before current settings
-are consulted. Interactive filter runs keep their live path.
+`api.tasks.batch_policy.transport` decides how a scheduled run travels: the
+shared key goes through the persisted batch collector, and a shared-key
+configuration the collector cannot carry (a non-OpenAI provider, a model
+without JSON-schema output) fails with `BATCH_UNSUPPORTED` in task
+progress/error rather than spending the shared budget live at full price. A
+person's own key runs live, billed to them, because they were promised no cap
+and their own bill and the collector holds only the server's key. Existing
+batch receipts are collected before current settings are consulted.
+Interactive filter runs keep their live path.

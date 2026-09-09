@@ -46,7 +46,6 @@ async def test_scheduled_splitter_never_sends_missing_content_live(setup, monkey
 @pytest.mark.parametrize(
     ("provider", "model", "key_source"),
     [
-        ("openai", "gpt-5-nano", "user"),
         ("openai", "text-embedding-3-small", "owner"),
         ("openai", "unknown-model", "owner"),
         ("xai", "grok-4.3", "owner"),
@@ -194,3 +193,32 @@ def test_bulk_content_preserves_single_url_raw_content_semantics(f):
     assert expected == {urls[0]: "old raw", urls[1]: "newer raw copy", urls[2]: "nonempty"}
     assert store.get_contents(urls) == expected
     assert store.get_contents([]) == {}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["run_filter_chunk", "run_filter_batch_chunk"])
+async def test_a_persons_own_key_keeps_scheduled_runs_live(setup, f, monkeypatch, kind):
+    """A person on their own key was promised no cap and their own bill, and
+    the batch collector holds only the server's key, so their scheduled sweep
+    runs live, billed to them, instead of stopping with BATCH_UNSUPPORTED
+    (Kanishk, 2026-09-09)."""
+    _uid, cfg, _flt, _job, _parent, payload = setup
+    cfg.key_source = "user"
+    live_calls = []
+
+    async def live(*args, **kwargs):
+        live_calls.append(True)
+
+    async def forbidden(*args, **kwargs):
+        pytest.fail("a person's own key never reaches the shared batch collector")
+
+    monkeypatch.setattr(filters, "_process_jobs", live)
+    monkeypatch.setattr(filters, "submit_or_collect", forbidden)
+    tid = f.make_task(kind, payload, status="running")
+    handler = (
+        filters.handle_run_filter_chunk
+        if kind == "run_filter_chunk"
+        else filters.handle_run_filter_batch_chunk
+    )
+    await handler(tid, payload)
+    assert live_calls == [True]
