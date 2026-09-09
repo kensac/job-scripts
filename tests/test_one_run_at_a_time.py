@@ -112,3 +112,64 @@ def test_a_reparse_already_queued_is_refused(client, admin_headers, f):
     assert r.status_code == 200, r.text
     again = client.post(f"/v1/admin/jobs/{job_id}/reparse", headers=admin_headers)
     assert again.status_code == 409 and again.json()["detail"]["task_id"] == r.json()["task_id"]
+
+
+def test_repeated_uploads_share_extraction_and_admin_admission(
+    client, user_headers, admin_headers, monkeypatch
+):
+    from api import ssrf
+
+    monkeypatch.setattr(ssrf, "validate_public_url", lambda url: None)
+    url = "https://example.com/jobs/shared-extraction"
+    response = client.post("/v1/uploads", json={"urls": [url, url]}, headers=user_headers)
+    assert response.status_code == 200, response.text
+    job_id = response.json()["accepted"][0]["job_id"]
+    rows = db.query("SELECT id FROM tasks WHERE kind = 'extract_upload'")
+    assert len(rows) == 1
+    refused = client.post(f"/v1/admin/jobs/{job_id}/reparse", headers=admin_headers)
+    assert refused.status_code == 409
+    assert refused.json()["detail"]["task_id"] == rows[0]["id"]
+
+
+def test_repeated_sources_are_one_manual_admission(client, admin_headers, f):
+    f.make_source("single")
+    response = client.post(
+        "/v1/admin/ingest", json={"sources": ["single", "single"]}, headers=admin_headers
+    )
+    assert response.status_code == 200, response.text
+    assert len(response.json()["tasks"]) == 1
+    assert len(db.query("SELECT id FROM tasks WHERE kind = 'ingest_source'")) == 1
+
+
+def test_concurrent_reparses_check_conflicts_under_the_job_lock(client, admin_headers, f):
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+
+    job_id = f.make_job()
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        with db.transaction():
+            db.query_one("SELECT id FROM jobs WHERE id = %s FOR UPDATE", (job_id,))
+            responses = [
+                workers.submit(
+                    client.post, f"/v1/admin/jobs/{job_id}/reparse", headers=admin_headers
+                )
+                for _ in range(2)
+            ]
+            deadline = time.monotonic() + 10
+            while time.monotonic() < deadline:
+                db.execute("SELECT pg_stat_clear_snapshot()")
+                blocked = db.query_one(
+                    "SELECT count(*) AS n FROM pg_stat_activity "
+                    "WHERE datname = current_database() AND wait_event_type = 'Lock' "
+                    "AND query LIKE '%%jobs%%'"
+                )
+                if blocked["n"] == 2:
+                    break
+                time.sleep(0.01)
+            else:
+                raise AssertionError(
+                    "both requests must reach the locked job before it is released"
+                )
+        results = [response.result(timeout=10) for response in responses]
+    assert sorted(result.status_code for result in results) == [200, 409]
+    assert len(db.query("SELECT id FROM tasks WHERE kind = 'extract_upload'")) == 1

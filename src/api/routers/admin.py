@@ -9,7 +9,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, JsonValue
 
-from api import ai, db, events, health, hosts, pagination, scoping, sorting
+from api import ai, db, events, health, hosts, pagination, scoping, sorting, task_admission
 from api import params as params_
 from api.auth import AuthedUser, require_user
 from api.config import CONFIG_KEYS
@@ -648,8 +648,8 @@ def revoke_invite(pk: str, user: AuthedUser = Depends(require_admin)):
 # slot, or a parked batch. Anything else is already over.
 # Every status a task row can carry, in lifecycle order; served on the queue
 # envelope so the summary strip renders tones from data rather than a copy.
-TASK_STATUSES = ("pending", "waiting", "running", "awaiting_batch", "done", "failed", "cancelled")
-CANCELLABLE = ("pending", "waiting", "running", "awaiting_batch")
+TASK_STATUSES = task_admission.TASK_STATUSES
+CANCELLABLE = tuple(status for status in TASK_STATUSES if status in task_admission.ACTIVE_STATUSES)
 
 
 class CancelTasksBody(BaseModel):
@@ -1365,59 +1365,34 @@ class IngestBody(BaseModel):
 
 @router.post("/ingest")
 def trigger_ingest(body: IngestBody, user: AuthedUser = Depends(require_admin)):
-    """Off-cycle pull: enqueue ingest tasks now (no dedupe, runs regardless of
-    the hourly cycle). Omit sources to pull everything active."""
+    """Queue an off-cycle pull for each active source without overlapping work."""
     active = {r["name"] for r in db.query("SELECT name FROM sources WHERE active")}
-    wanted = body.sources if body.sources else sorted(active)
+    wanted = list(dict.fromkeys(body.sources)) if body.sources else sorted(active)
     unknown = [s for s in wanted if s not in active]
     if unknown:
         raise HTTPException(
             400, detail={"code": "UNKNOWN_SOURCE", "message": f"unknown or inactive: {unknown}"}
         )
-    import time as _time
-
-    # A board whose pull is still queued or running is not queued again: the
-    # second task would wait behind the first and pull the same listings.
-    # Reported per board rather than refused whole, since one request can
-    # name many; refused whole only when every board named is in flight.
-    in_flight = {
-        r["source"]: r["id"]
-        for r in db.query(
-            """
-            SELECT DISTINCT ON (payload->>'source') payload->>'source' AS source, id
-            FROM tasks WHERE kind = 'ingest_source'
-              AND status IN ('pending', 'running', 'awaiting_batch', 'waiting')
-              AND payload->>'source' = ANY(%s)
-            ORDER BY payload->>'source', id DESC
-            """,
-            (wanted,),
-        )
-    }
-    if in_flight and all(name in in_flight for name in wanted):
+    cycle = f"manual-{user.id}-{int(time.time())}"
+    task_ids = []
+    in_flight = []
+    for name in wanted:
+        admission = task_admission.enqueue("ingest_source", {"source": name}, {"cycle": cycle})
+        if admission.conflict:
+            in_flight.append({"source": name, "task_id": admission.conflict["id"]})
+        else:
+            task_ids.append({"source": name, "task_id": admission.task_id})
+    in_flight.sort(key=lambda row: row["source"])
+    if in_flight and not task_ids:
         raise HTTPException(
             409,
             detail={
                 "code": "IN_PROGRESS",
                 "message": "every board named is already being pulled",
-                "in_flight": [{"source": s, "task_id": t} for s, t in sorted(in_flight.items())],
+                "in_flight": in_flight,
             },
         )
-    cycle = f"manual-{user.id}-{int(_time.time())}"
-    task_ids = []
-    for name in wanted:
-        if name in in_flight:
-            continue
-        row = db.query_one(
-            "INSERT INTO tasks (kind, payload) VALUES ('ingest_source', %s) RETURNING id",
-            (db.jsonb({"source": name, "cycle": cycle}),),
-        )
-        assert row is not None
-        events.publish_task(row["id"])
-        task_ids.append({"source": name, "task_id": row["id"]})
-    return {
-        "tasks": task_ids,
-        "in_flight": [{"source": s, "task_id": t} for s, t in sorted(in_flight.items())],
-    }
+    return {"tasks": task_ids, "in_flight": in_flight}
 
 
 class SourceGroupBody(BaseModel):
@@ -1676,29 +1651,21 @@ def reparse_job(job_id: int, user: AuthedUser = Depends(require_admin)):
     job = db.query_one("SELECT id FROM jobs WHERE id = %s", (job_id,))
     if not job:
         raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown job"})
-    running = db.query_one(
-        "SELECT id FROM tasks WHERE kind = 'extract_upload' "
-        "AND status IN ('pending', 'running', 'awaiting_batch', 'waiting') "
-        "AND (payload->>'job_id')::bigint = %s ORDER BY id DESC LIMIT 1",
-        (job_id,),
+    admission = task_admission.enqueue(
+        "extract_upload",
+        {"job_id": job_id},
+        {"user_id": user.id, "force": True},
     )
-    if running:
+    if admission.conflict:
         raise HTTPException(
             409,
             detail={
                 "code": "IN_PROGRESS",
                 "message": "this posting is already being parsed",
-                "task_id": running["id"],
+                "task_id": admission.conflict["id"],
             },
         )
-    db.execute("UPDATE jobs SET extraction_status = 'pending' WHERE id = %s", (job_id,))
-    row = db.query_one(
-        "INSERT INTO tasks (kind, payload) VALUES ('extract_upload', %s) RETURNING id",
-        (db.jsonb({"job_id": job_id, "user_id": user.id, "force": True}),),
-    )
-    assert row is not None
-    events.publish_task(row["id"])
-    return {"task_id": row["id"]}
+    return {"task_id": admission.task_id}
 
 
 class GroupBudgetPut(BaseModel):

@@ -4,9 +4,9 @@ from dataclasses import dataclass
 from typing import Literal
 
 from api import budget, db, events
+from api.task_admission import ACTIVE_STATUSES
 
 AdmissionPolicy = Literal["interactive", "scheduled"]
-ACTIVE_STATUSES = ("pending", "running", "awaiting_batch", "waiting")
 
 
 def conflict(user_id: int, filter_id: int | None, *, policy: AdmissionPolicy) -> dict | None:

@@ -18,7 +18,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from api import ai, ai_access, budget, db, events
+from api import ai, ai_access, budget, db, task_admission
 from api.auth import AuthedUser, require_user
 from api.job_access import require_visible_job
 from api.tasks import application as drafts
@@ -167,20 +167,7 @@ def _job(user: AuthedUser, job_id: int) -> dict[str, Any]:
 
 
 def _inflight(user_id: int, job_id: int) -> dict[str, Any] | None:
-    """The draft task still working on this person's answers for this job,
-    if any. Served on the view so the page disables the button from server
-    state, and checked on the request so a second click while the first
-    parks on the provider's batch is refused rather than queued twice."""
-    return db.query_one(
-        """
-        SELECT id, status, progress, created_at FROM tasks
-        WHERE kind = 'application_draft'
-          AND status IN ('pending', 'running', 'awaiting_batch', 'waiting')
-          AND (payload->>'user_id')::bigint = %s AND (payload->>'job_id')::bigint = %s
-        ORDER BY id DESC LIMIT 1
-        """,
-        (user_id, job_id),
-    )
+    return task_admission.in_flight("application_draft", {"user_id": user_id, "job_id": job_id})
 
 
 def _answers(user_id: int, job_id: int) -> list[dict[str, Any]]:
@@ -302,33 +289,21 @@ def request_drafts(job_id: int, body: DraftRequest, user: AuthedUser = Depends(r
     elif not db.query_one("SELECT 1 FROM user_resumes WHERE user_id = %s", (user.id,)):
         raise _bad(400, "NO_RESUME", "add a resume under settings first")
     ai_access.require_config(user)
-    running = _inflight(user.id, job_id)
-    if running:
+    admission = task_admission.enqueue(
+        "application_draft",
+        {"user_id": user.id, "job_id": job_id},
+        {"resume_id": body.resume_id, "keys": body.keys, "refresh": body.refresh},
+    )
+    if admission.conflict:
         raise HTTPException(
             409,
             detail={
                 "code": "IN_PROGRESS",
                 "message": "drafts for this job are already being written",
-                "task_id": running["id"],
+                "task_id": admission.conflict["id"],
             },
         )
-    task = db.query_one(
-        "INSERT INTO tasks (kind, payload) VALUES ('application_draft', %s) RETURNING id",
-        (
-            db.jsonb(
-                {
-                    "user_id": user.id,
-                    "job_id": job_id,
-                    "resume_id": body.resume_id,
-                    "keys": body.keys,
-                    "refresh": body.refresh,
-                }
-            ),
-        ),
-    )
-    assert task is not None
-    events.publish_task(task["id"])
-    return {"task_id": task["id"]}
+    return {"task_id": admission.task_id}
 
 
 class AnswerPut(BaseModel):
