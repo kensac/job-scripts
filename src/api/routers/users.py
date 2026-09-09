@@ -271,9 +271,7 @@ def get_settings(user: AuthedUser = Depends(require_user)):
         (user.id,),
     )
     settings = {**(row or _SETTINGS_DEFAULTS)}
-    # No saved layout means the default board, not every column shown
-    # (Kanishk, 2026-09-09): a new account starts on the admin's layout and
-    # a reset returns to it.
+    # New accounts and resets use the same configured board layout.
     if settings.get("column_layout") is None:
         settings["column_layout"] = db.get_config("board_default_column_layout") or None
     # Criteria in their full shape, defaults filled, whatever the row holds:
@@ -375,8 +373,7 @@ def put_settings(body: SettingsPut, user: AuthedUser = Depends(require_user)):
                 COALESCE(%(bypass)s, TRUE), COALESCE(%(criteria)s, '{}'::jsonb),
                 COALESCE(%(digest)s, FALSE), NULLIF(%(style)s, ''), now())
         ON CONFLICT (user_id) DO UPDATE SET
-            -- Absent keeps it; an explicit null clears it, which is the board's
-            -- reset. COALESCE here kept the old layout on reset until 2026-09-09.
+            -- Presence distinguishes an explicit reset from an omitted field.
             column_layout = CASE WHEN %(layout_set)s THEN EXCLUDED.column_layout
                                  ELSE user_settings.column_layout END,
             prefs = COALESCE(%(prefs)s, user_settings.prefs),

@@ -72,13 +72,29 @@ A client that decides what may be offered must be changed every time the rules
 change, and will disagree with the server in the meantime.
 
 **A default is served, not assumed by the client.** `GET /user/settings`
-fills `column_layout` from `board_default_column_layout` (app_config, seeded
-from Kanishk's layout on 2026-09-09: order, hidden columns, pins, widths, no
-sort) whenever the row holds none, so a fresh account and a reset both start
-on the same board and the column chooser can still show any hidden column.
-`PUT /user/settings` with `column_layout: null` clears the saved layout;
-absent keeps it. The upsert COALESCEd a null onto the old value until then,
-so the reset button only ever reset the browser.
+resolves an unset `column_layout` from `board_default_column_layout` in
+`app_config`. Render the returned layout for both a new account and a reset.
+
+### Updates and resets
+
+Do not infer update semantics from the HTTP verb or a nullable request type.
+Check the request model and write path before building a form or reset action.
+
+| Write | Omitted fields | Explicit values |
+|---|---|---|
+| `PUT /user/settings` | Preserve saved values | Null clears `column_layout`, `ai_model`, and `writing_style`. Null preserves `prefs`, `ai_params`, `criteria`, `bypass_sponsorship_filter`, and `email_digest`. Supplied objects replace the whole object; false is saved. |
+| `PATCH /user/filters/{id}` and `PATCH /user/views/{id}` | Preserve saved values | Null is rejected. An empty patch is rejected. False, zero and empty objects are saved where the field allows them. |
+| `PUT /user/profile` | Restore profile defaults | Replaces the entire profile. Unknown top-level keys are rejected. Send the complete intended profile, including collections. |
+
+An empty or whitespace-only writing style clears the override. Empty criteria
+clear the location/date constraints, but the non-admin age limit still applies.
+A null model removes the saved choice; read the returned effective model and
+availability rather than assuming which model will run.
+
+The implementations are `SettingsPut` and `FilterPatch` in `api/models.py`,
+`put_settings` in `api/routers/users.py`, and the request models and writers in
+`api/routers/views.py` and `api/routers/apply.py`. Filter and view updates share
+`api.updates.NonNullUpdate`; preserve its distinction between omission and null.
 
 ## Actions
 
