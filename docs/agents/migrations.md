@@ -12,6 +12,21 @@ so.** Omitting it produces a drift failure in CI's autogenerate check.
 A non-additive migration and any change to the task-claim, heartbeat or reaper
 contract must be announced before it merges, not after.
 
+**A migration that can refuse to apply must not reach the fleet unattended.**
+Merges reach the fleet through Renovate: it opens a PR in each host repo for
+the new image and automerges, so a migration lands on Renovate's cadence with
+nobody watching. The api and every worker run `upgrade head` at startup, so a
+preflight that raises (a uniqueness constraint whose data check fails, a
+`RAISE EXCEPTION` on ambiguous rows) is seven containers refusing to start
+across six hosts, found by whoever notices the board is down. Before merging
+such a migration, check the condition against production yourself and say the
+result in the PR; if it could plausibly raise, or the migration is not
+additive, ask the deployment owner for an explicit roll and restore the
+job-scripts opt-out in the host repos' `renovate.json` for that one release.
+The two constraint migrations of #476 (2026-09-09) were the first to land
+unattended; they passed because the data was clean and #472 already refused
+the condition at write time.
+
 **Parallel work produces two heads from one parent.** Each branch is green
 against its own parent, and `upgrade head` fails only once both are on main.
 The application runs `upgrade head` at startup, so two heads means new hosts
