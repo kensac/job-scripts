@@ -1,4 +1,11 @@
-"""Recorded usage estimates and separately labelled posting-verdict diagnostics."""
+"""Recorded usage estimates and separately labelled posting-verdict diagnostics.
+
+This surface was split from admin.py when that module had 1466 lines and sixty
+endpoints. Keep the cost populations explicit: verify_new can yield closed and
+clearance verdicts from one request, booking usage on the closed row. A
+check_type is therefore not a cost centre. `joint_call_rows` makes zero-token
+decided rows visible, although zero tokens alone cannot prove sibling billing.
+"""
 
 from __future__ import annotations
 
@@ -200,7 +207,30 @@ def spend(
         params,
     )
 
-    # Reach reflects current posting/subscription state, not historical reach.
+    # Why source reach has its own breakdown (historical measurement):
+    #
+    # The sweeps that spend tokens selected postings with no reference to who
+    # subscribes to what, so 21.7M of a 99.7M-token 30-day bill went to boards
+    # no user had enabled and to one an admin had switched off. This motivated
+    # the AI_ELIGIBLE_JOB gate and retaining a source-reach breakdown,
+    # because the only symptom was a number in a bill nobody attributed.
+    #
+    # Measured 2026-09-03. The ticket's own figure was 31.6%, counting
+    # `sheet_import` as unsubscribed; it is reachable, so the honest share is
+    # 21.8%.
+    #
+    # Those figures describe the recorded 2026-09-03 sample, not today's usage
+    # or a reconciled provider invoice. This query joins current jobs and
+    # subscriptions; it cannot reconstruct reach when an older request ran.
+    #
+    # Three buckets, not two. 'no_posting' is a call whose url has no jobs row,
+    # and the original url-keyed extraction design deliberately reached the
+    # fifth of that corpus whose posting row was gone and whose cached page
+    # could not be scraped again. That historical population does not establish
+    # eligibility in today's sweep; inspect its current candidate query. That work cannot be attributed to a source, which is a different
+    # fact from being unwanted - folding it into 'unreachable' would report
+    # deliberate work as waste. Unpriced calls are counted, never summed as
+    # zero: a NULL cost is a rate nobody looked up, not a free call.
     by_source_reach = db.query(
         f"""
         SELECT COALESCE(j.source, '') AS source,
@@ -233,6 +263,15 @@ def spend(
         for k in ("calls", "unpriced_calls", "cost_usd", "total_tokens"):
             acc[k] += row[k]
 
+    # Why the usage ledger must be separate from the verdict log:
+    # ai_queries is URL-keyed and cannot represent non-posting work. The
+    # original investigation found $18.49 in mail classification spend with
+    # no verdict rows, then the largest reported line item. Preserve that
+    # measurement as the reason for this separate population, not as a current
+    # invoice total or a claim that every paid request is now recorded.
+    # Fleet batch hooks and user-call writers record api_usage by purpose;
+    # their rows may represent different request counts. New call paths must
+    # still be audited for ledger coverage, including failed paid responses.
     ledger = _ledger_breakdowns(params)
     by_purpose = ledger["by_purpose"]
     batching["basis"] = "verdict_metadata_hypothesis"
@@ -262,6 +301,10 @@ def spend(
         "window": {"days": days, "from": totals.get("first_call"), "to": totals.get("last_call")},
         "totals": totals,
         "by_purpose": by_purpose,
+        # Expose the ceiling beside recorded spend: when the ceiling lived
+        # only inside enforcement, users first discovered it when scheduled
+        # work stopped. The two source populations still answer different
+        # questions and must remain labelled rather than forced to agree.
         "fleet_budget": budget.fleet_budget_status(),
         "ledger": {
             **ledger,
