@@ -514,7 +514,12 @@ class SavedView(Base):
 
 class UserFilter(Base):
     __tablename__ = "user_filters"
-    __table_args__ = (UniqueConstraint("user_id", "name"),)
+    __table_args__ = (
+        UniqueConstraint("user_id", "name"),
+        Index(
+            "uq_user_filters_one_enabled", "user_id", unique=True, postgresql_where=text("enabled")
+        ),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
     user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"))

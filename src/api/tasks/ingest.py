@@ -12,9 +12,9 @@ import re
 from typing import Any
 from urllib.parse import urlparse
 
-from api import db, hosts, metrics, telemetry, verdicts
+from api import db, filter_runs, hosts, metrics, telemetry, verdicts
 from api.tasks.board import content_attempted_urls, content_ready_urls
-from api.tasks.runtime import Deferred, cancelled, enqueue, set_progress
+from api.tasks.runtime import Deferred, cancelled, set_progress
 from core.store import add_ai_result
 
 logger = logging.getLogger("jobtracker_worker")
@@ -218,16 +218,6 @@ def schedule_filter_runs(cycle: str) -> None:
         """
     )
     for u in users:
-        splitting = db.query_one(
-            "SELECT 1 AS x FROM tasks WHERE kind = 'run_all_filters' "
-            "AND status IN ('pending', 'running') "
-            "AND (payload->>'user_id')::bigint = %s LIMIT 1",
-            (u["id"],),
-        )
-        if splitting:
-            continue
-        enqueue(
-            "run_all_filters",
-            {"user_id": u["id"], "batched": True},
-            dedupe_key=f"runall:{u['id']}:{cycle}",
+        filter_runs.enqueue(
+            u["id"], None, policy="scheduled", dedupe_key=f"runall:{u['id']}:{cycle}"
         )

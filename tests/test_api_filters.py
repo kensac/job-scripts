@@ -287,7 +287,7 @@ def test_two_filter_names_sharing_a_prompt_are_one_row(client, user_headers, f):
 
     uid = db.query_one("SELECT id FROM users WHERE sub = 'test-user'")["id"]
     a = f.make_filter(uid, name="default", prompt="same text")
-    b = f.make_filter(uid, name="general", prompt="same text")
+    b = f.make_filter(uid, name="general", prompt="same text", enabled=False)
     assert a["prompt_hash"] == b["prompt_hash"]
     _, url = f.make_ready_job(source="s")
     _reject(f, url, a["prompt_hash"], "Nope.")
