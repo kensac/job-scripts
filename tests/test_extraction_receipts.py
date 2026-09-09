@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from api import db
-from api.tasks import comp, requirements
+from api.tasks import comp, requirements, runtime
 from core.batch import BatchSpec
 
 
@@ -81,3 +81,9 @@ async def test_saved_extraction_result_collects_without_new_candidates(
             else {"yoe_min": 5, "model": "submitted-model", "content_row_id": content_row}
         )
         assert row == expected
+
+    monkeypatch.setattr(module, "run_batched", runtime.run_batched)
+    await getattr(module, f"handle_extract_{family}")(task_id, {})
+    progress = db.query_one("SELECT progress FROM tasks WHERE id=%s", (task_id,))["progress"]
+    assert progress["done"] == (0 if changed else 1)
+    assert progress["total"] == 1
