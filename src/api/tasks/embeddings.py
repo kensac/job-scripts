@@ -175,6 +175,9 @@ async def handle_embed_postings_batch(task_id: int, payload: dict[str, Any]) -> 
             if request is None or not context or request.endpoint != "/v1/embeddings":
                 receipt.outcome = "unknown_request"
                 continue
+            if not result.model:
+                receipt.outcome = "unknown_model"
+                continue
             vectors = result.embedding_vectors
             originals = context["rows"]
             if result.error or vectors is None or len(vectors) != len(originals):
@@ -201,7 +204,8 @@ async def handle_embed_postings_batch(task_id: int, payload: dict[str, Any]) -> 
             rows = []
             for original, vector in zip(originals, vectors, strict=True):
                 if len(vector) != context["dimensions"] or any(
-                    not isinstance(v, (int, float)) or not math.isfinite(v) for v in vector
+                    isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v)
+                    for v in vector
                 ):
                     continue
                 if current.get(original["url"]) != original["content_row_id"]:

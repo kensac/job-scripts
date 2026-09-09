@@ -317,7 +317,14 @@ async def _collect_batch(
                         "total_tokens": result.usage.get("total_tokens", 0),
                     }
                 data = body.get("data") or []
-                if data and {item.get("index") for item in data} == set(range(len(data))):
+                if (
+                    isinstance(data, list)
+                    and data
+                    and all(
+                        isinstance(item, dict) and type(item.get("index")) is int for item in data
+                    )
+                    and {item["index"] for item in data} == set(range(len(data)))
+                ):
                     vectors = [
                         item.get("embedding")
                         for item in sorted(data, key=lambda item: item["index"])

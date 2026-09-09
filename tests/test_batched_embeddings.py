@@ -229,3 +229,61 @@ async def test_rejected_packed_request_is_acknowledged_without_live_fallback(f, 
     await embeddings.handle_embed_postings_batch(task_id, {})
     assert batch_results.outcome_counts(task_id) == {"failed": 1}
     assert db.query_one("SELECT count(*) AS n FROM job_embeddings")["n"] == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("malformed", ["numeric_bool", "index_bool", "non_record", "missing_model"])
+async def test_malformed_provider_vectors_are_acknowledged_without_database_failure(f, malformed):
+    task_id, _ = _receipt(f)
+    db.execute("DELETE FROM batch_result_receipts WHERE task_id=%s", (task_id,))
+    data = [{"index": i, "embedding": [0.1] * EMBEDDING_DIMENSIONS} for i in range(2)]
+    if malformed == "numeric_bool":
+        for item in data:
+            item["embedding"][0] = True
+    elif malformed == "index_bool":
+        data[0]["index"], data[1]["index"] = False, True
+    elif malformed == "non_record":
+        data[0] = "not a record"
+    provider_batch = SimpleNamespace(
+        id="packed",
+        endpoint="/v1/embeddings",
+        status="completed",
+        output_file_id="out",
+        error_file_id=None,
+    )
+
+    async def content(file_id):
+        return SimpleNamespace(
+            text=json.dumps(
+                {
+                    "custom_id": "packed",
+                    "response": {
+                        "status_code": 200,
+                        "body": {
+                            "data": data,
+                            "usage": {"prompt_tokens": 101, "total_tokens": 101},
+                        },
+                    },
+                }
+            )
+        )
+
+    results = await batch._collect_batch(
+        SimpleNamespace(files=SimpleNamespace(content=content)),
+        provider_batch,
+        {},
+        create_missing=True,
+    )
+    for result in results.values():
+        result.model = None if malformed == "missing_model" else EMBEDDING_MODEL
+    batch_results.checkpoint(task_id, list(results.values()), [])
+    await embeddings.handle_embed_postings_batch(task_id, {})
+    assert db.query_one("SELECT count(*) AS n FROM job_embeddings")["n"] == 0
+    assert batch_results.unconsumed(task_id) == []
+    expected = {
+        "numeric_bool": "discarded",
+        "index_bool": "failed",
+        "non_record": "failed",
+        "missing_model": "unknown_model",
+    }
+    assert batch_results.outcome_counts(task_id) == {expected[malformed]: 1}
