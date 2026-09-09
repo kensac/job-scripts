@@ -66,8 +66,8 @@ def test_totals_and_batching(client, admin_headers, spend_rows):
     b = body["batching"]
     assert (b["batched_calls"], b["sync_calls"]) == (1, 2)
     assert Decimal(str(b["batched_cost_usd"])) == Decimal("0.225")
-    # Both sync calls are non-interactive, so both count as batchable; the
-    # saving is exactly half of what they cost.
+    # The compatibility scenario halves stored cost; metadata alone cannot
+    # establish transport or realized savings.
     assert b["batchable_sync_calls"] == 2
     assert Decimal(str(b["unrealized_savings_usd"])) == Decimal("0.2275")
 
@@ -266,3 +266,60 @@ def test_unpriced_is_its_own_question_not_a_cheap_one(client, admin_headers):
 
 def test_the_call_list_needs_admin(client, user_headers):
     assert client.get("/v1/admin/spend/calls", headers=user_headers).status_code == 403
+
+
+def test_ledger_breakdowns_reconcile_without_verdicts_and_keep_unknown_price(client, admin_headers):
+    from datetime import UTC, datetime, timedelta
+
+    from api import db
+
+    day = (datetime.now(UTC) - timedelta(days=2)).date()
+    following_day = day + timedelta(days=1)
+    # Stored estimates are deliberately different from today's model rates.
+    for purpose, model, cost, timestamp in (
+        ("mail", NANO, Decimal("1.25"), f"{day}T00:30:00Z"),
+        ("draft", NANO, Decimal("0"), f"{day}T23:30:00Z"),
+        ("mail", None, None, f"{following_day}T00:30:00Z"),
+    ):
+        db.execute(
+            "INSERT INTO api_usage (key_source, purpose, model, cost_usd, created_at) "
+            "VALUES ('server', %s, %s, %s, %s)",
+            (purpose, model, cost, timestamp),
+        )
+    # The DB session's local day must not change the report's UTC buckets.
+    from api.routers.spend import spend
+
+    with db.transaction():
+        db.execute("SET LOCAL timezone = 'America/Los_Angeles'")
+        body = spend(days=365, user=None)
+    ledger = body["ledger"]
+    assert ledger["basis"] == "recorded_estimate"
+    assert ledger["timezone"] == "UTC"
+    totals = ledger["totals"]
+    assert (
+        totals["calls"],
+        totals["priced_calls"],
+        totals["unpriced_calls"],
+        totals["unknown_model_calls"],
+    ) == (3, 2, 1, 1)
+    assert totals["cost_usd"] == Decimal("1.25")
+    assert body["totals"]["calls"] == 0
+    for rows in (ledger["by_model"], ledger["by_day"], body["by_purpose"]):
+        assert sum(row["cost_usd"] for row in rows) == totals["cost_usd"]
+        assert sum(row["calls"] for row in rows) == 3
+        assert sum(row["unpriced_calls"] for row in rows) == 1
+    assert [(str(row["day"]), row["calls"]) for row in ledger["by_day"]] == [
+        (str(day), 2),
+        (str(following_day), 1),
+    ]
+    unknown = next(row for row in ledger["by_model"] if row["model"] is None)
+    assert unknown["unpriced_calls"] == 1
+    assert body["verdict_diagnostics"]["totals"] == body["totals"]
+
+
+def test_empty_ledger_has_explicit_zero_coverage(client, admin_headers):
+    body = client.get("/v1/admin/spend", headers=admin_headers).json()
+    ledger = body["ledger"]
+    assert ledger["totals"]["calls"] == 0
+    assert ledger["totals"]["unpriced_calls"] == 0
+    assert ledger["by_model"] == ledger["by_day"] == []

@@ -12845,7 +12845,7 @@
     "/v1/admin/spend/calls": {
       "get": {
         "summary": "Spend Calls",
-        "description": "The calls behind a purpose.\n\n`by_purpose` was a dead end by construction: nothing anywhere renders\n`api_usage` rows, so a purpose's total could be read and never opened. The\nResponses page is over `ai_queries`, which is the verdict log and cannot\nsee work that produced no verdict - which is most of the bill.\n\n`unpriced` is its own filter rather than a cost sort, because a NULL cost\nis not a cheap call. It means nobody looked the rate up, and the set of\ncalls we cannot price is a different question from the set that was\ninexpensive.",
+        "description": "Recorded usage rows; null cost means unknown price, not a free call.",
         "operationId": "spend_calls_v1_admin_spend_calls_get",
         "parameters": [
           {
