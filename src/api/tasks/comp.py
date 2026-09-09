@@ -235,6 +235,10 @@ async def handle_extract_comp(task_id: int, payload: dict[str, Any]) -> None:
                         context["content_row_id"],
                     ),
                 )
+            # The 2026-09-05 audit found unconditional progress accounting
+            # could report done == total even when every line failed. Count
+            # writes, not parsed or collected responses; failed lines retain
+            # prior values and the selection predicates govern their retry.
             receipt.outcome = (
                 "written"
                 if parsed_ok and written

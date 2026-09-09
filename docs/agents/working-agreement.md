@@ -124,6 +124,9 @@ asked. Route it to the person who owns the file.
 
 ## Scale of work
 
+Keep one independently reviewable behavior per PR. Split unrelated fixes and
+experiments so each can be evaluated, reverted, and deployed on its own.
+
 Prefer the smallest change that is correct. When the same logic exists in
 several places and one has drifted, delete the duplication rather than fixing
 the copy.

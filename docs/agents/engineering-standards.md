@@ -72,6 +72,14 @@ Before concluding from an aggregate, check that the filter producing it does
 not exclude the population in question. A check scoped by the thing it is
 checking can never fail.
 
+Before changing a hot path, measure requests, queries, transactions and runtime
+before and after at a stated workload scale. Report what was measured; a cleaner
+abstraction or passing test does not establish a performance improvement.
+
+Prompt changes require before/after output-token and decision-quality evaluation
+on the same inputs. Schema and parsing tests establish compatibility, not outcome
+quality or savings. Keep evaluation costs explicitly bounded.
+
 ## A fix must reach its own population
 
 **Measure after shipping, not only before.** A fix that corrects a rule but
@@ -109,6 +117,10 @@ A clean exit reads as success everywhere. Verify that the thing happened, not
 that the process finished.
 
 ## Comments
+
+Preserve measured why-comments when refactoring. Move the evidence to the code
+that now enforces the rule, qualify historical counts, and correct stale claims
+without deleting the reason the guard exists.
 
 Do not write docstrings or comments unless they carry something the code
 cannot. When they do, they are load-bearing: record why a decision was made
