@@ -74,3 +74,33 @@ def test_malformed_stored_group_flags_fail_closed():
         )
         is False
     )
+
+
+def test_generic_mapping_preserves_case_and_whitespace():
+    from api.config import ConfigKey
+
+    spec = ConfigKey(default={}, value_type=dict[str, int], help="Named counters")
+    assert spec.validate({"MixedCase": 2, " spaced ": 3}) == {"MixedCase": 2, " spaced ": 3}
+
+
+def test_generic_string_list_accepts_empty_strings():
+    from api.config import ConfigKey
+
+    spec = ConfigKey(default=[], value_type=list[str], help="Text fragments")
+    assert spec.validate(["", " "]) == ["", " "]
+
+
+def test_group_access_refuses_a_non_policy_string_list(monkeypatch):
+    import pytest
+
+    from api.config import CONFIG_KEYS, ConfigKey, group_access_allowed
+
+    monkeypatch.setitem(
+        CONFIG_KEYS, "text_fragments", ConfigKey(default=[], value_type=list[str], help="Text")
+    )
+    db.execute(
+        "INSERT INTO app_config (key, value) VALUES (%s, %s)",
+        ("text_fragments", db.jsonb(["*"])),
+    )
+    with pytest.raises(ValueError, match="not a group policy"):
+        group_access_allowed("text_fragments", ["infra-admins"])

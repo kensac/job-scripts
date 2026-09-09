@@ -27,6 +27,7 @@ class ConfigKey:
     value_type: Any
     help: str
     choices: tuple[str, ...] = ()
+    kind: Literal["value", "groups", "hosts", "columns"] = "value"
     _adapter: TypeAdapter = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -41,9 +42,9 @@ class ConfigKey:
         parsed = self._adapter.validate_python(value, strict=True)
         if self.choices and parsed not in self.choices:
             raise ValueError(f"takes one of {', '.join(self.choices)}")
-        if self.value_type == list[str] and any(not group.strip() for group in parsed):
+        if self.kind == "groups" and any(not group.strip() for group in parsed):
             raise ValueError("takes nonempty group names")
-        if self.type is dict:
+        if self.kind == "hosts":
             normalized = {}
             for host, rate in parsed.items():
                 name = host.strip().lower()
@@ -51,7 +52,7 @@ class ConfigKey:
                     raise ValueError("takes distinct nonempty host names")
                 normalized[name] = rate
             return normalized
-        if self.value_type == list[ColumnState]:
+        if self.kind == "columns":
             if len({column.colId for column in parsed}) != len(parsed):
                 raise ValueError("takes distinct column identifiers")
             return [column.model_dump(exclude_unset=True) for column in parsed]
@@ -67,6 +68,7 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
     "gmail_connect_groups": ConfigKey(
         default=["infra-admins"],
         value_type=list[str],
+        kind="groups",
         help="Authentik groups whose members may connect a mailbox.",
     ),
     # Groups whose filter saves re-judge the board at once. Seeded closed:
@@ -76,6 +78,7 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
     "filter_rejudge_on_change_groups": ConfigKey(
         default=[],
         value_type=list[str],
+        kind="groups",
         help="Authentik groups whose filter saves re-judge the whole board at once; "
         'everyone else waits for the hourly sweep. "*" means everyone.',
     ),
@@ -108,6 +111,7 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
             {"colId": "row_actions", "hide": False, "pinned": "right", "width": 44},
         ],
         value_type=list[ColumnState],
+        kind="columns",
         help="Column state a board starts with before the person changes a column: "
         "AG Grid column state entries (colId, hide, pinned, width).",
     ),
@@ -163,6 +167,7 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
     "fetch_host_limits": ConfigKey(
         default={},
         value_type=dict[str, PositiveInt],
+        kind="hosts",
         help="Host to page fetches per hour, fleet-wide. A host that blocks bursts is "
         "drip-fed at this rate instead of being pulled off; the fetch-failure "
         "alert names the host.",
@@ -173,6 +178,7 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
     "ingest_host_pace_seconds": ConfigKey(
         default={"apply.workable.com": 20},
         value_type=dict[str, PositiveInt],
+        kind="hosts",
         help="Host to the smallest gap in seconds between pulls from one address, "
         "and between pages inside a pull. The fleet learns the actual gap per "
         "host and address from refusals (GET /admin/host-budgets); this is the "
@@ -304,7 +310,7 @@ def group_access_allowed(key: str, groups: list[str]) -> bool:
     from api import db
 
     spec = CONFIG_KEYS[key]
-    if spec.value_type != list[str]:
+    if spec.kind != "groups":
         raise ValueError(f"{key} is not a group policy")
     try:
         allowed = spec.validate(db.get_config(key))
