@@ -667,6 +667,11 @@ async def handle_classify_mail(task_id: int, payload: dict[str, Any]) -> None:
 
     backfill = bool(payload.get("backfill"))
     shape = BACKFILL_TASK if backfill else ONGOING_TASK
+    # Before this resume-first gate, an empty fresh selection skipped paid
+    # collection: two completed batches retained zero recorded tokens and
+    # NULL cost, leaving 2,646 messages unclassified behind their claims.
+    # That historical failure becomes likelier when a backfill finishes and
+    # there is normally no new mail to select.
     if has_batch_work(task_id):
         results, _ = await run_batched(task_id, shape, [])
         _record_results(task_id, results)
@@ -751,6 +756,9 @@ async def handle_classify_mail(task_id: int, payload: dict[str, Any]) -> None:
     if not rows:
         set_progress(task_id, len(corrected), len(corrected), "nothing to classify")
         return
+    # Claim before submission: the historical duplicate-spend incident had
+    # three tasks an hour apart carrying the same 1,156 requests. Resume must
+    # not replace these IDs with a fresh selection that was never submitted.
     db.execute(
         "UPDATE tasks SET payload = COALESCE(payload, '{}'::jsonb) || %s WHERE id = %s",
         (db.jsonb({"claimed_message_ids": [r["id"] for r in rows]}), task_id),
@@ -775,6 +783,10 @@ async def handle_classify_mail(task_id: int, payload: dict[str, Any]) -> None:
 
 
 def _record_results(task_id: int, results: list) -> None:
+    # One malformed row must not lose 4,999 other paid classifications in a
+    # 5,000-result batch, the scale behind the original per-row guard. Durable
+    # receipts now preserve unread results on storage failure and skip earlier
+    # acknowledgments on retry; do not restore a catch that drops failed writes.
     for res in results:
         with consume_result(task_id, res) as receipt:
             if not receipt.pending:
@@ -826,9 +838,9 @@ def _record_result(res, receipt) -> None:
     # job related, so the date it found is a marketing expiry, a newsletter
     # RSVP or a tuition date.
     #
-    # It is the largest source of deadlines in the corpus by a wide margin
-    # - 1,409 of 2,128, two thirds of every deadline recorded - and each
-    # one becomes an action item and feeds "quiet for 60+ days".
+    # The historical corpus audit found 1,409 of 2,128 recorded deadlines on
+    # non-job mail. These dates fed action items and "quiet for 60+ days";
+    # they are evidence for this guard, not a count of the current corpus.
     if when is not None and parsed.kind != "not_job_related":
         year_inferred = when.year_inferred
         if is_appointment(parsed.kind):

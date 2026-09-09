@@ -257,6 +257,9 @@ def list_source_requests(
         """,
         {**selection, "limit": limit + 1, "offset": max(0, offset)},
     )
+    # The Requests badge once showed the page size as the queue count. The
+    # catalog had 389 sources at that audit; a request queue can exceed one
+    # page, so count the full selection independently of pagination.
     total = db.query_one(f"SELECT count(*) AS n FROM source_requests sr {where}", selection)
     return {
         "filters": params_.applied(status=statuses, user=scoping.echo(ids)),

@@ -547,28 +547,27 @@ async def explain_check(job_id: int, body: ExplainBody, user: AuthedUser = Depen
             },
         )
 
-    parsed, usage = await _verdicts.run_check(
-        cfg,
-        url=job["url"],
-        check_type=check,
-        instructions=instructions,
-        input_text=content_row["input_content"][:60000],
-        response_model=model_cls,
-        verdict_of=verdict_of,
-        company=job["company"],
-        job_title=job["title"],
-        filter_name=filter_name,
-        prompt_hash=prompt_hash,
-        context="explain",
-    )
-    budget.record_usage(
+    with budget.record_parse_failures(user.id, cfg.key_source, "explain", cfg.model):
+        parsed, usage = await _verdicts.run_check(
+            cfg,
+            url=job["url"],
+            check_type=check,
+            instructions=instructions,
+            input_text=content_row["input_content"][:60000],
+            response_model=model_cls,
+            verdict_of=verdict_of,
+            company=job["company"],
+            job_title=job["title"],
+            filter_name=filter_name,
+            prompt_hash=prompt_hash,
+            context="explain",
+        )
+    budget.record_tokens(
         user.id,
         cfg.key_source,
         "explain",
         cfg.model,
-        usage.get("prompt_tokens", 0),
-        usage.get("completion_tokens", 0),
-        usage.get("total_tokens", 0),
+        usage,
     )
     if parsed is None:
         # run_check records the 'failed' row and returns None when the model

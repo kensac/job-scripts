@@ -22,7 +22,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from api import ai, application_writes, db, hosts, visibility
+from api import ai, application_writes, budget, db, hosts, visibility
 from api.tasks.runtime import (
     Deferred,
     consume_result,
@@ -359,7 +359,8 @@ async def draft_rows(
         # A person's own key has no batch endpoint we can bill to them; one
         # live call per question, the way their filters run.
         for spec in specs:
-            parsed, usage = await ai.parse(cfg, spec.instructions, spec.input, Draft)
+            with budget.record_parse_failures(user_id, cfg.key_source, PURPOSE, cfg.model):
+                parsed, usage = await ai.parse(cfg, spec.instructions, spec.input, Draft)
             done += application_writes.record_result(
                 task_id,
                 user_id,
@@ -422,6 +423,9 @@ async def handle_application_sweep(task_id: int, payload: dict[str, Any]) -> Non
     open a row for every paragraph question, and draft every row without a
     draft in one batch. Nothing is re-drafted: the button does that."""
     user_id = payload["user_id"]
+    # Collect before reading another cap of forms. On 2026-09-06 the first
+    # sweep read 113 forms before submission and 114 more on resume, spending
+    # two cycles of reads on one batch and reporting 60 of 158 done.
     if has_batch_work(task_id):
         await draft_rows(task_id, user_id, [], kind="sweep")
         _set_draft_progress(task_id, "drafts collected", 0)

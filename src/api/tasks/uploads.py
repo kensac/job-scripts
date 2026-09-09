@@ -28,30 +28,28 @@ async def handle_extract_upload(payload: dict[str, Any]) -> None:
         db.execute("UPDATE jobs SET extraction_status = 'failed' WHERE id = %s", (job["id"],))
         raise RuntimeError("could not extract page content")
 
-    parsed, usage = await ai.parse(
-        cfg,
-        (
-            "Extract job posting metadata from the page content. "
-            "company: employer name. title: role title. locations: list of locations "
-            "(empty if remote/unknown). terms: application seasons like 'Summer 2026' "
-            "if stated, else empty. Use empty strings/lists when a field is absent."
-        ),
-        content[:60000],
-        JobExtract,
-    )
-    if not parsed:
-        db.execute("UPDATE jobs SET extraction_status = 'failed' WHERE id = %s", (job["id"],))
-        raise RuntimeError("extraction returned no parsed output")
-
-    budget.record_usage(
+    with budget.record_parse_failures(payload["user_id"], cfg.key_source, "extract", cfg.model):
+        parsed, usage = await ai.parse(
+            cfg,
+            (
+                "Extract job posting metadata from the page content. "
+                "company: employer name. title: role title. locations: list of locations "
+                "(empty if remote/unknown). terms: application seasons like 'Summer 2026' "
+                "if stated, else empty. Use empty strings/lists when a field is absent."
+            ),
+            content[:60000],
+            JobExtract,
+        )
+    budget.record_tokens(
         payload["user_id"],
         cfg.key_source,
         "extract",
         cfg.model,
-        usage["prompt_tokens"],
-        usage["completion_tokens"],
-        usage["total_tokens"],
+        usage,
     )
+    if not parsed:
+        db.execute("UPDATE jobs SET extraction_status = 'failed' WHERE id = %s", (job["id"],))
+        raise RuntimeError("extraction returned no parsed output")
     db.execute(
         """
         UPDATE jobs SET company = %s, title = %s, locations = %s, terms = %s,
