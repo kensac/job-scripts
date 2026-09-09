@@ -18,11 +18,14 @@ def _filter(client, headers, name="strict"):
 
 def test_a_filter_run_is_refused_while_one_is_in_flight(client, user_headers):
     fid = _filter(client, user_headers)
-    # Creating a filter queues its first run; the list shows it.
+    # A save queues nothing unless the person's group re-judges on change
+    # (filter_rejudge_on_change_groups is seeded closed); the person presses
+    # Run, and the list shows that run.
+    first = client.post(f"/v1/user/filters/{fid}/run", headers=user_headers).json()["task_id"]
     rows = client.get("/v1/user/filters", headers=user_headers).json()
     (row,) = [x for x in rows["filters"] if x["id"] == fid]
     assert row["task"] is not None and row["task"]["status"] == "pending"
-    first = row["task"]["id"]
+    assert row["task"]["id"] == first
 
     r = client.post(f"/v1/user/filters/{fid}/run", headers=user_headers)
     assert r.status_code == 409, r.text

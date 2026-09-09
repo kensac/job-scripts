@@ -35,6 +35,11 @@ _GROUP_BUDGET_SEED = [
 _APP_CONFIG_SEED = [
     ("signups_enabled", True),
     ("gmail_connect_groups", ["infra-admins"]),
+    # Groups whose filter saves re-judge the board at once. Seeded closed:
+    # three edits on one new account cost 10.27 dollars in a day
+    # (2026-09-08), so for everyone else an edit waits for the hourly
+    # sweep at batch price. "*" opens it to everyone.
+    ("filter_rejudge_on_change_groups", []),
     # How long a posting whose page fetch came back empty waits before any
     # ingest or backfill tries it again. The hourly cycle used to be the
     # retry: 24 attempts a day at the same dead URL from every worker.

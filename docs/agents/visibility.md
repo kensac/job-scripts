@@ -80,6 +80,17 @@ endpoints never set the flag), and the same flag on a task row written by
 hand works the same way. Raising `group_budgets.weekly_token_budget` for a
 run and putting it back is not the tool for this.
 
+**A filter save does not re-judge the board unless the person's group is in
+`filter_rejudge_on_change_groups`** (app_config, seeded `[]`, `"*"` for
+everyone). Three edits on one new account cost 10.27 dollars in a day
+(2026-09-08): every save queued a full live run under the new hash while the
+previous run kept judging under the old one. Outside the list a save returns
+`run_blocked: "DEFERRED"` with the sentence the page shows, and the hourly
+ingest sweep judges the board under the new hash at batch price; the person's
+Run button still runs it at once. The board thins to acted-on rows until
+verdicts land, because visibility keys on the current hash; carrying old
+verdicts across an edit is the larger change this flag defers.
+
 ## Location criteria match places, not words
 
 Every distinct location string a board writes is one row of `locations`,
