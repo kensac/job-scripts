@@ -280,6 +280,7 @@ def test_ledger_breakdowns_reconcile_without_verdicts_and_keep_unknown_price(cli
         ("mail", NANO, Decimal("1.25"), f"{day}T00:30:00Z"),
         ("draft", NANO, Decimal("0"), f"{day}T23:30:00Z"),
         ("mail", None, None, f"{following_day}T00:30:00Z"),
+        ("experiment", "  ", None, f"{following_day}T01:30:00Z"),
     ):
         db.execute(
             "INSERT INTO api_usage (key_source, purpose, model, cost_usd, created_at) "
@@ -301,20 +302,20 @@ def test_ledger_breakdowns_reconcile_without_verdicts_and_keep_unknown_price(cli
         totals["priced_calls"],
         totals["unpriced_calls"],
         totals["unknown_model_calls"],
-    ) == (3, 2, 1, 1)
+    ) == (4, 2, 2, 2)
     assert totals["cost_usd"] == Decimal("1.25")
-    assert totals["ledger_rows"] == 3
+    assert totals["ledger_rows"] == 4
     assert body["totals"]["calls"] == 0
     for rows in (ledger["by_model"], ledger["by_day"], body["by_purpose"]):
         assert sum(row["cost_usd"] for row in rows) == totals["cost_usd"]
-        assert sum(row["calls"] for row in rows) == 3
-        assert sum(row["unpriced_calls"] for row in rows) == 1
+        assert sum(row["calls"] for row in rows) == 4
+        assert sum(row["unpriced_calls"] for row in rows) == 2
     assert [(str(row["day"]), row["calls"]) for row in ledger["by_day"]] == [
         (str(day), 2),
-        (str(following_day), 1),
+        (str(following_day), 2),
     ]
     unknown = next(row for row in ledger["by_model"] if row["model"] is None)
-    assert unknown["unpriced_calls"] == 1
+    assert unknown["unpriced_calls"] == 2
     assert body["verdict_diagnostics"]["totals"] == body["totals"]
 
 

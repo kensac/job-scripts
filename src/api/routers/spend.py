@@ -40,11 +40,12 @@ def _ledger_breakdowns(params: dict) -> dict[str, Any]:
     rows = db.query(
         f"""
         WITH daily_models AS (
-            SELECT purpose, model, (created_at AT TIME ZONE 'UTC')::date AS day,
+            SELECT purpose, NULLIF(BTRIM(model), '') AS model,
+                   (created_at AT TIME ZONE 'UTC')::date AS day,
                    COUNT(*) AS calls,
                    COUNT(*) FILTER (WHERE cost_usd IS NOT NULL) AS priced_calls,
                    COUNT(*) FILTER (WHERE cost_usd IS NULL) AS unpriced_calls,
-                   COUNT(*) FILTER (WHERE model IS NULL) AS unknown_model_calls,
+                   COUNT(*) FILTER (WHERE NULLIF(BTRIM(model), '') IS NULL) AS unknown_model_calls,
                    COALESCE(SUM(cost_usd), 0) AS cost_usd,
                    COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
                    COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
