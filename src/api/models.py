@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import datetime
-from typing import Any
+from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from api.updates import NonNullUpdate
 
 
 class UserJobPatch(BaseModel):
@@ -43,11 +45,11 @@ class FilterCreate(BaseModel):
 
 
 class FilterPatch(BaseModel):
-    name: str | None = Field(default=None, min_length=1, max_length=80)
-    prompt: str | None = Field(default=None, min_length=1, max_length=8000)
-    on_ambiguous: str | None = None
-    fail_closed: bool | None = None
-    enabled: bool | None = None
+    name: NonNullUpdate[Annotated[str, Field(min_length=1, max_length=80)]] = None
+    prompt: NonNullUpdate[Annotated[str, Field(min_length=1, max_length=8000)]] = None
+    on_ambiguous: NonNullUpdate[str] = None
+    fail_closed: NonNullUpdate[bool] = None
+    enabled: NonNullUpdate[bool] = None
 
 
 class ImprovePromptRequest(BaseModel):
@@ -71,7 +73,14 @@ class Criteria(BaseModel):
 
 
 class SettingsPut(BaseModel):
-    """Rejects unknown keys rather than dropping them.
+    """Partial settings update: omitted fields preserve their saved value.
+
+    Null resets column_layout, ai_model and writing_style to their defaults.
+    Other fields retain their legacy null-as-omission behavior. Supplied
+    objects replace the whole object; {} clears it, subject to the age cap
+    when criteria are written. False is a saved value, not an omission.
+
+    Rejects unknown keys rather than dropping them.
 
     `background` was a key here until it was removed, and a client still
     sending it needs to be told. Pydantic's default is to discard an

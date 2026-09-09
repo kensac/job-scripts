@@ -15,11 +15,11 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from psycopg.errors import UniqueViolation
-from pydantic import BaseModel, Field, StringConstraints, field_validator
-from pydantic.json_schema import SkipJsonSchema
+from pydantic import BaseModel, Field, StringConstraints
 
 from api import db
 from api.auth import AuthedUser, require_user
+from api.updates import NonNullUpdate
 
 router = APIRouter(prefix="/user/views")
 
@@ -40,19 +40,10 @@ class ViewCreate(BaseModel):
 
 
 class ViewPatch(BaseModel):
-    name: ViewName | SkipJsonSchema[None] = None
-    state: dict[str, Any] | SkipJsonSchema[None] = None
-    is_default: bool | SkipJsonSchema[None] = None
-    position: Annotated[int, Field(ge=0)] | SkipJsonSchema[None] = None
-
-    @field_validator("name", "state", "is_default", "position", mode="before")
-    @classmethod
-    def reject_null(cls, value: Any) -> Any:
-        # None marks omission internally, but clearing these non-null database
-        # fields is not an API operation. Validators run on supplied fields only.
-        if value is None:
-            raise ValueError("field may be omitted but must not be null")
-        return value
+    name: NonNullUpdate[ViewName] = None
+    state: NonNullUpdate[dict[str, Any]] = None
+    is_default: NonNullUpdate[bool] = None
+    position: NonNullUpdate[Annotated[int, Field(ge=0)]] = None
 
 
 def _lock_owner(user_id: int) -> None:
