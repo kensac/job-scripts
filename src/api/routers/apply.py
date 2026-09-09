@@ -9,10 +9,10 @@ import re
 from typing import Any
 from urllib.parse import urlsplit
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, ConfigDict, Field
 
-from api import ai, ai_access, apply, budget, db, events, telemetry
+from api import ai, ai_access, apply, budget, db, events, extension_policy, telemetry
 from api.auth import AuthedUser, require_user
 from api.routers.jobs import _write_board_row
 from api.tasks import application as drafts
@@ -22,6 +22,27 @@ router = APIRouter()
 
 SUBMITTED_STATUS = "Application Submitted"
 _BANK_COLS = "id, label, kind, value, times_used, last_used_at, updated_at"
+
+
+@router.get("/extension/config", response_model=extension_policy.ExtensionConfig)
+def extension_config(
+    response: Response,
+    adapter: extension_policy.AdapterId,
+    schema_version: int = Query(ge=1),
+):
+    # Disablements must remain readable when the person's session expires.
+    # This public response contains no profile, answers or credentials. The
+    # extension alone owns the bounded cache and pins a revision per fill.
+    response.headers["Cache-Control"] = "no-store"
+    if schema_version != 1:
+        raise _bad(409, "UNSUPPORTED_CONFIG_SCHEMA", "this configuration schema is not supported")
+    try:
+        policy = extension_policy.ExtensionPolicy.model_validate(db.get_config("extension_policy"))
+    except ValueError as exc:
+        raise _bad(
+            503, "INVALID_EXTENSION_POLICY", "extension configuration is unavailable"
+        ) from exc
+    return extension_policy.resolve(policy, adapter)
 
 
 def _bad(status: int, code: str, message: str) -> HTTPException:
