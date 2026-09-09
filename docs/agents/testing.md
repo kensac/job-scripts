@@ -118,3 +118,20 @@ Check the environment before the code: which database the run used, whether
 anything else was running against it, and whether the container still exists.
 A vanished container and a container with a vanished port mapping present
 identically to a suite as "the database stopped existing".
+
+## Investigating test performance
+
+Inspect `.github/workflows/test-performance.yml` for the benchmark matrix and
+`.github/workflows/test-run.yml` for the commands each lane executes. Dispatch
+the `Test performance` workflow on the revision being evaluated, then download
+its `timings-*` artifacts into separate directories under `measurements/`.
+Run `tools/test_performance.py` with `--repetitions` and `--shards` matching
+the workflow matrix to compare those reports.
+
+Verify identical test IDs and outcomes before interpreting a speed comparison.
+Compare setup, call and teardown phases to locate the cost, then open the
+fixtures or implementation responsible. Use the separate call profile to
+locate work, not to estimate ordinary runtime: instrumentation adds overhead
+and cumulative times overlap. Include runner setup, queue delays and total
+runner time when evaluating parallelism. Keep run-specific findings in the
+PR and workflow artifacts so the next investigation starts with fresh evidence.
