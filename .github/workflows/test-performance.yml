@@ -1,0 +1,91 @@
+name: Test performance
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/test-performance.yml'
+      - 'tests/ci_suite.py'
+      - 'tests/test_ci_suite.py'
+      - 'tools/test_performance.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        lane: [serial, profile, shard-0, shard-1, shard-2, corpus]
+        repetition: [1, 2]
+        exclude:
+          - lane: profile
+            repetition: 2
+    services:
+      postgres:
+        image: pgvector/pgvector:pg18-trixie@sha256:78bf48b801e792f99e3ac62b5036fd3876e9be48afda16c1e331af1c75ceb2ff
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: jobtracker_ci
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U ci" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/jobtracker_ci
+      TEST_DATABASE_URL: postgresql://ci:ci@localhost:5432/jobtracker_ci
+      JOBTRACKER_SERVICE_TOKEN: ci
+      PYTHONPATH: src
+      TEST_LANE: ${{ matrix.lane }}
+      TEST_REPETITION: ${{ matrix.repetition }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          enable-cache: true
+      - run: uv sync --frozen
+      - run: echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+      - run: python -m alembic upgrade head
+      - name: Measure tests
+        run: |
+          mkdir -p results
+          export TEST_REVISION=$(git rev-parse HEAD)
+          export APP_ENCRYPTION_KEY=$(python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
+          args=(-p tests.ci_suite -q tests --durations=25 --test-report=results/timing.json --junitxml=results/junit.xml)
+          case "$TEST_LANE" in
+            corpus) args+=(-m corpus) ;;
+            shard-*) args+=(-m 'not corpus' --shard-count=3 --shard-index="${TEST_LANE#shard-}") ;;
+          esac
+          if [ "$TEST_LANE" = profile ]; then
+            python -m cProfile -o results/profile.pstats -m pytest "${args[@]}"
+          else
+            python -m pytest "${args[@]}"
+          fi
+      - name: Upload measurements
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: timings-${{ matrix.lane }}-${{ matrix.repetition }}
+          path: results/
+          if-no-files-found: error
+
+  compare:
+    if: always()
+    needs: benchmark
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: timings-*
+          path: measurements
+      - name: Verify coverage and compare timings
+        run: python tools/test_performance.py measurements --repetitions=2 --shards=3 | tee "$GITHUB_STEP_SUMMARY"
