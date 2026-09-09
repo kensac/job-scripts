@@ -5,7 +5,6 @@ against a reference arm and against what production decided."""
 from __future__ import annotations
 
 import json
-from types import SimpleNamespace
 
 import pytest
 
@@ -98,9 +97,13 @@ async def test_a_filter_experiment_submits_one_batch_per_arm_and_scores_each(
     eid, task_id = r.json()["id"], r.json()["task_id"]
 
     submitted: list[tuple[str, str, int]] = []
+    original_specs = {}
 
     async def fake_submit(specs, model, effort, max_out, on_event=None):
         submitted.append((model, effort, len(specs)))
+        original_specs.update({spec.custom_id: spec for spec in specs})
+        if on_event:
+            on_event(f"batch-{model}-{effort}", "submitted", {"requests": len(specs)})
         assert all("only backend" in s.instructions for s in specs)
         assert all(s.input.startswith("Company: ") for s in specs)
         return [f"batch-{model}-{effort}"]
@@ -119,29 +122,35 @@ async def test_a_filter_experiment_submits_one_batch_per_arm_and_scores_each(
 
     # The provider answers: luna agrees with production; nano rejects everything.
     async def fake_collect(task_id, hook):
-        out = {}
-        for u in urls:
-            out[f"gpt-5-nano@medium|{u}"] = SimpleNamespace(
-                text=_verdict(u, True),
-                error=None,
-                batch_id="b1",
-                usage={
-                    "input_tokens": 1000,
-                    "output_tokens": 500,
-                    "output_tokens_details": {"reasoning_tokens": 400},
-                },
+        from tests.factories import make_batch_result
+
+        out = []
+        for model, effort, output_tokens, reasoning in [
+            ("gpt-5-nano", "medium", 500, 400),
+            ("gpt-5.6-luna", "high", 100, 50),
+        ]:
+            batch_id = f"batch-{model}-{effort}"
+            for u in urls:
+                custom_id = f"{model}@{effort}|{u}"
+                out.append(
+                    make_batch_result(
+                        task_id,
+                        original_specs[custom_id],
+                        text=_verdict(u, model == "gpt-5-nano" or urls.index(u) >= 2),
+                        batch_id=batch_id,
+                        model=model,
+                        usage={
+                            "input_tokens": 1000,
+                            "output_tokens": output_tokens,
+                            "output_tokens_details": {"reasoning_tokens": reasoning},
+                        },
+                    )
+                )
+            hook(
+                batch_id,
+                "completed",
+                {"input_tokens": len(urls) * 1000, "output_tokens": len(urls) * output_tokens},
             )
-            out[f"gpt-5.6-luna@high|{u}"] = SimpleNamespace(
-                text=_verdict(u, urls.index(u) >= 2),
-                error=None,
-                batch_id="b2",
-                usage={
-                    "input_tokens": 1000,
-                    "output_tokens": 100,
-                    "output_tokens_details": {"reasoning_tokens": 50},
-                },
-            )
-        db.execute("UPDATE tasks SET payload = payload - 'batch_ids' WHERE id = %s", (task_id,))
         return out
 
     monkeypatch.setattr(exp, "collect_pending", fake_collect)
@@ -163,7 +172,7 @@ async def test_a_filter_experiment_submits_one_batch_per_arm_and_scores_each(
     usage = db.query_one(
         "SELECT count(*) AS n, sum(total_tokens) AS t FROM api_usage WHERE purpose = 'experiment'"
     )
-    assert usage["n"] == 8 and usage["t"] == 8 * 1000 + 4 * 500 + 4 * 100
+    assert usage["n"] == 2 and usage["t"] == 8 * 1000 + 4 * 500 + 4 * 100
     # The listing carries what a form needs: the steps, each chat model
     # with the efforts it accepts, and every filter the filter step can name.
     listing = client.get("/v1/admin/experiments", headers=admin_headers).json()
@@ -251,3 +260,23 @@ def _user_id_of(sub: str) -> int:
     row = db.query_one("SELECT id FROM users WHERE sub = %s", (sub,))
     assert row is not None
     return row["id"]
+
+
+def test_partial_experiment_summary_counts_unsubmitted_arms():
+    params = {
+        "sampled": 2,
+        "arms": [{"model": "first", "effort": "low"}, {"model": "missing", "effort": "low"}],
+    }
+    experiment = db.query_one(
+        "INSERT INTO ai_experiments(purpose,params) VALUES ('verify',%s) RETURNING id",
+        (db.jsonb(params),),
+    )["id"]
+    db.execute(
+        "INSERT INTO ai_experiment_results(experiment_id,arm,url,error) VALUES (%s,'first@low','https://example.test/one','failed')",
+        (experiment,),
+    )
+    summary = exp.summarise(experiment)
+    assert summary["expected_results"] == 4
+    assert summary["received_results"] == 1
+    assert summary["missing_results"] == 3
+    assert summary["missing_arms"] == ["missing@low"]

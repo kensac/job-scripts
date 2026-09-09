@@ -19,7 +19,7 @@ from typing import Any
 
 import psycopg
 
-from api import db, events, hosts, metrics, telemetry
+from api import db, events, hosts, metrics, task_admission, telemetry
 from api.tasks import HANDLERS
 from api.tasks.runtime import (
     CHUNK_KINDS,
@@ -175,35 +175,12 @@ def schedule_ingest_cycle() -> None:
         microsecond=0,
     )
     cycle = bucket.strftime("%Y-%m-%dT%H:%M")
-    # A source whose last cycle's ingest has not been claimed yet gets no
-    # second one. The dedupe key is per cycle, so without this a queue that
-    # falls behind the hour grows by one task per source per hour and never
-    # catches up: 69 boards added at once on 2026-09-04 were still pending
-    # 40 minutes later behind two aggregator ingests, with the next cycle due
-    # to add 79 more. A RUNNING ingest does not block the next cycle's task,
-    # because that one will be claimed as soon as it finishes.
-    #
-    # A source on a longer interval than the cycle is skipped while its last
-    # successful or in-flight ingest is younger than that interval. A FAILED
-    # one does not count, so a board on a daily interval that failed retries
-    # next cycle rather than tomorrow. Hourly sources (interval 1) are governed
-    # by the per-cycle dedupe alone, which is exact where an age check drifts.
-    for s in db.query(
-        """
-        SELECT name, listings_url FROM sources s WHERE active
-          AND NOT EXISTS (
-            SELECT 1 FROM tasks t WHERE t.kind = 'ingest_source' AND t.status = 'pending'
-              AND t.payload->>'source' = s.name)
-          AND (s.ingest_interval_hours <= 1 OR NOT EXISTS (
-            SELECT 1 FROM tasks t WHERE t.kind = 'ingest_source'
-              AND t.status IN ('running', 'done')
-              AND t.payload->>'source' = s.name
-              AND t.created_at > now() - make_interval(hours => s.ingest_interval_hours)))
-        """
-    ):
-        enqueue(
+    for s in db.query("SELECT name, listings_url FROM sources WHERE active"):
+        task_admission.enqueue(
             "ingest_source",
-            {"source": s["name"], "cycle": cycle, "host": hosts.host_of(s["listings_url"])},
+            {"source": s["name"]},
+            {"cycle": cycle, "host": hosts.host_of(s["listings_url"])},
+            scheduled=True,
             dedupe_key=f"ingest:{s['name']}:{cycle}",
         )
     # Board membership for every person who can have one, every

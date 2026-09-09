@@ -9,6 +9,7 @@ import pytest
 
 from api import db
 from api.tasks import locations
+from tests.factories import make_batch_result
 from tests.test_api_jobs import _insert_job, _job_ids, _pass_closed, _subscribe, _uid
 
 
@@ -136,15 +137,18 @@ async def test_the_sweep_classifies_every_unseen_string_once(
     async def fake_run_batched(task_id, shape, specs):
         asked.extend(s.input for s in specs)
         return (
-            {
-                s.custom_id: SimpleNamespace(
+            [
+                make_batch_result(
+                    task_id,
+                    s,
+                    model="gpt-5-nano",
                     text='{"places": [{"country": "IN", "region": "", "city": "Bengaluru"}], "remote": false}'
                     if s.input == "Bengaluru"
                     else '{"places": [{"country": "IN", "region": "", "city": ""}], "remote": false}',
                     error=None,
                 )
                 for s in specs
-            },
+            ],
             SimpleNamespace(model="gpt-5-nano"),
         )
 
@@ -263,13 +267,16 @@ async def test_a_reclassify_cycle_re_asks_every_model_row_and_keeps_hand_correct
     async def fake_run_batched(task_id, shape, specs):
         asked.extend(s.input for s in specs)
         return (
-            {
-                s.custom_id: SimpleNamespace(
+            [
+                make_batch_result(
+                    task_id,
+                    s,
+                    model="gpt-5-nano",
                     text='{"places": [{"country": "US", "region": "CO", "city": "Golden"}], "remote": false}',
                     error=None,
                 )
                 for s in specs
-            },
+            ],
             SimpleNamespace(model="gpt-5-nano"),
         )
 

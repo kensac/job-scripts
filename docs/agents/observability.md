@@ -9,6 +9,24 @@ because the signals only make sense beside them.
 Tasks are claimed with row-level locking and skip-locked selection. A worker
 heartbeats while it holds a task.
 
+**Admission and claiming are separate contracts.** `api.task_admission`
+serializes application drafts, upload extraction and source pulls against a
+stable job or source row before checking for conflicting tasks. Its
+`in_flight` reader also supplies the application view. Filter runs use
+`api.filter_runs`, which locks the user row because single-filter and all-filter
+runs overlap. Route authorization stays with the caller; admission does not
+grant access to a subject.
+
+Interactive admission returns a conflict for pending, running, waiting or
+parked work. Scheduled ingestion skips sources with pending work, may queue
+behind an hourly pull already running, and respects longer source intervals
+after running or successful work. Keep these checks in admission. Terminal
+status alone does not prevent a new run; intervals and per-cycle dedupe keys
+still apply.
+Cancellation remains an atomic transition from active states. Claiming and
+retry policy belong to `api.worker`; claim-aware writes and progress updates
+belong to `api.tasks.runtime`.
+
 **A worker claims only kinds its own image has a handler for.** A roll goes
 host by host, so for a minute an old image and a new one share the queue. A
 kind the new image added must wait for a host that can run it, rather than be
@@ -34,13 +52,43 @@ that worker; keep tasks short and let the queue carry the volume.
 
 ## Batched work
 
-Scheduled work batches at half price and parks rather than holding a worker.
-A human waiting is the only reason to call a model synchronously.
+Batched work parks rather than holding a worker. Scheduled filter and draft
+work can still run live when its key/provider path does not use batches.
+Price the actual transport with `core.pricing`, not a blanket batch discount.
 
-**A batch is submitted whole and fails whole.** All requests failing means the
-submission was rejected on grounds that applied to every one of them; some
-failing means bad inputs. Different causes, and only the first is certainly a
-defect.
+Filter request inputs live in `core.filters.build_custom_input`, shared by live,
+batch and experiment callers. `api.verdicts.record_ai_verdict` persists their
+common verdict shape; transport exceptions and retries remain the caller's concern.
+Application drafts share request construction and result persistence in
+`api.tasks.application.draft_rows`.
+
+For these user-charged paths, `api.ai.batch_usage` normalises provider usage and
+`api.budget.record_tokens` writes the user ledger with explicit batch pricing
+and cached-token counts, including consumed calls that produced no valid answer.
+The batch event hook must use `charged_to_user=True` to avoid booking the same
+call to the fleet. Historical user ledger rows have no request or batch linkage;
+do not infer their transport from timestamps or rewrite their prices on read.
+
+On resume, `collect_pending` attaches model provenance from each `ai_batches`
+row. `run_batched` resolves routing only for new submissions; absent persisted
+model metadata stays unknown. Filter and application handlers collect paid work
+before checking current keys, resumes, or automatic-draft settings. Original
+filter input content is not retained in legacy task payloads, so resumed verdicts
+leave that field unknown rather than attributing today's page to an earlier call.
+
+Batch requests retain their immutable input, instructions and consumer context in
+`batch_requests`. Collection checkpoints each provider batch/custom ID receipt
+before removing pending batch IDs. A task payload marker retains empty terminal
+collections too; request snapshots alone never imply accepted submission.
+Consumers use `consume_result` to commit domain writes, user usage and
+acknowledgment in one transaction; replay skips acknowledged
+receipts. Fleet totals and their ledger entry share a transaction in the event hook.
+Use receipt outcome counts for cumulative progress across partial collection and
+replay. Both checkpoint tables expire with their owning task. Legacy requests
+without a snapshot retain unknown input rather than using a current page.
+
+Distinguish submission rejection from per-request failure using the stored
+provider errors. Failure counts alone do not establish the cause.
 
 **Every error a batch returns is stored as the provider wrote it**
 (`ai_batch_errors`, one row per failed request, or one row under an empty
@@ -380,3 +428,11 @@ finished with work in front of it and none completed, a task kind failing
 three times in three hours, a task the reaper keeps handing back, an open
 alert never mailed, and a pattern that admits every posting. A batched sweep
 counts a line as done only when its row lands.
+
+Application drafts carry a reserved answer ID and revision from submission to
+collection. A result applies only while that reservation still owns the answer;
+question changes and newer user intent invalidate it. Results without an
+original reservation are accounted for but never assigned a guessed revision.
+Task progress reports written, superseded, failed and unknown-request outcomes
+separately. Persist result acknowledgement with answer changes and usage in one
+transaction so a replay cannot append duplicate turns or charge the ledger twice.

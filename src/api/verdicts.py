@@ -47,29 +47,34 @@ async def run_check[T: BaseModel](
     recorded (status 'failed') and re-raised for the caller's retry policy.
     """
     common: dict[str, Any] = dict(
+        url=url,
+        check_type=check_type,
         model=cfg.model,
+        provider=cfg.provider,
+        key_source=cfg.key_source,
         reasoning_effort=cfg.params.get("reasoning_effort") or cfg.params.get("effort"),
         filter_name=filter_name,
         prompt_hash=prompt_hash,
         company=company,
         job_title=job_title,
         instructions=instructions,
-        input_content=input_text,
-        config_name=context,
+        input_text=input_text,
+        context=context,
+        # ai.parse already emits transport metrics for a live call.
+        record_call_metrics=False,
     )
     start = time.monotonic()
     try:
         parsed, usage = await ai.parse(cfg, instructions, input_text, response_model)
     except Exception as exc:
-        add_ai_result(
-            url,
-            "failed",
-            f"{check_type} check failed: {str(exc)[:100]}",
-            check_type,
+        record_ai_verdict(
+            rejected=None,
+            reason=f"{check_type} check failed: {str(exc)[:100]}",
+            parsed_json=None,
+            usage={},
             error=str(exc),
             **common,
         )
-        metrics.CHECKS.labels(check_type, "failed").inc()
         telemetry.capture(
             "ai_call_failed",
             properties={
@@ -84,32 +89,17 @@ async def run_check[T: BaseModel](
         )
         raise
     duration_ms = int((time.monotonic() - start) * 1000)
-    if parsed is None:
-        add_ai_result(
-            url,
-            "failed",
-            "AI returned no parsed response",
-            check_type,
-            duration_ms=duration_ms,
-            **common,
-        )
-        metrics.CHECKS.labels(check_type, "failed").inc()
-        return None, usage
-    rejected, reason = verdict_of(parsed)
-    status = "rejected" if rejected else "passed"
-    add_ai_result(
-        url,
-        status,
-        reason,
-        check_type,
-        parsed_json=json.dumps(parsed.model_dump()),
+    rejected, reason = (
+        verdict_of(parsed) if parsed is not None else (None, "AI returned no parsed response")
+    )
+    record_ai_verdict(
+        rejected=rejected,
+        reason=reason,
+        parsed_json=json.dumps(parsed.model_dump()) if parsed is not None else None,
+        usage=usage,
         duration_ms=duration_ms,
-        prompt_tokens=usage["prompt_tokens"],
-        completion_tokens=usage["completion_tokens"],
-        total_tokens=usage["total_tokens"],
         **common,
     )
-    metrics.CHECKS.labels(check_type, status).inc()
     return parsed, usage
 
 
@@ -117,27 +107,33 @@ def record_ai_verdict(
     *,
     url: str,
     check_type: str,
-    rejected: bool,
+    rejected: bool | None,
     reason: str,
-    parsed_json: str,
+    parsed_json: str | None,
     usage: dict[str, int],
-    model: str,
+    model: str | None,
     provider: str = "openai",
     key_source: str = "owner",
     company: str = "",
     job_title: str = "",
-    instructions: str = "",
-    input_text: str = "",
+    instructions: str | None = "",
+    input_text: str | None = "",
     filter_name: str | None = None,
     prompt_hash: str | None = None,
     context: str = "worker",
     batched: bool = False,
     batch_id: str | None = None,
+    reasoning_effort: str | None = None,
+    duration_ms: int | None = None,
+    error: str | None = None,
+    record_call_metrics: bool = True,
 ) -> None:
-    """Records a verdict whose AI response was obtained outside ai.parse
-    (e.g. the Batch API) - same complete row, metrics, and cost accounting
-    (batch pricing is half price)."""
-    status = "rejected" if rejected else "passed"
+    """Persist the shared result shape. A missing decision is a failed attempt.
+
+    Live calls already emit provider metrics inside ai.parse; batch callers
+    emit them here. Both paths keep consumed tokens on failed attempts.
+    """
+    status = "failed" if rejected is None else "rejected" if rejected else "passed"
     add_ai_result(
         url,
         status,
@@ -151,23 +147,34 @@ def record_ai_verdict(
         instructions=instructions,
         input_content=input_text,
         parsed_json=parsed_json,
-        prompt_tokens=usage.get("prompt_tokens", 0),
-        completion_tokens=usage.get("completion_tokens", 0),
-        total_tokens=usage.get("total_tokens", 0),
+        prompt_tokens=usage.get("prompt_tokens"),
+        completion_tokens=usage.get("completion_tokens"),
+        total_tokens=usage.get("total_tokens"),
         config_name=context,
         batch_id=batch_id,
+        cached_tokens=usage.get("cached_tokens"),
+        reasoning_tokens=usage.get("reasoning_tokens"),
+        reasoning_effort=reasoning_effort,
+        duration_ms=duration_ms,
+        error=error,
     )
     metrics.CHECKS.labels(check_type, status).inc()
-    metrics.AI_CALLS.labels(provider, model, "ok").inc()
+    if not record_call_metrics:
+        return
+    metrics.AI_CALLS.labels(
+        provider, model or "unknown", "error" if rejected is None else "ok"
+    ).inc()
+    if not usage:
+        return
     cost = pricing.estimate_cost_usd(
         model,
-        usage.get("prompt_tokens", 0),
-        usage.get("completion_tokens", 0),
+        usage.get("prompt_tokens"),
+        usage.get("completion_tokens"),
         cached_tokens=usage.get("cached_tokens"),
         batched=batched,
     )
     if cost is not None:
-        metrics.AI_COST_USD.labels(provider, model, key_source).inc(float(cost))
+        metrics.AI_COST_USD.labels(provider, model or "unknown", key_source).inc(float(cost))
 
 
 def host_paced(url: str) -> bool:

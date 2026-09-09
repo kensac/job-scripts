@@ -6,7 +6,8 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from api import ai_access, db, events, signals, sorting, visibility
+from api import ai_access, db, events, signals, sorting, task_admission, visibility
+from api import params as params_
 from api.auth import AuthedUser, require_user
 from api.job_access import require_visible_job
 from api.models import UploadRequest, UserJobPatch, UserJobsBulkIds, UserJobsBulkPatch
@@ -63,6 +64,7 @@ _JOB_ROW = f"""
 
 # Whitelisted server-side sort columns (all NULLS LAST so empty cells sink).
 _SORTABLE = {
+    "id": "j.id",
     "added_at": "j.created_at",
     "date_posted": "j.date_posted",
     "date_applied": "uj.date_applied",
@@ -176,6 +178,7 @@ def list_jobs(
     status: str | None = None,
     statuses: str | None = None,
     source: str | None = None,
+    sources: str | None = None,
     ats: str | None = None,
     include_hidden: bool = False,
     with_total: bool = False,
@@ -184,7 +187,11 @@ def list_jobs(
 ):
     limit = max(1, min(limit, 1000))
     offset = max(0, offset)
-    sorts = sorting.parse(sort, dir, _SORTABLE, "added_at")
+    sorts = (
+        [{"key": "id", "dir": "desc"}]
+        if cursor is not None
+        else sorting.parse(sort, dir, _SORTABLE, "added_at")
+    )
     extra = []
     params: dict = {"uid": user.id, "limit": limit + 1, "offset": offset}
     if not include_hidden:
@@ -194,9 +201,9 @@ def list_jobs(
             "AND (j.company ILIKE %(search)s OR j.title ILIKE %(search)s OR j.url ILIKE %(search)s)"
         )
         params["search"] = f"%{search}%"
-    wanted = [s.strip() for s in (statuses or "").split(",") if s.strip()]
-    if status and status not in wanted:
-        wanted.append(status)
+    wanted = params_.csv_with_scalar(statuses, status)
+    wanted_sources = params_.csv_with_scalar(sources, source)
+    wanted_ats = list(dict.fromkeys(value.lower() for value in params_.csv(ats)))
     if wanted:
         named = [s for s in wanted if s != NOT_APPLIED]
         clauses = []
@@ -206,9 +213,9 @@ def list_jobs(
         if NOT_APPLIED in wanted:
             clauses.append("(uj.status IS NULL OR uj.status = '')")
         extra.append(f"AND ({' OR '.join(clauses)})")
-    if source:
-        extra.append("AND j.source = %(source)s")
-        params["source"] = source
+    if wanted_sources:
+        extra.append("AND j.source = ANY(%(sources)s)")
+        params["sources"] = wanted_sources
     # The ATS counts a select should show are the counts under every OTHER
     # filter the page has on: a board-wide "rippling 4" beside a lens that
     # holds none of them reads as a lie (2026-09-07). So the facet is taken
@@ -224,9 +231,9 @@ def list_jobs(
                 params,
             )
         }
-    if ats:
-        extra.append(f"AND ({ATS_SQL}) = %(ats)s")
-        params["ats"] = ats.strip().lower()
+    if wanted_ats:
+        extra.append(f"AND ({ATS_SQL}) = ANY(%(ats)s)")
+        params["ats"] = wanted_ats
 
     filter_sql = "\n".join(extra)
     total = None
@@ -242,16 +249,18 @@ def list_jobs(
     # One pass, not two: the total rides on the page as a window count over
     # the same filtered set, so a sort with with_total costs one board read
     # rather than the count query and then the page query.
-    columns = _JOB_ROW + (", COUNT(*) OVER () AS total_rows" if with_total else "")
+    count_on_page = with_total and cursor is None
+    columns = _JOB_ROW + (", COUNT(*) OVER () AS total_rows" if count_on_page else "")
     sql = visibility.FAST.format(columns=columns, extra=f"{filter_sql}\n{order}")
     rows = db.query(sql, params)
     if with_total:
-        if rows:
+        if count_on_page and rows:
             total = rows[0]["total_rows"]
             for r in rows:
                 r.pop("total_rows", None)
         else:
-            # A page past the end carries no row to read the count from.
+            # Cursor position is pagination, not a filter. Count the full
+            # selection in cursor mode and when an offset page has no rows.
             row = db.query_one(
                 visibility.FAST.format(columns="COUNT(*) AS c", extra=filter_sql), params
             )
@@ -260,6 +269,7 @@ def list_jobs(
     rows = rows[:limit]
     return {
         "rows": rows,
+        "filters": params_.applied(status=wanted, source=wanted_sources, ats=wanted_ats),
         "next_cursor": rows[-1]["job_id"] if cursor is not None and has_more and rows else None,
         "has_more": has_more,
         "offset": offset,
@@ -629,12 +639,7 @@ def upload_links(body: UploadRequest, user: AuthedUser = Depends(require_user)):
             (user.id, row["id"]),
         )
         if row["extraction_status"] == "pending":
-            task = db.query_one(
-                "INSERT INTO tasks (kind, payload) VALUES ('extract_upload', %s) RETURNING id",
-                (db.jsonb({"job_id": row["id"], "user_id": user.id}),),
-            )
-            if task:
-                events.publish_task(task["id"])
+            task_admission.enqueue("extract_upload", {"job_id": row["id"]}, {"user_id": user.id})
         accepted.append({"job_id": row["id"], "url": url})
     return {"accepted": accepted, "rejected": rejected}
 

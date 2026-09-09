@@ -103,7 +103,7 @@ class TestAResumeReachesCollection:
 
         async def fake_run_batched(task_id, shape, specs):
             collected.append("reached")
-            return {}, None
+            return [], None
 
         monkeypatch.setattr(mail_classify, "run_batched", fake_run_batched)
         monkeypatch.setattr(mail_classify, "set_progress", lambda *a, **k: None)
@@ -118,7 +118,7 @@ class TestAResumeReachesCollection:
 
         async def fake_run_batched(task_id, shape, specs):
             called.append("reached")
-            return {}, None
+            return [], None
 
         monkeypatch.setattr(mail_classify, "run_batched", fake_run_batched)
         monkeypatch.setattr(mail_classify, "set_progress", lambda *a, **k: None)
@@ -135,7 +135,7 @@ class TestAResumeReachesCollection:
         tid = _task([in_flight], batch_ids=["batch_paid_for"])
 
         async def fake_run_batched(task_id, shape, specs):
-            return {}, None
+            return [], None
 
         monkeypatch.setattr(mail_classify, "run_batched", fake_run_batched)
         monkeypatch.setattr(mail_classify, "set_progress", lambda *a, **k: None)
@@ -165,12 +165,12 @@ class TestTheCeilingDoesNotStrandPaidWork:
         monkeypatch.setattr(runtime.budget, "check_fleet_budget", refuse)
 
         async def fake_collect(ids, hook):
-            return {}
+            return []
 
         monkeypatch.setattr("core.batch.collect_finished_batches", finished(fake_collect))
         shape = mail_classify.ONGOING_TASK
         results, _ = await runtime.run_batched(tid, shape, [])
-        assert results == {}
+        assert results == []
 
     @pytest.mark.asyncio
     async def test_a_fresh_submission_is_still_refused_when_over_budget(self, monkeypatch, f):

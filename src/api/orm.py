@@ -110,6 +110,7 @@ class Job(Base):
     comp_period: Mapped[str | None] = mapped_column(Text)
     comp_currency: Mapped[str | None] = mapped_column(Text)
     comp_basis: Mapped[str | None] = mapped_column(Text)
+    comp_content_row_id: Mapped[int | None] = mapped_column(BigInteger)
     comp_extracted: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
 
@@ -264,6 +265,7 @@ class ApplicationAnswer(Base):
     question: Mapped[str] = mapped_column(Text)
     source: Mapped[str] = mapped_column(Text, server_default=text("'form'"))
     required: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    draft_revision: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
     draft: Mapped[str | None] = mapped_column(Text)
     turns: Mapped[Any] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
     model: Mapped[str | None] = mapped_column(Text)
@@ -833,6 +835,30 @@ class AiBatch(Base):
     submitted_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
     updated_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
     completed_at: Mapped[datetime.datetime | None]
+
+
+class BatchRequest(Base):
+    __tablename__ = "batch_requests"
+
+    task_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("tasks.id", ondelete="CASCADE"), primary_key=True
+    )
+    custom_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    snapshot: Mapped[dict | None] = mapped_column(JSONB)
+
+
+class BatchResultReceipt(Base):
+    __tablename__ = "batch_result_receipts"
+    __table_args__ = (Index("idx_batch_result_receipts_task", "task_id", "consumed_at"),)
+
+    provider_batch_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    custom_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    task_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("tasks.id", ondelete="CASCADE"))
+    response: Mapped[dict] = mapped_column(JSONB)
+    model: Mapped[str | None] = mapped_column(Text)
+    outcome: Mapped[str | None] = mapped_column(Text)
+    received_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+    consumed_at: Mapped[datetime.datetime | None]
 
 
 class AiBatchError(Base):

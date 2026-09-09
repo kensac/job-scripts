@@ -29,6 +29,10 @@ AMBIGUITY_RULES = {
 }
 
 
+def build_custom_input(company: str, title: str, content: str) -> str:
+    return f"Company: {company}\nJob Title: {title}\n\nJob Content:\n{content}"
+
+
 def build_custom_instructions(prompt: str, on_ambiguous: str = "keep") -> str:
     if not prompt:
         return ""

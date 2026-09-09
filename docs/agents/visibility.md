@@ -146,6 +146,13 @@ state is the page's canonical request shape, the same names the API echoes in
 outlives the frontend that wrote it. A single column layout or filter set on
 `user_settings` is the pre-view form.
 
+The user board retains exact scalar `status` and `source` filters because
+stored values may contain commas. Their set parameters are `statuses` and
+`sources`; each merges with its scalar counterpart and echoes under canonical
+`filters.status` and `filters.source`. `ats` accepts a comma list and echoes
+lowercase values. Totals use the full selection; ATS facets omit only the ATS
+selection so they describe the available alternatives.
+
 List endpoints sort through `api.sorting` against a per-endpoint whitelist of
 column expressions. `sort=a,b&dir=asc,desc` is several columns at once, and a
 `dir` shorter than `sort` repeats its last value. Unknown keys drop rather
@@ -159,6 +166,11 @@ endpoint filters on, beside the `filters` echo, so a client renders a User
 control from the former. An endpoint with no user dimension (fleet workers,
 the shared checks, source analytics) leaves `user` out of `filterable` rather
 than pretending.
+
+Page-number lists use `api.pagination.Page` for bounds, offsets and metadata.
+Rows, totals and summaries share the same selection; pagination never narrows
+a total or summary. The user board's legacy cursor orders by descending ID
+and echoes that actual order, regardless of requested sort.
 
 ## The ATS on the board
 

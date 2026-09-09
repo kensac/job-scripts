@@ -271,9 +271,7 @@ def get_settings(user: AuthedUser = Depends(require_user)):
         (user.id,),
     )
     settings = {**(row or _SETTINGS_DEFAULTS)}
-    # No saved layout means the default board, not every column shown
-    # (Kanishk, 2026-09-09): a new account starts on the admin's layout and
-    # a reset returns to it.
+    # New accounts and resets use the same configured board layout.
     if settings.get("column_layout") is None:
         settings["column_layout"] = db.get_config("board_default_column_layout") or None
     # Criteria in their full shape, defaults filled, whatever the row holds:
@@ -375,19 +373,19 @@ def put_settings(body: SettingsPut, user: AuthedUser = Depends(require_user)):
                 COALESCE(%(bypass)s, TRUE), COALESCE(%(criteria)s, '{}'::jsonb),
                 COALESCE(%(digest)s, FALSE), NULLIF(%(style)s, ''), now())
         ON CONFLICT (user_id) DO UPDATE SET
-            -- Absent keeps it; an explicit null clears it, which is the board's
-            -- reset. COALESCE here kept the old layout on reset until 2026-09-09.
+            -- Presence distinguishes an explicit reset from an omitted field.
             column_layout = CASE WHEN %(layout_set)s THEN EXCLUDED.column_layout
                                  ELSE user_settings.column_layout END,
             prefs = COALESCE(%(prefs)s, user_settings.prefs),
-            ai_model = COALESCE(%(model)s, user_settings.ai_model),
+            ai_model = CASE WHEN %(model_set)s THEN EXCLUDED.ai_model
+                            ELSE user_settings.ai_model END,
             ai_params = COALESCE(%(params)s, user_settings.ai_params),
             bypass_sponsorship_filter = COALESCE(%(bypass)s, user_settings.bypass_sponsorship_filter),
             criteria = COALESCE(%(criteria)s, user_settings.criteria),
             email_digest = COALESCE(%(digest)s, user_settings.email_digest),
-            -- Absent keeps it; an empty string clears it to the default.
-            writing_style = CASE WHEN %(style)s IS NULL THEN user_settings.writing_style
-                                 ELSE NULLIF(%(style)s, '') END,
+            -- Null and an empty string both clear the saved override.
+            writing_style = CASE WHEN %(style_set)s THEN EXCLUDED.writing_style
+                                 ELSE user_settings.writing_style END,
             updated_at = now()
         """,
         {
@@ -396,6 +394,7 @@ def put_settings(body: SettingsPut, user: AuthedUser = Depends(require_user)):
             "layout_set": "column_layout" in body.model_fields_set,
             "prefs": db.jsonb(body.prefs) if body.prefs is not None else None,
             "model": body.ai_model,
+            "model_set": "ai_model" in body.model_fields_set,
             "params": db.jsonb(body.ai_params) if body.ai_params is not None else None,
             "bypass": body.bypass_sponsorship_filter,
             "criteria": db.jsonb(body.criteria.model_dump(mode="json"))
@@ -403,6 +402,7 @@ def put_settings(body: SettingsPut, user: AuthedUser = Depends(require_user)):
             else None,
             "digest": body.email_digest,
             "style": body.writing_style.strip() if body.writing_style is not None else None,
+            "style_set": "writing_style" in body.model_fields_set,
         },
     )
     if body.email_digest:

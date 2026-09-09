@@ -16,6 +16,7 @@ from api.tasks import HANDLERS, mail_classify
 from core import pricing, providers
 from core.mail_import import ImportedMessage
 from core.routing import resolve
+from tests.factories import make_task
 
 
 class _Res:
@@ -52,13 +53,31 @@ def _events(message_id: int):
 
 async def _run(monkeypatch, payload, results):
     async def fake(task_id, shape, specs):
-        from core.routing import resolve
+        from api import batch_results
+        from core.batch import BatchResult
 
-        return results, resolve(shape)
+        chosen = resolve(shape)
+        batch_results.snapshot_specs(task_id, specs)
+        batch_results.checkpoint(
+            task_id,
+            [
+                BatchResult(
+                    key,
+                    text=res.text,
+                    error=res.error,
+                    usage=res.usage,
+                    model=chosen.model,
+                    batch_id=f"batch-{task_id}",
+                )
+                for key, res in results.items()
+            ],
+            [],
+        )
+        return batch_results.unconsumed(task_id), chosen
 
     monkeypatch.setattr(mail_classify, "run_batched", fake)
     monkeypatch.setattr(mail_classify, "set_progress", lambda *a, **k: None)
-    await mail_classify.handle_classify_mail(1, payload)
+    await mail_classify.handle_classify_mail(make_task("classify_mail", payload), payload)
 
 
 def test_both_models_are_priced():
@@ -267,7 +286,7 @@ async def test_the_cap_is_clamped_not_trusted(monkeypatch, f):
         from core.routing import resolve
 
         seen["count"] = len(specs)
-        return {}, resolve(shape)
+        return [], resolve(shape)
 
     for i in range(3):
         _store(f, mid=f"<cap{i}@x>")
@@ -727,7 +746,7 @@ async def test_a_sweep_does_not_reselect_what_another_sweep_is_already_paying_fo
         from core.routing import resolve
 
         second_claim.extend(int(s.custom_id) for s in specs)
-        return {}, resolve(shape)
+        return [], resolve(shape)
 
     monkeypatch.setattr(mail_classify, "run_batched", second_capture)
     await mail_classify.handle_classify_mail(f.make_task("classify_mail", {}), {})

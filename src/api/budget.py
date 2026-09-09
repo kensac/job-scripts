@@ -417,13 +417,13 @@ def record_usage(
     completion_tokens: int,
     total_tokens: int,
     cached_tokens: int = 0,
+    *,
+    batched: bool = False,
 ) -> None:
-    """Every call charged to a user. record_usage is the sync path only - work
-    that a human waits on - so it never carries the batch discount."""
     db.execute(
         "INSERT INTO api_usage (user_id, key_source, purpose, model, "
-        "prompt_tokens, completion_tokens, total_tokens, cached_tokens, cost_usd) "
-        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+        "prompt_tokens, completion_tokens, total_tokens, cached_tokens, batched, cost_usd) "
+        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
         (
             user_id,
             key_source,
@@ -433,11 +433,40 @@ def record_usage(
             completion_tokens,
             total_tokens,
             cached_tokens,
+            batched,
             pricing.estimate_cost_usd(
-                model, prompt_tokens, completion_tokens, cached_tokens=cached_tokens
+                model,
+                prompt_tokens,
+                completion_tokens,
+                cached_tokens=cached_tokens,
+                batched=batched,
             ),
         ),
     )
     from api import metrics
 
     metrics.AI_TOKENS.labels(key_source, purpose).inc(total_tokens)
+
+
+def record_tokens(
+    user_id: int,
+    key_source: str,
+    purpose: str,
+    model: str | None,
+    usage: dict[str, int],
+    *,
+    batched: bool = False,
+) -> None:
+    if not usage.get("total_tokens"):
+        return
+    record_usage(
+        user_id,
+        key_source,
+        purpose,
+        model,
+        usage.get("prompt_tokens", 0),
+        usage.get("completion_tokens", 0),
+        usage.get("total_tokens", 0),
+        usage.get("cached_tokens", 0),
+        batched=batched,
+    )

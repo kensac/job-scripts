@@ -9,7 +9,7 @@ person is waiting for it (routers/application.py).
 
 Two tasks write drafts. The sweep (application_sweep, hourly per person
 with a resume) reads the forms of the postings on their board and drafts
-every question that has no draft yet, so the answer is ready when they open
+every untouched question that has no draft yet, so the answer is ready when they open
 the posting and the whole day's work rides one half-price batch. The
 on-demand task (application_draft) is the button: one posting, drafted or
 re-drafted now.
@@ -17,18 +17,17 @@ re-drafted now.
 
 from __future__ import annotations
 
-import datetime
-import json
 import logging
 from typing import Any
 
 from pydantic import BaseModel
 
-from api import ai, budget, db, hosts, visibility
+from api import ai, application_writes, db, hosts, visibility
 from api.tasks.runtime import (
     Deferred,
+    consume_result,
+    has_batch_work,
     load_config,
-    pending_batch_ids,
     run_batched,
     set_progress,
 )
@@ -39,7 +38,7 @@ from core.store import get_content
 
 logger = logging.getLogger("jobtracker_worker")
 
-PURPOSE = "application"
+PURPOSE = application_writes.PURPOSE
 IN_FLIGHT = ("pending", "running", "awaiting_batch", "waiting")
 
 # What a stranger's answer sounds like when nobody has said otherwise. A
@@ -190,17 +189,39 @@ def sync_form_questions(url: str, *, refresh: bool = False) -> list[dict[str, An
     return read_form(url)
 
 
-def ensure_answer_rows(user_id: int, job_id: int, questions: list[dict[str, Any]]) -> None:
-    for q in questions:
-        db.execute(
-            """
-            INSERT INTO application_answers (user_id, job_id, key, question, source, required)
-            VALUES (%s, %s, %s, %s, 'form', %s)
-            ON CONFLICT (user_id, job_id, key) DO UPDATE
-                SET question = EXCLUDED.question, required = EXCLUDED.required
-            """,
-            (user_id, job_id, q["key"], q["label"], bool(q.get("required"))),
+def ensure_answer_rows(
+    user_id: int, job_id: int, questions: list[dict[str, Any]], *, task_id: int | None = None
+) -> None:
+    with db.transaction():
+        # Admission locks job -> task -> answers. Inserts also acquire a job
+        # foreign-key lock, so take that first rather than after answer locks.
+        db.query_one("SELECT id FROM jobs WHERE id = %s FOR KEY SHARE", (job_id,))
+        task = (
+            db.query_one("SELECT payload FROM tasks WHERE id = %s FOR UPDATE", (task_id,))
+            if task_id
+            else None
         )
+        requests = (task["payload"].get("draft_requests") or {}) if task else {}
+        db.query(
+            "SELECT id FROM application_answers WHERE user_id = %s AND job_id = %s ORDER BY id FOR UPDATE",
+            (user_id, job_id),
+        )
+        for q in sorted(questions, key=lambda value: value["key"]):
+            owned_revision = requests.get(f"{job_id}|{q['key']}", {}).get("revision")
+            db.execute(
+                """
+                INSERT INTO application_answers (user_id, job_id, key, question, source, required)
+                VALUES (%s, %s, %s, %s, 'form', %s)
+                ON CONFLICT (user_id, job_id, key) DO UPDATE
+                    SET question = EXCLUDED.question, required = EXCLUDED.required,
+                        draft_revision = CASE
+                            WHEN application_answers.question IS DISTINCT FROM EXCLUDED.question
+                             AND application_answers.draft_revision IS DISTINCT FROM %s
+                            THEN application_answers.draft_revision + 1
+                            ELSE application_answers.draft_revision END
+                """,
+                (user_id, job_id, q["key"], q["label"], bool(q.get("required")), owned_revision),
+            )
 
 
 def resume_text(user_id: int, resume_id: int | None) -> str | None:
@@ -230,32 +251,49 @@ def auto_draft(user_id: int) -> bool:
     return (row or {}).get("v") != "false"
 
 
-def store_draft(
-    user_id: int, job_id: int, key: str, answer: str, model: str, kind: str = "draft"
-) -> None:
-    turn = {
-        "role": "assistant",
-        "kind": kind,
-        "text": answer,
-        "at": datetime.datetime.now(datetime.UTC).isoformat(),
-    }
-    db.execute(
-        """
-        UPDATE application_answers
-           SET draft = %s, model = %s, turns = turns || %s::jsonb, updated_at = now()
-         WHERE user_id = %s AND job_id = %s AND key = %s
-        """,
-        (answer, model, json.dumps([turn]), user_id, job_id, key),
-    )
+def _set_draft_progress(task_id: int, label: str, minimum_total: int) -> None:
+    done, total = application_writes.progress_counts(task_id, minimum_total)
+    set_progress(task_id, done, total, label + application_writes.outcome_note(task_id))
 
 
-def _usage_of(res: Any) -> dict[str, int]:
-    u = res.usage or {}
-    return {
-        "prompt_tokens": u.get("input_tokens", 0),
-        "completion_tokens": u.get("output_tokens", 0),
-        "total_tokens": u.get("total_tokens", 0),
-    }
+async def _batch_drafts(
+    task_id: int, user_id: int, specs: list, kind: str, *, resumed: bool
+) -> int:
+    results, chosen = await run_batched(task_id, APPLICATION_TASK, specs, charged_to_user=True)
+    done = 0
+    for res in results:
+        with consume_result(task_id, res) as receipt:
+            if not receipt.pending:
+                continue
+            parsed = None
+            if res.error or not res.text:
+                logger.warning("application draft %s: %s", res.custom_id, res.error or "empty")
+            else:
+                try:
+                    parsed = Draft.model_validate_json(res.text)
+                except ValueError:
+                    logger.warning("application draft %s: unparsable", res.custom_id)
+            request = res.request.context if res.request is not None else None
+            if request is None:
+                # Earlier submissions may have an original task reservation
+                # without a full request snapshot. Never invent a generation.
+                task = db.query_one(
+                    "SELECT payload->'draft_requests' AS requests FROM tasks WHERE id = %s",
+                    (task_id,),
+                )
+                request = ((task or {}).get("requests") or {}).get(res.custom_id)
+            receipt.outcome = application_writes.apply_result(
+                user_id,
+                request,
+                parsed.answer if parsed is not None else None,
+                ai.batch_usage(res.usage),
+                "owner",
+                res.model if resumed else chosen.model,
+                kind,
+                batched=True,
+            )
+            done += int(receipt.outcome == "written")
+    return done
 
 
 async def draft_rows(
@@ -269,11 +307,13 @@ async def draft_rows(
     question), for one person, from their resume and style: one half-price
     batch on the fleet's key, or live one at a time on their own. Returns
     how many drafts were written. Safe to run again from the top: a resumed
-    task collects the batch it parked on and overwrites."""
+    task collects its original results and applies only its own generations."""
     from openai.lib._pydantic import to_strict_json_schema
 
     from core.batch import BatchSpec
 
+    if has_batch_work(task_id):
+        return await _batch_drafts(task_id, user_id, [], kind, resumed=True)
     resume = resume_text(user_id, resume_id)
     if not resume:
         raise RuntimeError("no resume on file; add one under settings first")
@@ -281,7 +321,10 @@ async def draft_rows(
     schema = to_strict_json_schema(Draft)
     postings: dict[str, str] = {}
     specs = []
+    reserved = application_writes.reserve_task(task_id, user_id, rows)
     for r in rows:
+        if f"{r['job_id']}|{r['key']}" not in reserved:
+            continue
         if r["url"] not in postings:
             postings[r["url"]] = get_content(r["url"]) or ""
         specs.append(
@@ -289,11 +332,20 @@ async def draft_rows(
                 # job first, then the key: a key never carries a bar.
                 f"{r['job_id']}|{r['key']}",
                 text,
-                question_input(r["question"], r["company"], r["title"], postings[r["url"]], resume),
+                question_input(
+                    reserved[f"{r['job_id']}|{r['key']}"]["question"],
+                    r["company"],
+                    r["title"],
+                    postings[r["url"]],
+                    resume,
+                ),
                 "Draft",
                 schema,
+                context=reserved[f"{r['job_id']}|{r['key']}"],
             )
         )
+    if not specs:
+        return 0
     _, cfg = load_config(user_id)
     total = len(specs)
     done = 0
@@ -301,50 +353,25 @@ async def draft_rows(
         # The fleet's sanctioned writer, overridable from the task screen like
         # any other step; the tokens are the person's, booked below, so the
         # standard caller is told not to book them against the fleet as well.
-        set_progress(task_id, 0, total, f"{total} draft(s) submitted (half price)")
-        results, chosen = await run_batched(task_id, APPLICATION_TASK, specs, charged_to_user=True)
-        for custom_id, res in results.items():
-            job_id, _, key = custom_id.partition("|")
-            usage = _usage_of(res)
-            if usage["total_tokens"]:
-                budget.record_usage(
-                    user_id,
-                    cfg.key_source,
-                    PURPOSE,
-                    chosen.model,
-                    usage["prompt_tokens"],
-                    usage["completion_tokens"],
-                    usage["total_tokens"],
-                )
-            if res.error or not res.text:
-                logger.warning(f"application draft {key} for job {job_id}: {res.error or 'empty'}")
-                continue
-            try:
-                answer = Draft.model_validate_json(res.text).answer
-            except Exception:
-                logger.warning(f"application draft {key} for job {job_id}: unparsable")
-                continue
-            store_draft(user_id, int(job_id), key, answer, chosen.model, kind)
-            done += 1
+        _set_draft_progress(task_id, f"{total} draft(s) submitted (half price)", total)
+        done = await _batch_drafts(task_id, user_id, specs, kind, resumed=False)
     else:
         # A person's own key has no batch endpoint we can bill to them; one
         # live call per question, the way their filters run.
         for spec in specs:
-            job_id, _, key = spec.custom_id.partition("|")
             parsed, usage = await ai.parse(cfg, spec.instructions, spec.input, Draft)
-            budget.record_usage(
+            done += application_writes.record_result(
+                task_id,
                 user_id,
+                spec.custom_id,
+                parsed.answer if parsed is not None else None,
+                usage,
                 cfg.key_source,
-                PURPOSE,
                 cfg.model,
-                usage.get("prompt_tokens", 0),
-                usage.get("completion_tokens", 0),
-                usage.get("total_tokens", 0),
+                kind,
+                batched=False,
             )
-            if parsed:
-                store_draft(user_id, int(job_id), key, parsed.answer, cfg.model, kind)
-                done += 1
-            set_progress(task_id, done, total, "drafting")
+            _set_draft_progress(task_id, "drafting", total)
     return done
 
 
@@ -353,6 +380,10 @@ async def handle_application_draft(task_id: int, payload: dict[str, Any]) -> Non
     these questions), refresh (re-read the form). Drafts every question of
     the posting, drafted before or not."""
     user_id, job_id = payload["user_id"], payload["job_id"]
+    if has_batch_work(task_id):
+        await draft_rows(task_id, user_id, [], payload.get("resume_id"))
+        _set_draft_progress(task_id, "drafts collected", 0)
+        return
     job = db.query_one("SELECT id, url, company, title FROM jobs WHERE id = %s", (job_id,))
     if not job:
         raise LookupError("unknown job")
@@ -367,6 +398,7 @@ async def handle_application_draft(task_id: int, payload: dict[str, Any]) -> Non
             user_id,
             job_id,
             [q for q in questions if q.get("kind") == "long" or q["key"] in (keys or [])],
+            task_id=task_id,
         )
     rows = db.query(
         "SELECT a.job_id, a.key, a.question, j.url, j.company, j.title "
@@ -379,8 +411,8 @@ async def handle_application_draft(task_id: int, payload: dict[str, Any]) -> Non
     if not rows:
         set_progress(task_id, 0, 0, "no questions to answer")
         return
-    done = await draft_rows(task_id, user_id, rows, payload.get("resume_id"))
-    set_progress(task_id, done, len(rows), "drafts written")
+    await draft_rows(task_id, user_id, rows, payload.get("resume_id"))
+    _set_draft_progress(task_id, "drafts written", len(rows))
 
 
 async def handle_application_sweep(task_id: int, payload: dict[str, Any]) -> None:
@@ -390,6 +422,10 @@ async def handle_application_sweep(task_id: int, payload: dict[str, Any]) -> Non
     open a row for every paragraph question, and draft every row without a
     draft in one batch. Nothing is re-drafted: the button does that."""
     user_id = payload["user_id"]
+    if has_batch_work(task_id):
+        await draft_rows(task_id, user_id, [], kind="sweep")
+        _set_draft_progress(task_id, "drafts collected", 0)
+        return
     # One sweep per person at a time. A parked sweep frees its worker, so
     # the next hourly one was claimed while a manual full-board sweep sat on
     # its batch (2026-09-07 00:00Z): both selected the same undrafted rows,
@@ -423,28 +459,18 @@ async def handle_application_sweep(task_id: int, payload: dict[str, Any]) -> Non
     reads_cap = int(db.get_config("application_form_reads_per_cycle"))
     drafts_cap = int(db.get_config("application_drafts_per_cycle"))
 
-    # A task back from the provider's batch collects and stores; it does
-    # not read another cap of forms first. The first sweep did (113 forms
-    # on the way out, 114 more on the way back, 2026-09-06), which spent
-    # two cycles of reads on one cycle and reported 60 of 158 done.
-    resumed = bool(pending_batch_ids(task_id))
-
     # "On their board" is the board's own membership predicate
     # (api.visibility.FAST), not a fresh spelling of it.
-    unread = (
-        []
-        if resumed
-        else db.query(
-            visibility.FAST.format(
-                columns="j.url",
-                extra=(
-                    "AND j.active AND NOT EXISTS "
-                    "(SELECT 1 FROM application_forms f WHERE f.url = j.url) "
-                    "ORDER BY j.created_at DESC LIMIT %(n)s"
-                ),
+    unread = db.query(
+        visibility.FAST.format(
+            columns="j.url",
+            extra=(
+                "AND j.active AND NOT EXISTS "
+                "(SELECT 1 FROM application_forms f WHERE f.url = j.url) "
+                "ORDER BY j.created_at DESC LIMIT %(n)s"
             ),
-            {"uid": user_id, "n": reads_cap},
-        )
+        ),
+        {"uid": user_id, "n": reads_cap},
     )
     read = skipped = failed = 0
     for r in unread:
@@ -464,25 +490,21 @@ async def handle_application_sweep(task_id: int, payload: dict[str, Any]) -> Non
 
     # A row for every paragraph question on a board posting whose form is
     # read and that this person has no rows for yet.
-    for r in (
-        []
-        if resumed
-        else db.query(
-            visibility.FAST.format(
-                columns=(
-                    "j.id AS job_id, (SELECT f.questions FROM application_forms f "
-                    "WHERE f.url = j.url) AS questions"
-                ),
-                extra=(
-                    "AND j.active "
-                    "AND EXISTS (SELECT 1 FROM application_forms f "
-                    "            WHERE f.url = j.url AND f.questions IS NOT NULL) "
-                    "AND NOT EXISTS (SELECT 1 FROM application_answers a "
-                    "                WHERE a.user_id = %(uid)s AND a.job_id = j.id)"
-                ),
+    for r in db.query(
+        visibility.FAST.format(
+            columns=(
+                "j.id AS job_id, (SELECT f.questions FROM application_forms f "
+                "WHERE f.url = j.url) AS questions"
             ),
-            {"uid": user_id},
-        )
+            extra=(
+                "AND j.active "
+                "AND EXISTS (SELECT 1 FROM application_forms f "
+                "            WHERE f.url = j.url AND f.questions IS NOT NULL) "
+                "AND NOT EXISTS (SELECT 1 FROM application_answers a "
+                "                WHERE a.user_id = %(uid)s AND a.job_id = j.id)"
+            ),
+        ),
+        {"uid": user_id},
     ):
         ensure_answer_rows(
             user_id, r["job_id"], [q for q in r["questions"] if q.get("kind") == "long"]
@@ -510,12 +532,8 @@ async def handle_application_sweep(task_id: int, payload: dict[str, Any]) -> Non
         """,
         (user_id, on_board, drafts_cap),
     )
-    # Collection must be reachable when there is nothing new to submit: a
-    # resumed task goes on to run_batched with an empty selection so the
-    # batch it parked on is collected, even if every row it drafted has
-    # since left the board.
-    if not rows and not resumed:
+    if not rows:
         set_progress(task_id, 0, 0, "nothing new to draft" + note)
         return
-    done = await draft_rows(task_id, user_id, rows, kind="sweep")
-    set_progress(task_id, done, len(rows), "drafts written ahead of need" + note)
+    await draft_rows(task_id, user_id, rows, kind="sweep")
+    _set_draft_progress(task_id, "drafts written ahead of need" + note, len(rows))

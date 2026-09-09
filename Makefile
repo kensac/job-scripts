@@ -73,7 +73,7 @@ testdb-up:      ## docker postgres WITH pgvector for THIS checkout's test suite
 	docker run -d --rm --name $(TESTPG_NAME) -p $(TESTPG_PORT):5432 \
 	  -e POSTGRES_PASSWORD=test -e POSTGRES_DB=jobtracker_test \
 	  pgvector/pgvector:pg18-trixie >/dev/null
-	@until docker exec $(TESTPG_NAME) pg_isready -U postgres >/dev/null 2>&1; do sleep 1; done
+	@until docker exec $(TESTPG_NAME) pg_isready -h 127.0.0.1 -U postgres >/dev/null 2>&1; do sleep 1; done
 	@echo 'export TEST_DATABASE_URL=$(TESTPG_URL)'
 
 testdb-down:    ## stop this checkout's test database

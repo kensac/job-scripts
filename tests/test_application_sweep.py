@@ -42,18 +42,20 @@ def _sweep_task(uid: int) -> int:
     return row["id"]
 
 
-def _fake_batch(monkeypatch, calls):
+def _fake_batch(monkeypatch, calls, f):
     async def fake_run_batched(task_id, shape, specs, *, charged_to_user=False):
         calls.append([s.custom_id for s in specs])
-        return {
-            s.custom_id: SimpleNamespace(
+        return [
+            f.make_batch_result(
+                task_id,
+                s,
                 text=json.dumps({"answer": f"Ready: {s.custom_id.partition('|')[2]}."}),
                 error=None,
                 usage={"input_tokens": 100, "output_tokens": 20, "total_tokens": 120},
-                batch_id="b",
+                model="gpt-5.6-luna",
             )
             for s in specs
-        }, SimpleNamespace(model="gpt-5.6-luna")
+        ], SimpleNamespace(model="gpt-5.6-luna")
 
     monkeypatch.setattr(drafts, "run_batched", fake_run_batched)
 
@@ -72,7 +74,7 @@ async def test_the_sweep_reads_the_board_forms_and_drafts_what_is_missing_once(
     monkeypatch.setattr(forms, "_get", lambda url: fetched.append(url) or GREENHOUSE)
     _owner_config(monkeypatch)
     calls: list[list[str]] = []
-    _fake_batch(monkeypatch, calls)
+    _fake_batch(monkeypatch, calls, f)
 
     await drafts.handle_application_sweep(_sweep_task(uid), {"user_id": uid})
 
@@ -109,7 +111,7 @@ async def test_the_sweep_needs_a_resume_and_respects_the_switch(
     fetched = []
     monkeypatch.setattr(forms, "_get", lambda url: fetched.append(url) or GREENHOUSE)
     calls: list[list[str]] = []
-    _fake_batch(monkeypatch, calls)
+    _fake_batch(monkeypatch, calls, f)
 
     await drafts.handle_application_sweep(_sweep_task(uid), {"user_id": uid})
     assert fetched == [] and calls == []
@@ -148,7 +150,7 @@ async def test_a_busy_host_is_skipped_this_cycle_not_waited_on(
         (hosts.EGRESS_GROUP,),
     )
     calls: list[list[str]] = []
-    _fake_batch(monkeypatch, calls)
+    _fake_batch(monkeypatch, calls, f)
     await drafts.handle_application_sweep(_sweep_task(uid), {"user_id": uid})
     assert fetched == [] and calls == []
     task = db.query_one("SELECT progress FROM tasks WHERE kind = 'application_sweep'")
@@ -185,7 +187,7 @@ async def test_a_sweep_waits_for_an_earlier_one_still_parked_on_its_batch(
     monkeypatch.setattr(forms, "_get", lambda url: fetched.append(url) or GREENHOUSE)
     _owner_config(monkeypatch)
     calls: list[list[str]] = []
-    _fake_batch(monkeypatch, calls)
+    _fake_batch(monkeypatch, calls, f)
     parked = db.query_one(
         "INSERT INTO tasks (kind, payload, status) VALUES ('application_sweep', %s, 'awaiting_batch') "
         "RETURNING id",
@@ -233,7 +235,7 @@ async def test_a_sweep_back_from_its_batch_collects_and_reads_no_more_forms(
     monkeypatch.setattr(forms, "_get", lambda url: fetched.append(url) or GREENHOUSE)
     _owner_config(monkeypatch)
     calls: list[list[str]] = []
-    _fake_batch(monkeypatch, calls)
+    _fake_batch(monkeypatch, calls, f)
     task = db.query_one(
         "INSERT INTO tasks (kind, payload, status) VALUES ('application_sweep', %s, 'running') "
         "RETURNING id",

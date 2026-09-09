@@ -1234,6 +1234,22 @@
             }
           },
           {
+            "name": "sources",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sources"
+            }
+          },
+          {
             "name": "ats",
             "in": "query",
             "required": false,
@@ -3334,7 +3350,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/Profile"
+                "$ref": "#/components/schemas/ProfilePut"
               }
             }
           }
@@ -6485,6 +6501,22 @@
             }
           },
           {
+            "name": "user",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "User"
+            }
+          },
+          {
             "name": "limit",
             "in": "query",
             "required": false,
@@ -8006,7 +8038,7 @@
       },
       "post": {
         "summary": "Trigger Ingest",
-        "description": "Off-cycle pull: enqueue ingest tasks now (no dedupe, runs regardless of\nthe hourly cycle). Omit sources to pull everything active.",
+        "description": "Queue an off-cycle pull for each active source without overlapping work.",
         "operationId": "trigger_ingest_v1_admin_ingest_post",
         "parameters": [
           {
@@ -18668,63 +18700,19 @@
       "FilterPatch": {
         "properties": {
           "name": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 80,
-                "minLength": 1
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Name"
+            "$ref": "#/components/schemas/NonNullUpdate_Annotated_str__FieldInfo_annotation_NoneType__required_True__metadata__MinLen_min_length_1___MaxLen_max_length_80_____"
           },
           "prompt": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 8000,
-                "minLength": 1
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Prompt"
+            "$ref": "#/components/schemas/NonNullUpdate_Annotated_str__FieldInfo_annotation_NoneType__required_True__metadata__MinLen_min_length_1___MaxLen_max_length_8000_____"
           },
           "on_ambiguous": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "On Ambiguous"
+            "$ref": "#/components/schemas/NonNullUpdate_str_"
           },
           "fail_closed": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Fail Closed"
+            "$ref": "#/components/schemas/NonNullUpdate_bool_"
           },
           "enabled": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Enabled"
+            "$ref": "#/components/schemas/NonNullUpdate_bool_"
           }
         },
         "type": "object",
@@ -19193,6 +19181,35 @@
         ],
         "title": "ModelsResponse"
       },
+      "NonNullUpdate_Annotated_int__FieldInfo_annotation_NoneType__required_True__metadata__Ge_ge_0_____": {
+        "type": "integer",
+        "minimum": 0.0
+      },
+      "NonNullUpdate_Annotated_str__FieldInfo_annotation_NoneType__required_True__metadata__MinLen_min_length_1___MaxLen_max_length_8000_____": {
+        "type": "string",
+        "maxLength": 8000,
+        "minLength": 1
+      },
+      "NonNullUpdate_Annotated_str__FieldInfo_annotation_NoneType__required_True__metadata__MinLen_min_length_1___MaxLen_max_length_80_____": {
+        "type": "string",
+        "maxLength": 80,
+        "minLength": 1
+      },
+      "NonNullUpdate_Annotated_str__StringConstraints__": {
+        "type": "string",
+        "maxLength": 80,
+        "minLength": 1
+      },
+      "NonNullUpdate_bool_": {
+        "type": "boolean"
+      },
+      "NonNullUpdate_dict_str__Any__": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "NonNullUpdate_str_": {
+        "type": "string"
+      },
       "PatternPreviewBody": {
         "properties": {
           "title_pattern": {
@@ -19291,7 +19308,7 @@
         "type": "object",
         "title": "PresetBody"
       },
-      "Profile": {
+      "ProfilePut": {
         "properties": {
           "first_name": {
             "type": "string",
@@ -19559,9 +19576,10 @@
             "title": "Education"
           }
         },
+        "additionalProperties": false,
         "type": "object",
-        "title": "Profile",
-        "description": "Every fact a form asks that is not a question about the job. Blank\nmeans unknown, and an unknown fact leaves its field blank rather than\nguessing. EEO answers default to declining."
+        "title": "ProfilePut",
+        "description": "Replace the whole profile; omitted fields return to their defaults."
       },
       "ProviderEntry": {
         "properties": {
@@ -20721,7 +20739,7 @@
         "additionalProperties": false,
         "type": "object",
         "title": "SettingsPut",
-        "description": "Rejects unknown keys rather than dropping them.\n\n`background` was a key here until it was removed, and a client still\nsending it needs to be told. Pydantic's default is to discard an\nunrecognised key silently, which would answer 200 to a write that\nstored nothing - the one failure a caller cannot detect."
+        "description": "Partial settings update: omitted fields preserve their saved value.\n\nNull resets column_layout, ai_model and writing_style to their defaults.\nOther fields retain their legacy null-as-omission behavior. Supplied\nobjects replace the whole object; {} clears it, subject to the age cap\nwhen criteria are written. False is a saved value, not an omission.\n\nRejects unknown keys rather than dropping them.\n\n`background` was a key here until it was removed, and a client still\nsending it needs to be told. Pydantic's default is to discard an\nunrecognised key silently, which would answer 200 to a write that\nstored nothing - the one failure a caller cannot detect."
       },
       "SourceBody": {
         "properties": {
@@ -21414,24 +21432,16 @@
       "ViewPatch": {
         "properties": {
           "name": {
-            "type": "string",
-            "maxLength": 80,
-            "minLength": 1,
-            "title": "Name"
+            "$ref": "#/components/schemas/NonNullUpdate_Annotated_str__StringConstraints__"
           },
           "state": {
-            "additionalProperties": true,
-            "type": "object",
-            "title": "State"
+            "$ref": "#/components/schemas/NonNullUpdate_dict_str__Any__"
           },
           "is_default": {
-            "type": "boolean",
-            "title": "Is Default"
+            "$ref": "#/components/schemas/NonNullUpdate_bool_"
           },
           "position": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Position"
+            "$ref": "#/components/schemas/NonNullUpdate_Annotated_int__FieldInfo_annotation_NoneType__required_True__metadata__Ge_ge_0_____"
           }
         },
         "type": "object",

@@ -8,7 +8,7 @@ from typing import Any, LiteralString, cast
 import dotenv
 
 from core import pricing
-from core.pool import pool
+from core.pool import connection
 
 logger = logging.getLogger("jobtracker_store")
 
@@ -89,7 +89,7 @@ def prefetch(
     if not unique:
         return
     cols = ", ".join(_PREFETCH_COLS)
-    with pool.connection() as conn:
+    with connection() as conn:
         for check_type in check_types:
             sql = _as_query(
                 f"SELECT DISTINCT ON (url) {cols} FROM ai_queries "
@@ -191,7 +191,7 @@ def add_ai_result(
     }
     columns = ", ".join(_INSERT_COLUMNS)
     placeholders = ", ".join(f"%({c})s" for c in _INSERT_COLUMNS)
-    with pool.connection() as conn:
+    with connection() as conn:
         conn.execute(_as_query(f"INSERT INTO ai_queries ({columns}) VALUES ({placeholders})"), row)
     sub = _latest_cache.get(url)
     if sub is not None:
@@ -203,7 +203,7 @@ def add_ai_result(
 
 
 def get_ai_result(url: str) -> dict[str, Any] | None:
-    with pool.connection() as conn:
+    with connection() as conn:
         row = conn.execute(
             "SELECT * FROM ai_queries WHERE url = %s ORDER BY id DESC LIMIT 1", (url,)
         ).fetchone()
@@ -218,7 +218,7 @@ def get_latest(url: str, check_type: str) -> dict[str, Any] | None:
     sub = _latest_cache.get(url)
     if sub is not None and check_type in sub:
         return sub[check_type]
-    with pool.connection() as conn:
+    with connection() as conn:
         row = conn.execute(
             "SELECT * FROM ai_queries WHERE url = %s AND check_type = %s "
             "AND status IN ('passed', 'rejected') ORDER BY id DESC LIMIT 1",
@@ -241,7 +241,7 @@ def get_custom_result(
             return sub[prompt_hash]
     clause = " AND model = %s" if model is not None else ""
     params = (url, prompt_hash, model) if model is not None else (url, prompt_hash)
-    with pool.connection() as conn:
+    with connection() as conn:
         row = conn.execute(
             "SELECT * FROM ai_queries WHERE url = %s AND check_type = 'custom' "
             f"AND prompt_hash = %s{clause} AND status IN ('passed', 'rejected') "
@@ -385,7 +385,7 @@ def get_content(url: str) -> str | None:
     (company/title prefix), not raw page content, so reusing them would re-wrap
     the content on every subsequent custom filter.
     """
-    with pool.connection() as conn:
+    with connection() as conn:
         row = conn.execute(
             "SELECT input_content FROM ai_queries WHERE url = %s "
             "AND check_type != 'custom' "
@@ -421,7 +421,7 @@ def is_url_failed(url: str) -> bool:
 
 
 def _latest_per_url_where(condition: str, params: tuple) -> list[dict[str, Any]]:
-    with pool.connection() as conn:
+    with connection() as conn:
         sql = _as_query(
             "SELECT * FROM ai_queries q WHERE id = "
             "(SELECT MAX(id) FROM ai_queries WHERE url = q.url) "
@@ -454,7 +454,7 @@ def record_batch_errors(provider_batch_id: str, errors: dict[str, str]) -> None:
     rows = [(provider_batch_id, cid, err) for cid, err in errors.items() if err]
     if not rows:
         return
-    with pool.connection() as conn, conn.cursor() as cur:
+    with connection() as conn, conn.cursor() as cur:
         cur.executemany(
             "INSERT INTO ai_batch_errors (provider_batch_id, custom_id, error) VALUES (%s, %s, %s)",
             rows,

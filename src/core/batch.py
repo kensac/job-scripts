@@ -73,6 +73,7 @@ class BatchSpec:
     input: str
     schema_name: str
     schema: dict
+    context: dict | None = None
 
 
 @dataclass
@@ -82,6 +83,8 @@ class BatchResult:
     usage: dict | None = None
     error: str | None = None
     batch_id: str | None = None
+    model: str | None = None
+    request: BatchSpec | None = None
 
 
 def _estimate_tokens(spec: BatchSpec, max_output_tokens: int) -> int:
@@ -253,10 +256,6 @@ async def _collect_batch(
             if text is None:
                 result.error = "no output text"
 
-    for result in results.values():
-        if result.batch_id is None:
-            result.batch_id = batch.id
-
     if batch.error_file_id:
         try:
             err_content = await client.files.content(batch.error_file_id)
@@ -272,6 +271,10 @@ async def _collect_batch(
                     result.error = str(obj.get("error") or "batch error")
         except Exception as exc:
             logger.warning(f"Failed to read batch error file: {exc}")
+
+    for result in results.values():
+        if result.batch_id is None:
+            result.batch_id = batch.id
 
     _record_errors(batch, results)
     return results
@@ -494,7 +497,7 @@ async def run_responses_batch(
 
 async def collect_finished_batches(
     batch_ids: list[str], on_event: BatchEventHook = None
-) -> tuple[dict[str, BatchResult], list[str]]:
+) -> tuple[list[BatchResult], list[str]]:
     """Collect the batches that have reached a terminal state and report the
     ones that have not, without waiting on any of them.
 
@@ -508,8 +511,8 @@ async def collect_finished_batches(
     """
     client = _client()
     if not client:
-        return {}, list(batch_ids)
-    results: dict[str, BatchResult] = {}
+        return [], list(batch_ids)
+    results: list[BatchResult] = []
     unfinished: list[str] = []
     for batch_id in batch_ids:
         try:
@@ -524,12 +527,13 @@ async def collect_finished_batches(
         if batch.status not in _TERMINAL_STATES:
             unfinished.append(batch_id)
             continue
-        before = set(results)
-        await _collect_batch(client, batch, results, create_missing=True)
+        collected: dict[str, BatchResult] = {}
+        await _collect_batch(client, batch, collected, create_missing=True)
         _emit_usage(
             on_event,
             batch.id,
             batch.status,
-            {k: v for k, v in results.items() if k not in before},
+            collected,
         )
+        results.extend(collected.values())
     return results, unfinished

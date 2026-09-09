@@ -13,16 +13,12 @@ import pytest
 
 from api import db
 from api.tasks import runtime
+from core.batch import BatchResult
 from core.prompts import PROMPT_SAMPLE_SIZE, prompt_hash
 
 
-class _Res:
-    def __init__(self, text=None, error=None):
-        self.text, self.error = text, error
-
-
 def _results(n: int, prefix: str = "u"):
-    return {f"{prefix}{i}": _Res(text='{"ok": true}') for i in range(n)}
+    return [BatchResult(f"{prefix}{i}", text='{"ok": true}') for i in range(n)]
 
 
 def _prompts():
@@ -116,7 +112,7 @@ class TestSamples:
         change worth seeing, and it leaves no output behind."""
         pid = runtime._record_prompt("comp", "P")
         assert pid is not None
-        runtime._record_prompt_samples(pid, {"u1": _Res(error="no output text")})
+        runtime._record_prompt_samples(pid, [BatchResult("u1", error="no output text")])
         rows = _samples(pid)
         assert len(rows) == 1
         assert rows[0]["output"] is None

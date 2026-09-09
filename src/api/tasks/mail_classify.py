@@ -23,9 +23,10 @@ from typing import Any, Literal
 from pydantic import BaseModel
 
 from api import db
-from api.tasks.runtime import pending_batch_ids, run_batched, set_progress
+from api.batch_results import progress_counts
+from api.tasks.runtime import consume_result, has_batch_work, run_batched, set_progress
 from core.providers.spec import StructuredOutput
-from core.routing import Evidence, TaskShape, resolve
+from core.routing import Evidence, TaskShape
 
 logger = logging.getLogger("jobtracker_worker")
 
@@ -666,7 +667,10 @@ async def handle_classify_mail(task_id: int, payload: dict[str, Any]) -> None:
 
     backfill = bool(payload.get("backfill"))
     shape = BACKFILL_TASK if backfill else ONGOING_TASK
-    model = resolve(shape).model
+    if has_batch_work(task_id):
+        results, _ = await run_batched(task_id, shape, [])
+        _record_results(task_id, results)
+        return
     # Clamped rather than trusted: an enqueuer asking for the whole mailbox in
     # one task would build a spec list far larger than a wave can carry, and
     # the failure would arrive as memory pressure on a worker rather than as a
@@ -744,153 +748,125 @@ async def handle_classify_mail(task_id: int, payload: dict[str, Any]) -> None:
     if corrected:
         logger.info(f"Task {task_id}: corrected {len(corrected)} self-sent message(s)")
 
-    # A resume has batches waiting. It must reach run_batched even with nothing
-    # new to classify, because that is where the finished batch is collected -
-    # and _finish drops batch_ids afterwards as provably spent, so returning
-    # here throws away work the provider has already been paid for.
-    #
-    # That is not hypothetical. It was survivable during the backfill because
-    # there was always other mail to select, so rows was non-empty and the
-    # batch got collected as a side effect. With the backfill done, "nothing
-    # else to classify" is the normal state and this became the normal path:
-    # claim the new mail, submit, park, resume, find nothing, drop the batch.
-    # Two batches reached 'completed' at the provider with 0 input tokens, 0
-    # output tokens and NULL cost recorded, which is what a batch that was
-    # never downloaded looks like, and 2,646 messages sat unclassified behind
-    # claims that were never going to be collected.
-    resuming = bool(pending_batch_ids(task_id))
-    if not rows and not resuming:
+    if not rows:
         set_progress(task_id, len(corrected), len(corrected), "nothing to classify")
         return
+    db.execute(
+        "UPDATE tasks SET payload = COALESCE(payload, '{}'::jsonb) || %s WHERE id = %s",
+        (db.jsonb({"claimed_message_ids": [r["id"] for r in rows]}), task_id),
+    )
 
-    # Record what this task claimed BEFORE submitting, so a sweep an hour from
-    # now can see it. "No events yet" stays true for the whole time a message
-    # sits in the provider's queue, so without this the next sweep selects the
-    # same messages and pays for them again - which is exactly what happened:
-    # three tasks an hour apart each carrying an identical 1,156 requests.
-    #
-    # Merged rather than replaced, because submit_or_collect writes batch_ids
-    # into this same payload and a requeued attempt reattaches through it.
-    #
-    # Not on a resume. run_batched short-circuits to collecting the existing
-    # batches and never submits these specs, so writing them here would leave
-    # the ledger naming messages nobody ever paid for - and un-naming the ones
-    # actually in flight.
-    if not resuming:
-        db.execute(
-            "UPDATE tasks SET payload = COALESCE(payload, '{}'::jsonb) || %s WHERE id = %s",
-            (db.jsonb({"claimed_message_ids": [r["id"] for r in rows]}), task_id),
-        )
-
-    # Keyed by the messages actually in flight when resuming, so a collected
-    # result can still find the sent_at its deadline parsing needs.
-    if resuming:
-        claimed = db.query_one(
-            "SELECT COALESCE(payload -> 'claimed_message_ids', '[]'::jsonb) AS ids "
-            "FROM tasks WHERE id = %s",
-            (task_id,),
-        )
-        in_flight = [int(i) for i in ((claimed or {}).get("ids") or [])]
-        rows = db.query("SELECT id, sent_at FROM email_messages WHERE id = ANY(%s)", (in_flight,))
-        specs_source: list = []
-    else:
-        specs_source = rows
-
-    by_id = {r["id"]: r["sent_at"] for r in rows}
     schema = to_strict_json_schema(MailClassification)
     specs = [
-        BatchSpec(str(r["id"]), _INSTRUCTIONS, _spec_text(r), "MailClassification", schema)
-        for r in specs_source
+        BatchSpec(
+            str(r["id"]),
+            _INSTRUCTIONS,
+            _spec_text(r),
+            "MailClassification",
+            schema,
+            context={"sent_at": r["sent_at"].isoformat() if r["sent_at"] else None},
+        )
+        for r in rows
     ]
-    set_progress(task_id, 0, len(specs), f"mail classification submitted ({model}, half price)")
+    set_progress(task_id, 0, len(specs), "mail classification submitted")
     results, _ = await run_batched(task_id, shape, specs)
 
-    done = 0
-    skipped = 0
-    for key, res in results.items():
-        if res.error or not res.text:
-            continue
-        try:
-            parsed = MailClassification.model_validate_json(res.text)
-        except Exception:
-            logger.warning(f"mail classify: unparsable output for message {key}")
-            continue
-        # Everything that can raise happens BEFORE anything is written, so a
-        # half-parsed result cannot produce a half-written row that later looks
-        # like a completed classification.
-        when = parse_when(
-            parsed.deadline,
-            sent_at=by_id.get(int(key)) if key.isdigit() else None,
-            kind=parsed.kind,
+    _record_results(task_id, results)
+
+
+def _record_results(task_id: int, results: list) -> None:
+    for res in results:
+        with consume_result(task_id, res) as receipt:
+            if not receipt.pending:
+                continue
+            if res.request is None or res.request.context is None:
+                receipt.outcome = "unknown_request"
+                continue
+            if not res.custom_id.isdigit() or not db.query_one(
+                "SELECT 1 FROM email_messages WHERE id = %s", (int(res.custom_id),)
+            ):
+                receipt.outcome = "subject_missing"
+                continue
+            _record_result(res, receipt)
+    done, total = progress_counts(task_id)
+    set_progress(task_id, done, total, "mail classified")
+
+
+def _record_result(res, receipt) -> None:
+    key = res.custom_id
+    if res.error or not res.text:
+        receipt.outcome = "failed"
+        return
+    try:
+        parsed = MailClassification.model_validate_json(res.text)
+    except ValueError:
+        logger.warning(f"mail classify: unparsable output for message {key}")
+        receipt.outcome = "invalid_output"
+        return
+    # Everything that can raise happens BEFORE anything is written, so a
+    # half-parsed result cannot produce a half-written row that later looks
+    # like a completed classification.
+    when = parse_when(
+        parsed.deadline,
+        sent_at=datetime.datetime.fromisoformat(res.request.context["sent_at"])
+        if res.request.context.get("sent_at")
+        else None,
+        kind=parsed.kind,
+    )
+    # An interview that has been scheduled is an appointment, not something
+    # to act by. Until now every one of these went into deadline_at with
+    # its time stripped, while occurred_at - which mail_pipeline already
+    # reads - was never written at all.
+    occurred_at: datetime.datetime | None = None
+    deadline_at: datetime.datetime | None = None
+    year_inferred = False
+    # Mail that is not about a job has no job deadline, whatever date it
+    # states. This is the model's own answer applied to its own other
+    # answer, not a second judgement: it already said the message is not
+    # job related, so the date it found is a marketing expiry, a newsletter
+    # RSVP or a tuition date.
+    #
+    # It is the largest source of deadlines in the corpus by a wide margin
+    # - 1,409 of 2,128, two thirds of every deadline recorded - and each
+    # one becomes an action item and feeds "quiet for 60+ days".
+    if when is not None and parsed.kind != "not_job_related":
+        year_inferred = when.year_inferred
+        if is_appointment(parsed.kind):
+            occurred_at = when.at
+        else:
+            deadline_at = when.at
+    detail: dict[str, Any] = {"company": parsed.company, "role_title": parsed.role_title}
+    if parsed.deadline:
+        # The raw string is kept whether or not it parsed. Keeping only the
+        # successes means the failures cannot be studied - which is exactly
+        # the position this parser was rewritten from, with no record of
+        # what it had been unable to read.
+        detail["when_raw"] = parsed.deadline
+        detail["when_dropped_as_not_job_related"] = (
+            parsed.kind == "not_job_related" and when is not None
         )
-        # An interview that has been scheduled is an appointment, not something
-        # to act by. Until now every one of these went into deadline_at with
-        # its time stripped, while occurred_at - which mail_pipeline already
-        # reads - was never written at all.
-        occurred_at: datetime.datetime | None = None
-        deadline_at: datetime.datetime | None = None
-        year_inferred = False
-        # Mail that is not about a job has no job deadline, whatever date it
-        # states. This is the model's own answer applied to its own other
-        # answer, not a second judgement: it already said the message is not
-        # job related, so the date it found is a marketing expiry, a newsletter
-        # RSVP or a tuition date.
-        #
-        # It is the largest source of deadlines in the corpus by a wide margin
-        # - 1,409 of 2,128, two thirds of every deadline recorded - and each
-        # one becomes an action item and feeds "quiet for 60+ days".
-        if when is not None and parsed.kind != "not_job_related":
-            year_inferred = when.year_inferred
-            if is_appointment(parsed.kind):
-                occurred_at = when.at
-            else:
-                deadline_at = when.at
-        detail: dict[str, Any] = {"company": parsed.company, "role_title": parsed.role_title}
-        if parsed.deadline:
-            # The raw string is kept whether or not it parsed. Keeping only the
-            # successes means the failures cannot be studied - which is exactly
-            # the position this parser was rewritten from, with no record of
-            # what it had been unable to read.
-            detail["when_raw"] = parsed.deadline
-            detail["when_dropped_as_not_job_related"] = (
-                parsed.kind == "not_job_related" and when is not None
-            )
-            detail["when_precision"] = (
-                None if when is None else ("instant" if when.is_instant else "date")
-            )
-        try:
-            db.execute(
-                """
-                INSERT INTO email_events (
-                    message_id, kind, confidence, occurred_at, deadline_at,
-                    deadline_inferred, detail, model
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                """,
-                (
-                    int(key),
-                    parsed.kind,
-                    parsed.confidence,
-                    occurred_at,
-                    deadline_at,
-                    # Inferred if the model said so, OR if we resolved a
-                    # missing year ourselves. Either way it is not a date the
-                    # email stated outright.
-                    deadline_at is not None and (year_inferred or not parsed.deadline_is_explicit),
-                    db.jsonb(detail),
-                    model,
-                ),
-            )
-        except Exception:
-            # One malformed field must not discard the whole batch's results.
-            # The batch is already paid for; losing 4,999 good classifications
-            # to one bad row is the expensive way to be strict, and the row is
-            # picked up again next sweep because it has no event.
-            logger.warning(f"mail classify: could not record message {key}", exc_info=True)
-            skipped += 1
-            continue
-        done += 1
-        if done % 200 == 0:
-            set_progress(task_id, done, len(specs), "mail classified")
-    set_progress(task_id, done, len(specs), "mail classified")
-    if skipped:
-        logger.warning(f"mail classify: {skipped} row(s) skipped on write")
+        detail["when_precision"] = (
+            None if when is None else ("instant" if when.is_instant else "date")
+        )
+    db.execute(
+        """
+        INSERT INTO email_events (
+            message_id, kind, confidence, occurred_at, deadline_at,
+            deadline_inferred, detail, model
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        """,
+        (
+            int(key),
+            parsed.kind,
+            parsed.confidence,
+            occurred_at,
+            deadline_at,
+            # Inferred if the model said so, OR if we resolved a
+            # missing year ourselves. Either way it is not a date the
+            # email stated outright.
+            deadline_at is not None and (year_inferred or not parsed.deadline_is_explicit),
+            db.jsonb(detail),
+            res.model,
+        ),
+    )
+    receipt.outcome = "written"

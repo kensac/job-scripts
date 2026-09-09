@@ -10,7 +10,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from api import ai, ai_access, apply, budget, db, events, telemetry
 from api.auth import AuthedUser, require_user
@@ -33,8 +33,16 @@ def get_profile(user: AuthedUser = Depends(require_user)):
     return apply.load_profile(user.id).model_dump()
 
 
+class ProfilePut(apply.Profile):
+    """Replace the whole profile; omitted fields return to their defaults."""
+
+    # Stored profiles stay tolerant of older keys. Writes cannot silently drop
+    # misspelled fields while replacing the person's previously saved facts.
+    model_config = ConfigDict(extra="forbid")
+
+
 @router.put("/user/profile")
-def put_profile(body: apply.Profile, user: AuthedUser = Depends(require_user)):
+def put_profile(body: ProfilePut, user: AuthedUser = Depends(require_user)):
     """The whole profile, replaced. A resume id that is not the person's is
     dropped rather than refused, so a deleted resume does not wedge the
     profile."""

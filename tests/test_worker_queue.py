@@ -8,7 +8,7 @@ from api.tasks import filters as tasks_filters
 from api.tasks import runtime as tasks_runtime
 from api.tasks import verify as tasks_verify
 from core.store import add_ai_result
-from tests.factories import finished
+from tests.factories import finished, make_batch_result, make_task
 
 # ---------------------------------------------------------------------------
 # enqueue / dedupe
@@ -513,7 +513,10 @@ async def _submit_ids(specs, model, effort, max_out, on_event=None):
     """Stands in for the provider accepting a submission."""
     _submit_ids.last_specs = list(specs)
     _submit_ids.calls = getattr(_submit_ids, "calls", 0) + 1
-    return ["batch_test_1"]
+    batch_id = f"batch_test_{_submit_ids.calls}"
+    if on_event:
+        on_event(batch_id, "submitted", {"requests": len(specs)})
+    return [batch_id]
 
 
 def _collect_from(fake_batch):
@@ -521,7 +524,10 @@ def _collect_from(fake_batch):
     per-test expectations stay exactly as they were written."""
 
     async def _collect(batch_ids, on_event=None):
-        return await fake_batch(getattr(_submit_ids, "last_specs", []), "m", "low", 0, None)
+        results = await fake_batch(getattr(_submit_ids, "last_specs", []), "m", "low", 0, None)
+        for result in results.values():
+            result.batch_id = batch_ids[0]
+        return list(results.values())
 
     return _collect
 
@@ -735,38 +741,21 @@ async def test_reverify_records_batch_verdicts_and_reattaches(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     from core import batch as core_batch
 
-    submits = []
-
-    async def fake_batch(specs, model, effort, max_out, on_event=None):
-        submits.append(len(specs))
-        if on_event:
-            on_event(
-                "batch_rv1", "in_progress", {"requests": len(specs), "completed": 0, "failed": 0}
-            )
-        return {
-            s.custom_id: core_batch.BatchResult(
-                s.custom_id,
-                text='{"is_closed": true, "reason": "position filled"}',
-                usage={"input_tokens": 20, "output_tokens": 3, "total_tokens": 23},
-            )
-            for s in specs
-        }
-
     async def fake_collect(batch_ids, on_event=None):
-        return {
-            "https://rv.example.com/1": core_batch.BatchResult(
+        return [
+            core_batch.BatchResult(
                 "https://rv.example.com/1",
                 text='{"is_closed": true, "reason": "position filled"}',
                 usage={"input_tokens": 20, "output_tokens": 3, "total_tokens": 23},
+                batch_id=batch_ids[0],
             )
-        }
+        ]
 
     async def fake_fetch_page(url):
         return "job content here", False
 
     monkeypatch.setattr(fetching, "fetch_page", fake_fetch_page)
     monkeypatch.setattr("core.batch.submit_responses_batches", _submit_ids)
-    monkeypatch.setattr("core.batch.collect_finished_batches", finished(_collect_from(fake_batch)))
     monkeypatch.setattr("core.batch.collect_finished_batches", finished(fake_collect))
 
     rows = [{"url": "https://rv.example.com/1", "company": "Acme", "title": "SWE"}]
@@ -922,13 +911,22 @@ def _submitted_batch(provider_batch_id: str, minutes_ago: int) -> None:
     )
 
 
-def _reverify_result(url: str, batch_id: str, is_closed: bool):
-    from core.batch import BatchResult
+def _reverify_result(task_id: int, url: str, batch_id: str, is_closed: bool):
+    from core.batch import BatchSpec
 
-    return BatchResult(
-        url,
+    return make_batch_result(
+        task_id,
+        BatchSpec(
+            url,
+            "closed",
+            "original page",
+            "JobClosedVerdict",
+            {},
+            context={"company": "C", "title": "T"},
+        ),
         text=f'{{"is_closed": {str(is_closed).lower()}, "reason": "batch fixture"}}',
         usage={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+        model="m",
         batch_id=batch_id,
     )
 
@@ -943,9 +941,9 @@ def test_reverify_does_not_overturn_a_closure_settled_while_it_was_parked():
     # Settled AFTER we submitted, by evidence newer than ours.
     add_ai_result(url, "rejected", "ATS returns gone", "closed")
 
-    rows = {url: {"url": url, "company": "C", "title": "T"}}
+    task_id = make_task("reverify_chunk", {})
     recorded = tasks_verify._record_reverify_results(
-        {url: _reverify_result(url, "batch_parked", is_closed=False)}, rows, "m"
+        task_id, [_reverify_result(task_id, url, "batch_parked", is_closed=False)]
     )
 
     assert recorded == 0
@@ -974,9 +972,9 @@ def test_reverify_records_normally_when_nothing_settled_after_submission():
     )
     _submitted_batch("batch_fresh", minutes_ago=0)
 
-    rows = {url: {"url": url, "company": "C", "title": "T"}}
+    task_id = make_task("reverify_chunk", {})
     recorded = tasks_verify._record_reverify_results(
-        {url: _reverify_result(url, "batch_fresh", is_closed=False)}, rows, "m"
+        task_id, [_reverify_result(task_id, url, "batch_fresh", is_closed=False)]
     )
 
     assert recorded == 1
@@ -994,9 +992,9 @@ def test_reverify_records_when_the_evidence_cannot_be_dated():
     url = "https://stale.test/3"
     add_ai_result(url, "rejected", "stale closure", "closed")
 
-    rows = {url: {"url": url, "company": "C", "title": "T"}}
+    task_id = make_task("reverify_chunk", {})
     recorded = tasks_verify._record_reverify_results(
-        {url: _reverify_result(url, "batch_unregistered", is_closed=False)}, rows, "m"
+        task_id, [_reverify_result(task_id, url, "batch_unregistered", is_closed=False)]
     )
     assert recorded == 1
 

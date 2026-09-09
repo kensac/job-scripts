@@ -11,11 +11,8 @@ import pytest
 from api.tasks import comp, requirements
 
 
-def _refused(specs):
-    return {
-        s.custom_id: SimpleNamespace(text=None, error="not run", usage=None, batch_id="b")
-        for s in specs
-    }
+def _refused(f, task_id, specs):
+    return [f.make_batch_result(task_id, s, error="not run", model="gpt-5-nano") for s in specs]
 
 
 def _jobs(f):
@@ -40,7 +37,7 @@ async def test_comp_extracts_only_from_verified_open_postings(client, user_heade
 
     async def fake(task_id, shape, specs):
         asked.extend(s.custom_id for s in specs)
-        return _refused(specs), SimpleNamespace(model="gpt-5-nano")
+        return _refused(f, task_id, specs), SimpleNamespace(model="gpt-5-nano")
 
     monkeypatch.setattr(comp, "run_batched", fake)
     task = f.make_task("extract_comp", status="running")
@@ -58,7 +55,7 @@ async def test_requirements_extracts_only_from_verified_open_postings(
 
     async def fake(task_id, shape, specs):
         asked.extend(s.custom_id for s in specs)
-        return _refused(specs), SimpleNamespace(model="gpt-5-nano")
+        return _refused(f, task_id, specs), SimpleNamespace(model="gpt-5-nano")
 
     monkeypatch.setattr(requirements, "run_batched", fake)
     task = f.make_task("extract_requirements", status="running")

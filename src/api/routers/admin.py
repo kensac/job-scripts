@@ -9,7 +9,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, JsonValue
 
-from api import ai, db, events, health, hosts, scoping, sorting
+from api import ai, db, events, health, hosts, pagination, scoping, sorting, task_admission
 from api import params as params_
 from api.auth import AuthedUser, require_user
 from api.config import CONFIG_KEYS
@@ -236,26 +236,31 @@ def delete_preset(preset_id: int, user: AuthedUser = Depends(require_admin)):
 @router.get("/source-requests")
 def list_source_requests(
     status: str = "open",
+    users: str | None = Query(default=None, alias="user"),
     limit: int = 50,
     offset: int = 0,
     user: AuthedUser = Depends(require_admin),
 ):
     limit = max(1, min(limit, 200))
-    where = "" if status == "all" else "WHERE sr.status = %(status)s"
+    statuses = [] if status.strip() == "all" else params_.csv(status)
+    ids = scoping.user_ids(users)
+    clauses = ["sr.status = ANY(%(status)s)"] if statuses else []
+    if ids:
+        clauses.append(scoping.column("sr.user_id"))
+    where = "WHERE " + " AND ".join(clauses) if clauses else ""
+    selection = {"status": statuses, "user_ids": ids}
     rows = db.query(
         f"""
         SELECT sr.*, u.email AS requester_email, u.name AS requester_name
         FROM source_requests sr JOIN users u ON u.id = sr.user_id
         {where} ORDER BY sr.id DESC LIMIT %(limit)s OFFSET %(offset)s
         """,
-        {"status": status, "limit": limit + 1, "offset": max(0, offset)},
+        {**selection, "limit": limit + 1, "offset": max(0, offset)},
     )
-    # The badge on the Requests tab used to show the page size and read as
-    # the count; at 389 sources a queue of requests can exceed a page.
-    total = db.query_one(
-        f"SELECT count(*) AS n FROM source_requests sr {where}", {"status": status}
-    )
+    total = db.query_one(f"SELECT count(*) AS n FROM source_requests sr {where}", selection)
     return {
+        "filters": params_.applied(status=statuses, user=scoping.echo(ids)),
+        "filterable": ["status", "user"],
         "rows": rows[:limit],
         "has_more": len(rows) > limit,
         "total": total["n"] if total else 0,
@@ -310,8 +315,7 @@ def list_users(
     user: AuthedUser = Depends(require_admin),
 ):
     limit = max(1, min(limit, 200))
-    sort_col = _USERS_SORTABLE.get(sort, "u.last_seen_at")
-    direction = "ASC" if dir == "asc" else "DESC"
+    sorts = sorting.parse(sort, dir, _USERS_SORTABLE, "last_seen_at")
     # ids= is a bulk lookup: the queue page names workers' tasks by user and
     # was walking up to 40 pages to build that map. Ids that are not integers
     # are ignored rather than refused, so a malformed selection returns what
@@ -332,7 +336,7 @@ def list_users(
                            AND a.created_at > now() - interval '7 days'), 0) AS owner_tokens_week
         FROM users u LEFT JOIN user_settings s ON s.user_id = u.id
         {scope}
-        ORDER BY {sort_col} {direction} NULLS LAST, u.id LIMIT %(limit)s OFFSET %(offset)s
+        ORDER BY {sorting.clause(sorts, _USERS_SORTABLE)}, u.id LIMIT %(limit)s OFFSET %(offset)s
         """,
         {"limit": limit + 1, "offset": max(0, offset), "ids": wanted},
     )
@@ -342,8 +346,9 @@ def list_users(
         # Echoed and enumerated for the same reason as /admin/jobs: the page
         # renders the active sort without duplicating the default and never
         # has to guess the accepted keys.
-        "sort": sort if sort in _USERS_SORTABLE else "last_seen_at",
-        "dir": direction.lower(),
+        "sort": sorts[0]["key"],
+        "dir": sorts[0]["dir"],
+        "sorts": sorts,
         "sortable": sorted(_USERS_SORTABLE),
     }
 
@@ -481,6 +486,7 @@ def list_tasks(
     if ids:
         clauses.append(scoping.task())
         params["user_ids"] = ids
+    selection_where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     if before_id is not None:
         clauses.append("id < %(before_id)s")
         params["before_id"] = before_id
@@ -496,7 +502,7 @@ def list_tasks(
     )
     summary = db.query(
         f"SELECT kind, status, COUNT(*) AS count FROM tasks "
-        f"{'WHERE ' + scoping.task() if ids else ''} "
+        f"{selection_where} "
         "GROUP BY kind, status ORDER BY kind, status",
         params,
     )
@@ -638,12 +644,9 @@ def revoke_invite(pk: str, user: AuthedUser = Depends(require_admin)):
     return {"ok": True}
 
 
-# The statuses a task can be cancelled from: it holds a worker, a parent's
-# slot, or a parked batch. Anything else is already over.
-# Every status a task row can carry, in lifecycle order; served on the queue
-# envelope so the summary strip renders tones from data rather than a copy.
-TASK_STATUSES = ("pending", "waiting", "running", "awaiting_batch", "done", "failed", "cancelled")
-CANCELLABLE = ("pending", "waiting", "running", "awaiting_batch")
+# Preserve lifecycle order in queue metadata and cancellation validation.
+TASK_STATUSES = task_admission.TASK_STATUSES
+CANCELLABLE = tuple(status for status in TASK_STATUSES if status in task_admission.ACTIVE_STATUSES)
 
 
 class CancelTasksBody(BaseModel):
@@ -1359,59 +1362,34 @@ class IngestBody(BaseModel):
 
 @router.post("/ingest")
 def trigger_ingest(body: IngestBody, user: AuthedUser = Depends(require_admin)):
-    """Off-cycle pull: enqueue ingest tasks now (no dedupe, runs regardless of
-    the hourly cycle). Omit sources to pull everything active."""
+    """Queue an off-cycle pull for each active source without overlapping work."""
     active = {r["name"] for r in db.query("SELECT name FROM sources WHERE active")}
-    wanted = body.sources if body.sources else sorted(active)
+    wanted = list(dict.fromkeys(body.sources)) if body.sources else sorted(active)
     unknown = [s for s in wanted if s not in active]
     if unknown:
         raise HTTPException(
             400, detail={"code": "UNKNOWN_SOURCE", "message": f"unknown or inactive: {unknown}"}
         )
-    import time as _time
-
-    # A board whose pull is still queued or running is not queued again: the
-    # second task would wait behind the first and pull the same listings.
-    # Reported per board rather than refused whole, since one request can
-    # name many; refused whole only when every board named is in flight.
-    in_flight = {
-        r["source"]: r["id"]
-        for r in db.query(
-            """
-            SELECT DISTINCT ON (payload->>'source') payload->>'source' AS source, id
-            FROM tasks WHERE kind = 'ingest_source'
-              AND status IN ('pending', 'running', 'awaiting_batch', 'waiting')
-              AND payload->>'source' = ANY(%s)
-            ORDER BY payload->>'source', id DESC
-            """,
-            (wanted,),
-        )
-    }
-    if in_flight and all(name in in_flight for name in wanted):
+    cycle = f"manual-{user.id}-{int(time.time())}"
+    task_ids = []
+    in_flight = []
+    for name in wanted:
+        admission = task_admission.enqueue("ingest_source", {"source": name}, {"cycle": cycle})
+        if admission.conflict:
+            in_flight.append({"source": name, "task_id": admission.conflict["id"]})
+        else:
+            task_ids.append({"source": name, "task_id": admission.task_id})
+    in_flight.sort(key=lambda row: row["source"])
+    if in_flight and not task_ids:
         raise HTTPException(
             409,
             detail={
                 "code": "IN_PROGRESS",
                 "message": "every board named is already being pulled",
-                "in_flight": [{"source": s, "task_id": t} for s, t in sorted(in_flight.items())],
+                "in_flight": in_flight,
             },
         )
-    cycle = f"manual-{user.id}-{int(_time.time())}"
-    task_ids = []
-    for name in wanted:
-        if name in in_flight:
-            continue
-        row = db.query_one(
-            "INSERT INTO tasks (kind, payload) VALUES ('ingest_source', %s) RETURNING id",
-            (db.jsonb({"source": name, "cycle": cycle}),),
-        )
-        assert row is not None
-        events.publish_task(row["id"])
-        task_ids.append({"source": name, "task_id": row["id"]})
-    return {
-        "tasks": task_ids,
-        "in_flight": [{"source": s, "task_id": t} for s, t in sorted(in_flight.items())],
-    }
+    return {"tasks": task_ids, "in_flight": in_flight}
 
 
 class SourceGroupBody(BaseModel):
@@ -1539,15 +1517,15 @@ def list_reports(
     page_size: int = 50,
     user: AuthedUser = Depends(require_admin),
 ):
-    page = max(1, page)
-    page_size = max(1, min(page_size, 200))
+    paging = pagination.Page.from_params(page, page_size, maximum=200)
     ids = scoping.user_ids(users)
-    clauses = [] if status == "all" else ["r.status = %(status)s"]
+    statuses = [] if status.strip() == "all" else params_.csv(status)
+    clauses = ["r.status = ANY(%(status)s)"] if statuses else []
     if ids:
         clauses.append(scoping.column("r.user_id"))
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     total_row = db.query_one(
-        f"SELECT COUNT(*) AS c FROM reports r {where}", {"status": status, "user_ids": ids}
+        f"SELECT COUNT(*) AS c FROM reports r {where}", {"status": statuses, "user_ids": ids}
     )
     rows = db.query(
         f"""
@@ -1566,25 +1544,20 @@ def list_reports(
         ORDER BY r.id DESC LIMIT %(limit)s OFFSET %(offset)s
         """,
         {
-            "status": status,
+            "status": statuses,
             "user_ids": ids,
-            "limit": page_size,
-            "offset": (page - 1) * page_size,
+            "limit": paging.size,
+            "offset": paging.offset,
         },
     )
     total = total_row["c"] if total_row else 0
     return {
         "rows": rows,
-        "total": total,
-        "page": page,
-        "page_size": page_size,
-        "has_more": page * page_size < total,
+        **paging.metadata(total),
         "report_kinds": report_kinds(),
         # The drawer offers "close this posting" only on a build that has it.
         "can_close_posting": True,
-        "filters": params_.applied(
-            status=[] if status in ("all", "") else [status], user=scoping.echo(ids)
-        ),
+        "filters": params_.applied(status=statuses, user=scoping.echo(ids)),
         "filterable": ["status", "user"],
     }
 
@@ -1675,29 +1648,21 @@ def reparse_job(job_id: int, user: AuthedUser = Depends(require_admin)):
     job = db.query_one("SELECT id FROM jobs WHERE id = %s", (job_id,))
     if not job:
         raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown job"})
-    running = db.query_one(
-        "SELECT id FROM tasks WHERE kind = 'extract_upload' "
-        "AND status IN ('pending', 'running', 'awaiting_batch', 'waiting') "
-        "AND (payload->>'job_id')::bigint = %s ORDER BY id DESC LIMIT 1",
-        (job_id,),
+    admission = task_admission.enqueue(
+        "extract_upload",
+        {"job_id": job_id},
+        {"user_id": user.id, "force": True},
     )
-    if running:
+    if admission.conflict:
         raise HTTPException(
             409,
             detail={
                 "code": "IN_PROGRESS",
                 "message": "this posting is already being parsed",
-                "task_id": running["id"],
+                "task_id": admission.conflict["id"],
             },
         )
-    db.execute("UPDATE jobs SET extraction_status = 'pending' WHERE id = %s", (job_id,))
-    row = db.query_one(
-        "INSERT INTO tasks (kind, payload) VALUES ('extract_upload', %s) RETURNING id",
-        (db.jsonb({"job_id": job_id, "user_id": user.id, "force": True}),),
-    )
-    assert row is not None
-    events.publish_task(row["id"])
-    return {"task_id": row["id"]}
+    return {"task_id": admission.task_id}
 
 
 class GroupBudgetPut(BaseModel):
@@ -1803,23 +1768,21 @@ def list_queries(
                 "valid": [g.key for g in reason_taxonomy.GROUPS],
             },
         ) from None
-    page = max(1, page)
-    page_size = max(1, min(page_size, 500))
+    paging = pagination.Page.from_params(page, page_size, maximum=500)
     total_row = db.query_one(f"SELECT COUNT(*) AS c FROM ai_queries {where}", params)
-    sort_col = sort if sort in _SORTABLE else "id"
-    direction = "ASC" if dir == "asc" else "DESC"
+    sortable = {key: key for key in _SORTABLE}
+    sorts = sorting.parse(sort, dir, sortable, "id")
     rows = db.query(
         f"SELECT {_LIST_COLS} FROM ai_queries {where} "
-        f"ORDER BY {sort_col} {direction} LIMIT %(limit)s OFFSET %(offset)s",
-        {**params, "limit": page_size, "offset": (page - 1) * page_size},
+        f"ORDER BY {sorting.clause(sorts, sortable)}, id DESC LIMIT %(limit)s OFFSET %(offset)s",
+        {**params, "limit": paging.size, "offset": paging.offset},
     )
     total = total_row["c"] if total_row else 0
     return {
+        "sorts": sorts,
+        "sortable": sorted(sortable),
         "rows": rows,
-        "total": total,
-        "page": page,
-        "page_size": page_size,
-        "has_more": page * page_size < total,
+        **paging.metadata(total),
         "filters": params_.applied(
             check_type=params_.csv(check_type),
             status=params_.csv(status),
@@ -1894,8 +1857,7 @@ def list_jobs(
     page_size: int = 50,
     user: AuthedUser = Depends(require_admin),
 ):
-    page = max(1, page)
-    page_size = max(1, min(page_size, 500))
+    paging = pagination.Page.from_params(page, page_size, maximum=500)
     sub = ["url IS NOT NULL"]
     params: dict = {}
     wanted_sources = [s.strip() for s in (sources or "").split(",") if s.strip()]
@@ -1942,17 +1904,14 @@ def list_jobs(
     rows = db.query(
         f"{base} ORDER BY {sorting.clause(sorts, _JOBS_SORTABLE)}, url "
         "LIMIT %(limit)s OFFSET %(offset)s",
-        {**params, "limit": page_size, "offset": (page - 1) * page_size},
+        {**params, "limit": paging.size, "offset": paging.offset},
     )
     for r in rows:
         r["verdict"] = "rejected" if r["rejected"] > 0 else "passed" if r["passed"] > 0 else "other"
     total = total_row["c"] if total_row else 0
     return {
         "rows": rows,
-        "total": total,
-        "page": page,
-        "page_size": page_size,
-        "has_more": page * page_size < total,
+        **paging.metadata(total),
         # Echoed so the UI can render the active sort without duplicating the
         # default, and sortable so it never has to guess the accepted keys.
         "sort": sorts[0]["key"],

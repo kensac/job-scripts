@@ -9,7 +9,8 @@ from typing import Any
 from pydantic import BaseModel
 
 from api import db
-from api.tasks.runtime import run_batched, set_progress
+from api.batch_results import progress_counts
+from api.tasks.runtime import consume_result, has_batch_work, run_batched, set_progress
 from core.providers import StructuredOutput
 from core.routing import TaskShape
 
@@ -208,13 +209,15 @@ def _normalised(place: Place) -> dict[str, str | None] | None:
     }
 
 
-def store(text: str, parsed: LocationExtract, model: str) -> None:
+def store(
+    text: str, parsed: LocationExtract, model: str | None, *, preserve_manual: bool = False
+) -> bool:
     code = text.strip().upper()
     if code in _CODES:
         parsed = LocationExtract(country=_CODES[code], region=code)
     places = [p for p in (_normalised(pl) for pl in parsed.all_places()) if p is not None]
     first = places[0] if places else {"country": None, "region": None, "city": None}
-    db.execute(
+    row = db.query_one(
         """
         INSERT INTO locations (text, country, region, city, remote, places, model)
         VALUES (%(text)s, %(country)s, %(region)s, %(city)s, %(remote)s, %(places)s, %(model)s)
@@ -222,9 +225,12 @@ def store(text: str, parsed: LocationExtract, model: str) -> None:
             country = EXCLUDED.country, region = EXCLUDED.region, city = EXCLUDED.city,
             remote = EXCLUDED.remote, places = EXCLUDED.places, model = EXCLUDED.model,
             classified_at = now()
+        WHERE NOT %(preserve_manual)s OR locations.model IS DISTINCT FROM 'admin'
+        RETURNING text
         """,
         {
             "text": text,
+            "preserve_manual": preserve_manual,
             "country": first["country"],
             "region": first["region"],
             "city": first["city"],
@@ -234,45 +240,67 @@ def store(text: str, parsed: LocationExtract, model: str) -> None:
         },
     )
 
+    return row is not None
+
 
 async def handle_classify_locations(task_id: int, payload: dict[str, Any]) -> None:
     from openai.lib._pydantic import to_strict_json_schema
 
     from core.batch import BatchSpec
 
-    cap = int(db.get_config("classify_locations_per_cycle"))
-    if payload.get("reclassify"):
-        # Every model-made row again, in place: a row keeps its old answer
-        # until the new one lands, so a filter never sees a gap. Hand
-        # corrections are never re-asked.
-        texts = [
-            r["text"]
-            for r in db.query(
-                "SELECT text FROM locations WHERE model <> 'admin' ORDER BY text LIMIT %(cap)s",
-                {"cap": cap},
+    specs = []
+    if not has_batch_work(task_id):
+        cap = int(db.get_config("classify_locations_per_cycle"))
+        if payload.get("reclassify"):
+            texts = [
+                r["text"]
+                for r in db.query(
+                    "SELECT text FROM locations WHERE model <> 'admin' ORDER BY text LIMIT %(cap)s",
+                    {"cap": cap},
+                )
+            ]
+        else:
+            texts = [r["text"] for r in db.query(_CANDIDATES, {"cap": cap})]
+        if not texts:
+            set_progress(task_id, 0, 0, "nothing to classify")
+            return
+        schema = to_strict_json_schema(LocationAnswer)
+        specs = [
+            BatchSpec(
+                _custom_id(text),
+                _INSTRUCTIONS,
+                text,
+                "LocationAnswer",
+                schema,
+                context={"text": text},
             )
+            for text in texts
         ]
-    else:
-        texts = [r["text"] for r in db.query(_CANDIDATES, {"cap": cap})]
-    if not texts:
-        set_progress(task_id, 0, 0, "nothing to classify")
-        return
-    schema = to_strict_json_schema(LocationAnswer)
-    by_id = {_custom_id(t): t for t in texts}
-    specs = [BatchSpec(cid, _INSTRUCTIONS, t, "LocationAnswer", schema) for cid, t in by_id.items()]
-    set_progress(task_id, 0, len(specs), "locations batch submitted (half price)")
-    results, chosen = await run_batched(task_id, LOCATIONS_TASK, specs)
-    done = 0
-    for cid, res in results.items():
-        text = by_id.get(cid)
-        if text is None or not res.text or res.error:
-            continue
-        try:
-            answer = LocationAnswer.model_validate_json(res.text)
-            store(text, LocationExtract(places=answer.places, remote=answer.remote), chosen.model)
-            done += 1
-        except Exception:
-            # No row, so the next cycle asks again: the same re-sweep contract
-            # every batched pass has.
-            logger.warning(f"location parse failed for {text!r}")
-    set_progress(task_id, done, len(specs), f"{done} location(s) classified")
+        set_progress(task_id, 0, len(specs), "locations batch submitted")
+    results, _ = await run_batched(task_id, LOCATIONS_TASK, specs)
+    for res in results:
+        with consume_result(task_id, res) as receipt:
+            if not receipt.pending:
+                continue
+            context = res.request.context if res.request else None
+            if not context or "text" not in context:
+                receipt.outcome = "unknown_request"
+                continue
+            if not res.text or res.error:
+                receipt.outcome = "failed"
+                continue
+            try:
+                answer = LocationAnswer.model_validate_json(res.text)
+            except ValueError:
+                logger.warning("location parse failed for %r", context["text"])
+                receipt.outcome = "invalid_output"
+                continue
+            written = store(
+                context["text"],
+                LocationExtract(places=answer.places, remote=answer.remote),
+                res.model,
+                preserve_manual=True,
+            )
+            receipt.outcome = "written" if written else "superseded"
+    done, total = progress_counts(task_id)
+    set_progress(task_id, done, total, f"{done} location(s) classified")
