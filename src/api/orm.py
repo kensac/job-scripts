@@ -492,6 +492,13 @@ class SavedView(Base):
     __table_args__ = (
         UniqueConstraint("user_id", "page", "name", name="uq_saved_views_user_page_name"),
         Index("idx_saved_views_user_page", "user_id", "page", "position"),
+        Index(
+            "uq_saved_views_user_page_default",
+            "user_id",
+            "page",
+            unique=True,
+            postgresql_where=text("is_default"),
+        ),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
