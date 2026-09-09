@@ -23,6 +23,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from api import ai, application_writes, budget, db, hosts, visibility
+from api.tasks import batch_policy
 from api.tasks.runtime import (
     Deferred,
     consume_result,
@@ -296,17 +297,29 @@ async def _batch_drafts(
     return done
 
 
+def _scheduled_config(task_id: int, user_id: int) -> ai.AIConfig:
+    _, cfg = load_config(user_id)
+    if cfg.key_source == "owner":
+        # Application batches resolve APPLICATION_TASK independently of the
+        # person's interactive model; only credential transport gates this run.
+        batch_policy.require_transport(task_id, cfg)
+    return cfg
+
+
 async def draft_rows(
     task_id: int,
     user_id: int,
     rows: list[dict[str, Any]],
     resume_id: int | None = None,
     kind: str = "draft",
+    *,
+    scheduled: bool = False,
 ) -> int:
     """Write a draft for each row (job_id, url, company, title, key,
     question), for one person, from their resume and style: one half-price
     batch on the fleet's key, or live one at a time on their own. Returns
-    how many drafts were written. Safe to run again from the top: a resumed
+    how many drafts were written. Scheduled callers require batch transport on the shared key.
+    Safe to run again from the top: a resumed
     task collects its original results and applies only its own generations."""
     from openai.lib._pydantic import to_strict_json_schema
 
@@ -314,6 +327,7 @@ async def draft_rows(
 
     if has_batch_work(task_id):
         return await _batch_drafts(task_id, user_id, [], kind, resumed=True)
+    cfg = _scheduled_config(task_id, user_id) if scheduled else None
     resume = resume_text(user_id, resume_id)
     if not resume:
         raise RuntimeError("no resume on file; add one under settings first")
@@ -346,7 +360,8 @@ async def draft_rows(
         )
     if not specs:
         return 0
-    _, cfg = load_config(user_id)
+    if cfg is None:
+        _, cfg = load_config(user_id)
     total = len(specs)
     done = 0
     if cfg.key_source == "owner" and cfg.provider == "openai":
@@ -427,7 +442,7 @@ async def handle_application_sweep(task_id: int, payload: dict[str, Any]) -> Non
     # sweep read 113 forms before submission and 114 more on resume, spending
     # two cycles of reads on one batch and reporting 60 of 158 done.
     if has_batch_work(task_id):
-        await draft_rows(task_id, user_id, [], kind="sweep")
+        await draft_rows(task_id, user_id, [], kind="sweep", scheduled=True)
         _set_draft_progress(task_id, "drafts collected", 0)
         return
     # One sweep per person at a time. A parked sweep frees its worker, so
@@ -460,6 +475,9 @@ async def handle_application_sweep(task_id: int, payload: dict[str, Any]) -> Non
     if not resume_text(user_id, None):
         set_progress(task_id, 0, 0, "no resume on file")
         return
+    # Refuse unsupported shared credentials before spending reads. Revalidate
+    # in draft_rows after that phase, before reserving answer generations.
+    _scheduled_config(task_id, user_id)
     reads_cap = int(db.get_config("application_form_reads_per_cycle"))
     drafts_cap = int(db.get_config("application_drafts_per_cycle"))
 
@@ -539,5 +557,5 @@ async def handle_application_sweep(task_id: int, payload: dict[str, Any]) -> Non
     if not rows:
         set_progress(task_id, 0, 0, "nothing new to draft" + note)
         return
-    await draft_rows(task_id, user_id, rows, kind="sweep")
+    await draft_rows(task_id, user_id, rows, kind="sweep", scheduled=True)
     _set_draft_progress(task_id, "drafts written ahead of need" + note, len(rows))

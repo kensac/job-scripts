@@ -151,6 +151,7 @@ async def test_a_busy_host_is_skipped_this_cycle_not_waited_on(
     )
     calls: list[list[str]] = []
     _fake_batch(monkeypatch, calls, f)
+    _owner_config(monkeypatch)
     await drafts.handle_application_sweep(_sweep_task(uid), {"user_id": uid})
     assert fetched == [] and calls == []
     task = db.query_one("SELECT progress FROM tasks WHERE kind = 'application_sweep'")
