@@ -761,7 +761,7 @@ async def collect_pending(task_id: int, hook) -> dict[str, Any]:
     results, unfinished = await collect_finished_batches(existing, hook)
     samples: dict[int, dict] = {}
     for custom_id, result in results.items():
-        persisted = metadata.get(result.batch_id, {})
+        persisted = metadata.get(result.batch_id, {}) if result.batch_id is not None else {}
         result.model = persisted.get("model")
         if prompt_id := persisted.get("prompt_id"):
             samples.setdefault(prompt_id, {})[custom_id] = result
