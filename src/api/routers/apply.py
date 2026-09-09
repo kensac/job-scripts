@@ -350,14 +350,12 @@ async def suggest(body: SuggestBody, user: AuthedUser = Depends(require_user)):
         parts.append("Resume:\n" + resume)
     rules = (db.get_config("application_suggest_instructions") or "").strip() or DEFAULT_SUGGEST
     parsed, usage = await ai.parse(cfg, rules, "\n\n".join(parts), Suggestions)
-    budget.record_usage(
+    budget.record_tokens(
         user.id,
         cfg.key_source,
         drafts.PURPOSE,
         cfg.model,
-        usage.get("prompt_tokens", 0),
-        usage.get("completion_tokens", 0),
-        usage.get("total_tokens", 0),
+        usage,
     )
     if parsed is None:
         raise _bad(502, "NO_ANSWER", "the model returned no usable answer; try again")
