@@ -3,7 +3,7 @@ from __future__ import annotations
 import datetime
 import logging
 
-from api import budget, db
+from api import batch_results, budget, db
 
 logger = logging.getLogger("jobtracker_worker")
 PURPOSE = "application"
@@ -159,14 +159,19 @@ def outcome_note(task_id: int) -> str:
     counts = {}
     for value in results.values():
         counts[value] = counts.get(value, 0) + 1
-    for row in db.query(
-        "SELECT outcome, count(*) AS n FROM batch_result_receipts "
-        "WHERE task_id = %s AND consumed_at IS NOT NULL GROUP BY outcome",
-        (task_id,),
-    ):
-        counts[row["outcome"]] = counts.get(row["outcome"], 0) + row["n"]
+    for outcome, count in batch_results.outcome_counts(task_id).items():
+        counts[outcome] = counts.get(outcome, 0) + count
     if not counts:
         return ""
     return "; " + ", ".join(
         f"{count} {outcome.replace('_', ' ')}" for outcome, count in sorted(counts.items())
     )
+
+
+def progress_counts(task_id: int, minimum_total: int) -> tuple[int, int]:
+    done, total = batch_results.progress_counts(task_id)
+    task = db.query_one("SELECT payload FROM tasks WHERE id = %s", (task_id,))
+    payload = (task or {}).get("payload") or {}
+    live = payload.get("draft_results") or {}
+    done += sum(outcome == "written" for outcome in live.values())
+    return done, max(minimum_total, total + len(live), len(payload.get("draft_requests") or {}))

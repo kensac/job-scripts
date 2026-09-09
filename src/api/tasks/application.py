@@ -251,6 +251,11 @@ def auto_draft(user_id: int) -> bool:
     return (row or {}).get("v") != "false"
 
 
+def _set_draft_progress(task_id: int, label: str, minimum_total: int) -> None:
+    done, total = application_writes.progress_counts(task_id, minimum_total)
+    set_progress(task_id, done, total, label + application_writes.outcome_note(task_id))
+
+
 async def _batch_drafts(
     task_id: int, user_id: int, specs: list, kind: str, *, resumed: bool
 ) -> int:
@@ -348,7 +353,7 @@ async def draft_rows(
         # The fleet's sanctioned writer, overridable from the task screen like
         # any other step; the tokens are the person's, booked below, so the
         # standard caller is told not to book them against the fleet as well.
-        set_progress(task_id, 0, total, f"{total} draft(s) submitted (half price)")
+        _set_draft_progress(task_id, f"{total} draft(s) submitted (half price)", total)
         done = await _batch_drafts(task_id, user_id, specs, kind, resumed=False)
     else:
         # A person's own key has no batch endpoint we can bill to them; one
@@ -366,7 +371,7 @@ async def draft_rows(
                 kind,
                 batched=False,
             )
-            set_progress(task_id, done, total, "drafting")
+            _set_draft_progress(task_id, "drafting", total)
     return done
 
 
@@ -376,10 +381,8 @@ async def handle_application_draft(task_id: int, payload: dict[str, Any]) -> Non
     the posting, drafted before or not."""
     user_id, job_id = payload["user_id"], payload["job_id"]
     if has_batch_work(task_id):
-        done = await draft_rows(task_id, user_id, [], payload.get("resume_id"))
-        set_progress(
-            task_id, done, done, "drafts collected" + application_writes.outcome_note(task_id)
-        )
+        await draft_rows(task_id, user_id, [], payload.get("resume_id"))
+        _set_draft_progress(task_id, "drafts collected", 0)
         return
     job = db.query_one("SELECT id, url, company, title FROM jobs WHERE id = %s", (job_id,))
     if not job:
@@ -408,10 +411,8 @@ async def handle_application_draft(task_id: int, payload: dict[str, Any]) -> Non
     if not rows:
         set_progress(task_id, 0, 0, "no questions to answer")
         return
-    done = await draft_rows(task_id, user_id, rows, payload.get("resume_id"))
-    set_progress(
-        task_id, done, len(rows), "drafts written" + application_writes.outcome_note(task_id)
-    )
+    await draft_rows(task_id, user_id, rows, payload.get("resume_id"))
+    _set_draft_progress(task_id, "drafts written", len(rows))
 
 
 async def handle_application_sweep(task_id: int, payload: dict[str, Any]) -> None:
@@ -422,10 +423,8 @@ async def handle_application_sweep(task_id: int, payload: dict[str, Any]) -> Non
     draft in one batch. Nothing is re-drafted: the button does that."""
     user_id = payload["user_id"]
     if has_batch_work(task_id):
-        done = await draft_rows(task_id, user_id, [], kind="sweep")
-        set_progress(
-            task_id, done, done, "drafts collected" + application_writes.outcome_note(task_id)
-        )
+        await draft_rows(task_id, user_id, [], kind="sweep")
+        _set_draft_progress(task_id, "drafts collected", 0)
         return
     # One sweep per person at a time. A parked sweep frees its worker, so
     # the next hourly one was claimed while a manual full-board sweep sat on
@@ -536,10 +535,5 @@ async def handle_application_sweep(task_id: int, payload: dict[str, Any]) -> Non
     if not rows:
         set_progress(task_id, 0, 0, "nothing new to draft" + note)
         return
-    done = await draft_rows(task_id, user_id, rows, kind="sweep")
-    set_progress(
-        task_id,
-        done,
-        len(rows),
-        "drafts written ahead of need" + note + application_writes.outcome_note(task_id),
-    )
+    await draft_rows(task_id, user_id, rows, kind="sweep")
+    _set_draft_progress(task_id, "drafts written ahead of need" + note, len(rows))

@@ -306,7 +306,10 @@ def test_recorded_failed_live_result_is_not_submitted_again_on_task_retry(f):
 
 
 @pytest.mark.asyncio
-async def test_application_receipt_rolls_back_usage_and_answer_until_acknowledged(f, monkeypatch):
+@pytest.mark.parametrize("kind", ["application_draft", "application_sweep"])
+async def test_application_receipt_rolls_back_usage_and_answer_until_acknowledged(
+    f, monkeypatch, kind
+):
     from api import application_writes
     from core.batch import BatchSpec
 
@@ -314,7 +317,12 @@ async def test_application_receipt_rolls_back_usage_and_answer_until_acknowledge
     jid = f.make_job()
     application.ensure_answer_rows(uid, jid, [{"key": "why", "label": "Why us?"}])
     payload = {"user_id": uid, "job_id": jid}
-    tid = f.make_task("application_draft", payload, status="running")
+    tid = f.make_task(kind, payload, status="running")
+    handler = (
+        application.handle_application_draft
+        if kind == "application_draft"
+        else application.handle_application_sweep
+    )
     key = f"{jid}|why"
     request = application_writes.reserve_task(tid, uid, [{"job_id": jid, "key": "why"}])[key]
     f.make_batch_result(
@@ -333,15 +341,18 @@ async def test_application_receipt_rolls_back_usage_and_answer_until_acknowledge
 
     monkeypatch.setattr(db, "execute", fail_ack)
     with pytest.raises(RuntimeError, match="ack failed"):
-        await application.handle_application_draft(tid, payload)
+        await handler(tid, payload)
     assert db.query_one("SELECT count(*) AS n FROM api_usage")["n"] == 0
     assert db.query_one("SELECT draft FROM application_answers")["draft"] is None
     assert db.query_one("SELECT consumed_at FROM batch_result_receipts")["consumed_at"] is None
     monkeypatch.setattr(db, "execute", execute)
     for _ in range(2):
-        await application.handle_application_draft(tid, payload)
+        await handler(tid, payload)
     row = db.query_one("SELECT draft,turns FROM application_answers")
     assert row["draft"] == "Paid answer" and len(row["turns"]) == 1
     assert db.query_one("SELECT count(*) AS n FROM api_usage")["n"] == 1
     assert db.query_one("SELECT outcome FROM batch_result_receipts")["outcome"] == "written"
     assert "1 written" in application_writes.outcome_note(tid)
+
+    progress = db.query_one("SELECT progress FROM tasks WHERE id = %s", (tid,))["progress"]
+    assert progress["done"] == progress["total"] == 1
