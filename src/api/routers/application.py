@@ -166,10 +166,6 @@ def _job(user: AuthedUser, job_id: int) -> dict[str, Any]:
     return require_visible_job(user, job_id, "j.id, j.url, j.company, j.title")
 
 
-def _inflight(user_id: int, job_id: int) -> dict[str, Any] | None:
-    return task_admission.in_flight("application_draft", {"user_id": user_id, "job_id": job_id})
-
-
 def _answers(user_id: int, job_id: int) -> list[dict[str, Any]]:
     return db.query(
         f"SELECT {_ANSWER_COLS} FROM application_answers "
@@ -221,7 +217,9 @@ def get_application(job_id: int, user: AuthedUser = Depends(require_user)):
             "questions": len((form or {}).get("questions") or []),
         },
         "questions": list(answers.values()),
-        "task": _inflight(user.id, job_id),
+        "task": task_admission.in_flight(
+            "application_draft", {"user_id": user.id, "job_id": job_id}
+        ),
         "resumes": db.query(
             "SELECT id, name FROM user_resumes WHERE user_id = %s ORDER BY updated_at DESC",
             (user.id,),

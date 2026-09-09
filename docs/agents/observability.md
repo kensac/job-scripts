@@ -9,6 +9,24 @@ because the signals only make sense beside them.
 Tasks are claimed with row-level locking and skip-locked selection. A worker
 heartbeats while it holds a task.
 
+**Admission and claiming are separate contracts.** `api.task_admission`
+serializes application drafts, upload extraction and source pulls against a
+stable job or source row before checking for conflicting tasks. Its
+`in_flight` reader also supplies the application view. Filter runs use
+`api.filter_runs`, which locks the user row because single-filter and all-filter
+runs overlap. Route authorization stays with the caller; admission does not
+grant access to a subject.
+
+Interactive admission waits for pending, running, waiting and parked work.
+Scheduled ingestion blocks on pending work, may queue behind an hourly pull
+already running, and respects a longer source interval after running or
+successful work. Keep that policy in admission rather than copying a
+check-then-insert into a route or scheduler. Terminal tasks permit a new run;
+per-cycle dedupe keys still prevent repeating the same scheduled cycle.
+Cancellation remains an atomic transition from active states. Claiming and
+retry policy belong to `api.worker`; claim-aware writes and progress updates
+belong to `api.tasks.runtime`.
+
 **A worker claims only kinds its own image has a handler for.** A roll goes
 host by host, so for a minute an old image and a new one share the queue. A
 kind the new image added must wait for a host that can run it, rather than be

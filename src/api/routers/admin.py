@@ -644,10 +644,7 @@ def revoke_invite(pk: str, user: AuthedUser = Depends(require_admin)):
     return {"ok": True}
 
 
-# The statuses a task can be cancelled from: it holds a worker, a parent's
-# slot, or a parked batch. Anything else is already over.
-# Every status a task row can carry, in lifecycle order; served on the queue
-# envelope so the summary strip renders tones from data rather than a copy.
+# Preserve lifecycle order in queue metadata and cancellation validation.
 TASK_STATUSES = task_admission.TASK_STATUSES
 CANCELLABLE = tuple(status for status in TASK_STATUSES if status in task_admission.ACTIVE_STATUSES)
 
