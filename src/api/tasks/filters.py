@@ -153,7 +153,7 @@ async def _process_jobs(
             for t in pending:
                 t.cancel()
             raise PermissionError(f"BUDGET_EXCEEDED after {done}/{total} checks")
-    set_progress(task_id, *progress_counts(task_id), flt["name"])
+    set_progress(task_id, total, total, flt["name"])
     if parent_id:
         # Each chunk publishes what it decided. The parent materializes again
         # when it finalizes, but a parent waits on its slowest chunk, and a

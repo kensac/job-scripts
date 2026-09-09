@@ -109,7 +109,7 @@ def test_repark_only_when_ids_remain():
 @pytest.mark.asyncio
 async def test_worker_parks_a_handler_that_returns_with_batches_left(monkeypatch):
     async def partial(task_id, payload):
-        runtime._set_batch_ids(task_id, ["b"])
+        runtime._record_batch_ids(task_id, ["b"])
 
     monkeypatch.setitem(worker.HANDLERS, "test_kind", partial)
     tid = runtime.enqueue("test_kind", {})
