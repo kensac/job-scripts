@@ -12,7 +12,17 @@ from urllib.parse import urlsplit
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, ConfigDict, Field
 
-from api import ai, ai_access, apply, budget, db, events, extension_policy, telemetry
+from api import (
+    ai,
+    ai_access,
+    apply,
+    budget,
+    db,
+    events,
+    extension_policy,
+    extension_recipes,
+    telemetry,
+)
 from api.auth import AuthedUser, require_user
 from api.routers.jobs import _write_board_row
 from api.tasks import application as drafts
@@ -43,6 +53,33 @@ def extension_config(
             503, "INVALID_EXTENSION_POLICY", "extension configuration is unavailable"
         ) from exc
     return extension_policy.resolve(policy, adapter)
+
+
+@router.get("/extension/recipe", response_model=extension_recipes.RecipeConfig)
+def extension_recipe(
+    response: Response,
+    adapter: extension_policy.AdapterId,
+    schema_version: int = Query(ge=1),
+):
+    """The published table for a config-driven reader, or 404 when only the
+    bundled copy exists. Same public terms as /extension/config: no profile,
+    answers or credentials; the extension pins a revision per fill and keeps
+    the bundled table as its fallback (api.extension_recipes)."""
+    response.headers["Cache-Control"] = "no-store"
+    if schema_version != 1:
+        raise _bad(409, "UNSUPPORTED_CONFIG_SCHEMA", "this configuration schema is not supported")
+    try:
+        policy = extension_policy.ExtensionPolicy.model_validate(db.get_config("extension_policy"))
+    except ValueError as exc:
+        raise _bad(
+            503, "INVALID_EXTENSION_POLICY", "extension configuration is unavailable"
+        ) from exc
+    config = extension_recipes.config_for(adapter, policy.max_age_seconds)
+    if config is None:
+        raise _bad(
+            404, "NO_RECIPE", "no published recipe for this adapter; the bundled table applies"
+        )
+    return config
 
 
 def _bad(status: int, code: str, message: str) -> HTTPException:
