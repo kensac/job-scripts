@@ -43,7 +43,7 @@ class ViewPatch(BaseModel):
     name: ViewName | SkipJsonSchema[None] = None
     state: dict[str, Any] | SkipJsonSchema[None] = None
     is_default: bool | SkipJsonSchema[None] = None
-    position: int | SkipJsonSchema[None] = Field(default=None, ge=0)
+    position: Annotated[int, Field(ge=0)] | SkipJsonSchema[None] = None
 
     @field_validator("name", "state", "is_default", "position", mode="before")
     @classmethod
