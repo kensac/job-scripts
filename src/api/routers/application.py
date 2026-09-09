@@ -318,7 +318,8 @@ def put_answer(job_id: int, key: str, body: AnswerPut, user: AuthedUser = Depend
     row = db.query_one(
         f"""
         UPDATE application_answers
-           SET draft = NULLIF(%s, ''), turns = turns || %s::jsonb, updated_at = now()
+           SET draft = NULLIF(%s, ''), turns = turns || %s::jsonb, updated_at = now(),
+               draft_revision = draft_revision + 1
          WHERE user_id = %s AND job_id = %s AND key = %s
         RETURNING {_ANSWER_COLS}
         """,
@@ -357,6 +358,13 @@ async def refine_answer(
     if not resume:
         raise _bad(400, "NO_RESUME", "add a resume under settings first")
     cfg = ai_access.require_config(user)
+    row = db.query_one(
+        "UPDATE application_answers SET draft_revision = draft_revision + 1 "
+        "WHERE user_id = %s AND job_id = %s AND key = %s RETURNING *",
+        (user.id, job_id, key),
+    )
+    if row is None:
+        raise _bad(404, "NOT_FOUND", "unknown question")
     parsed, usage = await ai.parse(
         cfg,
         drafts.instructions(drafts.writing_style(user.id)),
@@ -372,15 +380,7 @@ async def refine_answer(
         ),
         drafts.Draft,
     )
-    budget.record_usage(
-        user.id,
-        cfg.key_source,
-        drafts.PURPOSE,
-        cfg.model,
-        usage.get("prompt_tokens", 0),
-        usage.get("completion_tokens", 0),
-        usage.get("total_tokens", 0),
-    )
+    budget.record_tokens(user.id, cfg.key_source, drafts.PURPOSE, cfg.model, usage)
     if parsed is None:
         raise _bad(502, "NO_ANSWER", "the model returned no usable answer; try again")
     turns = [
@@ -390,10 +390,15 @@ async def refine_answer(
     updated = db.query_one(
         f"""
         UPDATE application_answers
-           SET draft = %s, model = %s, turns = turns || %s::jsonb, updated_at = now()
-         WHERE user_id = %s AND job_id = %s AND key = %s
+           SET draft = %s, model = %s, turns = turns || %s::jsonb, updated_at = now(),
+               draft_revision = draft_revision + 1
+         WHERE user_id = %s AND job_id = %s AND key = %s AND draft_revision = %s
         RETURNING {_ANSWER_COLS}
         """,
-        (parsed.answer, cfg.model, json.dumps(turns), user.id, job_id, key),
+        (parsed.answer, cfg.model, json.dumps(turns), user.id, job_id, key, row["draft_revision"]),
     )
+    if updated is None:
+        raise _bad(
+            409, "ANSWER_CHANGED", "the answer changed while refining; your newer answer was kept"
+        )
     return updated

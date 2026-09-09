@@ -17,14 +17,12 @@ re-drafted now.
 
 from __future__ import annotations
 
-import datetime
-import json
 import logging
 from typing import Any
 
 from pydantic import BaseModel
 
-from api import ai, budget, db, hosts, visibility
+from api import ai, application_writes, db, hosts, visibility
 from api.tasks.runtime import (
     Deferred,
     load_config,
@@ -39,7 +37,7 @@ from core.store import get_content
 
 logger = logging.getLogger("jobtracker_worker")
 
-PURPOSE = "application"
+PURPOSE = application_writes.PURPOSE
 IN_FLIGHT = ("pending", "running", "awaiting_batch", "waiting")
 
 # What a stranger's answer sounds like when nobody has said otherwise. A
@@ -190,17 +188,39 @@ def sync_form_questions(url: str, *, refresh: bool = False) -> list[dict[str, An
     return read_form(url)
 
 
-def ensure_answer_rows(user_id: int, job_id: int, questions: list[dict[str, Any]]) -> None:
-    for q in questions:
-        db.execute(
-            """
-            INSERT INTO application_answers (user_id, job_id, key, question, source, required)
-            VALUES (%s, %s, %s, %s, 'form', %s)
-            ON CONFLICT (user_id, job_id, key) DO UPDATE
-                SET question = EXCLUDED.question, required = EXCLUDED.required
-            """,
-            (user_id, job_id, q["key"], q["label"], bool(q.get("required"))),
+def ensure_answer_rows(
+    user_id: int, job_id: int, questions: list[dict[str, Any]], *, task_id: int | None = None
+) -> None:
+    with db.transaction():
+        # Admission locks job -> task -> answers. Inserts also acquire a job
+        # foreign-key lock, so take that first rather than after answer locks.
+        db.query_one("SELECT id FROM jobs WHERE id = %s FOR KEY SHARE", (job_id,))
+        task = (
+            db.query_one("SELECT payload FROM tasks WHERE id = %s FOR UPDATE", (task_id,))
+            if task_id
+            else None
         )
+        requests = (task["payload"].get("draft_requests") or {}) if task else {}
+        db.query(
+            "SELECT id FROM application_answers WHERE user_id = %s AND job_id = %s ORDER BY id FOR UPDATE",
+            (user_id, job_id),
+        )
+        for q in sorted(questions, key=lambda value: value["key"]):
+            owned_revision = requests.get(f"{job_id}|{q['key']}", {}).get("revision")
+            db.execute(
+                """
+                INSERT INTO application_answers (user_id, job_id, key, question, source, required)
+                VALUES (%s, %s, %s, %s, 'form', %s)
+                ON CONFLICT (user_id, job_id, key) DO UPDATE
+                    SET question = EXCLUDED.question, required = EXCLUDED.required,
+                        draft_revision = CASE
+                            WHEN application_answers.question IS DISTINCT FROM EXCLUDED.question
+                             AND application_answers.draft_revision IS DISTINCT FROM %s
+                            THEN application_answers.draft_revision + 1
+                            ELSE application_answers.draft_revision END
+                """,
+                (user_id, job_id, q["key"], q["label"], bool(q.get("required")), owned_revision),
+            )
 
 
 def resume_text(user_id: int, resume_id: int | None) -> str | None:
@@ -230,26 +250,8 @@ def auto_draft(user_id: int) -> bool:
     return (row or {}).get("v") != "false"
 
 
-def store_draft(
-    user_id: int, job_id: int, key: str, answer: str, model: str | None, kind: str = "draft"
-) -> None:
-    turn = {
-        "role": "assistant",
-        "kind": kind,
-        "text": answer,
-        "at": datetime.datetime.now(datetime.UTC).isoformat(),
-    }
-    db.execute(
-        """
-        UPDATE application_answers
-           SET draft = %s, model = %s, turns = turns || %s::jsonb, updated_at = now()
-         WHERE user_id = %s AND job_id = %s AND key = %s
-        """,
-        (answer, model, json.dumps([turn]), user_id, job_id, key),
-    )
-
-
 def _record_draft(
+    task_id: int,
     user_id: int,
     custom_id: str,
     parsed: Draft | None,
@@ -260,12 +262,17 @@ def _record_draft(
     *,
     batched: bool,
 ) -> int:
-    budget.record_tokens(user_id, key_source, PURPOSE, model, usage, batched=batched)
-    if parsed is None:
-        return 0
-    job_id, _, key = custom_id.partition("|")
-    store_draft(user_id, int(job_id), key, parsed.answer, model, kind)
-    return 1
+    return application_writes.record_result(
+        task_id,
+        user_id,
+        custom_id,
+        parsed.answer if parsed is not None else None,
+        usage,
+        key_source,
+        model,
+        kind,
+        batched=batched,
+    )
 
 
 async def _batch_drafts(
@@ -284,6 +291,7 @@ async def _batch_drafts(
             except ValueError:
                 logger.warning(f"application draft {key} for job {job_id}: unparsable")
         done += _record_draft(
+            task_id,
             user_id,
             custom_id,
             parsed,
@@ -307,7 +315,7 @@ async def draft_rows(
     question), for one person, from their resume and style: one half-price
     batch on the fleet's key, or live one at a time on their own. Returns
     how many drafts were written. Safe to run again from the top: a resumed
-    task collects the batch it parked on and overwrites."""
+    task collects its original results and applies only its own generations."""
     from openai.lib._pydantic import to_strict_json_schema
 
     from core.batch import BatchSpec
@@ -321,7 +329,10 @@ async def draft_rows(
     schema = to_strict_json_schema(Draft)
     postings: dict[str, str] = {}
     specs = []
+    reserved = application_writes.reserve_task(task_id, user_id, rows)
     for r in rows:
+        if f"{r['job_id']}|{r['key']}" not in reserved:
+            continue
         if r["url"] not in postings:
             postings[r["url"]] = get_content(r["url"]) or ""
         specs.append(
@@ -334,6 +345,8 @@ async def draft_rows(
                 schema,
             )
         )
+    if not specs:
+        return 0
     _, cfg = load_config(user_id)
     total = len(specs)
     done = 0
@@ -349,6 +362,7 @@ async def draft_rows(
         for spec in specs:
             parsed, usage = await ai.parse(cfg, spec.instructions, spec.input, Draft)
             done += _record_draft(
+                task_id,
                 user_id,
                 spec.custom_id,
                 parsed,
@@ -369,7 +383,9 @@ async def handle_application_draft(task_id: int, payload: dict[str, Any]) -> Non
     user_id, job_id = payload["user_id"], payload["job_id"]
     if pending_batch_ids(task_id):
         done = await draft_rows(task_id, user_id, [], payload.get("resume_id"))
-        set_progress(task_id, done, done, "drafts collected")
+        set_progress(
+            task_id, done, done, "drafts collected" + application_writes.outcome_note(task_id)
+        )
         return
     job = db.query_one("SELECT id, url, company, title FROM jobs WHERE id = %s", (job_id,))
     if not job:
@@ -385,6 +401,7 @@ async def handle_application_draft(task_id: int, payload: dict[str, Any]) -> Non
             user_id,
             job_id,
             [q for q in questions if q.get("kind") == "long" or q["key"] in (keys or [])],
+            task_id=task_id,
         )
     rows = db.query(
         "SELECT a.job_id, a.key, a.question, j.url, j.company, j.title "
@@ -398,7 +415,9 @@ async def handle_application_draft(task_id: int, payload: dict[str, Any]) -> Non
         set_progress(task_id, 0, 0, "no questions to answer")
         return
     done = await draft_rows(task_id, user_id, rows, payload.get("resume_id"))
-    set_progress(task_id, done, len(rows), "drafts written")
+    set_progress(
+        task_id, done, len(rows), "drafts written" + application_writes.outcome_note(task_id)
+    )
 
 
 async def handle_application_sweep(task_id: int, payload: dict[str, Any]) -> None:
@@ -410,7 +429,9 @@ async def handle_application_sweep(task_id: int, payload: dict[str, Any]) -> Non
     user_id = payload["user_id"]
     if pending_batch_ids(task_id):
         done = await draft_rows(task_id, user_id, [], kind="sweep")
-        set_progress(task_id, done, done, "drafts collected")
+        set_progress(
+            task_id, done, done, "drafts collected" + application_writes.outcome_note(task_id)
+        )
         return
     # One sweep per person at a time. A parked sweep frees its worker, so
     # the next hourly one was claimed while a manual full-board sweep sat on
@@ -522,4 +543,9 @@ async def handle_application_sweep(task_id: int, payload: dict[str, Any]) -> Non
         set_progress(task_id, 0, 0, "nothing new to draft" + note)
         return
     done = await draft_rows(task_id, user_id, rows, kind="sweep")
-    set_progress(task_id, done, len(rows), "drafts written ahead of need" + note)
+    set_progress(
+        task_id,
+        done,
+        len(rows),
+        "drafts written ahead of need" + note + application_writes.outcome_note(task_id),
+    )

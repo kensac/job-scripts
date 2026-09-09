@@ -91,6 +91,10 @@ def enqueue(
             "ON CONFLICT (dedupe_key) DO NOTHING RETURNING id",
             (kind, db.jsonb({**payload, **subject}), dedupe_key),
         )
+        if row and kind == "application_draft":
+            from api.application_writes import reserve_task
+
+            reserve_task(row["id"], subject["user_id"])
     if row:
         events.publish_task(row["id"])
     return Admission(task_id=row["id"] if row else None)

@@ -264,6 +264,7 @@ class ApplicationAnswer(Base):
     question: Mapped[str] = mapped_column(Text)
     source: Mapped[str] = mapped_column(Text, server_default=text("'form'"))
     required: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    draft_revision: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
     draft: Mapped[str | None] = mapped_column(Text)
     turns: Mapped[Any] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
     model: Mapped[str | None] = mapped_column(Text)
