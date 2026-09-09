@@ -18,6 +18,12 @@ def csv(value: str | list[str] | None) -> list[str]:
     return [v.strip() for v in value.split(",") if v.strip()]
 
 
+def csv_with_scalar(values: str | None, scalar: str | None) -> list[str]:
+    # Legacy scalar filters accept arbitrary stored strings, including commas
+    # and surrounding spaces. Only the explicit set parameter is split.
+    return list(dict.fromkeys(csv(values) + ([scalar] if scalar else [])))
+
+
 def applied(**lists: list[str]) -> dict[str, list[str]]:
     """The `filters` echo: only the filters that narrowed anything."""
     return {key: values for key, values in lists.items() if values}

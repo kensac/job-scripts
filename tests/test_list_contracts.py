@@ -112,3 +112,103 @@ def test_query_sort_uses_secondary_key(client, admin_headers):
     ).json()
     assert [row["id"] for row in body["rows"]] == ids
     assert body["sorts"] == [{"key": "check_type", "dir": "asc"}, {"key": "id", "dir": "asc"}]
+
+
+def test_board_set_filters_scope_rows_total_and_ats_facets(client, user_headers, f):
+    uid = db.query_one("SELECT id FROM users WHERE sub = 'test-user'")["id"]
+    examples = [
+        ("a", "greenhouse", "applied"),
+        ("b", "lever", "interview"),
+        ("a", "ashby", "applied"),
+        ("excluded", "lever", "applied"),
+        ("a", "lever", "rejected"),
+    ]
+    ids = []
+    for index, (source, ats, status) in enumerate(examples):
+        hosts = {
+            "greenhouse": "boards.greenhouse.io",
+            "lever": "jobs.lever.co",
+            "ashby": "jobs.ashbyhq.com",
+        }
+        job_id = f.make_job(
+            url=f"https://{hosts[ats]}/set-contract/{index}", source=source, uploaded_by=uid
+        )
+        db.execute(
+            "INSERT INTO user_jobs(user_id,job_id,status) VALUES (%s,%s,%s)", (uid, job_id, status)
+        )
+        ids.append(job_id)
+    response = client.get(
+        "/v1/user/jobs",
+        params={
+            "statuses": " applied,interview ",
+            "sources": "a,b",
+            "ats": " GREENHOUSE,lever ",
+            "with_total": True,
+            "with_facets": True,
+            "limit": 1,
+        },
+        headers=user_headers,
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total"] == 2 and body["has_more"]
+    assert body["rows"][0]["job_id"] in ids[:2]
+    assert body["filters"] == {
+        "status": ["applied", "interview"],
+        "source": ["a", "b"],
+        "ats": ["greenhouse", "lever"],
+    }
+    assert {row["ats"]: row["count"] for row in body["facets"]["ats"]} == {
+        "greenhouse": 1,
+        "lever": 1,
+        "ashby": 1,
+    }
+
+
+def test_board_legacy_statuses_alias_merges_into_canonical_echo(client, user_headers, f):
+    from api.routers.jobs import NOT_APPLIED
+
+    uid = db.query_one("SELECT id FROM users WHERE sub = 'test-user'")["id"]
+    jobs = [f.make_job(uploaded_by=uid) for _ in range(3)]
+    for job_id, status in zip(jobs, ["applied", None, "rejected"], strict=True):
+        db.execute(
+            "INSERT INTO user_jobs(user_id,job_id,status) VALUES (%s,%s,%s)", (uid, job_id, status)
+        )
+    body = client.get(
+        "/v1/user/jobs",
+        params={"status": "applied", "statuses": f"applied,{NOT_APPLIED}", "with_total": True},
+        headers=user_headers,
+    ).json()
+    assert {row["job_id"] for row in body["rows"]} == set(jobs[:2])
+    assert body["total"] == 2
+    assert body["filters"] == {"status": ["applied", NOT_APPLIED]}
+
+
+def test_board_exact_scalar_filters_preserve_commas_alongside_sets(client, user_headers, f):
+    uid = db.query_one("SELECT id FROM users WHERE sub = 'test-user'")["id"]
+    ids = []
+    for source, status in [
+        ("Team, Inc", "Review, later"),
+        ("other", "applied"),
+        ("Team", "Review"),
+    ]:
+        job = f.make_job(uploaded_by=uid, source=source)
+        db.execute(
+            "INSERT INTO user_jobs(user_id,job_id,status) VALUES (%s,%s,%s)", (uid, job, status)
+        )
+        ids.append(job)
+    body = client.get(
+        "/v1/user/jobs",
+        params={
+            "source": "Team, Inc",
+            "sources": "other",
+            "status": "Review, later",
+            "statuses": "applied",
+        },
+        headers=user_headers,
+    ).json()
+    assert {row["job_id"] for row in body["rows"]} == set(ids[:2])
+    assert body["filters"] == {
+        "source": ["other", "Team, Inc"],
+        "status": ["applied", "Review, later"],
+    }
