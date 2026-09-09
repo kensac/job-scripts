@@ -12,7 +12,7 @@ from urllib.parse import urlsplit
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from api import ai, apply, budget, db, events, telemetry
+from api import ai, ai_access, apply, budget, db, events, telemetry
 from api.auth import AuthedUser, require_user
 from api.routers.jobs import _write_board_row
 from api.tasks import application as drafts
@@ -325,13 +325,7 @@ async def suggest(body: SuggestBody, user: AuthedUser = Depends(require_user)):
         return {"answers": {}, "skipped": skipped, "model": None}
     profile = apply.load_profile(user.id)
     resume = drafts.resume_text(user.id, profile.default_resume_id) or ""
-    ent = budget.get_entitlement(user)
-    try:
-        cfg = budget.resolve_ai_config(user.id, ent)
-    except PermissionError as exc:
-        raise _bad(402, "BUDGET_EXCEEDED", "weekly budget spent") from exc
-    except LookupError as exc:
-        raise _bad(402, "NO_API_KEY", "no key to draft with") from exc
+    cfg = ai_access.require_config(user)
     job = (
         db.query_one("SELECT company, title FROM jobs WHERE id = %s", (body.job_id,))
         if body.job_id

@@ -3,7 +3,14 @@ flight, and the view that owns the button says so from server state."""
 
 from __future__ import annotations
 
+import pytest
+
 from api import db
+
+
+@pytest.fixture(autouse=True)
+def _available_owner_key(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-owner-test")
 
 
 def _filter(client, headers, name="strict"):

@@ -240,15 +240,24 @@ def _effective_model(user: AuthedUser) -> dict:
     """
     try:
         cfg = budget.resolve_ai_config(user.id, budget.get_entitlement(user))
-    except (LookupError, PermissionError) as exc:
+    except budget.AIAccessError as exc:
         # No model, or out of budget. Both are real answers about what will
         # run - nothing - and neither is a substitution.
-        return {"effective_model": None, "unavailable_reason": type(exc).__name__}
+        return {
+            "effective_model": None,
+            "unavailable_reason": "PermissionError"
+            if isinstance(exc, PermissionError)
+            else "LookupError",
+            "unavailable_code": exc.reason,
+            "unavailable_message": exc.message,
+        }
     return {
         "effective_model": cfg.model,
         "substituted_from": cfg.substituted_from,
         "substitution_reason": cfg.substitution_reason,
         "unavailable_reason": None,
+        "unavailable_code": None,
+        "unavailable_message": None,
     }
 
 

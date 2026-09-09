@@ -7,6 +7,11 @@ from psycopg.errors import UniqueViolation
 from api import db
 
 
+@pytest.fixture(autouse=True)
+def _available_owner_key(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-owner-test")
+
+
 def test_database_refuses_multiple_enabled_filters(f):
     uid = f.make_user()
     f.make_filter(uid, name="first", enabled=True)

@@ -18,7 +18,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from api import ai, budget, db, events
+from api import ai, ai_access, budget, db, events
 from api.auth import AuthedUser, require_user
 from api.job_access import require_visible_job
 from api.tasks import application as drafts
@@ -387,13 +387,7 @@ async def refine_answer(
     resume = drafts.resume_text(user.id, body.resume_id)
     if not resume:
         raise _bad(400, "NO_RESUME", "add a resume under settings first")
-    ent = budget.get_entitlement(user)
-    try:
-        cfg = budget.resolve_ai_config(user.id, ent)
-    except PermissionError as exc:
-        raise _bad(402, "BUDGET_EXCEEDED", "weekly budget spent") from exc
-    except LookupError as exc:
-        raise _bad(402, "NO_API_KEY", "no key to draft with") from exc
+    cfg = ai_access.require_config(user)
     parsed, usage = await ai.parse(
         cfg,
         drafts.instructions(drafts.writing_style(user.id)),
