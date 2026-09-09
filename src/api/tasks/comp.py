@@ -148,6 +148,7 @@ async def handle_extract_comp(task_id: int, payload: dict[str, Any]) -> None:
         FROM jobs j
         {CONTENT_LATERAL.format(url="j.url", columns="id, input_content")}
         WHERE (NOT j.comp_extracted
+               OR (j.comp_content_row_id IS NOT NULL AND j.comp_content_row_id <> q.id)
                OR (j.comp_period IS NULL AND (j.comp_min IS NOT NULL OR j.comp_max IS NOT NULL)))
           AND j.active
           AND {AI_ELIGIBLE_JOB.format(job="j")}
@@ -215,16 +216,32 @@ async def handle_extract_comp(task_id: int, payload: dict[str, Any]) -> None:
                     logger.warning(f"comp parse failed for {url}")
             if parsed_ok:
                 written = db.execute_count(
-                    "UPDATE jobs SET comp_min = %s, comp_max = %s, comp_text = %s, "
+                    "UPDATE jobs j SET comp_min = %s, comp_max = %s, comp_text = %s, "
                     "comp_period = %s, comp_currency = %s, comp_basis = %s, "
-                    "comp_extracted = TRUE WHERE id = %s",
-                    (comp_min, comp_max, comp_text, comp_period, comp_currency, comp_basis, job_id),
+                    "comp_extracted = TRUE, comp_content_row_id = %s "
+                    "FROM (VALUES (%s::text)) AS page(url) "
+                    + CONTENT_LATERAL.format(url="page.url", columns="id")
+                    + " WHERE j.id = %s AND j.url = page.url AND q.id = %s",
+                    (
+                        comp_min,
+                        comp_max,
+                        comp_text,
+                        comp_period,
+                        comp_currency,
+                        comp_basis,
+                        context["content_row_id"],
+                        url,
+                        job_id,
+                        context["content_row_id"],
+                    ),
                 )
             receipt.outcome = (
                 "written"
                 if parsed_ok and written
                 else "failed"
                 if not parsed_ok
+                else "superseded"
+                if db.query_one("SELECT id FROM jobs WHERE id = %s", (job_id,))
                 else "missing_subject"
             )
             done += int(parsed_ok and bool(written))

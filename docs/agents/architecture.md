@@ -134,3 +134,12 @@ fresh copy:
   would drift, and the first one already had: an inner join against
   `user_jobs` silenced 947 of 1,159 proposals by never forming the question for
   applications that have no board row.
+
+## Compensation source provenance
+
+`jobs.comp_content_row_id` records the exact cached content used by a successful
+compensation extraction. Writes verify that source in the update statement;
+subsequent content changes make known older generations eligible again. A null
+source is unknown legacy provenance, not proof that the compensation is current.
+It does not itself trigger extraction, and must not be backfilled by guessing
+from timestamps. Existing unextracted and missing-period repair rules still apply.
