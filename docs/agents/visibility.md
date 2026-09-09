@@ -65,7 +65,10 @@ and 30 at most; a wider value is refused at the write (400 `MAX_AGE_DAYS`)
 by `PUT /user/settings`, and every non-admin row was set to 30 on
 2026-09-08. Admins (the `JOBTRACKER_ADMIN_GROUPS` groups) keep the full
 range. Checked at the write only, by Kanishk's choice; a stored value is
-what applies.
+what applies. `GET /user/usage` carries both caps as `limits`
+(`enabled_filters`, `max_age_days`, null for an admin) beside the weekly
+allowance, so the Usage page states every limit in one place instead of
+each surfacing only as a refusal.
 
 **A run may go past the shared cap without the cap moving.** `POST
 /admin/filters/run` `{user_id, filter_id?, ignore_budget}` queues a

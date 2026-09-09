@@ -23,6 +23,12 @@ def _grants(user: AuthedUser) -> dict:
         "has_byo_key": ent.has_byo_key,
         "key_source": ent.key_source,
         "owner_key_models": budget.owner_allowed_models(user.groups) if ent.owner_key else [],
+        # The other two caps a person runs under, so the Usage page states
+        # every limit in one place rather than each surfacing as a refusal.
+        "limits": {
+            "enabled_filters": 1,
+            "max_age_days": None if _is_admin(user.groups) else MAX_AGE_CAP_DAYS,
+        },
     }
 
 

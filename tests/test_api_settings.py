@@ -358,3 +358,13 @@ def test_a_non_admin_keeps_postings_at_most_30_days_old(client, user_headers, ad
         "/v1/user/settings", json={"criteria": {"max_age_days": 90}}, headers=admin_headers
     )
     assert admin.status_code == 200 and admin.json()["criteria"]["max_age_days"] == 90
+
+
+def test_usage_states_the_limits_a_person_runs_under(client, user_headers, admin_headers):
+    """The Usage page says every cap in one place: the weekly allowance it
+    already had, one enabled filter, and the 30-day window for a non-admin
+    (Kanishk, 2026-09-09). An admin has no age cap, so the field is null."""
+    mine = client.get("/v1/user/usage", headers=user_headers).json()["limits"]
+    assert mine == {"enabled_filters": 1, "max_age_days": 30}
+    theirs = client.get("/v1/user/usage", headers=admin_headers).json()["limits"]
+    assert theirs == {"enabled_filters": 1, "max_age_days": None}
