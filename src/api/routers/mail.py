@@ -18,7 +18,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
-from api import db, mail_match, mail_pipeline, rates, scoping
+from api import db, mail_match, mail_pipeline, pagination, rates, scoping, sorting
 from api import params as params_
 from api.auth import AuthedUser, require_user
 from api.routers import resolve
@@ -175,13 +175,11 @@ def list_mail(
         classified=classified,
         user_ids=ids,
     )
-    page = max(1, page)
-    page_size = max(1, min(page_size, 200))
+    paging = pagination.Page.from_params(page, page_size, maximum=200)
     total = db.query_one(
         f"SELECT COUNT(*) AS c FROM email_messages m {_CURRENT} WHERE TRUE {where}", params
     )
-    order = _SORTABLE.get(sort, "m.sent_at")
-    direction = "ASC" if dir == "asc" else "DESC"
+    sorts = sorting.parse(sort, dir, _SORTABLE, "sent_at")
     rows = db.query(
         f"""
         SELECT m.id, m.provider_message_id, m.source, m.from_email, m.subject, m.sent_at,
@@ -193,20 +191,17 @@ def list_mail(
         {_CURRENT}
         LEFT JOIN applications a ON a.id = mt.application_id
         WHERE TRUE {where}
-        ORDER BY {order} {direction} NULLS LAST, m.id DESC
+        ORDER BY {sorting.clause(sorts, _SORTABLE)}, m.id DESC
         LIMIT %(limit)s OFFSET %(offset)s
         """,
-        {**params, "limit": page_size, "offset": (page - 1) * page_size},
+        {**params, "limit": paging.size, "offset": paging.offset},
     )
     n = total["c"] if total else 0
     return {
+        "sorts": sorts,
+        "sortable": sorted(_SORTABLE),
         "rows": rows,
-        "total": n,
-        "page": page,
-        "page_size": page_size,
-        # Stated, not derived: a client computing this from total against a
-        # corpus that grows between pages can walk forever.
-        "has_more": page * page_size < n,
+        **paging.metadata(n),
         "filters": params_.applied(
             kind=params_.csv(kind),
             method=params_.csv(method),

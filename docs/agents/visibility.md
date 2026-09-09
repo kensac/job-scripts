@@ -160,6 +160,11 @@ control from the former. An endpoint with no user dimension (fleet workers,
 the shared checks, source analytics) leaves `user` out of `filterable` rather
 than pretending.
 
+Page-number lists use `api.pagination.Page` for bounds, offsets and metadata.
+Rows, totals and summaries share the same selection; pagination never narrows
+a total or summary. The user board's legacy cursor orders by descending ID
+and echoes that actual order, regardless of requested sort.
+
 ## The ATS on the board
 
 Every board row carries `ats`, the applicant tracking system its url lives

@@ -63,6 +63,7 @@ _JOB_ROW = f"""
 
 # Whitelisted server-side sort columns (all NULLS LAST so empty cells sink).
 _SORTABLE = {
+    "id": "j.id",
     "added_at": "j.created_at",
     "date_posted": "j.date_posted",
     "date_applied": "uj.date_applied",
@@ -184,7 +185,11 @@ def list_jobs(
 ):
     limit = max(1, min(limit, 1000))
     offset = max(0, offset)
-    sorts = sorting.parse(sort, dir, _SORTABLE, "added_at")
+    sorts = (
+        [{"key": "id", "dir": "desc"}]
+        if cursor is not None
+        else sorting.parse(sort, dir, _SORTABLE, "added_at")
+    )
     extra = []
     params: dict = {"uid": user.id, "limit": limit + 1, "offset": offset}
     if not include_hidden:
@@ -242,16 +247,18 @@ def list_jobs(
     # One pass, not two: the total rides on the page as a window count over
     # the same filtered set, so a sort with with_total costs one board read
     # rather than the count query and then the page query.
-    columns = _JOB_ROW + (", COUNT(*) OVER () AS total_rows" if with_total else "")
+    count_on_page = with_total and cursor is None
+    columns = _JOB_ROW + (", COUNT(*) OVER () AS total_rows" if count_on_page else "")
     sql = visibility.FAST.format(columns=columns, extra=f"{filter_sql}\n{order}")
     rows = db.query(sql, params)
     if with_total:
-        if rows:
+        if count_on_page and rows:
             total = rows[0]["total_rows"]
             for r in rows:
                 r.pop("total_rows", None)
         else:
-            # A page past the end carries no row to read the count from.
+            # Cursor position is pagination, not a filter. Count the full
+            # selection in cursor mode and when an offset page has no rows.
             row = db.query_one(
                 visibility.FAST.format(columns="COUNT(*) AS c", extra=filter_sql), params
             )

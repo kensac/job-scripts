@@ -9,7 +9,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, JsonValue
 
-from api import ai, db, events, health, hosts, scoping, sorting
+from api import ai, db, events, health, hosts, pagination, scoping, sorting
 from api import params as params_
 from api.auth import AuthedUser, require_user
 from api.config import CONFIG_KEYS
@@ -236,26 +236,31 @@ def delete_preset(preset_id: int, user: AuthedUser = Depends(require_admin)):
 @router.get("/source-requests")
 def list_source_requests(
     status: str = "open",
+    users: str | None = Query(default=None, alias="user"),
     limit: int = 50,
     offset: int = 0,
     user: AuthedUser = Depends(require_admin),
 ):
     limit = max(1, min(limit, 200))
-    where = "" if status == "all" else "WHERE sr.status = %(status)s"
+    statuses = [] if status.strip() == "all" else params_.csv(status)
+    ids = scoping.user_ids(users)
+    clauses = ["sr.status = ANY(%(status)s)"] if statuses else []
+    if ids:
+        clauses.append(scoping.column("sr.user_id"))
+    where = "WHERE " + " AND ".join(clauses) if clauses else ""
+    selection = {"status": statuses, "user_ids": ids}
     rows = db.query(
         f"""
         SELECT sr.*, u.email AS requester_email, u.name AS requester_name
         FROM source_requests sr JOIN users u ON u.id = sr.user_id
         {where} ORDER BY sr.id DESC LIMIT %(limit)s OFFSET %(offset)s
         """,
-        {"status": status, "limit": limit + 1, "offset": max(0, offset)},
+        {**selection, "limit": limit + 1, "offset": max(0, offset)},
     )
-    # The badge on the Requests tab used to show the page size and read as
-    # the count; at 389 sources a queue of requests can exceed a page.
-    total = db.query_one(
-        f"SELECT count(*) AS n FROM source_requests sr {where}", {"status": status}
-    )
+    total = db.query_one(f"SELECT count(*) AS n FROM source_requests sr {where}", selection)
     return {
+        "filters": params_.applied(status=statuses, user=scoping.echo(ids)),
+        "filterable": ["status", "user"],
         "rows": rows[:limit],
         "has_more": len(rows) > limit,
         "total": total["n"] if total else 0,
@@ -310,8 +315,7 @@ def list_users(
     user: AuthedUser = Depends(require_admin),
 ):
     limit = max(1, min(limit, 200))
-    sort_col = _USERS_SORTABLE.get(sort, "u.last_seen_at")
-    direction = "ASC" if dir == "asc" else "DESC"
+    sorts = sorting.parse(sort, dir, _USERS_SORTABLE, "last_seen_at")
     # ids= is a bulk lookup: the queue page names workers' tasks by user and
     # was walking up to 40 pages to build that map. Ids that are not integers
     # are ignored rather than refused, so a malformed selection returns what
@@ -332,7 +336,7 @@ def list_users(
                            AND a.created_at > now() - interval '7 days'), 0) AS owner_tokens_week
         FROM users u LEFT JOIN user_settings s ON s.user_id = u.id
         {scope}
-        ORDER BY {sort_col} {direction} NULLS LAST, u.id LIMIT %(limit)s OFFSET %(offset)s
+        ORDER BY {sorting.clause(sorts, _USERS_SORTABLE)}, u.id LIMIT %(limit)s OFFSET %(offset)s
         """,
         {"limit": limit + 1, "offset": max(0, offset), "ids": wanted},
     )
@@ -342,8 +346,9 @@ def list_users(
         # Echoed and enumerated for the same reason as /admin/jobs: the page
         # renders the active sort without duplicating the default and never
         # has to guess the accepted keys.
-        "sort": sort if sort in _USERS_SORTABLE else "last_seen_at",
-        "dir": direction.lower(),
+        "sort": sorts[0]["key"],
+        "dir": sorts[0]["dir"],
+        "sorts": sorts,
         "sortable": sorted(_USERS_SORTABLE),
     }
 
@@ -481,6 +486,7 @@ def list_tasks(
     if ids:
         clauses.append(scoping.task())
         params["user_ids"] = ids
+    selection_where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     if before_id is not None:
         clauses.append("id < %(before_id)s")
         params["before_id"] = before_id
@@ -496,7 +502,7 @@ def list_tasks(
     )
     summary = db.query(
         f"SELECT kind, status, COUNT(*) AS count FROM tasks "
-        f"{'WHERE ' + scoping.task() if ids else ''} "
+        f"{selection_where} "
         "GROUP BY kind, status ORDER BY kind, status",
         params,
     )
@@ -1539,15 +1545,15 @@ def list_reports(
     page_size: int = 50,
     user: AuthedUser = Depends(require_admin),
 ):
-    page = max(1, page)
-    page_size = max(1, min(page_size, 200))
+    paging = pagination.Page.from_params(page, page_size, maximum=200)
     ids = scoping.user_ids(users)
-    clauses = [] if status == "all" else ["r.status = %(status)s"]
+    statuses = [] if status.strip() == "all" else params_.csv(status)
+    clauses = ["r.status = ANY(%(status)s)"] if statuses else []
     if ids:
         clauses.append(scoping.column("r.user_id"))
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     total_row = db.query_one(
-        f"SELECT COUNT(*) AS c FROM reports r {where}", {"status": status, "user_ids": ids}
+        f"SELECT COUNT(*) AS c FROM reports r {where}", {"status": statuses, "user_ids": ids}
     )
     rows = db.query(
         f"""
@@ -1566,25 +1572,20 @@ def list_reports(
         ORDER BY r.id DESC LIMIT %(limit)s OFFSET %(offset)s
         """,
         {
-            "status": status,
+            "status": statuses,
             "user_ids": ids,
-            "limit": page_size,
-            "offset": (page - 1) * page_size,
+            "limit": paging.size,
+            "offset": paging.offset,
         },
     )
     total = total_row["c"] if total_row else 0
     return {
         "rows": rows,
-        "total": total,
-        "page": page,
-        "page_size": page_size,
-        "has_more": page * page_size < total,
+        **paging.metadata(total),
         "report_kinds": report_kinds(),
         # The drawer offers "close this posting" only on a build that has it.
         "can_close_posting": True,
-        "filters": params_.applied(
-            status=[] if status in ("all", "") else [status], user=scoping.echo(ids)
-        ),
+        "filters": params_.applied(status=statuses, user=scoping.echo(ids)),
         "filterable": ["status", "user"],
     }
 
@@ -1803,23 +1804,21 @@ def list_queries(
                 "valid": [g.key for g in reason_taxonomy.GROUPS],
             },
         ) from None
-    page = max(1, page)
-    page_size = max(1, min(page_size, 500))
+    paging = pagination.Page.from_params(page, page_size, maximum=500)
     total_row = db.query_one(f"SELECT COUNT(*) AS c FROM ai_queries {where}", params)
-    sort_col = sort if sort in _SORTABLE else "id"
-    direction = "ASC" if dir == "asc" else "DESC"
+    sortable = {key: key for key in _SORTABLE}
+    sorts = sorting.parse(sort, dir, sortable, "id")
     rows = db.query(
         f"SELECT {_LIST_COLS} FROM ai_queries {where} "
-        f"ORDER BY {sort_col} {direction} LIMIT %(limit)s OFFSET %(offset)s",
-        {**params, "limit": page_size, "offset": (page - 1) * page_size},
+        f"ORDER BY {sorting.clause(sorts, sortable)}, id DESC LIMIT %(limit)s OFFSET %(offset)s",
+        {**params, "limit": paging.size, "offset": paging.offset},
     )
     total = total_row["c"] if total_row else 0
     return {
+        "sorts": sorts,
+        "sortable": sorted(sortable),
         "rows": rows,
-        "total": total,
-        "page": page,
-        "page_size": page_size,
-        "has_more": page * page_size < total,
+        **paging.metadata(total),
         "filters": params_.applied(
             check_type=params_.csv(check_type),
             status=params_.csv(status),
@@ -1894,8 +1893,7 @@ def list_jobs(
     page_size: int = 50,
     user: AuthedUser = Depends(require_admin),
 ):
-    page = max(1, page)
-    page_size = max(1, min(page_size, 500))
+    paging = pagination.Page.from_params(page, page_size, maximum=500)
     sub = ["url IS NOT NULL"]
     params: dict = {}
     wanted_sources = [s.strip() for s in (sources or "").split(",") if s.strip()]
@@ -1942,17 +1940,14 @@ def list_jobs(
     rows = db.query(
         f"{base} ORDER BY {sorting.clause(sorts, _JOBS_SORTABLE)}, url "
         "LIMIT %(limit)s OFFSET %(offset)s",
-        {**params, "limit": page_size, "offset": (page - 1) * page_size},
+        {**params, "limit": paging.size, "offset": paging.offset},
     )
     for r in rows:
         r["verdict"] = "rejected" if r["rejected"] > 0 else "passed" if r["passed"] > 0 else "other"
     total = total_row["c"] if total_row else 0
     return {
         "rows": rows,
-        "total": total,
-        "page": page,
-        "page_size": page_size,
-        "has_more": page * page_size < total,
+        **paging.metadata(total),
         # Echoed so the UI can render the active sort without duplicating the
         # default, and sortable so it never has to guess the accepted keys.
         "sort": sorts[0]["key"],
