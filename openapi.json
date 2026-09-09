@@ -6485,6 +6485,22 @@
             }
           },
           {
+            "name": "user",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "User"
+            }
+          },
+          {
             "name": "limit",
             "in": "query",
             "required": false,
@@ -8006,7 +8022,7 @@
       },
       "post": {
         "summary": "Trigger Ingest",
-        "description": "Off-cycle pull: enqueue ingest tasks now (no dedupe, runs regardless of\nthe hourly cycle). Omit sources to pull everything active.",
+        "description": "Queue an off-cycle pull for each active source without overlapping work.",
         "operationId": "trigger_ingest_v1_admin_ingest_post",
         "parameters": [
           {

@@ -73,3 +73,42 @@ def test_cursor_board_total_does_not_change_when_page_becomes_empty(client, user
         assert response.status_code == 200
         assert response.json()["total"] == 3
         assert response.json()["sorts"] == [{"key": "id", "dir": "desc"}]
+
+
+def test_mail_sort_uses_secondary_key(client, admin_headers, f):
+    uid = f.make_user()
+    ids = []
+    for key in ["a", "b"]:
+        ids.append(
+            db.query_one(
+                "INSERT INTO email_messages (user_id, provider_message_id, source, sent_at) "
+                "VALUES (%s, %s, 'gmail', '2025-01-01') RETURNING id",
+                (uid, key),
+            )["id"]
+        )
+    body = client.get(
+        "/v1/admin/mail",
+        params={"user": uid, "sort": "sent_at,id", "dir": "asc,asc"},
+        headers=admin_headers,
+    ).json()
+    assert [row["id"] for row in body["rows"]] == ids
+    assert body["sorts"] == [{"key": "sent_at", "dir": "asc"}, {"key": "id", "dir": "asc"}]
+
+
+def test_query_sort_uses_secondary_key(client, admin_headers):
+    ids = []
+    for status in ["passed", "rejected"]:
+        ids.append(
+            db.query_one(
+                "INSERT INTO ai_queries (url, check_type, status) "
+                "VALUES (%s, 'closed', %s) RETURNING id",
+                (f"https://sort.test/{status}", status),
+            )["id"]
+        )
+    body = client.get(
+        "/v1/admin/queries",
+        params={"sort": "check_type,id", "dir": "asc,asc"},
+        headers=admin_headers,
+    ).json()
+    assert [row["id"] for row in body["rows"]] == ids
+    assert body["sorts"] == [{"key": "check_type", "dir": "asc"}, {"key": "id", "dir": "asc"}]
