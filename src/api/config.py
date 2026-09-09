@@ -6,6 +6,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, PositiveInt, TypeAdapter
 
+from api.extension_policy import ExtensionPolicy
+
 logger = logging.getLogger("jobtracker_api")
 ALL_GROUPS = "*"
 
@@ -56,10 +58,17 @@ class ConfigKey:
             if len({column.colId for column in parsed}) != len(parsed):
                 raise ValueError("takes distinct column identifiers")
             return [column.model_dump(exclude_unset=True) for column in parsed]
-        return parsed
+        return self._adapter.dump_python(parsed, mode="json")
 
 
 CONFIG_KEYS: dict[str, ConfigKey] = {
+    "extension_policy": ConfigKey(
+        default=ExtensionPolicy().model_dump(mode="json"),
+        value_type=ExtensionPolicy,
+        help="Controls bundled extension features and disables adapters by reader ID. "
+        "One atomic policy; no scripts, selectors or navigation commands. "
+        "Requires an extension supporting configuration schema 1; older releases ignore it.",
+    ),
     "signups_enabled": ConfigKey(
         default=True, value_type=bool, help="Whether new accounts can be created."
     ),
