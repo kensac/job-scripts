@@ -17,12 +17,12 @@ stable job or source row before checking for conflicting tasks. Its
 runs overlap. Route authorization stays with the caller; admission does not
 grant access to a subject.
 
-Interactive admission waits for pending, running, waiting and parked work.
-Scheduled ingestion blocks on pending work, may queue behind an hourly pull
-already running, and respects a longer source interval after running or
-successful work. Keep that policy in admission rather than copying a
-check-then-insert into a route or scheduler. Terminal tasks permit a new run;
-per-cycle dedupe keys still prevent repeating the same scheduled cycle.
+Interactive admission returns a conflict for pending, running, waiting or
+parked work. Scheduled ingestion skips sources with pending work, may queue
+behind an hourly pull already running, and respects longer source intervals
+after running or successful work. Keep these checks in admission. Terminal
+status alone does not prevent a new run; intervals and per-cycle dedupe keys
+still apply.
 Cancellation remains an atomic transition from active states. Claiming and
 retry policy belong to `api.worker`; claim-aware writes and progress updates
 belong to `api.tasks.runtime`.
@@ -52,8 +52,9 @@ that worker; keep tasks short and let the queue carry the volume.
 
 ## Batched work
 
-Scheduled work batches at half price and parks rather than holding a worker.
-A human waiting is the only reason to call a model synchronously.
+Batched work parks rather than holding a worker. Scheduled filter and draft
+work can still run live when its key/provider path does not use batches.
+Price the actual transport with `core.pricing`, not a blanket batch discount.
 
 Filter request inputs live in `core.filters.build_custom_input`, shared by live,
 batch and experiment callers. `api.verdicts.record_ai_verdict` persists their
