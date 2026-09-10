@@ -4,6 +4,12 @@ const entries=[{key:'name',label:'Full name',kind:'text',rung:'profile',value:'A
 if(new URLSearchParams(location.search).has('reset'))sessionStorage.clear();
 const memory={get:async key=>({[key]:JSON.parse(sessionStorage.getItem(key)||'null')}),set:async values=>{for(const [k,v]of Object.entries(values))sessionStorage.setItem(k,JSON.stringify(v));},remove:async key=>sessionStorage.removeItem(key)};
 const request=async msg=>{
+ if(msg.kind==='policy'){
+  const on={allowed:true,reason:null};
+  if(new URLSearchParams(location.search).get('policy')==='off')return {ok:false,unavailable:true,reason:'NETWORK'};
+  return {ok:true,config:{schema_version:1,revision:'preview',adapter:'preview',max_age_seconds:300,features:{autofill:on,ai_suggestions:on,resume_upload:on,auto_advance:on}}};
+ }
+ if(msg.kind==='recipe')return {ok:false,unavailable:true,reason:'NOT_PUBLISHED'};
  if(msg.path==='user/settings')return {ok:true,json:{prefs:{}}};
  if(msg.path==='user/apply/resolve'){
   if(mode==='loading')return new Promise(()=>{});
@@ -15,8 +21,8 @@ const request=async msg=>{
  return {ok:true,json:{id:1}};
 };
 const store=new SubmissionStore(memory,request);
-window.chrome={storage:{local:{get:(_keys,cb)=>cb({theme:new URLSearchParams(location.search).get('theme')||'light'}),set:()=>{}}},runtime:{sendMessage:(msg,cb)=>{(msg.kind==='submission'?store.handle(msg,{tab:{id:1},frameId:0,url:location.href}):request(msg)).then(cb);}}};
+window.chrome={storage:{local:{get:(_keys,cb)=>cb({theme:new URLSearchParams(location.search).get('theme')||'light'}),set:()=>{}}},runtime:{sendMessage:(msg,cb)=>{(msg.kind==='submission'?store.handle(msg,{tab:{id:1},frameId:0,url:location.href}):request(msg)).then(cb);},getURL:p=>'../../extension/'+p,getManifest:()=>({version:'preview'}),onMessage:{addListener:()=>{}}}};
 window.__jtReader={ready:()=>mode!=='confirmed',read:async()=>mode==='empty'?[]:entries.map(e=>({...e,_el:document.getElementById(e.key)})),fill:async(f,v)=>{if(f.kind==='file')return false;f._el.value=v;return true;},current:f=>f._el?.value||'',submitButton:()=>document.getElementById('demo-submit'),submitted:()=>mode==='confirmed'};
 document.getElementById('demo-form').onsubmit=event=>{event.preventDefault();setTimeout(()=>location.href=location.pathname+'?state=confirmed&fail=1',100);};
 if(mode==='confirmed')document.querySelector('main').innerHTML='<h1>Thank you for applying!</h1><p>Your application has been received.</p>';
-</script><script src="../../extension/content.js"></script></body></html>
+</script><script src="../../extension/panel.js"></script><script src="../../extension/content.js"></script></body></html>

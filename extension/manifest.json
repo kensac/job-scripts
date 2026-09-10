@@ -4,9 +4,11 @@
   "version": "0.1.0",
   "description": "Fills an application form from your Job Tracker profile, drafts and remembered answers. You review and click submit.",
   "permissions": [
-    "storage"
+    "storage",
+    "scripting"
   ],
   "host_permissions": [
+    "https://*/*",
     "https://www.kanishksachdev.com/*",
     "https://boards-api.greenhouse.io/*",
     "https://boards-api.eu.greenhouse.io/*"
@@ -20,6 +22,7 @@
         "https://jobs.ashbyhq.com/*"
       ],
       "js": [
+        "panel.js",
         "readers/ashby.js",
         "content.js"
       ],
@@ -34,6 +37,7 @@
         "https://boards.eu.greenhouse.io/*"
       ],
       "js": [
+        "panel.js",
         "readers/greenhouse.js",
         "content.js"
       ],
@@ -46,6 +50,7 @@
         "https://jobs.eu.lever.co/*"
       ],
       "js": [
+        "panel.js",
         "readers/lever.js",
         "content.js"
       ],
@@ -58,6 +63,7 @@
         "https://myjobs.adp.com/*/cx/*"
       ],
       "js": [
+        "panel.js",
         "ats/ADP.js",
         "engine.js",
         "content.js"
@@ -70,6 +76,7 @@
         "https://workforcenow.adp.com/mascsr/*/*/recruitment/*"
       ],
       "js": [
+        "panel.js",
         "ats/ADP2.js",
         "engine.js",
         "content.js"
@@ -82,6 +89,7 @@
         "https://*.amazon.jobs/*/*"
       ],
       "js": [
+        "panel.js",
         "ats/Amazon.js",
         "engine.js",
         "content.js"
@@ -95,6 +103,7 @@
         "https://jobs.apple.com/app/*/apply/*"
       ],
       "js": [
+        "panel.js",
         "ats/Apple.js",
         "engine.js",
         "content.js"
@@ -130,6 +139,7 @@
         "https://careers.tql.com/*/JobDetail*"
       ],
       "js": [
+        "panel.js",
         "ats/Avature.js",
         "engine.js",
         "content.js"
@@ -143,6 +153,7 @@
         "https://*.bamboohr.com/careers*"
       ],
       "js": [
+        "panel.js",
         "ats/BambooHR.js",
         "engine.js",
         "content.js"
@@ -159,6 +170,7 @@
         "https://*/TGNewUI/Profile/Home/ProfileBuilder*"
       ],
       "js": [
+        "panel.js",
         "ats/BrassRing.js",
         "engine.js",
         "content.js"
@@ -172,6 +184,7 @@
         "https://*.breezy.hr/*/apply*"
       ],
       "js": [
+        "panel.js",
         "ats/BreezyHR.js",
         "engine.js",
         "content.js"
@@ -187,6 +200,7 @@
         "https://joinbytedance.com/search/*"
       ],
       "js": [
+        "panel.js",
         "ats/ByteDance.js",
         "engine.js",
         "content.js"
@@ -200,6 +214,7 @@
         "https://*.comeet.co/jobs/*/*/apply*"
       ],
       "js": [
+        "panel.js",
         "ats/Comeet.js",
         "engine.js",
         "content.js"
@@ -212,6 +227,7 @@
         "https://cursor.com/careers/*"
       ],
       "js": [
+        "panel.js",
         "ats/Cursor.js",
         "engine.js",
         "content.js"
@@ -225,6 +241,7 @@
         "https://jobs.dayforcehcm.com/*/jobs/*"
       ],
       "js": [
+        "panel.js",
         "ats/DayforceHCM.js",
         "engine.js",
         "content.js"
@@ -237,6 +254,7 @@
         "https://app.dover.com/apply/*"
       ],
       "js": [
+        "panel.js",
         "ats/Dover.js",
         "engine.js",
         "content.js"
@@ -249,6 +267,7 @@
         "https://*.eightfold.ai/careers*"
       ],
       "js": [
+        "panel.js",
         "ats/Eightfold.js",
         "engine.js",
         "content.js"
@@ -261,6 +280,7 @@
         "https://*.freshteam.com/jobs/*"
       ],
       "js": [
+        "panel.js",
         "ats/FreshTeam.js",
         "engine.js",
         "content.js"
@@ -273,6 +293,7 @@
         "https://*.google.com/about/careers/applications/apply/*"
       ],
       "js": [
+        "panel.js",
         "ats/Google.js",
         "engine.js",
         "content.js"
@@ -286,6 +307,7 @@
         "https://*.governmentjobs.com/careers/*/jobs/*"
       ],
       "js": [
+        "panel.js",
         "ats/GovernmentJobs.js",
         "engine.js",
         "content.js"
@@ -298,6 +320,7 @@
         "https://jobs.gusto.com/postings/*"
       ],
       "js": [
+        "panel.js",
         "ats/Gusto.js",
         "engine.js",
         "content.js"
@@ -311,6 +334,7 @@
         "https://careers.ibm.com/*/careers/JobDetail*"
       ],
       "js": [
+        "panel.js",
         "ats/IBM.js",
         "engine.js",
         "content.js"
@@ -336,6 +360,7 @@
         "https://*.jibeapply.com/forms*"
       ],
       "js": [
+        "panel.js",
         "ats/ICIMS.js",
         "engine.js",
         "content.js"
@@ -348,6 +373,7 @@
         "https://smartapply.indeed.com/beta/indeedapply/form/*"
       ],
       "js": [
+        "panel.js",
         "ats/Indeed.js",
         "engine.js",
         "content.js"
@@ -360,6 +386,7 @@
         "https://*.applytojob.com/apply/*/*"
       ],
       "js": [
+        "panel.js",
         "ats/JazzHR.js",
         "engine.js",
         "content.js"
@@ -374,6 +401,7 @@
         "https://careers.jobscore.com/*/*/*apply*job_id=*"
       ],
       "js": [
+        "panel.js",
         "ats/JobScore.js",
         "engine.js",
         "content.js"
@@ -387,6 +415,7 @@
         "https://jobs.jobvite.com/*/apply*"
       ],
       "js": [
+        "panel.js",
         "ats/Jobvite.js",
         "engine.js",
         "content.js"
@@ -400,6 +429,7 @@
         "https://*.linkedin.com/jobs/view/*"
       ],
       "js": [
+        "panel.js",
         "ats/LinkedIn.js",
         "engine.js",
         "content.js"
@@ -412,6 +442,7 @@
         "https://*.mechanize.work/apply/*"
       ],
       "js": [
+        "panel.js",
         "ats/Mechanize.js",
         "engine.js",
         "content.js"
@@ -425,6 +456,7 @@
         "https://*.metacareers.com/*"
       ],
       "js": [
+        "panel.js",
         "ats/Meta.js",
         "engine.js",
         "content.js"
@@ -438,6 +470,7 @@
         "https://*.naukri.com/registration/createAccount*"
       ],
       "js": [
+        "panel.js",
         "ats/Naukri.js",
         "engine.js",
         "content.js"
@@ -450,6 +483,7 @@
         "https://explore.jobs.netflix.net/careers*"
       ],
       "js": [
+        "panel.js",
         "ats/Netflix.js",
         "engine.js",
         "content.js"
@@ -462,6 +496,7 @@
         "https://www.okta.com/company/careers/*/*"
       ],
       "js": [
+        "panel.js",
         "ats/Okta.js",
         "engine.js",
         "content.js"
@@ -480,6 +515,7 @@
         "https://*/*/sites/CX*/job/*"
       ],
       "js": [
+        "panel.js",
         "ats/OracleCloud.js",
         "engine.js",
         "content.js"
@@ -493,6 +529,7 @@
         "https://*.paylocity.com/Recruiting/*"
       ],
       "js": [
+        "panel.js",
         "ats/Paylocity.js",
         "engine.js",
         "content.js"
@@ -506,6 +543,7 @@
         "https://*.pinpointhq.com/postings/*"
       ],
       "js": [
+        "panel.js",
         "ats/PinpointHQ.js",
         "engine.js",
         "content.js"
@@ -518,6 +556,7 @@
         "https://jobs.polymer.co/*/*"
       ],
       "js": [
+        "panel.js",
         "ats/Polymer.js",
         "engine.js",
         "content.js"
@@ -530,6 +569,7 @@
         "https://*.recruitee.com/*/*"
       ],
       "js": [
+        "panel.js",
         "ats/Recruitee.js",
         "engine.js",
         "content.js"
@@ -544,6 +584,7 @@
         "https://ats.rippling.com/*/jobs/*"
       ],
       "js": [
+        "panel.js",
         "ats/Rippling.js",
         "engine.js",
         "content.js"
@@ -557,6 +598,7 @@
         "https://careers.roblox.com/jobs/*"
       ],
       "js": [
+        "panel.js",
         "ats/Roblox.js",
         "engine.js",
         "content.js"
@@ -571,6 +613,7 @@
         "https://*.seek.co.nz/job/*"
       ],
       "js": [
+        "panel.js",
         "ats/SEEK.js",
         "engine.js",
         "content.js"
@@ -584,6 +627,7 @@
         "https://jobs.smartrecruiters.com/*/*"
       ],
       "js": [
+        "panel.js",
         "ats/SmartRecruiters.js",
         "engine.js",
         "content.js"
@@ -597,6 +641,7 @@
         "https://*.successfactors.eu/*"
       ],
       "js": [
+        "panel.js",
         "ats/SuccessFactors.js",
         "engine.js",
         "content.js"
@@ -610,6 +655,7 @@
         "https://*.tal.net/*/candidate*"
       ],
       "js": [
+        "panel.js",
         "ats/TalNet.js",
         "engine.js",
         "content.js"
@@ -626,6 +672,7 @@
         "https://*.taleo.net/*/htmlResourceViewer.jss*"
       ],
       "js": [
+        "panel.js",
         "ats/Taleo.js",
         "engine.js",
         "content.js"
@@ -638,6 +685,7 @@
         "https://*.tesla.com/careers/*"
       ],
       "js": [
+        "panel.js",
         "ats/Tesla.js",
         "engine.js",
         "content.js"
@@ -655,6 +703,7 @@
         "https://lifeattiktok.com/createaccount*"
       ],
       "js": [
+        "panel.js",
         "ats/TikTok.js",
         "engine.js",
         "content.js"
@@ -667,6 +716,7 @@
         "https://app.trinethire.com/companies/*/jobs/*"
       ],
       "js": [
+        "panel.js",
         "ats/TriNetHire.js",
         "engine.js",
         "content.js"
@@ -679,6 +729,7 @@
         "https://*.uber.com/careers/apply*"
       ],
       "js": [
+        "panel.js",
         "ats/Uber.js",
         "engine.js",
         "content.js"
@@ -699,6 +750,7 @@
         "https://*.rec.pro.ukg.net/*/JobBoard/*/OpportunityDetail*"
       ],
       "js": [
+        "panel.js",
         "ats/Ultipro.js",
         "engine.js",
         "content.js"
@@ -712,6 +764,7 @@
         "https://careers.withwaymo.com/jobs/*"
       ],
       "js": [
+        "panel.js",
         "ats/Waymo.js",
         "engine.js",
         "content.js"
@@ -724,6 +777,7 @@
         "https://apply.workable.com/*"
       ],
       "js": [
+        "panel.js",
         "ats/Workable.js",
         "engine.js",
         "content.js"
@@ -737,6 +791,7 @@
         "https://*.myworkdaysite.com/*"
       ],
       "js": [
+        "panel.js",
         "ats/Workday.js",
         "engine.js",
         "content.js"

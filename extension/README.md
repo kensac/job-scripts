@@ -93,6 +93,28 @@ with the form. Nothing dismisses a manual popover, and nothing on the page
 can paint over the top layer. The host itself is a box of no size, so the
 viewport outside the panel stays the page's to click.
 
+That covers a form the window holds directly. An employer's careers page
+embeds the application instead (Greenhouse's embed is one: 6084px tall inside
+an 805px window on `app.careerpuck.com`), and `position: fixed` inside an
+iframe pins to that FRAME's viewport, so a panel mounted beside the form
+rides the page down and out of sight. The top layer does not help, being
+per-document.
+
+So the two split by frame. `content.js` stays with the form, because the flow
+cannot leave the form's document: the reader hands back DOM nodes, `capture()`
+walks the markup around each field, and the fill types into the controls.
+`panel.js` shows the panel, in the top frame when the form is embedded, and
+the background worker relays each operation there and each event back, since
+two content scripts in one tab cannot speak to each other. Everything the
+frames send is one way: the flow paints by id and every event carries the
+panel's input values with it, so nothing is ever read back across a frame.
+
+This is what `scripting` and the `https://*/*` host permission are for: the
+worker puts `panel.js` in the top frame of whatever page did the embedding,
+which is not a host the extension can name in advance. Nothing else runs
+there. The three named hosts under `host_permissions` are subsumed by that
+pattern and stay because they record which API endpoints the worker calls.
+
 `web_accessible_resources` publishes `panel.css` to the shadow root. Every
 match pattern there must have the path `/*` exactly, whatever the content
 script matches: Chrome refuses to load the extension otherwise, with
@@ -103,7 +125,8 @@ script matches: Chrome refuses to load the extension otherwise, with
 Run `python -m http.server 8768` at the repository root, then open
 `http://localhost:8768/tests/extension/panel-preview.html?reset=1`.
 The fixture uses fictional values and replaces every extension API call.
-`state=error`, `state=empty`, and `state=loading` exercise resolve states.
+`state=error`, `state=empty`, and `state=loading` exercise resolve states,
+and `policy=off` the paused panel a failed configuration read leaves.
 Submitting the demo navigates to a confirmation page with a failed save;
 remove `fail=1` from that URL to exercise recovery. No real application is
 submitted. Run `node --test tests/extension/*.test.cjs` for regressions.
