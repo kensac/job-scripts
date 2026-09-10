@@ -177,7 +177,6 @@
 #jt-apply.collapsed { width: 248px; }
 #jt-apply.collapsed .head { border: 0; padding: 12px; }
 #jt-apply.collapsed .body { display: none; }
-#jt-apply .source-strip { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 12px; color: var(--x-ash); font-size: 11px; }
 #jt-apply .metrics { display: grid; grid-template-columns: 1fr 1fr; margin-top: 16px; background: var(--x-wash); border: 1px solid var(--x-hair); border-radius: 6px; }
 #jt-apply .metrics > div { padding: 12px; }
 #jt-apply .metrics > div + div { border-left: 1px solid var(--x-hair); }
@@ -209,7 +208,6 @@
 #jt-apply input[role="switch"]:checked { background: var(--x-accent); border-color: var(--x-accent); }
 #jt-apply input[role="switch"]:checked::after { left: 15px; background: var(--x-on-accent); }
 #jt-apply .panel-footer { padding: 12px 16px; border-top: 1px solid var(--x-hair); display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
-#jt-apply .panel-footer > .muted { font-size: 10px; }
 #jt-apply #jt-report:has(textarea) { flex-basis: 100%; }
 #jt-apply #jt-report-btn { border: 0; padding: 0; min-height: 24px; color: var(--x-slate); font-size: 11px; background: transparent; }
 #jt-apply #jt-report textarea { display: block; width: 100%; margin: 8px 0; padding: 8px; border: 1px solid var(--x-smoke); border-radius: 4px; background: var(--x-card); color: var(--x-ink); font: inherit; font-size: 12px; resize: vertical; }

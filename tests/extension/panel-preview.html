@@ -10,6 +10,15 @@ const request=async msg=>{
   return {ok:true,config:{schema_version:1,revision:'preview',adapter:'preview',max_age_seconds:300,features:{autofill:on,ai_suggestions:on,resume_upload:on,auto_advance:on}}};
  }
  if(msg.kind==='recipe')return {ok:false,unavailable:true,reason:'NOT_PUBLISHED'};
+ if(msg.path&&msg.path.startsWith('user/apply/context')){
+  if(new URLSearchParams(location.search).get('context')==='error')return {ok:false,status:503};
+  return {ok:true,json:{
+   job:mode==='empty'?null:{id:20,company:'Example Company',title:'Software Engineer'},
+   profile:{first_name:'Alex',last_name:'Morgan',email:'alex@example.com',phone:'+1 555 0100',city:'Jersey City',state:'NJ',linkedin:'https://linkedin.com/in/example',education:[{school:'Example University'},{school:'Another School'}]},
+   answers:[{id:1,label:'Are you excited to work in an office?',kind:'yesno',value:'Yes',times_used:3},{id:2,label:'Do you require sponsorship?',kind:'yesno',value:'No',times_used:5}],
+   drafts:mode==='empty'?[]:[{key:'q-why',question:'Why are you interested in this role?',draft:'Because the work is close to what I already build.'}],
+  }};
+ }
  if(msg.path==='user/settings')return {ok:true,json:{prefs:{}}};
  if(msg.path==='user/apply/resolve'){
   if(mode==='loading')return new Promise(()=>{});

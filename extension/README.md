@@ -83,6 +83,23 @@ the tables out of casual view and stops nobody who reads this decoder. The
 Chrome Web Store's policy treats such a table as remote logic, so an install
 from the store would run with this route switched off.
 
+## What the panel says before it fills
+
+The panel opens on state, not on an invitation. Its heading is the posting
+when the url matches one on the board and the page's own title when it does
+not, and it says which of the two is true. Under the Autofill button are the
+three sources a fill draws from, each with how much of it there is and each
+opening on what it holds: the profile facts that are set, the answer bank
+with how often each answer has been used, and the drafts written for this
+posting. They used to be three words in a row that did nothing.
+
+One read answers all of it: `GET /user/apply/context?url=`, which matches the
+url to a posting and returns the profile, the bank and that posting's drafts.
+It opens no fill and writes nothing, which is what makes it safe to call the
+moment the panel appears; `/user/apply/resolve` is the one that opens a fill.
+The answer is kept for the page rather than re-read on every repaint, and a
+late answer never paints over a fill the person has already started.
+
 ## Where the panel sits
 
 The panel is in a shadow root, and its host is a manual popover, so the
