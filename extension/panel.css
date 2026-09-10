@@ -26,6 +26,29 @@
  */
 :host {
   all: initial !important;
+
+  /* The host is a manual popover, so it lives in the top layer (content.js
+   * says why). `all: initial` has just thrown the browser's popover styles
+   * away with everything else, and those are the ones that would stretch the
+   * host over the whole viewport and swallow every click meant for the page.
+   * What the host needs instead is to be a box of no size that the panel can
+   * position against, so #jt-apply below keeps its own fixed 360px box and
+   * the rest of the viewport stays the page's.
+   *
+   * display: block matters when showPopover is missing or throws: the
+   * browser's `[popover]:not(:popover-open) { display: none }` would
+   * otherwise hide the panel outright rather than fall back to the
+   * behaviour it had before the top layer. */
+  display: block !important;
+  position: fixed !important;
+  inset: 0 auto auto 0 !important;
+  width: 0 !important;
+  height: 0 !important;
+  margin: 0 !important;
+  border: 0 !important;
+  padding: 0 !important;
+  background: none !important;
+  overflow: visible !important;
 }
 
 #jt-apply {

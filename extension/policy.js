@@ -108,7 +108,10 @@ class PolicyStore {
   // fetchFn: fetch; base: the public proxy URL; now: a clock, for tests.
   constructor(storage, fetchFn, base, now = () => Date.now()) {
     this.storage = storage;
-    this.fetch = fetchFn;
+    // Called free, never as this.fetch(...): fetch is a method of the global
+    // scope, so any other receiver throws "Illegal invocation", which the
+    // catch in refresh reported as NETWORK on every page (2026-09-10).
+    this.fetch = (url, options) => fetchFn(url, options);
     this.base = base;
     this.now = now;
     this.inflight = new Map();

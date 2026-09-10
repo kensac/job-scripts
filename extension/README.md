@@ -83,6 +83,21 @@ the tables out of casual view and stops nobody who reads this decoder. The
 Chrome Web Store's policy treats such a table as remote logic, so an install
 from the store would run with this route switched off.
 
+## Where the panel sits
+
+The panel is in a shadow root, and its host is a manual popover, so the
+browser puts it in the top layer. `position: fixed` alone is not enough: a
+transform, filter, backdrop-filter, contain or perspective anywhere above it
+makes that ancestor the containing block, and the panel then scrolls away
+with the form. Nothing dismisses a manual popover, and nothing on the page
+can paint over the top layer. The host itself is a box of no size, so the
+viewport outside the panel stays the page's to click.
+
+`web_accessible_resources` publishes `panel.css` to the shadow root. Every
+match pattern there must have the path `/*` exactly, whatever the content
+script matches: Chrome refuses to load the extension otherwise, with
+"Invalid value for 'web_accessible_resources[0]'. Invalid match pattern."
+
 ## Local panel preview
 
 Run `python -m http.server 8768` at the repository root, then open

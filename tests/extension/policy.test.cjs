@@ -160,3 +160,18 @@ test('concurrent refreshes for one adapter share a single request', async () => 
   assert.equal(a.config.revision, b.config.revision);
   assert.equal((await store.resolve('not an adapter')).reason, 'BAD_ADAPTER');
 });
+
+// The worker passes the global fetch in. A method call on the store is a
+// different receiver, which real fetch answers with "Illegal invocation" and
+// refresh's catch turned into NETWORK on every page (2026-09-10).
+test('fetch is called free of the store, the way the global scope demands', async () => {
+  const strict = function (url, init) {
+    if (this !== undefined && this !== globalThis) {
+      throw new TypeError("Failed to execute 'fetch' on 'Window': Illegal invocation");
+    }
+    return responder(200, config({ adapter: 'greenhouse' })).fetchFn(url, init);
+  };
+  const got = await new Store(storage(), strict, BASE).resolve('greenhouse');
+  assert.equal(got.ok, true);
+  assert.equal(got.reason, undefined);
+});
