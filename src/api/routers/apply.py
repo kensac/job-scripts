@@ -119,6 +119,49 @@ def put_profile(body: ProfilePut, user: AuthedUser = Depends(require_user)):
     return body.model_dump()
 
 
+@router.get("/user/apply/context")
+def apply_context(url: str = Query(max_length=2000), user: AuthedUser = Depends(require_user)):
+    """What this person already has for the page in front of them, before
+    anything is filled: the profile facts that are set, the answer bank, and
+    the drafts for the posting when the url matches one.
+
+    A read. It opens no fill and writes nothing, which is what lets the
+    panel show its three sources the moment it appears rather than naming
+    them and making the person open the site to see what is in them.
+
+    One call rather than three: the panel wants all of it at once, and the
+    job match is the only way to know whether there are drafts at all.
+    """
+    job = db.query_one(
+        "SELECT id, company, title FROM jobs WHERE url = ANY(%s) LIMIT 1", (posting_urls(url),)
+    )
+    # Only the facts that are set. A blank fact fills nothing, so listing it
+    # would be a row that says the profile has something it does not.
+    facts = {
+        key: value
+        for key, value in apply.load_profile(user.id)
+        .model_dump(exclude={"default_resume_id", "notes"})
+        .items()
+        if value not in ("", None, [], {})
+    }
+    return {
+        "job": job,
+        "profile": facts,
+        "answers": db.query(
+            f"SELECT {_BANK_COLS} FROM application_answer_bank WHERE user_id = %s "
+            "ORDER BY times_used DESC, updated_at DESC LIMIT 200",
+            (user.id,),
+        ),
+        "drafts": db.query(
+            "SELECT key, question, draft FROM application_answers "
+            "WHERE user_id = %s AND job_id = %s AND draft IS NOT NULL ORDER BY id",
+            (user.id, job["id"]),
+        )
+        if job
+        else [],
+    }
+
+
 class AnswerPut(BaseModel):
     value: str = Field(min_length=1, max_length=4000)
 

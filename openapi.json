@@ -3478,6 +3478,95 @@
         }
       }
     },
+    "/v1/user/apply/context": {
+      "get": {
+        "summary": "Apply Context",
+        "description": "What this person already has for the page in front of them, before\nanything is filled: the profile facts that are set, the answer bank, and\nthe drafts for the posting when the url matches one.\n\nA read. It opens no fill and writes nothing, which is what lets the\npanel show its three sources the moment it appears rather than naming\nthem and making the person open the site to see what is in them.\n\nOne call rather than three: the panel wants all of it at once, and the\njob match is the only way to know whether there are drafts at all.",
+        "operationId": "apply_context_v1_user_apply_context_get",
+        "parameters": [
+          {
+            "name": "url",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 2000,
+              "title": "Url"
+            }
+          },
+          {
+            "name": "x-service-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-Service-Token"
+            }
+          },
+          {
+            "name": "x-user-sub",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Sub"
+            }
+          },
+          {
+            "name": "x-user-email",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Email"
+            }
+          },
+          {
+            "name": "x-user-name",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Name"
+            }
+          },
+          {
+            "name": "x-user-groups",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Groups"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/user/answers": {
       "get": {
         "summary": "List Answers",

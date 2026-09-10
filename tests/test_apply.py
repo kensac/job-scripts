@@ -884,3 +884,48 @@ def test_submission_failure_rolls_back_receipt_and_saved_answers(client, user_he
         is None
     )
     assert not db.query("SELECT id FROM application_answer_bank WHERE user_id = %s", (uid,))
+
+
+def test_the_panel_can_see_its_three_sources_without_opening_a_fill(client, user_headers):
+    uid = _uid(user_headers)
+    assert client.put("/v1/user/profile", json=_profile(), headers=user_headers).status_code == 200
+    job_id = _insert_job("src-ctx", "https://jobs.ashbyhq.com/rogo/ctx")
+    db.execute(
+        "INSERT INTO application_answers (user_id, job_id, key, question, draft) "
+        "VALUES (%s, %s, 'q-why', 'Why Rogo?', 'Because engines.')",
+        (uid, job_id),
+    )
+    db.execute(
+        "INSERT INTO application_answer_bank (user_id, label, label_norm, kind, value) VALUES "
+        "(%s, 'Are you excited to work in an office?', "
+        "'are you excited to work in an office?', 'yesno', 'Yes')",
+        (uid,),
+    )
+
+    got = client.get(
+        "/v1/user/apply/context",
+        params={"url": "https://jobs.ashbyhq.com/rogo/ctx/application?utm=x"},
+        headers=user_headers,
+    ).json()
+
+    assert got["job"]["id"] == job_id
+    assert got["profile"]["first_name"] == "Ada"
+    # A blank fact fills nothing, so it is not a row saying the profile has it.
+    assert "middle_name" not in got["profile"]
+    assert [a["value"] for a in got["answers"]] == ["Yes"]
+    assert [(d["key"], d["draft"]) for d in got["drafts"]] == [("q-why", "Because engines.")]
+
+    # The read opens no fill: that is what /resolve is for.
+    assert (
+        db.query_one("SELECT count(*) AS n FROM application_fills WHERE user_id = %s", (uid,))["n"]
+        == 0
+    )
+
+
+def test_a_page_with_no_matching_posting_has_no_drafts(client, user_headers):
+    got = client.get(
+        "/v1/user/apply/context",
+        params={"url": "https://jobs.ashbyhq.com/nobody/none/application"},
+        headers=user_headers,
+    ).json()
+    assert got["job"] is None and got["drafts"] == []
