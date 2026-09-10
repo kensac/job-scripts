@@ -58,12 +58,56 @@ const policy = new PolicyStore(chrome.storage.local, fetch, `${SITE}/api/extensi
 const recipes = new RecipeStore(chrome.storage.local, fetch, `${SITE}/api/extension/recipe`);
 chrome.tabs.onRemoved.addListener(async (tabId) => {
   const all = await chrome.storage.session.get(null);
-  const keys = Object.keys(all).filter((key) => key.startsWith(`submission:${tabId}:`));
+  const keys = Object.keys(all).filter((key) => key.startsWith(`submission:${tabId}:`) || key === `panel:${tabId}`);
   if (keys.length) await chrome.storage.session.remove(keys);
 });
 
+// THE PANEL IN THE TOP FRAME.
+//
+// When the form is embedded in a cross-origin iframe, content.js runs beside
+// the form, where the reader's DOM handles are, and the panel has to be in
+// the top frame or it rides the page out of sight (content.js says why). Two
+// content scripts in one tab cannot speak to each other, so every operation
+// and every event passes through here.
+//
+// The owner is kept in session storage rather than a variable: this worker is
+// stopped whenever the browser feels like it, and a click that came back to
+// no owner would be a button that silently did nothing.
+const ownerKey = (tabId) => `panel:${tabId}`;
+
+async function panelOp({ op, args }, sender) {
+  const tabId = sender.tab && sender.tab.id;
+  if (tabId === undefined) return { ok: false, status: 0, error: "no tab" };
+  const deliver = () => chrome.tabs.sendMessage(tabId, { kind: "panel-op", op, args }, { frameId: 0 });
+  if (op === "remove") await chrome.storage.session.remove(ownerKey(tabId));
+  else await chrome.storage.session.set({ [ownerKey(tabId)]: sender.frameId });
+  try {
+    await deliver();
+  } catch (_) {
+    // Nothing is listening in the top frame yet, or the page navigated out
+    // from under the last injection. Put panel.js there and deliver again;
+    // the file guards itself against being run twice.
+    await chrome.scripting.executeScript({ target: { tabId, frameIds: [0] }, files: ["panel.js"] });
+    await deliver();
+  }
+  return { ok: true };
+}
+
+// A control the person used, back to the frame that painted it.
+async function panelEvent({ event }, sender) {
+  const tabId = sender.tab && sender.tab.id;
+  if (tabId === undefined) return { ok: false, status: 0, error: "no tab" };
+  const got = await chrome.storage.session.get(ownerKey(tabId));
+  const frameId = got[ownerKey(tabId)];
+  if (frameId === undefined) return { ok: false, status: 0, error: "no panel owner" };
+  await chrome.tabs.sendMessage(tabId, { kind: "panel-event", event }, { frameId });
+  return { ok: true };
+}
+
 chrome.runtime.onMessage.addListener((msg, sender, reply) => {
-  (msg.kind === "submission" ? submissions.handle(msg, sender)
+  (msg.kind === "panel" ? panelOp(msg, sender)
+    : msg.kind === "panel-event" ? panelEvent(msg, sender)
+    : msg.kind === "submission" ? submissions.handle(msg, sender)
     : msg.kind === "policy" ? policy.resolve(msg.adapter)
     : msg.kind === "recipe" ? recipes.resolve(msg.adapter)
     : (msg.kind === "pdf" ? pdf : msg.kind === "get" ? get : call)(msg))

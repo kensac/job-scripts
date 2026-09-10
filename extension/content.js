@@ -8,70 +8,25 @@
 // back so the bank and the ledger learn. It never clicks submit itself.
 // The report button sends the page as the extension saw it, with a note.
 (async () => {
-  // THE PANEL LIVES IN A SHADOW ROOT, not in the host page's DOM.
+  // THE PANEL IS NOT ALWAYS IN THIS FRAME.
   //
-  // panel.css is scoped by #jt-apply, which is a convention the page does not
-  // have to honour: the panel is in the page's tree, so the page's selectors
-  // reach it. Workday's stylesheet put a collapsed line-height on its spans
-  // and the two-line labels drew over themselves. A reset answers the
-  // properties someone thought of; this answers all of them, on all 53 sites,
-  // including the ones nobody has hit yet.
+  // panel.js owns the panel's DOM, and says there why it is a shadow root in
+  // the top layer. This file owns the flow, and the flow cannot leave the
+  // form's own document: the reader hands back DOM nodes, capture() walks the
+  // markup around each field, and the fill types into the controls.
   //
-  // `host` is the element in the page. `panel` is the div inside the shadow
-  // root and keeps the id, so every panel.querySelector in this file and every
-  // #jt-apply rule in panel.css work unchanged.
+  // When the form is embedded in a cross-origin iframe, those two want
+  // different frames. An employer's careers page embeds the application
+  // (Greenhouse's embed is one: 6084px tall inside an 805px window on
+  // app.careerpuck.com), and position: fixed inside an iframe pins to that
+  // FRAME's viewport, so a panel mounted beside the form rides the page down
+  // and out of sight. The top layer does not help, being per-document.
   //
-  // The stylesheet is linked rather than inlined so panel.css stays one file
-  // that a person can read; it is in web_accessible_resources for that.
-  //
-  // Those matches are NOT the content scripts' matches. Chrome requires every
-  // pattern under web_accessible_resources to have the path "/*" exactly and
-  // refuses to load the extension otherwise ("Invalid match pattern"), so a
-  // path-scoped pattern cannot be carried over. BrassRing and Oracle Cloud are
-  // self-hosted and match any host, which leaves "https://*/*" - it subsumes
-  // every other origin, so adding an ATS never touches that block. The url is
-  // dynamic (use_dynamic_url) because a fixed one on every https page is a
-  // path any page could fetch to tell this extension is installed.
-  let host = null;
-
-  // The panel is a manual popover, so the browser puts the host in the TOP
-  // LAYER. position: fixed alone is not enough: a transform, filter,
-  // backdrop-filter, contain or perspective on any ancestor makes that
-  // ancestor the containing block, and the panel then scrolls with the page
-  // as though it were pinned to the form. The top layer has no ancestor to
-  // take the job, and it paints above every stacking context, so a page
-  // cannot cover the panel either. "manual" means nothing dismisses it: not
-  // Escape, not a click elsewhere. Where showPopover is missing the append
-  // still stands and the panel behaves as it did before.
-  function attach() {
-    document.body.appendChild(host);
-    try {
-      host.showPopover();
-    } catch (_) {
-      // Already open, or a browser without the top layer. Either is fine.
-    }
-  }
-
-  function mountPanel() {
-    host = document.createElement("div");
-    host.id = "jt-apply-host";
-    host.setAttribute("popover", "manual");
-    const root = host.attachShadow({ mode: "open" });
-    const link = document.createElement("link");
-    link.rel = "stylesheet";
-    link.href = chrome.runtime.getURL("panel.css");
-    const el = document.createElement("div");
-    el.id = "jt-apply";
-    root.append(link, el);
-    attach();
-    return el;
-  }
-
-  // The host is what the page can remove, so it is what "still there" asks
-  // about: a hydrating app (Greenhouse's board is a Remix app) throws it out
-  // with the markup it did not render, and panel.isConnected would be true
-  // for a panel inside a shadow root whose host is gone.
-  const mounted = () => host && host.isConnected;
+  // So the flow stays here beside the form and the panel goes to the top
+  // frame, where a window overlay is possible at all. `surface` is the same
+  // object either way, and every call is one way: paint, region, mark,
+  // ensure, remove. Nothing is read back across a frame.
+  const embedded = window.top !== window.self;
 
   const reader = window.__jtReader || { ready: () => false, submitButton: () => null, submitted: () => false };
   // Stamped into every report, so a report from a build the person has not
@@ -94,6 +49,43 @@
     });
   const api = (path, method, body) => send({ path, method, body });
   const pdf = (path) => send({ kind: "pdf", path });
+
+  // Bound by id rather than by node, so a repaint never loses a handler and
+  // the same registration works whether the control is in this document or
+  // in the top frame's. Every event carries the panel's input values, which
+  // is what makes the remote surface one way.
+  const handlers = new Map();
+  let onAi = null;
+  const on = (type, id, fn) => handlers.set(`${type}:${id}`, fn);
+  function dispatch({ type, id, ai, values }) {
+    if (ai && type === "click") return onAi && onAi(ai);
+    const fn = handlers.get(`${type}:${id}`);
+    if (fn) fn(values || {});
+  }
+
+  // The panel in the top frame: the background worker puts panel.js there and
+  // relays each operation, because two content scripts in one tab cannot
+  // speak to each other directly. text() is empty rather than remote,
+  // because a panel in another document is not in this one's innerText.
+  const remoteSurface = () => {
+    const op = (name, ...args) => send({ kind: "panel", op: name, args });
+    return {
+      paint: (...a) => op("paint", ...a),
+      region: (...a) => op("region", ...a),
+      mark: (...a) => op("mark", ...a),
+      ensure: () => op("ensure"),
+      remove: () => op("remove"),
+      text: () => "",
+    };
+  };
+  const surface = embedded ? remoteSurface() : window.__jtPanel.create(dispatch);
+  if (embedded) {
+    chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
+      if (!msg || msg.kind !== "panel-event") return;
+      dispatch(msg.event);
+      reply({ ok: true });
+    });
+  }
   let submission = (await send({ kind: "submission", action: "get" })).state || null;
   if (submission && submission.status !== "confirmed" && reader.ready() && new URL(submission.url).pathname !== location.pathname) {
     await send({ kind: "submission", action: "clear", fillId: submission.fillId });
@@ -169,7 +161,7 @@
   await syncPrefsFromAccount();
   const askable = (e) => !e.never_ai && (ASKABLE.has(e.kind) || (prefs.aiAll && e.kind === "long"));
 
-  let panel = null;
+  let panelUp = false;
   let step = 0;
   let fields = [];
   const clickThrough = (el) => {
@@ -193,25 +185,18 @@
   // panel.css. The button cycles light, dark, system and names the next.
   const THEME_NEXT = { light: "dark", dark: null, null: "light" };
   const themeLabel = (t) => (t === "light" ? "Light" : t === "dark" ? "Dark" : "System");
-  const applyTheme = () => {
-    if (!panel) return;
-    if (prefs.theme) panel.setAttribute("data-jt-theme", prefs.theme);
-    else panel.removeAttribute("data-jt-theme");
-    const btn = panel.querySelector("#jt-theme");
-    if (btn) {
-      btn.title = `Theme: ${themeLabel(prefs.theme)}. Switch to ${themeLabel(THEME_NEXT[String(prefs.theme)])}`;
-      btn.setAttribute("aria-label", btn.title);
-      btn.textContent = prefs.theme === "light" ? "☀" : prefs.theme === "dark" ? "☾" : "◐";
-    }
-  };
-
+  // The whole panel is repainted from prefs, so the theme button and the
+  // minimise button say what prefs say without anyone patching them by hand.
+  // A repaint is what a preference change does.
+  let painted = "";
   const render = (html) => {
-    if (!panel) return;
-    panel.classList.toggle("collapsed", prefs.collapsed);
-    panel.innerHTML = `
+    if (!panelUp) return;
+    painted = html;
+    const themeTitle = `Theme: ${themeLabel(prefs.theme)}. Switch to ${themeLabel(THEME_NEXT[String(prefs.theme)])}`;
+    surface.paint(`
       <div class="head">
         <div class="brand"><span class="brand-mark" aria-hidden="true">↗</span><div><h3>Job Tracker</h3><span class="eyebrow">Apply assistant</span></div></div>
-        <div class="head-actions"><button id="jt-theme" aria-label="Change theme"></button>
+        <div class="head-actions"><button id="jt-theme" aria-label="${esc(themeTitle)}" title="${esc(themeTitle)}">${prefs.theme === "light" ? "☀" : prefs.theme === "dark" ? "☾" : "◐"}</button>
         <button id="jt-min" aria-label="${prefs.collapsed ? "Expand panel" : "Minimise panel"}" aria-expanded="${!prefs.collapsed}" title="${prefs.collapsed ? "Expand" : "Minimise"}">${prefs.collapsed ? "+" : "−"}</button></div>
       </div>
       <div class="body">
@@ -222,32 +207,22 @@
           <label class="switch"><span><span class="setting-title">Continue between pages</span><span class="setting-description">Advance after filling. Always stop before Submit.</span></span><input type="checkbox" role="switch" id="jt-advance" ${prefs.autoAdvance ? "checked" : ""}></label>
         </details>
         <div class="panel-footer"><span class="muted">You review. You submit.</span><div id="jt-report"><button id="jt-report-btn">Report an issue</button></div></div>
-      </div>`;
-    applyTheme();
-    panel.querySelector("#jt-report-btn").onclick = reportForm;
-    panel.querySelector("#jt-ai-all").onchange = (ev) => {
-      prefs.aiAll = ev.target.checked;
-      savePref("aiAll", prefs.aiAll);
-    };
-    panel.querySelector("#jt-advance").onchange = (ev) => {
-      prefs.autoAdvance = ev.target.checked;
-      savePref("autoAdvance", prefs.autoAdvance);
-    };
-    panel.querySelector("#jt-theme").onclick = () => {
-      prefs.theme = THEME_NEXT[String(prefs.theme)];
-      savePref("theme", prefs.theme);
-      applyTheme();
-    };
-    panel.querySelector("#jt-min").onclick = () => {
-      prefs.collapsed = !prefs.collapsed;
-      savePref("collapsed", prefs.collapsed);
-      panel.classList.toggle("collapsed", prefs.collapsed);
-      panel.querySelector("#jt-min").textContent = prefs.collapsed ? "+" : "−";
-      panel.querySelector("#jt-min").title = prefs.collapsed ? "Expand" : "Minimise";
-      panel.querySelector("#jt-min").setAttribute("aria-label", prefs.collapsed ? "Expand panel" : "Minimise panel");
-      panel.querySelector("#jt-min").setAttribute("aria-expanded", String(!prefs.collapsed));
-    };
+      </div>`, { theme: prefs.theme, collapsed: prefs.collapsed });
   };
+
+  on("click", "jt-report-btn", reportForm);
+  on("change", "jt-ai-all", (values) => savePref("aiAll", (prefs.aiAll = !!values["jt-ai-all"])));
+  on("change", "jt-advance", (values) => savePref("autoAdvance", (prefs.autoAdvance = !!values["jt-advance"])));
+  on("click", "jt-theme", () => {
+    prefs.theme = THEME_NEXT[String(prefs.theme)];
+    savePref("theme", prefs.theme);
+    render(painted);
+  });
+  on("click", "jt-min", () => {
+    prefs.collapsed = !prefs.collapsed;
+    savePref("collapsed", prefs.collapsed);
+    render(painted);
+  });
 
   // Underscore keys are the reader's DOM handles; the API never sees them.
   const plain = (f) => Object.fromEntries(Object.entries(f).filter(([k]) => !k.startsWith("_")));
@@ -282,8 +257,8 @@
       // A page that hydrates after load (Greenhouse's board is a Remix app)
       // can throw the panel out of the body with the rest of the markup it
       // did not render; put it back rather than believing it is there.
-      if (panel && !mounted()) attach();
-      if (mountedFor === here && panel && fill && pageSig && pageSignature() !== pageSig) {
+      surface.ensure();
+      if (mountedFor === here && panelUp && fill && pageSig && pageSignature() !== pageSig) {
         pageSig = null;
         step += 1;
         fields = [];
@@ -292,34 +267,34 @@
         offer("The form moved to a new page.");
         return;
       }
-      if (mountedFor === here && panel) return;
+      if (mountedFor === here && panelUp) return;
       mountedFor = here;
       fields = [];
       fill = null;
       filled = new Map();
-      if (!panel) panel = mountPanel();
+      panelUp = true;
       offer();
     } else if (!fill && reader.applyButton && reader.applyButton()) {
       // The posting page, with the button that opens the form on it (the
       // selector table clicks it on 25 ATSs). Offered, never pressed unasked;
       // once the form appears the tick above takes over.
-      if (mountedFor === here + "#open" && panel) return;
+      if (mountedFor === here + "#open" && panelUp) return;
       mountedFor = here + "#open";
-      if (!panel) panel = mountPanel();
+      panelUp = true;
       render(`
         <p>This is the posting. The application form is a click away.</p>
         <button id="jt-open" class="primary">Open the application</button>
       `);
-      panel.querySelector("#jt-open").onclick = () => {
+      on("click", "jt-open", () => {
         const btn = reader.applyButton();
         if (btn) clickThrough(btn);
         mountedFor = null;
-      };
-    } else if (panel && !fill) {
+      });
+    } else if (panelUp && !fill) {
       // No form and nothing recorded on it: the posting page, or a page
       // away from the form. A panel after a submit stays for its message.
-      panel.remove();
-      panel = null;
+      surface.remove();
+      panelUp = false;
       mountedFor = null;
     }
   }
@@ -330,10 +305,10 @@
       <button id="jt-autofill" class="primary">Autofill this page <span aria-hidden="true">↗</span></button>
       <div class="source-strip"><span>Profile details</span><span>Saved answers</span><span>Drafts</span></div>
     `);
-    panel.querySelector("#jt-autofill").onclick = async () => {
+    on("click", "jt-autofill", async () => {
       await readFields();
       run();
-    };
+    });
   }
 
   // A reader's trace of a fill, kept by key: the fields are read again
@@ -363,7 +338,7 @@
       // person keeps the page, manual Submit tracking and reporting.
       policy = null;
       render(`<div class="result-heading"><span class="eyebrow">Autofill paused</span><h4>Could not confirm autofill is enabled</h4><p>Job Tracker could not load the extension's configuration for this site${pol.reason ? ` (${esc(String(pol.reason))})` : ""}. Your application is still here to fill by hand; reporting and submission tracking still work.</p></div><button id="jt-autofill" class="primary">Try again</button>`);
-      panel.querySelector("#jt-autofill").onclick = run;
+      on("click", "jt-autofill", run);
       return;
     }
     policy = pol.config;
@@ -400,10 +375,10 @@
           ? `<div class="result-heading"><span class="eyebrow">Sign-in needed</span><h4>Connect to Job Tracker</h4><p><a href="${esc(res.signin)}" target="_blank" rel="noopener noreferrer">Open Job Tracker</a> and sign in, then return here.</p></div><button id="jt-autofill" class="primary">Try again</button>`
           : `<div class="result-heading"><span class="eyebrow">Could not fill this page</span><h4>Let's try that again</h4><p>Job Tracker could not load your answers. Your application is still here.</p></div><button id="jt-autofill" class="primary">Try again</button><details class="help"><summary>Error details</summary><p class="warn">${esc(res.status)}: ${esc(JSON.stringify(res.json || res.error))}</p></details>`,
       );
-      panel.querySelector("#jt-autofill").onclick = async () => {
+      on("click", "jt-autofill", async () => {
         await readFields();
         run();
-      };
+      });
       return;
     }
     fill = res.json;
@@ -629,32 +604,29 @@
       ${fill.ai_error ? `<p class="notice warn" role="alert">Could not prepare AI answers: ${esc(fill.ai_error)}.</p>` : ""}
       ${fill.stopped ? `<p class="notice warn" role="alert">${esc(fill.stopped)}</p>` : ""}
       <button id="jt-again" class="primary">Fill again <span aria-hidden="true">↻</span></button>
-      ${todo.length ? `<section class="field-section"><h5>Needs your attention <span class="count">${todo.length}</span></h5><ul>${todo.map((e) => li(e, e.kind === "file" ? '<span class="tag">Attach file</span>' : e.never_ai || !askable(e) ? '<span class="tag">Fill on form</span>' : `<button data-ai="${esc(e.key)}" aria-label="Prepare an AI answer for ${esc(e.label || e.key)}">Draft answer</button>`)).join("")}</ul></section>` : ""}
+      ${todo.length ? `<section class="field-section"><h5>Needs your attention <span class="count">${todo.length}</span></h5><ul>${todo.map((e) => li(e, e.kind === "file" ? '<span class="tag">Attach file</span>' : e.never_ai || !askable(e) ? '<span class="tag">Fill on form</span>' : `<button id="jt-ai-${esc(e.key)}" data-ai="${esc(e.key)}" aria-label="Prepare an AI answer for ${esc(e.label || e.key)}">Draft answer</button>`)).join("")}</ul></section>` : ""}
       ${done.length ? `<details class="field-section"><summary>Filled items <span class="count">${done.length}</span></summary><ul>${done.map((e) => li(e, `<span class="tag success">${esc(sourceLabel[e.rung] || "Filled")}</span>`, true)).join("")}</ul></details>` : ""}
       <details class="help"><summary>What gets remembered?</summary><p>After you submit, choices and short answers you keep can be reused for the same question. Free-text answers stay specific to the application.</p></details>
     `);
-    panel.querySelector("#jt-again").onclick = async () => {
+    on("click", "jt-again", async () => {
       await readFields();
       run();
-    };
-    for (const btn of panel.querySelectorAll("[data-ai]")) {
-      btn.onclick = async () => {
-        btn.disabled = true;
-        btn.textContent = "asking…";
-        const entry = entryByKey(btn.dataset.ai);
-        if (!allowed("ai_suggestions")) {
-          entry.ai_note = "AI suggestions are switched off right now";
-          show();
-          return;
-        }
-        await askModel([entry]);
-        if (!isFilled(entry) && !fill.ai_error) {
-          const f = filled.get(entry.key);
-          entry.ai_note = f && f.value ? "the form did not take the answer" : "the model had no answer";
-        }
+    });
+    onAi = async (key) => {
+      surface.mark(`jt-ai-${key}`, { disabled: true, text: "asking…" });
+      const entry = entryByKey(key);
+      if (!allowed("ai_suggestions")) {
+        entry.ai_note = "AI suggestions are switched off right now";
         show();
-      };
-    }
+        return;
+      }
+      await askModel([entry]);
+      if (!isFilled(entry) && !fill.ai_error) {
+        const f = filled.get(entry.key);
+        entry.ai_note = f && f.value ? "the form did not take the answer" : "the model had no answer";
+      }
+      show();
+    };
   }
 
   function finals() {
@@ -718,40 +690,38 @@
     }
   }
 
+  const REPORT_BUTTON = `<button id="jt-report-btn">Report an issue</button>`;
   async function reportForm() {
-    const box = panel.querySelector("#jt-report");
     if (!fields.length && reader.ready()) await readFields();
-    box.innerHTML = `
+    surface.region("jt-report", `
       <label for="jt-note" class="setting-title">What went wrong?</label><p class="muted">Includes a capture of this page and its form values.</p><textarea id="jt-note" rows="3" placeholder="Add a note (optional)"></textarea>
-      <button id="jt-send">Send report</button> <button id="jt-cancel">Cancel</button>`;
-    box.querySelector("#jt-cancel").onclick = () => {
-      box.innerHTML = `<button id="jt-report-btn">Report an issue</button>`;
-      box.querySelector("#jt-report-btn").onclick = reportForm;
-    };
-    box.querySelector("#jt-send").onclick = async () => {
-      box.querySelector("#jt-send").disabled = true;
-      const res = await api("user/apply/reports", "POST", {
-        url: location.href,
-        note: box.querySelector("#jt-note").value,
-        page: capture(),
-      });
-      box.innerHTML = res.ok
-        ? `<p class="muted">Reported as #${res.json.id}. Thank you.</p>`
-        : `<p class="warn">Report failed (${esc(res.status)}): ${esc(JSON.stringify(res.json || res.error))}</p>`;
-    };
+      <button id="jt-send">Send report</button> <button id="jt-cancel">Cancel</button>`);
   }
+  on("click", "jt-cancel", () => surface.region("jt-report", REPORT_BUTTON));
+  // The note travels with the click, so the panel is never read across a frame.
+  on("click", "jt-send", async (values) => {
+    surface.mark("jt-send", { disabled: true });
+    const res = await api("user/apply/reports", "POST", {
+      url: location.href,
+      note: values["jt-note"] || "",
+      page: capture(),
+    });
+    surface.region("jt-report", res.ok
+      ? `<p class="muted">Reported as #${res.json.id}. Thank you.</p>`
+      : `<p class="warn">Report failed (${esc(res.status)}): ${esc(JSON.stringify(res.json || res.error))}</p>`);
+  });
 
   const CONFIRMED = /thank you for (applying|your application)|application (has been )?(received|submitted)|we('ve| have) received your application|we got your application|successfully submitted/i;
   const confirmationVisible = () => {
     if (reader.submitted()) return true;
-    const pageText = document.body.innerText.replace(panel?.innerText || "", "");
+    const pageText = document.body.innerText.replace(surface.text(), "");
     return !reader.ready() && CONFIRMED.test(pageText);
   };
 
   function showSubmission() {
     if (!submission) return;
-    if (!panel) panel = mountPanel();
-    else if (!mounted()) attach();
+    panelUp = true;
+    surface.ensure();
     // The earlier watcher stopped at 30 seconds. Keep watching after that
     // point, but offer the person a way to confirm a missed success signal.
     const overdue = Date.now() - submission.startedAt >= 30000;
@@ -762,25 +732,25 @@
       render(`<div class="result-heading"><span class="eyebrow">Submission recorded</span><h4>${submission.result.json.job_id ? "Saved to your board" : "Application recorded"}</h4><p>${submission.result.json.job_id ? "Your job is marked Application Submitted." : "This submission is saved in your application history. No matching board job was found, so no board status changed."}</p></div>`);
     } else if (submission.status === "confirmed") {
       render(`<div class="result-heading"><span class="eyebrow">Submitted · not yet recorded</span><h4>Save your submission</h4><p>The application was confirmed, but Job Tracker has not saved it yet. Retrying will not submit the application again.</p></div><button id="jt-retry-record" class="primary">Retry saving</button>${submission.result?.signin ? `<p><a href="${esc(submission.result.signin)}" target="_blank" rel="noopener noreferrer">Sign in to Job Tracker</a>, then retry.</p>` : ""}`);
-      panel.querySelector("#jt-retry-record").onclick = () => confirmSubmission("retry");
+      on("click", "jt-retry-record", () => confirmSubmission("retry"));
     } else {
       render(`<div class="working" role="status"><span class="spinner" aria-hidden="true"></span><div><h4>${overdue ? "Still awaiting confirmation" : "Checking your submission"}</h4><p>${overdue ? "If the form shows errors, correct them and submit again. If it succeeded, you can confirm it below." : "Waiting for the application site to confirm success. Your board has not changed yet."}</p></div></div><button id="jt-confirm-record" class="primary">I submitted this application</button><button id="jt-dismiss-attempt">Back to autofill</button>`);
-      panel.querySelector("#jt-confirm-record").onclick = () => confirmSubmission("confirm");
-      panel.querySelector("#jt-dismiss-attempt").onclick = async () => {
+      on("click", "jt-confirm-record", () => confirmSubmission("confirm"));
+      on("click", "jt-dismiss-attempt", async () => {
         const res = await send({ kind: "submission", action: "clear", fillId: submission.fillId });
         if (!res.ok) return;
         submission = null;
         submissionView = null;
         mountedFor = null;
         mount();
-      };
+      });
     }
   }
 
   async function confirmSubmission(action) {
     if (!submission || submissionBusy) return;
     submissionBusy = true;
-    for (const button of panel?.querySelectorAll("#jt-retry-record, #jt-confirm-record") || []) button.disabled = true;
+    for (const id of ["jt-retry-record", "jt-confirm-record"]) surface.mark(id, { disabled: true });
     const res = await send({ kind: "submission", action, fillId: submission.fillId });
     submissionBusy = false;
     if (res.ok) submission = res.state;

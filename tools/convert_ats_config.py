@@ -402,7 +402,8 @@ def main(argv: list[str]) -> int:
         scripts.append(
             {
                 "matches": c["matches"],
-                "js": [f"ats/{c['name']}.js", "engine.js", "content.js"],
+                # panel.js first: content.js reads window.__jtPanel at the top.
+                "js": ["panel.js", f"ats/{c['name']}.js", "engine.js", "content.js"],
                 # No "css": the panel lives in a shadow root and links
                 # panel.css itself from web_accessible_resources. Injecting it
                 # into the document would style nothing and leak the panel's
