@@ -23,11 +23,39 @@
   //
   // The stylesheet is linked rather than inlined so panel.css stays one file
   // that a person can read; it is in web_accessible_resources for that.
+  //
+  // Those matches are NOT the content scripts' matches. Chrome requires every
+  // pattern under web_accessible_resources to have the path "/*" exactly and
+  // refuses to load the extension otherwise ("Invalid match pattern"), so a
+  // path-scoped pattern cannot be carried over. BrassRing and Oracle Cloud are
+  // self-hosted and match any host, which leaves "https://*/*" - it subsumes
+  // every other origin, so adding an ATS never touches that block. The url is
+  // dynamic (use_dynamic_url) because a fixed one on every https page is a
+  // path any page could fetch to tell this extension is installed.
   let host = null;
+
+  // The panel is a manual popover, so the browser puts the host in the TOP
+  // LAYER. position: fixed alone is not enough: a transform, filter,
+  // backdrop-filter, contain or perspective on any ancestor makes that
+  // ancestor the containing block, and the panel then scrolls with the page
+  // as though it were pinned to the form. The top layer has no ancestor to
+  // take the job, and it paints above every stacking context, so a page
+  // cannot cover the panel either. "manual" means nothing dismisses it: not
+  // Escape, not a click elsewhere. Where showPopover is missing the append
+  // still stands and the panel behaves as it did before.
+  function attach() {
+    document.body.appendChild(host);
+    try {
+      host.showPopover();
+    } catch (_) {
+      // Already open, or a browser without the top layer. Either is fine.
+    }
+  }
 
   function mountPanel() {
     host = document.createElement("div");
     host.id = "jt-apply-host";
+    host.setAttribute("popover", "manual");
     const root = host.attachShadow({ mode: "open" });
     const link = document.createElement("link");
     link.rel = "stylesheet";
@@ -35,7 +63,7 @@
     const el = document.createElement("div");
     el.id = "jt-apply";
     root.append(link, el);
-    document.body.appendChild(host);
+    attach();
     return el;
   }
 
@@ -254,7 +282,7 @@
       // A page that hydrates after load (Greenhouse's board is a Remix app)
       // can throw the panel out of the body with the rest of the markup it
       // did not render; put it back rather than believing it is there.
-      if (panel && !mounted()) document.body.appendChild(host);
+      if (panel && !mounted()) attach();
       if (mountedFor === here && panel && fill && pageSig && pageSignature() !== pageSig) {
         pageSig = null;
         step += 1;
@@ -723,7 +751,7 @@
   function showSubmission() {
     if (!submission) return;
     if (!panel) panel = mountPanel();
-    else if (!mounted()) document.body.appendChild(host);
+    else if (!mounted()) attach();
     // The earlier watcher stopped at 30 seconds. Keep watching after that
     // point, but offer the person a way to confirm a missed success signal.
     const overdue = Date.now() - submission.startedAt >= 30000;
