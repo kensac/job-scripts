@@ -28,8 +28,13 @@ class ConfigKey:
     default: JsonValue
     value_type: Any
     help: str
+    # Which group of settings the admin page files this key under. The
+    # registry is the only place that knows; a page grouping twenty keys
+    # by guessing at their names guesses wrong the first time one is
+    # renamed.
+    section: str = "General"
     choices: tuple[str, ...] = ()
-    kind: Literal["value", "groups", "hosts", "columns"] = "value"
+    kind: Literal["value", "text", "groups", "hosts", "columns"] = "value"
     _adapter: TypeAdapter = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -63,6 +68,7 @@ class ConfigKey:
 
 CONFIG_KEYS: dict[str, ConfigKey] = {
     "extension_policy": ConfigKey(
+        section="Extension",
         default=ExtensionPolicy().model_dump(mode="json"),
         value_type=ExtensionPolicy,
         help="Controls bundled extension features and disables adapters by reader ID. "
@@ -70,11 +76,15 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
         "Requires an extension supporting configuration schema 1; older releases ignore it.",
     ),
     "signups_enabled": ConfigKey(
-        default=True, value_type=bool, help="Whether new accounts can be created."
+        section="Access",
+        default=True,
+        value_type=bool,
+        help="Whether brand-new people can create tracker accounts. Existing users, and the internal and admin groups, get in either way.",
     ),
     # Testing-mode OAuth is limited to 100 test users; keep the default
     # closed to other groups until the client is ready for them.
     "gmail_connect_groups": ConfigKey(
+        section="Access",
         default=["infra-admins"],
         value_type=list[str],
         kind="groups",
@@ -85,6 +95,7 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
     # (2026-09-08), so for everyone else an edit waits for the hourly
     # sweep at batch price. "*" opens it to everyone.
     "filter_rejudge_on_change_groups": ConfigKey(
+        section="Boards",
         default=[],
         value_type=list[str],
         kind="groups",
@@ -97,6 +108,7 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
     # holds no layout, so a new account and a reset both start here; the
     # column chooser still shows any hidden column.
     "board_default_column_layout": ConfigKey(
+        section="Boards",
         default=[
             {"colId": "company", "hide": False, "pinned": "left", "width": 160},
             {"colId": "size", "hide": True, "width": 120},
@@ -128,6 +140,7 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
     # ingest or backfill tries it again. The hourly cycle used to be the
     # retry: 24 attempts a day at the same dead URL from every worker.
     "fetch_retry_after_hours": ConfigKey(
+        section="Fetching",
         default=24,
         value_type=PositiveInt,
         help="Hours a posting whose page fetch came back empty waits before any "
@@ -138,6 +151,7 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
     # latency. Kinds allowlists (JOBTRACKER_WORKER_KINDS) are the one
     # legitimate reason, and the alert names them.
     "queue_stall_minutes": ConfigKey(
+        section="Health",
         default=10,
         value_type=PositiveInt,
         help="Minutes an idle worker may sit beside pending work before the queue counts as stalled.",
@@ -145,6 +159,7 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
     # Pending ingests older than this many ingest cycles mean the fleet is
     # behind the hour; one cycle is the normal wait.
     "ingest_backlog_cycles": ConfigKey(
+        section="Health",
         default=2,
         value_type=PositiveInt,
         help="Pending ingests older than this many hourly cycles mean the fleet is behind.",
@@ -153,6 +168,7 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
     # its board stops listing it. Long enough to evaluate a new pattern
     # against a month of what the boards actually posted.
     "screened_retention_days": ConfigKey(
+        section="Catalog",
         default=30,
         value_type=PositiveInt,
         help="Days a posting a title pattern screened out stays on record after its "
@@ -164,6 +180,7 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
     # Provider batches normally land within the hour; the stragglers seen
     # on 2026-09-04 sat 14 hours at a few requests short.
     "batch_straggler_hours": ConfigKey(
+        section="Health",
         default=4,
         value_type=PositiveInt,
         help="Hours a still-running provider batch may lag its finished siblings "
@@ -174,6 +191,7 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
     # after 12 in an hour) is added here, from the alert, at the rate it
     # tolerates. Hosts are data, so none is written into code.
     "fetch_host_limits": ConfigKey(
+        section="Fetching",
         default={},
         value_type=dict[str, PositiveInt],
         kind="hosts",
@@ -185,6 +203,7 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
     # limits by address and two workers share hetzner's; six seconds was not
     # enough, twenty holds. Read by core.boards through the ingest task.
     "ingest_host_pace_seconds": ConfigKey(
+        section="Fetching",
         default={"apply.workable.com": 20},
         value_type=dict[str, PositiveInt],
         kind="hosts",
@@ -200,6 +219,7 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
     # without a roll, so the share each engine serves can be read off the
     # content rows (reason 'static' vs 'scraped') and the choice revisited.
     "fetch_engine": ConfigKey(
+        section="Fetching",
         default="static_first",
         value_type=str,
         help="Which engine fetches a posting page after the ATS resolvers decline. "
@@ -210,6 +230,7 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
     # The text-length gate under static_first; see api.fetching.fetch_static
     # for the measurement behind 1,500.
     "static_fetch_min_chars": ConfigKey(
+        section="Fetching",
         default=1500,
         value_type=PositiveInt,
         help="Characters of text a browserless fetch must return to be served instead of the browser.",
@@ -219,6 +240,7 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
     # scans of ai_queries per call, a quarter of all server time on the box
     # for lifetime totals that move once an hour. 1 is as good as off.
     "admin_stats_cache_seconds": ConfigKey(
+        section="Health",
         default=60,
         value_type=PositiveInt,
         help="Seconds GET /admin/stats serves the same answer.",
@@ -229,6 +251,7 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
     # covers a person noticing a roll request; tighten it when every host
     # self-deploys. gcp-vps ran an hour behind on 2026-09-04 unnoticed.
     "fleet_roll_minutes": ConfigKey(
+        section="Health",
         default=120,
         value_type=PositiveInt,
         help="Minutes a worker may run a different release from the api before it counts as a "
@@ -238,6 +261,7 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
     # 8,735 strings; set low for a first look at GET /admin/locations, then
     # raised to clear it in one cycle.
     "classify_locations_per_cycle": ConfigKey(
+        section="Catalog",
         default=10000,
         value_type=PositiveInt,
         help="Distinct location strings the hourly classification cycle sends to the model.",
@@ -246,6 +270,7 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
     # preference write recomputes within a minute regardless; this is how
     # long a new verdict waits to reach a board. Kanishk: minutes, never a day.
     "board_refresh_minutes": ConfigKey(
+        section="Boards",
         default=3,
         value_type=PositiveInt,
         help="Minutes between recomputes of every person's board; a preference change recomputes sooner.",
@@ -256,12 +281,14 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
     # takes a working day at this rate and the ATSs see a trickle) and how
     # many missing drafts it batches (about $0.0005 each on luna).
     "application_form_reads_per_cycle": ConfigKey(
+        section="Applications",
         default=150,
         value_type=PositiveInt,
         help="Application forms the hourly sweep reads per person per cycle, newest postings "
         "first, one request each to the ATS under the host budget.",
     ),
     "resumes_per_user": ConfigKey(
+        section="Applications",
         default=10,
         value_type=PositiveInt,
         help="Resumes one person may keep. Each holds its PDF (5 MB at most) in the database, "
@@ -270,6 +297,8 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
     ),
     # Empty means the built-in text in the code; see the admin registry.
     "application_draft_instructions": ConfigKey(
+        section="Applications",
+        kind="text",
         default="",
         value_type=str,
         help="The rules the model drafts application answers under, before the person's own "
@@ -278,6 +307,8 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
         "application_sweep and the refine endpoint.",
     ),
     "application_suggest_instructions": ConfigKey(
+        section="Applications",
+        kind="text",
         default="",
         value_type=str,
         help="The rules the model fills the rest of an application form under (the fields the "
@@ -287,6 +318,7 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
     # The model never fills these on a form; the person does. One label a
     # line or comma-separated, whole words in the field's label or key.
     "application_ai_never_fills": ConfigKey(
+        section="Applications",
         default="location",
         value_type=str,
         help="Fields the model never fills on an application form, left to the person: one "
@@ -296,6 +328,7 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
         "an empty list lets the model fill every field, the location box included.",
     ),
     "application_drafts_per_cycle": ConfigKey(
+        section="Applications",
         default=500,
         value_type=PositiveInt,
         help="Missing application answers the hourly sweep drafts per person per cycle, in one "
@@ -306,6 +339,7 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
     # at a third of the reference's skills with seniority mostly blank. Turn
     # on from the admin config page after choosing a model worth paying for.
     "requirements_extraction_enabled": ConfigKey(
+        section="Catalog",
         default=False,
         value_type=bool,
         help="Whether the hourly requirements extraction runs. Off since 2026-09-07: its one "

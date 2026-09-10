@@ -48,11 +48,18 @@ should say so.
 
 **A value an administrator might want to change lives in `app_config`, not
 in code.** Retry windows, caps, cycle sizes: declare the default, typed
-validation, help text and choices in `api/config.py` (`CONFIG_KEYS`), and read
-it at the point of use with `db.get_config`. Database seeding and
-GET /admin/config derive from that registry; the admin config page renders
-every key from its metadata, so a new key needs no frontend entry; four keys in one evening each needed one before it did. A
-constant in code needs a deploy to
+validation, help text, choices, `kind` and `section` in `api/config.py`
+(`CONFIG_KEYS`), and read it at the point of use with `db.get_config`. Database
+seeding and GET /admin/config derive from that registry; the admin config page
+renders every key from its metadata, so a new key needs no frontend entry; four
+keys in one evening each needed one before it did. **The whole entry is served,
+because a page that infers presentation from prose infers it wrong:** `kind`
+picks the control (`text` is a paragraph, `groups` a chip list, `hosts` a
+rate table, `columns` a JSON block) where the page used to regex the help
+sentence for the word "rules"; `section` files the key under a heading where
+the page used to show twenty keys in one flat list; `default` is what "changed"
+and "Reset" mean. A new key names its section, or it lands in a General bucket
+that says nothing. A constant in code needs a deploy to
 change; a row changes on the next cycle. The seed is the default, so the
 comment explaining the number goes beside the seed, not beside a literal
 somewhere else. Values that are facts about a system (a provider's page size,
