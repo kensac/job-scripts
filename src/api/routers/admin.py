@@ -1490,8 +1490,19 @@ def get_config(user: AuthedUser = Depends(require_admin)):
     rows = db.query("SELECT key, value FROM app_config ORDER BY key")
     return {
         "config": {r["key"]: r["value"] for r in rows},
+        # The whole registry entry travels: the page picks its control
+        # from kind and type, files the key under section, and marks a
+        # value that differs from default as changed, none of which it
+        # can infer from the help sentence without guessing.
         "keys": {
-            key: {"type": spec.type.__name__, "help": spec.help, "choices": list(spec.choices)}
+            key: {
+                "type": spec.type.__name__,
+                "kind": spec.kind,
+                "section": spec.section,
+                "default": spec.default,
+                "help": spec.help,
+                "choices": list(spec.choices),
+            }
             for key, spec in _CONFIG_KEYS.items()
         },
     }

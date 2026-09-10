@@ -1,5 +1,6 @@
-"""GET /admin/config serves the registry beside the values: type, help and
-choices per key, so the admin page renders any tunable without a frontend
+"""GET /admin/config serves the registry beside the values: type, kind,
+section, default, help and choices per key, so the admin page renders any
+tunable, files it under a heading and marks it changed without a frontend
 entry, and a new key is one entry in api.config.CONFIG_KEYS."""
 
 from __future__ import annotations
@@ -14,12 +15,44 @@ def test_every_key_is_served_with_its_type_help_and_choices(client, admin_header
     for key, spec in body["keys"].items():
         assert spec["type"] in {"bool", "int", "str", "list", "dict"}, key
         assert spec["help"].strip(), key
+        # A key with no section lands in a "General" bucket the page shows
+        # last; a key naming a section nobody else names makes a heading of
+        # one, so the set is asserted whole rather than per key.
+        assert spec["section"].strip(), key
+        assert spec["kind"] in {"value", "text", "groups", "hosts", "columns"}, key
     assert body["keys"]["fetch_engine"]["choices"] == ["chromium", "static_first"]
     assert body["keys"]["batch_straggler_hours"] == {
         "type": "int",
+        "kind": "value",
+        "section": "Health",
+        "default": 4,
         "help": admin._CONFIG_KEYS["batch_straggler_hours"].help,
         "choices": [],
     }
+
+
+def test_every_key_is_filed_under_a_named_section():
+    """A new key with no section would otherwise appear in General, which is
+    a heading that says nothing about what the value does."""
+    sections = {spec.section for spec in admin._CONFIG_KEYS.values()}
+    assert sections == {
+        "Access",
+        "Applications",
+        "Boards",
+        "Catalog",
+        "Extension",
+        "Fetching",
+        "Health",
+    }
+    assert not [k for k, s in admin._CONFIG_KEYS.items() if s.section == "General"]
+
+
+def test_the_served_default_is_the_registry_default(client, admin_headers):
+    """The page marks a key changed by comparing its value to this; a served
+    default that is not the seed would mark every untouched key changed."""
+    body = client.get("/v1/admin/config", headers=admin_headers).json()
+    for key, spec in body["keys"].items():
+        assert spec["default"] == admin._CONFIG_KEYS[key].default, key
 
 
 def test_every_seeded_key_is_in_the_registry_and_the_reverse():
