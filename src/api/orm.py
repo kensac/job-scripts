@@ -101,6 +101,17 @@ class Job(Base):
     # against the posting url, applied uniformly across boards. Job rows serve
     # it as `closed_verdict` ('open' | 'closed' | NULL for never checked).
     active: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
+    # When the feed put this posting back after having dropped it, which is
+    # the one moment a closed verdict is worth re-reading. A closed verdict is
+    # otherwise terminal: demote_closed removes the board row, the reverify
+    # sweep takes its candidates from board rows, and its full run asks for
+    # verdicts that PASSED, so nothing ever looks at the page again. Set only
+    # on the false -> true edge in catalog.upsert_postings, so the work is one
+    # check per real re-listing rather than a sweep over every posting ever
+    # closed - 464 of which, on 2026-09-10, belonged to sources switched off.
+    # Self-clearing: the reverify candidate asks for relisted_at NEWER than
+    # the latest closed verdict, so a fresh verdict settles it.
+    relisted_at: Mapped[datetime.datetime | None]
     date_posted: Mapped[datetime.datetime | None]
     uploaded_by: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id"))
     extraction_status: Mapped[str | None] = mapped_column(Text)

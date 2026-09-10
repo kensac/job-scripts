@@ -76,6 +76,34 @@ Inactive rows are excluded from every sweep and leave boards through
 An aggregator list is not such a signal, and an empty pull is a broken fetch
 rather than an empty board, so neither retires anything.
 
+## A re-listing is the only thing that reopens a closed posting
+
+A closed verdict was otherwise permanent. `demote_closed` takes the board row
+away, the reverify sweep draws its candidates from board rows, and its full
+run asks for verdicts that PASSED, so no path led back to the page: the
+posting stayed closed forever on the copy fetched the moment it closed. On
+2026-09-10 that held 1,125 postings whose feed still listed them.
+
+So the upsert stamps `jobs.relisted_at` on the false to true edge, and the
+reverify sweep takes as a candidate any active posting whose `relisted_at` is
+newer than its latest closed verdict. The verdict itself settles the stamp,
+because a fresh answer is newer than the edge that asked for it.
+
+Key it on the edge, never on a timer. A sweep over everything ever closed
+grows without bound and is mostly postings that can no longer change: 464 of
+those 1,125 belonged to sources since switched off, and 295 were sheet
+imports with no feed behind them. The edge costs one check per posting a feed
+actually puts back.
+
+It belongs to reverify and not to `verify_new`, which judges from the cached
+page copy. For a posting that was closed, that copy is the one that showed it
+closed; only reverify re-fetches (`verdicts.refresh_content`).
+
+An aggregator row is never retired, so it has no edge and this cannot reach
+it. That is a deliberate hole, not an oversight: those feeds hold a posting
+active continuously, so "still listed" is a standing condition rather than an
+event, and there is nothing to trigger on.
+
 ## A posting page is fetched by the cheapest tier that plainly worked
 
 In order: the ATS resolver (an API call); then, when `fetch_engine` is

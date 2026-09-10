@@ -278,13 +278,39 @@ async def handle_reverify_open(task_id: int, payload: dict[str, Any]) -> None:
         cap_sql = "LIMIT %(cap)s" if REVERIFY_PER_CYCLE else ""
         rows = db.query(
             f"""
-            SELECT DISTINCT j.url, j.company, j.title FROM user_jobs uj
-            JOIN jobs j ON j.id = uj.job_id
-            WHERE {UNTOUCHED}
-              AND COALESCE((SELECT MAX(q.created_at) FROM ai_queries q
-                            WHERE q.url = j.url AND q.check_type = 'closed'),
-                           '-infinity') < now() - make_interval(days => %(days)s)
-            {cap_sql}
+            SELECT url, company, title FROM (
+                SELECT DISTINCT j.url, j.company, j.title FROM user_jobs uj
+                JOIN jobs j ON j.id = uj.job_id
+                WHERE {UNTOUCHED}
+                  AND COALESCE((SELECT MAX(q.created_at) FROM ai_queries q
+                                WHERE q.url = j.url AND q.check_type = 'closed'),
+                               '-infinity') < now() - make_interval(days => %(days)s)
+                {cap_sql}
+            ) stale
+            UNION
+            -- A posting its feed dropped and has since put back. Nothing else
+            -- reaches it: a closed verdict removed its board row through
+            -- demote_closed, so the branch above cannot see it, and the full
+            -- run asks for verdicts that PASSED, so that cannot either. A
+            -- closure was therefore permanent, held on the page copy taken
+            -- the moment it closed.
+            --
+            -- Keyed on the re-listing rather than a timer on purpose: a sweep
+            -- over everything ever closed grows without bound and is mostly
+            -- postings that can no longer change - on 2026-09-10, 464 of
+            -- 1,125 belonged to sources since switched off. This costs one
+            -- check per posting a feed actually puts back, and it lands in
+            -- reverify rather than verify_new because reverify re-fetches:
+            -- verify_new judges from the cached copy, which for a closed
+            -- posting is the copy that showed it closed.
+            --
+            -- Self-clearing: the fresh verdict is newer than relisted_at.
+            SELECT j.url, j.company, j.title FROM jobs j
+            WHERE j.active AND j.relisted_at IS NOT NULL
+              AND {AI_ELIGIBLE_JOB.format(job="j")}
+              AND j.relisted_at > COALESCE(
+                    (SELECT MAX(q.created_at) FROM ai_queries q
+                     WHERE q.url = j.url AND q.check_type = 'closed'), '-infinity')
             """,
             {"days": REVERIFY_DAYS, "cap": REVERIFY_PER_CYCLE},
         )

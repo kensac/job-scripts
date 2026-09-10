@@ -111,3 +111,66 @@ def test_a_posting_whose_fetch_failed_today_is_not_fetched_again_this_hour(monke
     assert progress["progress"]["skipped_recent_failure"] == 1
     assert progress["progress"]["fetch_failed"] == 2
     assert progress["progress"]["cached"] == 0
+
+
+def test_a_posting_the_feed_puts_back_is_stamped_and_reaches_the_recheck(f):
+    """A closed verdict used to be permanent: demote_closed takes the board
+    row away, and every reverify candidate is either a board row or a posting
+    whose verdict PASSED, so nothing ever read the page again. The feed
+    putting the posting back is the one event that says otherwise."""
+    from core import catalog
+
+    post = _posting("Software Engineer")
+    catalog.upsert_postings([post], "rocketlab")
+    verdicts.record_manual(
+        url=post.url,
+        check_type="closed",
+        rejected=True,
+        reason="posting gone",
+        company="",
+        job_title=post.title,
+        context="test",
+    )
+    row = db.query_one("SELECT active, relisted_at FROM jobs WHERE url = %s", (post.url,))
+    assert row and row["active"] and row["relisted_at"] is None
+
+    # The board drops it, so the pull no longer admits it.
+    catalog.retire_unlisted("rocketlab", [])
+    assert not db.query_one("SELECT active FROM jobs WHERE url = %s", (post.url,))["active"]
+
+    # And the board lists it again.
+    catalog.upsert_postings([post], "rocketlab")
+    back = db.query_one("SELECT active, relisted_at FROM jobs WHERE url = %s", (post.url,))
+    assert back["active"] and back["relisted_at"] is not None, "the re-listing must be stamped"
+
+    # Which is what puts it in front of the sweep that re-fetches the page.
+    assert post.url in _relisted_candidates()
+
+    # A fresh verdict settles it: the stamp is older than the answer now.
+    verdicts.record_manual(
+        url=post.url,
+        check_type="closed",
+        rejected=False,
+        reason="posting is live",
+        company="",
+        job_title=post.title,
+        context="test",
+    )
+    assert post.url not in _relisted_candidates()
+
+
+def _relisted_candidates() -> set[str]:
+    """The re-listed branch of the reverify candidate query, on its own."""
+    from core.store import AI_ELIGIBLE_JOB
+
+    rows = db.query(
+        f"""
+        SELECT j.url FROM jobs j
+        WHERE j.active AND j.relisted_at IS NOT NULL
+          AND {AI_ELIGIBLE_JOB.format(job="j")}
+          AND j.relisted_at > COALESCE(
+                (SELECT MAX(q.created_at) FROM ai_queries q
+                 WHERE q.url = j.url AND q.check_type = 'closed'), '-infinity')
+        """
+    )
+    return {r["url"] for r in rows}

@@ -93,6 +93,14 @@ def _upsert_batch(batch: list[tuple], retries: int = 3) -> None:
                     locations = EXCLUDED.locations,
                     terms = EXCLUDED.terms,
                     active = EXCLUDED.active,
+                    -- The false -> true edge, and only that edge: the feed
+                    -- dropped this posting and has put it back. It is the one
+                    -- moment a closed verdict is worth re-reading, and
+                    -- stamping it here costs nothing and needs no second
+                    -- query. jobs.active is the row as it stands, EXCLUDED
+                    -- the row this pull proposes.
+                    relisted_at = CASE WHEN NOT jobs.active AND EXCLUDED.active
+                                       THEN now() ELSE jobs.relisted_at END,
                     date_posted = COALESCE(jobs.date_posted, EXCLUDED.date_posted),
                     source = CASE WHEN jobs.source = 'upload'
                                   THEN EXCLUDED.source ELSE jobs.source END,
