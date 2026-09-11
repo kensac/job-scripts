@@ -10,6 +10,7 @@ is reproducible and never depends on a build\'s private wording.
 
 from __future__ import annotations
 
+import datetime
 import json
 from typing import Annotated, Any
 
@@ -46,6 +47,33 @@ class ViewPatch(BaseModel):
     position: NonNullUpdate[Annotated[int, Field(ge=0)]] = None
 
 
+class View(BaseModel):
+    """One saved view, the same row every route here returns.
+
+    `state` stays a free object. It is the page's own request shape and the
+    API never reads it, so declaring its keys here would be this module
+    claiming to know a page's vocabulary and going stale the first time a
+    page grows a filter.
+    """
+
+    id: int
+    page: str
+    name: str
+    state: dict[str, Any]
+    is_default: bool
+    position: int
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+
+
+class ViewList(BaseModel):
+    views: list[View]
+
+
+class ViewDeleted(BaseModel):
+    deleted: int
+
+
 def _lock_owner(user_id: int) -> None:
     # A view row cannot serialize the first create on an empty page. The
     # owner exists before any views and protects creation, ordering and delete.
@@ -80,25 +108,28 @@ def _clear_default(user_id: int, page: str, keep: int | None) -> None:
 
 
 @router.get("")
-def list_views(page: str | None = None, user: AuthedUser = Depends(require_user)):
+def list_views(page: str | None = None, user: AuthedUser = Depends(require_user)) -> ViewList:
     """Every view of the caller's, optionally one page's, in switcher order."""
-    rows = db.query(
-        f"SELECT {_COLS} FROM saved_views WHERE user_id = %(uid)s "
-        "AND (%(page)s::text IS NULL OR page = %(page)s) ORDER BY page, position, id",
-        {"uid": user.id, "page": page},
+    return ViewList(
+        views=db.query_as(
+            View,
+            f"SELECT {_COLS} FROM saved_views WHERE user_id = %(uid)s "
+            "AND (%(page)s::text IS NULL OR page = %(page)s) ORDER BY page, position, id",
+            {"uid": user.id, "page": page},
+        )
     )
-    return {"views": rows}
 
 
 @router.post("", status_code=201)
-def create_view(body: ViewCreate, user: AuthedUser = Depends(require_user)):
+def create_view(body: ViewCreate, user: AuthedUser = Depends(require_user)) -> View:
     _check_state(body.state)
     try:
         with db.transaction():
             _lock_owner(user.id)
             if body.is_default:
                 _clear_default(user.id, body.page, None)
-            row = db.query_one(
+            row = db.query_one_as(
+                View,
                 f"""
                 INSERT INTO saved_views (user_id, page, name, state, is_default, position)
                 VALUES (%(uid)s, %(page)s, %(name)s, %(state)s, %(default)s,
@@ -124,11 +155,13 @@ def create_view(body: ViewCreate, user: AuthedUser = Depends(require_user)):
                 "message": f"a view named {body.name!r} already exists on {body.page}",
             },
         ) from None
+    # An INSERT that did not raise returned its row.
+    assert row
     return row
 
 
 @router.patch("/{view_id}")
-def patch_view(view_id: int, body: ViewPatch, user: AuthedUser = Depends(require_user)):
+def patch_view(view_id: int, body: ViewPatch, user: AuthedUser = Depends(require_user)) -> View:
     """Rename, restate, reorder, or make default; a field left out is left alone."""
     fields = body.model_dump(exclude_unset=True)
     if not fields:
@@ -143,7 +176,8 @@ def patch_view(view_id: int, body: ViewPatch, user: AuthedUser = Depends(require
             current = _own(view_id, user)
             if fields.get("is_default"):
                 _clear_default(user.id, current["page"], view_id)
-            row = db.query_one(
+            row = db.query_one_as(
+                View,
                 f"UPDATE saved_views SET {cols}, updated_at = now() WHERE id = %(id)s AND user_id = %(uid)s "
                 f"RETURNING {_COLS}",
                 {**fields, "id": view_id, "uid": user.id},
@@ -158,13 +192,16 @@ def patch_view(view_id: int, body: ViewPatch, user: AuthedUser = Depends(require
                 "message": "a view with that name already exists on this page",
             },
         ) from None
+    # _own has already refused a view that is not the caller's, so the UPDATE
+    # matched.
+    assert row
     return row
 
 
 @router.delete("/{view_id}")
-def delete_view(view_id: int, user: AuthedUser = Depends(require_user)):
+def delete_view(view_id: int, user: AuthedUser = Depends(require_user)) -> ViewDeleted:
     with db.transaction():
         _lock_owner(user.id)
         _own(view_id, user)
         db.execute("DELETE FROM saved_views WHERE id = %s AND user_id = %s", (view_id, user.id))
-    return {"deleted": view_id}
+    return ViewDeleted(deleted=view_id)
