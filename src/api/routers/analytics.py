@@ -35,14 +35,16 @@ from api.auth import AuthedUser
 from api.rates import DEFAULT_MIN_SAMPLE
 from api.rates import rate as _rate
 from api.routers.admin import require_admin
+from core.checks import POSTING_CHECK_NAMES
 
 router = APIRouter(prefix="/analytics")
 
 
-# The checks whose latest verdict is a per-job yes/no. 'content' and
-# 'extraction' are excluded deliberately: they record a scrape attempt, not a
-# judgement about the posting, and neither writes a 'rejected' row.
-_VERDICT_CHECKS = ("closed", "clearance")
+# The checks whose latest verdict is a per-job yes/no, which is the registry:
+# 'content' and 'extraction' are not in it, deliberately, because they record
+# a scrape attempt rather than a judgement about the posting and neither
+# writes a 'rejected' row.
+_VERDICT_CHECKS = POSTING_CHECK_NAMES
 
 
 _INVENTORY_SQL = """

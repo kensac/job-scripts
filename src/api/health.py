@@ -4,6 +4,7 @@ import logging
 from typing import Any
 
 from api import db, telemetry
+from core.checks import POSTING_CHECK_NAMES
 
 logger = logging.getLogger("jobtracker_health")
 
@@ -231,7 +232,7 @@ def _detect_sources() -> list[dict[str, Any]]:
                        ORDER BY q.id
                    ) AS company_rank
             FROM ai_queries q JOIN jobs j ON j.url = q.url
-            WHERE q.check_type IN ('closed', 'clearance')
+            WHERE q.check_type = ANY(%(posting_checks)s)
               AND q.status IN ('passed', 'rejected')
               AND q.created_at > now() - interval '8 days'
               AND q.created_at - j.created_at
@@ -249,7 +250,11 @@ def _detect_sources() -> list[dict[str, Any]]:
         FROM firsts WHERE company_rank <= %(cap)s
         GROUP BY source, check_type
         """,
-        {"fresh_window": FRESH_CHECK_WINDOW, "cap": MAX_PER_COMPANY},
+        {
+            "fresh_window": FRESH_CHECK_WINDOW,
+            "cap": MAX_PER_COMPANY,
+            "posting_checks": list(POSTING_CHECK_NAMES),
+        },
     ):
         if r["recent_total"] < MIN_SAMPLES or r["base_total"] < MIN_SAMPLES:
             continue

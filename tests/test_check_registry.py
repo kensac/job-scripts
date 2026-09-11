@@ -9,6 +9,7 @@ arm again, the check registered here stops working through that route.
 from __future__ import annotations
 
 import dataclasses
+import inspect
 
 import pytest
 from pydantic import BaseModel, Field
@@ -139,3 +140,46 @@ def test_the_terse_schema_is_the_entry_s_own(registered_check):
     assert registered_check.terse_model is None
     assert registered_check.model_for(with_reason=False) is HiringManagerNamedResponse
     assert dataclasses.is_dataclass(registered_check)
+
+
+def test_the_verdict_index_covers_exactly_the_registered_checks():
+    """A partial index predicate is a constant in the database, so it cannot
+    read the registry. Registering a check without widening the index leaves
+    the board query walking rows it used to seek, and nothing says so: the
+    answers stay correct and only the plan changes.
+
+    This is the thing that says so. When it fails, the fix is a migration
+    widening idx_ai_queries_latest_verdict, in the same pull request as the
+    new check.
+    """
+    import re
+
+    from api.orm import AiQuery
+    from core.checks import POSTING_CHECK_NAMES
+
+    index = next(
+        ix for ix in AiQuery.__table__.indexes if ix.name == "idx_ai_queries_latest_verdict"
+    )
+    predicate = str(index.dialect_options["postgresql"]["where"])
+    listed = re.search(r"check_type IN \(([^)]*)\)", predicate)
+    assert listed, f"the index no longer filters on check_type: {predicate}"
+    covered = {name.strip().strip("'") for name in listed.group(1).split(",")}
+
+    assert covered == set(POSTING_CHECK_NAMES), (
+        f"idx_ai_queries_latest_verdict covers {sorted(covered)} but the registry holds "
+        f"{sorted(POSTING_CHECK_NAMES)}. Widen the index in a migration, or the board "
+        "query loses its index for the checks it does not cover."
+    )
+
+
+def test_the_set_of_posting_checks_has_one_definition():
+    """The queries that mean "every posting check" read the registry rather
+    than spelling the names. A spelled list is one a new check does not join,
+    and the failure is silent: the check runs, and the reader ignores it.
+    """
+    from api.routers.analytics import _VERDICT_CHECKS
+    from core.checks import POSTING_CHECK_NAMES
+    from core.store import prefetch
+
+    assert _VERDICT_CHECKS is POSTING_CHECK_NAMES
+    assert inspect.signature(prefetch).parameters["check_types"].default is POSTING_CHECK_NAMES
