@@ -14,6 +14,7 @@ from api.board import visibility
 from api.board.access import require_visible_job
 from api.models import UploadRequest, UserJobPatch, UserJobsBulkIds, UserJobsBulkPatch
 from api.problem import AI_REFUSALS, refuse
+from api.reports import REPORT_KINDS, ReportKind, report_kinds
 from api.task_admission import TaskProgress
 from core.comp import CompBasis, CompPeriod
 from core.fetching.urls import normalize_url
@@ -159,11 +160,6 @@ class StatusMeta(BaseModel):
 class AtsCount(BaseModel):
     ats: AtsName
     count: int
-
-
-class ReportKind(BaseModel):
-    kind: str
-    label: str
 
 
 class BoardOptions(BaseModel):
@@ -454,21 +450,6 @@ def status_meta(statuses: list[str]) -> list[StatusMeta]:
         for name in statuses
         for meta in (_STATUS_META.get(name, (False, None)),)
     ]
-
-
-REPORT_KINDS = ("stale", "wrong_data", "closed", "other")
-_REPORT_LABELS = {
-    "stale": "Posting is stale",
-    "wrong_data": "Details are wrong",
-    "closed": "Posting is closed",
-    "other": "Something else",
-}
-
-
-def report_kinds() -> list[ReportKind]:
-    """The kinds a report can carry, with the label the form shows; one copy,
-    served to the board's report modal and the admin reports page."""
-    return [ReportKind(kind=k, label=_REPORT_LABELS[k]) for k in REPORT_KINDS]
 
 
 @router.get("/user/jobs/options")
