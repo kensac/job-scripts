@@ -76,11 +76,20 @@ A merge reaches six hosts on Renovate's cadence with nobody watching
 ([deployment.md](deployment.md)), so "the tests passed" has to be enough
 before a change can land that way.
 
-**May be taken by an agent, PR opened and merged on green CI:** phase 0 and
-phase 1. Both are mechanical and have a decisive test: a new upward import
-fails the contract; a registered fake check type needs no other edit.
+**May be taken by an agent, PR opened and merged on green CI:** every phase,
+by Kanishk's standing instruction of 2026-09-10 ("merge it and keep going, you
+don't have to keep pausing"). Green CI is the gate, and CI runs the full
+suite, the type check and the import contract.
 
-**Needs a person before merge:** phases 2, 3, 4 and 5.
+That instruction replaced an earlier rule here that phases 2 to 5 each needed
+a person before merge. It does not replace the judgement the rule was
+protecting. A phase still has to bring its own evidence, and the two below
+still hold.
+
+**Still stop and ask:** a change whose failure would be silent in production
+and invisible in CI. Phase 2 and phase 4 are the named cases: one decides what
+gets paid for, the other migrates verdicts that cost money to produce. Bring
+the parallel cutover's numbers first, then merge.
 
 Phase 2 decides who sees what. Its failure mode is two definitions silently
 agreeing in the tests and disagreeing in production, which is the state the
@@ -110,7 +119,8 @@ Phase 4 migrates the verdict cache. Those rows cost money to produce and
 cannot be casually rebuilt.
 
 **Never in a loop:** any write to the production database, and any migration
-that can refuse to apply ([migrations.md](migrations.md)).
+that can refuse to apply ([migrations.md](migrations.md)). Neither of these is
+covered by the standing instruction above, because neither is gated by CI.
 
 ## Revising this document
 
