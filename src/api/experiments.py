@@ -12,13 +12,41 @@ sample is drawn by seed, so the same postings can be re-measured later.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from typing import Any
+
+from pydantic import BaseModel
 
 from api import db
 from core import providers
 from core.store import AI_ELIGIBLE_JOB, CONTENT_LATERAL, VERIFIED_OPEN
 
 PURPOSE = "experiment"
+
+Params = dict[str, Any]
+Posting = dict[str, Any]
+Comparison = dict[str, Any]
+Deployed = dict[str, Comparison]
+
+
+@dataclass(frozen=True, slots=True)
+class ExperimentStep:
+    instruction_builder: Callable[[Params], str]
+    answer_model: type[BaseModel]
+    input_builder: Callable[[Posting], str]
+    max_output_tokens: int
+    comparison_projector: Callable[[Comparison], Comparison]
+    load_deployed: Callable[[list[str], Params], Deployed]
+
+    def instructions(self, params: Params) -> str:
+        return self.instruction_builder(params)
+
+    def build_input(self, posting: Posting) -> str:
+        return self.input_builder(posting)
+
+    def project(self, answer: Comparison) -> Comparison:
+        return self.comparison_projector(answer)
 
 
 def _filter_instructions(params: dict[str, Any]) -> str:
@@ -70,7 +98,7 @@ def _requirements_fields(p: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def steps() -> dict[str, dict[str, Any]]:
+def steps() -> Mapping[str, ExperimentStep]:
     """The measurable steps: how each builds its request and which fields of
     its answer are compared. Imported lazily so the schemas are loaded only
     when an experiment needs the declarations."""
@@ -89,34 +117,38 @@ def steps() -> dict[str, dict[str, Any]]:
     from core.shapes import COMP_TASK, REQUIREMENTS_TASK, VERIFY_TASK
 
     return {
-        "filter": {
-            "instructions": _filter_instructions,
-            "model": FilterDecision,
-            "input": _posting_input,
-            "max_output_tokens": 6000,
-            "fields": _filter_fields,
-        },
-        "verify": {
-            "instructions": lambda params: _VERIFY_INSTRUCTIONS,
-            "model": VerifyVerdict,
-            "input": lambda r: r["input_content"][:VERIFY_INPUT_CHARS],
-            "max_output_tokens": VERIFY_TASK.max_output_tokens,
-            "fields": _verify_fields,
-        },
-        "comp": {
-            "instructions": lambda params: COMP_INSTRUCTIONS,
-            "model": CompExtract,
-            "input": lambda r: r["input_content"][:COMP_INPUT_CHARS],
-            "max_output_tokens": COMP_TASK.max_output_tokens,
-            "fields": _comp_fields,
-        },
-        "requirements": {
-            "instructions": lambda params: REQUIREMENTS_INSTRUCTIONS,
-            "model": RequirementsExtract,
-            "input": lambda r: r["input_content"][:REQUIREMENTS_INPUT_CHARS],
-            "max_output_tokens": REQUIREMENTS_TASK.max_output_tokens,
-            "fields": _requirements_fields,
-        },
+        "filter": ExperimentStep(
+            instruction_builder=_filter_instructions,
+            answer_model=FilterDecision,
+            input_builder=_posting_input,
+            max_output_tokens=6000,
+            comparison_projector=_filter_fields,
+            load_deployed=_filter_deployed,
+        ),
+        "verify": ExperimentStep(
+            instruction_builder=lambda params: _VERIFY_INSTRUCTIONS,
+            answer_model=VerifyVerdict,
+            input_builder=lambda r: r["input_content"][:VERIFY_INPUT_CHARS],
+            max_output_tokens=VERIFY_TASK.max_output_tokens,
+            comparison_projector=_verify_fields,
+            load_deployed=_verify_deployed,
+        ),
+        "comp": ExperimentStep(
+            instruction_builder=lambda params: COMP_INSTRUCTIONS,
+            answer_model=CompExtract,
+            input_builder=lambda r: r["input_content"][:COMP_INPUT_CHARS],
+            max_output_tokens=COMP_TASK.max_output_tokens,
+            comparison_projector=_comp_fields,
+            load_deployed=_comp_deployed,
+        ),
+        "requirements": ExperimentStep(
+            instruction_builder=lambda params: REQUIREMENTS_INSTRUCTIONS,
+            answer_model=RequirementsExtract,
+            input_builder=lambda r: r["input_content"][:REQUIREMENTS_INPUT_CHARS],
+            max_output_tokens=REQUIREMENTS_TASK.max_output_tokens,
+            comparison_projector=_requirements_fields,
+            load_deployed=_requirements_deployed,
+        ),
     }
 
 
@@ -162,78 +194,83 @@ def usage(res: Any) -> dict[str, int]:
     }
 
 
-def deployed_verdicts(purpose: str, urls: list[str], params: dict[str, Any]) -> dict[str, dict]:
-    """What production decided for these postings, in the step's own field
-    shape, so an arm can be scored against the live answer as well as
-    against the reference arm."""
-    if purpose == "filter":
-        row = db.query_one(
-            "SELECT prompt_hash FROM user_filters WHERE id = %s", (params.get("filter_id"),)
-        )
-        if not row:
-            return {}
-        rows = db.query(
-            """
-            SELECT DISTINCT ON (url) url, status FROM ai_queries
-            WHERE url = ANY(%s) AND check_type = 'custom' AND prompt_hash = %s
-              AND status IN ('passed', 'rejected')
-            ORDER BY url, id DESC
-            """,
-            (urls, row["prompt_hash"]),
-        )
-        return {r["url"]: {"should_filter": r["status"] == "rejected"} for r in rows}
-    if purpose == "verify":
-        rows = db.query(
-            """
-            SELECT DISTINCT ON (url, check_type) url, check_type, status FROM ai_queries
-            WHERE url = ANY(%s) AND check_type IN ('closed', 'clearance')
-              AND status IN ('passed', 'rejected')
-            ORDER BY url, check_type, id DESC
-            """,
-            (urls,),
-        )
-        out: dict[str, dict] = {}
-        for r in rows:
-            key = (
-                "is_closed" if r["check_type"] == "closed" else "requires_clearance_or_restrictions"
-            )
-            out.setdefault(r["url"], {})[key] = r["status"] == "rejected"
-        return out
-    if purpose == "comp":
-        rows = db.query(
-            "SELECT url, comp_min, comp_max, comp_period, comp_text FROM jobs "
-            "WHERE url = ANY(%s) AND comp_extracted",
-            (urls,),
-        )
-        return {
-            r["url"]: {
-                "has_comp": r["comp_text"] is not None,
-                "comp_min": r["comp_min"],
-                "comp_max": r["comp_max"],
-                "period": r["comp_period"],
-            }
-            for r in rows
+def _filter_deployed(urls: list[str], params: Params) -> Deployed:
+    row = db.query_one(
+        "SELECT prompt_hash FROM user_filters WHERE id = %s", (params.get("filter_id"),)
+    )
+    if not row:
+        return {}
+    rows = db.query(
+        """
+        SELECT DISTINCT ON (url) url, status FROM ai_queries
+        WHERE url = ANY(%s) AND check_type = 'custom' AND prompt_hash = %s
+          AND status IN ('passed', 'rejected')
+        ORDER BY url, id DESC
+        """,
+        (urls, row["prompt_hash"]),
+    )
+    return {r["url"]: {"should_filter": r["status"] == "rejected"} for r in rows}
+
+
+def _verify_deployed(urls: list[str], params: Params) -> Deployed:
+    rows = db.query(
+        """
+        SELECT DISTINCT ON (url, check_type) url, check_type, status FROM ai_queries
+        WHERE url = ANY(%s) AND check_type IN ('closed', 'clearance')
+          AND status IN ('passed', 'rejected')
+        ORDER BY url, check_type, id DESC
+        """,
+        (urls,),
+    )
+    out: Deployed = {}
+    for r in rows:
+        key = "is_closed" if r["check_type"] == "closed" else "requires_clearance_or_restrictions"
+        out.setdefault(r["url"], {})[key] = r["status"] == "rejected"
+    return out
+
+
+def _comp_deployed(urls: list[str], params: Params) -> Deployed:
+    rows = db.query(
+        "SELECT url, comp_min, comp_max, comp_period, comp_text FROM jobs "
+        "WHERE url = ANY(%s) AND comp_extracted",
+        (urls,),
+    )
+    return {
+        r["url"]: {
+            "has_comp": r["comp_text"] is not None,
+            "comp_min": r["comp_min"],
+            "comp_max": r["comp_max"],
+            "period": r["comp_period"],
         }
-    if purpose == "requirements":
-        # The stored row carries the scalar fields; skills live in their own
-        # table and are compared between arms only.
-        rows = db.query(
-            "SELECT url, degree_min, degree_required, seniority, employment_type, clearance, "
-            "yoe_min FROM job_requirements WHERE url = ANY(%s)",
-            (urls,),
-        )
-        return {
-            r["url"]: {
-                "degree_min": r["degree_min"] or "",
-                "degree_required": bool(r["degree_required"]),
-                "seniority": r["seniority"] or "",
-                "employment_type": r["employment_type"] or "",
-                "clearance": r["clearance"] or "",
-                "yoe_min": r["yoe_min"],
-            }
-            for r in rows
+        for r in rows
+    }
+
+
+def _requirements_deployed(urls: list[str], params: Params) -> Deployed:
+    # The stored row carries the scalar fields; skills live in their own
+    # table and are compared between arms only.
+    rows = db.query(
+        "SELECT url, degree_min, degree_required, seniority, employment_type, clearance, "
+        "yoe_min FROM job_requirements WHERE url = ANY(%s)",
+        (urls,),
+    )
+    return {
+        r["url"]: {
+            "degree_min": r["degree_min"] or "",
+            "degree_required": bool(r["degree_required"]),
+            "seniority": r["seniority"] or "",
+            "employment_type": r["employment_type"] or "",
+            "clearance": r["clearance"] or "",
+            "yoe_min": r["yoe_min"],
         }
-    return {}
+        for r in rows
+    }
+
+
+def deployed_verdicts(purpose: str, urls: list[str], params: Params) -> Deployed:
+    """What production decided, shaped for comparison by the named step."""
+    step = steps().get(purpose)
+    return step.load_deployed(urls, params) if step else {}
 
 
 def _agreement(a: dict[str, Any], b: dict[str, Any]) -> dict[str, float]:
@@ -288,7 +325,7 @@ def summarise(experiment_id: int) -> dict[str, Any]:
             a["failed"] += 1
         else:
             a["ok"] += 1
-            fields_by_arm.setdefault(r["arm"], {})[r["url"]] = step["fields"](r["output"])
+            fields_by_arm.setdefault(r["arm"], {})[r["url"]] = step.project(r["output"])
     urls = sorted({r["url"] for r in rows})
     deployed = deployed_verdicts(exp["purpose"], urls, exp["params"])
     reference = exp["params"].get("reference") or (

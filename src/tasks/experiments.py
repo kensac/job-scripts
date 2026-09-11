@@ -71,8 +71,8 @@ async def _run(task_id: int, payload: dict[str, Any]) -> None:
             "UPDATE ai_experiments SET params = params || %s::jsonb WHERE id = %s",
             (json.dumps({"sampled": len(rows)}), experiment_id),
         )
-        instructions = step["instructions"](params)
-        schema = to_strict_json_schema(step["model"])
+        instructions = step.instructions(params)
+        schema = to_strict_json_schema(step.answer_model)
         ids: list[str] = []
         skipped: dict[str, str] = {}
         for arm in params["arms"]:
@@ -85,8 +85,8 @@ async def _run(task_id: int, payload: dict[str, Any]) -> None:
                 BatchSpec(
                     f"{domain.arm_name(model, effort)}|{r['url']}",
                     instructions,
-                    step["input"](r),
-                    step["model"].__name__,
+                    step.build_input(r),
+                    step.answer_model.__name__,
                     schema,
                     context={
                         "experiment_id": experiment_id,
@@ -101,7 +101,7 @@ async def _run(task_id: int, payload: dict[str, Any]) -> None:
                 snapshot_specs(task_id, specs),
                 model,
                 effort,
-                step["max_output_tokens"],
+                step.max_output_tokens,
                 on_event=batch_event_hook(task_id, domain.PURPOSE, model),
             )
         db.execute(
@@ -148,10 +148,8 @@ async def _run(task_id: int, payload: dict[str, Any]) -> None:
             error = result.error
             if result.text and not result.error:
                 try:
-                    output = (
-                        original_step["model"]
-                        .model_validate_json(result.text)
-                        .model_dump(mode="json")
+                    output = original_step.answer_model.model_validate_json(result.text).model_dump(
+                        mode="json"
                     )
                 except ValueError as exc:
                     error = f"unparsable: {str(exc)[:200]}"

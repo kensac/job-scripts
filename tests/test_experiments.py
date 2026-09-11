@@ -5,6 +5,7 @@ against a reference arm and against what production decided."""
 from __future__ import annotations
 
 import json
+from dataclasses import FrozenInstanceError
 from types import SimpleNamespace
 
 import pytest
@@ -30,6 +31,23 @@ def _sample(f, n: int) -> list[str]:
     return urls
 
 
+def test_experiment_steps_are_typed_immutable_and_own_purpose_behavior():
+    expected_loaders = {
+        "filter": "_filter_deployed",
+        "verify": "_verify_deployed",
+        "comp": "_comp_deployed",
+        "requirements": "_requirements_deployed",
+    }
+    declared = exp.steps()
+    assert {purpose: step.load_deployed.__name__ for purpose, step in declared.items()} == (
+        expected_loaders
+    )
+    assert all(isinstance(step, exp.ExperimentStep) for step in declared.values())
+    with pytest.raises(FrozenInstanceError):
+        declared["comp"].max_output_tokens = 1
+    assert exp.deployed_verdicts("not-a-step", [], {}) == {}
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("family", "cap"),
@@ -53,7 +71,7 @@ async def test_task_and_experiment_inputs_share_the_derivation_cap(f, monkeypatc
         await task_verify.handle_verify_new(f.make_task("verify_new", status="running"), {})
 
     assert len(captured) == 1
-    experiment_input = exp.steps()[family]["input"]({"input_content": content})
+    experiment_input = exp.steps()[family].build_input({"input_content": content})
     assert captured[0].input == experiment_input == content[:cap]
 
 
