@@ -84,10 +84,20 @@ run asks for verdicts that PASSED, so no path led back to the page: the
 posting stayed closed forever on the copy fetched the moment it closed. On
 2026-09-10 that held 1,125 postings whose feed still listed them.
 
-So the upsert stamps `jobs.relisted_at` on the false to true edge, and the
-reverify sweep takes as a candidate any active posting whose `relisted_at` is
-newer than its latest closed verdict. The verdict itself settles the stamp,
-because a fresh answer is newer than the edge that asked for it.
+So the catalog appends to `job_listing_events` when a feed changes its mind:
+`listed` true when a pull puts a posting back, false when an authoritative
+pull stops admitting one. The reverify sweep takes as a candidate any active
+posting whose latest return is newer than its latest closed verdict. The
+verdict itself settles it, because a fresh answer is newer than the return
+that asked for it.
+
+A row per change, never per pull. At 74,000 postings an hour, a row per
+observation would be millions a day saying nothing changed.
+
+`jobs.active` remains the current answer and the log is how it got there,
+which is the question a boolean cannot answer. It is what makes a flapping
+board countable, and a flapping board matters now precisely because a return
+bills a re-check.
 
 Key it on the edge, never on a timer. A sweep over everything ever closed
 grows without bound and is mostly postings that can no longer change: 464 of

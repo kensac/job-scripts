@@ -5,6 +5,13 @@ a mismatch fails the build rather than reaching a host.
 
 ## Rules
 
+**Generate with `make migration m="what changed"`.** Autogenerate connects to a
+database to diff the models against it, and bare `alembic revision
+--autogenerate` reads `DATABASE_URL`, which is production. It is only a read,
+but the next command in that shell is `alembic upgrade`, and that one is not.
+The target points both at the throwaway copy.
+
+
 **A column with a server default still needs `nullable=False` if the model says
 so.** Omitting it produces a drift failure in CI's autogenerate check.
 

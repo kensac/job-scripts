@@ -305,11 +305,11 @@ async def handle_reverify_open(task_id: int, payload: dict[str, Any]) -> None:
             -- verify_new judges from the cached copy, which for a closed
             -- posting is the copy that showed it closed.
             --
-            -- Self-clearing: the fresh verdict is newer than relisted_at.
+            -- Self-clearing: the fresh verdict is newer than the return.
             SELECT j.url, j.company, j.title FROM jobs j
-            WHERE j.active AND j.relisted_at IS NOT NULL
-              AND {AI_ELIGIBLE_JOB.format(job="j")}
-              AND j.relisted_at > COALESCE(
+            WHERE j.active AND {AI_ELIGIBLE_JOB.format(job="j")}
+              AND (SELECT MAX(e.at) FROM job_listing_events e
+                   WHERE e.job_id = j.id AND e.listed) > COALESCE(
                     (SELECT MAX(q.created_at) FROM ai_queries q
                      WHERE q.url = j.url AND q.check_type = 'closed'), '-infinity')
             """,

@@ -131,17 +131,18 @@ def test_a_posting_the_feed_puts_back_is_stamped_and_reaches_the_recheck(f):
         job_title=post.title,
         context="test",
     )
-    row = db.query_one("SELECT active, relisted_at FROM jobs WHERE url = %s", (post.url,))
-    assert row and row["active"] and row["relisted_at"] is None
+    row = db.query_one("SELECT id, active FROM jobs WHERE url = %s", (post.url,))
+    assert row and row["active"] and _listing_events(row["id"]) == []
 
     # The board drops it, so the pull no longer admits it.
     catalog.retire_unlisted("rocketlab", [])
     assert not db.query_one("SELECT active FROM jobs WHERE url = %s", (post.url,))["active"]
+    assert _listing_events(row["id"]) == [False], "the board dropping it is an observation too"
 
     # And the board lists it again.
     catalog.upsert_postings([post], "rocketlab")
-    back = db.query_one("SELECT active, relisted_at FROM jobs WHERE url = %s", (post.url,))
-    assert back["active"] and back["relisted_at"] is not None, "the re-listing must be stamped"
+    assert db.query_one("SELECT active FROM jobs WHERE url = %s", (post.url,))["active"]
+    assert _listing_events(row["id"]) == [False, True], "the return must be recorded"
 
     # Which is what puts it in front of the sweep that re-fetches the page.
     assert post.url in _relisted_candidates()
@@ -159,6 +160,15 @@ def test_a_posting_the_feed_puts_back_is_stamped_and_reaches_the_recheck(f):
     assert post.url not in _relisted_candidates()
 
 
+def _listing_events(job_id: int) -> list[bool]:
+    return [
+        r["listed"]
+        for r in db.query(
+            "SELECT listed FROM job_listing_events WHERE job_id = %s ORDER BY id", (job_id,)
+        )
+    ]
+
+
 def _relisted_candidates() -> set[str]:
     """The re-listed branch of the reverify candidate query, on its own."""
     from core.store import AI_ELIGIBLE_JOB
@@ -166,9 +176,9 @@ def _relisted_candidates() -> set[str]:
     rows = db.query(
         f"""
         SELECT j.url FROM jobs j
-        WHERE j.active AND j.relisted_at IS NOT NULL
-          AND {AI_ELIGIBLE_JOB.format(job="j")}
-          AND j.relisted_at > COALESCE(
+        WHERE j.active AND {AI_ELIGIBLE_JOB.format(job="j")}
+          AND (SELECT MAX(e.at) FROM job_listing_events e
+               WHERE e.job_id = j.id AND e.listed) > COALESCE(
                 (SELECT MAX(q.created_at) FROM ai_queries q
                  WHERE q.url = j.url AND q.check_type = 'closed'), '-infinity')
         """

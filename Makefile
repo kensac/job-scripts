@@ -83,6 +83,16 @@ testdb-down:    ## stop this checkout's test database
 testdb-url:     ## print this checkout's TEST_DATABASE_URL
 	@echo 'export TEST_DATABASE_URL=$(TESTPG_URL)' 
 
+# Autogenerate connects to a database to diff the models against it, and bare
+# `alembic revision --autogenerate` reads DATABASE_URL, which is PRODUCTION.
+# It is a read, so nothing was harmed the day this was found, but the next
+# command in that shell is `alembic upgrade` and that one is not. Generate
+# against the throwaway copy, always.
+migration:      ## generate a migration from the models (m="what changed")
+	@test -n "$(m)" || { echo 'usage: make migration m="what changed"'; exit 1; }
+	DATABASE_URL='$(TESTPG_URL)' alembic upgrade head
+	DATABASE_URL='$(TESTPG_URL)' alembic revision --autogenerate -m "$(m)"
+
 # --- dev API ------------------------------------------------------------
 # A real API over a THROWAWAY COPY of production, so the frontend can build
 # against real shapes. The mock layer this replaces produced a 422 on every
