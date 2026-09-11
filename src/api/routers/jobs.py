@@ -680,14 +680,14 @@ def upload_links(body: UploadRequest, user: AuthedUser = Depends(require_user)):
     return {"accepted": accepted, "rejected": rejected}
 
 
-class ReportBody(BaseModel):
+class JobReport(BaseModel):
     kind: str
     message: str = ""
     corrections: dict | None = None
 
 
 @router.post("/user/jobs/{job_id}/report")
-def report_job(job_id: int, body: ReportBody, user: AuthedUser = Depends(require_user)):
+def report_job(job_id: int, body: JobReport, user: AuthedUser = Depends(require_user)):
     if body.kind not in REPORT_KINDS:
         raise HTTPException(
             400,

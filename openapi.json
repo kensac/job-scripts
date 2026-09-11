@@ -2963,7 +2963,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/api__routers__jobs__ReportBody"
+                "$ref": "#/components/schemas/JobReport"
               }
             }
           }
@@ -4426,7 +4426,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/api__routers__application__AnswerPut"
+                "$ref": "#/components/schemas/AnswerPut"
               }
             }
           }
@@ -5389,7 +5389,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/api__routers__apply__AnswerPut"
+                "$ref": "#/components/schemas/SavedAnswerPut"
               }
             }
           }
@@ -6039,7 +6039,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/api__routers__apply__ReportBody"
+                "$ref": "#/components/schemas/PageReport"
               }
             }
           }
@@ -16428,7 +16428,20 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/SourceNames"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CatalogCounts"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SourceLedgers"
+                    }
+                  ],
+                  "title": "Response Admin List Sources V1 Admin Sources Get"
+                }
               }
             }
           },
@@ -16554,7 +16567,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogSource"
+                }
               }
             }
           },
@@ -16692,7 +16707,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/SourceDeleted"
+                }
               }
             }
           },
@@ -16818,7 +16835,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogSource"
+                }
               }
             }
           },
@@ -16953,7 +16972,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogSource"
+                }
               }
             }
           },
@@ -17082,7 +17103,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/SourcesSwitched"
+                }
               }
             }
           },
@@ -17220,7 +17243,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/PatternPreview"
+                }
               }
             }
           },
@@ -17368,7 +17393,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ScreenedPostings"
+                }
               }
             }
           },
@@ -26122,6 +26149,20 @@
         ],
         "title": "AnswerList"
       },
+      "AnswerPut": {
+        "properties": {
+          "draft": {
+            "type": "string",
+            "maxLength": 20000,
+            "title": "Draft"
+          }
+        },
+        "type": "object",
+        "required": [
+          "draft"
+        ],
+        "title": "AnswerPut"
+      },
       "ApiKeyPut": {
         "properties": {
           "api_key": {
@@ -26340,6 +26381,30 @@
         "title": "Assignment",
         "description": "One of three targets. An application to attach to, a board job to\ncreate an application from, or a company and title when neither exists -\nwhich is the common case for mail predating the catalog."
       },
+      "Attached": {
+        "properties": {
+          "jobs": {
+            "type": "integer",
+            "title": "Jobs"
+          },
+          "subscribers": {
+            "type": "integer",
+            "title": "Subscribers"
+          },
+          "board_rows": {
+            "type": "integer",
+            "title": "Board Rows"
+          }
+        },
+        "type": "object",
+        "required": [
+          "jobs",
+          "subscribers",
+          "board_rows"
+        ],
+        "title": "Attached",
+        "description": "What still hangs off a source, and therefore what deleting it would\norphan."
+      },
       "AuthorizeRequest": {
         "properties": {
           "redirect_uri": {
@@ -26490,6 +26555,115 @@
         },
         "type": "object",
         "title": "CancelTasksBody"
+      },
+      "CatalogCounts": {
+        "properties": {
+          "sources": {
+            "type": "integer",
+            "title": "Sources"
+          },
+          "active": {
+            "type": "integer",
+            "title": "Active"
+          },
+          "by_kind": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "By Kind"
+          },
+          "last_ingest": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Last Ingest"
+          },
+          "bundles": {
+            "type": "integer",
+            "title": "Bundles"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sources",
+          "active",
+          "by_kind",
+          "last_ingest",
+          "bundles"
+        ],
+        "title": "CatalogCounts",
+        "description": "What a dashboard tile needs. `by_kind` counts active sources per board\nformat; `last_ingest` counts sources by how their most recent pull ended."
+      },
+      "CatalogSource": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "listings_url": {
+            "type": "string",
+            "title": "Listings Url"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "active": {
+            "type": "boolean",
+            "title": "Active"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "company": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company"
+          },
+          "title_pattern": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title Pattern"
+          },
+          "ingest_interval_hours": {
+            "type": "integer",
+            "title": "Ingest Interval Hours"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "listings_url",
+          "description",
+          "active",
+          "created_at",
+          "company",
+          "title_pattern",
+          "ingest_interval_hours",
+          "kind"
+        ],
+        "title": "CatalogSource",
+        "description": "A source row as stored, plus the format read off its URL. `kind` is\nnever a column: it is derived from `listings_url` every time, so it cannot\ndrift from what ingest will do with the row."
       },
       "ClosePostingBody": {
         "properties": {
@@ -27621,6 +27795,31 @@
         "type": "object",
         "title": "IngestBody"
       },
+      "Ingesting": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "created_at"
+        ],
+        "title": "Ingesting",
+        "description": "The pull queued or running for a board, so the page can disable its\nbutton from server state rather than guessing."
+      },
       "InviteBody": {
         "properties": {
           "email": {
@@ -27745,6 +27944,36 @@
           "title"
         ],
         "title": "JobRef"
+      },
+      "JobReport": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": ""
+          },
+          "corrections": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Corrections"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind"
+        ],
+        "title": "JobReport"
       },
       "JsonValue": {},
       "LocationPlace": {
@@ -28092,6 +28321,33 @@
         "title": "Ok",
         "description": "It worked and there is nothing to say about it.\n\nReturned where the interesting outcome is the status code. A route with\nsomething to report returns that instead; this is not a wrapper to put\naround a real answer."
       },
+      "PageReport": {
+        "properties": {
+          "url": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Url"
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 4000,
+            "title": "Note",
+            "default": ""
+          },
+          "page": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Page"
+          }
+        },
+        "type": "object",
+        "required": [
+          "url",
+          "page"
+        ],
+        "title": "PageReport"
+      },
       "PatchResult": {
         "properties": {
           "ok": {
@@ -28108,6 +28364,54 @@
           "autofilled"
         ],
         "title": "PatchResult"
+      },
+      "PatternPreview": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "title_pattern": {
+            "type": "string",
+            "title": "Title Pattern"
+          },
+          "titles": {
+            "type": "integer",
+            "title": "Titles"
+          },
+          "admitted": {
+            "type": "integer",
+            "title": "Admitted"
+          },
+          "excluded": {
+            "type": "integer",
+            "title": "Excluded"
+          },
+          "would_add": {
+            "type": "integer",
+            "title": "Would Add"
+          },
+          "would_drop": {
+            "type": "integer",
+            "title": "Would Drop"
+          },
+          "samples": {
+            "$ref": "#/components/schemas/PatternSamples"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source",
+          "title_pattern",
+          "titles",
+          "admitted",
+          "excluded",
+          "would_add",
+          "would_drop",
+          "samples"
+        ],
+        "title": "PatternPreview",
+        "description": "What a candidate pattern would admit, against every title this board\nhas listed. `would_add` is screened titles it lets in, `would_drop` is\ncatalog titles it turns away. Nothing is written."
       },
       "PatternPreviewBody": {
         "properties": {
@@ -28129,6 +28433,30 @@
           "title_pattern"
         ],
         "title": "PatternPreviewBody"
+      },
+      "PatternSamples": {
+        "properties": {
+          "admitted": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Admitted"
+          },
+          "excluded": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Excluded"
+          }
+        },
+        "type": "object",
+        "required": [
+          "admitted",
+          "excluded"
+        ],
+        "title": "PatternSamples"
       },
       "PresetBody": {
         "properties": {
@@ -29941,6 +30269,113 @@
         ],
         "title": "RunCheckBody"
       },
+      "SavedAnswerPut": {
+        "properties": {
+          "value": {
+            "type": "string",
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Value"
+          }
+        },
+        "type": "object",
+        "required": [
+          "value"
+        ],
+        "title": "SavedAnswerPut"
+      },
+      "ScreenedPosting": {
+        "properties": {
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "company": {
+            "type": "string",
+            "title": "Company"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "locations": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Locations"
+          },
+          "date_posted": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date Posted"
+          },
+          "pattern": {
+            "type": "string",
+            "title": "Pattern"
+          },
+          "first_seen_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "First Seen At"
+          },
+          "last_seen_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Last Seen At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "url",
+          "company",
+          "title",
+          "locations",
+          "date_posted",
+          "pattern",
+          "first_seen_at",
+          "last_seen_at"
+        ],
+        "title": "ScreenedPosting"
+      },
+      "ScreenedPostings": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/ScreenedPosting"
+            },
+            "type": "array",
+            "title": "Rows"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "has_more": {
+            "type": "boolean",
+            "title": "Has More"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source",
+          "rows",
+          "total",
+          "has_more"
+        ],
+        "title": "ScreenedPostings"
+      },
       "SettingsPut": {
         "properties": {
           "column_layout": {
@@ -30216,6 +30651,28 @@
         ],
         "title": "SourceCounts"
       },
+      "SourceDeleted": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "deleted": {
+            "type": "string",
+            "title": "Deleted"
+          },
+          "was_attached": {
+            "$ref": "#/components/schemas/Attached"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ok",
+          "deleted",
+          "was_attached"
+        ],
+        "title": "SourceDeleted"
+      },
       "SourceFunnel": {
         "properties": {
           "applications": {
@@ -30338,6 +30795,158 @@
         ],
         "title": "SourceGroupList"
       },
+      "SourceLedger": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "listings_url": {
+            "type": "string",
+            "title": "Listings Url"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "active": {
+            "type": "boolean",
+            "title": "Active"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "company": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company"
+          },
+          "ingest_interval_hours": {
+            "type": "integer",
+            "title": "Ingest Interval Hours"
+          },
+          "groups": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Groups"
+          },
+          "jobs": {
+            "type": "integer",
+            "title": "Jobs"
+          },
+          "subscribers": {
+            "type": "integer",
+            "title": "Subscribers"
+          },
+          "last_ingest_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Ingest Status"
+          },
+          "last_ingest_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Ingest At"
+          },
+          "last_ingest_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Ingest Error"
+          },
+          "last_new_posting_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last New Posting At"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "task": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Ingesting"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "listings_url",
+          "description",
+          "active",
+          "created_at",
+          "company",
+          "ingest_interval_hours",
+          "groups",
+          "jobs",
+          "subscribers",
+          "last_ingest_status",
+          "last_ingest_at",
+          "last_ingest_error",
+          "last_new_posting_at",
+          "kind",
+          "task"
+        ],
+        "title": "SourceLedger",
+        "description": "One row of the full list. `title_pattern` is deliberately absent: it is\na regex repeated on most rows and only the edit form reads it, through\nGET /admin/sources/{name}.\n\n`last_ingest_at` says the fetch worked. `last_new_posting_at` says the\nfetch found something we had not already seen. The gap between them is\nwhat retires a source."
+      },
+      "SourceLedgers": {
+        "properties": {
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/SourceLedger"
+            },
+            "type": "array",
+            "title": "Sources"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sources"
+        ],
+        "title": "SourceLedgers"
+      },
       "SourceList": {
         "properties": {
           "sources": {
@@ -30353,6 +30962,54 @@
           "sources"
         ],
         "title": "SourceList"
+      },
+      "SourceName": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "active": {
+            "type": "boolean",
+            "title": "Active"
+          },
+          "groups": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Groups"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "active",
+          "groups",
+          "kind"
+        ],
+        "title": "SourceName",
+        "description": "The vocabulary a picker needs, and nothing that costs a join over\njobs."
+      },
+      "SourceNames": {
+        "properties": {
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/SourceName"
+            },
+            "type": "array",
+            "title": "Sources"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sources"
+        ],
+        "title": "SourceNames"
       },
       "SourceRequest": {
         "properties": {
@@ -30626,6 +31283,55 @@
           "ok"
         ],
         "title": "SourcesReplaced"
+      },
+      "SourcesSwitched": {
+        "properties": {
+          "active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active"
+          },
+          "ingest_interval_hours": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ingest Interval Hours"
+          },
+          "selected": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Selected"
+          },
+          "changed": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Changed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "active",
+          "ingest_interval_hours",
+          "selected",
+          "changed"
+        ],
+        "title": "SourcesSwitched",
+        "description": "What was asked for, what the selection resolved to, and which rows\nactually moved. `selected` and `changed` differ by the rows that already\nheld the value."
       },
       "Stats": {
         "properties": {
@@ -31243,92 +31949,6 @@
         },
         "type": "object",
         "title": "ViewPatch"
-      },
-      "api__routers__application__AnswerPut": {
-        "properties": {
-          "draft": {
-            "type": "string",
-            "maxLength": 20000,
-            "title": "Draft"
-          }
-        },
-        "type": "object",
-        "required": [
-          "draft"
-        ],
-        "title": "AnswerPut"
-      },
-      "api__routers__apply__AnswerPut": {
-        "properties": {
-          "value": {
-            "type": "string",
-            "maxLength": 4000,
-            "minLength": 1,
-            "title": "Value"
-          }
-        },
-        "type": "object",
-        "required": [
-          "value"
-        ],
-        "title": "AnswerPut"
-      },
-      "api__routers__apply__ReportBody": {
-        "properties": {
-          "url": {
-            "type": "string",
-            "maxLength": 2000,
-            "minLength": 1,
-            "title": "Url"
-          },
-          "note": {
-            "type": "string",
-            "maxLength": 4000,
-            "title": "Note",
-            "default": ""
-          },
-          "page": {
-            "additionalProperties": true,
-            "type": "object",
-            "title": "Page"
-          }
-        },
-        "type": "object",
-        "required": [
-          "url",
-          "page"
-        ],
-        "title": "ReportBody"
-      },
-      "api__routers__jobs__ReportBody": {
-        "properties": {
-          "kind": {
-            "type": "string",
-            "title": "Kind"
-          },
-          "message": {
-            "type": "string",
-            "title": "Message",
-            "default": ""
-          },
-          "corrections": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Corrections"
-          }
-        },
-        "type": "object",
-        "required": [
-          "kind"
-        ],
-        "title": "ReportBody"
       }
     }
   }

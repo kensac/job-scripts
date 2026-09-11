@@ -40,3 +40,29 @@ def test_committed_openapi_matches_the_routes():
         f"  routes in the file that no longer exist: {extra or 'none'}\n"
         f"  routes whose shape changed: {changed or 'none'}"
     )
+
+
+def test_every_schema_has_a_name_a_generator_can_use():
+    """Two routers may not name two different models the same thing.
+
+    FastAPI does not refuse it. It disambiguates, by prefixing the module
+    path, so `Source` becomes `api__routers__source_admin__Source` and the
+    type a generator emits for the frontend is unusable. The point of
+    declaring shapes is that `openapi.json` can be pointed at a generator, so
+    a name that survives that round trip is part of the contract, not a
+    detail.
+
+    Renaming one of the two is the fix, and the better name is usually the
+    more specific one: a catalog row and a person's subscription are both
+    "a source" only until you have to hold both.
+    """
+    from api.app import app
+
+    mangled = sorted(n for n in app.openapi()["components"]["schemas"] if "__" in n)
+    # Pydantic names a generic by its parameters, which is long but unique
+    # and not a collision.
+    mangled = [n for n in mangled if not n.startswith("NonNullUpdate")]
+    assert not mangled, (
+        "two routers declare these under one name, so FastAPI mangled them:\n  "
+        + "\n  ".join(mangled)
+    )
