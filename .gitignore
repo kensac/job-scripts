@@ -281,3 +281,8 @@ Takeout/
 # scheduler lock.
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
+
+# Agent worktrees. Another session leaves a checkout here, and a bare
+# `git add -A` otherwise stages it as an embedded repository.
+.worktrees/
+.claude/worktrees/
