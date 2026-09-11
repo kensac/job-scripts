@@ -10099,7 +10099,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/FilterPresets"
+                }
               }
             }
           },
@@ -10235,7 +10237,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/FilterPreset"
+                }
               }
             }
           },
@@ -10374,7 +10378,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/FilterRunQueued"
+                }
               }
             }
           },
@@ -10521,7 +10527,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/FilterPreset"
+                }
               }
             }
           },
@@ -10656,7 +10664,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Ok"
+                }
               }
             }
           },
@@ -10830,7 +10840,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/RequestedSources"
+                }
               }
             }
           },
@@ -10977,7 +10989,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/SourceRequestResolved"
+                }
               }
             }
           },
@@ -11116,7 +11130,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/IngestSummary"
+                }
               }
             }
           },
@@ -11253,7 +11269,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/IngestQueued"
+                }
               }
             }
           },
@@ -11400,7 +11418,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/SourceBundle"
+                }
               }
             }
           },
@@ -11535,7 +11555,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/BundleDeleted"
+                }
               }
             }
           },
@@ -11664,7 +11686,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/HostBudgets"
+                }
               }
             }
           },
@@ -11848,7 +11872,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/UserLedger"
+                }
               }
             }
           },
@@ -11985,7 +12011,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/UserDetail"
+                }
               }
             }
           },
@@ -12124,7 +12152,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/InviteCreated"
+                }
               }
             }
           },
@@ -12250,7 +12280,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/InviteList"
+                }
               }
             }
           },
@@ -12387,7 +12419,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Ok"
+                }
               }
             }
           },
@@ -12515,7 +12549,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/GroupBudgets"
+                }
               }
             }
           },
@@ -12662,7 +12698,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/GroupBudget"
+                }
               }
             }
           },
@@ -12797,7 +12835,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Ok"
+                }
               }
             }
           },
@@ -13031,7 +13071,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/TaskQueue"
+                }
               }
             }
           },
@@ -13170,7 +13212,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/TasksCancelled"
+                }
               }
             }
           },
@@ -13325,7 +13369,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderBatches"
+                }
               }
             }
           },
@@ -13454,7 +13500,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/FleetWorkers"
+                }
               }
             }
           },
@@ -13593,7 +13641,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/QueueSummary"
+                }
               }
             }
           },
@@ -13751,7 +13801,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/BatchJobs"
+                }
               }
             }
           },
@@ -13926,7 +13978,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ClassifiedLocations"
+                }
               }
             }
           },
@@ -14074,7 +14128,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/PlacedLocation"
+                }
               }
             }
           },
@@ -14248,7 +14304,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ReportQueue"
+                }
               }
             }
           },
@@ -14395,7 +14453,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ReportResolved"
+                }
               }
             }
           },
@@ -14542,7 +14602,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/CorrectedJob"
+                }
               }
             }
           },
@@ -14690,7 +14752,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/PostingClosed"
+                }
               }
             }
           },
@@ -14827,7 +14891,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ReparseQueued"
+                }
               }
             }
           },
@@ -14956,7 +15022,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/RecheckOptions"
+                }
               }
             }
           },
@@ -15095,7 +15163,17 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/CheckRerun"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PostingGone"
+                    }
+                  ],
+                  "title": "Response Run Single Check V1 Admin Checks Run Post"
+                }
               }
             }
           },
@@ -15224,7 +15302,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/DataHealth"
+                }
               }
             }
           },
@@ -15353,7 +15433,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/HealthRun"
+                }
               }
             }
           },
@@ -15524,7 +15606,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/FailureBreakdown"
+                }
               }
             }
           },
@@ -15652,7 +15736,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Tunables"
+                }
               }
             }
           },
@@ -15799,7 +15885,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/TunableWritten"
+                }
               }
             }
           },
@@ -15928,7 +16016,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/QueryFilterOptions"
+                }
               }
             }
           },
@@ -16260,7 +16350,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/QueryPage"
+                }
               }
             }
           },
@@ -16397,7 +16489,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/QueryRecord"
+                }
               }
             }
           },
@@ -16535,7 +16629,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/QueriesDeleted"
+                }
               }
             }
           },
@@ -16767,7 +16863,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/CheckedPostings"
+                }
               }
             }
           },
@@ -16904,7 +17002,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/QueryResponses"
+                }
               }
             }
           },
@@ -17041,7 +17141,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/PostingTimeline"
+                }
               }
             }
           },
@@ -17169,7 +17271,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/QueryVocabulary"
+                }
               }
             }
           },
@@ -17298,7 +17402,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/LedgerStats"
+                }
               }
             }
           },
@@ -17427,7 +17533,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/RecipeHistory"
+                }
               }
             }
           },
@@ -17574,7 +17682,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/RecipePublished"
+                }
               }
             }
           },
@@ -17711,7 +17821,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/RecipePublished"
+                }
               }
             }
           },
@@ -29512,6 +29624,344 @@
         "title": "Autofilled",
         "description": "What the write filled in that the caller did not send.\n\nA status change can date the row by itself, so the caller is told rather\nthan having to re-read the row to find out.\n\nAn absent key is the answer, not a null: the route sets\nresponse_model_exclude_none so `{}` still means \"nothing was filled\",\nwhich is what the board already reads. Declaring the shape must not move\nthe wire."
       },
+      "BatchJobs": {
+        "properties": {
+          "batch": {
+            "$ref": "#/components/schemas/BatchRecord"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/BatchedCheck"
+            },
+            "type": "array",
+            "title": "Rows"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "has_more": {
+            "type": "boolean",
+            "title": "Has More"
+          }
+        },
+        "type": "object",
+        "required": [
+          "batch",
+          "rows",
+          "total",
+          "has_more"
+        ],
+        "title": "BatchJobs"
+      },
+      "BatchRecord": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "provider_batch_id": {
+            "type": "string",
+            "title": "Provider Batch Id"
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Id"
+          },
+          "purpose": {
+            "type": "string",
+            "title": "Purpose"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "requests": {
+            "type": "integer",
+            "title": "Requests"
+          },
+          "completed": {
+            "type": "integer",
+            "title": "Completed"
+          },
+          "failed_count": {
+            "type": "integer",
+            "title": "Failed Count"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "submitted_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Submitted At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "est_tokens": {
+            "type": "integer",
+            "title": "Est Tokens"
+          },
+          "input_tokens": {
+            "type": "integer",
+            "title": "Input Tokens"
+          },
+          "output_tokens": {
+            "type": "integer",
+            "title": "Output Tokens"
+          },
+          "est_cost_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Est Cost Usd"
+          },
+          "prompt_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "provider_batch_id",
+          "task_id",
+          "purpose",
+          "model",
+          "requests",
+          "completed",
+          "failed_count",
+          "status",
+          "submitted_at",
+          "updated_at",
+          "completed_at",
+          "est_tokens",
+          "input_tokens",
+          "output_tokens",
+          "est_cost_usd",
+          "prompt_id"
+        ],
+        "title": "BatchRecord",
+        "description": "A batch as stored. `prompt_id` is the prompt version it was submitted\nunder, which is what makes a batch's answers attributable to a prompt\nrather than to a model alone."
+      },
+      "BatchedCheck": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          },
+          "check_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Check Type"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "company": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company"
+          },
+          "job_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Title"
+          },
+          "prompt_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Tokens"
+          },
+          "completion_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completion Tokens"
+          },
+          "total_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Tokens"
+          },
+          "cached_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cached Tokens"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id"
+          },
+          "est_cost_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Est Cost Usd"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "url",
+          "check_type",
+          "status",
+          "reason",
+          "company",
+          "job_title",
+          "prompt_tokens",
+          "completion_tokens",
+          "total_tokens",
+          "cached_tokens",
+          "created_at",
+          "source",
+          "job_id",
+          "est_cost_usd"
+        ],
+        "title": "BatchedCheck",
+        "description": "One verdict this batch produced. `est_cost_usd` is not stored: it is\npriced here from the batch's model at the batched rate, so a batch is\ninspectable down to what each individual request cost."
+      },
       "BatchingDiagnostics": {
         "properties": {
           "batched_calls": {
@@ -30515,6 +30965,30 @@
         "title": "BoardSpend",
         "description": "What this board's postings cost to check, as billed at the time.\n\n`window` is in the response because /admin/spend defaults to 30 days and\nthis takes no window at all, so a reader comparing the two was comparing a\nlifetime against a month with nothing saying so. All-time is right here:\nwhether a board earned its keep is a question about its whole life.\n\nNot split per check_type: verify_new books one batched call against the\n`closed` row and writes the clearance verdict from the same response, so a\nsplit would read as though clearance were free on some paths.\n`priced_coverage` keeps \"this cost nothing\" apart from \"we do not know what\nthis cost\"."
       },
+      "BoardStatusCount": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "hidden": {
+            "type": "integer",
+            "title": "Hidden"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "count",
+          "hidden"
+        ],
+        "title": "BoardStatusCount",
+        "description": "`status` is 'not_applied' where the row has none, so every board row is\ncounted under some heading."
+      },
       "BoardYield": {
         "properties": {
           "board_rows": {
@@ -30679,6 +31153,24 @@
         ],
         "title": "BulkPatchResult",
         "description": "`skipped` names the ids the caller may not touch rather than refusing\nthe whole selection: a selection made from the board can include a row\nthat vanished or was never theirs, and failing everything for one would\nsend the page back to a request per row."
+      },
+      "BundleDeleted": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "deleted": {
+            "type": "string",
+            "title": "Deleted"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ok",
+          "deleted"
+        ],
+        "title": "BundleDeleted"
       },
       "CallTotals": {
         "properties": {
@@ -31203,6 +31695,40 @@
         "title": "CatalogSource",
         "description": "A source row as stored, plus the format read off its URL. `kind` is\nnever a column: it is derived from `listings_url` every time, so it cannot\ndrift from what ingest will do with the row."
       },
+      "CheckRerun": {
+        "properties": {
+          "check": {
+            "type": "string",
+            "title": "Check"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          },
+          "tokens": {
+            "type": "integer",
+            "title": "Tokens"
+          },
+          "model": {
+            "type": "string",
+            "title": "Model"
+          }
+        },
+        "type": "object",
+        "required": [
+          "check",
+          "status",
+          "reason",
+          "tokens",
+          "model"
+        ],
+        "title": "CheckRerun",
+        "description": "The verdict the re-run produced, and what produced it. `check` echoes\nwhat was asked for, which is not always `check_type`: filter:<id> and\nhash:<prompt_hash> both run as a custom check."
+      },
       "CheckStage": {
         "properties": {
           "checked": {
@@ -31234,6 +31760,41 @@
         ],
         "title": "CheckStage",
         "description": "One check's latest verdict per posting, counted.\n\n`coverage` is how much of the board the stage has seen at all: a pass rate\nover 2% of a board says almost nothing about the other 98%."
+      },
+      "CheckTypeTotals": {
+        "properties": {
+          "check_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Check Type"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "prompt_tokens": {
+            "type": "integer",
+            "title": "Prompt Tokens"
+          },
+          "completion_tokens": {
+            "type": "integer",
+            "title": "Completion Tokens"
+          }
+        },
+        "type": "object",
+        "required": [
+          "check_type",
+          "count",
+          "prompt_tokens",
+          "completion_tokens"
+        ],
+        "title": "CheckTypeTotals"
       },
       "CheckVerdict": {
         "properties": {
@@ -31287,6 +31848,157 @@
         ],
         "title": "CheckVerdict",
         "description": "The latest verdict for one posting check."
+      },
+      "CheckedPosting": {
+        "properties": {
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "company": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company"
+          },
+          "job_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Title"
+          },
+          "config_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Config Name"
+          },
+          "checks": {
+            "type": "integer",
+            "title": "Checks"
+          },
+          "passed": {
+            "type": "integer",
+            "title": "Passed"
+          },
+          "rejected": {
+            "type": "integer",
+            "title": "Rejected"
+          },
+          "failed": {
+            "type": "integer",
+            "title": "Failed"
+          },
+          "total_tokens": {
+            "type": "integer",
+            "title": "Total Tokens"
+          },
+          "last_seen": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Last Seen"
+          },
+          "verdict": {
+            "type": "string",
+            "title": "Verdict"
+          }
+        },
+        "type": "object",
+        "required": [
+          "url",
+          "company",
+          "job_title",
+          "config_name",
+          "checks",
+          "passed",
+          "rejected",
+          "failed",
+          "total_tokens",
+          "last_seen",
+          "verdict"
+        ],
+        "title": "CheckedPosting",
+        "description": "Every check ever run against one url, rolled up. The company and title\nare MAX() over the rows rather than a join to the catalog: this is the\nverdict ledger's own account of a posting, and it answers for urls the\ncatalog no longer holds.\n\n`verdict` is the roll-up of the roll-up: one rejection anywhere makes the\nposting rejected, since a posting that fails any check is out."
+      },
+      "CheckedPostings": {
+        "properties": {
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/CheckedPosting"
+            },
+            "type": "array",
+            "title": "Rows"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "page_size": {
+            "type": "integer",
+            "title": "Page Size"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "has_more": {
+            "type": "boolean",
+            "title": "Has More"
+          },
+          "sort": {
+            "type": "string",
+            "title": "Sort"
+          },
+          "dir": {
+            "type": "string",
+            "title": "Dir"
+          },
+          "sorts": {
+            "items": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Sorts"
+          },
+          "sortable": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Sortable"
+          }
+        },
+        "type": "object",
+        "required": [
+          "rows",
+          "page",
+          "page_size",
+          "total",
+          "has_more",
+          "sort",
+          "dir",
+          "sorts",
+          "sortable"
+        ],
+        "title": "CheckedPostings"
       },
       "ClassificationCell": {
         "properties": {
@@ -31368,6 +32080,143 @@
           "worst"
         ],
         "title": "ClassificationConsistency"
+      },
+      "ClassifiedLocation": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "country": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country"
+          },
+          "region": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Region"
+          },
+          "city": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "City"
+          },
+          "remote": {
+            "type": "boolean",
+            "title": "Remote"
+          },
+          "places": {
+            "items": {
+              "$ref": "#/components/schemas/LocationPlace"
+            },
+            "type": "array",
+            "title": "Places"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "classified_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Classified At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "text",
+          "country",
+          "region",
+          "city",
+          "remote",
+          "places",
+          "model",
+          "classified_at"
+        ],
+        "title": "ClassifiedLocation",
+        "description": "A list row, which also says when it was classified. The PUT does not\nreturn this field, so the two shapes are two models rather than one with\na field that is sometimes there."
+      },
+      "ClassifiedLocations": {
+        "properties": {
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/ClassifiedLocation"
+            },
+            "type": "array",
+            "title": "Rows"
+          },
+          "has_more": {
+            "type": "boolean",
+            "title": "Has More"
+          },
+          "offset": {
+            "type": "integer",
+            "title": "Offset"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "total_all": {
+            "type": "integer",
+            "title": "Total All"
+          },
+          "filters": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": "object",
+            "title": "Filters"
+          },
+          "filterable": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Filterable"
+          }
+        },
+        "type": "object",
+        "required": [
+          "rows",
+          "has_more",
+          "offset",
+          "total",
+          "total_all",
+          "filters",
+          "filterable"
+        ],
+        "title": "ClassifiedLocations",
+        "description": "`total` counts what the filters keep; `total_all` counts the whole\ntable, so the page can say \"40 unplaced of 12,000\" without a second\nrequest."
       },
       "ClosePostingBody": {
         "properties": {
@@ -31817,6 +32666,35 @@
         "title": "ConsistencyGroup",
         "description": "One body the classifier saw more than once, and the answers it gave."
       },
+      "ContentMix": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "ats_text": {
+            "type": "integer",
+            "title": "Ats Text"
+          },
+          "scraped": {
+            "type": "integer",
+            "title": "Scraped"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source",
+          "ats_text",
+          "scraped",
+          "total"
+        ],
+        "title": "ContentMix",
+        "description": "Where a source's check text came from over the last week. ATS text is\nfree and scraped text is paid for, so a source sliding from one to the\nother is a cost change nothing else reports."
+      },
       "ContextDraft": {
         "properties": {
           "key": {
@@ -31840,6 +32718,56 @@
         ],
         "title": "ContextDraft",
         "description": "A draft already written for this posting. Only drafts that exist are\nlisted, so `draft` is never null here."
+      },
+      "CorrectedJob": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "company": {
+            "type": "string",
+            "title": "Company"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "locations": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Locations"
+          },
+          "terms": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Terms"
+          },
+          "active": {
+            "type": "boolean",
+            "title": "Active"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "url",
+          "company",
+          "title",
+          "locations",
+          "terms",
+          "active"
+        ],
+        "title": "CorrectedJob",
+        "description": "The catalog row as the correction left it. Only the fields a person may\ncorrect come back, plus the url and id that identify which row moved."
       },
       "Correction": {
         "properties": {
@@ -32104,6 +33032,97 @@
         "title": "CustomCheckStage",
         "description": "Custom filters are per user and one posting can be judged by several,\nso there are two honest denominators and both are here. `checked` and\n`pass_rate` are job-level - a posting passed every filter it was put in\nfront of - and `evaluations` counts the judgements behind them."
       },
+      "DataHealth": {
+        "properties": {
+          "suppressed": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Suppressed"
+          },
+          "open": {
+            "items": {
+              "$ref": "#/components/schemas/HealthAlert"
+            },
+            "type": "array",
+            "title": "Open"
+          },
+          "recently_resolved": {
+            "items": {
+              "$ref": "#/components/schemas/HealthAlert"
+            },
+            "type": "array",
+            "title": "Recently Resolved"
+          },
+          "content_mix": {
+            "items": {
+              "$ref": "#/components/schemas/ContentMix"
+            },
+            "type": "array",
+            "title": "Content Mix"
+          }
+        },
+        "type": "object",
+        "required": [
+          "suppressed",
+          "open",
+          "recently_resolved",
+          "content_mix"
+        ],
+        "title": "DataHealth",
+        "description": "`suppressed` is always empty and is kept deliberately: a detector that\nis off and says nothing is indistinguishable from a detector that sees\nnothing, so a future suppression has somewhere to be reported."
+      },
+      "DayTotals": {
+        "properties": {
+          "day": {
+            "type": "string",
+            "format": "date",
+            "title": "Day"
+          },
+          "queries": {
+            "type": "integer",
+            "title": "Queries"
+          },
+          "failed": {
+            "type": "integer",
+            "title": "Failed"
+          },
+          "rejected": {
+            "type": "integer",
+            "title": "Rejected"
+          },
+          "prompt_tokens": {
+            "type": "integer",
+            "title": "Prompt Tokens"
+          },
+          "completion_tokens": {
+            "type": "integer",
+            "title": "Completion Tokens"
+          },
+          "cached_tokens": {
+            "type": "integer",
+            "title": "Cached Tokens"
+          },
+          "reasoning_tokens": {
+            "type": "integer",
+            "title": "Reasoning Tokens"
+          }
+        },
+        "type": "object",
+        "required": [
+          "day",
+          "queries",
+          "failed",
+          "rejected",
+          "prompt_tokens",
+          "completion_tokens",
+          "cached_tokens",
+          "reasoning_tokens"
+        ],
+        "title": "DayTotals",
+        "description": "One calendar day in the session timezone, not the first ten characters\nof a timestamp."
+      },
       "DecisionHistory": {
         "properties": {
           "decisions": {
@@ -32196,6 +33215,45 @@
           "summary"
         ],
         "title": "DecisionRow"
+      },
+      "DeferredPulls": {
+        "properties": {
+          "host": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Host"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "soonest_not_before": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Soonest Not Before"
+          }
+        },
+        "type": "object",
+        "required": [
+          "host",
+          "count",
+          "soonest_not_before"
+        ],
+        "title": "DeferredPulls",
+        "description": "The pulls waiting on a slot for one host, so the page can say \"3\nwaiting, next 14:52\" without paging every pending ingest task."
       },
       "DegreeCount": {
         "properties": {
@@ -33215,6 +34273,177 @@
         "title": "Facets",
         "description": "Counts under every OTHER filter the page has on. Taken before the ats\nclause joins the rest, because a board-wide \"rippling 4\" beside a lens\nthat holds none of them reads as a lie."
       },
+      "FailedCheck": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          },
+          "check_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Check Type"
+          },
+          "company": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company"
+          },
+          "job_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Title"
+          },
+          "worker": {
+            "type": "string",
+            "title": "Worker"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "created_at",
+          "url",
+          "check_type",
+          "company",
+          "job_title",
+          "worker",
+          "error",
+          "reason"
+        ],
+        "title": "FailedCheck",
+        "description": "One failure behind a pivot row. `error` is the first 300 characters:\na driver traceback is longer than the screen and the cause is at the front."
+      },
+      "FailureBreakdown": {
+        "properties": {
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/FailurePivot"
+            },
+            "type": "array",
+            "title": "Rows"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/FailedCheck"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "rows",
+          "items"
+        ],
+        "title": "FailureBreakdown",
+        "description": "`items` is empty unless the request named a worker or a host: the\npivot is the whole fleet, and the individual failures are a drill-down."
+      },
+      "FailurePivot": {
+        "properties": {
+          "worker": {
+            "type": "string",
+            "title": "Worker"
+          },
+          "host": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Host"
+          },
+          "check_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Check Type"
+          },
+          "failures": {
+            "type": "integer",
+            "title": "Failures"
+          },
+          "last_failure": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Last Failure"
+          }
+        },
+        "type": "object",
+        "required": [
+          "worker",
+          "host",
+          "check_type",
+          "failures",
+          "last_failure"
+        ],
+        "title": "FailurePivot",
+        "description": "Failures grouped by the worker that ran them and the host they were\nfetched from. `host` is read off the url, so a row with no url has none."
+      },
       "FeatureAvailability": {
         "properties": {
           "allowed": {
@@ -33493,6 +34722,78 @@
         "type": "object",
         "title": "FilterPatch"
       },
+      "FilterPreset": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt"
+          },
+          "on_ambiguous": {
+            "type": "string",
+            "title": "On Ambiguous"
+          },
+          "fail_closed": {
+            "type": "boolean",
+            "title": "Fail Closed"
+          },
+          "active": {
+            "type": "boolean",
+            "title": "Active"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "description",
+          "prompt",
+          "on_ambiguous",
+          "fail_closed",
+          "active",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "FilterPreset",
+        "description": "A preset as stored: a prompt somebody can start a filter from, shared\nacross everyone rather than owned by one person."
+      },
+      "FilterPresets": {
+        "properties": {
+          "presets": {
+            "items": {
+              "$ref": "#/components/schemas/FilterPreset"
+            },
+            "type": "array",
+            "title": "Presets"
+          }
+        },
+        "type": "object",
+        "required": [
+          "presets"
+        ],
+        "title": "FilterPresets"
+      },
       "FilterRow": {
         "properties": {
           "id": {
@@ -33605,6 +34906,25 @@
         ],
         "title": "FilterRunBody"
       },
+      "FilterRunQueued": {
+        "properties": {
+          "task_id": {
+            "type": "integer",
+            "title": "Task Id"
+          },
+          "ignore_budget": {
+            "type": "boolean",
+            "title": "Ignore Budget"
+          }
+        },
+        "type": "object",
+        "required": [
+          "task_id",
+          "ignore_budget"
+        ],
+        "title": "FilterRunQueued",
+        "description": "`ignore_budget` is echoed because it is the whole reason this route\nexists beside the person's own: the run is going past the shared weekly\ncap, and the answer says so rather than leaving it to the request."
+      },
       "FilterVerdictRow": {
         "properties": {
           "name": {
@@ -33676,6 +34996,48 @@
         ],
         "title": "FilterVerdictRow",
         "description": "One of this person's filters, and how it last judged this posting.\nEverything but the filter itself is null when it has never run on it."
+      },
+      "Finding": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "subject": {
+            "type": "string",
+            "title": "Subject"
+          },
+          "severity": {
+            "type": "string",
+            "title": "Severity"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "subject",
+          "severity",
+          "message",
+          "detail"
+        ],
+        "title": "Finding",
+        "description": "What a detector raised, before it was written to a row. The same four\nfields health_alerts stores, with no id: a finding that matches an alert\nalready open updates it rather than opening a second."
       },
       "FleetBudget": {
         "properties": {
@@ -33771,6 +35133,151 @@
         ],
         "title": "FleetBudget",
         "description": "Where fleet spend sits against its ceiling, with what the ceiling does\nnot cover carried as data rather than left in a comment."
+      },
+      "FleetWorker": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Started At"
+          },
+          "last_seen": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Last Seen"
+          },
+          "current_task_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Task Id"
+          },
+          "release": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Release"
+          },
+          "alive": {
+            "type": "boolean",
+            "title": "Alive"
+          },
+          "task_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Kind"
+          },
+          "task_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Status"
+          },
+          "task_progress": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Progress"
+          },
+          "task_started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Started At"
+          },
+          "done_24h": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Done 24H"
+          },
+          "failed_24h": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failed 24H"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "started_at",
+          "last_seen",
+          "current_task_id",
+          "release",
+          "alive",
+          "task_kind",
+          "task_status",
+          "task_progress",
+          "task_started_at",
+          "done_24h",
+          "failed_24h"
+        ],
+        "title": "FleetWorker",
+        "description": "One worker, as its heartbeat and its current task leave it.\n\n`alive` is the heartbeat being under 90 seconds old, resolved in SQL so\nevery reader agrees on the same clock. The task fields are null when the\nworker is idle: they come from a join on a task that is still running."
+      },
+      "FleetWorkers": {
+        "properties": {
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/FleetWorker"
+            },
+            "type": "array",
+            "title": "Rows"
+          }
+        },
+        "type": "object",
+        "required": [
+          "rows"
+        ],
+        "title": "FleetWorkers"
       },
       "FormState": {
         "properties": {
@@ -34142,6 +35649,47 @@
         "title": "GroupBreakdown",
         "description": "A bucket that a taxonomy group named. The residual bucket is the same\nshape without the name, and rides on the row as `ungrouped`."
       },
+      "GroupBudget": {
+        "properties": {
+          "group_name": {
+            "type": "string",
+            "title": "Group Name"
+          },
+          "weekly_token_budget": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weekly Token Budget"
+          },
+          "allowed_models": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allowed Models"
+          }
+        },
+        "type": "object",
+        "required": [
+          "group_name",
+          "weekly_token_budget",
+          "allowed_models"
+        ],
+        "title": "GroupBudget",
+        "description": "What a group may spend on the shared key. A null budget is uncapped and\nnull allowed_models is every model in the catalog; both are real answers\nrather than unset ones."
+      },
       "GroupBudgetPut": {
         "properties": {
           "weekly_token_budget": {
@@ -34175,6 +35723,57 @@
         "type": "object",
         "title": "GroupBudgetPut"
       },
+      "GroupBudgets": {
+        "properties": {
+          "groups": {
+            "items": {
+              "$ref": "#/components/schemas/GroupBudget"
+            },
+            "type": "array",
+            "title": "Groups"
+          },
+          "catalog_models": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Catalog Models"
+          }
+        },
+        "type": "object",
+        "required": [
+          "groups",
+          "catalog_models"
+        ],
+        "title": "GroupBudgets",
+        "description": "`catalog_models` is every model the server can run, so the form offers\na closed list rather than a text box that fails on save."
+      },
+      "GroupGrant": {
+        "properties": {
+          "group_name": {
+            "type": "string",
+            "title": "Group Name"
+          },
+          "weekly_token_budget": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weekly Token Budget"
+          }
+        },
+        "type": "object",
+        "required": [
+          "group_name",
+          "weekly_token_budget"
+        ],
+        "title": "GroupGrant",
+        "description": "A group this person is in that carries a budget. A null budget is\nuncapped, which is a real answer and not a missing one."
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -34187,6 +35786,210 @@
         },
         "type": "object",
         "title": "HTTPValidationError"
+      },
+      "HealthAlert": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "subject": {
+            "type": "string",
+            "title": "Subject"
+          },
+          "severity": {
+            "type": "string",
+            "title": "Severity"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "first_seen": {
+            "type": "string",
+            "format": "date-time",
+            "title": "First Seen"
+          },
+          "last_seen": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Last Seen"
+          },
+          "notified_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notified At"
+          },
+          "resolved_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved At"
+          },
+          "subject_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject Kind"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "subject",
+          "severity",
+          "message",
+          "detail",
+          "first_seen",
+          "last_seen",
+          "notified_at",
+          "resolved_at",
+          "subject_kind"
+        ],
+        "title": "HealthAlert",
+        "description": "An open or recently resolved alert.\n\n`subject_kind` is not a column. It says WHAT the subject is - a source, a\nhost, a provider and user, a task kind - and is annotated on read from the\none map in api.health, so an alert opened before the map existed still\ngets the right answer. It is null for a kind the map does not name.\n\n`detail` is whatever the detector that raised the alert had to show, so\nits shape is that detector's and is not declared further."
+      },
+      "HealthRun": {
+        "properties": {
+          "open": {
+            "type": "integer",
+            "title": "Open"
+          },
+          "new": {
+            "type": "integer",
+            "title": "New"
+          },
+          "alerts": {
+            "items": {
+              "$ref": "#/components/schemas/Finding"
+            },
+            "type": "array",
+            "title": "Alerts"
+          }
+        },
+        "type": "object",
+        "required": [
+          "open",
+          "new",
+          "alerts"
+        ],
+        "title": "HealthRun",
+        "description": "`open` is everything the detectors found; `new` is how much of it was\nnot already open, which is what would have been notified."
+      },
+      "HostBudget": {
+        "properties": {
+          "host": {
+            "type": "string",
+            "title": "Host"
+          },
+          "egress_group": {
+            "type": "string",
+            "title": "Egress Group"
+          },
+          "pace_seconds": {
+            "type": "number",
+            "title": "Pace Seconds"
+          },
+          "next_allowed_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Next Allowed At"
+          },
+          "ok": {
+            "type": "integer",
+            "title": "Ok"
+          },
+          "refused": {
+            "type": "integer",
+            "title": "Refused"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "closed": {
+            "type": "boolean",
+            "title": "Closed"
+          },
+          "blocked": {
+            "type": "boolean",
+            "title": "Blocked"
+          }
+        },
+        "type": "object",
+        "required": [
+          "host",
+          "egress_group",
+          "pace_seconds",
+          "next_allowed_at",
+          "ok",
+          "refused",
+          "updated_at",
+          "closed",
+          "blocked"
+        ],
+        "title": "HostBudget",
+        "description": "The pace one egress address keeps against one board host, as the fleet\nhas learned it.\n\n`closed` means the next slot is in the future, which is ordinary pacing.\n`blocked` is the different thing: refused repeatedly with nothing ever\naccepted, so no gap will open it. It is computed on read rather than\nstored, so the rule lives in one place (api.hosts.blocked)."
+      },
+      "HostBudgets": {
+        "properties": {
+          "budgets": {
+            "items": {
+              "$ref": "#/components/schemas/HostBudget"
+            },
+            "type": "array",
+            "title": "Budgets"
+          },
+          "deferred": {
+            "items": {
+              "$ref": "#/components/schemas/DeferredPulls"
+            },
+            "type": "array",
+            "title": "Deferred"
+          }
+        },
+        "type": "object",
+        "required": [
+          "budgets",
+          "deferred"
+        ],
+        "title": "HostBudgets"
       },
       "ImprovePromptRequest": {
         "properties": {
@@ -34284,6 +36087,105 @@
         "type": "object",
         "title": "IngestBody"
       },
+      "IngestQueued": {
+        "properties": {
+          "tasks": {
+            "items": {
+              "$ref": "#/components/schemas/SourceTask"
+            },
+            "type": "array",
+            "title": "Tasks"
+          },
+          "in_flight": {
+            "items": {
+              "$ref": "#/components/schemas/SourceTask"
+            },
+            "type": "array",
+            "title": "In Flight"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tasks",
+          "in_flight"
+        ],
+        "title": "IngestQueued",
+        "description": "What was queued, and what was already being pulled. A board already in\nflight is reported rather than queued twice; the request only fails when\nevery board named was in flight and nothing was queued at all."
+      },
+      "IngestSummary": {
+        "properties": {
+          "hours": {
+            "type": "integer",
+            "title": "Hours"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/SourceIngest"
+            },
+            "type": "array",
+            "title": "Rows"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/IngestTotals"
+          }
+        },
+        "type": "object",
+        "required": [
+          "hours",
+          "rows",
+          "totals"
+        ],
+        "title": "IngestSummary"
+      },
+      "IngestTotals": {
+        "properties": {
+          "pulls": {
+            "type": "integer",
+            "title": "Pulls"
+          },
+          "failed_pulls": {
+            "type": "integer",
+            "title": "Failed Pulls"
+          },
+          "fetched": {
+            "type": "integer",
+            "title": "Fetched"
+          },
+          "kept": {
+            "type": "integer",
+            "title": "Kept"
+          },
+          "cached": {
+            "type": "integer",
+            "title": "Cached"
+          },
+          "fetch_failed": {
+            "type": "integer",
+            "title": "Fetch Failed"
+          },
+          "gone": {
+            "type": "integer",
+            "title": "Gone"
+          },
+          "new_jobs": {
+            "type": "integer",
+            "title": "New Jobs"
+          }
+        },
+        "type": "object",
+        "required": [
+          "pulls",
+          "failed_pulls",
+          "fetched",
+          "kept",
+          "cached",
+          "fetch_failed",
+          "gone",
+          "new_jobs"
+        ],
+        "title": "IngestTotals",
+        "description": "The same counts summed over every board, so the page need not add up\n751 rows to show a headline."
+      },
       "Ingesting": {
         "properties": {
           "id": {
@@ -34309,6 +36211,42 @@
         "title": "Ingesting",
         "description": "The pull queued or running for a board, so the page can disable its\nbutton from server state rather than guessing."
       },
+      "Invite": {
+        "properties": {
+          "pk": {
+            "type": "string",
+            "title": "Pk"
+          },
+          "email": {
+            "type": "string",
+            "title": "Email"
+          },
+          "expires": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires"
+          },
+          "single_use": {
+            "type": "boolean",
+            "title": "Single Use"
+          }
+        },
+        "type": "object",
+        "required": [
+          "pk",
+          "email",
+          "expires",
+          "single_use"
+        ],
+        "title": "Invite",
+        "description": "An outstanding invitation, as Authentik holds it. `pk` is Authentik's\nid and is what revoking one names."
+      },
       "InviteBody": {
         "properties": {
           "email": {
@@ -34324,6 +36262,62 @@
           "email"
         ],
         "title": "InviteBody"
+      },
+      "InviteCreated": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "invite_url": {
+            "type": "string",
+            "title": "Invite Url"
+          },
+          "expires": {
+            "type": "string",
+            "title": "Expires"
+          },
+          "emailed": {
+            "type": "boolean",
+            "title": "Emailed"
+          },
+          "pk": {
+            "type": "string",
+            "title": "Pk"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ok",
+          "invite_url",
+          "expires",
+          "emailed",
+          "pk"
+        ],
+        "title": "InviteCreated",
+        "description": "`emailed` is false when the invite was created but delivery failed, so\nthe link is returned either way and somebody can send it by hand."
+      },
+      "InviteList": {
+        "properties": {
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/Invite"
+            },
+            "type": "array",
+            "title": "Rows"
+          },
+          "configured": {
+            "type": "boolean",
+            "title": "Configured"
+          }
+        },
+        "type": "object",
+        "required": [
+          "rows",
+          "configured"
+        ],
+        "title": "InviteList",
+        "description": "`configured` is false when the Authentik environment is missing, which\nis why the list is empty rather than there being nothing outstanding."
       },
       "JobCorrection": {
         "properties": {
@@ -34746,6 +36740,29 @@
         "title": "JobReport"
       },
       "JsonValue": {},
+      "KindStatusCount": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "status",
+          "count"
+        ],
+        "title": "KindStatusCount"
+      },
       "LabelCount": {
         "properties": {
           "label": {
@@ -35163,6 +37180,89 @@
           "purpose"
         ],
         "title": "LedgerPurpose"
+      },
+      "LedgerStats": {
+        "properties": {
+          "totals": {
+            "$ref": "#/components/schemas/LedgerTotals"
+          },
+          "by_check_type": {
+            "items": {
+              "$ref": "#/components/schemas/CheckTypeTotals"
+            },
+            "type": "array",
+            "title": "By Check Type"
+          },
+          "by_status": {
+            "items": {
+              "$ref": "#/components/schemas/StatusTotals"
+            },
+            "type": "array",
+            "title": "By Status"
+          },
+          "by_day": {
+            "items": {
+              "$ref": "#/components/schemas/DayTotals"
+            },
+            "type": "array",
+            "title": "By Day"
+          },
+          "by_model": {
+            "items": {
+              "$ref": "#/components/schemas/ModelTotals"
+            },
+            "type": "array",
+            "title": "By Model"
+          }
+        },
+        "type": "object",
+        "required": [
+          "totals",
+          "by_check_type",
+          "by_status",
+          "by_day",
+          "by_model"
+        ],
+        "title": "LedgerStats"
+      },
+      "LedgerTotals": {
+        "properties": {
+          "queries": {
+            "type": "integer",
+            "title": "Queries"
+          },
+          "prompt_tokens": {
+            "type": "integer",
+            "title": "Prompt Tokens"
+          },
+          "completion_tokens": {
+            "type": "integer",
+            "title": "Completion Tokens"
+          },
+          "cached_tokens": {
+            "type": "integer",
+            "title": "Cached Tokens"
+          },
+          "reasoning_tokens": {
+            "type": "integer",
+            "title": "Reasoning Tokens"
+          },
+          "cost_usd": {
+            "type": "number",
+            "title": "Cost Usd"
+          }
+        },
+        "type": "object",
+        "required": [
+          "queries",
+          "prompt_tokens",
+          "completion_tokens",
+          "cached_tokens",
+          "reasoning_tokens",
+          "cost_usd"
+        ],
+        "title": "LedgerTotals",
+        "description": "Lifetime totals over every model call. `cost_usd` is not a column: it\nis the sum of what each model's tokens priced at, and a model that cannot\nbe priced contributes nothing to it rather than a guess."
       },
       "LedgerWithTotals": {
         "properties": {
@@ -36950,6 +39050,67 @@
         "title": "ModelSpend",
         "description": "`model` is null for the scrape-only checks, which record an attempt\nrather than a judgement and carry neither a model nor a cost."
       },
+      "ModelTotals": {
+        "properties": {
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "queries": {
+            "type": "integer",
+            "title": "Queries"
+          },
+          "prompt_tokens": {
+            "type": "integer",
+            "title": "Prompt Tokens"
+          },
+          "completion_tokens": {
+            "type": "integer",
+            "title": "Completion Tokens"
+          },
+          "cached_tokens": {
+            "type": "integer",
+            "title": "Cached Tokens"
+          },
+          "batched_prompt_tokens": {
+            "type": "integer",
+            "title": "Batched Prompt Tokens"
+          },
+          "batched_completion_tokens": {
+            "type": "integer",
+            "title": "Batched Completion Tokens"
+          },
+          "batched_cached_tokens": {
+            "type": "integer",
+            "title": "Batched Cached Tokens"
+          },
+          "cost_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Usd"
+          }
+        },
+        "type": "object",
+        "required": [
+          "model",
+          "queries",
+          "prompt_tokens",
+          "completion_tokens",
+          "cached_tokens",
+          "batched_prompt_tokens",
+          "batched_completion_tokens",
+          "batched_cached_tokens",
+          "cost_usd"
+        ],
+        "title": "ModelTotals",
+        "description": "What one model has been asked and what that cost.\n\nThe batched columns are carried because batched and synchronous tokens\nbill at different rates and are priced as two calls: one blended rate over\nthe whole model would be wrong by up to 2x depending on the mix.\n\n`cost_usd` is null where the model cannot be priced from summed tokens: a\ntiered model's rate depends on each individual request's prompt length, so\na thousand small calls sum into a tier none of them was billed at, and the\nhonest answer is that it is not priced."
+      },
       "ModelsResponse": {
         "properties": {
           "providers": {
@@ -37578,6 +39739,37 @@
           "excluded"
         ],
         "title": "PatternSamples"
+      },
+      "PendingKind": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "pending": {
+            "type": "integer",
+            "title": "Pending"
+          },
+          "oldest_minutes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Oldest Minutes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "pending",
+          "oldest_minutes"
+        ],
+        "title": "PendingKind",
+        "description": "What is waiting, and how long the oldest of it has waited. The age is\nwhat turns a pending count into \"something is stuck\"."
       },
       "Phrasing": {
         "properties": {
@@ -38374,6 +40566,81 @@
         "title": "PipelineSummary",
         "description": "Counts, not a funnel: terminal stages beat progress regardless of\narrival order and a stage is recomputed rather than advanced, so nothing\nflows through anything.\n\nDismissals are counted rather than hidden. They change every other number\nhere, and a total that silently shrinks week to week with nothing\nexplaining why is the failure this whole system keeps producing."
       },
+      "PlacedLocation": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "country": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country"
+          },
+          "region": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Region"
+          },
+          "city": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "City"
+          },
+          "remote": {
+            "type": "boolean",
+            "title": "Remote"
+          },
+          "places": {
+            "items": {
+              "$ref": "#/components/schemas/LocationPlace"
+            },
+            "type": "array",
+            "title": "Places"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          }
+        },
+        "type": "object",
+        "required": [
+          "text",
+          "country",
+          "region",
+          "city",
+          "remote",
+          "places",
+          "model"
+        ],
+        "title": "PlacedLocation",
+        "description": "One classified location string, as the write left it.\n\nThe display columns are the FIRST place: a string naming three cities is\nthree entries in `places`, and `country`/`region`/`city` carry the first\nof them so a list can show something without unpacking the array. A string\nthe model could not place has every one of them null."
+      },
       "Population": {
         "properties": {
           "messages": {
@@ -38439,6 +40706,97 @@
         ],
         "title": "PostingAge",
         "description": "How long this one listing has been up. Carries no sample size, because\nit is a fact about this posting rather than a rate over many."
+      },
+      "PostingClosed": {
+        "properties": {
+          "job_id": {
+            "type": "integer",
+            "title": "Job Id"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "posting_closed": {
+            "type": "boolean",
+            "title": "Posting Closed"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "job_id",
+          "url",
+          "posting_closed",
+          "reason"
+        ],
+        "title": "PostingClosed",
+        "description": "`reason` is what was recorded on the verdict, which is the admin's note\nwith who wrote it prefixed, not the note as sent."
+      },
+      "PostingGone": {
+        "properties": {
+          "check": {
+            "type": "string",
+            "title": "Check"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "tokens": {
+            "type": "integer",
+            "title": "Tokens"
+          },
+          "refetched": {
+            "type": "boolean",
+            "title": "Refetched"
+          },
+          "closure_signal": {
+            "type": "string",
+            "title": "Closure Signal"
+          }
+        },
+        "type": "object",
+        "required": [
+          "check",
+          "status",
+          "reason",
+          "tokens",
+          "refetched",
+          "closure_signal"
+        ],
+        "title": "PostingGone",
+        "description": "No re-run happened, because the re-fetch found the posting closed.\n\nA separate shape rather than nullable fields on CheckRerun: nothing was\nasked of a model here, so `model` and a token count would be a guess, and\n`closure_signal` names what the fetch saw. `refetched` is always true,\nsince a closure can only be discovered by fetching."
+      },
+      "PostingTimeline": {
+        "properties": {
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/TimelineEntry"
+            },
+            "type": "array",
+            "title": "Rows"
+          }
+        },
+        "type": "object",
+        "required": [
+          "rows"
+        ],
+        "title": "PostingTimeline"
       },
       "PrefilterCell": {
         "properties": {
@@ -39576,6 +41934,185 @@
         "title": "ProposalAnswered",
         "description": "What answering actually wrote.\n\n`board_status` is present only when a row moved. It used to carry the\nproposed status whenever the answer was `accepted`, including for the\napplications with no board row where the UPDATE matched nothing, so the\ncaller was told a status had moved that no SELECT could find."
       },
+      "ProviderBatch": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "provider_batch_id": {
+            "type": "string",
+            "title": "Provider Batch Id"
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Id"
+          },
+          "purpose": {
+            "type": "string",
+            "title": "Purpose"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "requests": {
+            "type": "integer",
+            "title": "Requests"
+          },
+          "completed": {
+            "type": "integer",
+            "title": "Completed"
+          },
+          "failed_count": {
+            "type": "integer",
+            "title": "Failed Count"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "est_tokens": {
+            "type": "integer",
+            "title": "Est Tokens"
+          },
+          "input_tokens": {
+            "type": "integer",
+            "title": "Input Tokens"
+          },
+          "output_tokens": {
+            "type": "integer",
+            "title": "Output Tokens"
+          },
+          "est_cost_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Est Cost Usd"
+          },
+          "submitted_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Submitted At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "task_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Kind"
+          },
+          "task_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "provider_batch_id",
+          "task_id",
+          "purpose",
+          "model",
+          "requests",
+          "completed",
+          "failed_count",
+          "status",
+          "est_tokens",
+          "input_tokens",
+          "output_tokens",
+          "est_cost_usd",
+          "submitted_at",
+          "updated_at",
+          "completed_at",
+          "task_kind",
+          "task_status"
+        ],
+        "title": "ProviderBatch",
+        "description": "One batch job at the provider, with the task it belongs to.\n\n`requests` is what was submitted, `completed` and `failed_count` what came\nback. `est_tokens` is what submission estimated; `input_tokens` and\n`output_tokens` are what the provider billed, so the two disagreeing is\nthe estimate being wrong rather than anything being lost."
+      },
+      "ProviderBatches": {
+        "properties": {
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderBatch"
+            },
+            "type": "array",
+            "title": "Rows"
+          },
+          "filters": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": "object",
+            "title": "Filters"
+          },
+          "filterable": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Filterable"
+          }
+        },
+        "type": "object",
+        "required": [
+          "rows",
+          "filters",
+          "filterable"
+        ],
+        "title": "ProviderBatches"
+      },
       "ProviderCostDay": {
         "properties": {
           "start_time": {
@@ -39781,6 +42318,760 @@
         ],
         "title": "ProviderEntry"
       },
+      "QueriesDeleted": {
+        "properties": {
+          "deleted": {
+            "type": "integer",
+            "title": "Deleted"
+          }
+        },
+        "type": "object",
+        "required": [
+          "deleted"
+        ],
+        "title": "QueriesDeleted"
+      },
+      "QueryFilterOptions": {
+        "properties": {
+          "sources": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Sources"
+          },
+          "check_types": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Check Types"
+          },
+          "statuses": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Statuses"
+          },
+          "contexts": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Contexts"
+          },
+          "workers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Workers"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sources",
+          "check_types",
+          "statuses",
+          "contexts",
+          "workers"
+        ],
+        "title": "QueryFilterOptions",
+        "description": "The dropdowns, generated from live data so they cannot drift from what\nexists. `contexts` and `workers` are narrowed to the last 30 days: a value\nnothing has produced in a month is a dead option, not a filter."
+      },
+      "QueryListing": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "config_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Config Name"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          },
+          "check_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Check Type"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "company": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company"
+          },
+          "job_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Title"
+          },
+          "prompt_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Tokens"
+          },
+          "completion_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completion Tokens"
+          },
+          "total_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Tokens"
+          },
+          "cached_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cached Tokens"
+          },
+          "reasoning_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reasoning Tokens"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Ms"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "worker": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Worker"
+          },
+          "filter_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filter Name"
+          },
+          "prompt_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Hash"
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "created_at",
+          "config_name",
+          "url",
+          "check_type",
+          "status",
+          "reason",
+          "model",
+          "company",
+          "job_title",
+          "prompt_tokens",
+          "completion_tokens",
+          "total_tokens",
+          "cached_tokens",
+          "reasoning_tokens",
+          "duration_ms",
+          "error",
+          "worker",
+          "filter_name",
+          "prompt_hash",
+          "job_id",
+          "source"
+        ],
+        "title": "QueryListing",
+        "description": "`_LIST_COLS`, in types: one model call as the ledger lists it.\n\n`instructions`, `input_content` and `parsed_json` are deliberately absent.\nThey are page dumps and prompts, several kilobytes each, and only the row\na person opens needs them; GET /admin/queries/{id} carries those.\n\n`job_id` and `source` are looked up per row rather than joined: ai_queries\nand jobs share several column names, so a join would make every existing\nfilter ambiguous. A verdict about a url the catalog no longer holds has\nneither."
+      },
+      "QueryPage": {
+        "properties": {
+          "sorts": {
+            "items": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Sorts"
+          },
+          "sortable": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Sortable"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/QueryListing"
+            },
+            "type": "array",
+            "title": "Rows"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "page_size": {
+            "type": "integer",
+            "title": "Page Size"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "has_more": {
+            "type": "boolean",
+            "title": "Has More"
+          },
+          "filters": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": "object",
+            "title": "Filters"
+          },
+          "filterable": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Filterable"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sorts",
+          "sortable",
+          "rows",
+          "page",
+          "page_size",
+          "total",
+          "has_more",
+          "filters",
+          "filterable"
+        ],
+        "title": "QueryPage"
+      },
+      "QueryRecord": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "config_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Config Name"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          },
+          "check_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Check Type"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reasoning Effort"
+          },
+          "filter_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filter Name"
+          },
+          "prompt_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Hash"
+          },
+          "company": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company"
+          },
+          "job_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Title"
+          },
+          "instructions": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instructions"
+          },
+          "input_content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Content"
+          },
+          "parsed_json": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parsed Json"
+          },
+          "prompt_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Tokens"
+          },
+          "completion_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completion Tokens"
+          },
+          "total_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Tokens"
+          },
+          "cached_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cached Tokens"
+          },
+          "reasoning_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reasoning Tokens"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Ms"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "cost_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Usd"
+          },
+          "worker": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Worker"
+          },
+          "batch_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Batch Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "created_at",
+          "config_name",
+          "url",
+          "check_type",
+          "status",
+          "reason",
+          "model",
+          "reasoning_effort",
+          "filter_name",
+          "prompt_hash",
+          "company",
+          "job_title",
+          "instructions",
+          "input_content",
+          "parsed_json",
+          "prompt_tokens",
+          "completion_tokens",
+          "total_tokens",
+          "cached_tokens",
+          "reasoning_tokens",
+          "duration_ms",
+          "error",
+          "cost_usd",
+          "worker",
+          "batch_id"
+        ],
+        "title": "QueryRecord",
+        "description": "One model call, whole: what was asked, what came back, and what it\ncost. `instructions` and `input_content` are the prompt and the page as\nthey were at the time, which is what makes a verdict re-readable rather\nthan merely re-runnable. `parsed_json` is the answer before it was reduced\nto status and reason.\n\n`cost_usd` is a float rather than a Decimal because a declared Decimal\nserialises as a JSON string and this has always been a number."
+      },
+      "QueryResponses": {
+        "properties": {
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/QueryRecord"
+            },
+            "type": "array",
+            "title": "Rows"
+          }
+        },
+        "type": "object",
+        "required": [
+          "rows"
+        ],
+        "title": "QueryResponses",
+        "description": "Every model call against one url, whole rows, oldest first. This is the\ndrawer that shows what was asked and what came back, so it carries the\nprompt and the page text the list deliberately leaves out."
+      },
+      "QueryVocabulary": {
+        "properties": {
+          "check_types": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Check Types"
+          },
+          "statuses": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Statuses"
+          },
+          "configs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Configs"
+          }
+        },
+        "type": "object",
+        "required": [
+          "check_types",
+          "statuses",
+          "configs"
+        ],
+        "title": "QueryVocabulary",
+        "description": "The older, unscoped vocabulary: every distinct value ever recorded.\nGET /admin/queries/options is the same idea narrowed to what is still in\nuse, and is what the queries page reads."
+      },
       "Question": {
         "properties": {
           "key": {
@@ -39881,6 +43172,173 @@
         ],
         "title": "QuestionAdd"
       },
+      "QueueSummary": {
+        "properties": {
+          "hours": {
+            "type": "integer",
+            "title": "Hours"
+          },
+          "pending": {
+            "items": {
+              "$ref": "#/components/schemas/PendingKind"
+            },
+            "type": "array",
+            "title": "Pending"
+          },
+          "in_flight": {
+            "items": {
+              "$ref": "#/components/schemas/RunningTask"
+            },
+            "type": "array",
+            "title": "In Flight"
+          },
+          "throughput": {
+            "items": {
+              "$ref": "#/components/schemas/ThroughputBucket"
+            },
+            "type": "array",
+            "title": "Throughput"
+          },
+          "workers": {
+            "items": {
+              "$ref": "#/components/schemas/WorkerHeartbeat"
+            },
+            "type": "array",
+            "title": "Workers"
+          }
+        },
+        "type": "object",
+        "required": [
+          "hours",
+          "pending",
+          "in_flight",
+          "throughput",
+          "workers"
+        ],
+        "title": "QueueSummary"
+      },
+      "QueuedTask": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Payload"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "attempts": {
+            "type": "integer",
+            "title": "Attempts"
+          },
+          "worker": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Worker"
+          },
+          "progress": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Progress"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "last_heartbeat": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Heartbeat"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "cancellable": {
+            "type": "boolean",
+            "title": "Cancellable"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "payload",
+          "status",
+          "attempts",
+          "worker",
+          "progress",
+          "error",
+          "created_at",
+          "started_at",
+          "last_heartbeat",
+          "finished_at",
+          "cancellable"
+        ],
+        "title": "QueuedTask",
+        "description": "One row of the queue. `payload` is the task's subject and `progress` is\nwhat the handler has said about itself so far, both shaped by the kind, so\nneither is declared further.\n\n`cancellable` is not a column: it is whether the row's status is one a\ncancel would reach, resolved on read so the page does not carry a second\ncopy of that list."
+      },
       "Rate": {
         "properties": {
           "value": {
@@ -39935,6 +43393,85 @@
         ],
         "title": "ReasonGroup"
       },
+      "RecentTask": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "worker": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Worker"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "status",
+          "worker",
+          "created_at",
+          "finished_at"
+        ],
+        "title": "RecentTask"
+      },
+      "RecheckOptions": {
+        "properties": {
+          "models": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Models"
+          },
+          "defaults": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Defaults"
+          }
+        },
+        "type": "object",
+        "required": [
+          "models",
+          "defaults"
+        ],
+        "title": "RecheckOptions",
+        "description": "`defaults` is keyed by check option, not by check type: a re-check may\nbe asked for by filter id or prompt hash, and the person's last choice is\nremembered against what they asked for."
+      },
       "RecipeConfig": {
         "properties": {
           "schema_version": {
@@ -39981,6 +43518,41 @@
         "title": "RecipeConfig",
         "description": "What the extension fetches: the identity and the encoded table."
       },
+      "RecipeHistory": {
+        "properties": {
+          "recipes": {
+            "items": {
+              "$ref": "#/components/schemas/RecipeRevision"
+            },
+            "type": "array",
+            "title": "Recipes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "recipes"
+        ],
+        "title": "RecipeHistory"
+      },
+      "RecipePublished": {
+        "properties": {
+          "adapter": {
+            "type": "string",
+            "title": "Adapter"
+          },
+          "revision": {
+            "type": "string",
+            "title": "Revision"
+          }
+        },
+        "type": "object",
+        "required": [
+          "adapter",
+          "revision"
+        ],
+        "title": "RecipePublished",
+        "description": "The revision now serving that adapter. A revision is derived from the\nbody, so publishing the same recipe twice returns the same one."
+      },
       "RecipePut": {
         "properties": {
           "recipe": {
@@ -39992,6 +43564,53 @@
           "recipe"
         ],
         "title": "RecipePut"
+      },
+      "RecipeRevision": {
+        "properties": {
+          "adapter": {
+            "type": "string",
+            "title": "Adapter"
+          },
+          "revision": {
+            "type": "string",
+            "title": "Revision"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "published_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published By"
+          },
+          "published_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Published At"
+          },
+          "bytes": {
+            "type": "integer",
+            "title": "Bytes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "adapter",
+          "revision",
+          "enabled",
+          "published_by",
+          "published_at",
+          "bytes"
+        ],
+        "title": "RecipeRevision",
+        "description": "One publish. The recipe body itself is not here: this is the history\nlist, and a body is tens of kilobytes that only the editor opens.\n`bytes` is its size, which is what the list has a use for."
       },
       "Reclassification": {
         "properties": {
@@ -40238,6 +43857,37 @@
         "title": "RememberedAnswer",
         "description": "One answer the bank kept from a submitted form."
       },
+      "ReparseQueued": {
+        "properties": {
+          "task_id": {
+            "type": "integer",
+            "title": "Task Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "task_id"
+        ],
+        "title": "ReparseQueued"
+      },
+      "ReportCounts": {
+        "properties": {
+          "open": {
+            "type": "integer",
+            "title": "Open"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "open",
+          "total"
+        ],
+        "title": "ReportCounts"
+      },
       "ReportCreated": {
         "properties": {
           "id": {
@@ -40316,6 +43966,237 @@
         ],
         "title": "ReportList"
       },
+      "ReportQueue": {
+        "properties": {
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/ReportedPosting"
+            },
+            "type": "array",
+            "title": "Rows"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "page_size": {
+            "type": "integer",
+            "title": "Page Size"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "has_more": {
+            "type": "boolean",
+            "title": "Has More"
+          },
+          "report_kinds": {
+            "items": {
+              "$ref": "#/components/schemas/ReportKind"
+            },
+            "type": "array",
+            "title": "Report Kinds"
+          },
+          "can_close_posting": {
+            "type": "boolean",
+            "title": "Can Close Posting"
+          },
+          "filters": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": "object",
+            "title": "Filters"
+          },
+          "filterable": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Filterable"
+          }
+        },
+        "type": "object",
+        "required": [
+          "rows",
+          "page",
+          "page_size",
+          "total",
+          "has_more",
+          "report_kinds",
+          "can_close_posting",
+          "filters",
+          "filterable"
+        ],
+        "title": "ReportQueue",
+        "description": "`can_close_posting` tells the drawer this build has the close route, so\nit offers the action rather than discovering a 404."
+      },
+      "ReportResolved": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "status"
+        ],
+        "title": "ReportResolved"
+      },
+      "ReportedPosting": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "user_id": {
+            "type": "integer",
+            "title": "User Id"
+          },
+          "job_id": {
+            "type": "integer",
+            "title": "Job Id"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "corrections": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Corrections"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "resolution_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolution Note"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "resolved_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved At"
+          },
+          "reporter_email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reporter Email"
+          },
+          "reporter_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reporter Name"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "company": {
+            "type": "string",
+            "title": "Company"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "extraction_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Extraction Status"
+          },
+          "posting_closed": {
+            "type": "boolean",
+            "title": "Posting Closed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "user_id",
+          "job_id",
+          "kind",
+          "message",
+          "corrections",
+          "status",
+          "resolution_note",
+          "created_at",
+          "resolved_at",
+          "reporter_email",
+          "reporter_name",
+          "url",
+          "company",
+          "title",
+          "source",
+          "extraction_status",
+          "posting_closed"
+        ],
+        "title": "ReportedPosting",
+        "description": "A report somebody filed about a posting, with enough of the posting and\nthe person beside it that the queue reads without a second request.\n\n`corrections` is what the reporter says the right answer is, shaped by the\nkind of report, so it is not declared further. `posting_closed` is not a\ncolumn: it is the latest closed verdict for the url, which is what decides\nwhether the drawer offers to close it."
+      },
       "Repost": {
         "properties": {
           "title": {
@@ -40379,6 +44260,141 @@
         ],
         "title": "Repost",
         "description": "The same title, at the same locations, listed more than once. Location\nis part of the key: without it one chain listing a role across its estate\nreads as one enormous repost."
+      },
+      "RequestedSource": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "user_id": {
+            "type": "integer",
+            "title": "User Id"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "note": {
+            "type": "string",
+            "title": "Note"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "resolution_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolution Note"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "resolved_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved At"
+          },
+          "requester_email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requester Email"
+          },
+          "requester_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requester Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "user_id",
+          "url",
+          "note",
+          "status",
+          "resolution_note",
+          "created_at",
+          "resolved_at",
+          "requester_email",
+          "requester_name"
+        ],
+        "title": "RequestedSource",
+        "description": "A board somebody asked for, with who asked. `status` is open, added or\ndismissed, and a resolved request keeps its row so the same board is not\nadded twice."
+      },
+      "RequestedSources": {
+        "properties": {
+          "filters": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": "object",
+            "title": "Filters"
+          },
+          "filterable": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Filterable"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/RequestedSource"
+            },
+            "type": "array",
+            "title": "Rows"
+          },
+          "has_more": {
+            "type": "boolean",
+            "title": "Has More"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "filters",
+          "filterable",
+          "rows",
+          "has_more",
+          "total"
+        ],
+        "title": "RequestedSources",
+        "description": "`total` counts the whole selection, not the page. The Requests badge\nonce showed the page size as the queue count."
       },
       "Rescored": {
         "properties": {
@@ -41748,6 +45764,80 @@
         ],
         "title": "RunQueued"
       },
+      "RunningTask": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "worker": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Worker"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "progress": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Progress"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "worker",
+          "status",
+          "started_at",
+          "progress",
+          "source"
+        ],
+        "title": "RunningTask",
+        "description": "A task a worker holds right now. `source` is lifted out of the payload\nbecause an ingest is most of the queue and the board is what identifies\nit; every other kind has none."
+      },
       "SavedAnswerPut": {
         "properties": {
           "value": {
@@ -42371,6 +46461,44 @@
         "type": "object",
         "title": "SourceBody"
       },
+      "SourceBundle": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "members": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Members"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "active": {
+            "type": "boolean",
+            "title": "Active"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "members",
+          "description",
+          "active",
+          "created_at"
+        ],
+        "title": "SourceBundle",
+        "description": "A named set of boards, so a person subscribes to \"quant\" rather than to\nforty sources one at a time. `members` are source names."
+      },
       "SourceCounts": {
         "properties": {
           "source": {
@@ -42542,6 +46670,103 @@
           "groups"
         ],
         "title": "SourceGroupList"
+      },
+      "SourceIngest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "active": {
+            "type": "boolean",
+            "title": "Active"
+          },
+          "company": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company"
+          },
+          "ingest_interval_hours": {
+            "type": "integer",
+            "title": "Ingest Interval Hours"
+          },
+          "groups": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Groups"
+          },
+          "pulls": {
+            "type": "integer",
+            "title": "Pulls"
+          },
+          "failed_pulls": {
+            "type": "integer",
+            "title": "Failed Pulls"
+          },
+          "fetched": {
+            "type": "integer",
+            "title": "Fetched"
+          },
+          "kept": {
+            "type": "integer",
+            "title": "Kept"
+          },
+          "cached": {
+            "type": "integer",
+            "title": "Cached"
+          },
+          "fetch_failed": {
+            "type": "integer",
+            "title": "Fetch Failed"
+          },
+          "gone": {
+            "type": "integer",
+            "title": "Gone"
+          },
+          "last_pull_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Pull At"
+          },
+          "new_jobs": {
+            "type": "integer",
+            "title": "New Jobs"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "active",
+          "company",
+          "ingest_interval_hours",
+          "groups",
+          "pulls",
+          "failed_pulls",
+          "fetched",
+          "kept",
+          "cached",
+          "fetch_failed",
+          "gone",
+          "last_pull_at",
+          "new_jobs"
+        ],
+        "title": "SourceIngest",
+        "description": "One board over the window. The counts come from what each ingest task\nleft on its progress: `fetched` is what the board listed, `kept` is what\nthe title pattern admitted, `cached` is pages we already held, `gone` is\npostings the board reports removed. `new_jobs` is catalog rows created,\nwhich is the only one of these that is not a task's own account of itself.\n\nA source that pulls fine and delivers nothing shows pulls with no\nnew_jobs, which last_new_posting_at alone cannot show for a mirror."
       },
       "SourceLedger": {
         "properties": {
@@ -42856,6 +47081,24 @@
         ],
         "title": "SourceRequestList"
       },
+      "SourceRequestResolved": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "status"
+        ],
+        "title": "SourceRequestResolved"
+      },
       "SourceRow": {
         "properties": {
           "source": {
@@ -42962,6 +47205,24 @@
         },
         "type": "object",
         "title": "SourceSwitchBody"
+      },
+      "SourceTask": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "task_id": {
+            "type": "integer",
+            "title": "Task Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source",
+          "task_id"
+        ],
+        "title": "SourceTask"
       },
       "SourcesPatch": {
         "properties": {
@@ -43236,6 +47497,70 @@
         ],
         "title": "SpendCalls"
       },
+      "SpendDay": {
+        "properties": {
+          "day": {
+            "type": "string",
+            "format": "date",
+            "title": "Day"
+          },
+          "key_source": {
+            "type": "string",
+            "title": "Key Source"
+          },
+          "tokens": {
+            "type": "integer",
+            "title": "Tokens"
+          },
+          "calls": {
+            "type": "integer",
+            "title": "Calls"
+          }
+        },
+        "type": "object",
+        "required": [
+          "day",
+          "key_source",
+          "tokens",
+          "calls"
+        ],
+        "title": "SpendDay"
+      },
+      "SpendPurpose": {
+        "properties": {
+          "purpose": {
+            "type": "string",
+            "title": "Purpose"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "tokens": {
+            "type": "integer",
+            "title": "Tokens"
+          },
+          "calls": {
+            "type": "integer",
+            "title": "Calls"
+          }
+        },
+        "type": "object",
+        "required": [
+          "purpose",
+          "model",
+          "tokens",
+          "calls"
+        ],
+        "title": "SpendPurpose"
+      },
       "SpendWindow": {
         "properties": {
           "days": {
@@ -43412,6 +47737,31 @@
         ],
         "title": "StatusMeta",
         "description": "What a status MEANS, served beside the names so the board never decides\n\"is this over\" or \"which tone\" by matching a name it hand-copied. A status\nabsent from the table is in play with no outcome."
+      },
+      "StatusTotals": {
+        "properties": {
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "count"
+        ],
+        "title": "StatusTotals"
       },
       "StructuredOutput": {
         "type": "string",
@@ -44125,6 +48475,63 @@
         "title": "TaskProgress",
         "description": "What `set_progress` writes: how far, out of how much, and a line for a\nperson. A handler may add counts it wants queryable afterwards (what an\ningest fetched, kept, cached, failed to fetch) and the health detectors\nread those keys, so extras are carried rather than dropped.\n\nThe three have defaults because a parent task's progress is written by\n`jsonb_set` on one key, and a row that has reported nothing should read as\nnothing rather than fail the request that asks for it."
       },
+      "TaskQueue": {
+        "properties": {
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/QueuedTask"
+            },
+            "type": "array",
+            "title": "Rows"
+          },
+          "has_more": {
+            "type": "boolean",
+            "title": "Has More"
+          },
+          "summary": {
+            "items": {
+              "$ref": "#/components/schemas/KindStatusCount"
+            },
+            "type": "array",
+            "title": "Summary"
+          },
+          "filters": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": "object",
+            "title": "Filters"
+          },
+          "filterable": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Filterable"
+          },
+          "statuses": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Statuses"
+          }
+        },
+        "type": "object",
+        "required": [
+          "rows",
+          "has_more",
+          "summary",
+          "filters",
+          "filterable",
+          "statuses"
+        ],
+        "title": "TaskQueue",
+        "description": "`summary` counts the whole selection, not the page, so a filtered view\nsays how much it matched rather than how much it drew.\n\n`statuses` is the lifecycle in order, which is what lets the page render\nthem in that order rather than alphabetically."
+      },
       "TaskState": {
         "properties": {
           "id": {
@@ -44212,6 +48619,31 @@
         ],
         "title": "TaskState",
         "description": "A task this person started. Ownership lives in the payload, so the\nkinds that stamp no user_id are fleet work with nobody to show them to."
+      },
+      "TasksCancelled": {
+        "properties": {
+          "cancelled": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Cancelled"
+          },
+          "skipped": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Skipped"
+          }
+        },
+        "type": "object",
+        "required": [
+          "cancelled",
+          "skipped"
+        ],
+        "title": "TasksCancelled",
+        "description": "`skipped` names only ids the caller asked for by id and that were not\ncancellable. A selection by kind or status cancels whatever matches, so\nthere is nothing for it to skip."
       },
       "Taxonomy": {
         "properties": {
@@ -44576,6 +49008,60 @@
         ],
         "title": "Threads"
       },
+      "ThroughputBucket": {
+        "properties": {
+          "hour": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Hour"
+          },
+          "worker": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Worker"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "done": {
+            "type": "integer",
+            "title": "Done"
+          },
+          "failed": {
+            "type": "integer",
+            "title": "Failed"
+          },
+          "avg_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Seconds"
+          }
+        },
+        "type": "object",
+        "required": [
+          "hour",
+          "worker",
+          "kind",
+          "done",
+          "failed",
+          "avg_seconds"
+        ],
+        "title": "ThroughputBucket",
+        "description": "One hour of one worker on one kind. This is what makes a pending count\nan ETA, so it is per worker and per kind rather than a fleet average."
+      },
       "TimeToOutcome": {
         "properties": {
           "n": {
@@ -44624,6 +49110,122 @@
         "title": "TimeToOutcome",
         "description": "How long this company took to decide something.\n\n`basis` is tracker_dated_only, and that is not a caveat about precision.\nFor every mail-derived application `applied_at` IS the first matched\nmessage's sent_at, so a duration over those measures the gap between the\nfirst mail and the first DECIDING mail - zero whenever a rejection arrives\nwith no acknowledgement before it.\n\nMedian and p90 rather than a mean: over the 200 tracker applications with a\nclean duration the mean is 30.5 days and the median 7.9, so the mean is\ndescribing the tail rather than the wait. A median needs a sample as much\nas a proportion does, so below the floor both are null and `n` carries what\nthere is."
       },
+      "TimelineEntry": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "config_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Config Name"
+          },
+          "check_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Check Type"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "total_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Tokens"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Ms"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "created_at",
+          "config_name",
+          "check_type",
+          "status",
+          "reason",
+          "model",
+          "total_tokens",
+          "duration_ms",
+          "error"
+        ],
+        "title": "TimelineEntry",
+        "description": "One check in a posting's history, thin enough to render as a line. The\ninteresting column is `reason`: a posting's story is the sequence of\nverdicts and why each one was given."
+      },
       "Totals": {
         "properties": {
           "tracked": {
@@ -44648,6 +49250,90 @@
         "title": "Totals",
         "description": "The bookkeeping rows, deliberately not the board. Counted from\nuser_jobs, so `tracked` includes rows whose posting has since left."
       },
+      "Tunable": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "title": "Type"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "section": {
+            "type": "string",
+            "title": "Section"
+          },
+          "default": {
+            "$ref": "#/components/schemas/JsonValue"
+          },
+          "help": {
+            "type": "string",
+            "title": "Help"
+          },
+          "choices": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Choices"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "kind",
+          "section",
+          "default",
+          "help",
+          "choices"
+        ],
+        "title": "Tunable",
+        "description": "One registry entry, as `api.config.ConfigKey` holds it. `type` is the\nname of a Python type rather than the type, because it travels as JSON and\nthe page only needs to tell an int box from a checkbox."
+      },
+      "TunableWritten": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "value": {
+            "$ref": "#/components/schemas/JsonValue"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "value"
+        ],
+        "title": "TunableWritten",
+        "description": "The value as stored, which is not always the value as sent: a spec\nnormalises what it validates, so the caller is told what landed."
+      },
+      "Tunables": {
+        "properties": {
+          "config": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "type": "object",
+            "title": "Config"
+          },
+          "keys": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Tunable"
+            },
+            "type": "object",
+            "title": "Keys"
+          }
+        },
+        "type": "object",
+        "required": [
+          "config",
+          "keys"
+        ],
+        "title": "Tunables",
+        "description": "The stored values beside the registry that describes them, both keyed\nby the config key. `config` holds only keys app_config has a row for;\n`keys` holds every key the registry declares, which is what lets the page\nrender one it has never seen."
+      },
       "TypeCount": {
         "properties": {
           "type": {
@@ -44665,6 +49351,24 @@
           "postings"
         ],
         "title": "TypeCount"
+      },
+      "UploadCounts": {
+        "properties": {
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "failed": {
+            "type": "integer",
+            "title": "Failed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total",
+          "failed"
+        ],
+        "title": "UploadCounts"
       },
       "UploadRequest": {
         "properties": {
@@ -44876,6 +49580,158 @@
         "title": "UsageCall",
         "description": "One recorded call. A null cost means nobody looked the price up, never\nthat the call was free."
       },
+      "UserBudget": {
+        "properties": {
+          "owner_key": {
+            "type": "boolean",
+            "title": "Owner Key"
+          },
+          "weekly_token_budget": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weekly Token Budget"
+          },
+          "spent_this_week": {
+            "type": "integer",
+            "title": "Spent This Week"
+          },
+          "granted_by": {
+            "items": {
+              "$ref": "#/components/schemas/GroupGrant"
+            },
+            "type": "array",
+            "title": "Granted By"
+          }
+        },
+        "type": "object",
+        "required": [
+          "owner_key",
+          "weekly_token_budget",
+          "spent_this_week",
+          "granted_by"
+        ],
+        "title": "UserBudget",
+        "description": "Which cap applies to this person, resolved here rather than left to the\npage. The Users page showed a weekly total one click from a page showing a\n5,000,000 budget with nothing saying which cap applied to whom, which\ninvited the reading that an uncapped owner was over budget.\n\n`owner_key` is whether they spend on the shared key at all; somebody on\ntheir own key has no cap to be under."
+      },
+      "UserDetail": {
+        "properties": {
+          "user": {
+            "$ref": "#/components/schemas/UserProfile"
+          },
+          "budget": {
+            "$ref": "#/components/schemas/UserBudget"
+          },
+          "spend_by_day": {
+            "items": {
+              "$ref": "#/components/schemas/SpendDay"
+            },
+            "type": "array",
+            "title": "Spend By Day"
+          },
+          "spend_by_purpose": {
+            "items": {
+              "$ref": "#/components/schemas/SpendPurpose"
+            },
+            "type": "array",
+            "title": "Spend By Purpose"
+          },
+          "board": {
+            "items": {
+              "$ref": "#/components/schemas/BoardStatusCount"
+            },
+            "type": "array",
+            "title": "Board"
+          },
+          "filters": {
+            "items": {
+              "$ref": "#/components/schemas/UserFilterRow"
+            },
+            "type": "array",
+            "title": "Filters"
+          },
+          "sources": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Sources"
+          },
+          "uploads": {
+            "$ref": "#/components/schemas/UploadCounts"
+          },
+          "reports": {
+            "$ref": "#/components/schemas/ReportCounts"
+          },
+          "recent_tasks": {
+            "items": {
+              "$ref": "#/components/schemas/RecentTask"
+            },
+            "type": "array",
+            "title": "Recent Tasks"
+          }
+        },
+        "type": "object",
+        "required": [
+          "user",
+          "budget",
+          "spend_by_day",
+          "spend_by_purpose",
+          "board",
+          "filters",
+          "sources",
+          "uploads",
+          "reports",
+          "recent_tasks"
+        ],
+        "title": "UserDetail",
+        "description": "Everything one person's page shows: who they are, what they may spend\nand what they have spent, what their board and filters look like, and the\nlast ten things the fleet did for them."
+      },
+      "UserFilterRow": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "on_ambiguous": {
+            "type": "string",
+            "title": "On Ambiguous"
+          },
+          "fail_closed": {
+            "type": "boolean",
+            "title": "Fail Closed"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "enabled",
+          "on_ambiguous",
+          "fail_closed",
+          "updated_at"
+        ],
+        "title": "UserFilterRow",
+        "description": "A person's filters, without their prompts: this page is about who they\nare, and the prompt is theirs to read on their own screen."
+      },
       "UserJobPatch": {
         "properties": {
           "status": {
@@ -45023,6 +49879,181 @@
         "title": "UserJobsBulkPatch",
         "description": "One patch for a selection. Same field vocabulary as UserJobPatch; the\ncap keeps one request from holding a transaction over a whole catalog."
       },
+      "UserLedger": {
+        "properties": {
+          "users": {
+            "items": {
+              "$ref": "#/components/schemas/UserLedgerRow"
+            },
+            "type": "array",
+            "title": "Users"
+          },
+          "has_more": {
+            "type": "boolean",
+            "title": "Has More"
+          },
+          "sort": {
+            "type": "string",
+            "title": "Sort"
+          },
+          "dir": {
+            "type": "string",
+            "title": "Dir"
+          },
+          "sorts": {
+            "items": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Sorts"
+          },
+          "sortable": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Sortable"
+          }
+        },
+        "type": "object",
+        "required": [
+          "users",
+          "has_more",
+          "sort",
+          "dir",
+          "sorts",
+          "sortable"
+        ],
+        "title": "UserLedger",
+        "description": "`sort`, `dir` and `sorts` echo the sort that was applied and `sortable`\nenumerates the keys, so the page renders the active sort without\nduplicating the default and never has to guess what it may ask for."
+      },
+      "UserLedgerRow": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "sub": {
+            "type": "string",
+            "title": "Sub"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "groups": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Groups"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "last_seen_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Last Seen At"
+          },
+          "has_byo_key": {
+            "type": "boolean",
+            "title": "Has Byo Key"
+          },
+          "ai_provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ai Provider"
+          },
+          "ai_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ai Model"
+          },
+          "bypass_sponsorship_filter": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bypass Sponsorship Filter"
+          },
+          "board_rows": {
+            "type": "integer",
+            "title": "Board Rows"
+          },
+          "enabled_filters": {
+            "type": "integer",
+            "title": "Enabled Filters"
+          },
+          "sources": {
+            "type": "integer",
+            "title": "Sources"
+          },
+          "owner_tokens_week": {
+            "type": "integer",
+            "title": "Owner Tokens Week"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "sub",
+          "email",
+          "name",
+          "groups",
+          "created_at",
+          "last_seen_at",
+          "has_byo_key",
+          "ai_provider",
+          "ai_model",
+          "bypass_sponsorship_filter",
+          "board_rows",
+          "enabled_filters",
+          "sources",
+          "owner_tokens_week"
+        ],
+        "title": "UserLedgerRow",
+        "description": "One person, with the four counts the ledger sorts on. Each is a\ncorrelated count rather than a join, so a person with no board rows and no\nfilters still appears with zeros.\n\n`has_byo_key` says whether they hold their own provider key, which is what\ndecides whose budget their runs come out of. The key itself never leaves\nthe database."
+      },
       "UserMail": {
         "properties": {
           "messages": {
@@ -45057,6 +50088,136 @@
         ],
         "title": "UserMail",
         "description": "The page, and the per-kind counts over the SAME predicate - so a tab's\nnumber and its contents cannot disagree."
+      },
+      "UserProfile": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "sub": {
+            "type": "string",
+            "title": "Sub"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "groups": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Groups"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "last_seen_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Last Seen At"
+          },
+          "ai_provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ai Provider"
+          },
+          "ai_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ai Model"
+          },
+          "ai_params": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ai Params"
+          },
+          "bypass_sponsorship_filter": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bypass Sponsorship Filter"
+          },
+          "criteria": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Criteria"
+          },
+          "has_byo_key": {
+            "type": "boolean",
+            "title": "Has Byo Key"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "sub",
+          "email",
+          "name",
+          "groups",
+          "created_at",
+          "last_seen_at",
+          "ai_provider",
+          "ai_model",
+          "ai_params",
+          "bypass_sponsorship_filter",
+          "criteria",
+          "has_byo_key"
+        ],
+        "title": "UserProfile",
+        "description": "A person and their settings, minus anything secret. `criteria` and\n`ai_params` are shaped by what the person saved, so neither is declared\nfurther."
       },
       "UserSettings": {
         "properties": {
@@ -46015,6 +51176,49 @@
         ],
         "title": "Waste",
         "description": "A diagnostic, not proof that earlier work was unnecessary."
+      },
+      "WorkerHeartbeat": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Started At"
+          },
+          "last_seen": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Last Seen"
+          },
+          "current_task_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Task Id"
+          },
+          "fresh": {
+            "type": "boolean",
+            "title": "Fresh"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "started_at",
+          "last_seen",
+          "current_task_id",
+          "fresh"
+        ],
+        "title": "WorkerHeartbeat",
+        "description": "The fleet, thinner than /workers: no throughput and no running task,\nbecause this answers \"is anybody there\" beside the queue numbers."
       },
       "YearsCount": {
         "properties": {
