@@ -30,7 +30,7 @@ from api.board import eligibility as board_eligibility
 from api.board.eligibility import settings_params
 from api.queue import enqueue
 
-logger = logging.getLogger("jobtracker_api")
+logger = logging.getLogger(__name__)
 
 FULL = f"""
 WITH enabled_filters AS (

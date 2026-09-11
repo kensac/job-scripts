@@ -273,22 +273,53 @@ paid to remove. Keep the SQL, map the rows into dataclasses at the boundary,
 one domain at a time. `pyright` already runs clean, so the types would be
 enforced rather than decorative.
 
-## Logging is nearly consistent, and the gap is small
+## Logging: what was wrong, and what turned out not to be
 
-Measured 2026-09-10: 38 modules log, under seven logger names. Two are the
-convention, `jobtracker_worker` (24) and `jobtracker_api` (11). Five are
-one-offs, and one of those is `job_tracker` in `core/batch.py`, spelled
-differently from every other.
+Measured 2026-09-10, closed 2026-09-11.
 
-Nothing is lost by it. Telemetry attaches its handler to the ROOT logger
-precisely so a module needs no registration, which was checked before this was
-written down. The cost is only that filtering by source in a log viewer does
-not work the way the names suggest.
+**Seven logger names where two would do.** True, and now one rule: every
+module calls `logging.getLogger(__name__)`. The two conventions,
+`jobtracker_worker` (24 modules) and `jobtracker_api` (11), were not wrong so
+much as coarse: they said which half of the system logged, which is what the
+module path says anyway, and more precisely. Five modules used neither, one of
+them spelled `job_tracker`, and nothing enforced any of it because nothing
+had to: telemetry attaches its handler to the ROOT logger, so a module needs
+no registration to be shipped. The cost was only that filtering by source in a
+log viewer did not work the way the names suggested. `__name__` is the Python
+default, needs no decision when a module is added, and makes the record say
+`tasks.verify` rather than `jobtracker_worker`.
 
-Also worth one pass: 18 sites use `logger.exception` and 6 use `logger.error`.
-The second drops the traceback. Some of those six are deliberate, because the
-error is expected and the traceback is noise; they are worth reading rather
-than rewriting in bulk.
+**Tracebacks dropped.** Six `logger.error` against eighteen
+`logger.exception`. Read rather than rewritten in bulk, as this document
+said to: three were inside an `except` and interpolated the exception into the
+message, which keeps the sentence and throws away the stack. Those are
+`logger.exception` now. Three are deliberate and stay: two in `tasks/health.py`
+report a refusal with no exception in flight, and one in
+`core/fetching/listings.py` fires after a retry loop falls through, where
+there is nothing to trace.
+
+**"Unattended code that says nothing when it goes wrong" was wrong.** The row
+named four task handlers that hold no logger: `experiments` (505 lines),
+`embeddings` (232), `batch_policy` (64), `uploads` (61). Opened, none of them
+is silent.
+
+`api/worker.py` logs every task starting, done, parked, requeued on a
+transient error, and `logger.exception` on failure, so a handler that logs
+nothing still reports its failure with a traceback and the task id. None of
+the four contains a single `except`, so nothing is swallowed on the way.
+Three of the four call `set_progress`, which writes the outcome to the task
+row where the fleet page reads it. The fourth, `uploads`, raises on every
+failure path and writes `jobs.extraction_status`.
+
+So the gap was reasoning from the absence of a logger to the absence of a
+record, and the record is somewhere else. What a handler DID is in
+`tasks.progress`; what went wrong is in the worker's log. Adding a logger to
+each would have added lines, not information.
+
+`api/mail/pipeline.py` (588 lines) is the one place the argument does not
+reach, because it is a derivation rather than a task and no worker wraps it.
+It has no `except` either, so a failure propagates to whoever called it. Left
+alone until something actually goes unexplained.
 
 ## The gaps list
 
@@ -296,25 +327,37 @@ Everything measured and not yet closed, with the number that makes it a gap
 rather than an opinion. A row leaves this list when it is fixed or when a
 measurement says it was never worth fixing, and either way it says which.
 
-**The schema is not a contract.** 173 of 190 operations return an undeclared
-object; 11 declare a shape. Phase 7.
+**The schema is not a contract.** Was 173 of 190 operations returning an
+undeclared object on 2026-09-10. **143 of 190 on 2026-09-11**, and the ones
+left are concentrated: `routers/admin.py` (44) and the four modules
+`routers/mail/` was split into (33). Phase 7.
 
 **A failure is not in the contract at all.** 164 `raise HTTPException` sites,
 at least three `detail` shapes among them (69 `{code, message}`, 14 a bare
 string, 1 an f-string), and the schema declares 200, 201, 202 and the 422
 FastAPI adds. No 4xx. Phase 7.
 
-**Reads are untyped, and the goal is all of them.** 563 db call sites return
-bare dicts. `db.query_as` is the primitive and adoption is per domain, on
-Kanishk's instruction of 2026-09-11 that every read should carry a shape.
+**Reads are untyped, and the goal is all of them.** Was 563 db call sites
+returning bare dicts. **519 on 2026-09-11, of which 26 carry a shape.**
+`db.query_as` is the primitive and adoption is per domain, on Kanishk's
+instruction of 2026-09-11 that every read should carry a shape.
+
+Two things a generated client makes visible that this row does not.
+
+**Two routers may not name two models the same thing.** FastAPI does not
+refuse it; it mangles the name to `api__routers__source_admin__Source` and the
+type a generator emits is unusable. There were five such pairs, three of them
+predating phase 7. `tests/test_openapi_current.py` now fails on any mangled
+name, so the rule is enforced rather than remembered.
 
 Two things make it work that are worth knowing before starting a domain.
 
-**A `SELECT *` cannot be typed until it names its columns.** There are 24, in
-`core/store.py`, `tasks/filters.py`, `tasks/ingest.py`, `tasks/experiments.py`
-and `tasks/uploads.py`. Naming them is a good change on its own: a star select
-and the shape that reads it drift silently, which is the same defect one level
-down.
+**A `SELECT *` cannot be typed until it names its columns.** Was 24. **22 on
+2026-09-11**: six in `routers/admin.py`, four in `core/store.py`, three in
+`routers/mail/debug.py`, and the rest spread one or two at a time. Naming them
+is a good change on its own: a star select and the shape that reads it drift
+silently, which is the same defect one level down, and on a wide table it
+fetches a page of text to throw away.
 
 **Declaring a shape can move the wire, quietly.** A dict omits a key it has
 no value for; a model emits the key as null. `PATCH /user/jobs/{id}` returned
@@ -342,25 +385,16 @@ read the shape that module declares, and two do not inverse cleanly:
 `mail_classify` builds its two shapes in a function, and `application` reads
 its purpose from another module.
 
-**Unattended code that says nothing when it goes wrong.** Four task handlers
-log nothing at all: `experiments` (505 lines), `embeddings` (232),
-`batch_policy` (64), `uploads` (61). A handler runs with nobody watching, so
-silence there is different from silence in a router, where uvicorn's access
-log carries the request.
+~~**Unattended code that says nothing when it goes wrong.**~~ **Measured and
+dropped 2026-09-11**: the worker logs every task's start, outcome and failure,
+none of the four handlers swallows an exception, and three of the four write
+their outcome to the task row. See the logging section above.
 
-**Derivations that say nothing.** `api/mail/pipeline.py` (588 lines) derives
-an application's state from an event stream and logs nothing;
-`api/ai/__init__.py` (452) is the call path.
+~~**Seven logger names where two would do.**~~ **Closed 2026-09-11**: every
+module is `getLogger(__name__)`.
 
-**Seven logger names where two would do.** `jobtracker_worker` (24 modules)
-and `jobtracker_api` (11) are the convention; five are one-offs and
-`core/batch.py` uses `job_tracker`, spelled differently from all of them.
-Nothing is dropped, because telemetry attaches at the root; filtering by
-source is what does not work.
-
-**Tracebacks dropped on purpose or by accident, unknown which.** 18 sites use
-`logger.exception` and 6 use `logger.error`. The second keeps no traceback.
-Worth reading rather than rewriting in bulk: some are deliberate.
+~~**Tracebacks dropped on purpose or by accident.**~~ **Closed 2026-09-11**:
+read, three were accidental and are `logger.exception`, three are deliberate.
 
 **Test coverage, measured for the first time on 2026-09-11: 87%.** 11,800
 statements, 1,528 missed, across 1,656 tests. Better than "never measured"

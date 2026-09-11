@@ -29,7 +29,7 @@ from core.mail.importer import (
     parse_sent_at,
 )
 
-logger = logging.getLogger("jobtracker_api")
+logger = logging.getLogger(__name__)
 
 _API = "https://gmail.googleapis.com/gmail/v1/users/me"
 

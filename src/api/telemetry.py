@@ -38,7 +38,7 @@ from typing import Any
 
 from api import metrics
 
-logger = logging.getLogger("jobtracker_telemetry")
+logger = logging.getLogger(__name__)
 
 SERVICE = "service"
 _client: Any = None

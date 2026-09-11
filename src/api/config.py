@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue, PositiveInt, TypeA
 
 from api.apply.policy import ExtensionPolicy
 
-logger = logging.getLogger("jobtracker_api")
+logger = logging.getLogger(__name__)
 ALL_GROUPS = "*"
 
 

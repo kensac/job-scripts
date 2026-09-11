@@ -32,7 +32,7 @@ from tasks.runtime import (
     set_progress,
 )
 
-logger = logging.getLogger("jobtracker_worker")
+logger = logging.getLogger(__name__)
 
 
 # Postings are truncated before they reach the model. 20k characters covers all

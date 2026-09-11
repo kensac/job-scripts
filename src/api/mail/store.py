@@ -20,7 +20,7 @@ from api import db
 from core.mail.importer import ImportedMessage
 from core.mail.prefilter import looks_job_related
 
-logger = logging.getLogger("jobtracker_api")
+logger = logging.getLogger(__name__)
 
 # Rows per INSERT. Large enough that 38,685 messages is ~39 statements rather
 # than 38,685 round trips, small enough that one failed batch re-does little

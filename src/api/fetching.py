@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 
 from api import metrics
 
-logger = logging.getLogger("jobtracker_api")
+logger = logging.getLogger(__name__)
 
 SCRAPE_TIMEOUT_SECONDS = int(os.environ.get("JOBTRACKER_SCRAPE_TIMEOUT_SECONDS", "180"))
 

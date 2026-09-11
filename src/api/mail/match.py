@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from api import db
 from core.fetching.ats import canonicalize
 
-logger = logging.getLogger("jobtracker_worker")
+logger = logging.getLogger(__name__)
 
 # Tiers, most certain first. Stored on the row so the debug view can show
 # which one fired - a matcher nobody can audit is a matcher nobody can fix.

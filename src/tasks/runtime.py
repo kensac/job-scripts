@@ -37,7 +37,7 @@ from core.prompts import PROMPT_SAMPLE_SIZE, prompt_hash
 from core.routing import Choice, TaskShape, resolve
 from tasks.board import demote_closed, materialize_passing
 
-logger = logging.getLogger("jobtracker_worker")
+logger = logging.getLogger(__name__)
 
 
 MAX_CONCURRENCY = int(os.environ.get("JOBTRACKER_MAX_CONCURRENCY", "6"))

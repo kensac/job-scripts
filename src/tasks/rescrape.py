@@ -24,7 +24,7 @@ from typing import Any, LiteralString
 from api import db
 from core.store import CONTENT_LATERAL
 
-logger = logging.getLogger("jobtracker_worker")
+logger = logging.getLogger(__name__)
 
 # One literal statement per answer table, rather than a table name formatted
 # into one: the set of tables this may re-stamp and the set of statements it

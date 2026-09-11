@@ -18,7 +18,7 @@ from typing import Any
 from api import db
 from core.fetching import ats
 
-logger = logging.getLogger("jobtracker_worker")
+logger = logging.getLogger(__name__)
 
 # Ordered by how far through a process they are. A later stage never regresses
 # to an earlier one on the strength of an older email: an acknowledgement that

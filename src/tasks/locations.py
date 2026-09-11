@@ -14,7 +14,7 @@ from core.providers import StructuredOutput
 from core.routing import TaskShape
 from tasks.runtime import consume_result, has_batch_work, run_batched, set_progress
 
-logger = logging.getLogger("jobtracker_worker")
+logger = logging.getLogger(__name__)
 
 # Strings are short and the answer is a lookup the model already knows, so the
 # whole backlog (8,735 distinct strings on 2026-09-04) fits one cycle; after

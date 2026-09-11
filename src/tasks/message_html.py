@@ -25,7 +25,7 @@ from api import db
 from core.mail.importer import MAX_BODY_CHARS, MAX_HTML_CHARS, html_to_text
 from tasks.runtime import cancelled, set_progress
 
-logger = logging.getLogger("jobtracker_worker")
+logger = logging.getLogger(__name__)
 
 # Matches the import's own rule so a backfilled row is indistinguishable from a
 # freshly imported one. A body holds markup when it contains a closing tag;
