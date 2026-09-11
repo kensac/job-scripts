@@ -47,8 +47,10 @@ These are instructions, not history. Follow them.
 
 ## Repository map
 
-- `src/api/`: FastAPI application. Routers, task handlers, matching, pipeline.
-- `src/core/`: provider datasheets, pricing, routing, storage primitives.
+- `src/api/`: FastAPI application. Routers, the worker loop, matching, pipeline.
+- `src/tasks/`: the handlers the worker runs, and the runtime they run inside.
+- `src/core/`: provider datasheets, pricing, routing, task shapes, storage
+  primitives.
 - `alembic/`: migrations. See migrations.md before adding one.
 - `tests/`: three populations against a real database: hermetic, the
   generated corpus, and a synced copy of production. See testing.md.

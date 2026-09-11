@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+import dataclasses
 import os
 from contextlib import contextmanager
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from api import crypto, db
 from api.auth import AuthedUser
 from core import pricing
+
+if TYPE_CHECKING:
+    from api import ai
 
 
 @dataclass
@@ -233,9 +237,9 @@ def fleet_cycle_cost_usd() -> Decimal:
     and a ceiling that ignored overrides would be measuring a fleet that is not
     running.
     """
+    from api.task_config import configured_model
     from core.routing import NoEligibleModel, resolve
-    from tasks import SHAPES
-    from tasks.runtime import configured_model
+    from core.shapes import SHAPES
 
     total = Decimal(0)
     for purpose, shape in SHAPES.items():
@@ -492,3 +496,25 @@ def record_parse_failures(user_id: int, key_source: str, purpose: str, model: st
     except PaidParseError as exc:
         record_tokens(user_id, key_source, purpose, model, exc.usage)
         raise
+
+
+def load_config(user_id: int, ignore_budget: bool = False) -> tuple[Entitlement, ai.AIConfig]:
+    """The person's entitlement and model config for a task. With
+    ignore_budget the shared weekly cap is lifted for this task only (an
+    admin queued it that way): the spend is still recorded, the cap itself
+    does not move (Kanishk, 2026-09-08: raising it and putting it back for
+    one run was the wrong tool)."""
+    user = db.query_one("SELECT id, sub, email, name, groups FROM users WHERE id = %s", (user_id,))
+    if not user:
+        raise LookupError("unknown user")
+    authed = AuthedUser(
+        id=user["id"],
+        sub=user["sub"],
+        email=user["email"] or "",
+        name=user["name"] or "",
+        groups=user["groups"] or [],
+    )
+    ent = get_entitlement(authed)
+    if ignore_budget and ent.owner_key:
+        ent = dataclasses.replace(ent, weekly_token_budget=None)
+    return ent, resolve_ai_config(user_id, ent)

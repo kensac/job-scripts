@@ -24,160 +24,16 @@ from pydantic import BaseModel
 
 from api import db
 from api.ai.batch_results import progress_counts
-from core.providers.spec import StructuredOutput
-from core.routing import Evidence, TaskShape
+from core.shapes import BACKFILL_TASK, MAX_CLASSIFY_PER_CYCLE, ONGOING_TASK
 from tasks.runtime import consume_result, has_batch_work, run_batched, set_progress
 
 logger = logging.getLogger(__name__)
 
 
-# The one-time historical sweep and the ongoing trickle are priced differently
-# enough to be different models, and neither is the fleet default.
-#
-# gpt-5-nano is excluded on evidence rather than price: measured on
-# extraction-shaped work it FABRICATES, inventing 12 clearances across 55
-# postings and filling 0/"none" wherever the true answer is "unstated". This is
-# the same shape - a deadline that was never stated must not become a guessed
-# date, and silence must not become a fabricated rejection.
-#
-# Measured over the 38,685-message mailbox, batched: luna $10.44, mini $14.99.
-#
-# ONE model for both paths, on Kanishk's call, and the reason is consistency
-# rather than the $4.55. The backfill classified 67k messages on luna; an
-# ongoing feed on a different model reads the same mail by different standards,
-# so a rejection recognised in the archive might not be recognised next week -
-# and the difference would show up as a change in the funnel that nothing in
-# the funnel explains.
-#
-# The two constants stay separate because their ENV OVERRIDES are separate: the
-# per-task model config can move one path without the other, which is the point
-# of that feature. They simply default to the same model now.
-BACKFILL_MODEL = os.environ.get("JOBTRACKER_MAIL_BACKFILL_MODEL", "gpt-5.6-luna")
-ONGOING_MODEL = os.environ.get("JOBTRACKER_MAIL_ONGOING_MODEL", "gpt-5.6-luna")
 # A classification spec is the instructions plus a body capped at 20k chars,
 # so ~6k tokens against the same 1.8M-token wave budget comp.py sizes against:
 # ~300 specs per wave, times BATCH_WAVE_CONCURRENCY waves in flight.
 CLASSIFY_PER_CYCLE = int(os.environ.get("JOBTRACKER_MAIL_CLASSIFY_PER_CYCLE", "1200"))
-
-# A backfill may ask for more, because it is a ONE-TIME sweep over a mailbox
-# rather than an hourly trickle: at the ongoing cap, 34,000 archived messages
-# take about 28 hours of cycles to work through.
-#
-# The ceiling is derived from what a wave can actually carry rather than
-# picked: core.batch budgets BATCH_TOKEN_BUDGET tokens per wave and runs
-# BATCH_WAVE_CONCURRENCY waves at once, and a classification spec is ~1,500
-# tokens (measured on real mail, not estimated). That is ~1,200 specs per wave
-# and ~4,800 in flight, so asking for much beyond that only queues work the
-# provider will not start any sooner.
-MAX_CLASSIFY_PER_CYCLE = int(os.environ.get("JOBTRACKER_MAIL_CLASSIFY_MAX", "5000"))
-
-# Reasoning effort is PER MODEL, because these two do not accept the same
-# values. Probed against the live APIs, which name the sets in their 400s:
-#
-#   gpt-5-mini    accepts minimal, low, medium, high   REJECTS none
-#   gpt-5.6-luna  accepts none, low, medium, high,     REJECTS minimal
-#                         xhigh, max
-#
-# The intersection is only {low, medium, high}, so a single shared constant
-# would have to give up the cheapest setting on both. Each gets its cheapest
-# accepted value instead: classification is a labelling task that gains
-# nothing from reasoning, and a dry run measured ~40 output tokens per message
-# at luna/none against the ~200 assumed - most of why the corpus estimate fell
-# from $10.44 to $7.35.
-#
-# A shared constant is what shipped first, and it 400'd on every ongoing call
-# while backfill worked, because the value chosen suited only the model that
-# had been dry-run by hand.
-#
-# Which value each model accepts is NOT restated here. It is declared in
-# core/providers/, the model picks the first of these it accepts, and a second
-# copy keyed by model name would drift the moment a model is swapped by env
-# var - which both model constants above can be.
-_EFFORT_PREFERENCE = ("none", "minimal", "low")
-
-# Every model in the intersection above, so a model the registry has not been
-# taught still gets a value both generations accept rather than failing the
-# whole batch. Deliberately not the cheapest: guessing cheap at an unknown
-# model is how the 400 happened.
-FALLBACK_EFFORT = "low"
-
-
-def effort_for(model: str) -> str:
-    """The cheapest reasoning effort this model actually accepts.
-
-    Unknown models get the intersection value rather than a guess: a batch
-    submits whole and fails whole, so a rejected parameter costs the entire
-    run, not one call.
-
-    The choosing itself now lives in core.routing, which every task resolves
-    through; this keeps the name and the unknown-model floor that callers here
-    rely on, without a second copy of the preference walk.
-    """
-    return _classify_task(model, "effort_probe", "").resolved_effort() or FALLBACK_EFFORT
-
-
-# Enough for the schema's handful of short fields. The model does not reason
-# here, so a larger ceiling buys nothing and a smaller one truncates JSON
-# mid-string, which arrives as an unparsable line rather than an error.
-CLASSIFY_MAX_TOKENS = 400
-
-
-def _classify_task(model: str, purpose: str, label: str) -> TaskShape:
-    """One model per shape, never a list.
-
-    The choice above is an evidence judgment, not an optimisation: a router
-    minimising cost subject to declared capability would pick nano and reinstate
-    exactly the fabrication these two models were chosen to avoid. Resolution
-    still earns its place - it checks the key, the schema capability and the
-    price, and it is where the effort walk happens.
-    """
-    return TaskShape(
-        purpose=purpose,
-        label=label,
-        per_cycle=MAX_CLASSIFY_PER_CYCLE,
-        evidence=(
-            Evidence(
-                model="gpt-5-nano",
-                verdict="excluded",
-                finding=(
-                    "Invented a clearance level for 12 of 55 postings whose page "
-                    "never mentions clearance, and at minimal effort filled 0 and "
-                    "'none' wherever the honest answer was 'unstated' - which is "
-                    "the distinction this extraction exists to keep."
-                ),
-                sample_size=60,
-                measured_on=datetime.date(2026, 9, 2),
-            ),
-        ),
-        # The comment that used to live above BACKFILL_MODEL, promoted to data
-        # so it reaches a person overriding this from a screen. A code comment
-        # cannot warn the one reader who most needs the warning.
-        notes=(
-            "gpt-5-nano is excluded on evidence rather than price: measured on "
-            "extraction-shaped work it fabricates, inventing 12 clearances "
-            "across 55 postings and filling 0/'none' wherever the true answer "
-            "is 'unstated'. The same shape applies here - a deadline that was "
-            "never stated must not become a guessed date, and silence must not "
-            "become a fabricated rejection. Backfill and ongoing are priced "
-            "differently enough to be different models: over the 38,685-message "
-            "mailbox, batched, luna is $10.44 and mini $14.99, while ongoing at "
-            "~80/day is $11.31/yr on mini where per-message quality matters more."
-        ),
-        structured=StructuredOutput.JSON_SCHEMA,
-        batched=True,
-        max_output_tokens=CLASSIFY_MAX_TOKENS,
-        # Ranking only, and only ever against itself here, since there is one
-        # candidate. The real spec size is ~6k tokens.
-        est_prompt_tokens=6000,
-        effort_preference=_EFFORT_PREFERENCE,
-        candidates=(model,),
-    )
-
-
-BACKFILL_TASK = _classify_task(
-    BACKFILL_MODEL, "mail_classify_backfill", "Mail classification (backfill)"
-)
-ONGOING_TASK = _classify_task(ONGOING_MODEL, "mail_classify", "Mail classification (ongoing)")
 
 
 _INSTRUCTIONS = """You classify a single email from a job seeker's mailbox.

@@ -20,22 +20,19 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from pydantic import BaseModel
-
 from api import ai, budget, db, hosts
 from api.apply import writes as application_writes
+from api.apply.drafting import Draft, instructions, question_input, resume_text, writing_style
 from api.board import visibility
-from core.answers import DEFAULT_STYLE
+from api.budget import load_config
 from core.fetching import forms
-from core.providers.spec import StructuredOutput
-from core.routing import TaskShape
+from core.shapes import APPLICATION_TASK
 from core.store import get_content
 from tasks import batch_policy
 from tasks.runtime import (
     Deferred,
     consume_result,
     has_batch_work,
-    load_config,
     run_batched,
     set_progress,
 )
@@ -44,96 +41,6 @@ logger = logging.getLogger(__name__)
 
 PURPOSE = application_writes.PURPOSE
 IN_FLIGHT = ("pending", "running", "awaiting_batch", "waiting")
-
-# What a stranger's answer sounds like when nobody has said otherwise. A
-# person overrides the whole thing from settings; this is not merged with
-# theirs, it is replaced by it.
-FAULT_STYLE = (
-    "Concise but not abrupt: the shortest version that still has enough context to feel "
-    "thoughtful. Natural and conversational, like something a person would actually type, "
-    "not polished corporate language. Professional without being formal. Simple wording over "
-    "jargon or buzzwords. Specific rather than generic: name the actual project, situation or "
-    "reason instead of filler. Confident but understated: show competence through what was "
-    "done and how, never by declaring it. Low fluff: no excessive gratitude, pleasantries or "
-    "repetition."
-)
-
-APPLICATION_TASK = TaskShape(
-    purpose=PURPOSE,
-    label="Application answers",
-    per_cycle=0,
-    notes=(
-        "Prose a recruiter reads, written from a resume the model must not embroider. "
-        "Measured 2026-09-06 over four live questions: gpt-5.6-luna without reasoning picked "
-        "the resume facts that fit the role and stayed inside them; gpt-5-nano padded with "
-        "generic openers and loosened one claim. Both cost under a tenth of a cent an answer, "
-        "so the better writer is the choice."
-    ),
-    structured=StructuredOutput.JSON_SCHEMA,
-    batched=True,
-    max_output_tokens=1200,
-    est_prompt_tokens=3500,
-    effort_preference=("none", "minimal", "low"),
-    candidates=("gpt-5.6-luna",),
-)
-
-
-class Draft(BaseModel):
-    answer: str
-
-
-# The rules the model drafts under. A change here is a roll; a change on
-# the admin page (app_config application_draft_instructions) is a config
-# edit and takes effect on the next draft, so wording is tuned there and
-# this text is what an empty row means.
-DEFAULT_INSTRUCTIONS = (
-    "You draft the applicant's answer to one question on a job application form, in the "
-    "first person, as the applicant. Use only facts that appear in the resume; never invent "
-    "employers, dates, projects, numbers or skills. Tie what the resume shows to what the "
-    "posting asks for. Match the length to the question: a factual question gets a sentence "
-    "or two, a why-us or tell-us-more question gets 100 to 170 words. Plain prose, no "
-    "headings, no bullet points, no em dashes. Do not flatter the company beyond what the "
-    "posting itself says it does. Write only about what the resume shows. Never write a "
-    "sentence saying the applicant has not done, has not worked with, does not have, or "
-    'lacks something, in any phrasing: not "I have not worked with X", not "my resume '
-    'does not include X", not "while I lack X", not "I have not yet". Never disclaim '
-    "and never name a gap. When the question asks about something the resume does not show, "
-    "answer from the closest experience it does show and say nothing about the rest. When "
-    "the question asks directly and only about something the resume does not show, the "
-    "answer is an empty string: the applicant writes that one themselves."
-)
-
-
-def instructions(style: str | None) -> str:
-    rules = (db.get_config("application_draft_instructions") or "").strip() or DEFAULT_INSTRUCTIONS
-    return rules + "\n\nWriting style, in the applicant's own words:\n" + (style or DEFAULT_STYLE)
-
-
-def question_input(
-    question: str,
-    company: str,
-    title: str,
-    posting: str,
-    resume: str,
-    *,
-    draft: str | None = None,
-    turns: list[dict[str, Any]] | None = None,
-    instruction: str | None = None,
-) -> str:
-    parts = [
-        f"Question on the form: {question}",
-        f"Company: {company}\nRole: {title}",
-        f"Posting:\n{posting[:6000] or '(no posting text captured)'}",
-        f"Resume:\n{resume[:12000]}",
-    ]
-    if draft:
-        parts.append(f"Current draft:\n{draft}")
-    for t in turns or []:
-        if t.get("role") == "user":
-            parts.append(f"Earlier request from the applicant: {t.get('text', '')}")
-    if instruction:
-        parts.append(f"Revise the current draft as the applicant asks: {instruction}")
-    return "\n\n".join(parts)
 
 
 def store_form(url: str, questions: list[forms.Question] | None, error: str | None = None) -> None:
@@ -226,24 +133,6 @@ def ensure_answer_rows(
                 """,
                 (user_id, job_id, q["key"], q["label"], bool(q.get("required")), owned_revision),
             )
-
-
-def resume_text(user_id: int, resume_id: int | None) -> str | None:
-    if resume_id is not None:
-        row = db.query_one(
-            "SELECT text FROM user_resumes WHERE user_id = %s AND id = %s", (user_id, resume_id)
-        )
-    else:
-        row = db.query_one(
-            "SELECT text FROM user_resumes WHERE user_id = %s ORDER BY updated_at DESC LIMIT 1",
-            (user_id,),
-        )
-    return row["text"] if row else None
-
-
-def writing_style(user_id: int) -> str | None:
-    row = db.query_one("SELECT writing_style FROM user_settings WHERE user_id = %s", (user_id,))
-    return (row or {}).get("writing_style") or None
 
 
 def auto_draft(user_id: int) -> bool:

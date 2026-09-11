@@ -3,6 +3,7 @@ import pytest
 from api import db
 from core.batch import BatchResult
 from tasks import filters, runtime
+from tasks.runtime import batching
 
 
 @pytest.mark.asyncio
@@ -145,7 +146,7 @@ def test_request_snapshot_retries_and_collected_input_use_original_bytes(f):
 
 @pytest.mark.asyncio
 async def test_empty_terminal_collection_survives_crash_without_resubmitting(f, monkeypatch):
-    from tasks.application import APPLICATION_TASK
+    from core.shapes import APPLICATION_TASK
 
     tid = f.make_task("application_draft", {"batch_ids": ["failed-batch"]}, status="running")
 
@@ -159,7 +160,7 @@ async def test_empty_terminal_collection_survives_crash_without_resubmitting(f, 
     monkeypatch.setattr("core.batch.collect_finished_batches", empty_terminal)
     assert await runtime.collect_pending(tid, None) == []
     assert runtime.pending_batch_ids(tid) == []
-    monkeypatch.setattr(runtime, "resolve", no_new_submission)
+    monkeypatch.setattr(batching, "resolve", no_new_submission)
     assert runtime.has_batch_work(tid)
     results, _ = await runtime.run_batched(tid, APPLICATION_TASK, [])
     assert results == []

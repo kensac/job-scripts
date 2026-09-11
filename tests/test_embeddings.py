@@ -189,7 +189,7 @@ class TestSimilarEndpoint:
 
 
 class TestUnchangedRescrapes:
-    """The re-stamp shared with the requirements sweep (api/tasks/rescrape.py).
+    """The re-stamp shared with the requirements sweep (tasks/rescrape.py).
 
     This behaviour was spelled twice and only the requirements copy was
     tested, so the embeddings table had it by copy and by nobody's assertion.

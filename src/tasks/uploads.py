@@ -8,9 +8,9 @@ from pydantic import BaseModel
 
 from api import ai, budget, db
 from api.ai import verdicts
+from api.budget import load_config
 from core.answers import JobExtract
 from core.store import get_content
-from tasks.runtime import load_config
 
 
 class UploadedJob(BaseModel):

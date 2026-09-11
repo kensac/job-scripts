@@ -180,24 +180,26 @@ class TestNoSilentSubstitution:
         """The property that makes this PR a no-op at runtime. A second
         candidate is not free - see the cache test below - so widening one is a
         decision someone should have to make deliberately."""
-        from tasks import comp, mail_classify, verify
+        from core import shapes
+        from tasks import comp, verify
 
         for shape in (
             comp.COMP_TASK,
             verify.VERIFY_TASK,
-            mail_classify.BACKFILL_TASK,
-            mail_classify.ONGOING_TASK,
+            shapes.BACKFILL_TASK,
+            shapes.ONGOING_TASK,
         ):
             assert len(shape.candidates) == 1, shape.candidates
 
     def test_the_wired_models_are_the_ones_that_were_hardcoded(self):
         """Byte-identical selection to before the router existed."""
-        from tasks import comp, mail_classify, verify
+        from core import shapes
+        from tasks import comp, verify
 
         assert resolve(comp.COMP_TASK).model == "gpt-5-nano"
         assert resolve(verify.VERIFY_TASK).model == "gpt-5-nano"
-        assert resolve(mail_classify.BACKFILL_TASK).model == mail_classify.BACKFILL_MODEL
-        assert resolve(mail_classify.ONGOING_TASK).model == mail_classify.ONGOING_MODEL
+        assert resolve(shapes.BACKFILL_TASK).model == shapes.BACKFILL_MODEL
+        assert resolve(shapes.ONGOING_TASK).model == shapes.ONGOING_MODEL
 
 
 class TestKeyAvailability:
@@ -303,8 +305,12 @@ def test_every_batched_call_site_goes_through_the_standard_caller():
     # cap, so run_batched has nothing to resolve for it. Its spend still lands
     # in the ledger through the same batch_event_hook under purpose
     # "embedding" (2026-09-09).
-    KNOWN = {"filters.py", "verify.py", "runtime.py", "embeddings.py"}
-    root = pathlib.Path(__file__).resolve().parent.parent / "src" / "api" / "tasks"
+    #
+    # The runtime is where submit_or_collect lives, so it is not in the sweep
+    # below: the glob reads the handler modules and the runtime is a package.
+    KNOWN = {"filters.py", "verify.py", "embeddings.py"}
+    root = pathlib.Path(__file__).resolve().parent.parent / "src" / "tasks"
+    assert root.is_dir(), root
     offenders = [
         path.name
         for path in sorted(root.glob("*.py"))
@@ -340,7 +346,7 @@ def test_the_standard_caller_cannot_run_without_a_purpose():
 def test_every_registered_task_is_keyed_by_its_own_purpose():
     """One registry, so a task cannot be configurable under a name nothing
     reports, or reported under a name nothing configures."""
-    from tasks import SHAPES
+    from core.shapes import SHAPES
 
     for key, shape in SHAPES.items():
         assert shape.purpose == key

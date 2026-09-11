@@ -64,7 +64,7 @@ real only relocates the problem.
 | 3 | Catalog observations are facts | A re-listing is an appended row, not a mutated column |
 | 4 | ~~Derivations are content addressed~~ | **Dropped 2026-09-10.** Measured; see below |
 | 5 | Files move to the shape | `tasks` is a sibling of `api` and `core`. `apply` is a package. The rest is judgement about churn |
-| 6 | The long files are split | No module does four jobs. `resolve.py` 1,339 lines, `health.py` 1,159, `tasks/runtime.py` 775. `orm.py`, `mail.py` and `admin.py` are done |
+| 6 | The long files are split | No module does four jobs. `resolve.py` 1,339 lines, `health.py` 1,159. `orm.py`, `mail.py`, `admin.py` and `tasks/runtime.py` are done |
 | 7 | Every operation declares what it returns | `openapi.json` generates the frontend's types. 173 of 190 operations declare nothing today |
 
 **The API contract was the invariant, and is now a price.** `openapi.json` is
@@ -193,32 +193,74 @@ part of the API, they are work the worker runs using it.
 That is the first argument for moving a file in this plan that is about
 something other than where a reader looks for it, and the move is done.
 
-Turning the contract on then named six imports, and five are one smell wearing
-five hats: every one reaches past a handler for a SHAPE or a CONSTANT, never
+Turning the contract on then named six imports, and five were one smell wearing
+five hats: every one reached past a handler for a SHAPE or a CONSTANT, never
 for behaviour. `SHAPES` twice, a drafting default, a verdict model, an event
-kinds list. So the contract is written down in `pyproject.toml` and not
-enabled, because five exceptions is a contract that records debt rather than
-preventing it.
+kinds list.
 
-The slice that lands it: move the shapes to where both layers can read them.
-`tasks/models.py` is already a shapes module and is under `tasks` by habit.
-`SHAPES` is the awkward one, assembled BY importing each task module to read
-the shape it declares, so those declarations invert and live beside
-`TaskShape` in `core/routing.py`.
+**Taken 2026-09-11, and the contract is down to four ignored imports.** What
+each task declares is `core/shapes.py`: the purpose, the sanctioned models, the
+output cap, the per-cycle size and the measured evidence, with the constants
+each shape reads moved alongside it and imported back by the handler. So
+`api.budget` prices a fleet cycle and `api.routers.task_models` configures one
+without importing the code that runs them. `configured_model` is
+`api/task_config.py` and `load_config` is `api/budget.py`; both read the
+database on behalf of the services from inside the task runtime. What a draft
+is written from is `api/apply/drafting.py`, so the two routers that draft one
+live no longer borrow it from the sweep that batches them.
+
+Two things this section said were wrong when the code was opened, and both were
+load-bearing for the claim that `SHAPES` could not move.
+
+**A registry is not an option, and that part was right.** `SHAPES` is built by
+reading each declaration, and a registry the handlers wrote into on import
+would be empty for any caller that had not imported `tasks` - which is exactly
+the caller this move exists for. The failure would be a fleet cost silently
+computed over no tasks.
+
+**"mail_classify builds its two shapes in a function" is not an obstacle.** A
+factory moves down as well as a literal does; `_classify_task` is a pure
+`TaskShape` constructor and it now lives in `core/shapes.py` with the two
+shapes it builds. **"application reads its purpose from another module" was
+backwards.** The purpose was a bare string in `api/apply/writes.py`, which now
+reads it off the shape instead of spelling it a second time.
+
+The shapes went to `core/shapes.py` rather than beside `TaskShape` in
+`core/routing.py`, which is what this document asked for. `core/routing.py` is
+the resolver and is already 494 lines; adding 420 lines of declarations to it
+would have made it do two jobs in the same phase whose point is that no module
+does four.
 
 ## Phases 6 and 7
 
 Added on Kanishk's instruction, to be taken after the move lands.
 
-**6, the long files.** `tasks/runtime.py` is the clearest case rather than the
-biggest: 796 lines holding queue primitives, batch orchestration, config
-constants and model routing, imported by 24 modules. Splitting it is what
-would let the layering be stated as layers, because three of the four imports
-that make `api` and `api.tasks` circular are reaching past the handlers for a
-queue primitive. `admin.py` and `mail.py` were bigger and simpler: long
-because nothing ever split them, not because anything was tangled. Both are
-taken. `mail.py` is `routers/mail/`, four surfaces and the helpers two of them
-share; `admin.py` is `routers/admin/`, ten subjects and one shared module.
+**6, the long files.** `tasks/runtime.py` was the clearest case rather than the
+biggest: 775 lines holding queue primitives, batch orchestration, config
+constants and model routing, imported by 24 modules. **Split 2026-09-11.** It
+is now `tasks/runtime/`, three modules by job - `limits` is how much runs at
+once, `lifecycle` is the claim and the progress and the end of a task, and
+`batching` is the provider batch. The fourth job left the package entirely,
+because it was never the runtime's: `configured_model` and `load_config` read
+the database on behalf of the services and are now `api/task_config.py` and
+`api/budget.py`.
+
+The package re-exports the three, because that is what the importers want: a
+handler takes a progress call, a chunk size and a batch submission in one
+import and does not care which of the three it came from. Nothing outside the
+package changed its import line except for the four names that moved out of it.
+
+One expectation this document had did not survive. Splitting the runtime does
+NOT let the layering be stated as layers. `api.worker` imports `tasks` for
+HANDLERS whatever else it does, so it needs an exception regardless, and the
+one it takes for the runtime is the same fact written twice rather than a
+second problem. Only a worker that stopped being an `api` module would drop
+those two lines, and that would not change a single import.
+
+`admin.py` and `mail.py` were bigger and simpler: long because nothing ever
+split them, not because anything was tangled. Both are taken. `mail.py` is
+`routers/mail/`, four surfaces and the helpers two of them share; `admin.py`
+is `routers/admin/`, ten subjects and one shared module.
 
 **7, the schema is the contract.** Measured 2026-09-10: of 190 operations,
 **173 return an undeclared object** and 11 declare a shape. So `openapi.json`
@@ -375,16 +417,29 @@ in the file raises `PydanticUserError: ... is not fully defined`, at import,
 with a message that does not say the cause. Found the hard way on
 `routers/apply.py`.
 
-**The services still reach into the handlers.** Nine ignored imports in three
-causes. The largest is four routers calling four helpers that live inside a
-handler because that is where they were first needed: `resume_text`,
-`writing_style`, `instructions`, `locations.store`. Moving those four is what
-empties most of the list.
+**The services still reach into the handlers, in four imports.** Nine on
+2026-09-11, and the five that were a shape or a constant are closed. The
+contract in `pyproject.toml` is enforced in CI and carries only these, each
+with what would move it.
 
-**SHAPES cannot move down.** It is assembled by importing each task module to
-read the shape that module declares, and two do not inverse cleanly:
-`mail_classify` builds its two shapes in a function, and `application` reads
-its purpose from another module.
+`api.worker -> tasks` and `api.worker -> tasks.runtime` are correct and are not
+debt. The worker IS the task runner: it loads HANDLERS to dispatch them and
+reads the runtime for the same reason. Two lines for one fact, and the fact
+goes away only if the worker stops being an `api` module. Nothing in the code
+would change if it did, so it has not been done for a line in a config file.
+
+`api.routers.admin.catalog -> tasks.locations` and
+`api.routers.experiments -> tasks.experiments` are behaviour, and they are the
+design error rather than a missing home. the catalog calls `locations.store`;
+experiments calls `steps`, `arm_ok`, `arm_name` and `summarise`. What moves
+them is moving the functions, not a constant, and experiments is the bigger
+half: `tasks/experiments.py` is 505 lines of which the handler is about 40 and
+the rest is the experiment domain the router actually wants. That is a phase 6
+split as much as a contract fix, and it should be taken as one.
+
+The four drafting helpers this list used to name are gone.
+`api/apply/drafting.py` holds `resume_text`, `writing_style`, `instructions`,
+`question_input` and the `Draft` shape, and both routers read them there.
 
 ~~**Unattended code that says nothing when it goes wrong.**~~ **Measured and
 dropped 2026-09-11**: the worker logs every task's start, outcome and failure,
@@ -465,6 +520,12 @@ or alters an operation, the spec parses equal document for document, and the
 one literal-before-parameter ordering this surface depends on,
 `/queries/options` before `/queries/{query_id}`, is preserved inside the
 module that holds both.
+
+`tasks/runtime.py` is the middle shape: its four jobs were named in the file
+before anyone split it, so the reading was already done, but two of the four
+turned out not to belong to the runtime at all. The lesson worth carrying to
+the routers is that a long module's last job is often somebody else's, and the
+split is the moment that shows.
 
 **`user_jobs` answers two questions.** What a person keeps, and what the
 sweeps carry. Phase 2b, deferred: moving the sweeps' scope changes what gets

@@ -373,7 +373,6 @@ def test_an_admin_queues_a_run_past_the_cap_for_one_run_only(
     ignore_budget goes past it for that run alone, the spend still recorded,
     and the cap never moves. The person's own endpoints cannot set it."""
     from api import budget, db
-    from tasks import runtime
 
     flt = client.post(
         "/v1/user/filters",
@@ -406,8 +405,8 @@ def test_an_admin_queues_a_run_past_the_cap_for_one_run_only(
     )
     monkeypatch.setattr(budget, "get_entitlement", lambda authed: spent)
     monkeypatch.setattr(budget, "resolve_ai_config", lambda user_id, ent: ("cfg", ent.key_source))
-    assert runtime.load_config(uid)[0].key_source is None
-    lifted, _ = runtime.load_config(uid, ignore_budget=True)
+    assert budget.load_config(uid)[0].key_source is None
+    lifted, _ = budget.load_config(uid, ignore_budget=True)
     assert lifted.key_source == "owner" and lifted.weekly_token_budget is None
     assert spent.weekly_token_budget == 100
 

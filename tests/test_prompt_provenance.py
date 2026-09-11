@@ -15,6 +15,7 @@ from api import db
 from core.batch import BatchResult
 from core.prompts import PROMPT_SAMPLE_SIZE, prompt_hash
 from tasks import runtime
+from tasks.runtime import batching
 
 
 def _results(n: int, prefix: str = "u"):
@@ -37,7 +38,7 @@ class TestPromptIdentity:
         text per row is 75 MB; storing it per distinct text is 32 KB, which is
         what makes keeping the text affordable at all."""
         for _ in range(5):
-            runtime._record_prompt("comp", "Extract the compensation.")
+            batching._record_prompt("comp", "Extract the compensation.")
         rows = _prompts()
         assert len(rows) == 1
         assert rows[0]["batches"] == 5
@@ -45,8 +46,8 @@ class TestPromptIdentity:
 
     def test_a_changed_prompt_is_a_new_row_not_an_overwrite(self):
         """The whole question is "what changed", which needs both texts."""
-        runtime._record_prompt("comp", "Extract the compensation.")
-        runtime._record_prompt("comp", "Extract the compensation, in USD.")
+        batching._record_prompt("comp", "Extract the compensation.")
+        batching._record_prompt("comp", "Extract the compensation, in USD.")
         rows = _prompts()
         assert len(rows) == 2
         assert {r["instructions"] for r in rows} == {
@@ -61,9 +62,9 @@ class TestPromptIdentity:
         assert prompt_hash("a b") != prompt_hash("a  b")
 
     def test_first_seen_is_kept_and_last_seen_moves(self):
-        runtime._record_prompt("comp", "P")
+        batching._record_prompt("comp", "P")
         first = _prompts()[0]
-        runtime._record_prompt("comp", "P")
+        batching._record_prompt("comp", "P")
         again = _prompts()[0]
         assert again["first_seen_at"] == first["first_seen_at"]
         assert again["last_seen_at"] >= first["last_seen_at"]
@@ -75,61 +76,61 @@ class TestPromptIdentity:
         def boom(*a, **k):
             raise RuntimeError("database is having a moment")
 
-        monkeypatch.setattr(runtime.db, "query_one", boom)
-        assert runtime._record_prompt("comp", "P") is None
+        monkeypatch.setattr(db, "query_one", boom)
+        assert batching._record_prompt("comp", "P") is None
 
 
 class TestSamples:
     def test_outputs_are_sampled_against_the_prompt(self):
-        pid = runtime._record_prompt("comp", "P")
+        pid = batching._record_prompt("comp", "P")
         assert pid is not None
-        runtime._record_prompt_samples(pid, _results(3))
+        batching._record_prompt_samples(pid, _results(3))
         rows = _samples(pid)
         assert len(rows) == 3
         assert all(r["output"] == '{"ok": true}' for r in rows)
 
     def test_the_cap_is_per_prompt_version_not_per_sweep(self):
         """A prompt running hourly for a year holds 100 rows, not 8,760."""
-        pid = runtime._record_prompt("comp", "P")
+        pid = batching._record_prompt("comp", "P")
         assert pid is not None
         for cycle in range(3):
-            runtime._record_prompt_samples(pid, _results(60, prefix=f"c{cycle}u"))
+            batching._record_prompt_samples(pid, _results(60, prefix=f"c{cycle}u"))
         assert len(_samples(pid)) == PROMPT_SAMPLE_SIZE
 
     def test_a_new_prompt_version_gets_its_own_sample_budget(self):
         """Otherwise the first prompt's samples would starve every later one,
         and the comparison the samples exist for needs both sides."""
-        old = runtime._record_prompt("comp", "P1")
-        new = runtime._record_prompt("comp", "P2")
+        old = batching._record_prompt("comp", "P1")
+        new = batching._record_prompt("comp", "P2")
         assert old is not None and new is not None
-        runtime._record_prompt_samples(old, _results(PROMPT_SAMPLE_SIZE + 20))
-        runtime._record_prompt_samples(new, _results(5))
+        batching._record_prompt_samples(old, _results(PROMPT_SAMPLE_SIZE + 20))
+        batching._record_prompt_samples(new, _results(5))
         assert len(_samples(old)) == PROMPT_SAMPLE_SIZE
         assert len(_samples(new)) == 5
 
     def test_errors_are_sampled_too(self):
         """A prompt edit that starts producing unparseable JSON is exactly the
         change worth seeing, and it leaves no output behind."""
-        pid = runtime._record_prompt("comp", "P")
+        pid = batching._record_prompt("comp", "P")
         assert pid is not None
-        runtime._record_prompt_samples(pid, [BatchResult("u1", error="no output text")])
+        batching._record_prompt_samples(pid, [BatchResult("u1", error="no output text")])
         rows = _samples(pid)
         assert len(rows) == 1
         assert rows[0]["output"] is None
         assert rows[0]["error"] == "no output text"
 
     def test_no_prompt_means_no_samples_rather_than_orphans(self):
-        runtime._record_prompt_samples(None, _results(3))
+        batching._record_prompt_samples(None, _results(3))
         assert db.query("SELECT 1 FROM ai_prompt_samples") == []
 
     def test_sampling_never_takes_down_a_sweep(self, monkeypatch):
-        pid = runtime._record_prompt("comp", "P")
+        pid = batching._record_prompt("comp", "P")
 
         def boom(*a, **k):
             raise RuntimeError("database is having a moment")
 
-        monkeypatch.setattr(runtime.db, "query_one", boom)
-        runtime._record_prompt_samples(pid, _results(3))
+        monkeypatch.setattr(db, "query_one", boom)
+        batching._record_prompt_samples(pid, _results(3))
 
 
 class TestNoFork:
@@ -156,8 +157,8 @@ class TestNoFork:
         recorded under one prompt is still there after another is recorded."""
         _, url = f.make_ready_job(content="a long job description " * 20)
         f.make_requirements(url, skills_required=["Python"])
-        runtime._record_prompt("requirements", "V1")
-        runtime._record_prompt("requirements", "V2")
+        batching._record_prompt("requirements", "V1")
+        batching._record_prompt("requirements", "V2")
         assert db.query_one("SELECT COUNT(*) AS n FROM job_requirements")["n"] == 1
         assert db.query_one("SELECT COUNT(*) AS n FROM job_skills WHERE url = %s", (url,))["n"] == 1
 
@@ -177,7 +178,7 @@ class TestSeam:
         assert source.count("_record_prompt_samples(") == 1
 
     def test_the_batch_row_carries_the_prompt(self):
-        pid = runtime._record_prompt("comp", "P")
+        pid = batching._record_prompt("comp", "P")
         hook = runtime.batch_event_hook(1, "comp", "gpt-5-nano", prompt_id=pid)
         hook("batch_x", "submitted", {"requests": 3, "completed": 0, "failed": 0})
         row = db.query_one("SELECT prompt_id FROM ai_batches WHERE provider_batch_id = 'batch_x'")

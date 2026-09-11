@@ -5,9 +5,12 @@ import logging
 
 from api import budget, db
 from api.ai import batch_results
+from core.shapes import APPLICATION_TASK
 
 logger = logging.getLogger(__name__)
-PURPOSE = "application"
+# The ledgers group by this and the shape resolves on it, so it is read off the
+# declaration rather than spelled twice.
+PURPOSE = APPLICATION_TASK.purpose
 
 
 def reserve_task(task_id: int, user_id: int, rows: list[dict] | None = None) -> dict[str, dict]:

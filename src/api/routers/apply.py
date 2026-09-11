@@ -22,13 +22,13 @@ from api import (
     telemetry,
 )
 from api.ai import access as ai_access
+from api.apply import drafting as drafts
 from api.apply import policy as extension_policy
 from api.apply import recipes as extension_recipes
 from api.auth import AuthedUser, require_user
 from api.problem import refuse
 from api.routers.jobs import _write_board_row
 from core.fetching.forms import posting_urls
-from tasks import application as drafts
 
 router = APIRouter()
 

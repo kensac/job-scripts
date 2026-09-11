@@ -11,7 +11,7 @@ from decimal import Decimal
 import pytest
 
 from api import budget, db
-from tasks import SHAPES
+from core.shapes import SHAPES
 
 
 def _put(client, headers, purpose, **body):

@@ -62,7 +62,7 @@ def test_looks_blocked_long_real_posting_with_cloudflare_word():
 
 
 # ---------------------------------------------------------------------------
-# api.tasks_runtime.AdaptiveLimiter
+# tasks.runtime.limits.AdaptiveLimiter
 # ---------------------------------------------------------------------------
 
 
@@ -273,7 +273,7 @@ def test_requirements_declares_a_shape_the_model_can_actually_serve():
     from core import providers
     from core.providers import StructuredOutput
     from core.routing import resolve
-    from tasks.requirements import REQUIREMENTS_MODEL, REQUIREMENTS_TASK
+    from core.shapes import REQUIREMENTS_MODEL, REQUIREMENTS_TASK
 
     assert REQUIREMENTS_TASK.candidates == (REQUIREMENTS_MODEL,)
     assert REQUIREMENTS_TASK.structured is StructuredOutput.JSON_SCHEMA
@@ -314,8 +314,7 @@ def test_no_fleet_task_defaults_to_a_model_that_is_dropping_requests():
     failing model works fine most of the time, which is exactly why this needs
     to be a fact about the configuration."""
     from api.routers.filters import IMPROVE_MODEL
-    from tasks.mail_classify import BACKFILL_MODEL, ONGOING_MODEL
-    from tasks.requirements import REQUIREMENTS_MODEL
+    from core.shapes import BACKFILL_MODEL, ONGOING_MODEL, REQUIREMENTS_MODEL
 
     for name, model in (
         ("requirements", REQUIREMENTS_MODEL),
@@ -333,8 +332,7 @@ def test_swapping_the_mail_or_requirements_model_carries_its_effort():
     ongoing mail path while the backfill kept working."""
     from core import providers
     from core.routing import resolve
-    from tasks.mail_classify import BACKFILL_TASK, ONGOING_TASK
-    from tasks.requirements import REQUIREMENTS_TASK
+    from core.shapes import BACKFILL_TASK, ONGOING_TASK, REQUIREMENTS_TASK
 
     for shape in (REQUIREMENTS_TASK, BACKFILL_TASK, ONGOING_TASK):
         chosen = resolve(shape)

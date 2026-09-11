@@ -163,7 +163,7 @@ class TestTheCeilingDoesNotStrandPaidWork:
         def refuse(projected_usd=None):
             raise budget.FleetBudgetExceeded("over")
 
-        monkeypatch.setattr(runtime.budget, "check_fleet_budget", refuse)
+        monkeypatch.setattr(budget, "check_fleet_budget", refuse)
 
         async def fake_collect(ids, hook):
             return []
@@ -183,6 +183,6 @@ class TestTheCeilingDoesNotStrandPaidWork:
         def refuse(projected_usd=None):
             raise budget.FleetBudgetExceeded("over")
 
-        monkeypatch.setattr(runtime.budget, "check_fleet_budget", refuse)
+        monkeypatch.setattr(budget, "check_fleet_budget", refuse)
         with pytest.raises(budget.FleetBudgetExceeded):
             await runtime.run_batched(tid, mail_classify.ONGOING_TASK, [])
