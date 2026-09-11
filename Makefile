@@ -37,6 +37,9 @@ test:           ## run the test suite
 	node --test tests/extension/*.test.cjs
 	pytest -q tests
 
+test-par:       ## run the python suite across cores (one database per worker)
+	pytest -q -n auto tests
+
 schema:         ## regenerate openapi.json (commit it)
 	python -m api.export_schema > openapi.json
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import os
 import shutil
@@ -8,11 +9,12 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 
 import psycopg
 import pytest
 from cryptography.fernet import Fernet
+from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
@@ -102,11 +104,53 @@ def _assert_disposable(url: str) -> str:
     return url
 
 
-os.environ["DATABASE_URL"] = (
-    _assert_disposable(os.environ["TEST_DATABASE_URL"])
-    if os.environ.get("TEST_DATABASE_URL")
-    else _start_scratch_postgres()
-)
+def _worker_database(dsn: str, worker: str) -> str:
+    """One database per xdist worker, created here on demand.
+
+    The advisory lock below is what keeps two runs from truncating each
+    other's rows, and under `-n` it would simply refuse every worker after
+    the first. So each worker gets its own database rather than the lock
+    being loosened: the property it protects is the one parallelism needs
+    most. Migrating an empty database costs about 1.3 s, which is less than
+    the resets a single worker saves in its first few tests.
+
+    The name is derived, not chosen, so it still satisfies the disposable
+    rule that anything destructive checks: jobtracker_test -> jobtracker_gw0_test.
+    """
+    from core.disposable_db import require_disposable_name
+
+    base = str(conninfo_to_dict(dsn).get("dbname") or "")
+    for suffix in ("_test", "_ci"):
+        if base.endswith(suffix):
+            name = f"{base[: -len(suffix)]}_{worker}{suffix}"
+            break
+    else:
+        name = f"{base}_{worker}_test"
+    require_disposable_name(name)
+    # CREATE DATABASE cannot run inside a transaction, and two workers reach
+    # this at the same moment on the first parallel run, so the race is
+    # expected rather than guarded against with a lock.
+    with psycopg.connect(dsn, autocommit=True) as conn:
+        if not conn.execute("SELECT 1 FROM pg_database WHERE datname = %s", (name,)).fetchone():
+            with contextlib.suppress(psycopg.errors.DuplicateDatabase):
+                conn.execute(f'CREATE DATABASE "{name}"')
+    # As a URL when it arrived as one: db.py hands this string to SQLAlchemy
+    # for the migrations, and SQLAlchemy cannot parse libpq's keyword form.
+    parsed = urlparse(dsn)
+    if parsed.scheme:
+        return urlunparse(parsed._replace(path=f"/{name}"))
+    return make_conninfo(dsn, dbname=name)
+
+
+# gw0, gw1 ... under xdist; unset in a serial run. A scratch server is already
+# one per process, so only a shared TEST_DATABASE_URL needs splitting.
+_XDIST_WORKER = os.environ.get("PYTEST_XDIST_WORKER")
+
+if os.environ.get("TEST_DATABASE_URL"):
+    _dsn = _assert_disposable(os.environ["TEST_DATABASE_URL"])
+    os.environ["DATABASE_URL"] = _worker_database(_dsn, _XDIST_WORKER) if _XDIST_WORKER else _dsn
+else:
+    os.environ["DATABASE_URL"] = _start_scratch_postgres()
 
 from api import db  # noqa: E402  (import only after DATABASE_URL is set)
 
@@ -230,6 +274,40 @@ def pytest_sessionfinish(session, exitstatus) -> None:
         _stop_scratch_pg()
 
 
+def pytest_configure(config) -> None:
+    """Keep the corpus tests together when the run is parallel.
+
+    xdist's default `load` hands the next test to whichever worker is free,
+    which would scatter the corpus tests across all of them and have each
+    worker build the corpus for itself. `loadgroup` honours the xdist_group
+    marker applied below, so they land on one worker and it is built once.
+    """
+    if getattr(config.option, "numprocesses", None) and config.option.dist == "load":
+        config.option.dist = "loadgroup"
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_collection_modifyitems(config, items) -> None:
+    """Run the corpus tests last, as one group.
+
+    The corpus is generated data that an unmarked test's reset empties, so it
+    is rebuilt the next time a corpus test runs. Interleaved, that cost four
+    builds of about six seconds each in a serial run. Ordered, one build
+    serves all of them, and it happens after every test that would have
+    emptied it.
+
+    tryfirst so the CI shard split (tests/ci_suite.py, trylast) partitions the
+    ordered list; its assignment hashes node ids and does not depend on order,
+    but a shard should still run the corpus at its end.
+    """
+    corpus = [item for item in items if item.get_closest_marker("corpus")]
+    if not corpus:
+        return
+    for item in corpus:
+        item.add_marker(pytest.mark.xdist_group("corpus"))
+    items[:] = [item for item in items if not item.get_closest_marker("corpus")] + corpus
+
+
 # Tables that must SURVIVE a truncate. Everything else is derived, because a
 # hand-maintained enumeration silently rots: ai_batches was missing from the
 # old list and leaked rows between tests until a unique constraint failed, and
@@ -248,6 +326,85 @@ def _mutable_tables() -> list[str]:
         "SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename"
     )
     return [r["tablename"] for r in rows if r["tablename"] not in _PERSISTENT_TABLES]
+
+
+def _names(tables: list[str]) -> str:
+    return ", ".join(f'"{t}"' for t in tables)
+
+
+# Read once: the migrations ran above, and no test adds a table.
+_TABLES = _mutable_tables()
+
+# Emptying a table costs about the same whether it held one row or none -
+# roughly 5 ms per relation for TRUNCATE, which over 51 tables and 1,650 tests
+# was the largest single cost in the suite. Measured 2026-09-11 on one
+# checkout's database: 360 ms per reset, against CI setup phases of 133-145 s
+# in a 171-186 s serial run. A test dirties a handful of tables, so the reset
+# asks which ones rather than assuming all of them.
+#
+# DELETE rather than TRUNCATE for the ordinary case: TRUNCATE rewrites a
+# relation file and takes an ACCESS EXCLUSIVE lock per table, while deleting
+# the dozen rows a test wrote is nearly free. Measured on the same database
+# with the same test-shaped state: truncate all 51 = 360 ms, truncate only the
+# dirty ones = 159 ms (a test that touches `users` drags its 28-table foreign
+# key closure in through CASCADE), delete the dirty ones = 10.7 ms.
+#
+# Above this many rows a table goes back to TRUNCATE, where row-by-row
+# deletion stops being the cheap option - the corpus tables, which hold tens
+# of thousands.
+_BULK_ROWS = 5_000
+
+# One round trip: which tables have rows, and how many, counting no further
+# than the threshold that changes the decision.
+_DIRTY_TABLES = " UNION ALL ".join(
+    f"SELECT '{t}' AS t, "
+    f'(SELECT count(*) FROM (SELECT 1 FROM "{t}" LIMIT {_BULK_ROWS + 1}) s) AS n '
+    f'WHERE EXISTS (SELECT 1 FROM "{t}")'
+    for t in _TABLES
+)
+
+# RESTART IDENTITY only resets the sequences of the tables it truncates, and a
+# test that inserted and then deleted leaves an advanced sequence behind an
+# empty table. Restarting those keeps every id starting from 1, as it did when
+# every table was truncated every time.
+_USED_SEQUENCES = (
+    "SELECT sequencename FROM pg_sequences WHERE schemaname = 'public' AND last_value IS NOT NULL"
+)
+
+# Deleting in an order no foreign key objects to would mean sorting 51 tables
+# by their dependencies on every reset. Turning the constraints off for the
+# statement is one line and needs superuser, which every test database here
+# has; where it does not, the reset truncates the dirty set instead.
+_CAN_SKIP_CONSTRAINTS = bool(
+    db.query_one("SELECT current_setting('is_superuser') = 'on' AS ok")["ok"]
+)
+
+
+def _reset_to_empty() -> None:
+    """Leave the database as a truncate-everything reset left it: no rows
+    outside the persistent tables, every sequence back at its start, and the
+    seeded defaults present."""
+    rows = db.query(_DIRTY_TABLES)
+    if rows:
+        bulk = [r["t"] for r in rows if r["n"] > _BULK_ROWS]
+        small = [r["t"] for r in rows if r["n"] <= _BULK_ROWS]
+        if bulk:
+            db.execute(f"TRUNCATE TABLE {_names(bulk)} RESTART IDENTITY CASCADE")
+        if small and _CAN_SKIP_CONSTRAINTS:
+            # One statement, so one transaction: a failure rolls the session
+            # setting back with the deletes, and a pooled connection never
+            # escapes this function with its constraints still disabled.
+            db.execute(
+                "SET session_replication_role = replica; "
+                + "; ".join(f'DELETE FROM "{t}"' for t in small)
+                + "; SET session_replication_role = origin"
+            )
+        elif small:
+            db.execute(f"TRUNCATE TABLE {_names(small)} RESTART IDENTITY CASCADE")
+    advanced = [r["sequencename"] for r in db.query(_USED_SEQUENCES)]
+    if advanced:
+        db.execute("; ".join(f'ALTER SEQUENCE "{s}" RESTART' for s in advanced))
+    _reseed()
 
 
 # Whether this database was a synced copy of production when the run started.
@@ -358,8 +515,7 @@ def _clean_db(request):
             "    make integration\n"
             "or point TEST_DATABASE_URL at a scratch database for the rest."
         )
-    db.execute(f"TRUNCATE TABLE {', '.join(_mutable_tables())} RESTART IDENTITY CASCADE")
-    _reseed()
+    _reset_to_empty()
     yield
 
 
