@@ -83,9 +83,9 @@ def test_a_domain_serving_many_companies_is_flagged_for_review(f):
     signal = mail_pipeline.sender_signal(uid)
     assert len(signal) == 3
     for value in signal.values():
-        assert value["review_suggested"] is True
-        assert value["sender_company_count"] == 3
-        assert "3 different companies" in value["why"]
+        assert value.review_suggested is True
+        assert value.sender_company_count == 3
+        assert "3 different companies" in value.why
 
 
 def test_an_employers_own_domain_is_not_flagged(f):
@@ -99,9 +99,9 @@ def test_an_employers_own_domain_is_not_flagged(f):
     signal = mail_pipeline.sender_signal(uid)
     assert len(signal) == 4
     for value in signal.values():
-        assert value["review_suggested"] is False
-        assert value["sender_is_ats"] is False
-        assert value["sender_company_count"] == 1
+        assert value.review_suggested is False
+        assert value.sender_is_ats is False
+        assert value.sender_company_count == 1
 
 
 def test_an_ats_serving_many_companies_is_never_flagged(f):
@@ -114,9 +114,9 @@ def test_an_ats_serving_many_companies_is_never_flagged(f):
 
     signal = mail_pipeline.sender_signal(uid)
     for value in signal.values():
-        assert value["sender_is_ats"] is True
-        assert value["review_suggested"] is False, "an ATS is an intermediary on purpose"
-        assert value["sender_company_count"] == 4
+        assert value.sender_is_ats is True
+        assert value.review_suggested is False, "an ATS is an intermediary on purpose"
+        assert value.sender_company_count == 4
 
 
 def test_two_companies_is_below_the_threshold(f):
@@ -128,8 +128,8 @@ def test_two_companies_is_below_the_threshold(f):
     _app(f, uid, "Company Two", "shared.test", 2)
 
     signal = mail_pipeline.sender_signal(uid)
-    assert all(v["review_suggested"] is False for v in signal.values())
-    assert all(v["sender_company_count"] == 2 for v in signal.values())
+    assert all(v.review_suggested is False for v in signal.values())
+    assert all(v.sender_company_count == 2 for v in signal.values())
 
 
 def test_the_signal_is_scoped_to_one_user(f):
@@ -144,8 +144,8 @@ def test_the_signal_is_scoped_to_one_user(f):
     signal = mail_pipeline.sender_signal(mine)
     assert len(signal) == 1
     only = next(iter(signal.values()))
-    assert only["sender_company_count"] == 1
-    assert only["review_suggested"] is False
+    assert only.sender_company_count == 1
+    assert only.review_suggested is False
 
 
 def test_it_recomputes_rather_than_freezing_at_match_time(f):
@@ -154,9 +154,9 @@ def test_it_recomputes_rather_than_freezing_at_match_time(f):
     time and not a column."""
     uid = f.make_user()
     first = _app(f, uid, "Looks Legit", "later.test", 1)
-    assert mail_pipeline.sender_signal(uid)[first]["review_suggested"] is False
+    assert mail_pipeline.sender_signal(uid)[first].review_suggested is False
 
     _app(f, uid, "Second Name", "later.test", 2)
     _app(f, uid, "Third Name", "later.test", 3)
 
-    assert mail_pipeline.sender_signal(uid)[first]["review_suggested"] is True
+    assert mail_pipeline.sender_signal(uid)[first].review_suggested is True

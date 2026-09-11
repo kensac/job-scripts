@@ -42,6 +42,21 @@ def _event(message_id: int, kind: str, deadline=None) -> int:
     return row["id"]
 
 
+def _event_row(event_id: int, kind: str) -> mail_pipeline.ApplicationEvent:
+    """An event as `stage_for` reads it, without going near the database. It
+    reads `id` and `kind`; the rest is what the row carries for the reader."""
+    return mail_pipeline.ApplicationEvent(
+        id=event_id,
+        kind=kind,
+        occurred_at=None,
+        deadline_at=None,
+        deadline_inferred=False,
+        message_id=event_id,
+        sent_at=None,
+        subject=None,
+    )
+
+
 def _match(message_id: int, application_id: int | None) -> None:
     db.execute(
         "INSERT INTO application_matches (message_id, application_id, method) VALUES (%s, %s, %s)",
@@ -61,7 +76,7 @@ def _chain(f, kinds: list[str]) -> tuple[int, int]:
 
 def test_stage_advances_with_the_process(f):
     _uid, app = _chain(f, ["acknowledgement", "interview_invite"])
-    assert mail_pipeline.state_of(app)["stage"] == "interviewing"
+    assert mail_pipeline.state_of(app).stage == "interviewing"
 
 
 def test_a_rejection_wins_over_a_later_acknowledgement(f):
@@ -69,12 +84,12 @@ def test_a_rejection_wins_over_a_later_acknowledgement(f):
     the decision, so one arriving after a rejection is untidy mail delivery,
     not the employer changing their mind."""
     _uid, app = _chain(f, ["rejection", "acknowledgement"])
-    assert mail_pipeline.state_of(app)["stage"] == "rejected"
+    assert mail_pipeline.state_of(app).stage == "rejected"
 
 
 def test_stage_does_not_regress_on_an_out_of_order_event(f):
     _uid, app = _chain(f, ["interview_invite", "acknowledgement"])
-    assert mail_pipeline.state_of(app)["stage"] == "interviewing"
+    assert mail_pipeline.state_of(app).stage == "interviewing"
 
 
 def test_reclassifying_a_message_changes_the_state(f):
@@ -86,18 +101,18 @@ def test_reclassifying_a_message_changes_the_state(f):
     mid = _message(uid, "<reclass@x>")
     _event(mid, "rejection")
     _match(mid, app)
-    assert mail_pipeline.state_of(app)["stage"] == "rejected"
+    assert mail_pipeline.state_of(app).stage == "rejected"
 
     # Same message, same kind, newer row: the earlier verdict is superseded.
     db.execute("INSERT INTO email_events (message_id, kind) VALUES (%s, %s)", (mid, "rejection"))
-    assert mail_pipeline.state_of(app)["stage"] == "rejected"
+    assert mail_pipeline.state_of(app).stage == "rejected"
 
     # A correction: the same message reclassified. The rejection must be
     # RETRACTED, not left standing beside the new verdict - a message is one
     # thing, and keying per (message, kind) would make a misclassification
     # permanent. This assertion is what caught that.
     _event(mid, "interview_invite")
-    assert mail_pipeline.state_of(app)["stage"] == "interviewing"
+    assert mail_pipeline.state_of(app).stage == "interviewing"
 
 
 def test_only_the_newest_match_counts(f):
@@ -108,11 +123,11 @@ def test_only_the_newest_match_counts(f):
     mid = _message(uid, "<rematch@x>")
     _event(mid, "offer")
     _match(mid, first)
-    assert mail_pipeline.state_of(first)["stage"] == "offer"
+    assert mail_pipeline.state_of(first).stage == "offer"
 
     _match(mid, second)
-    assert mail_pipeline.state_of(first)["stage"] == "applied"
-    assert mail_pipeline.state_of(second)["stage"] == "offer"
+    assert mail_pipeline.state_of(first).stage == "applied"
+    assert mail_pipeline.state_of(second).stage == "offer"
 
 
 def test_an_assessment_opens_an_action_item(f):
@@ -219,7 +234,7 @@ def test_withdrawn_is_the_one_stage_only_the_person_can_assert(f):
     reach it - because no employer sends mail saying you pulled out."""
     from api.mail.pipeline import WITHDRAWN_STATUSES, stage_for
 
-    events = [{"id": 1, "kind": "acknowledgement", "sent_at": None}]
+    events = [_event_row(1, "acknowledgement")]
     assert stage_for(events) == "acknowledged"
     for status in WITHDRAWN_STATUSES:
         assert stage_for(events, status) == "withdrawn"
@@ -231,10 +246,7 @@ def test_withdrawing_beats_a_later_acknowledgement(f):
     inferred from what an employer sent, so it outranks all of it."""
     from api.mail.pipeline import stage_for
 
-    events = [
-        {"id": 1, "kind": "rejection", "sent_at": None},
-        {"id": 2, "kind": "acknowledgement", "sent_at": None},
-    ]
+    events = [_event_row(1, "rejection"), _event_row(2, "acknowledgement")]
     assert stage_for(events) == "rejected"
     assert stage_for(events, "No Longer Interested") == "withdrawn"
 

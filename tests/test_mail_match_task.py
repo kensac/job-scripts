@@ -547,9 +547,7 @@ def test_a_human_verdict_is_recorded_even_when_it_repeats_the_matcher(f):
     standing = mail_match.latest(mid)
     mail_match.record(
         mid,
-        mail_match.Match(
-            standing["application_id"], standing["method"], standing["confidence"], "affirmed"
-        ),
+        mail_match.Match(standing.application_id, standing.method, standing.confidence, "affirmed"),
         actor_user_id=uid,
     )
     rows = db.query(
@@ -570,11 +568,11 @@ def test_an_unattachable_kind_stops_reading_as_a_matching_failure(f):
     mid = _message(uid, sent_at=datetime.datetime(2026, 3, 2, tzinfo=datetime.UTC))
     _event(mid, "rejection", company="Acme", title="Role")
     task.match_pending(uid)
-    assert mail_match.latest(mid)["method"] == "unmatched"
+    assert mail_match.latest(mid).method == "unmatched"
 
     _event(mid, "recruiter_outreach", company="Acme")
     task.match_pending(uid)
-    assert mail_match.latest(mid)["method"] == mail_match.NOT_AN_APPLICATION
+    assert mail_match.latest(mid).method == mail_match.NOT_AN_APPLICATION
 
 
 @pytest.mark.asyncio

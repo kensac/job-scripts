@@ -9,6 +9,7 @@ somebody else's mailbox.
 
 from __future__ import annotations
 
+import datetime
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -19,9 +20,14 @@ from api import params as params_
 from api.auth import AuthedUser
 from api.mail import match as mail_match
 from api.mail import pipeline as mail_pipeline
+from api.mail.match import CurrentMatch
+from api.rates import Rate
 from api.routers.admin import require_admin
 from api.routers.mail.shared import (
+    Candidates,
     Reclassification,
+    Reclassified,
+    Reverted,
     _apply_classification,
     _apply_revert,
     _candidates_payload,
@@ -147,6 +153,54 @@ _CURRENT = """
 """
 
 
+class MailRow(BaseModel):
+    """One message as the debug list shows it: what arrived, what the
+    classifier last said, and what the matcher last did with it.
+
+    Every field after `prefilter_reason` is the CURRENT row of an append-only
+    log and can be null for its own reason - no classification yet, no match
+    attempted, a match that found nothing. They are not interchangeable and
+    `_where` filters on the difference."""
+
+    id: int
+    provider_message_id: str
+    source: str
+    from_email: str | None
+    subject: str | None
+    sent_at: datetime.datetime | None
+    prefilter_hit: bool | None
+    prefilter_reason: str | None
+    kind: str | None
+    confidence: str | None
+    deadline_at: datetime.datetime | None
+    deadline_inferred: bool | None
+    model: str | None
+    application_id: int | None
+    method: str | None
+    match_confidence: str | None
+    rationale: str | None
+    company_name: str | None
+    title: str | None
+
+
+class MailList(BaseModel):
+    """The page, plus what it was sorted and filtered by.
+
+    `sortable` and `filterable` are the vocabulary a client builds its controls
+    from, and `sorts`/`filters` echo what was actually applied, so the page
+    never has to duplicate the default or guess the keys."""
+
+    sorts: list[dict[str, str]]
+    sortable: list[str]
+    rows: list[MailRow]
+    page: int
+    page_size: int
+    total: int
+    has_more: bool
+    filters: dict[str, list[str]]
+    filterable: list[str]
+
+
 @router.get("/admin/mail")
 def list_mail(
     kind: str | None = None,
@@ -163,7 +217,7 @@ def list_mail(
     page: int = 1,
     page_size: int = 50,
     user: AuthedUser = Depends(require_admin),
-):
+) -> MailList:
     ids = scoping.user_ids(users)
     where, params = _where(
         kind=kind,
@@ -181,7 +235,8 @@ def list_mail(
         f"SELECT COUNT(*) AS c FROM email_messages m {_CURRENT} WHERE TRUE {where}", params
     )
     sorts = sorting.parse(sort, dir, _SORTABLE, "sent_at")
-    rows = db.query(
+    rows = db.query_as(
+        MailRow,
         f"""
         SELECT m.id, m.provider_message_id, m.source, m.from_email, m.subject, m.sent_at,
                m.prefilter_hit, m.prefilter_reason,
@@ -198,18 +253,18 @@ def list_mail(
         {**params, "limit": paging.size, "offset": paging.offset},
     )
     n = total["c"] if total else 0
-    return {
-        "sorts": sorts,
-        "sortable": sorted(_SORTABLE),
-        "rows": rows,
+    return MailList(
+        sorts=sorts,
+        sortable=sorted(_SORTABLE),
+        rows=rows,
         **paging.metadata(n),
-        "filters": params_.applied(
+        filters=params_.applied(
             kind=params_.csv(kind),
             method=params_.csv(method),
             source=params_.csv(source),
             user=scoping.echo(ids),
         ),
-        "filterable": [
+        filterable=[
             "kind",
             "matched",
             "source",
@@ -220,7 +275,7 @@ def list_mail(
             "q",
             "user",
         ],
-    }
+    )
 
 
 # Identical input must not get different labels. That is checkable forever
@@ -257,7 +312,8 @@ groups AS (
     GROUP BY 1, 2
     HAVING count(*) >= 2
 )
-SELECT * FROM groups ORDER BY kinds DESC, copies DESC
+SELECT sender, subject, copies, kinds, kind_list, example_message_id
+FROM groups ORDER BY kinds DESC, copies DESC
 """
 
 # Below this a body is a stub - a bare signature, a one-line auto-reply - and
@@ -265,11 +321,39 @@ SELECT * FROM groups ORDER BY kinds DESC, copies DESC
 _CONSISTENCY_MIN_BODY = 200
 
 
+class ConsistencyGroup(BaseModel):
+    """One body the classifier saw more than once, and the answers it gave."""
+
+    sender: str | None
+    subject: str | None
+    copies: int
+    kinds: list[str]
+    example_message_id: int
+
+
+class ConsistencyCoverage(BaseModel):
+    """What the rate is a rate OF. Only a repeated body can be checked this
+    way, so this is a canary over part of the corpus and never a measure of
+    it - a rate quoted without this would describe a canary as a census."""
+
+    messages_covered: int
+    messages_classified: int
+    min_copies: int
+    min_body_chars: int
+
+
+class ClassificationConsistency(BaseModel):
+    groups: Rate
+    messages: Rate
+    coverage: ConsistencyCoverage
+    worst: list[ConsistencyGroup]
+
+
 @router.get("/admin/mail/consistency")
 def classification_consistency(
     limit: int = Query(default=25, ge=1, le=200),
     user: AuthedUser = Depends(require_admin),
-):
+) -> ClassificationConsistency:
     """Where the classifier gave identical inputs different answers.
 
     A label-free regression metric: no ground truth, only self-agreement, so
@@ -293,37 +377,131 @@ def classification_consistency(
         SELECT count(*) AS c FROM latest
         """
     )
-    return {
-        "groups": rates.rate(len(inconsistent), len(rows), rates.DEFAULT_MIN_SAMPLE),
-        "messages": rates.rate(
+    return ClassificationConsistency(
+        groups=rates.rate(len(inconsistent), len(rows), rates.DEFAULT_MIN_SAMPLE),
+        messages=rates.rate(
             sum(r["copies"] for r in inconsistent), covered, rates.DEFAULT_MIN_SAMPLE
         ),
-        # What the rate is a rate OF. Only repeated bodies are checkable, so
-        # this is a canary over part of the corpus rather than a measure of it.
-        "coverage": {
-            "messages_covered": covered,
-            "messages_classified": int((total_row or {}).get("c", 0)),
-            "min_copies": 2,
-            "min_body_chars": _CONSISTENCY_MIN_BODY,
-        },
-        "worst": [
-            {
-                "sender": r["sender"],
-                "subject": r["subject"],
-                "copies": r["copies"],
-                "kinds": sorted(r["kind_list"]),
-                "example_message_id": r["example_message_id"],
-            }
+        coverage=ConsistencyCoverage(
+            messages_covered=covered,
+            messages_classified=int((total_row or {}).get("c", 0)),
+            min_copies=2,
+            min_body_chars=_CONSISTENCY_MIN_BODY,
+        ),
+        worst=[
+            ConsistencyGroup(
+                sender=r["sender"],
+                subject=r["subject"],
+                copies=r["copies"],
+                kinds=sorted(r["kind_list"]),
+                example_message_id=r["example_message_id"],
+            )
             for r in inconsistent[:limit]
         ],
-    }
+    )
+
+
+class ClassificationCell(BaseModel):
+    """What one model said, at one confidence, about how many messages - with
+    the two things that go wrong inside a correct-looking answer: no company
+    extracted, and a deadline the model inferred rather than read."""
+
+    kind: str
+    model: str | None
+    confidence: str | None
+    messages: int
+    no_company: int
+    inferred_deadlines: int
+
+
+class MatchingCell(BaseModel):
+    """How many messages of a kind the matcher settled, and by which tier.
+    `never attempted` is a method value here because an absence in a
+    distribution is a gap nobody can read."""
+
+    kind: str
+    method: str
+    messages: int
+
+
+class PrefilterCell(BaseModel):
+    prefilter_hit: bool
+    job_related: bool
+    messages: int
+
+
+class SenderDomainRow(BaseModel):
+    domain: str | None
+    messages: int
+    matched: int
+
+
+class SourceRow(BaseModel):
+    source: str
+    messages: int
+
+
+class MailCorpus(BaseModel):
+    """The whole import, deliberately NOT windowed: how much mail exists, when
+    it starts, and how much nothing has looked at are properties of the
+    import rather than of a slice."""
+
+    messages: int
+    unclassified: int
+    oldest: datetime.datetime | None
+    newest: datetime.datetime | None
+    by_source: list[SourceRow]
+
+
+class Population(BaseModel):
+    """The denominator a section counts over, and what it leaves out. Each
+    section below counts a DIFFERENT population and nothing in the rows says
+    so, which invites a subtraction that means nothing."""
+
+    messages: int
+    excludes: list[str]
+
+
+class DomainPopulation(Population):
+    """The sender breakdown is also TRUNCATED, so it says how many domains it
+    shows against how many exist."""
+
+    domains_shown: int
+    domains_total: int
+
+
+class Populations(BaseModel):
+    classification: Population
+    matching: Population
+    prefilter: Population
+    sender_domains: DomainPopulation
+
+
+class PrefilterSummary(BaseModel):
+    """A rate the prefilter could never report about itself, and the reason it
+    was kept as a signal rather than deleted: the mail a gate WOULD have
+    dropped is the one unrecoverable failure."""
+
+    cells: list[PrefilterCell]
+    job_related_a_gate_would_have_dropped: int
+    job_related_total: int
+
+
+class MailAnalytics(BaseModel):
+    window_days: int | None
+    corpus: MailCorpus
+    populations: Populations
+    classification: list[ClassificationCell]
+    matching: list[MatchingCell]
+    prefilter: PrefilterSummary
+    sender_domains: list[SenderDomainRow]
 
 
 @router.get("/admin/mail/analytics")
 def mail_analytics(
     days: int = Query(default=0, ge=0, le=3650),
     user: AuthedUser = Depends(require_admin),
-):
+) -> MailAnalytics:
     """Where the pipeline is wrong, as distributions rather than examples.
 
     /admin/mail answers "why did THIS message get that answer" and has to show
@@ -338,10 +516,11 @@ def mail_analytics(
     window = "AND m.sent_at >= now() - make_interval(days => %(days)s)" if days else ""
     params: dict[str, Any] = {"days": days} if days else {}
 
-    def q(sql: str) -> list[dict[str, Any]]:
-        return db.query(sql.format(window=window), params)
+    def q[Row](row: type[Row], sql: str) -> list[Row]:
+        return db.query_as(row, sql.format(window=window), params)
 
     classification = q(
+        ClassificationCell,
         """
         WITH ce AS (
             SELECT DISTINCT ON (message_id) message_id, kind, confidence, model, deadline_inferred,
@@ -355,10 +534,11 @@ def mail_analytics(
         FROM email_messages m JOIN ce ON ce.message_id = m.id
         WHERE TRUE {window}
         GROUP BY 1, 2, 3 ORDER BY 4 DESC
-        """
+        """,
     )
 
     matching = q(
+        MatchingCell,
         """
         WITH ce AS (
             SELECT DISTINCT ON (message_id) message_id, kind
@@ -376,7 +556,7 @@ def mail_analytics(
         LEFT JOIN cm ON cm.message_id = m.id
         WHERE ce.kind <> 'not_job_related' {window}
         GROUP BY 1, 2 ORDER BY 3 DESC
-        """
+        """,
     )
 
     # The prefilter gates nothing on purpose - a filtered-out email is the one
@@ -385,6 +565,7 @@ def mail_analytics(
     # WOULD have missed. That is the only honest basis for ever letting the
     # ongoing feed use one, and it is a question only this endpoint can answer.
     prefilter = q(
+        PrefilterCell,
         """
         WITH ce AS (
             SELECT DISTINCT ON (message_id) message_id, kind
@@ -396,12 +577,13 @@ def mail_analytics(
         FROM email_messages m JOIN ce ON ce.message_id = m.id
         WHERE TRUE {window}
         GROUP BY 1, 2
-        """
+        """,
     )
-    missed = sum(r["messages"] for r in prefilter if not r["prefilter_hit"] and r["job_related"])
-    job_related_total = sum(r["messages"] for r in prefilter if r["job_related"])
+    missed = sum(r.messages for r in prefilter if not r.prefilter_hit and r.job_related)
+    job_related_total = sum(r.messages for r in prefilter if r.job_related)
 
     senders = q(
+        SenderDomainRow,
         """
         WITH ce AS (
             SELECT DISTINCT ON (message_id) message_id, kind
@@ -419,7 +601,7 @@ def mail_analytics(
         LEFT JOIN cm ON cm.message_id = m.id
         WHERE ce.kind <> 'not_job_related' {window}
         GROUP BY 1 ORDER BY 2 DESC LIMIT 40
-        """
+        """,
     )
 
     # Deliberately NOT windowed, and named `corpus` so it cannot be read as
@@ -453,54 +635,125 @@ def mail_analytics(
         params,
     )
 
-    return {
-        "window_days": days or None,
-        "corpus": {
-            **corpus,
-            "by_source": db.query(
+    return MailAnalytics(
+        window_days=days or None,
+        corpus=MailCorpus(
+            messages=corpus.get("messages", 0),
+            unclassified=corpus.get("unclassified", 0),
+            oldest=corpus.get("oldest"),
+            newest=corpus.get("newest"),
+            by_source=db.query_as(
+                SourceRow,
                 "SELECT m.source, count(*) AS messages FROM email_messages m "
-                "GROUP BY 1 ORDER BY 2 DESC"
+                "GROUP BY 1 ORDER BY 2 DESC",
             ),
-        },
+        ),
         # Each section below counts a DIFFERENT population, and nothing in the
         # rows says so. Presented side by side they invite a subtraction that
         # means nothing, so the denominators ship here rather than being
         # hardcoded by whoever renders them.
-        "populations": {
-            "classification": {
-                "messages": sum(r["messages"] for r in classification),
-                "excludes": [],
-            },
-            "matching": {
-                "messages": sum(r["messages"] for r in matching),
-                "excludes": ["not_job_related"],
-            },
-            "prefilter": {
-                "messages": sum(r["messages"] for r in prefilter),
-                "excludes": [],
-            },
-            "sender_domains": {
-                "messages": sum(r["messages"] for r in senders),
-                "excludes": ["not_job_related"],
-                "domains_shown": len(senders),
-                "domains_total": (domain_total or {}).get("domains", 0),
-            },
-        },
-        "classification": classification,
-        "matching": matching,
-        # A rate the prefilter could never report about itself, and the reason
-        # it was kept as a signal rather than deleted.
-        "prefilter": {
-            "cells": prefilter,
-            "job_related_a_gate_would_have_dropped": missed,
-            "job_related_total": job_related_total,
-        },
-        "sender_domains": senders,
-    }
+        populations=Populations(
+            classification=Population(
+                messages=sum(r.messages for r in classification), excludes=[]
+            ),
+            matching=Population(
+                messages=sum(r.messages for r in matching), excludes=["not_job_related"]
+            ),
+            prefilter=Population(messages=sum(r.messages for r in prefilter), excludes=[]),
+            sender_domains=DomainPopulation(
+                messages=sum(r.messages for r in senders),
+                excludes=["not_job_related"],
+                domains_shown=len(senders),
+                domains_total=(domain_total or {}).get("domains", 0),
+            ),
+        ),
+        classification=classification,
+        matching=matching,
+        prefilter=PrefilterSummary(
+            cells=prefilter,
+            job_related_a_gate_would_have_dropped=missed,
+            job_related_total=job_related_total,
+        ),
+        sender_domains=senders,
+    )
+
+
+class AdminMailMessage(BaseModel):
+    """The stored message, whole, for the one surface that may see everybody's.
+
+    The columns were a `SELECT *`, so what reached the client was whatever the
+    table happened to hold on the day. `body_html` is the markup as it
+    arrived: the user-facing reader sanitises on read, this one does not,
+    because an administrator debugging a classification needs what the
+    classifier saw."""
+
+    id: int
+    user_id: int
+    provider_message_id: str
+    provider_thread_id: str | None
+    thread_topic: str | None
+    source: str
+    from_email: str | None
+    from_name: str | None
+    to_emails: list[str] | None
+    subject: str | None
+    sent_at: datetime.datetime | None
+    body_text: str | None
+    body_html: str | None
+    headers: dict[str, Any] | None
+    prefilter_hit: bool | None
+    prefilter_reason: str | None
+    imported_at: datetime.datetime
+
+
+class AdminMailEvent(BaseModel):
+    """One classification, as written. The log is append-only, so a message
+    with three of these was corrected twice and the last one is in force."""
+
+    id: int
+    message_id: int
+    kind: str
+    confidence: str | None
+    occurred_at: datetime.datetime | None
+    deadline_at: datetime.datetime | None
+    deadline_inferred: bool
+    detail: dict[str, Any] | None
+    # Which machine wrote it; null means a person did, and actor_user_id says
+    # which one.
+    model: str | None
+    actor_user_id: int | None
+    created_at: datetime.datetime
+
+
+class AdminMailMatch(BaseModel):
+    """One match attempt, with the application it named. Append-only as well,
+    so a tier that keeps being corrected stays visible as history rather than
+    being papered over one row at a time."""
+
+    id: int
+    message_id: int
+    application_id: int | None
+    method: str
+    confidence: str | None
+    rationale: str | None
+    actor_user_id: int | None
+    created_at: datetime.datetime
+    company_name: str | None
+    title: str | None
+    job_id: int | None
+
+
+class AdminMailDetail(BaseModel):
+    message: AdminMailMessage
+    events: list[AdminMailEvent]
+    matches: list[AdminMailMatch]
+    # What tier 1 would see, so a missed exact-link match can be diagnosed
+    # without re-running the matcher and guessing at why.
+    canonical_urls: list[str]
 
 
 @router.get("/admin/mail/{message_id}")
-def mail_detail(message_id: int, user: AuthedUser = Depends(require_admin)):
+def mail_detail(message_id: int, user: AuthedUser = Depends(require_admin)) -> AdminMailDetail:
     """One message with its FULL history, not just the current verdict.
 
     Every classification and every match attempt, oldest first. That history
@@ -508,27 +761,38 @@ def mail_detail(message_id: int, user: AuthedUser = Depends(require_admin)):
     board, or a classification corrected on a later pass, is exactly what
     someone debugging a wrong answer needs to see.
     """
-    message = db.query_one("SELECT * FROM email_messages WHERE id = %s", (message_id,))
+    message = db.query_one_as(
+        AdminMailMessage,
+        "SELECT id, user_id, provider_message_id, provider_thread_id, thread_topic, source, "
+        "from_email, from_name, to_emails, subject, sent_at, body_text, body_html, headers, "
+        "prefilter_hit, prefilter_reason, imported_at FROM email_messages WHERE id = %s",
+        (message_id,),
+    )
     if not message:
         raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown message"})
-    return {
-        "message": message,
-        "events": db.query(
-            "SELECT * FROM email_events WHERE message_id = %s ORDER BY id", (message_id,)
+    return AdminMailDetail(
+        message=message,
+        events=db.query_as(
+            AdminMailEvent,
+            "SELECT id, message_id, kind, confidence, occurred_at, deadline_at, "
+            "deadline_inferred, detail, model, actor_user_id, created_at "
+            "FROM email_events WHERE message_id = %s ORDER BY id",
+            (message_id,),
         ),
-        "matches": db.query(
+        matches=db.query_as(
+            AdminMailMatch,
             """
-            SELECT am.*, a.company_name, a.title, a.job_id
+            SELECT am.id, am.message_id, am.application_id, am.method, am.confidence,
+                   am.rationale, am.actor_user_id, am.created_at,
+                   a.company_name, a.title, a.job_id
             FROM application_matches am
             LEFT JOIN applications a ON a.id = am.application_id
             WHERE am.message_id = %s ORDER BY am.id
             """,
             (message_id,),
         ),
-        # What tier 1 would see, so a missed exact-link match can be diagnosed
-        # without re-running the matcher and guessing at why.
-        "canonical_urls": sorted(mail_match.canonical_urls(message.get("body_text"))),
-    }
+        canonical_urls=sorted(mail_match.canonical_urls(message.body_text)),
+    )
 
 
 class MatchOverride(BaseModel):
@@ -573,7 +837,7 @@ def admin_match_candidates(
     q: str | None = Query(default=None),
     limit: int = Query(default=25, ge=1, le=100),
     user: AuthedUser = Depends(require_admin),
-):
+) -> Candidates:
     """The same picker the user gets, over the message owner's applications.
 
     The admin panel offered a bare application-id field, which requires
@@ -589,7 +853,7 @@ def admin_match_candidates(
 @router.post("/admin/mail/{message_id}/classify")
 def admin_correct_classification(
     message_id: int, body: Reclassification, user: AuthedUser = Depends(require_admin)
-):
+) -> Reclassified:
     """Correct what a message IS, in someone else's mailbox.
 
     Recorded against the admin rather than the owner: `actor_user_id` is the
@@ -600,15 +864,28 @@ def admin_correct_classification(
     return _apply_classification(message, body, actor_user_id=user.id)
 
 
-@router.post("/admin/mail/{message_id}/classify/revert")
-def admin_revert_classification(message_id: int, user: AuthedUser = Depends(require_admin)):
+@router.post("/admin/mail/{message_id}/classify/revert", response_model_exclude_none=True)
+def admin_revert_classification(
+    message_id: int, user: AuthedUser = Depends(require_admin)
+) -> Reverted:
     """Undo a correction by restoring the model's last answer."""
     _admin_message(message_id)
     return _apply_revert(message_id, actor_user_id=user.id)
 
 
+class MatchOverridden(BaseModel):
+    """The match now in force, which is what the append produced rather than
+    what was asked for - a refusal is recorded as the matcher's own refusal
+    method, so agreeing with the matcher looks like agreeing with it."""
+
+    ok: bool
+    current: CurrentMatch | None
+
+
 @router.post("/admin/mail/{message_id}/match")
-def override_match(message_id: int, body: MatchOverride, user: AuthedUser = Depends(require_admin)):
+def override_match(
+    message_id: int, body: MatchOverride, user: AuthedUser = Depends(require_admin)
+) -> MatchOverridden:
     """Correct a match by hand.
 
     An append, not an edit: the matcher's own attempt survives underneath, so
@@ -649,4 +926,4 @@ def override_match(message_id: int, body: MatchOverride, user: AuthedUser = Depe
     )
     if body.application_id is not None:
         mail_pipeline.sync_action_items(body.application_id)
-    return {"ok": True, "current": mail_match.latest(message_id)}
+    return MatchOverridden(ok=True, current=mail_match.latest(message_id))

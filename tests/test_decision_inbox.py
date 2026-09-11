@@ -144,7 +144,7 @@ def test_rejecting_returns_the_message_to_the_queue_and_deletes_nothing(client, 
     assert len(db.query("SELECT id FROM application_matches WHERE message_id = %s", (mid,))) == 2
     current = mail_match.latest(mid)
     assert current is not None
-    assert (current["method"], current["application_id"]) == (mail_match.DETACHED, None)
+    assert (current.method, current.application_id) == (mail_match.DETACHED, None)
 
 
 def test_the_matcher_does_not_overturn_a_person(client, me):
@@ -171,8 +171,8 @@ def test_the_matcher_does_not_overturn_a_person(client, me):
 
     current = mail_match.latest(mid)
     assert current is not None
-    assert current["application_id"] is None, "the person's answer still stands"
-    assert current["actor_user_id"] == uid
+    assert current.application_id is None, "the person's answer still stands"
+    assert current.actor_user_id == uid
 
 
 def test_the_sweep_leaves_a_human_decided_message_alone(client, me):
@@ -196,8 +196,8 @@ def test_the_sweep_leaves_a_human_decided_message_alone(client, me):
 
     current = mail_match.latest(mid)
     assert current is not None
-    assert current["method"] == mail_match.NOT_AN_APPLICATION
-    assert current["actor_user_id"] == uid
+    assert current.method == mail_match.NOT_AN_APPLICATION
+    assert current.actor_user_id == uid
     assert app is not None
 
 
@@ -444,7 +444,7 @@ def test_history_keeps_the_answer_that_was_overturned(client, me):
     assert match is not None
     assert (
         client.post(
-            f"/v1/user/pipeline/{app}/matches/{match['id']}/detach", json={}, headers=headers
+            f"/v1/user/pipeline/{app}/matches/{match.id}/detach", json={}, headers=headers
         ).status_code
         == 200
     )
@@ -472,7 +472,7 @@ def test_confirm_then_reject_leaves_three_rows(client, me):
     match = mail_match.latest(mid)
     assert match is not None
     client.post(
-        f"/v1/user/resolve/match:{match['id']}", json={"choice": "reject_match"}, headers=headers
+        f"/v1/user/resolve/match:{match.id}", json={"choice": "reject_match"}, headers=headers
     )
 
     rows = db.query(
@@ -500,7 +500,7 @@ def test_a_detach_from_the_pipeline_records_who_did_it(client, me):
     )
     current = mail_match.latest(mid)
     assert current is not None
-    assert current["actor_user_id"] == uid
+    assert current.actor_user_id == uid
 
 
 def test_never_reviewed_is_one_query_and_a_review_moves_it(client, me):

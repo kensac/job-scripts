@@ -129,11 +129,11 @@ def test_matches_are_append_only(f):
     app = _application(uid, company="Acme", title="Engineer")
 
     mail_match.record(mid, mail_match.Match(None, mail_match.UNMATCHED, "none", "nothing yet"))
-    assert mail_match.latest(mid)["application_id"] is None
+    assert mail_match.latest(mid).application_id is None
 
     mail_match.record(mid, mail_match.Match(app, mail_match.ATS_COMPANY, "medium", "later"))
     current = mail_match.latest(mid)
-    assert current["application_id"] == app
+    assert current.application_id == app
     # The earlier non-match is still there: it is evidence about when we knew
     # what, not a mistake to erase.
     n = db.query_one("SELECT COUNT(*) AS c FROM application_matches WHERE message_id = %s", (mid,))

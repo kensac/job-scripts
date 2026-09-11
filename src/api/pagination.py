@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -14,7 +15,10 @@ class Page:
     def offset(self) -> int:
         return (self.number - 1) * self.size
 
-    def metadata(self, total: int) -> dict[str, int | bool]:
+    def metadata(self, total: int) -> dict[str, Any]:
+        """The four fields every paged envelope carries. `Any` rather than
+        `int | bool` so a caller can unpack this into a declared response
+        model: the union assigns to neither field."""
         return {
             "page": self.number,
             "page_size": self.size,
