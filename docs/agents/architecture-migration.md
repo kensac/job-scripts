@@ -495,10 +495,9 @@ in the file raises `PydanticUserError: ... is not fully defined`, at import,
 with a message that does not say the cause. Found the hard way on
 `routers/apply.py`.
 
-**The services still reach into the handlers, in three imports.** Nine on
-2026-09-11, and six are closed. The
-contract in `pyproject.toml` is enforced in CI and carries only these, each
-with what would move it.
+**The service boundary has only the task runner's two inherent imports.** Nine
+imports crossed it on 2026-09-11. The contract in `pyproject.toml` is enforced
+in CI and now carries only these two.
 
 `api.worker -> tasks` and `api.worker -> tasks.runtime` are correct and are not
 debt. The worker IS the task runner: it loads HANDLERS to dispatch them and
@@ -506,9 +505,11 @@ reads the runtime for the same reason. Two lines for one fact, and the fact
 goes away only if the worker stops being an `api` module. Nothing in the code
 would change if it did, so it has not been done for a line in a config file.
 
-`api.routers.admin.catalog -> tasks.locations` is behaviour, and it is a design
-error rather than a missing home. The catalog calls `locations.store`, so the
-functions need a service home rather than another exception.
+The location edge is closed. `api/locations.py` owns the place inputs,
+normalisation and write, including the rule that a model result cannot replace
+an administrator's correction. The admin route and classification task both
+call that service. `tasks/locations.py` owns only candidate selection, request
+construction, batch lifecycle and result consumption.
 
 The experiment edge is closed. Request construction, arm validation, sampling
 and scoring live in `api/experiments.py`, which both the router and the task
