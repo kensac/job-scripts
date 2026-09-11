@@ -62,7 +62,7 @@ real only relocates the problem.
 | 1 | Check types are a registry | A new check type is a registration; no literal names it |
 | 2 | A board row and the working set are told apart | `user_jobs` says what a person keeps; something else says what the sweeps carry |
 | 3 | Catalog observations are facts | A re-listing is an appended row, not a mutated column |
-| 4 | Derivations are content addressed | Changing the model does not invalidate a verdict |
+| 4 | ~~Derivations are content addressed~~ | **Dropped 2026-09-10.** Measured; see below |
 | 5 | Files move to the shape | Packages match this document |
 
 **The API contract is the invariant.** `openapi.json` is canon and
@@ -115,8 +115,44 @@ and 214 are untouched. 214 is not a cost problem. The reason to separate the
 two meanings is that one table answering two questions is how the next wrong
 answer gets written, not that it is currently wasting money.
 
-Phase 4 migrates the verdict cache. Those rows cost money to produce and
-cannot be casually rebuilt.
+## Phase 4 was dropped
+
+It was going to make a verdict's identity `(input_hash, recipe_id)` so that
+changing the model did not invalidate one. Two things killed it.
+
+**It contradicted a decision already taken deliberately.** `_check_filter`
+says so in as many words: "Scoped to the model on purpose: a verdict from a
+different model is not this model's verdict." The cost cliff that follows is
+named there too. Switching to a better model and keeping the old model's
+answers is not a saving, it is a stale corpus, and the phase was written
+without reading the rationale that was already in the file.
+
+**Reframed as staleness, it was measured and it is small.** The valuable half
+of the idea was that a verdict should record the page it judged, so a changed
+page invalidates it. Measured on 2026-09-10, as the share of latest verdicts
+whose url has a newer page than the verdict:
+
+| check | latest verdicts | judged on a page since replaced |
+|---|---|---|
+| closed | 66,022 | 170 (0%) |
+| clearance | 66,016 | 2,532 (3%) |
+| custom | 38,819 | 765 (1%) |
+
+The clearance number was the largest because nothing ever re-checked
+clearance, and that is fixed at its cause instead. Read that table with its
+confound in view: pages are re-fetched mainly by the re-verification sweep, so
+"the page changed" is partly a measure of how often we look.
+
+What the idea was reaching for already exists here anyway.
+`job_requirements` and `job_embeddings` carry `content_hash` and the
+`ai_queries` row their answer was read from, and `tasks/rescrape.py`
+generalises "re-scraped and unchanged, so re-stamp rather than re-pay" across
+answer tables. Verdicts do not fit that helper, which updates one row per url
+while `ai_queries` is append-only, but the pattern is there to extend the day
+a measurement asks for it.
+
+Phase 2 still brings its numbers before it merges: it decides what gets paid
+for.
 
 **Never in a loop:** any write to the production database, and any migration
 that can refuse to apply ([migrations.md](migrations.md)). Neither of these is
