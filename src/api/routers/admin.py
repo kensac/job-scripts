@@ -193,7 +193,7 @@ def admin_run_filter(body: FilterRunBody, user: AuthedUser = Depends(require_adm
             detail={
                 "code": "IN_PROGRESS",
                 "message": "this run is already in progress",
-                "task_id": result.conflict["id"],
+                "task_id": result.conflict.id,
             },
         )
     task_id = result.task_id
@@ -1386,7 +1386,7 @@ def trigger_ingest(body: IngestBody, user: AuthedUser = Depends(require_admin)):
     for name in wanted:
         admission = task_admission.enqueue("ingest_source", {"source": name}, {"cycle": cycle})
         if admission.conflict:
-            in_flight.append({"source": name, "task_id": admission.conflict["id"]})
+            in_flight.append({"source": name, "task_id": admission.conflict.id})
         else:
             task_ids.append({"source": name, "task_id": admission.task_id})
     in_flight.sort(key=lambda row: row["source"])
@@ -1680,7 +1680,7 @@ def reparse_job(job_id: int, user: AuthedUser = Depends(require_admin)):
             detail={
                 "code": "IN_PROGRESS",
                 "message": "this posting is already being parsed",
-                "task_id": admission.conflict["id"],
+                "task_id": admission.conflict.id,
             },
         )
     return {"task_id": admission.task_id}

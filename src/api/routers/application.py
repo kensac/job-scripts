@@ -15,13 +15,14 @@ import io
 import json
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field
 
 from api import ai, budget, db, task_admission
 from api.ai import access as ai_access
 from api.auth import AuthedUser, require_user
 from api.board.access import require_visible_job
+from api.models import Ok
 from api.problem import refuse
 from core.answers import DEFAULT_STYLE
 from core.fetching import forms
@@ -37,6 +38,96 @@ _RESUME_COLS = (
     "created_at, updated_at"
 )
 _ANSWER_COLS = "key, question, source, required, draft, turns, model, updated_at"
+
+
+class Resume(BaseModel):
+    """`_RESUME_COLS`, in types. `text` is what the drafts are written from;
+    `pdf` is not here because the file is fetched from its own route."""
+
+    id: int
+    name: str
+    filename: str | None
+    chars: int
+    text: str
+    has_pdf: bool
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+
+
+class ResumeList(BaseModel):
+    resumes: list[Resume]
+
+
+class ResumeRef(BaseModel):
+    """Enough to choose one from a menu."""
+
+    id: int
+    name: str
+
+
+class JobRef(BaseModel):
+    id: int
+    url: str
+    company: str | None
+    title: str | None
+
+
+class Answer(BaseModel):
+    """`_ANSWER_COLS`, in types. `turns` is the back-and-forth, oldest first:
+    the person's edits and instructions and the model's rewrites, each with a
+    role, a kind and a time."""
+
+    key: str
+    question: str
+    source: str
+    required: bool
+    draft: str | None
+    turns: list[dict[str, Any]]
+    model: str | None
+    updated_at: datetime.datetime | None
+
+
+class Question(Answer):
+    """An answer as the application view shows it. A question the form
+    carries but nobody has drafted yet has no row, so every field but the
+    question itself is empty, and `multiline` says whether the box wants
+    prose."""
+
+    multiline: bool
+
+
+class AnswerRevision(Answer):
+    """An answer plus the counter the refinement holds it against, so a
+    rewrite that lands after the person edited the box is refused rather than
+    silently overwriting them."""
+
+    draft_revision: int
+
+
+class FormState(BaseModel):
+    """Whether this job's form could be read, and what came back. `questions`
+    is a count, because the questions themselves are merged into the answers
+    above rather than listed twice."""
+
+    supported: bool
+    host: str
+    fetched_at: datetime.datetime | None
+    error: str | None
+    questions: int
+
+
+class Application(BaseModel):
+    job: JobRef
+    form: FormState
+    questions: list[Question]
+    task: task_admission.InFlight | None
+    resumes: list[ResumeRef]
+    writing_style: str | None
+    default_style: str
+
+
+class DraftsQueued(BaseModel):
+    task_id: int | None
 
 
 class ResumeCreate(BaseModel):
@@ -59,17 +150,18 @@ def pdf_text(data: bytes) -> str:
 
 
 @router.get("/user/resumes")
-def list_resumes(user: AuthedUser = Depends(require_user)):
-    return {
-        "resumes": db.query(
+def list_resumes(user: AuthedUser = Depends(require_user)) -> ResumeList:
+    return ResumeList(
+        resumes=db.query_as(
+            Resume,
             f"SELECT {_RESUME_COLS} FROM user_resumes WHERE user_id = %s ORDER BY updated_at DESC",
             (user.id,),
         )
-    }
+    )
 
 
 @router.post("/user/resumes", status_code=201)
-def create_resume(body: ResumeCreate, user: AuthedUser = Depends(require_user)):
+def create_resume(body: ResumeCreate, user: AuthedUser = Depends(require_user)) -> Resume:
     """Pasted text or a PDF, base64 in the body. The PDF's text is what is
     kept; the file itself is not stored. Same name replaces the text."""
     text = (body.text or "").strip()
@@ -100,7 +192,8 @@ def create_resume(body: ResumeCreate, user: AuthedUser = Depends(require_user)):
     cap = int(db.get_config("resumes_per_user", 10))
     if kept and kept["n"] >= cap:
         raise refuse(409, "TOO_MANY_RESUMES", f"up to {cap} resumes; delete one first")
-    row = db.query_one(
+    row = db.query_one_as(
+        Resume,
         f"""
         INSERT INTO user_resumes (user_id, name, text, filename, pdf)
         VALUES (%s, %s, %s, %s, %s)
@@ -111,14 +204,19 @@ def create_resume(body: ResumeCreate, user: AuthedUser = Depends(require_user)):
         """,
         (user.id, body.name.strip(), text[:MAX_RESUME_CHARS], body.filename, data),
     )
+    assert row is not None  # an upsert with RETURNING always yields its row
     return row
 
 
-@router.get("/user/resumes/{resume_id}/pdf")
-def resume_pdf(resume_id: int, user: AuthedUser = Depends(require_user)):
+@router.get(
+    "/user/resumes/{resume_id}/pdf",
+    response_class=Response,
+    responses={200: {"content": {"application/pdf": {}}}},
+)
+def resume_pdf(resume_id: int, user: AuthedUser = Depends(require_user)) -> Response:
     """The file as uploaded, for the extension to attach to a form. A pasted
-    resume has no file."""
-    from fastapi.responses import Response
+    resume has no file. Declared as a PDF because the schema said JSON, which
+    was never true of this route."""
 
     row = db.query_one(
         "SELECT filename, pdf FROM user_resumes WHERE id = %s AND user_id = %s",
@@ -137,8 +235,11 @@ def resume_pdf(resume_id: int, user: AuthedUser = Depends(require_user)):
 
 
 @router.patch("/user/resumes/{resume_id}")
-def patch_resume(resume_id: int, body: ResumePatch, user: AuthedUser = Depends(require_user)):
-    row = db.query_one(
+def patch_resume(
+    resume_id: int, body: ResumePatch, user: AuthedUser = Depends(require_user)
+) -> Resume:
+    row = db.query_one_as(
+        Resume,
         f"""
         UPDATE user_resumes
            SET name = COALESCE(%s, name), text = COALESCE(%s, text), updated_at = now()
@@ -153,22 +254,23 @@ def patch_resume(resume_id: int, body: ResumePatch, user: AuthedUser = Depends(r
 
 
 @router.delete("/user/resumes/{resume_id}")
-def delete_resume(resume_id: int, user: AuthedUser = Depends(require_user)):
+def delete_resume(resume_id: int, user: AuthedUser = Depends(require_user)) -> Ok:
     row = db.query_one(
         "DELETE FROM user_resumes WHERE id = %s AND user_id = %s RETURNING id",
         (resume_id, user.id),
     )
     if not row:
         raise refuse(404, "NOT_FOUND", "unknown resume")
-    return {"ok": True}
+    return Ok()
 
 
 def _job(user: AuthedUser, job_id: int) -> dict[str, Any]:
     return require_visible_job(user, job_id, "j.id, j.url, j.company, j.title")
 
 
-def _answers(user_id: int, job_id: int) -> list[dict[str, Any]]:
-    return db.query(
+def _answers(user_id: int, job_id: int) -> list[Answer]:
+    return db.query_as(
+        Answer,
         f"SELECT {_ANSWER_COLS} FROM application_answers "
         "WHERE user_id = %s AND job_id = %s ORDER BY id",
         (user_id, job_id),
@@ -176,7 +278,7 @@ def _answers(user_id: int, job_id: int) -> list[dict[str, Any]]:
 
 
 @router.get("/user/jobs/{job_id}/application")
-def get_application(job_id: int, user: AuthedUser = Depends(require_user)):
+def get_application(job_id: int, user: AuthedUser = Depends(require_user)) -> Application:
     """The form as read (or why it could not be), every question with its
     draft and its back-and-forth, and what the drafts would be written from."""
     job = _job(user, job_id)
@@ -184,50 +286,52 @@ def get_application(job_id: int, user: AuthedUser = Depends(require_user)):
         "SELECT questions, error, fetched_at FROM application_forms WHERE url = %s",
         (job["url"],),
     )
-    answers = {a["key"]: a for a in _answers(user.id, job_id)}
-    # Questions the form carries that this person has no row for yet, so the
-    # page shows the form before the first draft is asked for.
-    for q in (form or {}).get("questions") or []:
-        answers.setdefault(
-            q["key"],
-            {
-                "key": q["key"],
-                "question": q["label"],
-                "source": "form",
-                "required": bool(q.get("required")),
-                "draft": None,
-                "turns": [],
-                "model": None,
-                "updated_at": None,
-            },
-        )
+    asked = (form or {}).get("questions") or []
     # Whether the box wants prose. A one-line box (a URL, a salary) is a
     # field to fill, not an answer to draft; the view renders it as one and
     # the task drafts it only when asked for by key. A pasted question is
-    # prose by definition.
-    multiline = {q["key"]: q.get("kind") == "long" for q in (form or {}).get("questions") or []}
-    for a in answers.values():
-        a["multiline"] = multiline.get(a["key"], True)
-    return {
-        "job": job,
-        "form": {
-            "supported": forms.supported(job["url"]),
-            "host": forms.host_of(job["url"]),
-            "fetched_at": (form or {}).get("fetched_at"),
-            "error": (form or {}).get("error"),
-            "questions": len((form or {}).get("questions") or []),
-        },
-        "questions": list(answers.values()),
-        "task": task_admission.in_flight(
-            "application_draft", {"user_id": user.id, "job_id": job_id}
+    # prose by definition, which is what the default says.
+    multiline = {q["key"]: q.get("kind") == "long" for q in asked}
+    questions = {
+        a.key: Question(**a.model_dump(), multiline=multiline.get(a.key, True))
+        for a in _answers(user.id, job_id)
+    }
+    # Questions the form carries that this person has no row for yet, so the
+    # page shows the form before the first draft is asked for.
+    for q in asked:
+        questions.setdefault(
+            q["key"],
+            Question(
+                key=q["key"],
+                question=q["label"],
+                source="form",
+                required=bool(q.get("required")),
+                draft=None,
+                turns=[],
+                model=None,
+                updated_at=None,
+                multiline=multiline.get(q["key"], True),
+            ),
+        )
+    return Application(
+        job=JobRef(**job),
+        form=FormState(
+            supported=forms.supported(job["url"]),
+            host=forms.host_of(job["url"]),
+            fetched_at=(form or {}).get("fetched_at"),
+            error=(form or {}).get("error"),
+            questions=len(asked),
         ),
-        "resumes": db.query(
+        questions=list(questions.values()),
+        task=task_admission.in_flight("application_draft", {"user_id": user.id, "job_id": job_id}),
+        resumes=db.query_as(
+            ResumeRef,
             "SELECT id, name FROM user_resumes WHERE user_id = %s ORDER BY updated_at DESC",
             (user.id,),
         ),
-        "writing_style": drafts.writing_style(user.id),
-        "default_style": DEFAULT_STYLE,
-    }
+        writing_style=drafts.writing_style(user.id),
+        default_style=DEFAULT_STYLE,
+    )
 
 
 class QuestionAdd(BaseModel):
@@ -236,13 +340,16 @@ class QuestionAdd(BaseModel):
 
 
 @router.post("/user/jobs/{job_id}/application/questions", status_code=201)
-def add_question(job_id: int, body: QuestionAdd, user: AuthedUser = Depends(require_user)):
+def add_question(
+    job_id: int, body: QuestionAdd, user: AuthedUser = Depends(require_user)
+) -> Answer:
     """A question pasted in from a form this code cannot read. Keyed by its
     text, so pasting the same question twice is one row."""
     _job(user, job_id)
     text = " ".join(body.question.split())
     key = "m" + hashlib.sha1(text.lower().encode()).hexdigest()[:10]  # noqa: S324 - a key, not a secret
-    row = db.query_one(
+    row = db.query_one_as(
+        Answer,
         f"""
         INSERT INTO application_answers (user_id, job_id, key, question, source, required)
         VALUES (%s, %s, %s, %s, 'manual', %s)
@@ -251,11 +358,12 @@ def add_question(job_id: int, body: QuestionAdd, user: AuthedUser = Depends(requ
         """,
         (user.id, job_id, key, text, body.required),
     )
+    assert row is not None  # an upsert with RETURNING always yields its row
     return row
 
 
 @router.delete("/user/jobs/{job_id}/application/questions/{key}")
-def delete_question(job_id: int, key: str, user: AuthedUser = Depends(require_user)):
+def delete_question(job_id: int, key: str, user: AuthedUser = Depends(require_user)) -> Ok:
     _job(user, job_id)
     row = db.query_one(
         "DELETE FROM application_answers WHERE user_id = %s AND job_id = %s AND key = %s "
@@ -264,7 +372,7 @@ def delete_question(job_id: int, key: str, user: AuthedUser = Depends(require_us
     )
     if not row:
         raise refuse(404, "NOT_FOUND", "no pasted question with that key")
-    return {"ok": True}
+    return Ok()
 
 
 class DraftRequest(BaseModel):
@@ -274,7 +382,9 @@ class DraftRequest(BaseModel):
 
 
 @router.post("/user/jobs/{job_id}/application/draft", status_code=202)
-def request_drafts(job_id: int, body: DraftRequest, user: AuthedUser = Depends(require_user)):
+def request_drafts(
+    job_id: int, body: DraftRequest, user: AuthedUser = Depends(require_user)
+) -> DraftsQueued:
     """Queues the drafts. The task reads the form if it has not been read,
     then writes one draft per question, batched at half price where the
     person's key allows it."""
@@ -299,10 +409,10 @@ def request_drafts(job_id: int, body: DraftRequest, user: AuthedUser = Depends(r
             detail={
                 "code": "IN_PROGRESS",
                 "message": "drafts for this job are already being written",
-                "task_id": admission.conflict["id"],
+                "task_id": admission.conflict.id,
             },
         )
-    return {"task_id": admission.task_id}
+    return DraftsQueued(task_id=admission.task_id)
 
 
 class AnswerPut(BaseModel):
@@ -310,13 +420,16 @@ class AnswerPut(BaseModel):
 
 
 @router.put("/user/jobs/{job_id}/application/answers/{key}")
-def put_answer(job_id: int, key: str, body: AnswerPut, user: AuthedUser = Depends(require_user)):
+def put_answer(
+    job_id: int, key: str, body: AnswerPut, user: AuthedUser = Depends(require_user)
+) -> Answer:
     """The person's own edit. Kept as the draft and as a turn, so a later
     refinement starts from what they wrote rather than what the model did.
     An empty draft clears it; the page saves whatever the box holds on blur."""
     _job(user, job_id)
     turn = {"role": "user", "kind": "edit", "text": body.draft, "at": _now()}
-    row = db.query_one(
+    row = db.query_one_as(
+        Answer,
         f"""
         UPDATE application_answers
            SET draft = NULLIF(%s, ''), turns = turns || %s::jsonb, updated_at = now(),
@@ -343,43 +456,42 @@ def _now() -> str:
 @router.post("/user/jobs/{job_id}/application/answers/{key}/refine")
 async def refine_answer(
     job_id: int, key: str, body: RefineBody, user: AuthedUser = Depends(require_user)
-):
+) -> Answer:
     """One turn of back-and-forth on one draft: the person says what to
     change, the model rewrites from the current draft and the earlier
     requests. Live, on the person's own configured model, like explain."""
     job = _job(user, job_id)
-    row = db.query_one(
-        f"SELECT {_ANSWER_COLS} FROM application_answers "
-        "WHERE user_id = %s AND job_id = %s AND key = %s",
+    if not db.query_one(
+        "SELECT 1 FROM application_answers WHERE user_id = %s AND job_id = %s AND key = %s",
         (user.id, job_id, key),
-    )
-    if not row:
+    ):
         raise refuse(404, "NOT_FOUND", "unknown question")
     resume = drafts.resume_text(user.id, body.resume_id)
     if not resume:
         raise refuse(400, "NO_RESUME", "add a resume under settings first")
     cfg = ai_access.require_config(user)
     instruction = {"role": "user", "kind": "instruction", "text": body.instruction, "at": _now()}
-    row = db.query_one(
+    held = db.query_one_as(
+        AnswerRevision,
         "UPDATE application_answers SET draft_revision = draft_revision + 1, "
         "turns = turns || %s::jsonb, updated_at = now() "
-        "WHERE user_id = %s AND job_id = %s AND key = %s RETURNING *",
+        f"WHERE user_id = %s AND job_id = %s AND key = %s RETURNING {_ANSWER_COLS}, draft_revision",
         (db.jsonb([instruction]), user.id, job_id, key),
     )
-    if row is None:
+    if held is None:
         raise refuse(404, "NOT_FOUND", "unknown question")
     with budget.record_parse_failures(user.id, cfg.key_source, drafts.PURPOSE, cfg.model):
         parsed, usage = await ai.parse(
             cfg,
             drafts.instructions(drafts.writing_style(user.id)),
             drafts.question_input(
-                row["question"],
+                held.question,
                 job["company"],
                 job["title"],
                 get_content(job["url"]) or "",
                 resume,
-                draft=row["draft"],
-                turns=row["turns"][:-1],
+                draft=held.draft,
+                turns=held.turns[:-1],
                 instruction=body.instruction,
             ),
             drafts.Draft,
@@ -390,7 +502,8 @@ async def refine_answer(
     turns = [
         {"role": "assistant", "kind": "refine", "text": parsed.answer, "at": _now()},
     ]
-    updated = db.query_one(
+    updated = db.query_one_as(
+        Answer,
         f"""
         UPDATE application_answers
            SET draft = %s, model = %s, turns = turns || %s::jsonb, updated_at = now(),
@@ -398,7 +511,7 @@ async def refine_answer(
          WHERE user_id = %s AND job_id = %s AND key = %s AND draft_revision = %s
         RETURNING {_ANSWER_COLS}
         """,
-        (parsed.answer, cfg.model, json.dumps(turns), user.id, job_id, key, row["draft_revision"]),
+        (parsed.answer, cfg.model, json.dumps(turns), user.id, job_id, key, held.draft_revision),
     )
     if updated is None:
         raise refuse(

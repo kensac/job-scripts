@@ -3218,7 +3218,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ResumeList"
+                }
               }
             }
           },
@@ -3345,7 +3347,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Resume"
+                }
               }
             }
           },
@@ -3405,7 +3409,7 @@
     "/v1/user/resumes/{resume_id}/pdf": {
       "get": {
         "summary": "Resume Pdf",
-        "description": "The file as uploaded, for the extension to attach to a form. A pasted\nresume has no file.",
+        "description": "The file as uploaded, for the extension to attach to a form. A pasted\nresume has no file. Declared as a PDF because the schema said JSON, which\nwas never true of this route.",
         "operationId": "resume_pdf_v1_user_resumes__resume_id__pdf_get",
         "parameters": [
           {
@@ -3472,9 +3476,7 @@
           "200": {
             "description": "Successful Response",
             "content": {
-              "application/json": {
-                "schema": {}
-              }
+              "application/pdf": {}
             }
           },
           "400": {
@@ -3610,7 +3612,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Resume"
+                }
               }
             }
           },
@@ -3735,7 +3739,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Ok"
+                }
               }
             }
           },
@@ -3863,7 +3869,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Application"
+                }
               }
             }
           },
@@ -4001,7 +4009,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Answer"
+                }
               }
             }
           },
@@ -4137,7 +4147,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Ok"
+                }
               }
             }
           },
@@ -4275,7 +4287,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/DraftsQueued"
+                }
               }
             }
           },
@@ -4422,7 +4436,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Answer"
+                }
               }
             }
           },
@@ -4569,7 +4585,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Answer"
+                }
               }
             }
           },
@@ -26013,6 +26031,81 @@
         "type": "object",
         "title": "ActionAnswer"
       },
+      "Answer": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "question": {
+            "type": "string",
+            "title": "Question"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "required": {
+            "type": "boolean",
+            "title": "Required"
+          },
+          "draft": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Draft"
+          },
+          "turns": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Turns"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "question",
+          "source",
+          "required",
+          "draft",
+          "turns",
+          "model",
+          "updated_at"
+        ],
+        "title": "Answer",
+        "description": "`_ANSWER_COLS`, in types. `turns` is the back-and-forth, oldest first:\nthe person's edits and instructions and the model's rewrites, each with a\nrole, a kind and a time."
+      },
       "AnswerList": {
         "properties": {
           "answers": {
@@ -26060,6 +26153,66 @@
           "api_key"
         ],
         "title": "ApiKeyPut"
+      },
+      "Application": {
+        "properties": {
+          "job": {
+            "$ref": "#/components/schemas/JobRef"
+          },
+          "form": {
+            "$ref": "#/components/schemas/FormState"
+          },
+          "questions": {
+            "items": {
+              "$ref": "#/components/schemas/Question"
+            },
+            "type": "array",
+            "title": "Questions"
+          },
+          "task": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InFlight"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "resumes": {
+            "items": {
+              "$ref": "#/components/schemas/ResumeRef"
+            },
+            "type": "array",
+            "title": "Resumes"
+          },
+          "writing_style": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Writing Style"
+          },
+          "default_style": {
+            "type": "string",
+            "title": "Default Style"
+          }
+        },
+        "type": "object",
+        "required": [
+          "job",
+          "form",
+          "questions",
+          "task",
+          "resumes",
+          "writing_style",
+          "default_style"
+        ],
+        "title": "Application"
       },
       "AppliedWeek": {
         "properties": {
@@ -26586,6 +26739,26 @@
         },
         "type": "object",
         "title": "DraftRequest"
+      },
+      "DraftsQueued": {
+        "properties": {
+          "task_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "task_id"
+        ],
+        "title": "DraftsQueued"
       },
       "Education": {
         "properties": {
@@ -27166,6 +27339,55 @@
         ],
         "title": "FilterRunBody"
       },
+      "FormState": {
+        "properties": {
+          "supported": {
+            "type": "boolean",
+            "title": "Supported"
+          },
+          "host": {
+            "type": "string",
+            "title": "Host"
+          },
+          "fetched_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fetched At"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "questions": {
+            "type": "integer",
+            "title": "Questions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "supported",
+          "host",
+          "fetched_at",
+          "error",
+          "questions"
+        ],
+        "title": "FormState",
+        "description": "Whether this job's form could be read, and what came back. `questions`\nis a count, because the questions themselves are merged into the answers\nabove rather than listed twice."
+      },
       "Funnel": {
         "properties": {
           "applications": {
@@ -27337,6 +27559,48 @@
         ],
         "title": "ImprovePromptRequest"
       },
+      "InFlight": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "progress": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Progress"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "status",
+          "created_at"
+        ],
+        "title": "InFlight",
+        "description": "The task a person is waiting on, as the page shows it.\n\nDeclared here rather than in the router that surfaces it, because the\ncolumns are this function's and a router copying them is how the two\ndrift. `filter_runs` finds its own conflicting task with its own query\nand returns this same shape, which is why `kind` is here: it was already\nin that query, and one model for one idea beats two that agree today."
+      },
       "IngestBody": {
         "properties": {
           "sources": {
@@ -27439,6 +27703,48 @@
         },
         "type": "object",
         "title": "JobCorrection"
+      },
+      "JobRef": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "company": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "url",
+          "company",
+          "title"
+        ],
+        "title": "JobRef"
       },
       "JsonValue": {},
       "LocationPlace": {
@@ -27773,6 +28079,18 @@
       },
       "NonNullUpdate_str_": {
         "type": "string"
+      },
+      "Ok": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok",
+            "default": true
+          }
+        },
+        "type": "object",
+        "title": "Ok",
+        "description": "It worked and there is nothing to say about it.\n\nReturned where the interesting outcome is the status code. A route with\nsomething to report returns that instead; this is not a wrapper to put\naround a real answer."
       },
       "PatchResult": {
         "properties": {
@@ -28293,6 +28611,86 @@
           "params"
         ],
         "title": "ProviderEntry"
+      },
+      "Question": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "question": {
+            "type": "string",
+            "title": "Question"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "required": {
+            "type": "boolean",
+            "title": "Required"
+          },
+          "draft": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Draft"
+          },
+          "turns": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Turns"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "multiline": {
+            "type": "boolean",
+            "title": "Multiline"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "question",
+          "source",
+          "required",
+          "draft",
+          "turns",
+          "model",
+          "updated_at",
+          "multiline"
+        ],
+        "title": "Question",
+        "description": "An answer as the application view shows it. A question the form\ncarries but nobody has drafted yet has no row, so every field but the\nquestion itself is empty, and `multiline` says whether the box wants\nprose."
       },
       "QuestionAdd": {
         "properties": {
@@ -29242,6 +29640,64 @@
         ],
         "title": "ResolveSourceRequest"
       },
+      "Resume": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "filename": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filename"
+          },
+          "chars": {
+            "type": "integer",
+            "title": "Chars"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "has_pdf": {
+            "type": "boolean",
+            "title": "Has Pdf"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "filename",
+          "chars",
+          "text",
+          "has_pdf",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "Resume",
+        "description": "`_RESUME_COLS`, in types. `text` is what the drafts are written from;\n`pdf` is not here because the file is fetched from its own route."
+      },
       "ResumeCreate": {
         "properties": {
           "name": {
@@ -29292,6 +29748,22 @@
         ],
         "title": "ResumeCreate"
       },
+      "ResumeList": {
+        "properties": {
+          "resumes": {
+            "items": {
+              "$ref": "#/components/schemas/Resume"
+            },
+            "type": "array",
+            "title": "Resumes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "resumes"
+        ],
+        "title": "ResumeList"
+      },
       "ResumePatch": {
         "properties": {
           "name": {
@@ -29323,6 +29795,25 @@
         },
         "type": "object",
         "title": "ResumePatch"
+      },
+      "ResumeRef": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "ResumeRef",
+        "description": "Enough to choose one from a menu."
       },
       "ReviewRate": {
         "properties": {

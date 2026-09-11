@@ -1,9 +1,29 @@
 from __future__ import annotations
 
+import datetime
 from dataclasses import dataclass
 from typing import Any, Literal
 
+from pydantic import BaseModel
+
 from api import db, events
+
+
+class InFlight(BaseModel):
+    """The task a person is waiting on, as the page shows it.
+
+    Declared here rather than in the router that surfaces it, because the
+    columns are this function's and a router copying them is how the two
+    drift. `filter_runs` finds its own conflicting task with its own query
+    and returns this same shape, which is why `kind` is here: it was already
+    in that query, and one model for one idea beats two that agree today."""
+
+    id: int
+    kind: str
+    status: str
+    progress: dict[str, Any] | None = None
+    created_at: datetime.datetime
+
 
 ACTIVE_STATUSES = ("pending", "running", "awaiting_batch", "waiting")
 TASK_STATUSES = ("pending", "waiting", "running", "awaiting_batch", "done", "failed", "cancelled")
@@ -12,7 +32,7 @@ TaskKind = Literal["application_draft", "extract_upload", "ingest_source"]
 
 def in_flight(
     kind: TaskKind, subject: dict[str, Any], *, statuses: tuple[str, ...] = ACTIVE_STATUSES
-) -> dict | None:
+) -> InFlight | None:
     clauses = ["kind = %(kind)s", "status = ANY(%(statuses)s)"]
     params: dict[str, Any] = {"kind": kind, "statuses": list(statuses)}
     for index, (key, value) in enumerate(subject.items()):
@@ -22,8 +42,9 @@ def in_flight(
         clauses.append(f"{expression} = %(value{index})s")
         params[f"key{index}"] = key
         params[f"value{index}"] = value
-    return db.query_one(
-        "SELECT id, status, progress, created_at FROM tasks WHERE "
+    return db.query_one_as(
+        InFlight,
+        "SELECT id, kind, status, progress, created_at FROM tasks WHERE "
         + " AND ".join(clauses)
         + " ORDER BY id DESC LIMIT 1",
         params,
@@ -33,7 +54,7 @@ def in_flight(
 @dataclass(frozen=True)
 class Admission:
     task_id: int | None = None
-    conflict: dict | None = None
+    conflict: InFlight | None = None
 
 
 def enqueue(

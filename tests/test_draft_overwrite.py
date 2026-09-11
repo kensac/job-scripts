@@ -248,8 +248,8 @@ async def test_sweep_cannot_supersede_pending_refinement(f, monkeypatch):
     row = await routes.refine_answer(
         jid, "why", routes.RefineBody(instruction="Write an answer"), SimpleNamespace(id=uid)
     )
-    assert row["draft"] == "Requested refinement"
-    assert [turn["kind"] for turn in row["turns"]] == ["instruction", "refine"]
+    assert row.draft == "Requested refinement"
+    assert [turn["kind"] for turn in row.turns] == ["instruction", "refine"]
 
 
 @pytest.mark.asyncio
