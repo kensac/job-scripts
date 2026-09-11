@@ -50,7 +50,6 @@ def init_schema() -> None:
             _migrate()
         finally:
             conn.execute("SELECT pg_advisory_unlock(%s)", (_SCHEMA_LOCK_KEY,))
-    _seed_sources()
     seed_defaults()
 
 
@@ -98,27 +97,6 @@ def _migrate() -> None:
 
     cfg = Config(str(PROJECT_ROOT / "alembic.ini"))
     command.upgrade(cfg, "head")
-
-
-def _seed_sources() -> None:
-    from core.configs import load_configs, load_groups
-
-    for name, cfg in load_configs().items():
-        execute(
-            """
-            INSERT INTO sources (name, listings_url) VALUES (%s, %s)
-            ON CONFLICT (name) DO UPDATE SET listings_url = EXCLUDED.listings_url
-            """,
-            (name, cfg["JOB_LISTINGS_URL"]),
-        )
-    for name, members in load_groups().items():
-        execute(
-            """
-            INSERT INTO source_groups (name, members) VALUES (%s, %s)
-            ON CONFLICT (name) DO UPDATE SET members = EXCLUDED.members
-            """,
-            (name, members),
-        )
 
 
 def _as_query(sql: str) -> LiteralString:
