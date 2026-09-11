@@ -87,7 +87,6 @@ def _record_reverify_results(task_id: int, results: list) -> int:
             # verdict was written once and never again: nothing else revisits
             # it. The page is already fetched and the call is already made, so
             # the second axis costs its output tokens and nothing else.
-            written = False
             # One call, two rows, and the usage books onto the first one
             # written. The second is a zero-token decided row, which is the
             # same spelling handle_verify_new uses below and the shape
@@ -112,10 +111,11 @@ def _record_reverify_results(task_id: int, results: list) -> int:
                     batch_id=res.batch_id,
                 )
                 usage = {}
-                written = True
-            receipt.outcome = "written" if written else "superseded"
-            if not written:
-                continue
+            # Both axes are answered unconditionally here, unlike verify_new,
+            # which writes only the checks its request was missing. The
+            # staleness guard above is what decides whether this result writes
+            # at all, so reaching here is the written outcome.
+            receipt.outcome = "written"
             recorded += 1
     return recorded
 
