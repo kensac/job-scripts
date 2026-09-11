@@ -29,6 +29,7 @@ from api import ai, batch_results, budget, db, events, metrics
 from api.batch_results import consume_result as consume_result
 from api.batch_results import snapshot_specs as snapshot_specs
 from api.budget import Entitlement
+from api.queue import INGEST_INTERVAL_MINUTES, enqueue  # noqa: F401
 from api.tasks.board import demote_closed, materialize_passing
 from core import pricing
 from core.batch import BatchEventCounts, BatchResult
@@ -41,10 +42,6 @@ logger = logging.getLogger("jobtracker_worker")
 MAX_CONCURRENCY = int(os.environ.get("JOBTRACKER_MAX_CONCURRENCY", "6"))
 
 # How often every active source is queued for ingest. The scheduler in
-# api/worker.py buckets time by it; the ingest_backlog detector in
-# api/health.py measures lateness in multiples of it. Lives here so health
-# never imports the worker.
-INGEST_INTERVAL_MINUTES = int(os.environ.get("JOBTRACKER_INGEST_INTERVAL_MINUTES", "60"))
 
 
 class AdaptiveLimiter:
@@ -180,25 +177,6 @@ def _record_batch_ids(task_id: int, batch_ids: list[str], conn: Any = None) -> N
         conn.execute(sql, params)
     else:
         db.execute(sql, params)
-
-
-def enqueue(kind: str, payload: dict[str, Any], dedupe_key: str | None = None) -> int | None:
-    """Insert a task; with a dedupe_key, at most one task per key ever exists,
-    so every fleet worker can race to enqueue and exactly one wins.
-
-    parent_id is mirrored out of the payload into its own column: it is the
-    only payload field that gets queried, and no index can serve
-    payload->>'parent_id'. It stays in the payload too so a chunk handler
-    reading its own payload is unchanged."""
-    row = db.query_one(
-        "INSERT INTO tasks (kind, payload, dedupe_key, parent_id) "
-        "VALUES (%s, %s, %s, %s) "
-        "ON CONFLICT (dedupe_key) DO NOTHING RETURNING id",
-        (kind, db.jsonb(payload), dedupe_key, payload.get("parent_id")),
-    )
-    if row:
-        events.publish_task(row["id"])
-    return row["id"] if row else None
 
 
 class Deferred(Exception):

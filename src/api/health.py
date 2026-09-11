@@ -4,6 +4,7 @@ import logging
 from typing import Any
 
 from api import db, telemetry
+from api.queue import INGEST_INTERVAL_MINUTES
 from core.checks import POSTING_CHECK_NAMES
 
 logger = logging.getLogger("jobtracker_health")
@@ -790,8 +791,6 @@ def _detect_queue() -> list[dict[str, Any]]:
                 },
             }
         )
-
-    from api.tasks.runtime import INGEST_INTERVAL_MINUTES
 
     cycles = int(db.get_config("ingest_backlog_cycles"))
     limit_minutes = cycles * INGEST_INTERVAL_MINUTES

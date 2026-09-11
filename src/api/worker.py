@@ -20,6 +20,7 @@ from typing import Any
 import psycopg
 
 from api import db, events, hosts, metrics, telemetry
+from api.queue import INGEST_INTERVAL_MINUTES, enqueue
 from api.tasks import HANDLERS
 from api.tasks.runtime import (
     CHUNK_KINDS,
@@ -28,7 +29,6 @@ from api.tasks.runtime import (
     AwaitingBatch,
     Deferred,
     TaskClaim,
-    enqueue,
     finish,
     maybe_finalize_parent,
     reconcile_chunks,
@@ -41,8 +41,6 @@ logger = logging.getLogger("jobtracker_worker")
 
 POLL_SECONDS = float(os.environ.get("JOBTRACKER_WORKER_POLL", "5"))
 
-
-from api.tasks.runtime import INGEST_INTERVAL_MINUTES  # noqa: E402
 
 # How often to ask the provider whether parked batches have landed. One
 # minute, matching the housekeeping tick, which is the floor: a finer bucket

@@ -175,3 +175,25 @@ name = "core does not depend on api"
 type = "forbidden"
 source_modules = ["core"]
 forbidden_modules = ["api"]
+
+# THE SECOND LAYER CANNOT BE STATED YET, and finding out why is worth more
+# than the contract would have been.
+#
+# What we want: no module in `api` reaches into `api.tasks`. Handlers read the
+# services freely; the services must not reach back. Three did, all for a
+# queue primitive, and two imported inside a function to dodge the cycle that
+# reaching created. That primitive is api/queue.py now, below both, and the
+# only two left are the dependency pointing the right way round: api.worker IS
+# the task runner, and api.budget prices the fleet, whose cost is the sum over
+# task shapes.
+#
+# What import-linter can express: a `forbidden` contract skips a target that
+# is INSIDE its source. With source_modules = ["api"], `api.tasks` is internal
+# and the contract passes no matter what, which was verified by adding a
+# violation and watching it stay green. Narrowing the source to one module
+# catches it, so enforcing this means enumerating forty-odd api modules and
+# leaving a hole the day someone adds the forty-first.
+#
+# Stating it properly needs api.tasks to be a SIBLING of api rather than a
+# child, which is phase 5 work that now has a concrete reason rather than a
+# stylistic one. See docs/agents/architecture-migration.md.
