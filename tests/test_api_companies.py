@@ -92,10 +92,10 @@ def test_amounts_without_a_currency_are_not_folded_into_a_currency(client, admin
     assert buckets["USD"]["n"] == 1
 
 
-def test_applications_are_absent_rather_than_zero(client, admin_headers, f):
+def test_applications_are_null_rather_than_zero(client, admin_headers, f):
     f.make_job(source="s", company="Untouched", title="a")
 
-    assert "applications" not in _item(client, admin_headers, "untouched")
+    assert _item(client, admin_headers, "untouched")["applications"] is None
 
 
 def test_applications_carry_their_status_breakdown(client, admin_headers, f):
@@ -148,14 +148,14 @@ def test_a_dismissed_application_stops_counting(client, admin_headers, f):
         (user_id,),
     )
 
-    assert "applications" not in _item(client, admin_headers, "coursework")
+    assert _item(client, admin_headers, "coursework")["applications"] is None
 
 
-def test_open_is_omitted_below_its_floor(client, admin_headers, f):
+def test_open_is_null_below_its_floor(client, admin_headers, f):
     for i in range(OPEN_MIN_CHECKED - 1):
         f.make_ready_job(source="s", company="Thin", title=f"t{i}", closed="passed")
 
-    assert "open" not in _item(client, admin_headers, "thin")
+    assert _item(client, admin_headers, "thin")["open"] is None
 
 
 def test_open_comes_from_the_closed_check_not_the_active_flag(client, admin_headers, f):
@@ -214,7 +214,7 @@ def test_repost_excludes_a_role_listed_across_many_locations(client, admin_heade
     )
     db.execute("UPDATE jobs SET date_posted = now() WHERE id = %s", (second,))
 
-    assert "repost" not in _item(client, admin_headers, "grocer")
+    assert _item(client, admin_headers, "grocer")["repost"] is None
 
 
 def test_repost_excludes_the_same_role_on_two_boards(client, admin_headers, f):
@@ -226,7 +226,7 @@ def test_repost_excludes_the_same_role_on_two_boards(client, admin_headers, f):
     )
     db.execute("UPDATE jobs SET date_posted = now() WHERE id = %s", (second,))
 
-    assert "repost" not in _item(client, admin_headers, "syndicated")
+    assert _item(client, admin_headers, "syndicated")["repost"] is None
 
 
 def test_search_matches_on_the_casefolded_key(client, admin_headers, f):
@@ -300,4 +300,4 @@ def test_the_status_breakdown_never_exceeds_the_count_it_breaks_down(client, adm
     item = _item(client, admin_headers, "twinned")
     # The one application is dismissed, so it counts for nothing - and its board
     # row must not survive in the breakdown as a part of a whole that is zero.
-    assert "applications" not in item
+    assert item["applications"] is None

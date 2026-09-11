@@ -33,7 +33,7 @@ if not _COST_COLUMN:
     )
 
 
-def _sources() -> list[dict]:
+def _sources() -> list[analytics.BoardAnalytics]:
     return analytics._collect(analytics.DEFAULT_MIN_SAMPLE)
 
 
@@ -41,17 +41,17 @@ def _sources() -> list[dict]:
 def test_every_source_in_jobs_survives_into_the_response():
     """sheet_import and upload have no row in `sources`. An inner join drops
     them, and sheet_import is the largest board in the catalog."""
-    rows = {r["source"] for r in _sources()}
+    rows = {r.source for r in _sources()}
     in_jobs = {r["source"] for r in db.query("SELECT DISTINCT source FROM jobs")}
     assert in_jobs <= rows, f"sources lost between jobs and the response: {in_jobs - rows}"
 
 
 @pytest.mark.corpus
 def test_unconfigured_sources_are_reported_as_such_not_omitted():
-    rows = {r["source"]: r for r in _sources()}
+    rows = {r.source: r for r in _sources()}
     configured = {r["name"] for r in db.query("SELECT name FROM sources")}
     for name, row in rows.items():
-        assert row["configured"] is (name in configured)
+        assert row.configured is (name in configured)
 
 
 @pytest.mark.integration
@@ -67,9 +67,9 @@ def test_active_share_is_not_comparable_across_feeds():
     inactive rows.
     """
     rows = _sources()
-    with_postings = [r for r in rows if r["inventory"]["total"] > 0]
-    reporting = [r for r in with_postings if r["inventory"]["reports_inactive"]]
-    silent = [r for r in with_postings if not r["inventory"]["reports_inactive"]]
+    with_postings = [r for r in rows if r.inventory.total > 0]
+    reporting = [r for r in with_postings if r.inventory.reports_inactive]
+    silent = [r for r in with_postings if not r.inventory.reports_inactive]
     assert reporting, "no board reports inactive postings - the flag is meaningless"
     assert silent, (
         "every board now reports inactive postings; active_share may have "
@@ -108,10 +108,10 @@ def test_status_vocabulary_still_has_no_interview_or_offer_state():
 @pytest.mark.corpus
 def test_rates_never_render_a_number_below_the_floor():
     for row in _sources():
-        for name, stage in row["funnel"].items():
-            rate = stage["pass_rate"]
-            if rate["denominator"] < analytics.DEFAULT_MIN_SAMPLE:
-                assert rate["value"] is None, f"{row['source']}/{name} rendered a floored rate"
+        for name, stage in row.funnel.items():
+            rate = stage.pass_rate
+            if rate.denominator < analytics.DEFAULT_MIN_SAMPLE:
+                assert rate.value is None, f"{row.source}/{name} rendered a floored rate"
 
 
 @pytest.mark.corpus
@@ -129,15 +129,15 @@ def test_every_rate_carries_its_denominator():
                 _check(value, f"{path}[{i}]")
 
     for row in _sources():
-        _check(row, row["source"])
+        _check(row.model_dump(), row.source)
 
 
 @pytest.mark.corpus
 def test_funnel_never_claims_to_have_checked_more_than_the_board_holds():
     for row in _sources():
-        total = row["inventory"]["total"]
-        for name, stage in row["funnel"].items():
-            assert stage["checked"] <= total, f"{row['source']}/{name} checked > total"
+        total = row.inventory.total
+        for name, stage in row.funnel.items():
+            assert stage.checked <= total, f"{row.source}/{name} checked > total"
 
 
 @pytest.mark.corpus
