@@ -13,7 +13,7 @@ from api.auth import AuthedUser, require_user
 from api.board import visibility
 from api.board.access import require_visible_job
 from api.models import UploadRequest, UserJobPatch, UserJobsBulkIds, UserJobsBulkPatch
-from api.problem import refuse
+from api.problem import AI_REFUSALS, refuse
 from core.comp import CompBasis, CompPeriod
 from core.fetching.urls import normalize_url
 
@@ -825,7 +825,7 @@ class ExplainBody(BaseModel):
     check: str
 
 
-@router.post("/user/jobs/{job_id}/explain")
+@router.post("/user/jobs/{job_id}/explain", responses=AI_REFUSALS)
 async def explain_check(
     job_id: int, body: ExplainBody, user: AuthedUser = Depends(require_user)
 ) -> Explained:

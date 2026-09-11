@@ -44,12 +44,30 @@ def refuse(status: int, code: str, message: str) -> HTTPException:
     return HTTPException(status, detail=Problem(code=code, message=message).model_dump())
 
 
+def _problems(*statuses: int) -> dict[int | str, dict[str, type[BaseModel]]]:
+    return {status: {"model": ProblemResponse} for status in statuses}
+
+
 # Attached to every router, so an operation documents its refusals without
 # each one listing them. A route that cannot return one of these is rare
 # enough that over-declaring here is cheaper than under-declaring everywhere.
-REFUSALS: dict[int | str, dict[str, type[BaseModel]]] = {
-    400: {"model": ProblemResponse},
-    403: {"model": ProblemResponse},
-    404: {"model": ProblemResponse},
-    409: {"model": ProblemResponse},
-}
+#
+# 401 is here because `require_user` raises it, and that dependency is on
+# nearly every route in the application.
+REFUSALS = _problems(400, 401, 403, 404, 409)
+
+# A route that asks a model something. 402 is `require_config` refusing on
+# entitlement or budget, and it is a refusal a client acts on rather than
+# reports: the answer is to add a key or raise a cap. 502 is the model
+# answering with nothing usable after the tokens were already spent, which
+# has to read as a real outcome rather than a crash.
+AI_REFUSALS = _problems(402, 502)
+
+# A route that takes a file or a page capture. The cap is stated in the
+# message, because a client that knows the limit can say so before the upload
+# rather than after it.
+SIZE_REFUSALS = _problems(413)
+
+# A route that needs something the fleet owns and may not have, such as a
+# server-side model key.
+UNAVAILABLE_REFUSALS = _problems(503)

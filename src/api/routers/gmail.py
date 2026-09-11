@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from api import oauth
 from api.auth import AuthedUser, require_user
 from api.models import Ok
+from api.problem import AI_REFUSALS
 
 router = APIRouter(prefix="/user/gmail")
 
@@ -80,7 +81,7 @@ def authorize(
     return AuthorizationUrl(authorization_url=url)
 
 
-@router.post("/callback")
+@router.post("/callback", responses=AI_REFUSALS)
 def callback(
     body: CallbackRequest, user: AuthedUser = Depends(require_connect_access)
 ) -> GmailStatus:
