@@ -289,6 +289,66 @@ The second drops the traceback. Some of those six are deliberate, because the
 error is expected and the traceback is noise; they are worth reading rather
 than rewriting in bulk.
 
+## The gaps list
+
+Everything measured and not yet closed, with the number that makes it a gap
+rather than an opinion. A row leaves this list when it is fixed or when a
+measurement says it was never worth fixing, and either way it says which.
+
+**The schema is not a contract.** 173 of 190 operations return an undeclared
+object; 11 declare a shape. Phase 7.
+
+**A failure is not in the contract at all.** 164 `raise HTTPException` sites,
+at least three `detail` shapes among them (69 `{code, message}`, 14 a bare
+string, 1 an f-string), and the schema declares 200, 201, 202 and the 422
+FastAPI adds. No 4xx. Phase 7.
+
+**Reads are untyped.** 678 SQL call sites return bare dicts. `db.query_as` is
+the primitive; adoption is per domain. Phase 7.
+
+**The services still reach into the handlers.** Nine ignored imports in three
+causes. The largest is four routers calling four helpers that live inside a
+handler because that is where they were first needed: `resume_text`,
+`writing_style`, `instructions`, `locations.store`. Moving those four is what
+empties most of the list.
+
+**SHAPES cannot move down.** It is assembled by importing each task module to
+read the shape that module declares, and two do not inverse cleanly:
+`mail_classify` builds its two shapes in a function, and `application` reads
+its purpose from another module.
+
+**Unattended code that says nothing when it goes wrong.** Four task handlers
+log nothing at all: `experiments` (505 lines), `embeddings` (232),
+`batch_policy` (64), `uploads` (61). A handler runs with nobody watching, so
+silence there is different from silence in a router, where uvicorn's access
+log carries the request.
+
+**Derivations that say nothing.** `api/mail/pipeline.py` (588 lines) derives
+an application's state from an event stream and logs nothing;
+`api/ai/__init__.py` (452) is the call path.
+
+**Seven logger names where two would do.** `jobtracker_worker` (24 modules)
+and `jobtracker_api` (11) are the convention; five are one-offs and
+`core/batch.py` uses `job_tracker`, spelled differently from all of them.
+Nothing is dropped, because telemetry attaches at the root; filtering by
+source is what does not work.
+
+**Tracebacks dropped on purpose or by accident, unknown which.** 18 sites use
+`logger.exception` and 6 use `logger.error`. The second keeps no traceback.
+Worth reading rather than rewriting in bulk: some are deliberate.
+
+**Test coverage has never been measured.** Nothing in `pyproject.toml`, the
+`Makefile` or CI mentions it. 1,656 tests over 36,500 lines of `src` with no
+number attached to them.
+
+**The long files.** `routers/admin.py` 2,136 lines, `routers/mail.py` 2,117,
+`routers/resolve.py` 1,339, `orm.py` 1,268, `health.py` 1,155. Long because
+nothing split them. Phase 6.
+
+**`user_jobs` answers two questions.** What a person keeps, and what the
+sweeps carry. Phase 2b, deferred: moving the sweeps' scope changes what gets
+paid for, so it waits for a cutover comparison.
+
 ## Revising this document
 
 This plan was written from a reading of the codebase, and a phase that opens
