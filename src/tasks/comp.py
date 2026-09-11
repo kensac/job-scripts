@@ -3,15 +3,13 @@
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
 from api import db
 from api.ai import batch_results
-from core.providers.spec import StructuredOutput
-from core.routing import TaskShape
+from core.shapes import COMP_TASK, EXTRACT_COMP_PER_CYCLE
 from core.store import AI_ELIGIBLE_JOB, CONTENT_LATERAL, VERIFIED_OPEN
 from tasks import rescrape
 from tasks.runtime import (
@@ -22,14 +20,6 @@ from tasks.runtime import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-# Comp extraction runs hourly and each pass is bounded, so one task cannot pull
-# the whole catalog into memory or occupy a worker indefinitely. The size is
-# chosen to fill the batch-wave concurrency rather than picked arbitrarily: a
-# comp spec is ~6.5k tokens against a 1.8M-token wave budget, so ~276 specs per
-# wave, and waves now run BATCH_WAVE_CONCURRENCY at a time.
-EXTRACT_COMP_PER_CYCLE = int(os.environ.get("JOBTRACKER_EXTRACT_COMP_PER_CYCLE", "1100"))
 
 
 # Multipliers to a yearly figure. The old version knew only hourly and
@@ -53,29 +43,6 @@ COMP_PERIODS = (*tuple(_PERIOD_TO_YEARLY), "one_time")
 
 
 COMP_BASES = ("base", "total", "stipend", "unspecified")
-
-
-# What this work needs, rather than which model happens to serve it. One
-# candidate, so the resolved model is gpt-5-nano exactly as before - what
-# changes is that the capability, the key and the price are now checked
-# instead of assumed. Comp extraction is the shape nano handles well: a
-# stated number copied off the page, not a judgment about silence.
-COMP_TASK = TaskShape(
-    purpose="comp",
-    label="Compensation extraction",
-    per_cycle=EXTRACT_COMP_PER_CYCLE,
-    notes=(
-        "Copying a stated number off the page, which is the shape gpt-5-nano "
-        "handles well - it is not asked to judge silence, only to read a figure "
-        "that is either printed or absent."
-    ),
-    structured=StructuredOutput.JSON_SCHEMA,
-    batched=True,
-    max_output_tokens=1500,
-    est_prompt_tokens=6500,
-    effort="low",
-    candidates=("gpt-5-nano",),
-)
 
 
 class CompExtract(BaseModel):

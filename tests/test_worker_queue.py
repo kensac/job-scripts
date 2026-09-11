@@ -217,7 +217,7 @@ def test_park_refuses_once_the_task_has_been_reclaimed():
     _hold_claim(task_id)
     _reclaim_elsewhere(task_id)
 
-    assert tasks_runtime._park_awaiting_batch(task_id, ["batch_lost"]) is False
+    assert tasks_runtime.park_awaiting_batch(task_id, ["batch_lost"]) is False
     row = db.query_one("SELECT status, worker FROM tasks WHERE id = %s", (task_id,))
     assert row["status"] == "running", "must not park a run another worker holds"
     assert row["worker"] == "other-host"
@@ -231,7 +231,7 @@ def test_park_succeeds_while_the_claim_is_held():
     worker._claim_task()
     _hold_claim(task_id)
 
-    assert tasks_runtime._park_awaiting_batch(task_id, ["batch_a"]) is True
+    assert tasks_runtime.park_awaiting_batch(task_id, ["batch_a"]) is True
     row = db.query_one(
         "SELECT status, started_at, last_heartbeat FROM tasks WHERE id = %s", (task_id,)
     )
@@ -250,7 +250,7 @@ def test_park_does_not_duplicate_ids_the_hook_already_recorded():
     hook("batch_1", "validating", {"requests": 1, "completed": 0, "failed": 0})
     hook("batch_2", "validating", {"requests": 1, "completed": 0, "failed": 0})
 
-    assert tasks_runtime._park_awaiting_batch(task_id, ["batch_1", "batch_2"]) is True
+    assert tasks_runtime.park_awaiting_batch(task_id, ["batch_1", "batch_2"]) is True
     assert tasks_runtime.pending_batch_ids(task_id) == ["batch_1", "batch_2"]
 
 
@@ -259,7 +259,7 @@ def test_park_records_ids_the_hook_never_saw():
     worker._claim_task()
     _hold_claim(task_id)
 
-    assert tasks_runtime._park_awaiting_batch(task_id, ["batch_1", "batch_2"]) is True
+    assert tasks_runtime.park_awaiting_batch(task_id, ["batch_1", "batch_2"]) is True
     assert tasks_runtime.pending_batch_ids(task_id) == ["batch_1", "batch_2"]
 
 

@@ -1,6 +1,6 @@
 """The worker loop: claim a task, run its handler, reap what died.
 
-Handlers live in api/tasks/. This module owns only the loop, the queue
+Handlers live in src/tasks/. This module owns only the loop, the queue
 mechanics, and the schedule - so a handler can be read without reading the
 runtime, and the runtime without reading twelve handlers.
 """

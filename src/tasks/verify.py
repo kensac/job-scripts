@@ -11,8 +11,8 @@ from api import ai, db, events
 from api.ai import verdicts
 from api.ai.batch_results import progress_counts
 from core.answers import _VERIFY_INSTRUCTIONS, VerifyVerdict
-from core.providers.spec import StructuredOutput
-from core.routing import TaskShape, resolve
+from core.routing import resolve
+from core.shapes import VERIFY_TASK
 from core.store import AI_ELIGIBLE_JOB, CONTENT_LATERAL
 from tasks.board import UNTOUCHED, demote_closed
 from tasks.runtime import (
@@ -245,32 +245,6 @@ async def _reverify_jobs(
     set_progress(task_id, total, total, "reverified")
     if parent_id:
         update_parent_progress(parent_id)
-
-
-# Closed/clearance verification, batched. One candidate, so this resolves to
-# gpt-5-nano exactly as it did when the name was written inline - the change is
-# that a missing key or a model that cannot enforce a schema now fails here,
-# with a reason, instead of at the provider after a wave has been built.
-#
-# Deliberately NOT widened to a second model. tasks/filters.py scopes its
-# cached-verdict check by model, so a sweep that answered on a different model
-# than last cycle would see no cached verdicts and re-run everything at full
-# price. See core/routing.py.
-VERIFY_TASK = TaskShape(
-    purpose="verify",
-    label="Closed and clearance verification",
-    notes=(
-        "A yes/no read of whether a posting is still open and whether it "
-        "demands a clearance. Cheap and high volume - every active job, every "
-        "cycle - so the fleet default is the right place to start."
-    ),
-    structured=StructuredOutput.JSON_SCHEMA,
-    batched=True,
-    max_output_tokens=1000,
-    est_prompt_tokens=5500,
-    effort="low",
-    candidates=("gpt-5-nano",),
-)
 
 
 async def handle_reverify_open(task_id: int, payload: dict[str, Any]) -> None:

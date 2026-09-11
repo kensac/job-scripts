@@ -98,7 +98,8 @@ class TestProgressAtTracksMovementNotWrites:
         scope - a direct call has no claim to check and stays unrestricted, so
         the claim has to be set here or this tests nothing.
         """
-        from tasks.runtime import TaskClaim, _current_claim
+        from tasks.runtime import TaskClaim
+        from tasks.runtime.lifecycle import _current_claim
 
         task_id = _task()
         token = _current_claim.set(TaskClaim(task_id=task_id, worker="oci", attempts=1))

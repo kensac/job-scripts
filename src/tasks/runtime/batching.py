@@ -1,158 +1,31 @@
-"""Task-execution primitives shared by every handler.
+"""Provider batches: submitting one, parking the task on it, collecting it,
+and recording what it cost and what it was asked.
 
-Sits below the handlers so a handler can import it without pulling in the
-worker loop, while the loop imports handlers for its registry. That ordering
-is what keeps the two from forming a cycle.
-
-The names here are public because they are used that way. They were spelled
-with a leading underscore while sixteen modules imported set_progress and
-eleven names in total crossed a module boundary, so the underscore was a claim
-about the interface that the callers falsified. A handler reads this module to
-find out what it may call; that is easier when the answer is "the public names"
-than when it is "the private ones, apparently".
-
-Anything genuinely internal to this module keeps its underscore.
+A batch lives provider-side while it queues, so a worker polling one does no
+work. The park in here is what frees the slot, and the batch ids in the task
+payload are what lets a resumed run reattach to work already paid for instead
+of buying it twice.
 """
 
 from __future__ import annotations
 
 import dataclasses
-import datetime
 import logging
-import os
-import time
-from contextvars import ContextVar
 from decimal import Decimal
-from typing import Any, LiteralString, NamedTuple
+from typing import Any
 
-from api import ai, budget, db, events, metrics
+from api import budget, db, events
 from api.ai import batch_results
 from api.ai.batch_results import consume_result as consume_result
 from api.ai.batch_results import snapshot_specs as snapshot_specs
-from api.budget import Entitlement
-from api.queue import INGEST_INTERVAL_MINUTES, enqueue  # noqa: F401
+from api.task_config import configured_model
 from core import pricing
 from core.batch import BatchEventCounts, BatchResult
 from core.prompts import PROMPT_SAMPLE_SIZE, prompt_hash
 from core.routing import Choice, TaskShape, resolve
-from tasks.board import demote_closed, materialize_passing
+from tasks.runtime.lifecycle import claim_guard
 
 logger = logging.getLogger(__name__)
-
-
-MAX_CONCURRENCY = int(os.environ.get("JOBTRACKER_MAX_CONCURRENCY", "6"))
-
-# How often every active source is queued for ingest. The scheduler in
-
-
-class AdaptiveLimiter:
-    """AIMD concurrency control on a rolling throughput window: grow while the
-    completion rate keeps improving, step down when it stalls or errors appear,
-    halve on rate limits. Each host converges to its own ceiling."""
-
-    def __init__(self, min_c: int = 1, max_c: int = MAX_CONCURRENCY, window: int = 8):
-        self.limit = min(3, max_c)
-        self.min_c = min_c
-        self.max_c = max_c
-        self.window = window
-        self._count = 0
-        self._errors = 0
-        self._win_start = time.monotonic()
-        self._prev_rate: float | None = None
-
-    def record(self, error: bool = False, rate_limited: bool = False) -> None:
-        if rate_limited:
-            self.limit = max(self.min_c, self.limit // 2)
-            self._reset()
-            return
-        if error:
-            self._errors += 1
-        self._count += 1
-        if self._count < self.window:
-            return
-        elapsed = time.monotonic() - self._win_start
-        rate = self._count / elapsed if elapsed > 0 else 0.0
-        if self._errors:
-            self.limit = max(self.min_c, self.limit - 1)
-        elif self._prev_rate is None or rate >= self._prev_rate * 1.05:
-            self.limit = min(self.max_c, self.limit + 1)
-        elif rate < self._prev_rate * 0.9:
-            self.limit = max(self.min_c, self.limit - 1)
-        self._prev_rate = rate
-        self._reset()
-
-    def _reset(self) -> None:
-        self._count = 0
-        self._errors = 0
-        self._win_start = time.monotonic()
-        metrics.WORKER_CONCURRENCY.set(self.limit)
-
-
-# In-flight jobs per worker inside a chunk (network time dominates, so calls
-# overlap); the adaptive limiter tunes the actual level per host.
-
-
-SCRAPE_CONCURRENCY = int(os.environ.get("JOBTRACKER_SCRAPE_CONCURRENCY", "2"))
-
-
-# Filter runs shard into chunks of this many checks; the shared queue then
-# load-balances by availability (fast workers simply claim more chunks).
-CHUNK_SIZE = int(os.environ.get("JOBTRACKER_CHUNK_SIZE", "100"))
-
-
-# Scheduled runs batch their AI calls through the OpenAI Batch API at half
-# price; jobs in one batch chunk (content already cached, so no scraping).
-BATCH_CHUNK_SIZE = int(os.environ.get("JOBTRACKER_BATCH_CHUNK_SIZE", "500"))
-
-
-MAX_ATTEMPTS = 3
-
-
-HEARTBEAT_TIMEOUT_MINUTES = 15
-
-
-CHUNK_KINDS = ["run_filter_chunk", "reverify_chunk", "run_filter_batch_chunk"]
-
-
-class TaskClaim(NamedTuple):
-    """Proof that this worker still holds the task it claimed.
-
-    `status` alone cannot express ownership: the reaper requeues a stale task
-    to 'pending' and another worker claims it back to 'running', so both states
-    look identical to the worker that lost it. attempts is incremented by the
-    claim itself, which makes (worker, attempts) a generation stamp - any
-    re-claim, by any host including this one, invalidates every claim before
-    it.
-    """
-
-    task_id: int
-    worker: str
-    attempts: int
-
-
-_current_claim: ContextVar[TaskClaim | None] = ContextVar("_current_claim", default=None)
-
-
-def set_current_claim(claim: TaskClaim | None) -> None:
-    """Called by the worker loop around a handler run. Nothing else claims
-    tasks, so nothing else sets this."""
-    _current_claim.set(claim)
-
-
-def _owned(task_id: int) -> tuple[LiteralString, dict[str, Any]]:
-    """The SQL tail and params that restrict a lifecycle write to the worker
-    that still owns `task_id`.
-
-    Outside the worker loop there is no claim to check - direct handler calls
-    and tests - and the write stays as unrestricted as it was before.
-    """
-    claim = _current_claim.get()
-    if claim is None or claim.task_id != task_id:
-        return "", {}
-    return " AND worker = %(_claim_worker)s AND attempts = %(_claim_attempts)s", {
-        "_claim_worker": claim.worker,
-        "_claim_attempts": claim.attempts,
-    }
 
 
 def _record_batch_ids(task_id: int, batch_ids: list[str], conn: Any = None) -> None:
@@ -180,15 +53,6 @@ def _record_batch_ids(task_id: int, batch_ids: list[str], conn: Any = None) -> N
         db.execute(sql, params)
 
 
-class Deferred(Exception):
-    """The task goes back to pending, unclaimed until not_before, with no
-    attempt spent: the host's slot for this address is not open yet."""
-
-    def __init__(self, not_before: datetime.datetime) -> None:
-        super().__init__(f"deferred until {not_before:%H:%M:%S}")
-        self.not_before = not_before
-
-
 class AwaitingBatch(Exception):
     """Raised by a handler that has submitted provider batches and has nothing
     left to do until they finish.
@@ -201,7 +65,7 @@ class AwaitingBatch(Exception):
     """
 
 
-def _park_awaiting_batch(task_id: int, batch_ids: list[str]) -> bool:
+def park_awaiting_batch(task_id: int, batch_ids: list[str]) -> bool:
     """Records the batches a task is waiting on and releases the worker.
 
     The ids go in the payload so a resumed run reattaches to work already paid
@@ -217,7 +81,7 @@ def _park_awaiting_batch(task_id: int, batch_ids: list[str]) -> bool:
     when this worker has lost the claim - because an id that reaches no row is
     paid work nothing points at. Only the park itself is refused.
     """
-    owned, owned_params = _owned(task_id)
+    owned, owned_params = claim_guard(task_id)
     with db.pool.connection() as conn:
         _record_batch_ids(task_id, batch_ids, conn=conn)
         result = conn.execute(
@@ -232,152 +96,6 @@ def _park_awaiting_batch(task_id: int, batch_ids: list[str]) -> bool:
     if parked:
         events.publish_task(task_id)
     return parked
-
-
-def finish(task_id: int, status: str, error: str | None = None) -> None:
-    """Ends the task and closes out its batch lifecycle.
-
-    Only running tasks can be finished; an admin 'cancelled' status sticks, and
-    a worker that lost the claim must not finish the run that took it over.
-
-    batch_ids are dropped here because this is the one point where the batches
-    they name are provably spent. Leaving them behind lets a later re-run of
-    the same row collect those outputs again and write verdicts from scraped
-    text old enough to predate a closure. A retry *within* the run keeps them:
-    that is the reattach path, and it is what stops paid work being resubmitted.
-    """
-    owned, owned_params = _owned(task_id)
-    db.execute(
-        f"""
-        UPDATE tasks SET status = %(status)s, error = %(error)s, finished_at = now(),
-            payload = COALESCE(payload, '{{}}'::jsonb) - 'batch_ids'
-        WHERE id = %(tid)s AND status = 'running'{owned}
-        """,
-        {
-            "status": status,
-            "error": error[:500] if error else None,
-            "tid": task_id,
-            **owned_params,
-        },
-    )
-    events.publish_task(task_id)
-
-
-def cancelled(task_id: int) -> bool:
-    row = db.query_one("SELECT status FROM tasks WHERE id = %s", (task_id,))
-    return not row or row["status"] != "running"
-
-
-def parent_cancelled(parent_id: int) -> bool:
-    row = db.query_one("SELECT status FROM tasks WHERE id = %s", (parent_id,))
-    return not row or row["status"] == "cancelled"
-
-
-def update_parent_progress(parent_id: int) -> None:
-    agg = db.query_one(
-        "SELECT COALESCE(SUM((progress->>'done')::int), 0) AS done FROM tasks "
-        "WHERE kind = ANY(%s) AND parent_id = %s",
-        (CHUNK_KINDS, parent_id),
-    )
-    db.execute(
-        "UPDATE tasks SET progress = jsonb_set(COALESCE(progress, '{}'::jsonb), "
-        "'{done}', to_jsonb(%s::int)), last_heartbeat = now() "
-        "WHERE id = %s AND status = 'waiting'",
-        (agg["done"] if agg else 0, parent_id),
-    )
-    events.publish_task(parent_id)
-
-
-def maybe_finalize_parent(parent_id: int) -> None:
-    update_parent_progress(parent_id)
-    live = db.query_one(
-        # awaiting_batch counts as live: a parked chunk has work in flight
-        # at the provider, and finalizing the parent without it would publish
-        # partial results as if they were complete.
-        "SELECT COUNT(*) AS c FROM tasks WHERE kind = ANY(%s) "
-        "AND parent_id = %s AND status IN ('pending', 'running', 'awaiting_batch')",
-        (CHUNK_KINDS, parent_id),
-    )
-    if live and live["c"]:
-        return
-    failed = db.query_one(
-        "SELECT COUNT(*) AS c FROM tasks WHERE kind = ANY(%s) "
-        "AND parent_id = %s AND status = 'failed'",
-        (CHUNK_KINDS, parent_id),
-    )
-    parent = db.query_one("SELECT kind, payload FROM tasks WHERE id = %s", (parent_id,))
-    if parent and parent["kind"] == "reverify_open":
-        try:
-            demote_closed()
-        except Exception:
-            logger.exception("demotion failed")
-    elif parent and (parent["payload"] or {}).get("user_id"):
-        try:
-            materialize_passing(parent["payload"]["user_id"])
-        except Exception:
-            logger.exception("materialize failed")
-    n_failed = failed["c"] if failed else 0
-    if n_failed:
-        db.execute(
-            "UPDATE tasks SET status = 'failed', error = %s, finished_at = now() "
-            "WHERE id = %s AND status = 'waiting'",
-            (f"{n_failed} chunk(s) failed", parent_id),
-        )
-    else:
-        db.execute(
-            "UPDATE tasks SET status = 'done', finished_at = now() "
-            "WHERE id = %s AND status = 'waiting'",
-            (parent_id,),
-        )
-    events.publish_task(parent_id)
-
-
-def reconcile_chunks() -> None:
-    db.execute(
-        "UPDATE tasks SET status = 'cancelled', error = 'parent cancelled', finished_at = now() "
-        "WHERE kind = ANY(%s) AND status = 'pending' "
-        "AND parent_id IN (SELECT id FROM tasks WHERE status = 'cancelled')",
-        (CHUNK_KINDS,),
-    )
-    for r in db.query(
-        """
-        SELECT id FROM tasks t WHERE t.status = 'waiting'
-        AND NOT EXISTS (SELECT 1 FROM tasks c WHERE c.kind = ANY(%s)
-            AND c.parent_id = t.id
-            AND c.status IN ('pending', 'running', 'awaiting_batch'))
-        """,
-        (CHUNK_KINDS,),
-    ):
-        maybe_finalize_parent(r["id"])
-
-
-def set_progress(
-    task_id: int, done: int, total: int, label: str, extra: dict[str, Any] | None = None
-) -> None:
-    # `extra` is for counts a handler wants queryable afterwards (what an
-    # ingest fetched, kept, cached, failed to fetch). The label is for a
-    # person; the health detectors read the keys.
-    #
-    # The heartbeat rides along with progress, so this write has to respect the
-    # claim too: a worker that lost the task would otherwise keep proving the
-    # liveness of the run that replaced it, and the reaper would never see it.
-    owned, owned_params = _owned(task_id)
-    db.execute(
-        # progress_at moves ONLY when the value differs. A handler that reports
-        # the same numbers again has not advanced, and stamping it would make a
-        # stalled handler indistinguishable from a working one - the same
-        # mistake as a timer-driven heartbeat, one column along.
-        f"UPDATE tasks SET progress = %(progress)s, last_heartbeat = now(), "
-        f"    progress_at = CASE WHEN progress IS DISTINCT FROM %(progress)s "
-        f"                       THEN now() ELSE progress_at END "
-        f"WHERE id = %(tid)s{owned}",
-        {
-            "progress": db.jsonb({"done": done, "total": total, "label": label, **(extra or {})}),
-            "tid": task_id,
-            **owned_params,
-        },
-    )
-    events.publish_task(task_id)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -500,30 +218,6 @@ def batch_event_hook(
         events.publish_task(task_id)
 
     return on_event
-
-
-def configured_model(purpose: str) -> str | None:
-    """The model a person has configured for this task, if any.
-
-    Read here rather than inside resolve() because core does not import api and
-    an override lives in the database. resolve() takes it as an argument and
-    stays a pure function of the declaration plus one value, which is what lets
-    the configuration screen ask "what would this do" without a write.
-
-    Latest row wins, and the table is append-only, so the history a monthly
-    review needs is the table itself rather than something reconstructed.
-    Returns None on any failure: a configuration lookup that cannot be read
-    must fall back to the call site's own judgment rather than stopping a sweep.
-    """
-    try:
-        row = db.query_one(
-            "SELECT model FROM task_model_overrides WHERE purpose = %s ORDER BY id DESC LIMIT 1",
-            (purpose,),
-        )
-    except Exception:
-        logger.warning(f"could not read the configured model for {purpose}", exc_info=True)
-        return None
-    return (row or {}).get("model") or None
 
 
 def _record_prompt(purpose: str, instructions: str) -> int | None:
@@ -681,7 +375,7 @@ async def submit_or_collect(
         # Nothing was accepted by the provider; fail normally so the usual
         # retry path applies rather than parking forever.
         raise RuntimeError("no batches were accepted by the provider")
-    if not _park_awaiting_batch(task_id, ids):
+    if not park_awaiting_batch(task_id, ids):
         # ai_batches still records them (the event hook fired on submission),
         # so they are recoverable by hand - but nothing will collect them
         # automatically, which is worth failing loudly over.
@@ -748,28 +442,4 @@ def repark_if_unfinished(task_id: int) -> bool:
     remaining = pending_batch_ids(task_id)
     if not remaining:
         return False
-    return _park_awaiting_batch(task_id, remaining)
-
-
-def load_config(user_id: int, ignore_budget: bool = False) -> tuple[Entitlement, ai.AIConfig]:
-    """The person's entitlement and model config for a task. With
-    ignore_budget the shared weekly cap is lifted for this task only (an
-    admin queued it that way): the spend is still recorded, the cap itself
-    does not move (Kanishk, 2026-09-08: raising it and putting it back for
-    one run was the wrong tool)."""
-    user = db.query_one("SELECT id, sub, email, name, groups FROM users WHERE id = %s", (user_id,))
-    if not user:
-        raise LookupError("unknown user")
-    from api.auth import AuthedUser
-
-    authed = AuthedUser(
-        id=user["id"],
-        sub=user["sub"],
-        email=user["email"] or "",
-        name=user["name"] or "",
-        groups=user["groups"] or [],
-    )
-    ent = budget.get_entitlement(authed)
-    if ignore_budget and ent.owner_key:
-        ent = dataclasses.replace(ent, weekly_token_budget=None)
-    return ent, budget.resolve_ai_config(user_id, ent)
+    return park_awaiting_batch(task_id, remaining)

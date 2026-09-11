@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import datetime
 import logging
-import os
 from typing import Any
 
 from pydantic import BaseModel
@@ -12,7 +10,6 @@ from pydantic import BaseModel
 from api import db
 from api.ai import batch_results
 from core import skills as skills_lib
-from core.providers import StructuredOutput
 from core.requirements import (
     CLEARANCE_LEVELS,
     DEGREE_LEVELS,
@@ -22,7 +19,7 @@ from core.requirements import (
     SPONSORSHIPS,
     in_vocabulary,
 )
-from core.routing import Evidence, TaskShape
+from core.shapes import EXTRACT_REQUIREMENTS_PER_CYCLE, REQUIREMENTS_TASK
 from core.store import AI_ELIGIBLE_JOB, CONTENT_LATERAL, VERIFIED_OPEN
 from tasks import rescrape
 from tasks.runtime import (
@@ -39,145 +36,6 @@ logger = logging.getLogger(__name__)
 # but 24 of the 20,730 pages in the corpus, and the tail past that is boilerplate
 # (similar-role lists, cookie notices) rather than requirements.
 REQUIREMENTS_INPUT_CHARS = 20000
-
-
-# gpt-5-nano is the fleet default and is the wrong model here, so this pass
-# names its own. Audited over 60 real postings against whether the page even
-# mentions the fact: nano at "low" effort invented a clearance level for 12 of
-# 55 postings that never mention clearance, and lost 5 of 60 responses to the
-# output cap; nano at "minimal" filled 0 and "none" wherever the honest answer
-# was "unstated", which is the one distinction this schema exists to keep.
-# gpt-5-mini at "minimal" invented one degree, one yoe and no clearances, and
-# truncated nothing. Batched over the whole corpus that is $9.89 against nano's
-# $1.98 - a one-time pass over postings that can never be re-scraped.
-REQUIREMENTS_MODEL = os.environ.get("JOBTRACKER_REQUIREMENTS_MODEL", "gpt-5.6-luna")
-
-
-# "minimal" is not a cost compromise, it is the better answer: low-effort
-# reasoning was 78% of the output bill (802 output tokens per posting against
-# 194) and bought nothing this task needs, since every field is copied off the
-# page rather than deduced.
-REQUIREMENTS_REASONING_EFFORT = "minimal"
-
-# Cheapest first, and every value here is accepted by SOME model in the
-# registry, so swapping the model swaps the effort with it rather than sending
-# one the model refuses. luna takes "none"; nano takes "minimal", and sent
-# the same request directly on 2026-09-05 it completed at ~200 output tokens
-# with no reasoning, against 750 to 1,450 at "low". The 21,525-line failure
-# of 2026-09-04 was not the effort: OpenAI's error file for those batches says
-# every line carried "none", which nano rejects, from a routing path that did
-# not yet re-pick the effort for an overridden model.
-_EFFORT_PREFERENCE = ("none", "minimal", "low")
-
-
-# Measured p100 over the pilot was 378 tokens; the JSON's whole variable part is
-# the two skill arrays, so the budget is set to carry roughly three times the
-# widest skill list seen. An unfinished response is unparseable JSON, and an
-# unparseable line leaves the url unextracted for the next sweep to re-pay
-# forever, so the headroom is worth more than the tokens - a cap is a ceiling,
-# not a charge. 2000 rather than 1000 because nano at low effort spent 802
-# output tokens a posting in the pilot before the JSON, and a cap the
-# reasoning alone can hit turns every long posting into an unparseable line.
-REQUIREMENTS_MAX_OUTPUT_TOKENS = 2000
-
-
-# The same declaration every other batched extraction makes. The model is the
-# caller's judgment - the note above is why mini and not nano - and the router
-# checks it can do what this task needs rather than choosing it for cost.
-# est_prompt_tokens is the fitted figure from the pilot below, not the
-# conservative chunking estimate: it ranks candidates and never becomes a bill.
-
-
-# Bounded per cycle for the same reason comp extraction is: one task must not
-# pull the whole corpus into memory or hold a worker indefinitely. Sized to fill
-# the batch-wave concurrency rather than picked round, using core.batch's own
-# estimator since that is what actually chunks the waves: instructions (3,611
-# chars) plus a posting (5,608 chars, the corpus mean after truncation) is 2,302
-# tokens at BATCH_CHARS_PER_TOKEN, plus REQUIREMENTS_MAX_OUTPUT_TOKENS reserved,
-# so 3,304 tokens a spec against the 1.8M-token BATCH_TOKEN_BUDGET is 545 specs
-# per wave, and waves run BATCH_WAVE_CONCURRENCY (4) at a time: 2,179.
-#
-# That estimate is deliberately conservative, and it is worth knowing by how
-# much. Fitted against real API usage over a 60-posting pilot, the true cost of
-# a request is 1,255 + 0.181 x content_chars input tokens: job postings tokenize
-# at about 5.5 characters per token, not the 4 that BATCH_CHARS_PER_TOKEN
-# assumes, and the 1,255 fixed is the instructions plus the JSON schema, which
-# is roughly 45% of a request's input at this posting length. So real waves run
-# under budget rather than over it, which is the safe direction. Whole corpus:
-# 47.0M input and 4.0M output tokens, $9.89 batched at REQUIREMENTS_MODEL.
-EXTRACT_REQUIREMENTS_PER_CYCLE = int(
-    os.environ.get("JOBTRACKER_EXTRACT_REQUIREMENTS_PER_CYCLE", "2179")
-)
-
-
-REQUIREMENTS_TASK = TaskShape(
-    purpose="requirements",
-    label="Requirements extraction",
-    per_cycle=EXTRACT_REQUIREMENTS_PER_CYCLE,
-    evidence=(
-        Evidence(
-            model="gpt-5-nano",
-            verdict="excluded",
-            finding=(
-                "Invented a clearance level for 12 of 55 postings whose page "
-                "never mentions clearance, and at minimal effort filled 0 and "
-                "'none' wherever the honest answer was 'unstated' - which is "
-                "the distinction this extraction exists to keep."
-            ),
-            sample_size=60,
-            measured_on=datetime.date(2026, 9, 2),
-        ),
-        Evidence(
-            model="gpt-5-mini",
-            verdict="excluded",
-            finding=(
-                "Extracts well - over the same postings it invented one "
-                "degree, one years-of-experience figure and no clearances, "
-                "and truncated nothing. Excluded on RELIABILITY rather than "
-                "quality: 499 of its 31,999 batched requests failed, against "
-                "0 of 19,971 on nano and 0 of 60,000 on luna. A failed line "
-                "leaves a posting unextracted and looks like a batch that "
-                "worked, so nothing was watching."
-            ),
-            sample_size=31999,
-            measured_on=datetime.date(2026, 9, 2),
-        ),
-        Evidence(
-            model="gpt-5.6-luna",
-            verdict="chosen",
-            finding=(
-                "Zero failures across 60,000 batched requests, the only model "
-                "with a clean record at that volume. Chosen for reliability; "
-                "its extraction quality on this task has NOT been audited the "
-                "way nano and mini were, and that gap is the reason this entry "
-                "exists rather than a note."
-            ),
-            sample_size=60000,
-            measured_on=datetime.date(2026, 9, 2),
-        ),
-    ),
-    notes=(
-        "Not nano, on measured quality: over 60 real postings it invented a "
-        "clearance level for 12 of 55 that never mention clearance, and at "
-        "minimal effort filled 0 and 'none' wherever the honest answer was "
-        "'unstated' - the one distinction this extraction exists to keep. "
-        "Not mini, on measured RELIABILITY: 499 of 31,999 batched requests "
-        "failed against zero on the other two, and a failed line leaves a "
-        "posting unextracted while looking like a batch that worked. luna is "
-        "the only model with a clean record at volume, and its extraction "
-        "quality here has not been audited the way the other two were."
-    ),
-    structured=StructuredOutput.JSON_SCHEMA,
-    batched=True,
-    max_output_tokens=REQUIREMENTS_MAX_OUTPUT_TOKENS,
-    est_prompt_tokens=2270,
-    # Preference, not a pin. luna REJECTS "minimal" and mini rejects "none",
-    # so a literal effort makes the model unswappable: point this at the other
-    # one and resolve() refuses, or worse a batch submits and fails whole on a
-    # 400. That is #179 exactly. The model picks the first value it accepts.
-    effort_preference=_EFFORT_PREFERENCE,
-    candidates=(REQUIREMENTS_MODEL,),
-)
 
 
 class RequirementsExtract(BaseModel):

@@ -38,7 +38,7 @@ from api.auth import AuthedUser
 from api.routers.admin import require_admin
 from core import providers
 from core.routing import NoEligibleModel, candidates_for, resolve
-from tasks import SHAPES
+from core.shapes import SHAPES
 
 router = APIRouter(prefix="/admin")
 

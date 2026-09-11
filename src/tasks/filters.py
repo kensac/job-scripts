@@ -9,6 +9,7 @@ from typing import Any
 from api import ai, budget, db, events, metrics
 from api.ai import verdicts
 from api.ai.batch_results import progress_counts
+from api.budget import load_config
 from core.answers import FilterDecision, FilterResult
 from core.filters import build_custom_decision_instructions, build_custom_input
 from core.store import get_content, get_contents, get_custom_result
@@ -31,7 +32,6 @@ from tasks.runtime import (
     consume_result,
     enqueue,
     has_batch_work,
-    load_config,
     parent_cancelled,
     set_progress,
     submit_or_collect,

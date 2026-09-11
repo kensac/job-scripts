@@ -21,6 +21,7 @@ from core import batch
 from core.batch import BatchProgress
 from tasks import batches as tasks_batches
 from tasks import runtime
+from tasks.runtime import batching
 from tests.factories import make_task
 
 COMPLETED_LINE = (
@@ -109,7 +110,7 @@ def test_repark_only_when_ids_remain():
 @pytest.mark.asyncio
 async def test_worker_parks_a_handler_that_returns_with_batches_left(monkeypatch):
     async def partial(task_id, payload):
-        runtime._record_batch_ids(task_id, ["b"])
+        batching._record_batch_ids(task_id, ["b"])
 
     monkeypatch.setitem(worker.HANDLERS, "test_kind", partial)
     tid = runtime.enqueue("test_kind", {})

@@ -3,11 +3,14 @@
 HANDLERS is the only thing the worker loop needs from this package. Importing
 them here keeps the loop from knowing which module any given kind lives in,
 and keeps handlers from importing the loop.
+
+What each task DECLARES - its purpose, its models, its per-cycle size - is not
+here. That is core/shapes.py, so the services can price and configure a task
+without importing the code that runs it.
 """
 
 from __future__ import annotations
 
-from tasks import application, comp, locations, mail_classify, requirements, verify
 from tasks.application import handle_application_draft, handle_application_sweep
 from tasks.batches import handle_poll_batches
 from tasks.board import handle_recompute_board
@@ -41,24 +44,6 @@ from tasks.verify import (
     handle_verify_new,
 )
 
-# Every configurable task, keyed by the purpose its own shape declares. This
-# is the list the configuration screen offers and the list resolve() is asked
-# about - one registry, so a task cannot be configurable but unreported, or
-# reported under a name nothing configures.
-SHAPES = {
-    shape.purpose: shape
-    for shape in (
-        comp.COMP_TASK,
-        requirements.REQUIREMENTS_TASK,
-        locations.LOCATIONS_TASK,
-        verify.VERIFY_TASK,
-        mail_classify.BACKFILL_TASK,
-        mail_classify.ONGOING_TASK,
-        application.APPLICATION_TASK,
-    )
-}
-
-
 HANDLERS = {
     "extract_upload": lambda task_id, payload: handle_extract_upload(payload),
     "classify_mail": handle_classify_mail,
@@ -90,4 +75,4 @@ HANDLERS = {
     "run_experiment": handle_run_experiment,
 }
 
-__all__ = ["HANDLERS", "SHAPES"]
+__all__ = ["HANDLERS"]

@@ -1,6 +1,6 @@
 """Putting work on the queue, and the cadence the queue runs at.
 
-BELOW the handlers on purpose. api/tasks/runtime.py is the runtime a handler
+BELOW the handlers on purpose. tasks/runtime/ is the runtime a handler
 runs inside: claims, heartbeats, progress, batches. This is the smaller thing
 that code outside the task system needs, and needing it is not a reason to
 reach into the handlers package.

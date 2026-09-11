@@ -25,14 +25,14 @@ status alone does not prevent a new run; intervals and per-cycle dedupe keys
 still apply.
 Cancellation remains an atomic transition from active states. Claiming and
 retry policy belong to `api.worker`; claim-aware writes and progress updates
-belong to `api.tasks.runtime`.
+belong to `tasks.runtime.lifecycle`.
 
 **A worker claims only kinds its own image has a handler for.** A roll goes
 host by host, so for a minute an old image and a new one share the queue. A
 kind the new image added must wait for a host that can run it, rather than be
 claimed and failed as unknown by one that cannot. That happened to the first
 classify_locations task on 2026-09-05, in the seconds before the claiming
-host's own deploy. The registry in `api/tasks/__init__.py` is what the worker
+host's own deploy. The registry in `src/tasks/__init__.py` is what the worker
 can do, and the claim reads it; the kind allow and exclude lists narrow from
 there.
 
@@ -66,7 +66,7 @@ with reasons, and the explicit explanation endpoint retains `FilterVerdict`.
 `build_custom_decision_instructions` changes only the requested output. Editing
 output presentation must not force existing criteria to be judged again.
 Application drafts share request construction and result persistence in
-`api.tasks.application.draft_rows`.
+`tasks.application.draft_rows`.
 
 For these user-charged paths, `api.ai.batch_usage` normalises provider usage and
 `api.budget.record_tokens` writes the user ledger with explicit batch pricing
@@ -462,7 +462,7 @@ fetched before submission, never used as a reason to make a live model call.
 Failed fetches respect the content retry window and remain undecided for a
 later eligible cycle; they are not immediately requeued inside the run.
 
-`api.tasks.batch_policy.transport` decides how a scheduled run travels: the
+`tasks.batch_policy.transport` decides how a scheduled run travels: the
 shared key goes through the persisted batch collector, and a shared-key
 configuration the collector cannot carry (a non-OpenAI provider, a model
 without JSON-schema output) fails with `BATCH_UNSUPPORTED` in task

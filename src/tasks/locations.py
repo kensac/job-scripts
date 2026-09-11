@@ -10,36 +10,10 @@ from pydantic import BaseModel
 
 from api import db
 from api.ai.batch_results import progress_counts
-from core.providers import StructuredOutput
-from core.routing import TaskShape
+from core.shapes import LOCATIONS_TASK
 from tasks.runtime import consume_result, has_batch_work, run_batched, set_progress
 
 logger = logging.getLogger(__name__)
-
-# Strings are short and the answer is a lookup the model already knows, so the
-# whole backlog (8,735 distinct strings on 2026-09-04) fits one cycle; after
-# that a cycle carries only the strings new boards wrote since the last one.
-# Persisted config (classify_locations_per_cycle), so the first pass can be
-# a small sample read off GET /admin/locations before the backlog is paid for.
-CLASSIFY_LOCATIONS_PER_CYCLE = 10000
-
-LOCATIONS_TASK = TaskShape(
-    purpose="locations",
-    label="Location classification",
-    per_cycle=CLASSIFY_LOCATIONS_PER_CYCLE,
-    notes=(
-        "Naming the country, state and city a short string refers to is a "
-        "lookup, not a judgment about silence: the shape gpt-5-nano handles. "
-        "A string that names no single place is left empty, which excludes "
-        "nothing, so the cost of a wrong answer is one visible posting."
-    ),
-    structured=StructuredOutput.JSON_SCHEMA,
-    batched=True,
-    max_output_tokens=120,
-    est_prompt_tokens=260,
-    effort_preference=("minimal", "low"),
-    candidates=("gpt-5-nano",),
-)
 
 
 class Place(BaseModel):

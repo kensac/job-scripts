@@ -13,7 +13,7 @@ import pytest
 
 from api import db
 from api.mail import store as mail_store
-from core import pricing, providers
+from core import pricing, providers, shapes
 from core.mail.importer import ImportedMessage
 from core.routing import resolve
 from tasks import HANDLERS, mail_classify
@@ -85,8 +85,8 @@ def test_both_models_are_priced():
     """If a model is missing from the price table its spend books as NULL and
     the classification run is invisible to /admin/spend - a silent hole in
     exactly the surface built to catch silent holes."""
-    assert pricing.rates_for(mail_classify.BACKFILL_MODEL) is not None
-    assert pricing.rates_for(mail_classify.ONGOING_MODEL) is not None
+    assert pricing.rates_for(shapes.BACKFILL_MODEL) is not None
+    assert pricing.rates_for(shapes.ONGOING_MODEL) is not None
 
 
 def test_handler_is_registered():
@@ -103,11 +103,11 @@ def test_both_mail_paths_read_the_mail_the_same_way():
 
     The constants stay separate because their env overrides are separate: the
     per-task model config can move one path without the other."""
-    assert mail_classify.BACKFILL_MODEL == mail_classify.ONGOING_MODEL
+    assert shapes.BACKFILL_MODEL == shapes.ONGOING_MODEL
 
     # Still separate purposes, so the two remain separable in the spend ledger
     # even while they share a model.
-    assert mail_classify.BACKFILL_TASK.purpose != mail_classify.ONGOING_TASK.purpose
+    assert shapes.BACKFILL_TASK.purpose != shapes.ONGOING_TASK.purpose
 
 
 @pytest.mark.asyncio
@@ -127,7 +127,7 @@ async def test_writes_an_event(monkeypatch, f):
     assert len(events) == 1
     assert events[0]["kind"] == "rejection"
     assert events[0]["detail"]["company"] == "Acme"
-    assert events[0]["model"] == mail_classify.ONGOING_MODEL
+    assert events[0]["model"] == shapes.ONGOING_MODEL
 
 
 @pytest.mark.asyncio
@@ -231,16 +231,16 @@ def test_each_model_gets_an_effort_it_actually_accepts():
     dead. Validating against a union is what hid it, so this validates
     against the models actually configured.
     """
-    for model in (mail_classify.BACKFILL_MODEL, mail_classify.ONGOING_MODEL):
+    for model in (shapes.BACKFILL_MODEL, shapes.ONGOING_MODEL):
         accepts = _PROBED_ACCEPTS.get(model)
         assert accepts is not None, f"{model} configured but never probed"
-        assert mail_classify.effort_for(model) in accepts
+        assert shapes.effort_for(model) in accepts
 
 
 def test_an_unknown_model_gets_a_value_both_generations_accept():
     """A rejected parameter costs the whole batch, not one call, so the
     fallback has to be in the intersection rather than a guess."""
-    effort = mail_classify.effort_for("some-model-that-ships-tomorrow")
+    effort = shapes.effort_for("some-model-that-ships-tomorrow")
     for accepts in _PROBED_ACCEPTS.values():
         assert effort in accepts
 
@@ -255,9 +255,9 @@ def test_effort_follows_the_model_rather_than_a_shared_constant():
     that matters is that each shape's effort is DERIVED from its own model's
     declared set, so pointing a path at a different model moves its effort
     with it rather than sending a value that model refuses."""
-    for shape in (mail_classify.BACKFILL_TASK, mail_classify.ONGOING_TASK):
+    for shape in (shapes.BACKFILL_TASK, shapes.ONGOING_TASK):
         model = resolve(shape).model
-        assert shape.resolved_effort() == mail_classify.effort_for(model)
+        assert shape.resolved_effort() == shapes.effort_for(model)
         declared = providers.model(model)
         assert declared is not None
         assert shape.resolved_effort() not in declared.reasoning.rejects
@@ -267,13 +267,13 @@ def test_max_tokens_leaves_room_for_the_schema():
     """Too small truncates JSON mid-string, which arrives as an unparsable
     line rather than an error - so it looks like a model failure, not a
     configuration one."""
-    assert mail_classify.CLASSIFY_MAX_TOKENS >= 200
+    assert shapes.CLASSIFY_MAX_TOKENS >= 200
 
 
 def test_a_backfill_may_ask_for_more_than_the_hourly_cap():
     """34,000 archived messages take ~28 hours of hourly cycles at the ongoing
     cap. A one-time sweep is a different job from a trickle."""
-    assert mail_classify.MAX_CLASSIFY_PER_CYCLE > mail_classify.CLASSIFY_PER_CYCLE
+    assert shapes.MAX_CLASSIFY_PER_CYCLE > mail_classify.CLASSIFY_PER_CYCLE
 
 
 @pytest.mark.asyncio

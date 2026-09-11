@@ -24,11 +24,11 @@ from core import pricing, providers
 from core.store import AI_ELIGIBLE_JOB, CONTENT_LATERAL, VERIFIED_OPEN
 from tasks.runtime import (
     AwaitingBatch,
-    _park_awaiting_batch,
     batch_event_hook,
     collect_pending,
     consume_result,
     has_batch_work,
+    park_awaiting_batch,
     pending_batch_ids,
     set_progress,
     snapshot_specs,
@@ -438,7 +438,7 @@ async def _run(task_id: int, payload: dict[str, Any]) -> None:
         set_progress(
             task_id, 0, len(rows) * (len(params["arms"]) - len(skipped)), "batches submitted"
         )
-        if not _park_awaiting_batch(task_id, ids):
+        if not park_awaiting_batch(task_id, ids):
             raise RuntimeError(
                 f"submitted {len(ids)} batch(es) but task {task_id} was no longer claimable"
             )

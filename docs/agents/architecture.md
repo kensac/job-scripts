@@ -124,7 +124,7 @@ fresh copy:
 - **AI pricing**: `core/pricing.py`, rendered as both Python and SQL from one
   source with a parity test.
 - **Provider facts**: one datasheet per provider under `core/providers/`.
-- **Task handlers**: `api/tasks/`, one module per family. The task runtime
+- **Task handlers**: `src/tasks/`, one module per family. The task runtime
   imports nothing from the worker; the worker imports only the handler table.
 - **Listing formats**: `core/boards.py`, one fetcher per board format, chosen
   by the listings URL. See [sources-and-boards.md](sources-and-boards.md).

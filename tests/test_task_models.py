@@ -11,8 +11,7 @@ from __future__ import annotations
 import pytest
 
 from api import db
-from tasks import SHAPES
-from tasks.requirements import REQUIREMENTS_MODEL
+from core.shapes import REQUIREMENTS_MODEL, SHAPES
 
 
 def _get(client, headers, purpose="requirements"):
@@ -268,7 +267,7 @@ class TestTakesEffect:
         """run_batched resolves per run, so a change lands on the next sweep.
         A batch already submitted finishes on the model that submitted it -
         the request is with the provider and cannot be recalled."""
-        from tasks.runtime import configured_model
+        from api.task_config import configured_model
 
         assert configured_model("requirements") is None
         _put(client, admin_headers, "requirements", model="gpt-5-nano")
@@ -281,8 +280,9 @@ class TestTakesEffect:
         """Under an override the batch carried the sanctioned candidate's
         effort: luna's "none" went to nano and 21,525 lines died on a 400 on
         2026-09-04, then 112 more on 2026-09-05."""
+        from core.shapes import REQUIREMENTS_TASK
         from tasks import runtime
-        from tasks.requirements import REQUIREMENTS_TASK
+        from tasks.runtime import batching
 
         sent = {}
 
@@ -290,7 +290,7 @@ class TestTakesEffect:
             sent.update(model=model, effort=effort, max_tokens=max_tokens)
             return []
 
-        monkeypatch.setattr(runtime, "submit_or_collect", fake_submit)
+        monkeypatch.setattr(batching, "submit_or_collect", fake_submit)
         _put(client, admin_headers, "requirements", model="gpt-5-nano")
         await runtime.run_batched(1, REQUIREMENTS_TASK, [])
         assert sent["model"] == "gpt-5-nano" and sent["effort"] == "minimal"
@@ -299,13 +299,13 @@ class TestTakesEffect:
         assert sent["model"] == "gpt-5.6-luna" and sent["effort"] == "none"
 
     def test_an_unreadable_override_falls_back_rather_than_stopping_a_sweep(self, monkeypatch):
-        from tasks import runtime
+        from api import db, task_config
 
         def boom(*a, **k):
             raise RuntimeError("database is having a moment")
 
-        monkeypatch.setattr(runtime.db, "query_one", boom)
-        assert runtime.configured_model("requirements") is None
+        monkeypatch.setattr(db, "query_one", boom)
+        assert task_config.configured_model("requirements") is None
 
 
 @pytest.mark.parametrize("purpose", sorted(SHAPES))
