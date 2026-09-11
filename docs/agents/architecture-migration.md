@@ -234,6 +234,17 @@ generator at `openapi.json` and get types that work.
 Reads returning bare dicts is the same problem seen from inside: renaming a
 column is a grep across 678 call sites, and a typo is found at runtime.
 
+**Failures are part of the contract and are not declared at all.** The schema
+carries 200, 201, 202 and the 422 FastAPI adds for validation, and nothing
+else. There are 164 `raise HTTPException` sites and at least three shapes
+among them: 69 use `detail={"code": ..., "message": ...}`, 14 pass a bare
+string, one passes an f-string. A client cannot know what a failure looks
+like, so it guesses, and the guess is per client.
+
+Declaring the error shape is the same job as declaring the success shape and
+belongs in this phase. One convention, `{code, message}`, since that is
+already the majority and the frontend already reads `detail.code`.
+
 The primitive is `db.query_as(Shape, sql, params)` and its one-row sibling.
 The SQL is unchanged; only what comes back has a name. A column the shape does
 not declare raises there and then, which is the point: a SELECT and its shape
@@ -260,6 +271,23 @@ has to stay readable, while inviting the N+1 shape this codebase has already
 paid to remove. Keep the SQL, map the rows into dataclasses at the boundary,
 one domain at a time. `pyright` already runs clean, so the types would be
 enforced rather than decorative.
+
+## Logging is nearly consistent, and the gap is small
+
+Measured 2026-09-10: 38 modules log, under seven logger names. Two are the
+convention, `jobtracker_worker` (24) and `jobtracker_api` (11). Five are
+one-offs, and one of those is `job_tracker` in `core/batch.py`, spelled
+differently from every other.
+
+Nothing is lost by it. Telemetry attaches its handler to the ROOT logger
+precisely so a module needs no registration, which was checked before this was
+written down. The cost is only that filtering by source in a log viewer does
+not work the way the names suggest.
+
+Also worth one pass: 18 sites use `logger.exception` and 6 use `logger.error`.
+The second drops the traceback. Some of those six are deliberate, because the
+error is expected and the traceback is noise; they are worth reading rather
+than rewriting in bulk.
 
 ## Revising this document
 
