@@ -9,7 +9,7 @@ import json
 import pytest
 
 from api import db
-from api.tasks import experiments as exp
+from tasks import experiments as exp
 
 
 def _verdict(url: str, rejected: bool) -> str:

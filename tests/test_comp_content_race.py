@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from api import db
-from api.tasks import comp
+from tasks import comp
 
 
 @pytest.mark.asyncio

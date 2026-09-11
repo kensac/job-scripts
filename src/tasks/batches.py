@@ -6,7 +6,7 @@ import logging
 from typing import Any
 
 from api import db
-from api.tasks.runtime import resume_parked, set_progress
+from tasks.runtime import resume_parked, set_progress
 
 logger = logging.getLogger("jobtracker_worker")
 

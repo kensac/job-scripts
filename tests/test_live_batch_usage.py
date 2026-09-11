@@ -3,8 +3,8 @@ from types import SimpleNamespace
 import pytest
 
 from api import ai, budget, db
-from api.tasks import application, filters
 from core import pricing
+from tasks import application, filters
 
 MODEL = "gpt-5-mini"
 RAW_USAGE = {

@@ -25,7 +25,7 @@ import pytest
 
 from api import db, mail_store
 from api.mail_store import ImportedMessage
-from api.tasks import mail_classify
+from tasks import mail_classify
 from tests.factories import finished
 
 
@@ -155,7 +155,7 @@ class TestTheCeilingDoesNotStrandPaidWork:
         the provider has already been paid for - the same loss by a different
         route, and one I introduced with the ceiling."""
         from api import budget
-        from api.tasks import runtime
+        from tasks import runtime
 
         tid = _task([], batch_ids=["batch_paid_for"])
 
@@ -175,7 +175,7 @@ class TestTheCeilingDoesNotStrandPaidWork:
     @pytest.mark.asyncio
     async def test_a_fresh_submission_is_still_refused_when_over_budget(self, monkeypatch, f):
         from api import budget
-        from api.tasks import runtime
+        from tasks import runtime
 
         tid = _task([])
 

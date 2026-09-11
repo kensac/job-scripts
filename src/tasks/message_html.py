@@ -22,8 +22,8 @@ import logging
 from typing import Any
 
 from api import db
-from api.tasks.runtime import cancelled, set_progress
 from core.mail_import import MAX_BODY_CHARS, MAX_HTML_CHARS, html_to_text
+from tasks.runtime import cancelled, set_progress
 
 logger = logging.getLogger("jobtracker_worker")
 

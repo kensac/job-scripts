@@ -373,7 +373,7 @@ def test_an_admin_queues_a_run_past_the_cap_for_one_run_only(
     ignore_budget goes past it for that run alone, the spend still recorded,
     and the cap never moves. The person's own endpoints cannot set it."""
     from api import budget, db
-    from api.tasks import runtime
+    from tasks import runtime
 
     flt = client.post(
         "/v1/user/filters",

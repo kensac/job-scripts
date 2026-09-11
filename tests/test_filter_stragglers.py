@@ -13,10 +13,10 @@ from __future__ import annotations
 import pytest
 
 from api import ai, db, fetching
-from api.tasks import filters as tasks_filters
-from api.tasks import ingest as tasks_ingest
-from api.tasks.board import in_flight_urls
 from core.store import add_ai_result
+from tasks import filters as tasks_filters
+from tasks import ingest as tasks_ingest
+from tasks.board import in_flight_urls
 from tests.factories import make_task
 
 

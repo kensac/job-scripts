@@ -3,8 +3,8 @@ from types import SimpleNamespace
 import pytest
 
 from api import db
-from api.tasks import locations, verify
 from core.batch import BatchSpec
+from tasks import locations, verify
 from tests.factories import make_batch_result
 
 

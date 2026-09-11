@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import pytest
 
 from api import ai, db
-from api.tasks import filters
+from tasks import filters
 
 
 @pytest.fixture

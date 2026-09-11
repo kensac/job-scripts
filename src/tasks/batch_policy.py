@@ -1,8 +1,8 @@
 """Scheduled work requires an implemented batch transport for its credentials."""
 
 from api import ai, db
-from api.tasks.runtime import set_progress
 from core import providers
+from tasks.runtime import set_progress
 
 
 def scheduled(payload: dict) -> bool:

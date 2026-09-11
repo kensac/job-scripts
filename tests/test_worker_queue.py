@@ -3,11 +3,11 @@ from __future__ import annotations
 import pytest
 
 from api import ai, db, fetching, worker
-from api.tasks import content as tasks_content
-from api.tasks import filters as tasks_filters
-from api.tasks import runtime as tasks_runtime
-from api.tasks import verify as tasks_verify
 from core.store import add_ai_result
+from tasks import content as tasks_content
+from tasks import filters as tasks_filters
+from tasks import runtime as tasks_runtime
+from tasks import verify as tasks_verify
 from tests.factories import finished, make_batch_result, make_task
 
 # ---------------------------------------------------------------------------
@@ -1027,7 +1027,7 @@ async def test_polling_records_the_status_it_already_fetched(monkeypatch, f):
     'in_progress' at 446 of 501 requests. The column lied in both directions:
     live work read as stuck, and a genuinely stalled batch was indistinguishable
     from a healthy one."""
-    from api.tasks import batches as tasks_batches
+    from tasks import batches as tasks_batches
 
     task_id = f.make_task("classify_mail", {"batch_ids": ["batch_live"]}, status="awaiting_batch")
     db.execute(
@@ -1066,7 +1066,7 @@ async def test_polling_records_the_status_it_already_fetched(monkeypatch, f):
 
 @pytest.mark.asyncio
 async def test_polling_stamps_completed_at_once_terminal(monkeypatch, f):
-    from api.tasks import batches as tasks_batches
+    from tasks import batches as tasks_batches
 
     task_id = f.make_task("classify_mail", {"batch_ids": ["batch_done"]}, status="awaiting_batch")
     db.execute(

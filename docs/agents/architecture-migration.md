@@ -63,7 +63,7 @@ real only relocates the problem.
 | 2 | A board row and the working set are told apart | Named and pinned apart (2a). Moving the sweeps' scope off `user_jobs` (2b) waits for a cutover comparison |
 | 3 | Catalog observations are facts | A re-listing is an appended row, not a mutated column |
 | 4 | ~~Derivations are content addressed~~ | **Dropped 2026-09-10.** Measured; see below |
-| 5 | Files move to the shape | Packages match this document. Trialled on `apply`. `api.tasks` becoming a sibling of `api` is no longer cosmetic: see below |
+| 5 | Files move to the shape | `tasks` is a sibling of `api` and `core`. `apply` is a package. The rest is judgement about churn |
 | 6 | The long files are split | No module does four jobs. `admin.py` 2,136 lines, `mail.py` 2,117, `resolve.py` 1,337, `orm.py` 1,248, `health.py` 1,155, `tasks/runtime.py` 796 |
 | 7 | A row is typed, not a dict | A read returns a shape a type checker knows. 678 SQL call sites return bare dicts today |
 
@@ -176,7 +176,20 @@ contract one line and expresses what is already true: the handlers are not
 part of the API, they are work the worker runs using it.
 
 That is the first argument for moving a file in this plan that is about
-something other than where a reader looks for it.
+something other than where a reader looks for it, and the move is done.
+
+Turning the contract on then named six imports, and five are one smell wearing
+five hats: every one reaches past a handler for a SHAPE or a CONSTANT, never
+for behaviour. `SHAPES` twice, a drafting default, a verdict model, an event
+kinds list. So the contract is written down in `pyproject.toml` and not
+enabled, because five exceptions is a contract that records debt rather than
+preventing it.
+
+The slice that lands it: move the shapes to where both layers can read them.
+`tasks/models.py` is already a shapes module and is under `tasks` by habit.
+`SHAPES` is the awkward one, assembled BY importing each task module to read
+the shape it declares, so those declarations invert and live beside
+`TaskShape` in `core/routing.py`.
 
 ## Phases 6 and 7
 

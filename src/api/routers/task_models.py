@@ -36,9 +36,9 @@ from pydantic import BaseModel, Field
 from api import db
 from api.auth import AuthedUser
 from api.routers.admin import require_admin
-from api.tasks import SHAPES
 from core import providers
 from core.routing import NoEligibleModel, candidates_for, resolve
+from tasks import SHAPES
 
 router = APIRouter(prefix="/admin")
 

@@ -12,9 +12,9 @@ from __future__ import annotations
 import pytest
 
 from api import db
-from api.tasks import runtime
 from core.batch import BatchResult
 from core.prompts import PROMPT_SAMPLE_SIZE, prompt_hash
+from tasks import runtime
 
 
 def _results(n: int, prefix: str = "u"):
@@ -143,8 +143,8 @@ class TestNoFork:
         import inspect
 
         from api.routers import jobs
-        from api.tasks import board
         from core import store
+        from tasks import board
 
         for module in (jobs, board, store):
             source = inspect.getsource(module)
@@ -188,6 +188,6 @@ class TestSeam:
         import importlib
         import inspect
 
-        module = importlib.import_module(f"api.tasks.{handler}")
+        module = importlib.import_module(f"tasks.{handler}")
         source = inspect.getsource(module)
         assert "run_batched(" in source, handler

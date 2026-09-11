@@ -46,7 +46,7 @@ def test_an_idle_worker_beside_old_pending_work_is_a_stall_and_a_busy_one_is_not
 
 
 def test_ingest_pending_past_two_cycles_is_a_backlog_and_within_one_is_not(monkeypatch):
-    from api.tasks import runtime
+    from tasks import runtime
 
     monkeypatch.setattr(runtime, "INGEST_INTERVAL_MINUTES", 60)
     _pending("ingest_source", 90, {"source": "a"})

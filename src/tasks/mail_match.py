@@ -23,7 +23,7 @@ from typing import Any
 
 from api import db, mail_match
 from api.mail_pipeline import sync_action_items
-from api.tasks.runtime import set_progress
+from tasks.runtime import set_progress
 
 logger = logging.getLogger("jobtracker_worker")
 

@@ -2,9 +2,9 @@ import pytest
 
 from api import ai, db, visibility
 from api.apply import writes as application_writes
-from api.tasks import application, runtime
 from core import batch
 from core.batch import BatchSpec
+from tasks import application, runtime
 
 
 def _setup(f, *, cached=True):

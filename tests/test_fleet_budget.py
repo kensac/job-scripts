@@ -11,7 +11,7 @@ from decimal import Decimal
 import pytest
 
 from api import budget, db
-from api.tasks import SHAPES
+from tasks import SHAPES
 
 
 def _put(client, headers, purpose, **body):
@@ -137,7 +137,7 @@ class TestTheSweepRefuses:
         billable whether or not this system still wants it."""
         import inspect
 
-        from api.tasks.runtime import run_batched
+        from tasks.runtime import run_batched
 
         source = inspect.getsource(run_batched)
         # The call now carries a projection, so match the name rather than an
@@ -168,7 +168,7 @@ class TestFilterWorkIsNotFleetWork:
     """
 
     def _fire(self, purpose, **kw):
-        from api.tasks.runtime import batch_event_hook
+        from tasks.runtime import batch_event_hook
 
         hook = batch_event_hook(1, purpose, "gpt-5-nano", **kw)
         hook("b-usage", "submitted", {"requests": 1, "completed": 0, "failed": 0})
@@ -204,7 +204,7 @@ class TestFilterWorkIsNotFleetWork:
         # Enough to breach several times over, so the assertion is about the
         # user_id predicate and not about a magnitude that happens to fit.
         for i in range(60):
-            from api.tasks.runtime import batch_event_hook
+            from tasks.runtime import batch_event_hook
 
             hook = batch_event_hook(1, "filter", "gpt-5-nano", charged_to_user=True)
             hook(f"b{i}", "submitted", {"requests": 1, "completed": 0, "failed": 0})
@@ -339,7 +339,7 @@ class TestTheSweepPricesItsOwnSubmission:
     def test_run_batched_projects_before_submitting(self):
         import inspect
 
-        from api.tasks.runtime import run_batched
+        from tasks.runtime import run_batched
 
         source = inspect.getsource(run_batched)
         assert "check_fleet_budget(" in source

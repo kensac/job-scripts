@@ -4,7 +4,7 @@ import pytest
 
 from api import ai, budget, db
 from api.routers import application as routes
-from api.tasks import application
+from tasks import application
 
 
 @pytest.mark.asyncio

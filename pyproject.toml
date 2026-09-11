@@ -162,13 +162,8 @@ markers = [
 # The one violation when this was added was core/devseed.py, which seeded a
 # development database through api.db and has moved to api/ where it belongs.
 #
-# Deliberately one contract rather than a full stack of layers: api and
-# api.tasks import each other (api.tasks reads api freely, and api defers three
-# imports inside functions to avoid the cycle), so a layer contract over those
-# two would fail today. Untangling them is phase 5 work; see
-# docs/agents/architecture-migration.md.
 [tool.importlinter]
-root_packages = ["api", "core"]
+root_packages = ["api", "core", "tasks"]
 
 [[tool.importlinter.contracts]]
 name = "core does not depend on api"
@@ -176,24 +171,30 @@ type = "forbidden"
 source_modules = ["core"]
 forbidden_modules = ["api"]
 
-# THE SECOND LAYER CANNOT BE STATED YET, and finding out why is worth more
-# than the contract would have been.
+# THE SECOND LAYER IS NOW STATABLE, AND IS NOT YET STATED.
 #
-# What we want: no module in `api` reaches into `api.tasks`. Handlers read the
-# services freely; the services must not reach back. Three did, all for a
-# queue primitive, and two imported inside a function to dodge the cycle that
-# reaching created. That primitive is api/queue.py now, below both, and the
-# only two left are the dependency pointing the right way round: api.worker IS
-# the task runner, and api.budget prices the fleet, whose cost is the sum over
-# task shapes.
+# `tasks` being a sibling of `api` is what makes it possible: import-linter's
+# `forbidden` skips a target inside its source, so while the handlers lived at
+# api.tasks the rule passed whatever the code did. Verified before this move
+# by adding a violation and watching it stay green.
 #
-# What import-linter can express: a `forbidden` contract skips a target that
-# is INSIDE its source. With source_modules = ["api"], `api.tasks` is internal
-# and the contract passes no matter what, which was verified by adding a
-# violation and watching it stay green. Narrowing the source to one module
-# catches it, so enforcing this means enumerating forty-odd api modules and
-# leaving a hole the day someone adds the forty-first.
+# Turning it on names six imports, and five of them are one smell wearing five
+# hats. Every one reaches past a handler for a SHAPE or a CONSTANT, never for
+# behaviour:
 #
-# Stating it properly needs api.tasks to be a SIBLING of api rather than a
-# child, which is phase 5 work that now has a concrete reason rather than a
-# stylistic one. See docs/agents/architecture-migration.md.
+#   api.budget              -> tasks.SHAPES            price the fleet
+#   api.routers.task_models -> tasks.SHAPES            configure the fleet
+#   api.routers.users       -> tasks.application.DEFAULT_STYLE
+#   api.routers.jobs        -> tasks.models.FilterVerdict
+#   api.routers.mail        -> tasks.mail_classify.EVENT_KINDS
+#
+# The sixth is the dependency pointing the right way round: api.worker IS the
+# task runner and loads HANDLERS to dispatch them.
+#
+# Listing five as exceptions would leave a contract that mostly records debt,
+# and one that grows an entry at a time until it means nothing. The shapes
+# move to where both layers can read them instead, and the contract lands with
+# them. tasks/models.py is already a shapes module; it is only under `tasks`
+# by habit. SHAPES is the awkward one: it is assembled BY importing each task
+# module to read the shape that module declares, so the declarations have to
+# invert and live beside TaskShape in core/routing.py.

@@ -4,8 +4,8 @@ import hashlib
 
 from api import ai, fetching, ssrf, worker
 from api import criteria as crit
-from api.tasks import runtime as tasks_runtime
 from core import filters, pricing
+from tasks import runtime as tasks_runtime
 
 # ---------------------------------------------------------------------------
 # api.criteria
@@ -270,10 +270,10 @@ def test_requirements_declares_a_shape_the_model_can_actually_serve():
     """Every batched extraction goes through the router so its model is checked
     against declared capability rather than assumed. Requirements was the last
     one naming a model straight into the batch call."""
-    from api.tasks.requirements import REQUIREMENTS_MODEL, REQUIREMENTS_TASK
     from core import providers
     from core.providers import StructuredOutput
     from core.routing import resolve
+    from tasks.requirements import REQUIREMENTS_MODEL, REQUIREMENTS_TASK
 
     assert REQUIREMENTS_TASK.candidates == (REQUIREMENTS_MODEL,)
     assert REQUIREMENTS_TASK.structured is StructuredOutput.JSON_SCHEMA
@@ -314,8 +314,8 @@ def test_no_fleet_task_defaults_to_a_model_that_is_dropping_requests():
     failing model works fine most of the time, which is exactly why this needs
     to be a fact about the configuration."""
     from api.routers.filters import IMPROVE_MODEL
-    from api.tasks.mail_classify import BACKFILL_MODEL, ONGOING_MODEL
-    from api.tasks.requirements import REQUIREMENTS_MODEL
+    from tasks.mail_classify import BACKFILL_MODEL, ONGOING_MODEL
+    from tasks.requirements import REQUIREMENTS_MODEL
 
     for name, model in (
         ("requirements", REQUIREMENTS_MODEL),
@@ -331,10 +331,10 @@ def test_swapping_the_mail_or_requirements_model_carries_its_effort():
     the model unswappable - point a task at the other one and resolve() refuses,
     or a batch submits and fails whole on a 400. That is #179, and it broke the
     ongoing mail path while the backfill kept working."""
-    from api.tasks.mail_classify import BACKFILL_TASK, ONGOING_TASK
-    from api.tasks.requirements import REQUIREMENTS_TASK
     from core import providers
     from core.routing import resolve
+    from tasks.mail_classify import BACKFILL_TASK, ONGOING_TASK
+    from tasks.requirements import REQUIREMENTS_TASK
 
     for shape in (REQUIREMENTS_TASK, BACKFILL_TASK, ONGOING_TASK):
         chosen = resolve(shape)

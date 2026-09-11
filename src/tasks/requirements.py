@@ -10,13 +10,6 @@ from typing import Any
 from pydantic import BaseModel
 
 from api import batch_results, db
-from api.tasks import rescrape
-from api.tasks.runtime import (
-    consume_result,
-    has_batch_work,
-    run_batched,
-    set_progress,
-)
 from core import skills as skills_lib
 from core.providers import StructuredOutput
 from core.requirements import (
@@ -30,6 +23,13 @@ from core.requirements import (
 )
 from core.routing import Evidence, TaskShape
 from core.store import AI_ELIGIBLE_JOB, CONTENT_LATERAL, VERIFIED_OPEN
+from tasks import rescrape
+from tasks.runtime import (
+    consume_result,
+    has_batch_work,
+    run_batched,
+    set_progress,
+)
 
 logger = logging.getLogger("jobtracker_worker")
 

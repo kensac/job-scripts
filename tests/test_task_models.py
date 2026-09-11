@@ -11,8 +11,8 @@ from __future__ import annotations
 import pytest
 
 from api import db
-from api.tasks import SHAPES
-from api.tasks.requirements import REQUIREMENTS_MODEL
+from tasks import SHAPES
+from tasks.requirements import REQUIREMENTS_MODEL
 
 
 def _get(client, headers, purpose="requirements"):
@@ -268,7 +268,7 @@ class TestTakesEffect:
         """run_batched resolves per run, so a change lands on the next sweep.
         A batch already submitted finishes on the model that submitted it -
         the request is with the provider and cannot be recalled."""
-        from api.tasks.runtime import configured_model
+        from tasks.runtime import configured_model
 
         assert configured_model("requirements") is None
         _put(client, admin_headers, "requirements", model="gpt-5-nano")
@@ -281,8 +281,8 @@ class TestTakesEffect:
         """Under an override the batch carried the sanctioned candidate's
         effort: luna's "none" went to nano and 21,525 lines died on a 400 on
         2026-09-04, then 112 more on 2026-09-05."""
-        from api.tasks import runtime
-        from api.tasks.requirements import REQUIREMENTS_TASK
+        from tasks import runtime
+        from tasks.requirements import REQUIREMENTS_TASK
 
         sent = {}
 
@@ -299,7 +299,7 @@ class TestTakesEffect:
         assert sent["model"] == "gpt-5.6-luna" and sent["effort"] == "none"
 
     def test_an_unreadable_override_falls_back_rather_than_stopping_a_sweep(self, monkeypatch):
-        from api.tasks import runtime
+        from tasks import runtime
 
         def boom(*a, **k):
             raise RuntimeError("database is having a moment")

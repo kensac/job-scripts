@@ -7,7 +7,7 @@ import logging
 from typing import Any
 
 from api import db
-from api.tasks.runtime import set_progress
+from tasks.runtime import set_progress
 
 logger = logging.getLogger("jobtracker_worker")
 

@@ -3,9 +3,9 @@ from decimal import Decimal
 import pytest
 
 from api import db
-from api.tasks import application, filters, runtime
 from core import batch, pricing
 from core.batch import BatchResult, BatchSpec
+from tasks import application, filters, runtime
 
 
 def _parked(f, kind, payload, model):

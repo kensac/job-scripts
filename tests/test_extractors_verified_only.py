@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from api.tasks import comp, requirements
+from tasks import comp, requirements
 
 
 def _refused(f, task_id, specs):

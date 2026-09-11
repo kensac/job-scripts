@@ -9,7 +9,7 @@ than anything in this code.
 from __future__ import annotations
 
 from api import db
-from api.tasks.runtime import batch_event_hook
+from tasks.runtime import batch_event_hook
 
 
 def _park(kind: str, hours: float = 0.5) -> int:

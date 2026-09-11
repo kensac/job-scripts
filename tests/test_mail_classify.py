@@ -12,10 +12,10 @@ import datetime
 import pytest
 
 from api import db, mail_store
-from api.tasks import HANDLERS, mail_classify
 from core import pricing, providers
 from core.mail_import import ImportedMessage
 from core.routing import resolve
+from tasks import HANDLERS, mail_classify
 from tests.factories import make_task
 
 

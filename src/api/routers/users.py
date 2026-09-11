@@ -284,7 +284,7 @@ def get_settings(user: AuthedUser = Depends(require_user)):
     # Read-only, beside the field it is the placeholder for: the settings
     # page is where a person writes their style, so it shows the default
     # there without reading a job's application view to find it.
-    from api.tasks.application import DEFAULT_STYLE
+    from tasks.application import DEFAULT_STYLE
 
     return {**settings, "default_style": DEFAULT_STYLE, **_effective_model(user)}
 

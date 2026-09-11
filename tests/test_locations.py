@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 from api import db
-from api.tasks import locations
+from tasks import locations
 from tests.factories import make_batch_result
 from tests.test_api_jobs import _insert_job, _job_ids, _pass_closed, _subscribe, _uid
 

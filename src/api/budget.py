@@ -233,9 +233,9 @@ def fleet_cycle_cost_usd() -> Decimal:
     and a ceiling that ignored overrides would be measuring a fleet that is not
     running.
     """
-    from api.tasks import SHAPES
-    from api.tasks.runtime import configured_model
     from core.routing import NoEligibleModel, resolve
+    from tasks import SHAPES
+    from tasks.runtime import configured_model
 
     total = Decimal(0)
     for purpose, shape in SHAPES.items():

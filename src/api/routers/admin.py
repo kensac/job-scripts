@@ -816,7 +816,7 @@ def list_locations(
 def put_location(text: str, body: LocationPut, user: AuthedUser = Depends(require_admin)):
     """A person's classification of one string, kept over the model's: the
     sweep never re-asks about a string that has a row."""
-    from api.tasks.locations import LocationExtract, Place, store
+    from tasks.locations import LocationExtract, Place, store
 
     store(
         text.strip(),
@@ -1125,9 +1125,9 @@ async def run_single_check(body: RunCheckBody, user: AuthedUser = Depends(requir
     re-derives from it immediately. No downstream re-run needed, since
     visibility is a read-time predicate rather than stored derived state."""
     from api import verdicts as _verdicts
-    from api.tasks.models import FilterVerdict
     from core.checks import POSTING_CHECKS
     from core.filters import build_custom_instructions
+    from tasks.models import FilterVerdict
 
     job = db.query_one("SELECT id, url, company, title FROM jobs WHERE id = %s", (body.job_id,))
     if not job:
