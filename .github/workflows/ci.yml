@@ -127,32 +127,21 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    services:
-      postgres:
-        # pgvector, not plain postgres: migrations CREATE EXTENSION vector, so a
-        # base image without it fails the whole suite at conftest import.
-        # -trixie is load-bearing. The default pg18 tag is bookworm (glibc 2.36)
-        # and prod's cluster was initialised under trixie (glibc 2.41); mixing
-        # them emits collation-version mismatches, which is silent text-index
-        # corruption rather than a loud failure.
-        image: pgvector/pgvector:pg18-trixie@sha256:78bf48b801e792f99e3ac62b5036fd3876e9be48afda16c1e331af1c75ceb2ff
-        env:
-          POSTGRES_USER: ci
-          POSTGRES_PASSWORD: ci
-          POSTGRES_DB: jobtracker_ci
-        ports:
-          - 5432:5432
-        # Postgres is ready about a second after it starts; a 5 s interval
-        # with no start period meant the first probe ran too early and the
-        # job waited for the second, 5.9 s measured. Probe sooner and more
-        # often, with the same total patience.
-        options: >-
-          --health-cmd "pg_isready -h 127.0.0.1 -U ci" --health-interval 2s
-          --health-start-period 2s --health-timeout 3s --health-retries 20
     env:
       DATABASE_URL: postgresql://ci:ci@localhost:5432/jobtracker_ci
       PYTHONPATH: src
     steps:
+      # Postgres starts in the background so its image pull overlaps the
+      # checkout and the dependency sync below. As a `services:` block the
+      # runner pulled and health-checked it before the job's first step,
+      # with nothing to overlap: 12-14 s of a 45 s lane, measured, of which
+      # 7.7 s was the pull. Here that time is spent while the job does its
+      # other setup, and the wait below is what is left of it.
+      - name: Start Postgres in the background
+        run: |
+          nohup docker run --rm -d --name pg -p 5432:5432 \
+            -e POSTGRES_USER=ci -e POSTGRES_PASSWORD=ci -e POSTGRES_DB=jobtracker_ci \
+            pgvector/pgvector:pg18-trixie@sha256:78bf48b801e792f99e3ac62b5036fd3876e9be48afda16c1e331af1c75ceb2ff >/dev/null 2>&1 &
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ needs.gate.outputs.revision }}
@@ -163,6 +152,20 @@ jobs:
       - run: echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
       - name: Type check
         run: pyright
+      # Whatever is left of the pull and the boot after the setup above.
+      # A container that never arrives fails here with its own logs rather
+      # than as a connection refused inside a test.
+      - name: Wait for Postgres
+        run: |
+          for _ in $(seq 1 90); do
+            if docker exec pg pg_isready -h 127.0.0.1 -U ci >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::Postgres never became ready"
+          docker logs pg 2>&1 | tail -50 || true
+          exit 1
       - name: Import contract
         run: lint-imports
       - name: Compile all sources
