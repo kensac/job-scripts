@@ -24,6 +24,8 @@ import datetime
 import time
 from typing import Any
 
+from pydantic import BaseModel
+
 from api import db
 
 # A proportion needs enough trials before it carries information. Thirty is the
@@ -91,10 +93,57 @@ FROM firsts {group}
 # threads racing to fill the same key recompute the same value and one wins,
 # which is why no lock is taken - a dict get/set needs none, and blocking a
 # request thread to save a duplicate query would be the worse trade.
-_board_cache: dict[str, tuple[float, dict[str, Any] | None]] = {}
+_board_cache: dict[str, tuple[float, BoardReliability | None]] = {}
 
 
-def _board_reliability(source: str) -> dict[str, Any] | None:
+class PostingAge(BaseModel):
+    """How long this one listing has been up. Carries no sample size, because
+    it is a fact about this posting rather than a rate over many."""
+
+    posted_at: datetime.datetime
+    days_listed: int
+
+
+class BoardReliability(BaseModel):
+    """How often this board's postings were already gone the first time they
+    were checked. An observation over `sample_n`, not a prediction."""
+
+    source: str
+    dead_on_arrival: int
+    sample_n: int
+
+
+class Repost(BaseModel):
+    """The same title, at the same locations, listed more than once. Location
+    is part of the key: without it one chain listing a role across its estate
+    reads as one enormous repost."""
+
+    title: str | None
+    url_count: int
+    first_posted_at: datetime.datetime | None
+    last_posted_at: datetime.datetime | None
+    span_days: int | None
+
+
+class Signals(BaseModel):
+    """Every signal is null when it cannot clear its floor.
+
+    It used to be absent instead, because a caller renders "no signal" as
+    nothing at all and an empty object is a correct answer. Declaring the
+    shape made the keys appear with null, which the one consumer reads
+    identically: `!signals?.posting_age` is true either way. Null is kept
+    rather than serialised away because a key that is sometimes absent cannot
+    be typed, and being able to type it is the reason this exists.
+
+    What must not change is that a null here means the signal DOES NOT EXIST.
+    Never a zero, and never something for the caller to re-derive."""
+
+    posting_age: PostingAge | None = None
+    board_reliability: BoardReliability | None = None
+    repost: Repost | None = None
+
+
+def _board_reliability(source: str) -> BoardReliability | None:
     cached = _board_cache.get(source)
     now = time.monotonic()
     if cached and now - cached[0] < _BOARD_RELIABILITY_TTL_SECONDS:
@@ -104,17 +153,17 @@ def _board_reliability(source: str) -> dict[str, Any] | None:
     signal = (
         None
         if checked < BOARD_RELIABILITY_MIN_CHECKED
-        else {
-            "source": source,
-            "dead_on_arrival": int(row["dead_on_arrival"]),  # pyright: ignore[reportOptionalSubscript]
-            "sample_n": checked,
-        }
+        else BoardReliability(
+            source=source,
+            dead_on_arrival=int(row["dead_on_arrival"]),  # pyright: ignore[reportOptionalSubscript]
+            sample_n=checked,
+        )
     )
     _board_cache[source] = (now, signal)
     return signal
 
 
-def _posting_age(job: dict[str, Any]) -> dict[str, Any] | None:
+def _posting_age(job: dict[str, Any]) -> PostingAge | None:
     """Purely observational, so it carries no sample size - it is a fact about
     this one listing. Absent when the board supplied no date (sheet_import
     carries one for 1,628 of 6,021 postings, upload for none), because the
@@ -126,7 +175,7 @@ def _posting_age(job: dict[str, Any]) -> dict[str, Any] | None:
     if days < 0:
         # A future date_posted is a feed error, not a posting from tomorrow.
         return None
-    return {"posted_at": posted, "days_listed": int(days)}
+    return PostingAge(posted_at=posted, days_listed=int(days))
 
 
 # Location is part of the key, and leaving it out was a real defect rather
@@ -148,7 +197,7 @@ WHERE source = %(source)s
 """
 
 
-def _repost(job: dict[str, Any]) -> dict[str, Any] | None:
+def _repost(job: dict[str, Any]) -> Repost | None:
     """Scoped to a single source on purpose. The same (company, title) under
     two urls from two different boards is our ingest seeing one posting twice,
     not an employer re-listing it: 15% of multi-url pairs span sources and are
@@ -179,22 +228,22 @@ def _repost(job: dict[str, Any]) -> dict[str, Any] | None:
     span_days = int((row["last_posted_at"] - row["first_posted_at"]).total_seconds() / _DAY)
     if span_days < REPOST_MIN_SPAN_DAYS:
         return None
-    return {
-        "title": job["title"],
-        "url_count": int(row["url_count"]),
-        "first_posted_at": row["first_posted_at"],
-        "last_posted_at": row["last_posted_at"],
-        "span_days": span_days,
-    }
+    return Repost(
+        title=job["title"],
+        url_count=int(row["url_count"]),
+        first_posted_at=row["first_posted_at"],
+        last_posted_at=row["last_posted_at"],
+        span_days=span_days,
+    )
 
 
-def signals_for(job: dict[str, Any]) -> dict[str, Any]:
-    """Every key is optional. A caller must treat a missing key as "this signal
-    does not exist" - never as a zero, and never as something to re-derive.
+def signals_for(job: dict[str, Any]) -> Signals:
+    """Every signal is optional. A caller must treat a missing one as "this
+    signal does not exist" - never as a zero, and never as something to
+    re-derive.
     """
-    built = {
-        "posting_age": _posting_age(job),
-        "board_reliability": _board_reliability(job["source"]),
-        "repost": _repost(job),
-    }
-    return {name: signal for name, signal in built.items() if signal is not None}
+    return Signals(
+        posting_age=_posting_age(job),
+        board_reliability=_board_reliability(job["source"]),
+        repost=_repost(job),
+    )

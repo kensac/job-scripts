@@ -1619,7 +1619,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/BoardOptions"
+                }
               }
             }
           },
@@ -1919,7 +1921,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Board"
+                }
               }
             }
           },
@@ -2175,7 +2179,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/BulkDeleted"
+                }
               }
             }
           },
@@ -2570,7 +2576,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/JobDetail"
+                }
               }
             }
           },
@@ -2708,7 +2716,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Explained"
+                }
               }
             }
           },
@@ -2836,7 +2846,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Uploaded"
+                }
               }
             }
           },
@@ -2973,7 +2985,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ReportFiled"
+                }
               }
             }
           },
@@ -3100,7 +3114,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/TaskState"
+                }
               }
             }
           },
@@ -26089,6 +26105,24 @@
   },
   "components": {
     "schemas": {
+      "AcceptedUpload": {
+        "properties": {
+          "job_id": {
+            "type": "integer",
+            "title": "Job Id"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url"
+          }
+        },
+        "type": "object",
+        "required": [
+          "job_id",
+          "url"
+        ],
+        "title": "AcceptedUpload"
+      },
       "ActionAnswer": {
         "properties": {
           "note": {
@@ -26608,6 +26642,24 @@
         "title": "Assignment",
         "description": "One of three targets. An application to attach to, a board job to\ncreate an application from, or a company and title when neither exists -\nwhich is the common case for mail predating the catalog."
       },
+      "AtsCount": {
+        "properties": {
+          "ats": {
+            "type": "string",
+            "title": "Ats"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ats",
+          "count"
+        ],
+        "title": "AtsCount"
+      },
       "Attached": {
         "properties": {
           "jobs": {
@@ -26680,6 +26732,491 @@
         "title": "Autofilled",
         "description": "What the write filled in that the caller did not send.\n\nA status change can date the row by itself, so the caller is told rather\nthan having to re-read the row to find out.\n\nAn absent key is the answer, not a null: the route sets\nresponse_model_exclude_none so `{}` still means \"nothing was filled\",\nwhich is what the board already reads. Declaring the shape must not move\nthe wire."
       },
+      "Board": {
+        "properties": {
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/BoardRow"
+            },
+            "type": "array",
+            "title": "Rows"
+          },
+          "filters": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": "object",
+            "title": "Filters"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "has_more": {
+            "type": "boolean",
+            "title": "Has More"
+          },
+          "offset": {
+            "type": "integer",
+            "title": "Offset"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          },
+          "facets": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Facets"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sorts": {
+            "items": {
+              "$ref": "#/components/schemas/Sort"
+            },
+            "type": "array",
+            "title": "Sorts"
+          },
+          "sortable": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Sortable"
+          },
+          "board_computed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Board Computed At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "rows",
+          "filters",
+          "next_cursor",
+          "has_more",
+          "offset",
+          "total",
+          "facets",
+          "sorts",
+          "sortable",
+          "board_computed_at"
+        ],
+        "title": "Board",
+        "description": "One page of the board, and everything the page needs to render its own\ncontrols without re-deriving them."
+      },
+      "BoardOptions": {
+        "properties": {
+          "statuses": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Statuses"
+          },
+          "status_meta": {
+            "items": {
+              "$ref": "#/components/schemas/StatusMeta"
+            },
+            "type": "array",
+            "title": "Status Meta"
+          },
+          "not_applied_sentinel": {
+            "type": "string",
+            "title": "Not Applied Sentinel"
+          },
+          "sources": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Sources"
+          },
+          "ats": {
+            "items": {
+              "$ref": "#/components/schemas/AtsCount"
+            },
+            "type": "array",
+            "title": "Ats"
+          },
+          "report_kinds": {
+            "items": {
+              "$ref": "#/components/schemas/ReportKind"
+            },
+            "type": "array",
+            "title": "Report Kinds"
+          }
+        },
+        "type": "object",
+        "required": [
+          "statuses",
+          "status_meta",
+          "not_applied_sentinel",
+          "sources",
+          "ats",
+          "report_kinds"
+        ],
+        "title": "BoardOptions",
+        "description": "Everything the board's filter and edit controls need, generated from\ndata instead of hardcoded in the client.\n\n`ats` here is the board-wide count, the profile of the board as a whole.\nThe per-page counts under the other filters are `facets` on the list."
+      },
+      "BoardReliability": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "dead_on_arrival": {
+            "type": "integer",
+            "title": "Dead On Arrival"
+          },
+          "sample_n": {
+            "type": "integer",
+            "title": "Sample N"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source",
+          "dead_on_arrival",
+          "sample_n"
+        ],
+        "title": "BoardReliability",
+        "description": "How often this board's postings were already gone the first time they\nwere checked. An observation over `sample_n`, not a prediction."
+      },
+      "BoardRow": {
+        "properties": {
+          "job_id": {
+            "type": "integer",
+            "title": "Job Id"
+          },
+          "company": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "locations": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Locations"
+          },
+          "terms": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Terms"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "ats": {
+            "type": "string",
+            "title": "Ats"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "raw_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Raw Url"
+          },
+          "active": {
+            "type": "boolean",
+            "title": "Active"
+          },
+          "date_posted": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date Posted"
+          },
+          "added_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Added At"
+          },
+          "extraction_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Extraction Status"
+          },
+          "comp_min": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comp Min"
+          },
+          "comp_max": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comp Max"
+          },
+          "comp_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comp Text"
+          },
+          "comp_currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comp Currency"
+          },
+          "comp_period": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comp Period"
+          },
+          "comp_basis": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comp Basis"
+          },
+          "closed_verdict": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closed Verdict"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "date_applied": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date Applied"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "size": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size"
+          },
+          "recruiter": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recruiter"
+          },
+          "connection1": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Connection1"
+          },
+          "connection2": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Connection2"
+          },
+          "documents": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Documents"
+          },
+          "hidden": {
+            "type": "boolean",
+            "title": "Hidden"
+          }
+        },
+        "type": "object",
+        "required": [
+          "job_id",
+          "company",
+          "title",
+          "locations",
+          "terms",
+          "source",
+          "ats",
+          "url",
+          "raw_url",
+          "active",
+          "date_posted",
+          "added_at",
+          "extraction_status",
+          "comp_min",
+          "comp_max",
+          "comp_text",
+          "comp_currency",
+          "comp_period",
+          "comp_basis",
+          "closed_verdict",
+          "status",
+          "date_applied",
+          "notes",
+          "size",
+          "recruiter",
+          "connection1",
+          "connection2",
+          "documents",
+          "hidden"
+        ],
+        "title": "BoardRow",
+        "description": "`_JOB_ROW`, in types: the posting, the ATS read off its url, and this\nperson's own row over the top.\n\n`closed_verdict` is three-valued and must stay that way: 'open', 'closed',\nor null for never checked. `active` cannot answer this question, it is\nwhatever a board's feed last said and nothing ever clears it."
+      },
       "Breakdown": {
         "properties": {
           "decisions": {
@@ -26721,6 +27258,24 @@
         ],
         "title": "Breakdown",
         "description": "One bucket of rejections. `examples` is a reproducible sample of\n`distinct_phrasings`, not a frequency ranking; see `_finish`."
+      },
+      "BulkDeleted": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "deleted": {
+            "type": "integer",
+            "title": "Deleted"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ok",
+          "deleted"
+        ],
+        "title": "BulkDeleted"
       },
       "BulkPatchResult": {
         "properties": {
@@ -26933,6 +27488,55 @@
         ],
         "title": "CatalogSource",
         "description": "A source row as stored, plus the format read off its URL. `kind` is\nnever a column: it is derived from `listings_url` every time, so it cannot\ndrift from what ingest will do with the row."
+      },
+      "CheckVerdict": {
+        "properties": {
+          "check_type": {
+            "type": "string",
+            "title": "Check Type"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "check_type",
+          "status",
+          "reason",
+          "model",
+          "created_at"
+        ],
+        "title": "CheckVerdict",
+        "description": "The latest verdict for one posting check."
       },
       "ClosePostingBody": {
         "properties": {
@@ -27994,6 +28598,59 @@
         ],
         "title": "ExplainBody"
       },
+      "Explained": {
+        "properties": {
+          "check": {
+            "type": "string",
+            "title": "Check"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "refetched": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refetched"
+          },
+          "closure_signal": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closure Signal"
+          }
+        },
+        "type": "object",
+        "required": [
+          "check",
+          "status",
+          "reason"
+        ],
+        "title": "Explained",
+        "description": "One check re-run on purpose, with the reasoning the cheap path skips.\n\n`refetched` and `closure_signal` are present only when the content could\nnot be fetched and the fetch itself said why: a 404 or a removal notice is\nan answer about the posting, not a failure to get one."
+      },
       "ExtensionAvailability": {
         "properties": {
           "autofill": {
@@ -28050,6 +28707,23 @@
           "features"
         ],
         "title": "ExtensionConfig"
+      },
+      "Facets": {
+        "properties": {
+          "ats": {
+            "items": {
+              "$ref": "#/components/schemas/AtsCount"
+            },
+            "type": "array",
+            "title": "Ats"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ats"
+        ],
+        "title": "Facets",
+        "description": "Counts under every OTHER filter the page has on. Taken before the ats\nclause joins the rest, because a board-wide \"rippling 4\" beside a lens\nthat holds none of them reads as a lie."
       },
       "FeatureAvailability": {
         "properties": {
@@ -28440,6 +29114,74 @@
           "user_id"
         ],
         "title": "FilterRunBody"
+      },
+      "FilterVerdictRow": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "enabled",
+          "status",
+          "reason",
+          "model",
+          "created_at"
+        ],
+        "title": "FilterVerdictRow",
+        "description": "One of this person's filters, and how it last judged this posting.\nEverything but the filter itself is null when it has never run on it."
       },
       "FormState": {
         "properties": {
@@ -28901,6 +29643,269 @@
         },
         "type": "object",
         "title": "JobCorrection"
+      },
+      "JobDetail": {
+        "properties": {
+          "job": {
+            "$ref": "#/components/schemas/JobFacts"
+          },
+          "signals": {
+            "$ref": "#/components/schemas/Signals"
+          },
+          "row": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OwnRow"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "history": {
+            "items": {
+              "$ref": "#/components/schemas/StatusChange"
+            },
+            "type": "array",
+            "title": "History"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content"
+          },
+          "content_fetched_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content Fetched At"
+          },
+          "checks": {
+            "items": {
+              "$ref": "#/components/schemas/CheckVerdict"
+            },
+            "type": "array",
+            "title": "Checks"
+          },
+          "filter_verdicts": {
+            "items": {
+              "$ref": "#/components/schemas/FilterVerdictRow"
+            },
+            "type": "array",
+            "title": "Filter Verdicts"
+          }
+        },
+        "type": "object",
+        "required": [
+          "job",
+          "signals",
+          "row",
+          "history",
+          "content",
+          "content_fetched_at",
+          "checks",
+          "filter_verdicts"
+        ],
+        "title": "JobDetail",
+        "description": "Everything behind one board row: the posting, the content that was\njudged, this person's own row and its history, and why the checks and\nfilters let it through."
+      },
+      "JobFacts": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "raw_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Raw Url"
+          },
+          "company": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "locations": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Locations"
+          },
+          "terms": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Terms"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "active": {
+            "type": "boolean",
+            "title": "Active"
+          },
+          "date_posted": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date Posted"
+          },
+          "comp_min": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comp Min"
+          },
+          "comp_max": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comp Max"
+          },
+          "comp_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comp Text"
+          },
+          "comp_currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comp Currency"
+          },
+          "comp_period": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comp Period"
+          },
+          "comp_basis": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comp Basis"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "closed_verdict": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closed Verdict"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "url",
+          "raw_url",
+          "company",
+          "title",
+          "locations",
+          "terms",
+          "source",
+          "active",
+          "date_posted",
+          "comp_min",
+          "comp_max",
+          "comp_text",
+          "comp_currency",
+          "comp_period",
+          "comp_basis",
+          "created_at",
+          "closed_verdict"
+        ],
+        "title": "JobFacts",
+        "description": "The posting behind one board row. Wider than `BoardRow` where the\ndetail view needs it and narrower where the list does."
       },
       "JobRef": {
         "properties": {
@@ -29785,6 +30790,129 @@
         "title": "Ok",
         "description": "It worked and there is nothing to say about it.\n\nReturned where the interesting outcome is the status code. A route with\nsomething to report returns that instead; this is not a wrapper to put\naround a real answer."
       },
+      "OwnRow": {
+        "properties": {
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "date_applied": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date Applied"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "size": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size"
+          },
+          "recruiter": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recruiter"
+          },
+          "connection1": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Connection1"
+          },
+          "connection2": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Connection2"
+          },
+          "documents": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Documents"
+          },
+          "hidden": {
+            "type": "boolean",
+            "title": "Hidden"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "date_applied",
+          "notes",
+          "size",
+          "recruiter",
+          "connection1",
+          "connection2",
+          "documents",
+          "hidden",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "OwnRow",
+        "description": "This person's own row, which is null when they have never touched the\nposting. A board row is a grant as well as a record, so absence is a real\nanswer rather than an empty one."
+      },
       "OwnedFilter": {
         "properties": {
           "name": {
@@ -30070,6 +31198,26 @@
         ],
         "title": "PhrasingPage",
         "description": "`filters` echoes what narrowed this page, keyed by parameter name, and\ncarries only the parameters that narrowed anything."
+      },
+      "PostingAge": {
+        "properties": {
+          "posted_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Posted At"
+          },
+          "days_listed": {
+            "type": "integer",
+            "title": "Days Listed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "posted_at",
+          "days_listed"
+        ],
+        "title": "PostingAge",
+        "description": "How long this one listing has been up. Carries no sample size, because\nit is a fact about this posting rather than a rate over many."
       },
       "PresetBody": {
         "properties": {
@@ -31446,6 +32594,24 @@
         ],
         "title": "RefineBody"
       },
+      "RejectedUpload": {
+        "properties": {
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "error": {
+            "type": "string",
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "url",
+          "error"
+        ],
+        "title": "RejectedUpload"
+      },
       "RejectionReasons": {
         "properties": {
           "window_days": {
@@ -31589,6 +32755,48 @@
         "title": "ReportCreated",
         "description": "The extension shows the number, so the person can quote it."
       },
+      "ReportFiled": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "created_at"
+        ],
+        "title": "ReportFiled"
+      },
+      "ReportKind": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "label"
+        ],
+        "title": "ReportKind"
+      },
       "ReportList": {
         "properties": {
           "reports": {
@@ -31604,6 +32812,70 @@
           "reports"
         ],
         "title": "ReportList"
+      },
+      "Repost": {
+        "properties": {
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "url_count": {
+            "type": "integer",
+            "title": "Url Count"
+          },
+          "first_posted_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Posted At"
+          },
+          "last_posted_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Posted At"
+          },
+          "span_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Span Days"
+          }
+        },
+        "type": "object",
+        "required": [
+          "title",
+          "url_count",
+          "first_posted_at",
+          "last_posted_at",
+          "span_days"
+        ],
+        "title": "Repost",
+        "description": "The same title, at the same locations, listed more than once. Location\nis part of the key: without it one chain listing a role across its estate\nreads as one enormous repost."
       },
       "Rescored": {
         "properties": {
@@ -33194,6 +34466,43 @@
         "title": "SettingsPut",
         "description": "Partial settings update: omitted fields preserve their saved value.\n\nNull resets column_layout, ai_model and writing_style to their defaults.\nOther fields retain their legacy null-as-omission behavior. Supplied\nobjects replace the whole object; {} clears it, subject to the age cap\nwhen criteria are written. False is a saved value, not an omission.\n\nRejects unknown keys rather than dropping them.\n\n`background` was a key here until it was removed, and a client still\nsending it needs to be told. Pydantic's default is to discard an\nunrecognised key silently, which would answer 200 to a write that\nstored nothing - the one failure a caller cannot detect."
       },
+      "Signals": {
+        "properties": {
+          "posting_age": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PostingAge"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "board_reliability": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BoardReliability"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "repost": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Repost"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "title": "Signals",
+        "description": "Every signal is null when it cannot clear its floor.\n\nIt used to be absent instead, because a caller renders \"no signal\" as\nnothing at all and an empty object is a correct answer. Declaring the\nshape made the keys appear with null, which the one consumer reads\nidentically: `!signals?.posting_age` is true either way. Null is kept\nrather than serialised away because a key that is sometimes absent cannot\nbe typed, and being able to type it is the reason this exists.\n\nWhat must not change is that a null here means the signal DOES NOT EXIST.\nNever a zero, and never something for the caller to re-derive."
+      },
       "Similar": {
         "properties": {
           "job_id": {
@@ -33232,6 +34541,24 @@
           "postings"
         ],
         "title": "SkillCount"
+      },
+      "Sort": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "dir": {
+            "type": "string",
+            "title": "Dir"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "dir"
+        ],
+        "title": "Sort"
       },
       "Source": {
         "properties": {
@@ -34137,6 +35464,44 @@
         ],
         "title": "Stats"
       },
+      "StatusChange": {
+        "properties": {
+          "old_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Old Status"
+          },
+          "new_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "New Status"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "old_status",
+          "new_status",
+          "created_at"
+        ],
+        "title": "StatusChange"
+      },
       "StatusCount": {
         "properties": {
           "status": {
@@ -34155,6 +35520,37 @@
         ],
         "title": "StatusCount",
         "description": "A status and how many board rows carry it. The empty string is the\nboard's own name for \"no status yet\", not a missing value, which is why\nthe query coalesces rather than letting null through."
+      },
+      "StatusMeta": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "terminal": {
+            "type": "boolean",
+            "title": "Terminal"
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outcome"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "terminal",
+          "outcome"
+        ],
+        "title": "StatusMeta",
+        "description": "What a status MEANS, served beside the names so the board never decides\n\"is this over\" or \"which tone\" by matching a name it hand-copied. A status\nabsent from the table is in play with no outcome."
       },
       "Submitted": {
         "properties": {
@@ -34627,6 +36023,87 @@
         "type": "object",
         "title": "TaskModelPut"
       },
+      "TaskState": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "progress": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Progress"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "status",
+          "progress",
+          "error",
+          "created_at",
+          "started_at",
+          "finished_at"
+        ],
+        "title": "TaskState",
+        "description": "A task this person started. Ownership lives in the payload, so the\nkinds that stamp no user_id are fleet work with nobody to show them to."
+      },
       "Taxonomy": {
         "properties": {
           "groups": {
@@ -34706,6 +36183,31 @@
           "urls"
         ],
         "title": "UploadRequest"
+      },
+      "Uploaded": {
+        "properties": {
+          "accepted": {
+            "items": {
+              "$ref": "#/components/schemas/AcceptedUpload"
+            },
+            "type": "array",
+            "title": "Accepted"
+          },
+          "rejected": {
+            "items": {
+              "$ref": "#/components/schemas/RejectedUpload"
+            },
+            "type": "array",
+            "title": "Rejected"
+          }
+        },
+        "type": "object",
+        "required": [
+          "accepted",
+          "rejected"
+        ],
+        "title": "Uploaded",
+        "description": "Accepted and rejected separately, with the reason on each rejection: an\nupload is the one place a person chooses the url, so being told now beats\na job that silently never extracts."
       },
       "UserJobPatch": {
         "properties": {
