@@ -18615,7 +18615,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/BoardAnalyticsList"
+                }
               }
             }
           },
@@ -18754,7 +18756,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/BoardAnalyticsDetail"
+                }
               }
             }
           },
@@ -18975,7 +18979,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/CompanyList"
+                }
               }
             }
           },
@@ -26833,6 +26839,370 @@
         "title": "Board",
         "description": "One page of the board, and everything the page needs to render its own\ncontrols without re-deriving them."
       },
+      "BoardAnalytics": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "configured": {
+            "type": "boolean",
+            "title": "Configured"
+          },
+          "listings_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Listings Url"
+          },
+          "source_active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Active"
+          },
+          "inventory": {
+            "$ref": "#/components/schemas/BoardInventory"
+          },
+          "freshness": {
+            "$ref": "#/components/schemas/BoardFreshness"
+          },
+          "ingest": {
+            "$ref": "#/components/schemas/BoardIngest"
+          },
+          "funnel": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/CustomCheckStage"
+                },
+                {
+                  "$ref": "#/components/schemas/CheckStage"
+                }
+              ]
+            },
+            "type": "object",
+            "title": "Funnel"
+          },
+          "decay": {
+            "$ref": "#/components/schemas/BoardDecay"
+          },
+          "spend": {
+            "$ref": "#/components/schemas/BoardSpend"
+          },
+          "overlap": {
+            "$ref": "#/components/schemas/BoardOverlap"
+          },
+          "board_yield": {
+            "$ref": "#/components/schemas/BoardYield"
+          },
+          "drill": {
+            "$ref": "#/components/schemas/BoardDrill"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source",
+          "configured",
+          "listings_url",
+          "source_active",
+          "inventory",
+          "freshness",
+          "ingest",
+          "funnel",
+          "decay",
+          "spend",
+          "overlap",
+          "board_yield",
+          "drill"
+        ],
+        "title": "BoardAnalytics",
+        "description": "One board.\n\n`configured` is false for a source that has supplied postings and has no\ncatalog row. `funnel` is keyed by check name rather than declaring one\nfield per check, because the checks are a registry (core.checks) and a\nmodel enumerating them would be the literal that registry exists to\nremove; the `custom` key carries the wider shape."
+      },
+      "BoardAnalyticsDetail": {
+        "properties": {
+          "row": {
+            "$ref": "#/components/schemas/BoardAnalytics"
+          },
+          "overlap_partners": {
+            "items": {
+              "$ref": "#/components/schemas/OverlapPartner"
+            },
+            "type": "array",
+            "title": "Overlap Partners"
+          },
+          "min_sample": {
+            "type": "integer",
+            "title": "Min Sample"
+          },
+          "caveats": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Caveats"
+          }
+        },
+        "type": "object",
+        "required": [
+          "row",
+          "overlap_partners",
+          "min_sample",
+          "caveats"
+        ],
+        "title": "BoardAnalyticsDetail"
+      },
+      "BoardAnalyticsList": {
+        "properties": {
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/BoardAnalytics"
+            },
+            "type": "array",
+            "title": "Rows"
+          },
+          "min_sample": {
+            "type": "integer",
+            "title": "Min Sample"
+          },
+          "caveats": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Caveats"
+          }
+        },
+        "type": "object",
+        "required": [
+          "rows",
+          "min_sample",
+          "caveats"
+        ],
+        "title": "BoardAnalyticsList",
+        "description": "`caveats` ships with the numbers rather than beside them on a wiki,\nbecause a caveat a reader has to go and find is one that will be missed."
+      },
+      "BoardDecay": {
+        "properties": {
+          "dead_on_arrival": {
+            "$ref": "#/components/schemas/Rate"
+          },
+          "still_open": {
+            "$ref": "#/components/schemas/Rate"
+          }
+        },
+        "type": "object",
+        "required": [
+          "dead_on_arrival",
+          "still_open"
+        ],
+        "title": "BoardDecay",
+        "description": "`dead_on_arrival` is the FIRST closed-check on a posting already saying\nclosed: what the board handed over. `still_open` is the latest verdict:\nwhat has died since."
+      },
+      "BoardDrill": {
+        "properties": {
+          "checked_jobs": {
+            "type": "string",
+            "title": "Checked Jobs"
+          },
+          "queries": {
+            "type": "string",
+            "title": "Queries"
+          },
+          "closed_rejected": {
+            "type": "string",
+            "title": "Closed Rejected"
+          },
+          "clearance_rejected": {
+            "type": "string",
+            "title": "Clearance Rejected"
+          },
+          "custom_rejected": {
+            "type": "string",
+            "title": "Custom Rejected"
+          }
+        },
+        "type": "object",
+        "required": [
+          "checked_jobs",
+          "queries",
+          "closed_rejected",
+          "clearance_rejected",
+          "custom_rejected"
+        ],
+        "title": "BoardDrill",
+        "description": "Where the frontend goes to see the rows behind a number, built on the\nserver so the filter that produced an aggregate and the filter that\nfetches its members cannot drift apart.\n\n`checked_jobs` is deliberately the funnel denominator and not the posting\ncount: /v1/admin/jobs aggregates ai_queries and only knows postings that\nhave a verdict."
+      },
+      "BoardFreshness": {
+        "properties": {
+          "with_date_posted": {
+            "$ref": "#/components/schemas/Rate"
+          },
+          "median_age_days": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Median Age Days"
+          },
+          "p90_age_days": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P90 Age Days"
+          },
+          "posted_7d": {
+            "type": "integer",
+            "title": "Posted 7D"
+          },
+          "posted_30d": {
+            "type": "integer",
+            "title": "Posted 30D"
+          },
+          "first_loaded_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Loaded At"
+          },
+          "last_loaded_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Loaded At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "with_date_posted",
+          "median_age_days",
+          "p90_age_days",
+          "posted_7d",
+          "posted_30d",
+          "first_loaded_at",
+          "last_loaded_at"
+        ],
+        "title": "BoardFreshness",
+        "description": "Age comes from `date_posted`, never from `created_at`: created_at is\nwhen a row was loaded into this catalog and the whole table shares a floor\nfrom the last reseed. `with_date_posted` therefore reports how much of the\nboard these ages actually cover."
+      },
+      "BoardIngest": {
+        "properties": {
+          "runs": {
+            "type": "integer",
+            "title": "Runs"
+          },
+          "succeeded": {
+            "type": "integer",
+            "title": "Succeeded"
+          },
+          "failed": {
+            "type": "integer",
+            "title": "Failed"
+          },
+          "last_success_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Success At"
+          },
+          "last_failure_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Failure At"
+          },
+          "success_rate": {
+            "$ref": "#/components/schemas/Rate"
+          }
+        },
+        "type": "object",
+        "required": [
+          "runs",
+          "succeeded",
+          "failed",
+          "last_success_at",
+          "last_failure_at",
+          "success_rate"
+        ],
+        "title": "BoardIngest",
+        "description": "`last_success_at` is when the pull last ran cleanly.\n`freshness.last_loaded_at` is when it last produced a posting this catalog\nhad not seen. The gap between the two is a board serving a frozen feed."
+      },
+      "BoardInventory": {
+        "properties": {
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "active": {
+            "type": "integer",
+            "title": "Active"
+          },
+          "inactive": {
+            "type": "integer",
+            "title": "Inactive"
+          },
+          "active_share": {
+            "$ref": "#/components/schemas/Rate"
+          },
+          "reports_inactive": {
+            "type": "boolean",
+            "title": "Reports Inactive"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total",
+          "active",
+          "inactive",
+          "active_share",
+          "reports_inactive"
+        ],
+        "title": "BoardInventory",
+        "description": "How many postings this board has supplied, and how many it still calls\nlive.\n\n`active_share` is comparable only between boards with the same\n`reports_inactive`. False means nothing this board ever supplied is marked\ninactive, which means its feed has no way to say otherwise - a fact about\nthe feed's format, not about the board."
+      },
       "BoardOptions": {
         "properties": {
           "statuses": {
@@ -26886,6 +27256,34 @@
         ],
         "title": "BoardOptions",
         "description": "Everything the board's filter and edit controls need, generated from\ndata instead of hardcoded in the client.\n\n`ats` here is the board-wide count, the profile of the board as a whole.\nThe per-page counts under the other filters are `facets` on the list."
+      },
+      "BoardOverlap": {
+        "properties": {
+          "keyed_jobs": {
+            "type": "integer",
+            "title": "Keyed Jobs"
+          },
+          "shared_with_other_source": {
+            "type": "integer",
+            "title": "Shared With Other Source"
+          },
+          "duplicated_share": {
+            "$ref": "#/components/schemas/Rate"
+          },
+          "exclusive": {
+            "type": "integer",
+            "title": "Exclusive"
+          }
+        },
+        "type": "object",
+        "required": [
+          "keyed_jobs",
+          "shared_with_other_source",
+          "duplicated_share",
+          "exclusive"
+        ],
+        "title": "BoardOverlap",
+        "description": "Keyed on (company, title), because jobs.url is unique table-wide: a\nposting belongs to exactly one source by construction, so duplication is\ninvisible at the url level."
       },
       "BoardReliability": {
         "properties": {
@@ -27214,6 +27612,80 @@
         "title": "BoardRow",
         "description": "`_JOB_ROW`, in types: the posting, the ATS read off its url, and this\nperson's own row over the top.\n\n`closed_verdict` is three-valued and must stay that way: 'open', 'closed',\nor null for never checked. `active` cannot answer this question, it is\nwhatever a board's feed last said and nothing ever clears it."
       },
+      "BoardSpend": {
+        "properties": {
+          "window": {
+            "type": "string",
+            "title": "Window"
+          },
+          "calls": {
+            "type": "integer",
+            "title": "Calls"
+          },
+          "total_tokens": {
+            "type": "integer",
+            "title": "Total Tokens"
+          },
+          "cost_usd": {
+            "type": "number",
+            "title": "Cost Usd"
+          },
+          "priced_coverage": {
+            "$ref": "#/components/schemas/Rate"
+          },
+          "by_model": {
+            "items": {
+              "$ref": "#/components/schemas/ModelSpend"
+            },
+            "type": "array",
+            "title": "By Model"
+          }
+        },
+        "type": "object",
+        "required": [
+          "window",
+          "calls",
+          "total_tokens",
+          "cost_usd",
+          "priced_coverage",
+          "by_model"
+        ],
+        "title": "BoardSpend",
+        "description": "What this board's postings cost to check, as billed at the time.\n\n`window` is in the response because /admin/spend defaults to 30 days and\nthis takes no window at all, so a reader comparing the two was comparing a\nlifetime against a month with nothing saying so. All-time is right here:\nwhether a board earned its keep is a question about its whole life.\n\nNot split per check_type: verify_new books one batched call against the\n`closed` row and writes the clearance verdict from the same response, so a\nsplit would read as though clearance were free on some paths.\n`priced_coverage` keeps \"this cost nothing\" apart from \"we do not know what\nthis cost\"."
+      },
+      "BoardYield": {
+        "properties": {
+          "board_rows": {
+            "type": "integer",
+            "title": "Board Rows"
+          },
+          "with_status": {
+            "type": "integer",
+            "title": "With Status"
+          },
+          "applied": {
+            "type": "integer",
+            "title": "Applied"
+          },
+          "users": {
+            "type": "integer",
+            "title": "Users"
+          },
+          "apply_rate": {
+            "$ref": "#/components/schemas/Rate"
+          }
+        },
+        "type": "object",
+        "required": [
+          "board_rows",
+          "with_status",
+          "applied",
+          "users",
+          "apply_rate"
+        ],
+        "title": "BoardYield",
+        "description": "What the board's postings became once a person saw them."
+      },
       "Breakdown": {
         "properties": {
           "decisions": {
@@ -27486,6 +27958,38 @@
         "title": "CatalogSource",
         "description": "A source row as stored, plus the format read off its URL. `kind` is\nnever a column: it is derived from `listings_url` every time, so it cannot\ndrift from what ingest will do with the row."
       },
+      "CheckStage": {
+        "properties": {
+          "checked": {
+            "type": "integer",
+            "title": "Checked"
+          },
+          "passed": {
+            "type": "integer",
+            "title": "Passed"
+          },
+          "rejected": {
+            "type": "integer",
+            "title": "Rejected"
+          },
+          "pass_rate": {
+            "$ref": "#/components/schemas/Rate"
+          },
+          "coverage": {
+            "$ref": "#/components/schemas/Rate"
+          }
+        },
+        "type": "object",
+        "required": [
+          "checked",
+          "passed",
+          "rejected",
+          "pass_rate",
+          "coverage"
+        ],
+        "title": "CheckStage",
+        "description": "One check's latest verdict per posting, counted.\n\n`coverage` is how much of the board the stage has seen at all: a pass rate\nover 2% of a board says almost nothing about the other 98%."
+      },
       "CheckVerdict": {
         "properties": {
           "check_type": {
@@ -27546,6 +28050,350 @@
         },
         "type": "object",
         "title": "ClosePostingBody"
+      },
+      "Company": {
+        "properties": {
+          "company_key": {
+            "type": "string",
+            "title": "Company Key"
+          },
+          "company_name": {
+            "type": "string",
+            "title": "Company Name"
+          },
+          "total_postings_seen": {
+            "type": "integer",
+            "title": "Total Postings Seen"
+          },
+          "comp": {
+            "$ref": "#/components/schemas/CompanyPay"
+          },
+          "extraction": {
+            "$ref": "#/components/schemas/CompanyExtraction"
+          },
+          "applications": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CompanyApplications"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "open": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CompanyOpen"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "repost": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CompanyRepost"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "company_key",
+          "company_name",
+          "total_postings_seen",
+          "comp",
+          "extraction"
+        ],
+        "title": "Company",
+        "description": "One company NAME, not one company. `company_key` is\nlower(btrim(company)) over free text, so spelling variants are separate\nrows and a distinct-name count is an upper bound on the number of real\nemployers.\n\n`applications`, `open` and `repost` are null when the name is below the\nfloor that would make them mean anything, and so is `responses` inside the\nfirst. The server stays the single authority on what is well powered; a\ncaller renders a null block as nothing at all and never computes the floor\nitself.\n\nThey were ABSENT rather than null until this was declared. Dropping them in\na serialiser keeps that wire and erases the schema - pydantic derives it\nfrom the serialiser's return type, so the model becomes an open object,\nwhich is the generated type this phase exists to stop producing. So the\nnull wins, and the consumers are checked instead."
+      },
+      "CompanyApplications": {
+        "properties": {
+          "n": {
+            "type": "integer",
+            "title": "N"
+          },
+          "last_applied_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Applied At"
+          },
+          "statuses": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Statuses"
+          },
+          "responses": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CompanyResponses"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "n",
+          "last_applied_at",
+          "statuses"
+        ],
+        "title": "CompanyApplications",
+        "description": "The calling user's applications under this name, counted from\n`applications` and not from the board: the board only knows postings\ntracked by hand, while `applications` also holds the ones only email knows\nabout.\n\n`statuses` is still what the user typed on the board, so an application\nwith no board row counts in `n` and in no status - a real gap between what\nmail knows and what he has recorded, left visible rather than reconciled\naway."
+      },
+      "CompanyCoverage": {
+        "properties": {
+          "messages_awaiting_classification": {
+            "type": "integer",
+            "title": "Messages Awaiting Classification"
+          },
+          "min_sample": {
+            "type": "integer",
+            "title": "Min Sample"
+          }
+        },
+        "type": "object",
+        "required": [
+          "messages_awaiting_classification",
+          "min_sample"
+        ],
+        "title": "CompanyCoverage",
+        "description": "A company that has not replied may simply not have been READ yet.\nSilence is only evidence once the mailbox is classified, so the size of the\nbacklog travels with the numbers that depend on it rather than being\nsomething a reader has to know to ask about."
+      },
+      "CompanyExtraction": {
+        "properties": {
+          "measures": {
+            "type": "string",
+            "title": "Measures"
+          },
+          "found_pay": {
+            "type": "integer",
+            "title": "Found Pay"
+          },
+          "ran_found_nothing": {
+            "type": "integer",
+            "title": "Ran Found Nothing"
+          },
+          "not_attempted": {
+            "type": "integer",
+            "title": "Not Attempted"
+          }
+        },
+        "type": "object",
+        "required": [
+          "measures",
+          "found_pay",
+          "ran_found_nothing",
+          "not_attempted"
+        ],
+        "title": "CompanyExtraction",
+        "description": "Named for what the extractor did, because that is all these three can\nhonestly claim. They sum to total_postings_seen."
+      },
+      "CompanyList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/Company"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "has_more": {
+            "type": "boolean",
+            "title": "Has More"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "coverage": {
+            "$ref": "#/components/schemas/CompanyCoverage"
+          },
+          "total_names": {
+            "type": "integer",
+            "title": "Total Names"
+          },
+          "caveats": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Caveats"
+          },
+          "filters": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": "object",
+            "title": "Filters"
+          },
+          "filterable": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Filterable"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "has_more",
+          "next_cursor",
+          "coverage",
+          "total_names",
+          "caveats",
+          "filters",
+          "filterable"
+        ],
+        "title": "CompanyList",
+        "description": "`total_names` counts what the lenses show rather than the whole catalog:\nsame CTEs, same cuts, no page. `next_cursor` is an offset and says so."
+      },
+      "CompanyOpen": {
+        "properties": {
+          "n_open": {
+            "type": "integer",
+            "title": "N Open"
+          },
+          "n_checked": {
+            "type": "integer",
+            "title": "N Checked"
+          },
+          "last_checked_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Last Checked At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "n_open",
+          "n_checked",
+          "last_checked_at"
+        ],
+        "title": "CompanyOpen",
+        "description": "The latest closed verdict per posting, the same instrument the board row\nand the per-job signal use. Null below OPEN_MIN_CHECKED, which is where\n\"9 of 14 still answer\" stops being worth a sentence."
+      },
+      "CompanyPay": {
+        "properties": {
+          "measures": {
+            "type": "string",
+            "title": "Measures"
+          },
+          "not": {
+            "type": "string",
+            "title": "Not"
+          },
+          "n_extracted": {
+            "type": "integer",
+            "title": "N Extracted"
+          },
+          "n_total": {
+            "type": "integer",
+            "title": "N Total"
+          },
+          "by_currency": {
+            "items": {
+              "$ref": "#/components/schemas/CurrencyRange"
+            },
+            "type": "array",
+            "title": "By Currency"
+          }
+        },
+        "type": "object",
+        "required": [
+          "measures",
+          "not",
+          "n_extracted",
+          "n_total",
+          "by_currency"
+        ],
+        "title": "CompanyPay",
+        "description": "`measures` and `not` travel WITH the number rather than in the\nresponse-level caveats, because a caveat one refactor away from the datum\nit qualifies is a caveat that will eventually be dropped. A posting that\nstated pay we failed to read is indistinguishable from one that stated\nnone, so `n_extracted` is a count of what we found, never of what this\nemployer discloses."
+      },
+      "CompanyRepost": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "url_count": {
+            "type": "integer",
+            "title": "Url Count"
+          },
+          "first_posted_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "First Posted At"
+          },
+          "last_posted_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Last Posted At"
+          },
+          "span_days": {
+            "type": "integer",
+            "title": "Span Days"
+          }
+        },
+        "type": "object",
+        "required": [
+          "title",
+          "url_count",
+          "first_posted_at",
+          "last_posted_at",
+          "span_days"
+        ],
+        "title": "CompanyRepost",
+        "description": "One title repeated under several urls on a SINGLE source AT ONE\nLOCATION, more than signals.REPOST_MIN_SPAN_DAYS apart.\n\nLocation is in the key because without it a chain listing one role across\nits estate reads as one enormous repost. This is the largest surviving\ngroup, so `url_count` is reported: a high count is an evergreen\nrequisition, not a repost cycle."
+      },
+      "CompanyResponses": {
+        "properties": {
+          "replied": {
+            "$ref": "#/components/schemas/Rate"
+          },
+          "reached_outcome": {
+            "$ref": "#/components/schemas/Rate"
+          },
+          "days_to_first_outcome": {
+            "$ref": "#/components/schemas/TimeToOutcome"
+          }
+        },
+        "type": "object",
+        "required": [
+          "replied",
+          "reached_outcome",
+          "days_to_first_outcome"
+        ],
+        "title": "CompanyResponses",
+        "description": "Does this company reply, and how long does it take?\n\nRATES ARE ALMOST ALWAYS NULL HERE, and that is the honest answer rather\nthan a defect: of 1,283 companies with an application, 449 have two, 87\nhave five and TWO have thirty. The numerator and denominator carry the\ninformation and the caller renders \"2 of 7\". A company with three\napplications and one reply does not have a 33% response rate; it has one\nreply.\n\nA reply is any classified mail. `reached_outcome` counts only the mail that\nDECIDED something - an acknowledgement is a mail server saying it received\nthe form, and counting it would report a 100% response rate for every\ncompany running an ATS."
       },
       "ConfigPut": {
         "properties": {
@@ -27646,6 +28494,98 @@
         },
         "type": "object",
         "title": "Criteria"
+      },
+      "CurrencyRange": {
+        "properties": {
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          },
+          "n": {
+            "type": "integer",
+            "title": "N"
+          },
+          "min": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min"
+          },
+          "max": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max"
+          }
+        },
+        "type": "object",
+        "required": [
+          "currency",
+          "n",
+          "min",
+          "max"
+        ],
+        "title": "CurrencyRange",
+        "description": "What our extractor read, per currency it read it in.\n\nCurrency is present on 452 of 11,442 extracted rows, so a null currency is\nthe ordinary case and gets its own entry rather than being folded into USD:\nan amount whose currency was never captured is not a dollar figure."
+      },
+      "CustomCheckStage": {
+        "properties": {
+          "checked": {
+            "type": "integer",
+            "title": "Checked"
+          },
+          "passed": {
+            "type": "integer",
+            "title": "Passed"
+          },
+          "rejected": {
+            "type": "integer",
+            "title": "Rejected"
+          },
+          "pass_rate": {
+            "$ref": "#/components/schemas/Rate"
+          },
+          "coverage": {
+            "$ref": "#/components/schemas/Rate"
+          },
+          "evaluations": {
+            "type": "integer",
+            "title": "Evaluations"
+          },
+          "evaluations_passed": {
+            "type": "integer",
+            "title": "Evaluations Passed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "checked",
+          "passed",
+          "rejected",
+          "pass_rate",
+          "coverage",
+          "evaluations",
+          "evaluations_passed"
+        ],
+        "title": "CustomCheckStage",
+        "description": "Custom filters are per user and one posting can be judged by several,\nso there are two honest denominators and both are here. `checked` and\n`pass_rate` are job-level - a posting passed every filter it was put in\nfront of - and `evaluations` counts the judgements behind them."
       },
       "DecisionHistory": {
         "properties": {
@@ -30472,6 +31412,49 @@
         ],
         "title": "ModelEntry"
       },
+      "ModelSpend": {
+        "properties": {
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "calls": {
+            "type": "integer",
+            "title": "Calls"
+          },
+          "total_tokens": {
+            "type": "integer",
+            "title": "Total Tokens"
+          },
+          "cost_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Usd"
+          }
+        },
+        "type": "object",
+        "required": [
+          "model",
+          "calls",
+          "total_tokens",
+          "cost_usd"
+        ],
+        "title": "ModelSpend",
+        "description": "`model` is null for the scrape-only checks, which record an attempt\nrather than a judgement and carry neither a model nor a cost."
+      },
       "ModelsResponse": {
         "properties": {
           "providers": {
@@ -30784,6 +31767,25 @@
         "type": "object",
         "title": "Ok",
         "description": "It worked and there is nothing to say about it.\n\nReturned where the interesting outcome is the status code. A route with\nsomething to report returns that instead; this is not a wrapper to put\naround a real answer."
+      },
+      "OverlapPartner": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "shared_postings": {
+            "type": "integer",
+            "title": "Shared Postings"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source",
+          "shared_postings"
+        ],
+        "title": "OverlapPartner",
+        "description": "Another board carrying the same (company, title) as this one."
       },
       "OwnRow": {
         "properties": {
@@ -32440,6 +33442,42 @@
           "question"
         ],
         "title": "QuestionAdd"
+      },
+      "Rate": {
+        "properties": {
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          },
+          "numerator": {
+            "type": "integer",
+            "title": "Numerator"
+          },
+          "denominator": {
+            "type": "integer",
+            "title": "Denominator"
+          },
+          "below_floor": {
+            "type": "boolean",
+            "title": "Below Floor"
+          }
+        },
+        "type": "object",
+        "required": [
+          "value",
+          "numerator",
+          "denominator",
+          "below_floor"
+        ],
+        "title": "Rate",
+        "description": "A proportion carrying the counts that produced it.\n\n`value` is null below the floor and the caller renders \"2 of 7\", so the\nnumerator and denominator are always present. `below_floor` says which\nkind of null a null value is: too small a sample, or no trials at all."
       },
       "ReasonGroup": {
         "properties": {
@@ -36118,6 +37156,54 @@
           "evidence_missing_criterion"
         ],
         "title": "Taxonomy"
+      },
+      "TimeToOutcome": {
+        "properties": {
+          "n": {
+            "type": "integer",
+            "title": "N"
+          },
+          "median": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Median"
+          },
+          "p90": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P90"
+          },
+          "below_floor": {
+            "type": "boolean",
+            "title": "Below Floor"
+          },
+          "basis": {
+            "type": "string",
+            "title": "Basis"
+          }
+        },
+        "type": "object",
+        "required": [
+          "n",
+          "median",
+          "p90",
+          "below_floor",
+          "basis"
+        ],
+        "title": "TimeToOutcome",
+        "description": "How long this company took to decide something.\n\n`basis` is tracker_dated_only, and that is not a caveat about precision.\nFor every mail-derived application `applied_at` IS the first matched\nmessage's sent_at, so a duration over those measures the gap between the\nfirst mail and the first DECIDING mail - zero whenever a rejection arrives\nwith no acknowledgement before it.\n\nMedian and p90 rather than a mean: over the 200 tracker applications with a\nclean duration the mean is 30.5 days and the median 7.9, so the mean is\ndescribing the tail rather than the wait. A median needs a sample as much\nas a proportion does, so below the floor both are null and `n` carries what\nthere is."
       },
       "Totals": {
         "properties": {

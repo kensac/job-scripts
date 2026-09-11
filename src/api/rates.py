@@ -7,7 +7,7 @@ into disagreeing about what "below the floor" means. One definition, imported.
 
 from __future__ import annotations
 
-from typing import Any
+from pydantic import BaseModel
 
 # A proportion needs enough trials before it carries information. Thirty is the
 # conventional floor for the normal approximation to the binomial: below it the
@@ -17,13 +17,25 @@ from typing import Any
 DEFAULT_MIN_SAMPLE = 30
 
 
-def rate(numerator: int, denominator: int, min_sample: int) -> dict[str, Any]:
-    """Below the floor `value` is None and the caller renders "2 of 7"; the
-    numerator and denominator are always present so it can."""
+class Rate(BaseModel):
+    """A proportion carrying the counts that produced it.
+
+    `value` is null below the floor and the caller renders "2 of 7", so the
+    numerator and denominator are always present. `below_floor` says which
+    kind of null a null value is: too small a sample, or no trials at all.
+    """
+
+    value: float | None
+    numerator: int
+    denominator: int
+    below_floor: bool
+
+
+def rate(numerator: int, denominator: int, min_sample: int) -> Rate:
     below = denominator < min_sample
-    return {
-        "value": None if below or not denominator else round(numerator / denominator, 4),
-        "numerator": numerator,
-        "denominator": denominator,
-        "below_floor": below,
-    }
+    return Rate(
+        value=None if below or not denominator else round(numerator / denominator, 4),
+        numerator=numerator,
+        denominator=denominator,
+        below_floor=below,
+    )

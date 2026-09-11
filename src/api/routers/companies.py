@@ -17,21 +17,25 @@ only column that could supply it is `jobs.active`, which reports whether a
 board still lists a posting rather than whether the role is open; sorting on
 it would rank companies by which board happened to scrape them.
 
-Anything below its sample floor is OMITTED. Not nulled, not zeroed, not
-flagged - the server is the single authority on what is well powered, and a
-flag a caller might forget to check puts that decision in two places.
+Anything below its sample floor is NULL. Not zeroed, not flagged - the server
+is the single authority on what is well powered, and a flag a caller might
+forget to check puts that decision in two places. It was omitted rather than
+null until the response was declared; see `Company` for why the declaration
+won that argument.
 """
 
 from __future__ import annotations
 
-from typing import Any
+import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 
 from api import db, rates, signals
 from api import params as params_
 from api.auth import AuthedUser
 from api.mail import pipeline as mail_pipeline
+from api.rates import Rate
 from api.routers.admin import require_admin
 
 router = APIRouter(prefix="/admin")
@@ -66,7 +70,7 @@ _MAX_LIMIT = 200
 # (3,000 of them) is the closest this schema gets to "the posting stated no
 # pay" - but it still cannot separate that from "the posting stated pay and we
 # missed it", so both live in one bucket named for what WE did.
-_BASE_SQL = """
+_BASE_CTES = """
 WITH base AS (
     SELECT lower(btrim(company)) AS company_key,
            mode() WITHIN GROUP (ORDER BY company) AS company_name,
@@ -107,7 +111,17 @@ WITH base AS (
       AND a.user_id = %(user_id)s
     GROUP BY lower(btrim(a.company_name))
 )
-SELECT base.*,
+"""
+
+# The columns are named, not `base.*`. A star select and the shape that reads
+# it drift apart in silence, which is this module's own defect one level down.
+# The CTEs are their own constant because the page and the total below count
+# the same rows and must keep doing so.
+_BASE_SQL = (
+    _BASE_CTES
+    + """
+SELECT base.company_key, base.company_name, base.total_postings_seen,
+       base.comp_found, base.comp_ran_found_nothing, base.comp_not_attempted,
        COALESCE(apps.applications_n, 0) AS applications_n,
        apps.last_applied_at
 FROM base LEFT JOIN apps ON apps.company_key = base.company_key
@@ -115,6 +129,7 @@ WHERE {cuts}
 ORDER BY {order}, base.company_key
 LIMIT %(limit)s OFFSET %(offset)s
 """
+)
 
 # The lenses over 8,503 names: the ones this admin applied to, the ones whose
 # postings state pay, the ones that re-list. Each is a predicate over the same
@@ -215,7 +230,7 @@ FROM per_app GROUP BY company_key
 
 # The total counts what the lenses show: same CTEs, same cuts, no page.
 _COUNT_SQL = (
-    _BASE_SQL.split("SELECT base.*")[0]
+    _BASE_CTES
     + "SELECT count(*) AS c\nFROM base LEFT JOIN apps ON apps.company_key = base.company_key\n"
     + "WHERE {cuts}\n"
 )
@@ -322,20 +337,261 @@ _CAVEATS = [
 ]
 
 
-def _bucket(rows: list[dict[str, Any]], key: str = "company_key") -> dict[str, list[dict]]:
-    out: dict[str, list[dict]] = {}
+# Every query above is keyed on the company name, lowered and trimmed. The
+# shapes below are those rows: a column the shape does not declare raises where
+# it is read, rather than turning up as a missing field on the page.
+class _CompanyKeyed(BaseModel):
+    company_key: str
+
+
+class _CompanyRow(_CompanyKeyed):
+    company_name: str
+    total_postings_seen: int
+    comp_found: int
+    comp_ran_found_nothing: int
+    comp_not_attempted: int
+    applications_n: int
+    last_applied_at: datetime.date | None
+
+
+class _CurrencyRow(_CompanyKeyed):
+    currency: str | None
+    n: int
+    min: int | None
+    max: int | None
+
+
+class _StatusRow(_CompanyKeyed):
+    status: str
+    n: int
+
+
+class _OpenRow(_CompanyKeyed):
+    n_checked: int
+    n_open: int
+    last_checked_at: datetime.datetime
+
+
+class _RepostRow(_CompanyKeyed):
+    title: str
+    url_count: int
+    first_posted_at: datetime.datetime
+    last_posted_at: datetime.datetime
+    span_days: int
+
+
+class _ResponseRow(_CompanyKeyed):
+    applications: int
+    replied: int
+    with_outcome: int
+    timed_n: int
+    median_days: float | None
+    p90_days: float | None
+
+
+class _Count(BaseModel):
+    c: int
+
+
+class CurrencyRange(BaseModel):
+    """What our extractor read, per currency it read it in.
+
+    Currency is present on 452 of 11,442 extracted rows, so a null currency is
+    the ordinary case and gets its own entry rather than being folded into USD:
+    an amount whose currency was never captured is not a dollar figure.
+    """
+
+    currency: str | None
+    n: int
+    min: int | None
+    max: int | None
+
+
+class CompanyPay(BaseModel):
+    """`measures` and `not` travel WITH the number rather than in the
+    response-level caveats, because a caveat one refactor away from the datum
+    it qualifies is a caveat that will eventually be dropped. A posting that
+    stated pay we failed to read is indistinguishable from one that stated
+    none, so `n_extracted` is a count of what we found, never of what this
+    employer discloses.
+    """
+
+    measures: str
+    # `not` is a keyword, so the field carries the trailing underscore and the
+    # wire keeps the name it has always had.
+    not_: str = Field(serialization_alias="not")
+    n_extracted: int
+    n_total: int
+    by_currency: list[CurrencyRange]
+
+
+class CompanyExtraction(BaseModel):
+    """Named for what the extractor did, because that is all these three can
+    honestly claim. They sum to total_postings_seen."""
+
+    measures: str
+    found_pay: int
+    ran_found_nothing: int
+    not_attempted: int
+
+
+class TimeToOutcome(BaseModel):
+    """How long this company took to decide something.
+
+    `basis` is tracker_dated_only, and that is not a caveat about precision.
+    For every mail-derived application `applied_at` IS the first matched
+    message's sent_at, so a duration over those measures the gap between the
+    first mail and the first DECIDING mail - zero whenever a rejection arrives
+    with no acknowledgement before it.
+
+    Median and p90 rather than a mean: over the 200 tracker applications with a
+    clean duration the mean is 30.5 days and the median 7.9, so the mean is
+    describing the tail rather than the wait. A median needs a sample as much
+    as a proportion does, so below the floor both are null and `n` carries what
+    there is.
+    """
+
+    n: int
+    median: float | None
+    p90: float | None
+    below_floor: bool
+    basis: str
+
+
+class CompanyResponses(BaseModel):
+    """Does this company reply, and how long does it take?
+
+    RATES ARE ALMOST ALWAYS NULL HERE, and that is the honest answer rather
+    than a defect: of 1,283 companies with an application, 449 have two, 87
+    have five and TWO have thirty. The numerator and denominator carry the
+    information and the caller renders "2 of 7". A company with three
+    applications and one reply does not have a 33% response rate; it has one
+    reply.
+
+    A reply is any classified mail. `reached_outcome` counts only the mail that
+    DECIDED something - an acknowledgement is a mail server saying it received
+    the form, and counting it would report a 100% response rate for every
+    company running an ATS.
+    """
+
+    replied: Rate
+    reached_outcome: Rate
+    days_to_first_outcome: TimeToOutcome
+
+
+class CompanyApplications(BaseModel):
+    """The calling user's applications under this name, counted from
+    `applications` and not from the board: the board only knows postings
+    tracked by hand, while `applications` also holds the ones only email knows
+    about.
+
+    `statuses` is still what the user typed on the board, so an application
+    with no board row counts in `n` and in no status - a real gap between what
+    mail knows and what he has recorded, left visible rather than reconciled
+    away.
+    """
+
+    n: int
+    last_applied_at: datetime.date | None
+    statuses: dict[str, int]
+    responses: CompanyResponses | None = None
+
+
+class CompanyOpen(BaseModel):
+    """The latest closed verdict per posting, the same instrument the board row
+    and the per-job signal use. Null below OPEN_MIN_CHECKED, which is where
+    "9 of 14 still answer" stops being worth a sentence.
+    """
+
+    n_open: int
+    n_checked: int
+    last_checked_at: datetime.datetime
+
+
+class CompanyRepost(BaseModel):
+    """One title repeated under several urls on a SINGLE source AT ONE
+    LOCATION, more than signals.REPOST_MIN_SPAN_DAYS apart.
+
+    Location is in the key because without it a chain listing one role across
+    its estate reads as one enormous repost. This is the largest surviving
+    group, so `url_count` is reported: a high count is an evergreen
+    requisition, not a repost cycle.
+    """
+
+    title: str
+    url_count: int
+    first_posted_at: datetime.datetime
+    last_posted_at: datetime.datetime
+    span_days: int
+
+
+class Company(BaseModel):
+    """One company NAME, not one company. `company_key` is
+    lower(btrim(company)) over free text, so spelling variants are separate
+    rows and a distinct-name count is an upper bound on the number of real
+    employers.
+
+    `applications`, `open` and `repost` are null when the name is below the
+    floor that would make them mean anything, and so is `responses` inside the
+    first. The server stays the single authority on what is well powered; a
+    caller renders a null block as nothing at all and never computes the floor
+    itself.
+
+    They were ABSENT rather than null until this was declared. Dropping them in
+    a serialiser keeps that wire and erases the schema - pydantic derives it
+    from the serialiser's return type, so the model becomes an open object,
+    which is the generated type this phase exists to stop producing. So the
+    null wins, and the consumers are checked instead.
+    """
+
+    company_key: str
+    company_name: str
+    total_postings_seen: int
+    comp: CompanyPay
+    extraction: CompanyExtraction
+    applications: CompanyApplications | None = None
+    open: CompanyOpen | None = None
+    repost: CompanyRepost | None = None
+
+
+class CompanyCoverage(BaseModel):
+    """A company that has not replied may simply not have been READ yet.
+    Silence is only evidence once the mailbox is classified, so the size of the
+    backlog travels with the numbers that depend on it rather than being
+    something a reader has to know to ask about."""
+
+    messages_awaiting_classification: int
+    min_sample: int
+
+
+class CompanyList(BaseModel):
+    """`total_names` counts what the lenses show rather than the whole catalog:
+    same CTEs, same cuts, no page. `next_cursor` is an offset and says so."""
+
+    items: list[Company]
+    has_more: bool
+    next_cursor: str | None
+    coverage: CompanyCoverage
+    total_names: int
+    caveats: list[str]
+    filters: dict[str, list[str]]
+    filterable: list[str]
+
+
+def _bucket[R: _CompanyKeyed](rows: list[R]) -> dict[str, list[R]]:
+    out: dict[str, list[R]] = {}
     for row in rows:
-        out.setdefault(row[key], []).append(row)
+        out.setdefault(row.company_key, []).append(row)
     return out
 
 
-def _quantile(value: Any, n: int, min_sample: int) -> float | None:
+def _quantile(value: float | None, n: int, min_sample: int) -> float | None:
     if value is None or n < min_sample:
         return None
-    return round(float(value), 1)
+    return round(value, 1)
 
 
-def _response_block(row: dict[str, Any] | None, min_sample: int) -> dict[str, Any] | None:
+def _response_block(row: _ResponseRow | None, min_sample: int) -> CompanyResponses | None:
     """Does this company reply, and how long does it take?
 
     RATES ARE ALMOST ALWAYS NULL HERE, and that is the honest answer rather than
@@ -362,97 +618,101 @@ def _response_block(row: dict[str, Any] | None, min_sample: int) -> dict[str, An
     """
     if row is None:
         return None
-    applications = int(row["applications"])
+    applications = row.applications
     if not applications:
         return None
-    timed = int(row["timed_n"])
-    return {
-        "replied": rates.rate(int(row["replied"]), applications, min_sample),
-        "reached_outcome": rates.rate(int(row["with_outcome"]), applications, min_sample),
-        "days_to_first_outcome": {
-            "n": timed,
+    timed = row.timed_n
+    return CompanyResponses(
+        replied=rates.rate(row.replied, applications, min_sample),
+        reached_outcome=rates.rate(row.with_outcome, applications, min_sample),
+        days_to_first_outcome=TimeToOutcome(
+            n=timed,
             # A median needs a sample as much as a proportion does. One timed
             # application produced a "median" of 205 days, which is not a
             # median - it is that one application wearing the word.
-            "median": _quantile(row["median_days"], timed, min_sample),
-            "p90": _quantile(row["p90_days"], timed, min_sample),
-            "below_floor": timed < min_sample,
+            median=_quantile(row.median_days, timed, min_sample),
+            p90=_quantile(row.p90_days, timed, min_sample),
+            below_floor=timed < min_sample,
             # Named so nobody reads this as covering every application.
-            "basis": "tracker_dated_only",
-        },
-    }
+            basis="tracker_dated_only",
+        ),
+    )
 
 
 def _item(
-    base: dict[str, Any],
+    base: _CompanyRow,
     *,
-    currency: list[dict[str, Any]],
-    statuses: list[dict[str, Any]],
-    open_row: dict[str, Any] | None,
-    repost: dict[str, Any] | None,
-    responses: dict[str, Any] | None = None,
+    currency: list[_CurrencyRow],
+    statuses: list[_StatusRow],
+    open_row: _OpenRow | None,
+    repost: _RepostRow | None,
+    responses: _ResponseRow | None = None,
     min_sample: int = rates.DEFAULT_MIN_SAMPLE,
-) -> dict[str, Any]:
-    total = int(base["total_postings_seen"])
-    item: dict[str, Any] = {
-        "company_key": base["company_key"],
-        "company_name": base["company_name"],
-        "total_postings_seen": total,
-        "comp": {
+) -> Company:
+    total = base.total_postings_seen
+    applications = None
+    if base.applications_n >= APPLICATIONS_MIN:
+        applications = CompanyApplications(
+            n=base.applications_n,
+            last_applied_at=base.last_applied_at,
+            statuses={r.status: r.n for r in statuses},
+            responses=_response_block(responses, min_sample),
+        )
+    return Company(
+        company_key=base.company_key,
+        company_name=base.company_name,
+        total_postings_seen=total,
+        comp=CompanyPay(
             # The qualification travels WITH the number rather than in the
             # response-level caveats list, because a caveat one refactor away
             # from the datum it qualifies is a caveat that will eventually be
             # dropped. n_extracted is a count of what OUR extractor found; it
             # is not a count of what this employer published, and the two are
             # not separable here.
-            "measures": "postings where our extractor found a pay range",
-            "not": "what this company chooses to disclose",
-            "n_extracted": int(base["comp_found"]),
-            "n_total": total,
-            "by_currency": [
-                {
-                    "currency": row["currency"],
-                    "n": int(row["n"]),
-                    "min": int(row["min"]) if row["min"] is not None else None,
-                    "max": int(row["max"]) if row["max"] is not None else None,
-                }
-                for row in sorted(currency, key=lambda r: -int(r["n"]))
+            measures="postings where our extractor found a pay range",
+            not_="what this company chooses to disclose",
+            n_extracted=base.comp_found,
+            n_total=total,
+            by_currency=[
+                CurrencyRange(
+                    currency=row.currency,
+                    n=row.n,
+                    min=row.min,
+                    max=row.max,
+                )
+                for row in sorted(currency, key=lambda r: -r.n)
             ],
-        },
+        ),
         # Named for what the extractor did, because that is all these three
         # can honestly claim. They sum to total_postings_seen.
-        "extraction": {
-            "measures": "what our extractor did, per posting",
-            "found_pay": int(base["comp_found"]),
-            "ran_found_nothing": int(base["comp_ran_found_nothing"]),
-            "not_attempted": int(base["comp_not_attempted"]),
-        },
-    }
-    applications_n = int(base["applications_n"])
-    if applications_n >= APPLICATIONS_MIN:
-        item["applications"] = {
-            "n": applications_n,
-            "last_applied_at": base["last_applied_at"],
-            "statuses": {r["status"]: int(r["n"]) for r in statuses},
-        }
-        block = _response_block(responses, min_sample)
-        if block is not None:
-            item["applications"]["responses"] = block
-    if open_row and int(open_row["n_checked"]) >= OPEN_MIN_CHECKED:
-        item["open"] = {
-            "n_open": int(open_row["n_open"]),
-            "n_checked": int(open_row["n_checked"]),
-            "last_checked_at": open_row["last_checked_at"],
-        }
-    if repost:
-        item["repost"] = {
-            "title": repost["title"],
-            "url_count": int(repost["url_count"]),
-            "first_posted_at": repost["first_posted_at"],
-            "last_posted_at": repost["last_posted_at"],
-            "span_days": int(repost["span_days"]),
-        }
-    return item
+        extraction=CompanyExtraction(
+            measures="what our extractor did, per posting",
+            found_pay=base.comp_found,
+            ran_found_nothing=base.comp_ran_found_nothing,
+            not_attempted=base.comp_not_attempted,
+        ),
+        applications=applications,
+        open=(
+            CompanyOpen(
+                n_open=open_row.n_open,
+                n_checked=open_row.n_checked,
+                last_checked_at=open_row.last_checked_at,
+            )
+            if open_row and open_row.n_checked >= OPEN_MIN_CHECKED
+            else None
+        ),
+        repost=(
+            CompanyRepost(
+                title=repost.title,
+                url_count=repost.url_count,
+                first_posted_at=repost.first_posted_at,
+                last_posted_at=repost.last_posted_at,
+                span_days=repost.span_days,
+            )
+            if repost
+            else None
+        ),
+    )
 
 
 def _offset_from(cursor: str | None) -> int:
@@ -487,7 +747,7 @@ def list_companies(
     cursor: str | None = None,
     min_sample: int = Query(default=rates.DEFAULT_MIN_SAMPLE, ge=1),
     user: AuthedUser = Depends(require_admin),
-):
+) -> CompanyList:
     limit = max(1, min(limit, _MAX_LIMIT))
     offset = _offset_from(cursor)
     column = _SORTABLE.get(sort, "total_postings_seen")
@@ -509,18 +769,25 @@ def list_companies(
         "min_span": signals.REPOST_MIN_SPAN_DAYS,
     }
 
-    rows = db.query(_BASE_SQL.format(order=order, cuts=_CUTS), params)
+    rows = db.query_as(_CompanyRow, _BASE_SQL.format(order=order, cuts=_CUTS), params)
     has_more = len(rows) > limit
     rows = rows[:limit]
-    keys = [r["company_key"] for r in rows]
+    keys = [r.company_key for r in rows]
 
-    currency = _bucket(db.query(_CURRENCY_SQL, {"keys": keys})) if keys else {}
-    statuses = _bucket(db.query(_STATUS_SQL, {"keys": keys, "user_id": user.id})) if keys else {}
-    open_rows = {r["company_key"]: r for r in db.query(_OPEN_SQL, {"keys": keys})} if keys else {}
+    currency = _bucket(db.query_as(_CurrencyRow, _CURRENCY_SQL, {"keys": keys})) if keys else {}
+    statuses = (
+        _bucket(db.query_as(_StatusRow, _STATUS_SQL, {"keys": keys, "user_id": user.id}))
+        if keys
+        else {}
+    )
+    open_rows = (
+        {r.company_key: r for r in db.query_as(_OpenRow, _OPEN_SQL, {"keys": keys})} if keys else {}
+    )
     reposts = (
         {
-            r["company_key"]: r
-            for r in db.query(
+            r.company_key: r
+            for r in db.query_as(
+                _RepostRow,
                 _REPOST_SQL,
                 {
                     "keys": keys,
@@ -535,8 +802,9 @@ def list_companies(
 
     responses = (
         {
-            r["company_key"]: r
-            for r in db.query(
+            r.company_key: r
+            for r in db.query_as(
+                _ResponseRow,
                 _RESPONSE_SQL,
                 {
                     "keys": keys,
@@ -550,45 +818,38 @@ def list_companies(
         else {}
     )
 
-    total_row = db.query_one(_COUNT_SQL.format(cuts=_CUTS), params)
-    return {
-        "items": [
+    total_row = db.query_one_as(_Count, _COUNT_SQL.format(cuts=_CUTS), params)
+    awaiting = db.query_one_as(
+        _Count,
+        "SELECT count(*) AS c FROM email_messages m WHERE NOT EXISTS "
+        "(SELECT 1 FROM email_events e WHERE e.message_id = m.id)",
+    )
+    return CompanyList(
+        items=[
             _item(
                 row,
-                currency=currency.get(row["company_key"], []),
-                statuses=statuses.get(row["company_key"], []),
-                open_row=open_rows.get(row["company_key"]),
-                repost=reposts.get(row["company_key"]),
-                responses=responses.get(row["company_key"]),
+                currency=currency.get(row.company_key, []),
+                statuses=statuses.get(row.company_key, []),
+                open_row=open_rows.get(row.company_key),
+                repost=reposts.get(row.company_key),
+                responses=responses.get(row.company_key),
                 min_sample=min_sample,
             )
             for row in rows
         ],
-        "has_more": has_more,
-        "next_cursor": str(offset + limit) if has_more else None,
-        # A company that has not replied may simply not have been READ yet.
-        # Silence is only evidence once the mailbox is classified, so the size
-        # of the backlog travels with the numbers that depend on it rather than
-        # being something a reader has to know to ask about.
-        "coverage": {
-            "messages_awaiting_classification": int(
-                (
-                    db.query_one(
-                        "SELECT count(*) AS c FROM email_messages m WHERE NOT EXISTS "
-                        "(SELECT 1 FROM email_events e WHERE e.message_id = m.id)"
-                    )
-                    or {"c": 0}
-                )["c"]
-            ),
-            "min_sample": min_sample,
-        },
-        "total_names": int(total_row["c"]) if total_row else 0,
-        "caveats": _CAVEATS,
-        "filters": params_.applied(
+        has_more=has_more,
+        next_cursor=str(offset + limit) if has_more else None,
+        coverage=CompanyCoverage(
+            messages_awaiting_classification=awaiting.c if awaiting else 0,
+            min_sample=min_sample,
+        ),
+        total_names=total_row.c if total_row else 0,
+        caveats=_CAVEATS,
+        filters=params_.applied(
             q=[q.strip()] if q and pattern else [],
             applied=["true"] if applied else [],
             has_comp=["true"] if has_comp else [],
             repost=["true"] if repost else [],
         ),
-        "filterable": ["q", "applied", "has_comp", "repost"],
-    }
+        filterable=["q", "applied", "has_comp", "repost"],
+    )

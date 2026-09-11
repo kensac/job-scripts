@@ -10,7 +10,12 @@ from __future__ import annotations
 import datetime
 
 from api import db, rates
-from api.routers.companies import _OUTCOME_KINDS, _RESPONSE_SQL, _response_block
+from api.routers.companies import (
+    _OUTCOME_KINDS,
+    _RESPONSE_SQL,
+    _response_block,
+    _ResponseRow,
+)
 
 OUTCOMES = list(_OUTCOME_KINDS)
 
@@ -49,7 +54,8 @@ def _reply(uid: int, app_id: int, kind: str, *, domain: str, day: int) -> None:
 
 
 def _block(key: str, min_sample: int, intermediaries: list[str] | None = None, uid: int = 0):
-    rows = db.query(
+    rows = db.query_as(
+        _ResponseRow,
         _RESPONSE_SQL,
         {
             "keys": [key],
@@ -71,10 +77,10 @@ def test_a_rate_below_the_floor_is_null_but_keeps_its_counts(f):
 
     block = _block("acme", rates.DEFAULT_MIN_SAMPLE, uid=uid)
     assert block is not None
-    assert block["replied"]["value"] is None
-    assert block["replied"]["numerator"] == 1
-    assert block["replied"]["denominator"] == 3
-    assert block["replied"]["below_floor"] is True
+    assert block.replied.value is None
+    assert block.replied.numerator == 1
+    assert block.replied.denominator == 3
+    assert block.replied.below_floor is True
 
 
 def test_the_floor_is_a_parameter_not_a_constant(f):
@@ -85,8 +91,8 @@ def test_the_floor_is_a_parameter_not_a_constant(f):
         app = _apply(uid, "Acme", provenance="tracker", applied_day=day)
     _reply(uid, app, "rejection", domain="acme.test", day=10)
 
-    assert _block("acme", 3, uid=uid)["replied"]["value"] == round(1 / 3, 4)
-    assert _block("acme", 4, uid=uid)["replied"]["value"] is None
+    assert _block("acme", 3, uid=uid).replied.value == round(1 / 3, 4)
+    assert _block("acme", 4, uid=uid).replied.value is None
 
 
 def test_an_acknowledgement_is_a_reply_but_not_an_outcome(f):
@@ -97,8 +103,8 @@ def test_an_acknowledgement_is_a_reply_but_not_an_outcome(f):
     _reply(uid, app, "acknowledgement", domain="acme.test", day=2)
 
     block = _block("acme", 1, uid=uid)
-    assert block["replied"]["numerator"] == 1
-    assert block["reached_outcome"]["numerator"] == 0
+    assert block.replied.numerator == 1
+    assert block.reached_outcome.numerator == 0
 
 
 def test_timing_ignores_mail_derived_applications(f):
@@ -112,9 +118,9 @@ def test_timing_ignores_mail_derived_applications(f):
     _reply(uid, app, "rejection", domain="acme.test", day=20)
 
     block = _block("acme", 1, uid=uid)
-    assert block["reached_outcome"]["numerator"] == 1, "it still counts as an outcome"
-    assert block["days_to_first_outcome"]["n"] == 0, "but it is not timed"
-    assert block["days_to_first_outcome"]["median"] is None
+    assert block.reached_outcome.numerator == 1, "it still counts as an outcome"
+    assert block.days_to_first_outcome.n == 0, "but it is not timed"
+    assert block.days_to_first_outcome.median is None
 
 
 def test_timing_uses_tracker_dates_and_reports_its_basis(f):
@@ -122,10 +128,10 @@ def test_timing_uses_tracker_dates_and_reports_its_basis(f):
     app = _apply(uid, "Acme", provenance="tracker", applied_day=1)
     _reply(uid, app, "rejection", domain="acme.test", day=11)
 
-    timing = _block("acme", 1, uid=uid)["days_to_first_outcome"]
-    assert timing["n"] == 1
-    assert timing["median"] == 10.0
-    assert timing["basis"] == "tracker_dated_only"
+    timing = _block("acme", 1, uid=uid).days_to_first_outcome
+    assert timing.n == 1
+    assert timing.median == 10.0
+    assert timing.basis == "tracker_dated_only"
 
 
 def test_a_median_needs_a_sample_too(f):
@@ -135,10 +141,10 @@ def test_a_median_needs_a_sample_too(f):
     app = _apply(uid, "Acme", provenance="tracker", applied_day=1)
     _reply(uid, app, "rejection", domain="acme.test", day=28)
 
-    timing = _block("acme", rates.DEFAULT_MIN_SAMPLE, uid=uid)["days_to_first_outcome"]
-    assert timing["n"] == 1
-    assert timing["median"] is None
-    assert timing["below_floor"] is True
+    timing = _block("acme", rates.DEFAULT_MIN_SAMPLE, uid=uid).days_to_first_outcome
+    assert timing.n == 1
+    assert timing.median is None
+    assert timing.below_floor is True
 
 
 def test_an_outcome_before_the_application_date_is_not_timed(f):
@@ -148,7 +154,7 @@ def test_an_outcome_before_the_application_date_is_not_timed(f):
     app = _apply(uid, "Acme", provenance="tracker", applied_day=20)
     _reply(uid, app, "rejection", domain="acme.test", day=2)
 
-    assert _block("acme", 1, uid=uid)["days_to_first_outcome"]["n"] == 0
+    assert _block("acme", 1, uid=uid).days_to_first_outcome.n == 0
 
 
 def test_applications_arriving_via_an_intermediary_are_excluded(f):
@@ -170,7 +176,7 @@ def test_an_employer_is_not_excluded_by_the_intermediary_rule(f):
 
     block = _block("acme", 1, intermediaries=["university.test"], uid=uid)
     assert block is not None
-    assert block["replied"]["numerator"] == 1
+    assert block.replied.numerator == 1
 
 
 def test_the_aggregate_is_scoped_to_one_user(f, client):
