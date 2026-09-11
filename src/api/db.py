@@ -124,6 +124,32 @@ def query_one(sql: str, params: Any = None) -> dict[str, Any] | None:
     return dict(row) if row else None
 
 
+def query_as[Row](row: type[Row], sql: str, params: Any = None) -> list[Row]:
+    """query(), with each row built into a shape a type checker knows.
+
+    The SQL stays exactly as written. This is not an ORM and must not become
+    one: the hot paths here carry query plans measured against production
+    (api/board/visibility.py records 320ms falling to 28ms, and why), and
+    hiding them behind a query builder would hide the one thing that has to
+    stay readable. What a dict costs is different and smaller: a renamed
+    column is a grep across every call site, and a typo is a KeyError at
+    runtime rather than a red line in the editor.
+
+    A column the shape does not declare raises TypeError here rather than
+    being carried silently, which is the point: a SELECT and its shape drift
+    apart in one commit and are found in the next test run, not in a bug
+    report about a missing field.
+    """
+    with _connection() as conn:
+        return [row(**r) for r in conn.execute(_as_query(sql), params).fetchall()]
+
+
+def query_one_as[Row](row: type[Row], sql: str, params: Any = None) -> Row | None:
+    with _connection() as conn:
+        got = conn.execute(_as_query(sql), params).fetchone()
+    return row(**got) if got else None
+
+
 def execute(sql: str, params: Any = None) -> None:
     with _connection() as conn:
         conn.execute(_as_query(sql), params)

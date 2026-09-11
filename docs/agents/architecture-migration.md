@@ -65,7 +65,7 @@ real only relocates the problem.
 | 4 | ~~Derivations are content addressed~~ | **Dropped 2026-09-10.** Measured; see below |
 | 5 | Files move to the shape | `tasks` is a sibling of `api` and `core`. `apply` is a package. The rest is judgement about churn |
 | 6 | The long files are split | No module does four jobs. `admin.py` 2,136 lines, `mail.py` 2,117, `resolve.py` 1,337, `orm.py` 1,248, `health.py` 1,155, `tasks/runtime.py` 796 |
-| 7 | A row is typed, not a dict | A read returns a shape a type checker knows. 678 SQL call sites return bare dicts today |
+| 7 | Every operation declares what it returns | `openapi.json` generates the frontend's types. 173 of 190 operations declare nothing today |
 
 **The API contract was the invariant, and is now a price.** `openapi.json` is
 canon and `tests/test_openapi_current.py` fails the build when routes and
@@ -218,14 +218,136 @@ that make `api` and `api.tasks` circular are reaching past the handlers for a
 queue primitive. `admin.py` and `mail.py` are bigger and simpler: they are
 long because nothing ever split them, not because anything is tangled.
 
-**7, typed rows.** Reads return bare dicts, so renaming a column is a grep
-across 678 call sites and a typo is found at runtime. The fix is NOT an ORM:
+**7, the schema is the contract.** Measured 2026-09-10: of 190 operations,
+**173 return an undeclared object** and 11 declare a shape. So `openapi.json`
+is a list of routes, not a contract. It cannot be dropped into a frontend and
+generate anything, which is the whole reason it is generated and committed.
+
+That is why the frontend writes those types by hand, and why they drift. One
+had a capture field typed as a string when the extension sends an object, and
+the page crashed on 2026-09-10 when a report with fields was opened. Nothing
+could have caught it: there was no declared shape to disagree with.
+
+The goal is therefore not internal tidiness. It is that a person can point a
+generator at `openapi.json` and get types that work.
+
+Reads returning bare dicts is the same problem seen from inside: renaming a
+column is a grep across 678 call sites, and a typo is found at runtime.
+
+**Failures are part of the contract and are not declared at all.** The schema
+carries 200, 201, 202 and the 422 FastAPI adds for validation, and nothing
+else. There are 164 `raise HTTPException` sites and at least three shapes
+among them: 69 use `detail={"code": ..., "message": ...}`, 14 pass a bare
+string, one passes an f-string. A client cannot know what a failure looks
+like, so it guesses, and the guess is per client.
+
+Declaring the error shape is the same job as declaring the success shape and
+belongs in this phase. One convention, `{code, message}`, since that is
+already the majority and the frontend already reads `detail.code`.
+
+The primitive is `db.query_as(Shape, sql, params)` and its one-row sibling.
+The SQL is unchanged; only what comes back has a name. A column the shape does
+not declare raises there and then, which is the point: a SELECT and its shape
+drift apart in one commit and are caught in the next test run rather than in a
+bug report about a missing field.
+
+Adopt it where a row is READ, not where one becomes JSON for a task payload.
+`tasks/filters.py` puts candidate rows into `payload["jobs"]`, so typing that
+one buys a conversion at the boundary and nothing else. An HTTP response is
+not such a boundary: FastAPI serialises a declared model, and declaring it is
+most of the value, because the shape reaches openapi.json and the frontend
+stops writing those types by hand.
+
+That is also the first place the API contract has been spent. `GET
+/user/apply/reports` returned an undeclared dict, so the frontend's type for
+it was written by reading the query, and it had drifted: a capture field typed
+as a string was an object, and the page crashed on 2026-09-10. The wire format
+did not change, only the declaration, which is the cheap half of the
+permission: additive, no consumer breaks, and the hand-written type can be
+generated instead. The fix is NOT an ORM:
 the hot paths are hand-tuned SQL carrying measured query plans
 (`visibility.FULL` records 320ms to 28ms), and an ORM would hide exactly what
 has to stay readable, while inviting the N+1 shape this codebase has already
 paid to remove. Keep the SQL, map the rows into dataclasses at the boundary,
 one domain at a time. `pyright` already runs clean, so the types would be
 enforced rather than decorative.
+
+## Logging is nearly consistent, and the gap is small
+
+Measured 2026-09-10: 38 modules log, under seven logger names. Two are the
+convention, `jobtracker_worker` (24) and `jobtracker_api` (11). Five are
+one-offs, and one of those is `job_tracker` in `core/batch.py`, spelled
+differently from every other.
+
+Nothing is lost by it. Telemetry attaches its handler to the ROOT logger
+precisely so a module needs no registration, which was checked before this was
+written down. The cost is only that filtering by source in a log viewer does
+not work the way the names suggest.
+
+Also worth one pass: 18 sites use `logger.exception` and 6 use `logger.error`.
+The second drops the traceback. Some of those six are deliberate, because the
+error is expected and the traceback is noise; they are worth reading rather
+than rewriting in bulk.
+
+## The gaps list
+
+Everything measured and not yet closed, with the number that makes it a gap
+rather than an opinion. A row leaves this list when it is fixed or when a
+measurement says it was never worth fixing, and either way it says which.
+
+**The schema is not a contract.** 173 of 190 operations return an undeclared
+object; 11 declare a shape. Phase 7.
+
+**A failure is not in the contract at all.** 164 `raise HTTPException` sites,
+at least three `detail` shapes among them (69 `{code, message}`, 14 a bare
+string, 1 an f-string), and the schema declares 200, 201, 202 and the 422
+FastAPI adds. No 4xx. Phase 7.
+
+**Reads are untyped.** 678 SQL call sites return bare dicts. `db.query_as` is
+the primitive; adoption is per domain. Phase 7.
+
+**The services still reach into the handlers.** Nine ignored imports in three
+causes. The largest is four routers calling four helpers that live inside a
+handler because that is where they were first needed: `resume_text`,
+`writing_style`, `instructions`, `locations.store`. Moving those four is what
+empties most of the list.
+
+**SHAPES cannot move down.** It is assembled by importing each task module to
+read the shape that module declares, and two do not inverse cleanly:
+`mail_classify` builds its two shapes in a function, and `application` reads
+its purpose from another module.
+
+**Unattended code that says nothing when it goes wrong.** Four task handlers
+log nothing at all: `experiments` (505 lines), `embeddings` (232),
+`batch_policy` (64), `uploads` (61). A handler runs with nobody watching, so
+silence there is different from silence in a router, where uvicorn's access
+log carries the request.
+
+**Derivations that say nothing.** `api/mail/pipeline.py` (588 lines) derives
+an application's state from an event stream and logs nothing;
+`api/ai/__init__.py` (452) is the call path.
+
+**Seven logger names where two would do.** `jobtracker_worker` (24 modules)
+and `jobtracker_api` (11) are the convention; five are one-offs and
+`core/batch.py` uses `job_tracker`, spelled differently from all of them.
+Nothing is dropped, because telemetry attaches at the root; filtering by
+source is what does not work.
+
+**Tracebacks dropped on purpose or by accident, unknown which.** 18 sites use
+`logger.exception` and 6 use `logger.error`. The second keeps no traceback.
+Worth reading rather than rewriting in bulk: some are deliberate.
+
+**Test coverage has never been measured.** Nothing in `pyproject.toml`, the
+`Makefile` or CI mentions it. 1,656 tests over 36,500 lines of `src` with no
+number attached to them.
+
+**The long files.** `routers/admin.py` 2,136 lines, `routers/mail.py` 2,117,
+`routers/resolve.py` 1,339, `orm.py` 1,268, `health.py` 1,155. Long because
+nothing split them. Phase 6.
+
+**`user_jobs` answers two questions.** What a person keeps, and what the
+sweeps carry. Phase 2b, deferred: moving the sweeps' scope changes what gets
+paid for, so it waits for a cutover comparison.
 
 ## Revising this document
 
