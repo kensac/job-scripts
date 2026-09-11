@@ -4,16 +4,17 @@ from dataclasses import dataclass
 from typing import Literal
 
 from api import budget, db, events
-from api.task_admission import ACTIVE_STATUSES
+from api.task_admission import ACTIVE_STATUSES, InFlight
 
 AdmissionPolicy = Literal["interactive", "scheduled"]
 
 
-def conflict(user_id: int, filter_id: int | None, *, policy: AdmissionPolicy) -> dict | None:
+def conflict(user_id: int, filter_id: int | None, *, policy: AdmissionPolicy) -> InFlight | None:
     # A scheduled splitter may progress while older chunks wait: candidate
     # selection excludes their URLs. Interactive runs wait for the whole run.
     statuses = ("pending", "running") if policy == "scheduled" else ACTIVE_STATUSES
-    return db.query_one(
+    return db.query_one_as(
+        InFlight,
         """
         SELECT id, kind, status, progress, created_at FROM tasks
         WHERE kind IN ('run_filter', 'run_all_filters') AND status = ANY(%(statuses)s)
@@ -29,7 +30,7 @@ def conflict(user_id: int, filter_id: int | None, *, policy: AdmissionPolicy) ->
 @dataclass(frozen=True)
 class RunAdmission:
     task_id: int | None
-    conflict: dict | None = None
+    conflict: InFlight | None = None
     access_failure: budget.AIAccessError | None = None
 
     def as_dict(self) -> dict:
@@ -46,7 +47,7 @@ class RunAdmission:
             "message": "An overlapping filter run is already in progress."
             if self.conflict
             else None,
-            "task_id": self.conflict["id"] if self.conflict else self.task_id,
+            "task_id": self.conflict.id if self.conflict else self.task_id,
         }
 
 

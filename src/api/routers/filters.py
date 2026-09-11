@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from psycopg.errors import UniqueViolation
 from pydantic import BaseModel
 
-from api import ai, budget, db, filter_runs
+from api import ai, budget, db, filter_runs, task_admission
 from api.ai import access as ai_access
 from api.auth import AuthedUser, require_user
 from api.board import visibility
@@ -111,7 +111,7 @@ def _running(user_id: int, kind: str, filter_id: int | None = None) -> dict | No
     )
 
 
-def _refuse_second_run(running: dict | None) -> None:
+def _refuse_second_run(running: task_admission.InFlight | None) -> None:
     """A second run while the first is in flight is refused, not queued: the
     page disabled its button only while it remembered its own task id, so a
     reload could queue the same run twice while the first parked on the
@@ -122,7 +122,7 @@ def _refuse_second_run(running: dict | None) -> None:
             detail={
                 "code": "IN_PROGRESS",
                 "message": "this run is already in progress",
-                "task_id": running["id"],
+                "task_id": running.id,
             },
         )
 

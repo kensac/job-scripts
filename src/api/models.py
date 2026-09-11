@@ -1,3 +1,12 @@
+"""The bodies that belong to no single router.
+
+Mostly request bodies, shared because more than one router accepts them.
+`Ok` is the one response here, and for the same reason: it was written
+sixteen times as a bare `{"ok": True}` in nine files, which is not a
+contract a client can read, it is a coincidence nine files share.
+A router's own response models live beside its routes.
+"""
+
 from __future__ import annotations
 
 import datetime
@@ -6,6 +15,16 @@ from typing import Annotated, Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from api.updates import NonNullUpdate
+
+
+class Ok(BaseModel):
+    """It worked and there is nothing to say about it.
+
+    Returned where the interesting outcome is the status code. A route with
+    something to report returns that instead; this is not a wrapper to put
+    around a real answer."""
+
+    ok: bool = True
 
 
 class UserJobPatch(BaseModel):
