@@ -23,14 +23,20 @@ jobs:
       contents: write
       actions: write
     # No database here. The schema export reads the app's routes, not its
-    # tables: exporting against a DSN pointing at a closed port produces a
+    # tables: exported against a DSN pointing at a closed port it produces a
     # file identical to the committed one, byte for byte. Booting Postgres
     # for it cost the gate about 14 s (7.7 s pulling the image, 5.9 s waiting
     # on a health check), and every other job waits on the gate. Migrations
     # are still applied and checked for drift in `static`, on a real
     # database, and tests/test_openapi_current.py still compares the
     # committed schema against the live routes.
+    #
+    # The DSN still has to be SET: core/pool.py reads DATABASE_URL at import
+    # and raises KeyError without it. Port 1 refuses the connection, the pool
+    # logs that it could not connect, and the export finishes anyway because
+    # it never asks the pool for anything.
     env:
+      DATABASE_URL: postgresql://unused:unused@127.0.0.1:1/no_database_here
       PYTHONPATH: src
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -217,21 +223,34 @@ jobs:
     steps:
       - name: Require successful preparation and execution
         env:
-          PREPARE_RESULT: ${{ needs.gate.result }}
+          GATE_RESULT: ${{ needs.gate.result }}
+          STATIC_RESULT: ${{ needs.static.result }}
           TEST_RESULT: ${{ needs.tests.result }}
+          CORRECTED: ${{ needs.gate.outputs.corrected }}
         run: |
-          test "$PREPARE_RESULT" = success
-          test "$TEST_RESULT" = success
+          test "$GATE_RESULT" = success
+          # An auto-fix push deliberately skips the static checks and the
+          # lanes: the run it dispatches on the pushed commit is the one that
+          # judges them. Requiring them here would fail every branch that
+          # needed a mechanical fix.
+          if [ "$CORRECTED" != true ]; then
+            test "$STATIC_RESULT" = success
+            test "$TEST_RESULT" = success
+          fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        if: needs.gate.outputs.corrected != 'true'
         with:
           ref: ${{ needs.gate.outputs.revision }}
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        if: needs.gate.outputs.corrected != 'true'
         with:
           name: test-manifest
           path: collection
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        if: needs.gate.outputs.corrected != 'true'
         with:
           pattern: timings-*
           path: measurements
       - name: Verify every collected test executed exactly once
+        if: needs.gate.outputs.corrected != 'true'
         run: python tools/test_performance.py measurements --shards=3 --manifest=collection/manifest.json | tee "$GITHUB_STEP_SUMMARY"
