@@ -12,9 +12,9 @@ import os
 from typing import Any
 
 from api import db, verdicts
-from api.tasks.board import fetch_retry_interval
-from api.tasks.runtime import SCRAPE_CONCURRENCY, AdaptiveLimiter, cancelled, set_progress
 from core.store import SUBSCRIBED_SOURCE
+from tasks.board import fetch_retry_interval
+from tasks.runtime import SCRAPE_CONCURRENCY, AdaptiveLimiter, cancelled, set_progress
 
 logger = logging.getLogger("jobtracker_worker")
 

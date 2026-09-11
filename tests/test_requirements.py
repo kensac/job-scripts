@@ -5,15 +5,15 @@ import hashlib
 import pytest
 
 from api import db
-from api.tasks.requirements import (
+from core import skills
+from core.requirements import CLEARANCE_LEVELS, DEGREE_LEVELS, MAX_PLAUSIBLE_YOE
+from tasks.requirements import (
     _CANDIDATES,
     REQUIREMENTS_INPUT_CHARS,
     RequirementsExtract,
     _store,
     _years,
 )
-from core import skills
-from core.requirements import CLEARANCE_LEVELS, DEGREE_LEVELS, MAX_PLAUSIBLE_YOE
 
 CONTENT = "a long job description " * 20
 
@@ -226,8 +226,8 @@ class TestContentLateralParity:
         """comp, verify and requirements each pick "the page text for this url".
         They carried three copies of that decision and one had already drifted
         from get_content; this pins them to one answer."""
-        from api.tasks.comp import EXTRACT_COMP_PER_CYCLE  # noqa: F401
         from core.store import CONTENT_LATERAL
+        from tasks.comp import EXTRACT_COMP_PER_CYCLE  # noqa: F401
 
         job_id, url = f.make_ready_job(content="RAW PAGE " * 40)
         f.make_verdict(url, "closed", "passed", content="CHECK COPY " * 40)
@@ -361,7 +361,7 @@ class TestRescrapedPages:
         """A re-scrape that changed nothing is the common case, and the id
         moving is not evidence the text did. Re-extracting on the id alone
         would re-pay for the catalog every time a refresh ran."""
-        from api.tasks import rescrape
+        from tasks import rescrape
 
         _, url = f.make_ready_job(content=CONTENT)
         rows = db.query(_CANDIDATES, {"cap": 10})
@@ -386,7 +386,7 @@ class TestRescrapedPages:
     def test_an_unchanged_rescrape_stops_coming_back(self, f):
         """Re-stamped rather than merely skipped, or it is re-examined every
         cycle forever."""
-        from api.tasks import rescrape
+        from tasks import rescrape
 
         _, url = f.make_ready_job(content=CONTENT)
         rows = db.query(_CANDIDATES, {"cap": 10})

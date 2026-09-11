@@ -21,8 +21,8 @@ import psycopg
 
 from api import db, events, hosts, metrics, telemetry
 from api.queue import INGEST_INTERVAL_MINUTES, enqueue
-from api.tasks import HANDLERS
-from api.tasks.runtime import (
+from tasks import HANDLERS
+from tasks.runtime import (
     CHUNK_KINDS,
     HEARTBEAT_TIMEOUT_MINUTES,
     MAX_ATTEMPTS,
@@ -243,7 +243,7 @@ def schedule_ingest_cycle() -> None:
     # Application answers ahead of need, hourly, for each person who has put
     # a resume in: the forms of the postings on their board are read and
     # every question without a draft rides one half-price batch, so the
-    # answer is there when the posting is opened. See api.tasks.application.
+    # answer is there when the posting is opened. See tasks.application.
     for u in db.query("SELECT DISTINCT user_id AS id FROM user_resumes ORDER BY 1"):
         enqueue(
             "application_sweep",

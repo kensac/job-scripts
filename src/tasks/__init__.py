@@ -7,35 +7,35 @@ and keeps handlers from importing the loop.
 
 from __future__ import annotations
 
-from api.tasks import application, comp, locations, mail_classify, requirements, verify
-from api.tasks.application import handle_application_draft, handle_application_sweep
-from api.tasks.batches import handle_poll_batches
-from api.tasks.board import handle_recompute_board
-from api.tasks.comp import handle_extract_comp
-from api.tasks.content import handle_fetch_missing_content
-from api.tasks.digests import handle_send_digests
-from api.tasks.embeddings import handle_embed_postings, handle_embed_postings_batch
-from api.tasks.experiments import handle_run_experiment
-from api.tasks.filters import (
+from tasks import application, comp, locations, mail_classify, requirements, verify
+from tasks.application import handle_application_draft, handle_application_sweep
+from tasks.batches import handle_poll_batches
+from tasks.board import handle_recompute_board
+from tasks.comp import handle_extract_comp
+from tasks.content import handle_fetch_missing_content
+from tasks.digests import handle_send_digests
+from tasks.embeddings import handle_embed_postings, handle_embed_postings_batch
+from tasks.experiments import handle_run_experiment
+from tasks.filters import (
     handle_run_all_filters,
     handle_run_filter,
     handle_run_filter_batch_chunk,
     handle_run_filter_chunk,
 )
-from api.tasks.health import handle_data_health
-from api.tasks.ingest import handle_ingest_source
-from api.tasks.locations import handle_classify_locations
-from api.tasks.mail_classify import handle_classify_mail
-from api.tasks.mail_match import handle_match_mail
-from api.tasks.mail_sync import (
+from tasks.health import handle_data_health
+from tasks.ingest import handle_ingest_source
+from tasks.locations import handle_classify_locations
+from tasks.mail_classify import handle_classify_mail
+from tasks.mail_match import handle_match_mail
+from tasks.mail_sync import (
     handle_import_archive,
     handle_probe_credentials,
     handle_sync_gmail,
 )
-from api.tasks.message_html import handle_backfill_message_html
-from api.tasks.requirements import handle_extract_requirements
-from api.tasks.uploads import handle_extract_upload
-from api.tasks.verify import (
+from tasks.message_html import handle_backfill_message_html
+from tasks.requirements import handle_extract_requirements
+from tasks.uploads import handle_extract_upload
+from tasks.verify import (
     handle_reverify_chunk,
     handle_reverify_open,
     handle_verify_new,

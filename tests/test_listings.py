@@ -8,9 +8,9 @@ import asyncio
 import dataclasses
 
 from api import db, verdicts
-from api.tasks import ingest
 from core import boards
 from core.posting import JobPosting
+from tasks import ingest
 
 TODAY = 2_000_000_000
 

@@ -30,11 +30,11 @@ from api.batch_results import consume_result as consume_result
 from api.batch_results import snapshot_specs as snapshot_specs
 from api.budget import Entitlement
 from api.queue import INGEST_INTERVAL_MINUTES, enqueue  # noqa: F401
-from api.tasks.board import demote_closed, materialize_passing
 from core import pricing
 from core.batch import BatchEventCounts, BatchResult
 from core.prompts import PROMPT_SAMPLE_SIZE, prompt_hash
 from core.routing import Choice, TaskShape, resolve
+from tasks.board import demote_closed, materialize_passing
 
 logger = logging.getLogger("jobtracker_worker")
 

@@ -12,7 +12,7 @@ from typing import Any
 import pytest
 
 from api import db
-from api.tasks import health as health_task
+from tasks import health as health_task
 
 
 @pytest.fixture

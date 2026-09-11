@@ -10,8 +10,8 @@ from types import SimpleNamespace
 import pytest
 
 from api import db, visibility
-from api.tasks import application as drafts
 from core import forms
+from tasks import application as drafts
 from tests.test_application import GREENHOUSE, _owner_config, _user_id
 from tests.test_application import _job_for as _row_for
 

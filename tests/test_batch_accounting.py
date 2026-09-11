@@ -3,8 +3,8 @@ from decimal import Decimal
 import pytest
 
 from api import db
-from api.tasks import runtime
 from core import batch, pricing
+from tasks import runtime
 
 
 @pytest.mark.parametrize("model", ["gpt-5-mini", "grok-4.3", "unknown-model"])

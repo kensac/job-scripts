@@ -9,8 +9,8 @@ import pytest
 import requests
 
 from api import db, health, hosts, worker
-from api.tasks import ingest
-from api.tasks.runtime import Deferred
+from tasks import ingest
+from tasks.runtime import Deferred
 
 
 def _config(key, value):

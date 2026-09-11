@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from api import db
-from api.tasks import board as tasks_board
 from core.store import add_ai_result
+from tasks import board as tasks_board
 
 
 def _user_id() -> int:

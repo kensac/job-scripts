@@ -7,7 +7,7 @@ import logging
 import pytest
 
 from api import telemetry, worker
-from api.tasks import runtime
+from tasks import runtime
 
 
 class _Fake:

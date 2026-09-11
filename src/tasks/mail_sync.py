@@ -26,8 +26,8 @@ from typing import Any
 
 from api import db, gmail, mail_store, oauth
 from api.queue import enqueue
-from api.tasks.runtime import set_progress
 from core.mail_import import read_archive
+from tasks.runtime import set_progress
 
 logger = logging.getLogger("jobtracker_worker")
 

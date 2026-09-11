@@ -5,9 +5,9 @@ from __future__ import annotations
 import asyncio
 
 from api import db, verdicts
-from api.tasks import ingest
 from core import boards
 from core.posting import JobPosting
+from tasks import ingest
 
 
 def _posting(title: str, date_posted: int = 0) -> JobPosting:

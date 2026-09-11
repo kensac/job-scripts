@@ -58,7 +58,7 @@ def test_concurrent_filter_creation_has_one_winner(client, user_headers):
 
 
 def test_scheduler_refuses_pending_individual_run(f):
-    from api.tasks.ingest import schedule_filter_runs
+    from tasks.ingest import schedule_filter_runs
 
     uid = f.make_user(groups=["jobtracker-users-internal"])
     f.subscribe(uid, "test-source")

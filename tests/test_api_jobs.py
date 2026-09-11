@@ -158,7 +158,7 @@ def test_enabled_filter_gates_visibility_disabled_bypasses(client, user_headers)
 
 
 def test_criteria_excluded_locations_match_places(client, user_headers):
-    from api.tasks import locations
+    from tasks import locations
 
     uid = _uid(user_headers)
     jid_uk = _insert_job("src-d", "https://x.test/d1", locations=["London, UK"])

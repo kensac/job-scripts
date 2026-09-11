@@ -180,7 +180,7 @@ class TestNoSilentSubstitution:
         """The property that makes this PR a no-op at runtime. A second
         candidate is not free - see the cache test below - so widening one is a
         decision someone should have to make deliberately."""
-        from api.tasks import comp, mail_classify, verify
+        from tasks import comp, mail_classify, verify
 
         for shape in (
             comp.COMP_TASK,
@@ -192,7 +192,7 @@ class TestNoSilentSubstitution:
 
     def test_the_wired_models_are_the_ones_that_were_hardcoded(self):
         """Byte-identical selection to before the router existed."""
-        from api.tasks import comp, mail_classify, verify
+        from tasks import comp, mail_classify, verify
 
         assert resolve(comp.COMP_TASK).model == "gpt-5-nano"
         assert resolve(verify.VERIFY_TASK).model == "gpt-5-nano"
@@ -253,7 +253,7 @@ class TestCustomVerdictCostCliff:
         a coupling that no longer holds."""
         import inspect
 
-        from api.tasks import filters
+        from tasks import filters
 
         source = inspect.getsource(filters)
         assert "get_custom_result(url, prompt_hash, model=cfg.model)" in source
@@ -264,7 +264,7 @@ def test_no_call_site_still_hardcodes_a_batched_model():
     nobody can review, price or capability-check."""
     import inspect
 
-    from api.tasks import comp, verify
+    from tasks import comp, verify
 
     for module in (comp, verify):
         source = inspect.getsource(module)
@@ -330,7 +330,7 @@ def test_the_standard_caller_cannot_run_without_a_purpose():
     import dataclasses
     import inspect
 
-    from api.tasks.runtime import run_batched
+    from tasks.runtime import run_batched
 
     assert "purpose" not in inspect.signature(run_batched).parameters
     field = next(f for f in dataclasses.fields(TaskShape) if f.name == "purpose")
@@ -340,7 +340,7 @@ def test_the_standard_caller_cannot_run_without_a_purpose():
 def test_every_registered_task_is_keyed_by_its_own_purpose():
     """One registry, so a task cannot be configurable under a name nothing
     reports, or reported under a name nothing configures."""
-    from api.tasks import SHAPES
+    from tasks import SHAPES
 
     for key, shape in SHAPES.items():
         assert shape.purpose == key

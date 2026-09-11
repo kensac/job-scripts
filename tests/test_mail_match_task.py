@@ -14,7 +14,7 @@ import itertools
 import pytest
 
 from api import db
-from api.tasks import mail_match as task
+from tasks import mail_match as task
 
 _seq = itertools.count(1)
 

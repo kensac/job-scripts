@@ -9,15 +9,6 @@ from typing import Any
 
 from api import batch_results, db
 from api.task_admission import ACTIVE_STATUSES
-from api.tasks import rescrape
-from api.tasks.runtime import (
-    batch_event_hook,
-    consume_result,
-    enqueue,
-    has_batch_work,
-    set_progress,
-    submit_or_collect,
-)
 from core.batch import BatchSpec
 from core.embeddings import (
     EMBEDDING_BATCH_SIZE,
@@ -27,6 +18,15 @@ from core.embeddings import (
 )
 from core.pricing import estimate_cost_usd
 from core.store import AI_ELIGIBLE_JOB, CONTENT_LATERAL
+from tasks import rescrape
+from tasks.runtime import (
+    batch_event_hook,
+    consume_result,
+    enqueue,
+    has_batch_work,
+    set_progress,
+    submit_or_collect,
+)
 
 logger = logging.getLogger("jobtracker_worker")
 

@@ -302,7 +302,7 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
         default="",
         value_type=str,
         help="The rules the model drafts application answers under, before the person's own "
-        "writing style. Empty means the built-in text in api.tasks.application; a change "
+        "writing style. Empty means the built-in text in tasks.application; a change "
         "here takes effect on the next draft, with no roll. Read by application_draft, "
         "application_sweep and the refine endpoint.",
     ),

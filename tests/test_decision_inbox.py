@@ -15,7 +15,7 @@ import datetime
 import pytest
 
 from api import db, mail_match
-from api.tasks import mail_match as match_task
+from tasks import mail_match as match_task
 from tests.conftest import _auth_headers
 
 SENT = datetime.datetime(2026, 1, 1, tzinfo=datetime.UTC)

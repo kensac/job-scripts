@@ -20,7 +20,9 @@ from typing import Any
 
 from api import db
 from api.batch_results import progress_counts
-from api.tasks.runtime import (
+from core import pricing, providers
+from core.store import AI_ELIGIBLE_JOB, CONTENT_LATERAL, VERIFIED_OPEN
+from tasks.runtime import (
     AwaitingBatch,
     _park_awaiting_batch,
     batch_event_hook,
@@ -31,8 +33,6 @@ from api.tasks.runtime import (
     set_progress,
     snapshot_specs,
 )
-from core import pricing, providers
-from core.store import AI_ELIGIBLE_JOB, CONTENT_LATERAL, VERIFIED_OPEN
 
 logger = logging.getLogger("jobtracker_worker")
 
@@ -92,8 +92,8 @@ def steps() -> dict[str, dict[str, Any]]:
     """The measurable steps: how each builds its request and which fields of
     its answer are compared. Imported lazily so this module does not pull
     every task module in at import."""
-    from api.tasks import comp, requirements, verify
-    from api.tasks.models import FilterDecision, VerifyVerdict
+    from tasks import comp, requirements, verify
+    from tasks.models import FilterDecision, VerifyVerdict
 
     return {
         "filter": {

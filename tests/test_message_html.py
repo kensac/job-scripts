@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from api import db
-from api.tasks import message_html
+from tasks import message_html
 
 
 def _msg(uid: int, mid: str, body: str, html: str | None = None) -> int:

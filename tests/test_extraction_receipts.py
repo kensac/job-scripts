@@ -5,8 +5,8 @@ from types import SimpleNamespace
 import pytest
 
 from api import db
-from api.tasks import comp, requirements, runtime
 from core.batch import BatchSpec
+from tasks import comp, requirements, runtime
 
 
 def test_requirements_and_skills_rollback_with_the_consuming_transaction(f):

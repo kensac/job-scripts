@@ -21,9 +21,9 @@ from pydantic import BaseModel, Field
 from api import ai, ai_access, budget, db, task_admission
 from api.auth import AuthedUser, require_user
 from api.job_access import require_visible_job
-from api.tasks import application as drafts
 from core import forms
 from core.store import get_content
+from tasks import application as drafts
 
 router = APIRouter()
 

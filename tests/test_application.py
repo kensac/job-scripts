@@ -11,8 +11,8 @@ from types import SimpleNamespace
 import pytest
 
 from api import db
-from api.tasks import application as drafts
 from core import forms
+from tasks import application as drafts
 
 
 @pytest.fixture(autouse=True)
@@ -187,7 +187,7 @@ class TestReadingTheForm:
         the listing pulls already pace under; keyed by the posting host the
         reads had their own row and ignored a Greenhouse backoff."""
         from api import db, hosts
-        from api.tasks import application as drafts
+        from tasks import application as drafts
 
         assert forms.budget_host("https://job-boards.greenhouse.io/x/jobs/1") == (
             "boards-api.greenhouse.io"

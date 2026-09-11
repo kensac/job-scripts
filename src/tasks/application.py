@@ -24,8 +24,12 @@ from pydantic import BaseModel
 
 from api import ai, budget, db, hosts, visibility
 from api.apply import writes as application_writes
-from api.tasks import batch_policy
-from api.tasks.runtime import (
+from core import forms
+from core.providers.spec import StructuredOutput
+from core.routing import TaskShape
+from core.store import get_content
+from tasks import batch_policy
+from tasks.runtime import (
     Deferred,
     consume_result,
     has_batch_work,
@@ -33,10 +37,6 @@ from api.tasks.runtime import (
     run_batched,
     set_progress,
 )
-from core import forms
-from core.providers.spec import StructuredOutput
-from core.routing import TaskShape
-from core.store import get_content
 
 logger = logging.getLogger("jobtracker_worker")
 

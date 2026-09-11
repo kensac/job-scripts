@@ -3,9 +3,9 @@ from __future__ import annotations
 import os
 
 from api import db
-from api.tasks import runtime as tasks_runtime
 from api.worker import enqueue
 from core.store import add_ai_result
+from tasks import runtime as tasks_runtime
 
 SERVICE_TOKEN = os.environ["JOBTRACKER_SERVICE_TOKEN"]
 
@@ -647,7 +647,7 @@ def test_the_fetch_retry_window_is_persisted_config_with_a_floor(client, admin_h
     (zero hours is the hourly hammering the key exists to stop, and a bool is
     an int to isinstance)."""
     from api import db
-    from api.tasks.board import fetch_retry_interval
+    from tasks.board import fetch_retry_interval
 
     assert (
         client.get("/v1/admin/config", headers=admin_headers).json()["config"][

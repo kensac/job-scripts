@@ -17,10 +17,10 @@ from types import SimpleNamespace
 import pytest
 
 from api import db, worker
-from api.tasks import batches as tasks_batches
-from api.tasks import runtime
 from core import batch
 from core.batch import BatchProgress
+from tasks import batches as tasks_batches
+from tasks import runtime
 from tests.factories import make_task
 
 COMPLETED_LINE = (

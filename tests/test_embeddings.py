@@ -4,9 +4,9 @@ import psycopg
 import pytest
 
 from api import db
-from api.tasks.embeddings import _CANDIDATES, _store
 from core.embeddings import EMBEDDING_DIMENSIONS, EMBEDDING_MODEL
 from core.pricing import estimate_cost_usd
+from tasks.embeddings import _CANDIDATES, _store
 
 CONTENT = "a long job description " * 20
 
@@ -198,8 +198,8 @@ class TestUnchangedRescrapes:
     def test_an_unchanged_rescrape_re_stamps_the_embedding_instead_of_repaying(self, f):
         import hashlib
 
-        from api.tasks import rescrape
         from core.embeddings import EMBEDDING_INPUT_CHARS
+        from tasks import rescrape
 
         _, url = f.make_ready_job(content="a posting long enough to embed " * 20)
         f.make_embedding(url)
@@ -233,7 +233,7 @@ class TestUnchangedRescrapes:
         assert stamped["content_row_id"] == row["id"], "re-stamped, or it comes back every cycle"
 
     def test_a_table_it_does_not_know_is_refused_rather_than_formatted_into_sql(self):
-        from api.tasks import rescrape
+        from tasks import rescrape
 
         assert {"job_embeddings", "job_requirements"} == rescrape.STAMPABLE
         with pytest.raises(ValueError, match="not a re-stampable table"):

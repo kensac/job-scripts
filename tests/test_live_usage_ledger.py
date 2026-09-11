@@ -6,8 +6,8 @@ from types import SimpleNamespace
 import pytest
 
 from api import ai, ai_access, db, verdicts
-from api.tasks import uploads
 from core import pricing
+from tasks import uploads
 
 
 @pytest.mark.parametrize("kind", ["explain", "suggest", "improve", "upload"])

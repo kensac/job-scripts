@@ -392,7 +392,7 @@ def test_a_draft_never_names_a_gap_and_an_empty_draft_does_not_fill_a_form(clien
     form. The instructions used to ask for exactly that; now they forbid
     naming a gap, and a question with no answer in the resume gets an empty
     draft, which the form resolver treats as no draft at all."""
-    from api.tasks import application as drafts
+    from tasks import application as drafts
 
     text = drafts.instructions(None)
     assert "never name a gap" in text and "I have not worked with X" in text

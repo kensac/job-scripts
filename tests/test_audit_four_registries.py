@@ -6,7 +6,7 @@ from __future__ import annotations
 import datetime
 
 from api import db
-from api.tasks import runtime as tasks_runtime
+from tasks import runtime as tasks_runtime
 from tests.test_api_pipeline import _app
 
 

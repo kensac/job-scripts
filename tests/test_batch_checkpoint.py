@@ -1,8 +1,8 @@
 import pytest
 
 from api import db
-from api.tasks import filters, runtime
 from core.batch import BatchResult
+from tasks import filters, runtime
 
 
 @pytest.mark.asyncio
@@ -144,7 +144,7 @@ def test_request_snapshot_retries_and_collected_input_use_original_bytes(f):
 
 @pytest.mark.asyncio
 async def test_empty_terminal_collection_survives_crash_without_resubmitting(f, monkeypatch):
-    from api.tasks.application import APPLICATION_TASK
+    from tasks.application import APPLICATION_TASK
 
     tid = f.make_task("application_draft", {"batch_ids": ["failed-batch"]}, status="running")
 

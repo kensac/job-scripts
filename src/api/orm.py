@@ -331,7 +331,7 @@ class ApplicationReport(Base):
 
 class AiExperiment(Base):
     """One AI step measured across models and efforts on a seeded sample,
-    through the production path. See api.tasks.experiments."""
+    through the production path. See tasks.experiments."""
 
     __tablename__ = "ai_experiments"
 
@@ -558,7 +558,7 @@ class UserSettings(Base):
     ai_params: Mapped[dict] = mapped_column(server_default=text("'{}'::jsonb"))
     email_digest: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     # How the person writes, in their own words; NULL means the built-in
-    # default in api.tasks.application.
+    # default in tasks.application.
     writing_style: Mapped[str | None] = mapped_column(Text)
     # The facts every application form asks, in api.apply.Profile's shape.
     profile: Mapped[dict] = mapped_column(server_default=text("'{}'::jsonb"))

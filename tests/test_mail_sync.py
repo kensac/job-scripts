@@ -12,8 +12,8 @@ import datetime
 import pytest
 
 from api import db, mail_store, oauth
-from api.tasks import mail_sync
 from core.mail_import import ImportedMessage
+from tasks import mail_sync
 
 
 def _connect(user_id: int, *, invalid: bool = False) -> None:

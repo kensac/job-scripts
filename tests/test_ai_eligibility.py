@@ -84,7 +84,7 @@ def test_requirements_sweep_skips_unreachable_postings(population, f):
     Both postings have cached content, both are verified open, and neither
     has a stored answer, so the only thing that can separate them is the gate.
     """
-    from api.tasks.requirements import _CANDIDATES
+    from tasks.requirements import _CANDIDATES
 
     urls = {}
     for key in ("subscribed", "unsubscribed"):

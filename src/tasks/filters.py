@@ -8,16 +8,18 @@ from typing import Any
 
 from api import ai, budget, db, events, metrics, verdicts
 from api.batch_results import progress_counts
-from api.tasks import batch_policy
-from api.tasks.board import (
+from core.filters import build_custom_decision_instructions, build_custom_input
+from core.store import get_content, get_contents, get_custom_result
+from tasks import batch_policy
+from tasks.board import (
     candidates_for,
     content_attempted_urls,
     decided_urls,
     in_flight_urls,
     materialize_passing,
 )
-from api.tasks.models import FilterDecision, FilterResult
-from api.tasks.runtime import (
+from tasks.models import FilterDecision, FilterResult
+from tasks.runtime import (
     BATCH_CHUNK_SIZE,
     CHUNK_SIZE,
     SCRAPE_CONCURRENCY,
@@ -34,8 +36,6 @@ from api.tasks.runtime import (
     submit_or_collect,
     update_parent_progress,
 )
-from core.filters import build_custom_decision_instructions, build_custom_input
-from core.store import get_content, get_contents, get_custom_result
 
 logger = logging.getLogger("jobtracker_worker")
 

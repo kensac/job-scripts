@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from api import db
-from api.tasks import comp, requirements
+from tasks import comp, requirements
 
 
 @pytest.mark.parametrize(
