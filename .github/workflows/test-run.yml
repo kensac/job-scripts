@@ -52,7 +52,9 @@ jobs:
           enable-cache: true
       - run: uv sync --frozen
       - run: echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
-      - run: python -m alembic upgrade head
+      # No `alembic upgrade head` here: conftest provisions the database it
+      # is handed, so the step migrated an empty database that pytest then
+      # found already at head. Two to three seconds a lane, four lanes.
       - name: Measure tests
         run: |
           mkdir -p results
