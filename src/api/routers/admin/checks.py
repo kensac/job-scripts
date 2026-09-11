@@ -47,12 +47,50 @@ def _remember_recheck_model(user_id: int, check: str, model: str) -> None:
     )
 
 
+class RecheckOptions(BaseModel):
+    """`defaults` is keyed by check option, not by check type: a re-check may
+    be asked for by filter id or prompt hash, and the person's last choice is
+    remembered against what they asked for."""
+
+    models: list[str]
+    defaults: dict[str, str]
+
+
 @router.get("/checks/options")
-def recheck_options(user: AuthedUser = Depends(require_admin)):
+def recheck_options(user: AuthedUser = Depends(require_admin)) -> RecheckOptions:
     """What a re-check may run on, and what this person chose last time per
     option, so the picker opens on the model they ended on rather than the
     cheapest one every time."""
-    return {"models": _recheck_models(user), "defaults": _recheck_defaults(user.id)}
+    return RecheckOptions(models=_recheck_models(user), defaults=_recheck_defaults(user.id))
+
+
+class CheckRerun(BaseModel):
+    """The verdict the re-run produced, and what produced it. `check` echoes
+    what was asked for, which is not always `check_type`: filter:<id> and
+    hash:<prompt_hash> both run as a custom check."""
+
+    check: str
+    status: str
+    reason: str
+    tokens: int
+    model: str
+
+
+class PostingGone(BaseModel):
+    """No re-run happened, because the re-fetch found the posting closed.
+
+    A separate shape rather than nullable fields on CheckRerun: nothing was
+    asked of a model here, so `model` and a token count would be a guess, and
+    `closure_signal` names what the fetch saw. `refetched` is always true,
+    since a closure can only be discovered by fetching.
+    """
+
+    check: str
+    status: str
+    reason: str | None
+    tokens: int
+    refetched: bool
+    closure_signal: str
 
 
 class RunCheckBody(BaseModel):
@@ -66,7 +104,9 @@ class RunCheckBody(BaseModel):
 
 
 @router.post("/checks/run")
-async def run_single_check(body: RunCheckBody, user: AuthedUser = Depends(require_admin)):
+async def run_single_check(
+    body: RunCheckBody, user: AuthedUser = Depends(require_admin)
+) -> CheckRerun | PostingGone:
     """Manually re-run one check on one job, ignoring the cached verdict. The
     fresh row becomes the latest for that (url, check_type), so visibility
     re-derives from it immediately. No downstream re-run needed, since
@@ -134,14 +174,14 @@ async def run_single_check(body: RunCheckBody, user: AuthedUser = Depends(requir
             (job["url"],),
         )
         if closure_signal:
-            return {
-                "check": body.check,
-                "status": "rejected",
-                "reason": (gone or {}).get("reason", ""),
-                "tokens": 0,
-                "refetched": True,
-                "closure_signal": closure_signal,
-            }
+            return PostingGone(
+                check=body.check,
+                status="rejected",
+                reason=(gone or {}).get("reason", ""),
+                tokens=0,
+                refetched=True,
+                closure_signal=closure_signal,
+            )
         raise HTTPException(
             409,
             detail={"code": "NO_CONTENT", "message": "could not fetch this posting just now"},
@@ -202,10 +242,10 @@ async def run_single_check(body: RunCheckBody, user: AuthedUser = Depends(requir
         # Only a run that happened sets the default: a refused or failed
         # choice is not the one the person "last used".
         _remember_recheck_model(user.id, body.check, model)
-    return {
-        "check": body.check,
-        "status": "rejected" if rejected else "passed",
-        "reason": reason,
-        "tokens": usage.get("total_tokens", 0),
-        "model": model,
-    }
+    return CheckRerun(
+        check=body.check,
+        status="rejected" if rejected else "passed",
+        reason=reason,
+        tokens=usage.get("total_tokens", 0),
+        model=model,
+    )
