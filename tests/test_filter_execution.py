@@ -65,3 +65,40 @@ async def test_identity_neutral_live_adapter_has_no_person_state_effects(f, monk
     )
     assert person_state is not None
     assert person_state["status"] == "saved"
+
+
+@pytest.mark.asyncio
+async def test_frozen_content_never_refetches_or_reads_a_later_page(monkeypatch):
+    seen = []
+
+    async def checked(cfg, candidate, content, snapshot, label):
+        seen.append(content)
+        return None
+
+    async def must_not_refresh(*args, **kwargs):
+        raise AssertionError("a frozen run must not fetch a later page")
+
+    monkeypatch.setattr(filter_execution, "get_content", lambda _url: "later content")
+    monkeypatch.setattr(filter_execution.verdicts, "refresh_content", must_not_refresh)
+    monkeypatch.setattr(filter_execution, "check_filter", checked)
+    hooks = filter_execution.ExecutionHooks(
+        verdict_label="managed:test",
+        key_source="owner",
+        record_failure=lambda _model: nullcontext(),
+        record_usage=lambda usage, model, batched: None,
+        budget_exceeded=lambda: False,
+        cancelled=lambda: False,
+        progress=lambda done, total, label: None,
+        complete=lambda: None,
+    )
+    snapshot = filter_execution.FilterSnapshot("managed", "prompt", "filter", "hash")
+
+    await filter_execution.execute_live(
+        1,
+        ai.AIConfig("openai", "key", "owner", "gpt-5.6-luna"),
+        snapshot,
+        [{"url": "https://job", "company": "C", "title": "T", "content": "frozen"}],
+        hooks,
+    )
+
+    assert seen == ["frozen"]

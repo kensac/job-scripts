@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from psycopg.errors import UniqueViolation
 from pydantic import BaseModel, ConfigDict, Field
 
-from api import db
+from api import db, managed_board_runs
 from api.auth import AuthedUser
 from api.models import Criteria
 from api.routers.admin.shared import require_admin
@@ -82,6 +82,10 @@ class ManagedBoard(BaseModel):
 
 class ManagedBoards(BaseModel):
     boards: list[ManagedBoard]
+
+
+class ManagedBoardLatestRun(BaseModel):
+    run: managed_board_runs.ManagedBoardRun | None
 
 
 class _Name(BaseModel):
@@ -262,6 +266,38 @@ def get_managed_board(board_id: int, user: AuthedUser = Depends(require_admin)) 
     if board is None:
         raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown managed board"})
     return board
+
+
+@router.post("/managed-boards/{board_id}/run")
+def run_managed_board(
+    board_id: int, user: AuthedUser = Depends(require_admin)
+) -> managed_board_runs.ManagedBoardRunQueued:
+    try:
+        return managed_board_runs.admit(board_id)
+    except managed_board_runs.RunRefusal as exc:
+        status = 404 if exc.code == "NOT_FOUND" else 409
+        raise HTTPException(
+            status,
+            detail={"code": exc.code, "message": exc.message, "task_id": exc.task_id},
+        ) from exc
+
+
+@router.get("/managed-boards/{board_id}/runs/latest")
+def latest_managed_board_run(
+    board_id: int, user: AuthedUser = Depends(require_admin)
+) -> ManagedBoardLatestRun:
+    if _get(board_id) is None:
+        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown managed board"})
+    return ManagedBoardLatestRun(run=managed_board_runs.latest(board_id))
+
+
+@router.get("/managed-boards/{board_id}/cost")
+def managed_board_cost(
+    board_id: int, user: AuthedUser = Depends(require_admin)
+) -> managed_board_runs.ManagedBoardCost:
+    if _get(board_id) is None:
+        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown managed board"})
+    return managed_board_runs.cost(board_id)
 
 
 @router.post("/managed-boards")
