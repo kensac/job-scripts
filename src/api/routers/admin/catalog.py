@@ -13,8 +13,8 @@ from api import db, pagination, scoping, task_admission
 from api import params as params_
 from api.auth import AuthedUser
 from api.locations import LocationExtract, Place, store
+from api.reports import ReportKind, report_kinds
 from api.routers.admin.shared import require_admin
-from api.routers.jobs import ReportKind, report_kinds
 
 router = APIRouter()
 
