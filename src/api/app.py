@@ -8,6 +8,7 @@ from fastapi import Depends, FastAPI, Request
 from api import db, metrics, telemetry
 from api.auth import require_user
 from api.board import visibility
+from api.problem import REFUSALS
 from api.routers import (
     admin,
     analytics,
@@ -79,27 +80,29 @@ async def _capture_unhandled(request: Request, call_next):
         raise
 
 
-app.include_router(users.router, prefix="/v1")
-app.include_router(views.router, prefix="/v1", dependencies=[Depends(require_user)])
-app.include_router(jobs.router, prefix="/v1")
-app.include_router(application.router, prefix="/v1")
-app.include_router(apply.router, prefix="/v1")
-app.include_router(filters.router, prefix="/v1")
-app.include_router(sources.router, prefix="/v1")
-app.include_router(stats.router, prefix="/v1")
-app.include_router(requirements.router, prefix="/v1")
-app.include_router(admin.router, prefix="/v1")
-app.include_router(source_admin.router, prefix="/v1")
-app.include_router(experiments.router, prefix="/v1")
-app.include_router(task_models.router, prefix="/v1")
-app.include_router(analytics.router, prefix="/v1")
-app.include_router(companies.router, prefix="/v1")
-app.include_router(spend.router, prefix="/v1")
-app.include_router(mail.router, prefix="/v1")
-app.include_router(resolve.router, prefix="/v1")
-app.include_router(filter_insights.router, prefix="/v1")
-app.include_router(filter_insights.user_router, prefix="/v1")
-app.include_router(gmail.router, prefix="/v1")
+app.include_router(users.router, prefix="/v1", responses=REFUSALS)
+app.include_router(
+    views.router, prefix="/v1", dependencies=[Depends(require_user)], responses=REFUSALS
+)
+app.include_router(jobs.router, prefix="/v1", responses=REFUSALS)
+app.include_router(application.router, prefix="/v1", responses=REFUSALS)
+app.include_router(apply.router, prefix="/v1", responses=REFUSALS)
+app.include_router(filters.router, prefix="/v1", responses=REFUSALS)
+app.include_router(sources.router, prefix="/v1", responses=REFUSALS)
+app.include_router(stats.router, prefix="/v1", responses=REFUSALS)
+app.include_router(requirements.router, prefix="/v1", responses=REFUSALS)
+app.include_router(admin.router, prefix="/v1", responses=REFUSALS)
+app.include_router(source_admin.router, prefix="/v1", responses=REFUSALS)
+app.include_router(experiments.router, prefix="/v1", responses=REFUSALS)
+app.include_router(task_models.router, prefix="/v1", responses=REFUSALS)
+app.include_router(analytics.router, prefix="/v1", responses=REFUSALS)
+app.include_router(companies.router, prefix="/v1", responses=REFUSALS)
+app.include_router(spend.router, prefix="/v1", responses=REFUSALS)
+app.include_router(mail.router, prefix="/v1", responses=REFUSALS)
+app.include_router(resolve.router, prefix="/v1", responses=REFUSALS)
+app.include_router(filter_insights.router, prefix="/v1", responses=REFUSALS)
+app.include_router(filter_insights.user_router, prefix="/v1", responses=REFUSALS)
+app.include_router(gmail.router, prefix="/v1", responses=REFUSALS)
 metrics.instrument(app)
 # At import, before the middleware stack is built: the instrumentation takes a
 # lazy tracer that starts producing spans once telemetry.init() sets the
