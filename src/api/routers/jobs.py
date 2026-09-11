@@ -4,7 +4,7 @@ import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from api import db, events, signals, sorting, task_admission
 from api import params as params_
@@ -108,6 +108,265 @@ _STATUS_META: dict[str, tuple[bool, str | None]] = {
 }
 
 
+class StatusMeta(BaseModel):
+    """What a status MEANS, served beside the names so the board never decides
+    "is this over" or "which tone" by matching a name it hand-copied. A status
+    absent from the table is in play with no outcome."""
+
+    name: str
+    terminal: bool
+    outcome: str | None
+
+
+class AtsCount(BaseModel):
+    ats: str
+    count: int
+
+
+class ReportKind(BaseModel):
+    kind: str
+    label: str
+
+
+class BoardOptions(BaseModel):
+    """Everything the board's filter and edit controls need, generated from
+    data instead of hardcoded in the client.
+
+    `ats` here is the board-wide count, the profile of the board as a whole.
+    The per-page counts under the other filters are `facets` on the list."""
+
+    statuses: list[str]
+    status_meta: list[StatusMeta]
+    not_applied_sentinel: str
+    sources: list[str]
+    ats: list[AtsCount]
+    report_kinds: list[ReportKind]
+
+
+class BoardRow(BaseModel):
+    """`_JOB_ROW`, in types: the posting, the ATS read off its url, and this
+    person's own row over the top.
+
+    `closed_verdict` is three-valued and must stay that way: 'open', 'closed',
+    or null for never checked. `active` cannot answer this question, it is
+    whatever a board's feed last said and nothing ever clears it."""
+
+    job_id: int
+    company: str | None
+    title: str | None
+    locations: list[str]
+    terms: list[str]
+    source: str
+    ats: str
+    url: str
+    raw_url: str | None
+    active: bool
+    date_posted: datetime.datetime | None
+    added_at: datetime.datetime
+    extraction_status: str | None
+    # float, not Decimal. psycopg hands back a Decimal and FastAPI's encoder
+    # turned it into a number, which is what the board has always received and
+    # what its type says. Declaring Decimal would make pydantic serialise it as
+    # a STRING, silently, and the schema would agree with neither.
+    comp_min: float | None
+    comp_max: float | None
+    comp_text: str | None
+    comp_currency: str | None
+    comp_period: str | None
+    comp_basis: str | None
+    closed_verdict: str | None
+    status: str | None
+    date_applied: datetime.date | None
+    notes: str | None
+    size: str | None
+    recruiter: str | None
+    connection1: str | None
+    connection2: str | None
+    documents: str | None
+    hidden: bool
+    # A window count rides on the page when the caller asked for a total, so
+    # one board read answers both. Excluded from the response: it is the same
+    # number on every row and it is reported once, as `total`.
+    total_rows: int | None = Field(default=None, exclude=True)
+
+
+class Sort(BaseModel):
+    key: str
+    dir: str
+
+
+class Facets(BaseModel):
+    """Counts under every OTHER filter the page has on. Taken before the ats
+    clause joins the rest, because a board-wide "rippling 4" beside a lens
+    that holds none of them reads as a lie."""
+
+    ats: list[AtsCount]
+
+
+class Board(BaseModel):
+    """One page of the board, and everything the page needs to render its own
+    controls without re-deriving them."""
+
+    rows: list[BoardRow]
+    # Only the filters that narrowed anything, echoed back.
+    filters: dict[str, list[str]]
+    next_cursor: int | None
+    has_more: bool
+    offset: int
+    total: int | None
+    facets: Facets | None
+    # The active sort as applied, so the UI renders it without duplicating the
+    # default, and the keys it may ask for.
+    sorts: list[Sort]
+    sortable: list[str]
+    # When the board's membership was last computed, so a page can say "as of"
+    # and a person knows a preference change has landed.
+    board_computed_at: datetime.datetime | None
+
+
+class JobFacts(BaseModel):
+    """The posting behind one board row. Wider than `BoardRow` where the
+    detail view needs it and narrower where the list does."""
+
+    id: int
+    url: str
+    raw_url: str | None
+    company: str | None
+    title: str | None
+    locations: list[str]
+    terms: list[str]
+    source: str
+    active: bool
+    date_posted: datetime.datetime | None
+    comp_min: float | None
+    comp_max: float | None
+    comp_text: str | None
+    comp_currency: str | None
+    comp_period: str | None
+    comp_basis: str | None
+    created_at: datetime.datetime
+    closed_verdict: str | None
+
+
+class OwnRow(BaseModel):
+    """This person's own row, which is null when they have never touched the
+    posting. A board row is a grant as well as a record, so absence is a real
+    answer rather than an empty one."""
+
+    status: str | None
+    date_applied: datetime.date | None
+    notes: str | None
+    size: str | None
+    recruiter: str | None
+    connection1: str | None
+    connection2: str | None
+    documents: str | None
+    hidden: bool
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+
+
+class StatusChange(BaseModel):
+    old_status: str | None
+    new_status: str | None
+    created_at: datetime.datetime
+
+
+class CheckVerdict(BaseModel):
+    """The latest verdict for one posting check."""
+
+    check_type: str
+    status: str
+    reason: str | None
+    model: str | None
+    created_at: datetime.datetime
+
+
+class FilterVerdictRow(BaseModel):
+    """One of this person's filters, and how it last judged this posting.
+    Everything but the filter itself is null when it has never run on it."""
+
+    name: str
+    enabled: bool
+    status: str | None
+    reason: str | None
+    model: str | None
+    created_at: datetime.datetime | None
+
+
+class JobDetail(BaseModel):
+    """Everything behind one board row: the posting, the content that was
+    judged, this person's own row and its history, and why the checks and
+    filters let it through."""
+
+    job: JobFacts
+    signals: signals.Signals
+    row: OwnRow | None
+    history: list[StatusChange]
+    content: str | None
+    content_fetched_at: datetime.datetime | None
+    checks: list[CheckVerdict]
+    filter_verdicts: list[FilterVerdictRow]
+
+
+class Explained(BaseModel):
+    """One check re-run on purpose, with the reasoning the cheap path skips.
+
+    `refetched` and `closure_signal` are present only when the content could
+    not be fetched and the fetch itself said why: a 404 or a removal notice is
+    an answer about the posting, not a failure to get one."""
+
+    check: str
+    status: str
+    reason: str | None
+    refetched: bool | None = None
+    closure_signal: str | None = None
+
+
+class BulkDeleted(BaseModel):
+    ok: bool
+    deleted: int
+
+
+class AcceptedUpload(BaseModel):
+    job_id: int
+    url: str
+
+
+class RejectedUpload(BaseModel):
+    url: str
+    error: str
+
+
+class Uploaded(BaseModel):
+    """Accepted and rejected separately, with the reason on each rejection: an
+    upload is the one place a person chooses the url, so being told now beats
+    a job that silently never extracts."""
+
+    accepted: list[AcceptedUpload]
+    rejected: list[RejectedUpload]
+
+
+class ReportFiled(BaseModel):
+    id: int
+    status: str
+    created_at: datetime.datetime
+
+
+class TaskState(BaseModel):
+    """A task this person started. Ownership lives in the payload, so the
+    kinds that stamp no user_id are fleet work with nobody to show them to."""
+
+    id: int
+    kind: str
+    status: str
+    progress: dict[str, Any] | None
+    error: str | None
+    created_at: datetime.datetime
+    started_at: datetime.datetime | None
+    finished_at: datetime.datetime | None
+
+
 class Autofilled(BaseModel):
     """What the write filled in that the caller did not send.
 
@@ -145,9 +404,9 @@ class Deleted(BaseModel):
     ok: bool
 
 
-def status_meta(statuses: list[str]) -> list[dict[str, Any]]:
+def status_meta(statuses: list[str]) -> list[StatusMeta]:
     return [
-        {"name": name, "terminal": meta[0], "outcome": meta[1]}
+        StatusMeta(name=name, terminal=meta[0], outcome=meta[1])
         for name in statuses
         for meta in (_STATUS_META.get(name, (False, None)),)
     ]
@@ -162,14 +421,14 @@ _REPORT_LABELS = {
 }
 
 
-def report_kinds() -> list[dict[str, str]]:
+def report_kinds() -> list[ReportKind]:
     """The kinds a report can carry, with the label the form shows; one copy,
     served to the board's report modal and the admin reports page."""
-    return [{"kind": k, "label": _REPORT_LABELS[k]} for k in REPORT_KINDS]
+    return [ReportKind(kind=k, label=_REPORT_LABELS[k]) for k in REPORT_KINDS]
 
 
 @router.get("/user/jobs/options")
-def job_options(user: AuthedUser = Depends(require_user)):
+def job_options(user: AuthedUser = Depends(require_user)) -> BoardOptions:
     """Everything the board's filter/edit controls need, generated from data
     instead of hardcoded in the client."""
     in_use = [
@@ -190,21 +449,22 @@ def job_options(user: AuthedUser = Depends(require_user)):
     ]
     # The ATSs on this person's board with how many rows each, most first,
     # so the filter offers what is there rather than a fixed list.
-    ats = db.query(
+    ats = db.query_as(
+        AtsCount,
         visibility.FAST.format(
             columns=f"({ATS_SQL}) AS ats, COUNT(*) AS count",
             extra="AND COALESCE(uj.hidden, FALSE) = FALSE GROUP BY 1 ORDER BY 2 DESC, 1",
         ),
         {"uid": user.id},
     )
-    return {
-        "statuses": statuses,
-        "status_meta": status_meta(statuses),
-        "not_applied_sentinel": NOT_APPLIED,
-        "sources": sources,
-        "ats": ats,
-        "report_kinds": report_kinds(),
-    }
+    return BoardOptions(
+        statuses=statuses,
+        status_meta=status_meta(statuses),
+        not_applied_sentinel=NOT_APPLIED,
+        sources=sources,
+        ats=ats,
+        report_kinds=report_kinds(),
+    )
 
 
 @router.get("/user/jobs")
@@ -224,7 +484,7 @@ def list_jobs(
     with_total: bool = False,
     with_facets: bool = False,
     user: AuthedUser = Depends(require_user),
-):
+) -> Board:
     limit = max(1, min(limit, 1000))
     offset = max(0, offset)
     sorts = (
@@ -262,15 +522,16 @@ def list_jobs(
     # before the ats clause joins the rest.
     facets = None
     if with_facets:
-        facets = {
-            "ats": db.query(
+        facets = Facets(
+            ats=db.query_as(
+                AtsCount,
                 visibility.FAST.format(
                     columns=f"({ATS_SQL}) AS ats, COUNT(*) AS count",
                     extra="\n".join(extra) + "\nGROUP BY 1 ORDER BY 2 DESC, 1",
                 ),
                 params,
             )
-        }
+        )
     if wanted_ats:
         extra.append(f"AND ({ATS_SQL}) = ANY(%(ats)s)")
         params["ats"] = wanted_ats
@@ -292,12 +553,10 @@ def list_jobs(
     count_on_page = with_total and cursor is None
     columns = _JOB_ROW + (", COUNT(*) OVER () AS total_rows" if count_on_page else "")
     sql = visibility.FAST.format(columns=columns, extra=f"{filter_sql}\n{order}")
-    rows = db.query(sql, params)
+    rows = db.query_as(BoardRow, sql, params)
     if with_total:
         if count_on_page and rows:
-            total = rows[0]["total_rows"]
-            for r in rows:
-                r.pop("total_rows", None)
+            total = rows[0].total_rows
         else:
             # Cursor position is pagination, not a filter. Count the full
             # selection in cursor mode and when an offset page has no rows.
@@ -307,25 +566,18 @@ def list_jobs(
             total = row["c"] if row else 0
     has_more = len(rows) > limit
     rows = rows[:limit]
-    return {
-        "rows": rows,
-        "filters": params_.applied(status=wanted, source=wanted_sources, ats=wanted_ats),
-        "next_cursor": rows[-1]["job_id"] if cursor is not None and has_more and rows else None,
-        "has_more": has_more,
-        "offset": offset,
-        "total": total,
-        # Counts per ATS under the page's other filters, for the select;
-        # options.ats is the board-wide count and stays for the profile of
-        # the board as a whole.
-        "facets": facets,
-        # The active sort as applied, so the UI renders it without duplicating
-        # the default, and the keys it may ask for.
-        "sorts": sorts,
-        "sortable": sorted(_SORTABLE),
-        # When the board's membership was last computed, so a page can say
-        # "as of" and a person knows a preference change has landed.
-        "board_computed_at": visibility.computed_at(user.id),
-    }
+    return Board(
+        rows=rows,
+        filters=params_.applied(status=wanted, source=wanted_sources, ats=wanted_ats),
+        next_cursor=rows[-1].job_id if cursor is not None and has_more and rows else None,
+        has_more=has_more,
+        offset=offset,
+        total=total,
+        facets=facets,
+        sorts=[Sort(**s) for s in sorts],
+        sortable=sorted(_SORTABLE),
+        board_computed_at=visibility.computed_at(user.id),
+    )
 
 
 def _touchable(user: AuthedUser, job_ids: list[int]) -> set[int]:
@@ -436,7 +688,7 @@ def patch_jobs(
 
 
 @router.get("/user/jobs/{job_id}/detail")
-def job_detail(job_id: int, user: AuthedUser = Depends(require_user)):
+def job_detail(job_id: int, user: AuthedUser = Depends(require_user)) -> JobDetail:
     """Everything behind one board row: cached posting content, the user's own
     row + status history, and why the AI let it through (per-filter verdicts
     plus the closed/clearance checks)."""
@@ -457,7 +709,8 @@ def job_detail(job_id: int, user: AuthedUser = Depends(require_user)):
         "ORDER BY id DESC LIMIT 1",
         (job["url"],),
     )
-    checks = db.query(
+    checks = db.query_as(
+        CheckVerdict,
         """
         SELECT DISTINCT ON (check_type) check_type, status, reason, model, created_at
         FROM ai_queries
@@ -467,7 +720,8 @@ def job_detail(job_id: int, user: AuthedUser = Depends(require_user)):
         """,
         {"url": job["url"]},
     )
-    filter_verdicts = db.query(
+    filter_verdicts = db.query_as(
+        FilterVerdictRow,
         """
         SELECT f.name, f.enabled, v.status, v.reason, v.model, v.created_at
         FROM user_filters f
@@ -482,27 +736,29 @@ def job_detail(job_id: int, user: AuthedUser = Depends(require_user)):
         """,
         {"url": job["url"], "uid": user.id},
     )
-    return {
-        "job": job,
-        # Every key is optional and absence means the signal does not exist -
-        # never a zero, never something for the caller to re-derive.
-        "signals": signals.signals_for(job),
-        "row": db.query_one(
+    return JobDetail(
+        job=JobFacts(**job),
+        # Every signal is optional and absence means it does not exist, never a
+        # zero and never something for the caller to re-derive.
+        signals=signals.signals_for(job),
+        row=db.query_one_as(
+            OwnRow,
             "SELECT status, date_applied, notes, size, recruiter, connection1, "
             "connection2, documents, hidden, created_at, updated_at "
             "FROM user_jobs WHERE user_id = %s AND job_id = %s",
             (user.id, job_id),
         ),
-        "history": db.query(
+        history=db.query_as(
+            StatusChange,
             "SELECT old_status, new_status, created_at FROM user_job_history "
             "WHERE user_id = %s AND job_id = %s ORDER BY id",
             (user.id, job_id),
         ),
-        "content": (content_row or {}).get("input_content"),
-        "content_fetched_at": (content_row or {}).get("created_at"),
-        "checks": checks,
-        "filter_verdicts": filter_verdicts,
-    }
+        content=(content_row or {}).get("input_content"),
+        content_fetched_at=(content_row or {}).get("created_at"),
+        checks=checks,
+        filter_verdicts=filter_verdicts,
+    )
 
 
 class ExplainBody(BaseModel):
@@ -510,7 +766,9 @@ class ExplainBody(BaseModel):
 
 
 @router.post("/user/jobs/{job_id}/explain")
-async def explain_check(job_id: int, body: ExplainBody, user: AuthedUser = Depends(require_user)):
+async def explain_check(
+    job_id: int, body: ExplainBody, user: AuthedUser = Depends(require_user)
+) -> Explained:
     """On-demand debugging: re-runs one check with the reason-ful schema and
     fuller reasoning (default verdicts skip reasons to save output tokens).
     Records a fresh verdict row (context 'explain') and returns the reason."""
@@ -537,13 +795,13 @@ async def explain_check(job_id: int, body: ExplainBody, user: AuthedUser = Depen
             (job["url"],),
         )
         if closure_signal:
-            return {
-                "check": body.check,
-                "status": "rejected",
-                "reason": (gone or {}).get("reason", ""),
-                "refetched": True,
-                "closure_signal": closure_signal,
-            }
+            return Explained(
+                check=body.check,
+                status="rejected",
+                reason=(gone or {}).get("reason", ""),
+                refetched=True,
+                closure_signal=closure_signal,
+            )
         raise HTTPException(
             409,
             detail={"code": "NO_CONTENT", "message": "could not fetch this posting just now"},
@@ -618,7 +876,7 @@ async def explain_check(job_id: int, body: ExplainBody, user: AuthedUser = Depen
             },
         )
     rejected, reason = verdict_of(parsed)
-    return {"check": body.check, "status": "rejected" if rejected else "passed", "reason": reason}
+    return Explained(check=body.check, status="rejected" if rejected else "passed", reason=reason)
 
 
 @router.delete("/user/jobs/{job_id}")
@@ -631,21 +889,23 @@ def delete_user_job(job_id: int, user: AuthedUser = Depends(require_user)) -> De
 
 
 @router.delete("/user/jobs")
-def delete_user_jobs(body: UserJobsBulkIds, user: AuthedUser = Depends(require_user)):
+def delete_user_jobs(
+    body: UserJobsBulkIds, user: AuthedUser = Depends(require_user)
+) -> BulkDeleted:
     """The selection form of the delete above: the caller's own rows only,
     one statement, count returned."""
     deleted = db.execute_count(
         "DELETE FROM user_jobs WHERE user_id = %s AND job_id = ANY(%s)", (user.id, body.job_ids)
     )
-    return {"ok": True, "deleted": deleted}
+    return BulkDeleted(ok=True, deleted=deleted)
 
 
 @router.post("/uploads")
-def upload_links(body: UploadRequest, user: AuthedUser = Depends(require_user)):
+def upload_links(body: UploadRequest, user: AuthedUser = Depends(require_user)) -> Uploaded:
     from api import ssrf
 
-    accepted = []
-    rejected = []
+    accepted: list[AcceptedUpload] = []
+    rejected: list[RejectedUpload] = []
     for submitted in body.urls:
         raw = submitted.strip()
         if not raw.startswith(("http://", "https://")):
@@ -655,7 +915,7 @@ def upload_links(body: UploadRequest, user: AuthedUser = Depends(require_user)):
         # instead of a job that silently never extracts.
         error = ssrf.validate_public_url(raw)
         if error:
-            rejected.append({"url": raw, "error": error})
+            rejected.append(RejectedUpload(url=raw, error=error))
             continue
         url = normalize_url(raw)
         row = db.query_one(
@@ -676,8 +936,8 @@ def upload_links(body: UploadRequest, user: AuthedUser = Depends(require_user)):
         )
         if row["extraction_status"] == "pending":
             task_admission.enqueue("extract_upload", {"job_id": row["id"]}, {"user_id": user.id})
-        accepted.append({"job_id": row["id"], "url": url})
-    return {"accepted": accepted, "rejected": rejected}
+        accepted.append(AcceptedUpload(job_id=row["id"], url=url))
+    return Uploaded(accepted=accepted, rejected=rejected)
 
 
 class JobReport(BaseModel):
@@ -687,7 +947,9 @@ class JobReport(BaseModel):
 
 
 @router.post("/user/jobs/{job_id}/report")
-def report_job(job_id: int, body: JobReport, user: AuthedUser = Depends(require_user)):
+def report_job(
+    job_id: int, body: JobReport, user: AuthedUser = Depends(require_user)
+) -> ReportFiled:
     if body.kind not in REPORT_KINDS:
         raise HTTPException(
             400,
@@ -695,7 +957,8 @@ def report_job(job_id: int, body: JobReport, user: AuthedUser = Depends(require_
         )
     if not db.query_one("SELECT id FROM jobs WHERE id = %s", (job_id,)):
         raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown job"})
-    row = db.query_one(
+    row = db.query_one_as(
+        ReportFiled,
         """
         INSERT INTO reports (user_id, job_id, kind, message, corrections)
         VALUES (%s, %s, %s, %s, %s)
@@ -709,17 +972,19 @@ def report_job(job_id: int, body: JobReport, user: AuthedUser = Depends(require_
             db.jsonb(body.corrections) if body.corrections is not None else None,
         ),
     )
+    assert row is not None  # an insert with RETURNING always yields its row
     return row
 
 
 @router.get("/tasks/{task_id}")
-def get_task(task_id: int, user: AuthedUser = Depends(require_user)):
+def get_task(task_id: int, user: AuthedUser = Depends(require_user)) -> TaskState:
     # Task ids are sequential and `error` is str(exc) written verbatim by the
     # worker, so an ungated lookup hands any signed-in user every other user's
     # failures. Ownership lives in the payload: every user-initiated kind
     # stamps user_id there, and the kinds that do not (ingest_source,
     # verify_new, data_health...) are fleet work with no user to show it to.
-    row = db.query_one(
+    row = db.query_one_as(
+        TaskState,
         "SELECT id, kind, status, progress, error, created_at, started_at, finished_at "
         "FROM tasks WHERE id = %s AND (payload->>'user_id')::bigint = %s",
         (task_id, user.id),

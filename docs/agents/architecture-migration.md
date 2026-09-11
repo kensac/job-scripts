@@ -412,6 +412,31 @@ Where the old dict omitted keys, set `response_model_exclude_none=True` on the
 route and say so beside the model. Declaring must not change the payload; that
 is the whole reason it is safe to do everywhere.
 
+Two ways it moves that are not obvious, both found the hard way.
+
+**A `Decimal` field is served as a JSON string.** psycopg returns a `numeric`
+column as a `Decimal`, and while a route returned a bare dict, FastAPI's
+encoder turned each one into a number. Declaring the field as `Decimal` hands
+serialisation to pydantic, which writes `"100.5"`. The schema then says
+`type: string`, agreeing with neither the old wire nor the client, and nothing
+fails: the board just renders a quoted number. Declare money as `float`.
+`tests/test_openapi_current.py` walks every response model and fails on a
+`Decimal`.
+
+**A key that is sometimes absent cannot be typed.** `signals_for` omitted a
+signal that could not clear its sample floor, and a declared optional field
+emits null instead. A `@model_serializer` that drops the nulls keeps the wire
+exact and ERASES the schema, because pydantic derives the serialisation schema
+from the serialiser's return type, so the model becomes `{type: object,
+additionalProperties: true}`. That is the useless generated type this phase
+exists to stop producing, so the null wins and the consumer is checked instead.
+
+**The completion check for this phase is a generator, not a count.** Running
+`npx openapi-typescript openapi.json` and reading the output is what found the
+`Decimal` bug, an hour after it merged in `routers/experiments.py` and minutes
+before it would have merged again on the board. Nothing else would have: the
+tests passed, pyright passed, the schema was self-consistent and wrong.
+
 **A response model must be defined ABOVE the route that returns it.** This
 module uses `from __future__ import annotations`, so a return annotation is a
 string and FastAPI resolves it when the decorator runs. A model defined later

@@ -4,7 +4,6 @@ through the production path. See tasks.experiments."""
 from __future__ import annotations
 
 import datetime
-import decimal
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -85,7 +84,10 @@ class ArmResult(BaseModel):
     url: str
     output: dict[str, Any] | None
     usage: dict[str, Any] | None
-    cost_usd: decimal.Decimal | None
+    # float, not Decimal: pydantic serialises a Decimal as a string, and this
+    # shipped declaring one, so the cost came back quoted where it used to be a
+    # number.
+    cost_usd: float | None
     error: str | None
 
 
