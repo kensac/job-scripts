@@ -97,9 +97,11 @@ def test_unknown_and_unpublished_have_identical_refusals(client):
     unpublished = client.get("/v1/public/job-lists/engineering")
 
     assert unknown.status_code == unpublished.status_code == 404
-    assert unknown.json() == unpublished.json() == {
-        "detail": {"code": "NOT_FOUND", "message": "unknown job list"}
-    }
+    assert (
+        unknown.json()
+        == unpublished.json()
+        == {"detail": {"code": "NOT_FOUND", "message": "unknown job list"}}
+    )
     assert unknown.headers["cache-control"] == unpublished.headers["cache-control"] == "no-store"
 
 
