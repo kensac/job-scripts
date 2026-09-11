@@ -15855,6 +15855,169 @@
         }
       }
     },
+    "/v1/admin/user-job-populations": {
+      "get": {
+        "summary": "User Job Populations",
+        "description": "Report overlapping stored populations; do not infer one from another.",
+        "operationId": "user_job_populations_v1_admin_user_job_populations_get",
+        "parameters": [
+          {
+            "name": "user",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "User"
+            }
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source"
+            }
+          },
+          {
+            "name": "x-service-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-Service-Token"
+            }
+          },
+          {
+            "name": "x-user-sub",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Sub"
+            }
+          },
+          {
+            "name": "x-user-email",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Email"
+            }
+          },
+          {
+            "name": "x-user-name",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Name"
+            }
+          },
+          {
+            "name": "x-user-groups",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Groups"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserJobPopulations"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/admin/working-set-shadow": {
       "get": {
         "summary": "Working Set Shadow Report",
@@ -41022,6 +41185,102 @@
         "title": "Population",
         "description": "The denominator a section counts over, and what it leaves out. Each\nsection below counts a DIFFERENT population and nothing in the rows says\nso, which invites a subtraction that means nothing."
       },
+      "PopulationCounts": {
+        "properties": {
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "legacy_compatibility": {
+            "type": "integer",
+            "title": "Legacy Compatibility"
+          },
+          "person_state": {
+            "type": "integer",
+            "title": "Person State"
+          },
+          "working_set": {
+            "type": "integer",
+            "title": "Working Set"
+          },
+          "materialized_visibility": {
+            "type": "integer",
+            "title": "Materialized Visibility"
+          },
+          "person_and_working_set": {
+            "type": "integer",
+            "title": "Person And Working Set"
+          },
+          "person_and_visibility": {
+            "type": "integer",
+            "title": "Person And Visibility"
+          },
+          "working_set_and_visibility": {
+            "type": "integer",
+            "title": "Working Set And Visibility"
+          },
+          "all_three": {
+            "type": "integer",
+            "title": "All Three"
+          },
+          "person_shaped_unmarked": {
+            "type": "integer",
+            "title": "Person Shaped Unmarked"
+          },
+          "legacy_unknown": {
+            "type": "integer",
+            "title": "Legacy Unknown"
+          },
+          "visibility_computed_at_min": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Visibility Computed At Min"
+          },
+          "visibility_computed_at_max": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Visibility Computed At Max"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source",
+          "legacy_compatibility",
+          "person_state",
+          "working_set",
+          "materialized_visibility",
+          "person_and_working_set",
+          "person_and_visibility",
+          "working_set_and_visibility",
+          "all_three",
+          "person_shaped_unmarked",
+          "legacy_unknown",
+          "visibility_computed_at_min",
+          "visibility_computed_at_max"
+        ],
+        "title": "PopulationCounts"
+      },
       "Populations": {
         "properties": {
           "classification": {
@@ -50263,6 +50522,61 @@
         },
         "type": "object",
         "title": "UserJobPatch"
+      },
+      "UserJobPopulations": {
+        "properties": {
+          "generated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Generated At"
+          },
+          "basis": {
+            "type": "string",
+            "title": "Basis",
+            "default": "distinct user_id/job_id pairs"
+          },
+          "visibility_basis": {
+            "type": "string",
+            "title": "Visibility Basis",
+            "default": "materialized board_visible rows; timestamps describe rows present, not projection freshness"
+          },
+          "global": {
+            "$ref": "#/components/schemas/PopulationCounts"
+          },
+          "by_source": {
+            "items": {
+              "$ref": "#/components/schemas/PopulationCounts"
+            },
+            "type": "array",
+            "title": "By Source"
+          },
+          "filters": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": "object",
+            "title": "Filters"
+          },
+          "filterable": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Filterable"
+          }
+        },
+        "type": "object",
+        "required": [
+          "generated_at",
+          "global",
+          "by_source",
+          "filters",
+          "filterable"
+        ],
+        "title": "UserJobPopulations"
       },
       "UserJobsBulkIds": {
         "properties": {
