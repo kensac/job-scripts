@@ -49,6 +49,9 @@ thrown away**. Anything that cannot be rebuilt from facts is a fact.
 
 ## The phases, in order
 
+Which phase is done, and what the current one has measured, is issue #508.
+This document is the rules; that issue is the working state.
+
 Each phase ships on its own and leaves the system working. The order is not
 arbitrary: the file moves are LAST, because moving files before the seams are
 real only relocates the problem.
