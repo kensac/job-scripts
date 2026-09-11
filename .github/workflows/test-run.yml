@@ -64,7 +64,11 @@ jobs:
           case "$TEST_LANE" in
             serial|profile) ;;
             corpus) args+=(-m corpus) ;;
-            shard-*) args+=(-m 'not corpus' --shard-count="$TEST_SHARDS" --shard-index="${TEST_LANE#shard-}") ;;
+            # -n auto: four vCPUs on a public repo's runner, and the suite
+            # waits on Postgres far more than it computes, so the workers
+            # overlap each other's waiting. Each gets its own database
+            # (tests/conftest.py), which is what makes this safe at all.
+            shard-*) args+=(-n auto -m 'not corpus' --shard-count="$TEST_SHARDS" --shard-index="${TEST_LANE#shard-}") ;;
             *) echo "Unknown test lane: $TEST_LANE"; exit 1 ;;
           esac
           if [ "$TEST_LANE" = profile ]; then

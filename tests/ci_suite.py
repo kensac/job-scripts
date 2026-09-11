@@ -28,7 +28,13 @@ def pytest_configure(config):
     if count < 1 or not 0 <= index < count:
         raise pytest.UsageError("--shard-index must be between 0 and --shard-count minus one")
     output = config.getoption("test_report")
-    if output:
+    # Under xdist only the controller writes the report. It receives every
+    # worker's logreport, so one file still describes the whole lane, where
+    # four workers writing the same path would leave one worker's quarter of
+    # it. `workerinput` is the per-config marker rather than the environment
+    # variable, because a nested pytester run inherits the variable and would
+    # then write nothing.
+    if output and not hasattr(config, "workerinput"):
         config.pluginmanager.register(_Report(config, Path(output).resolve()), "test-phase-report")
 
 
