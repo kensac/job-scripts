@@ -65,6 +65,8 @@ from api.resolve.contracts import (
 )
 from api.resolve.contracts import PICKER_APPLICATIONS as PICKER_APPLICATIONS
 from api.resolve.contracts import ResolveChoice as ResolveChoice
+from api.resolve.history import history_for
+from api.resolve.review_rates import review_rates_for
 from api.routers.admin import require_admin
 
 router = APIRouter()
@@ -731,106 +733,6 @@ def _resolve(
     raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown queue item"})
 
 
-# Everything a person has decided, from the four logs that record it, newest
-# first.
-#
-# Read from the logs themselves rather than from a decisions table, because
-# every one of these is already append-only and a fifth copy would be the one
-# that drifts. A decision that vanishes when it is reversed takes the evidence
-# that the rule was wrong with it, so both survive and each says which it
-# replaced.
-#
-# The neighbours are computed over HUMAN rows only, which is why the filter
-# sits inside each branch rather than outside the window. Windowing over every
-# row would point `supersedes` at the matcher's own attachment - a real row,
-# but not a decision, and not in this list. Every id either side of a decision
-# here resolves to another row in the same response.
-#
-# That the matcher can never appear as the newer row is not an accident of the
-# data: `mail_match.record` refuses to overwrite a human verdict, so a human
-# row's successor is always another human row.
-_HISTORY_SQL = """
-WITH match_decisions AS (
-    SELECT am.id, am.created_at, am.actor_user_id, am.message_id, am.application_id,
-           am.rationale
-    FROM application_matches am
-    JOIN email_messages m ON m.id = am.message_id
-    WHERE m.user_id = %(user)s AND am.actor_user_id IS NOT NULL
-)
-SELECT 'match' AS log, d.id, d.created_at AS at, d.actor_user_id, d.application_id,
-       lead(d.id) OVER (PARTITION BY d.message_id ORDER BY d.id) AS newer,
-       lag(d.id) OVER (PARTITION BY d.message_id ORDER BY d.id) AS older,
-       CASE WHEN d.application_id IS NOT NULL THEN 'attached' ELSE 'rejected' END AS decision,
-       coalesce(a.company_name, m.subject, 'a message') AS subject
-FROM match_decisions d
-JOIN email_messages m ON m.id = d.message_id
-LEFT JOIN applications a ON a.id = d.application_id
-
-UNION ALL
-
-SELECT 'proposal', sr.id, sr.created_at, sr.user_id, sr.application_id,
-       lead(sr.id) OVER (PARTITION BY sr.application_id, sr.event_id ORDER BY sr.id),
-       lag(sr.id) OVER (PARTITION BY sr.application_id, sr.event_id ORDER BY sr.id),
-       sr.response,
-       coalesce(a.company_name, 'an application')
-FROM suggestion_responses sr
-LEFT JOIN applications a ON a.id = sr.application_id
-WHERE sr.user_id = %(user)s
-
-UNION ALL
-
--- Closed by hand, not by a later email. `resolved_by_event_id` set means the
--- system settled it, which is it working rather than a decision anyone made.
---
--- No neighbours, because `action_items` is updated in place rather than
--- appended to: reopening clears `resolved_at` and the closure that preceded it
--- is gone from the row. So this log can show that an item was closed and
--- cannot show that it was closed twice. Stated rather than papered over - the
--- fix is a second table and it is not worth one for the 0 items a person has
--- ever closed.
-SELECT 'action', ai.id, ai.resolved_at, ai.user_id, ai.application_id, NULL, NULL,
-       'closed', coalesce(a.company_name, ai.kind)
-FROM action_items ai
-LEFT JOIN applications a ON a.id = ai.application_id
-WHERE ai.user_id = %(user)s
-  AND ai.resolved_at IS NOT NULL
-  AND ai.resolved_by_event_id IS NULL
-
-UNION ALL
-
-SELECT 'classification', ev.id, ev.created_at, ev.actor_user_id, NULL,
-       lead(ev.id) OVER (PARTITION BY ev.message_id ORDER BY ev.id),
-       lag(ev.id) OVER (PARTITION BY ev.message_id ORDER BY ev.id),
-       ev.kind, coalesce(m2.subject, 'a message')
-FROM email_events ev
-JOIN email_messages m2 ON m2.id = ev.message_id
-WHERE m2.user_id = %(user)s AND ev.actor_user_id IS NOT NULL
-
-ORDER BY at DESC, id DESC
-"""
-
-
-def _history_for(owner_id: int, viewer_id: int, limit: int, offset: int) -> dict[str, Any]:
-    rows = db.query(_HISTORY_SQL, {"user": owner_id})
-    decisions = [
-        {
-            "id": f"{row['log']}:{row['id']}",
-            "at": row["at"],
-            "kind": row["log"],
-            "decision": row["decision"],
-            # The same actor id reads as "you" to the owner and as an
-            # administrator to anyone else, derived rather than stored twice.
-            "by": "you" if row["actor_user_id"] == viewer_id else "administrator",
-            "summary": row["subject"],
-            "application_id": row["application_id"],
-            "superseded_by": f"{row['log']}:{row['newer']}" if row["newer"] else None,
-            "supersedes": f"{row['log']}:{row['older']}" if row["older"] else None,
-        }
-        for row in rows
-    ]
-    return {"decisions": decisions[offset : offset + limit], "total": len(decisions)}
-
-
 @router.get("/user/resolve/queue", response_model=ResolveQueue, response_model_exclude_none=True)
 def resolve_queue(
     limit: int = Query(default=50, ge=1, le=200),
@@ -864,7 +766,7 @@ def resolve_history(
     user: AuthedUser = Depends(require_user),
 ):
     """What the user has decided, newest first, overturned answers included."""
-    return _history_for(user.id, user.id, limit, offset)
+    return history_for(user.id, user.id, limit, offset)
 
 
 @router.post(
@@ -904,7 +806,7 @@ def admin_resolve_history(
     corrections read as "you" and the owner's read as somebody else - the
     opposite of what the owner sees for the same rows, and correct for both.
     """
-    return _history_for(user_id, user.id, limit, offset)
+    return history_for(user_id, user.id, limit, offset)
 
 
 @router.post(
@@ -917,61 +819,6 @@ def admin_resolve_item(
     user: AuthedUser = Depends(require_admin),
 ) -> ResolveResult:
     return _resolve(item_id, body, owner_id=user_id, actor_user_id=user.id)
-
-
-# Confirm and reject rates per tier. The GROUPING IS THE POINT: "is the matcher
-# right" is unanswerable, while "is ats_company at medium confidence right"
-# decides whether that tier should keep writing unattended. It only works
-# because confirming preserves the method the matcher wrote instead of
-# restamping it `manual`.
-#
-# Rejections are counted against the tier that MADE the attachment, which is
-# the row underneath the rejection rather than the rejection itself - a
-# `detached` row names no tier, so counting by its own method would put every
-# rejection in one bucket and no tier would ever look wrong.
-_REVIEW_RATES_SQL = """
-WITH ranked AS (
-    SELECT am.id, am.message_id, am.application_id, am.method, am.confidence,
-           am.actor_user_id,
-           row_number() OVER (PARTITION BY am.message_id ORDER BY am.id DESC) AS rn,
-           lag(am.method) OVER (PARTITION BY am.message_id ORDER BY am.id) AS prev_method,
-           lag(am.confidence) OVER (PARTITION BY am.message_id ORDER BY am.id) AS prev_confidence,
-           lag(am.application_id) OVER (PARTITION BY am.message_id ORDER BY am.id) AS prev_app,
-           lag(am.actor_user_id) OVER (PARTITION BY am.message_id ORDER BY am.id) AS prev_actor
-    FROM application_matches am
-    JOIN email_messages m ON m.id = am.message_id
-    -- NULL means every user, which is what /job-scripts is: the view across
-    -- the fleet, not one person's data behind a permission level.
-    WHERE (%(user)s::bigint IS NULL OR m.user_id = %(user)s)
-),
-attached AS (
-    SELECT method, confidence,
-           count(*) AS attached,
-           count(*) FILTER (WHERE actor_user_id IS NOT NULL) AS reviewed
-    FROM ranked WHERE rn = 1 AND application_id IS NOT NULL
-    GROUP BY 1, 2
-),
-answered AS (
-    -- A human row whose predecessor was the matcher's. Same application means
-    -- they agreed; a NULL application means they threw it out.
-    SELECT prev_method AS method, prev_confidence AS confidence,
-           count(*) FILTER (WHERE application_id IS NOT DISTINCT FROM prev_app) AS confirmed,
-           count(*) FILTER (WHERE application_id IS NULL AND prev_app IS NOT NULL) AS rejected
-    FROM ranked
-    WHERE actor_user_id IS NOT NULL AND prev_actor IS NULL AND prev_app IS NOT NULL
-    GROUP BY 1, 2
-)
-SELECT coalesce(att.method, ans.method) AS method,
-       coalesce(att.confidence, ans.confidence) AS confidence,
-       coalesce(att.attached, 0) AS attached,
-       coalesce(att.reviewed, 0) AS reviewed,
-       coalesce(ans.confirmed, 0) AS confirmed,
-       coalesce(ans.rejected, 0) AS rejected
-FROM attached att
-FULL OUTER JOIN answered ans
-  ON ans.method = att.method AND ans.confidence IS NOT DISTINCT FROM att.confidence
-ORDER BY 3 DESC, 1
-"""
 
 
 @router.get("/admin/resolve/rates", response_model=ReviewRates, response_model_exclude_none=True)
@@ -993,19 +840,4 @@ def admin_review_rates(
     whether a tier should keep writing unattended, which is a question about
     the aggregate rather than about any row.
     """
-    rows = db.query(_REVIEW_RATES_SQL, {"user": user_id})
-    by_method = []
-    for row in rows:
-        answered = row["confirmed"] + row["rejected"]
-        by_method.append(
-            {
-                **row,
-                "confirm_rate": (row["confirmed"] / answered) if answered else None,
-                "note": None if answered else "not measured: nobody has reviewed this tier yet",
-            }
-        )
-    return {
-        "by_method": by_method,
-        "never_reviewed": sum(r["attached"] - r["reviewed"] for r in rows),
-        "reviewed": sum(r["reviewed"] for r in rows),
-    }
+    return review_rates_for(user_id)
