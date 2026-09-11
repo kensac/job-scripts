@@ -383,6 +383,35 @@ nothing split them. Phase 6.
 sweeps carry. Phase 2b, deferred: moving the sweeps' scope changes what gets
 paid for, so it waits for a cutover comparison.
 
+## Taking phase 7 in the order that pays
+
+173 operations is not a list to work alphabetically. The frontend calls about
+forty of them, and those are where an undeclared shape actually costs
+something, because that is where a hand-written type drifts from the query it
+was read off. `lib/job-tracker/client.ts` in the frontend repository is the
+list; the ones it calls most are `/user/jobs`, `/user/jobs/options`,
+`/user/settings`, `/user/profile`, `/user/filters`, `/user/sources`,
+`/user/stats`, `/user/usage`, `/user/funnel` and `/user/pipeline/summary`.
+
+The admin surface is most of the remaining count and almost none of the
+remaining value. It is worth declaring eventually, and last.
+
+## Working in a stack
+
+`git-spice` is set up, trunk `main`. It restacks a branch when its base moves,
+which is the whole reason to use it here: a phase often has a follow-up that
+should not wait for the first to merge.
+
+Two things it will not do for you. `git-spice branch restack` rebases onto the
+LOCAL base branch, so `git fetch` and move `main` first or it rebases onto a
+stale one. And a pull request whose base branch is deleted on merge is CLOSED
+by GitHub, not retargeted: retarget it at `main` BEFORE merging its base, or
+open a new one afterwards.
+
+A stack does not make the tests faster. Every pull request runs the full suite
+either way; CI takes two to three minutes with the sharding it already has.
+What the stack buys is not waiting.
+
 ## Revising this document
 
 This plan was written from a reading of the codebase, and a phase that opens
