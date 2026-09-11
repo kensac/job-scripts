@@ -66,7 +66,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Bootstrap"
+                }
               }
             }
           },
@@ -185,7 +187,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Usage"
+                }
               }
             }
           },
@@ -424,7 +428,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/UserSettings"
+                }
               }
             }
           },
@@ -550,7 +556,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/UserSettingsSaved"
+                }
               }
             }
           },
@@ -638,7 +646,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Ok"
+                }
               }
             }
           },
@@ -724,7 +734,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Ok"
+                }
               }
             }
           },
@@ -852,7 +864,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Ok"
+                }
               }
             }
           },
@@ -968,7 +982,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Ok"
+                }
               }
             }
           },
@@ -18094,7 +18110,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/TaskModelList"
+                }
               }
             }
           },
@@ -18221,7 +18239,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/TaskModel"
+                }
               }
             }
           },
@@ -18357,7 +18377,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/TaskModel"
+                }
               }
             }
           },
@@ -18485,7 +18507,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/TaskModelHistory"
+                }
               }
             }
           },
@@ -19111,7 +19135,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Spend"
+                }
               }
             }
           },
@@ -19345,7 +19371,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/SpendCalls"
+                }
               }
             }
           },
@@ -19476,7 +19504,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderCosts"
+                }
               }
             }
           },
@@ -25582,7 +25612,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/GmailStatus"
+                }
               }
             }
           },
@@ -25710,7 +25742,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AuthorizationUrl"
+                }
               }
             }
           },
@@ -25838,7 +25872,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/GmailStatus"
+                }
               }
             }
           },
@@ -25957,7 +25993,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Ok"
+                }
               }
             }
           },
@@ -26702,6 +26740,19 @@
         "title": "Attached",
         "description": "What still hangs off a source, and therefore what deleting it would\norphan."
       },
+      "AuthorizationUrl": {
+        "properties": {
+          "authorization_url": {
+            "type": "string",
+            "title": "Authorization Url"
+          }
+        },
+        "type": "object",
+        "required": [
+          "authorization_url"
+        ],
+        "title": "AuthorizationUrl"
+      },
       "AuthorizeRequest": {
         "properties": {
           "redirect_uri": {
@@ -26749,6 +26800,55 @@
         "type": "object",
         "title": "Autofilled",
         "description": "What the write filled in that the caller did not send.\n\nA status change can date the row by itself, so the caller is told rather\nthan having to re-read the row to find out.\n\nAn absent key is the answer, not a null: the route sets\nresponse_model_exclude_none so `{}` still means \"nothing was filled\",\nwhich is what the board already reads. Declaring the shape must not move\nthe wire."
+      },
+      "BatchingDiagnostics": {
+        "properties": {
+          "batched_calls": {
+            "type": "integer",
+            "title": "Batched Calls"
+          },
+          "sync_calls": {
+            "type": "integer",
+            "title": "Sync Calls"
+          },
+          "batched_cost_usd": {
+            "type": "number",
+            "title": "Batched Cost Usd"
+          },
+          "sync_cost_usd": {
+            "type": "number",
+            "title": "Sync Cost Usd"
+          },
+          "batchable_sync_calls": {
+            "type": "integer",
+            "title": "Batchable Sync Calls"
+          },
+          "unrealized_savings_usd": {
+            "type": "number",
+            "title": "Unrealized Savings Usd"
+          },
+          "basis": {
+            "type": "string",
+            "title": "Basis",
+            "default": "verdict_metadata_hypothesis"
+          },
+          "note": {
+            "type": "string",
+            "title": "Note",
+            "default": "Missing batch IDs do not establish synchronous transport. unrealized_savings_usd is a legacy half-cost scenario, not verified savings."
+          }
+        },
+        "type": "object",
+        "required": [
+          "batched_calls",
+          "sync_calls",
+          "batched_cost_usd",
+          "sync_cost_usd",
+          "batchable_sync_calls",
+          "unrealized_savings_usd"
+        ],
+        "title": "BatchingDiagnostics",
+        "description": "A retained compatibility estimate. Missing batch IDs do not prove\nsynchronous transport, which is why the basis travels with the numbers."
       },
       "Board": {
         "properties": {
@@ -27737,6 +27837,51 @@
         "title": "BoardYield",
         "description": "What the board's postings became once a person saw them."
       },
+      "Bootstrap": {
+        "properties": {
+          "user": {
+            "$ref": "#/components/schemas/BootstrappedUser"
+          },
+          "grants": {
+            "$ref": "#/components/schemas/Grants"
+          }
+        },
+        "type": "object",
+        "required": [
+          "user",
+          "grants"
+        ],
+        "title": "Bootstrap"
+      },
+      "BootstrappedUser": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "sub": {
+            "type": "string",
+            "title": "Sub"
+          },
+          "email": {
+            "type": "string",
+            "title": "Email"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "sub",
+          "email",
+          "name"
+        ],
+        "title": "BootstrappedUser",
+        "description": "Who the caller is, as the session already knows them. Empty rather than\nnull where the identity provider sent nothing, which is what AuthedUser\nalready holds."
+      },
       "Breakdown": {
         "properties": {
           "decisions": {
@@ -27823,6 +27968,39 @@
         ],
         "title": "BulkPatchResult",
         "description": "`skipped` names the ids the caller may not touch rather than refusing\nthe whole selection: a selection made from the board can include a row\nthat vanished or was never theirs, and failing everything for one would\nsend the page back to a request per row."
+      },
+      "CallTotals": {
+        "properties": {
+          "calls": {
+            "type": "integer",
+            "title": "Calls"
+          },
+          "cost_usd": {
+            "type": "number",
+            "title": "Cost Usd"
+          },
+          "unpriced_calls": {
+            "type": "integer",
+            "title": "Unpriced Calls"
+          },
+          "prompt_tokens": {
+            "type": "integer",
+            "title": "Prompt Tokens"
+          },
+          "completion_tokens": {
+            "type": "integer",
+            "title": "Completion Tokens"
+          }
+        },
+        "type": "object",
+        "required": [
+          "calls",
+          "cost_usd",
+          "unpriced_calls",
+          "prompt_tokens",
+          "completion_tokens"
+        ],
+        "title": "CallTotals"
       },
       "CallbackRequest": {
         "properties": {
@@ -28502,6 +28680,35 @@
         },
         "type": "object",
         "title": "Correction"
+      },
+      "CostBasis": {
+        "properties": {
+          "per_cycle": {
+            "type": "integer",
+            "title": "Per Cycle"
+          },
+          "est_prompt_tokens": {
+            "type": "integer",
+            "title": "Est Prompt Tokens"
+          },
+          "max_output_tokens": {
+            "type": "integer",
+            "title": "Max Output Tokens"
+          },
+          "batched": {
+            "type": "boolean",
+            "title": "Batched"
+          }
+        },
+        "type": "object",
+        "required": [
+          "per_cycle",
+          "est_prompt_tokens",
+          "max_output_tokens",
+          "batched"
+        ],
+        "title": "CostBasis",
+        "description": "What a cycle cost is computed FROM, so the client can render it as an\nestimate with its basis rather than as a price. per_cycle is the handler's\nown cap; a task with no cap sends 0 and no cycle cost."
       },
       "Criteria": {
         "properties": {
@@ -30183,6 +30390,101 @@
         "title": "FilterVerdictRow",
         "description": "One of this person's filters, and how it last judged this posting.\nEverything but the filter itself is null when it has never run on it."
       },
+      "FleetBudget": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "spent_usd": {
+            "type": "number",
+            "title": "Spent Usd"
+          },
+          "ceiling_usd": {
+            "type": "number",
+            "title": "Ceiling Usd"
+          },
+          "cycles": {
+            "type": "integer",
+            "title": "Cycles"
+          },
+          "cycle_cost_usd": {
+            "type": "number",
+            "title": "Cycle Cost Usd"
+          },
+          "headroom_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Headroom Usd"
+          },
+          "used_fraction": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Used Fraction"
+          },
+          "projected_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Projected Usd"
+          },
+          "projected_exceeds": {
+            "type": "boolean",
+            "title": "Projected Exceeds"
+          },
+          "scope": {
+            "type": "string",
+            "title": "Scope"
+          },
+          "excludes": {
+            "type": "string",
+            "title": "Excludes"
+          },
+          "shared_key_possible": {
+            "type": "boolean",
+            "title": "Shared Key Possible"
+          },
+          "shared_key_note": {
+            "type": "string",
+            "title": "Shared Key Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "enabled",
+          "spent_usd",
+          "ceiling_usd",
+          "cycles",
+          "cycle_cost_usd",
+          "headroom_usd",
+          "used_fraction",
+          "projected_usd",
+          "projected_exceeds",
+          "scope",
+          "excludes",
+          "shared_key_possible",
+          "shared_key_note"
+        ],
+        "title": "FleetBudget",
+        "description": "Where fleet spend sits against its ceiling, with what the ceiling does\nnot cover carried as data rather than left in a comment."
+      },
       "FormState": {
         "properties": {
           "supported": {
@@ -30314,6 +30616,165 @@
         ],
         "title": "FunnelStage",
         "description": "One stage with its own denominator. `reached` counts applications an\nevent of that kind ever arrived for, so the stages overlap and do not sum\nto `of`."
+      },
+      "GmailStatus": {
+        "properties": {
+          "available": {
+            "type": "boolean",
+            "title": "Available"
+          },
+          "connected": {
+            "type": "boolean",
+            "title": "Connected"
+          },
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "account_email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Account Email"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Scopes"
+          },
+          "needs_reconnect": {
+            "type": "boolean",
+            "title": "Needs Reconnect"
+          },
+          "invalid_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Invalid Reason"
+          },
+          "connected_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Connected At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "available",
+          "connected",
+          "provider",
+          "account_email",
+          "scopes",
+          "needs_reconnect",
+          "invalid_reason",
+          "connected_at"
+        ],
+        "title": "GmailStatus",
+        "description": "The grant as the settings page renders it. `available` is about the\ncaller's groups and the rest is about the grant, which is why an\nunavailable mailbox is still a 200 with connected=false."
+      },
+      "GrantLimits": {
+        "properties": {
+          "enabled_filters": {
+            "type": "integer",
+            "title": "Enabled Filters"
+          },
+          "max_age_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Age Days"
+          }
+        },
+        "type": "object",
+        "required": [
+          "enabled_filters",
+          "max_age_days"
+        ],
+        "title": "GrantLimits"
+      },
+      "Grants": {
+        "properties": {
+          "owner_key": {
+            "type": "boolean",
+            "title": "Owner Key"
+          },
+          "weekly_token_budget": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weekly Token Budget"
+          },
+          "spent_this_week": {
+            "type": "integer",
+            "title": "Spent This Week"
+          },
+          "has_byo_key": {
+            "type": "boolean",
+            "title": "Has Byo Key"
+          },
+          "key_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key Source"
+          },
+          "owner_key_models": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Owner Key Models"
+          },
+          "limits": {
+            "$ref": "#/components/schemas/GrantLimits"
+          }
+        },
+        "type": "object",
+        "required": [
+          "owner_key",
+          "weekly_token_budget",
+          "spent_this_week",
+          "has_byo_key",
+          "key_source",
+          "owner_key_models",
+          "limits"
+        ],
+        "title": "Grants",
+        "description": "What this person may spend and on what, in one place."
       },
       "GroupApplied": {
         "properties": {
@@ -31016,6 +31477,485 @@
         ],
         "title": "LabelCount"
       },
+      "LedgerBucket": {
+        "properties": {
+          "calls": {
+            "type": "integer",
+            "title": "Calls"
+          },
+          "ledger_rows": {
+            "type": "integer",
+            "title": "Ledger Rows"
+          },
+          "priced_calls": {
+            "type": "integer",
+            "title": "Priced Calls"
+          },
+          "unpriced_calls": {
+            "type": "integer",
+            "title": "Unpriced Calls"
+          },
+          "unknown_model_calls": {
+            "type": "integer",
+            "title": "Unknown Model Calls"
+          },
+          "cost_usd": {
+            "type": "number",
+            "title": "Cost Usd"
+          },
+          "prompt_tokens": {
+            "type": "integer",
+            "title": "Prompt Tokens"
+          },
+          "completion_tokens": {
+            "type": "integer",
+            "title": "Completion Tokens"
+          },
+          "total_tokens": {
+            "type": "integer",
+            "title": "Total Tokens"
+          },
+          "cached_tokens": {
+            "type": "integer",
+            "title": "Cached Tokens"
+          },
+          "batched_calls": {
+            "type": "integer",
+            "title": "Batched Calls"
+          },
+          "models": {
+            "type": "integer",
+            "title": "Models"
+          },
+          "first_call": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Call"
+          },
+          "last_call": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Call"
+          }
+        },
+        "type": "object",
+        "required": [
+          "calls",
+          "ledger_rows",
+          "priced_calls",
+          "unpriced_calls",
+          "unknown_model_calls",
+          "cost_usd",
+          "prompt_tokens",
+          "completion_tokens",
+          "total_tokens",
+          "cached_tokens",
+          "batched_calls",
+          "models",
+          "first_call",
+          "last_call"
+        ],
+        "title": "LedgerBucket",
+        "description": "One grouping set of the usage ledger. The three below are the same\nmeasures cut three ways, so the dimension each carries is the only thing\nthat differs."
+      },
+      "LedgerDay": {
+        "properties": {
+          "calls": {
+            "type": "integer",
+            "title": "Calls"
+          },
+          "ledger_rows": {
+            "type": "integer",
+            "title": "Ledger Rows"
+          },
+          "priced_calls": {
+            "type": "integer",
+            "title": "Priced Calls"
+          },
+          "unpriced_calls": {
+            "type": "integer",
+            "title": "Unpriced Calls"
+          },
+          "unknown_model_calls": {
+            "type": "integer",
+            "title": "Unknown Model Calls"
+          },
+          "cost_usd": {
+            "type": "number",
+            "title": "Cost Usd"
+          },
+          "prompt_tokens": {
+            "type": "integer",
+            "title": "Prompt Tokens"
+          },
+          "completion_tokens": {
+            "type": "integer",
+            "title": "Completion Tokens"
+          },
+          "total_tokens": {
+            "type": "integer",
+            "title": "Total Tokens"
+          },
+          "cached_tokens": {
+            "type": "integer",
+            "title": "Cached Tokens"
+          },
+          "batched_calls": {
+            "type": "integer",
+            "title": "Batched Calls"
+          },
+          "models": {
+            "type": "integer",
+            "title": "Models"
+          },
+          "first_call": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Call"
+          },
+          "last_call": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Call"
+          },
+          "day": {
+            "type": "string",
+            "format": "date",
+            "title": "Day"
+          }
+        },
+        "type": "object",
+        "required": [
+          "calls",
+          "ledger_rows",
+          "priced_calls",
+          "unpriced_calls",
+          "unknown_model_calls",
+          "cost_usd",
+          "prompt_tokens",
+          "completion_tokens",
+          "total_tokens",
+          "cached_tokens",
+          "batched_calls",
+          "models",
+          "first_call",
+          "last_call",
+          "day"
+        ],
+        "title": "LedgerDay"
+      },
+      "LedgerModel": {
+        "properties": {
+          "calls": {
+            "type": "integer",
+            "title": "Calls"
+          },
+          "ledger_rows": {
+            "type": "integer",
+            "title": "Ledger Rows"
+          },
+          "priced_calls": {
+            "type": "integer",
+            "title": "Priced Calls"
+          },
+          "unpriced_calls": {
+            "type": "integer",
+            "title": "Unpriced Calls"
+          },
+          "unknown_model_calls": {
+            "type": "integer",
+            "title": "Unknown Model Calls"
+          },
+          "cost_usd": {
+            "type": "number",
+            "title": "Cost Usd"
+          },
+          "prompt_tokens": {
+            "type": "integer",
+            "title": "Prompt Tokens"
+          },
+          "completion_tokens": {
+            "type": "integer",
+            "title": "Completion Tokens"
+          },
+          "total_tokens": {
+            "type": "integer",
+            "title": "Total Tokens"
+          },
+          "cached_tokens": {
+            "type": "integer",
+            "title": "Cached Tokens"
+          },
+          "batched_calls": {
+            "type": "integer",
+            "title": "Batched Calls"
+          },
+          "models": {
+            "type": "integer",
+            "title": "Models"
+          },
+          "first_call": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Call"
+          },
+          "last_call": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Call"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          }
+        },
+        "type": "object",
+        "required": [
+          "calls",
+          "ledger_rows",
+          "priced_calls",
+          "unpriced_calls",
+          "unknown_model_calls",
+          "cost_usd",
+          "prompt_tokens",
+          "completion_tokens",
+          "total_tokens",
+          "cached_tokens",
+          "batched_calls",
+          "models",
+          "first_call",
+          "last_call",
+          "model"
+        ],
+        "title": "LedgerModel"
+      },
+      "LedgerPurpose": {
+        "properties": {
+          "calls": {
+            "type": "integer",
+            "title": "Calls"
+          },
+          "ledger_rows": {
+            "type": "integer",
+            "title": "Ledger Rows"
+          },
+          "priced_calls": {
+            "type": "integer",
+            "title": "Priced Calls"
+          },
+          "unpriced_calls": {
+            "type": "integer",
+            "title": "Unpriced Calls"
+          },
+          "unknown_model_calls": {
+            "type": "integer",
+            "title": "Unknown Model Calls"
+          },
+          "cost_usd": {
+            "type": "number",
+            "title": "Cost Usd"
+          },
+          "prompt_tokens": {
+            "type": "integer",
+            "title": "Prompt Tokens"
+          },
+          "completion_tokens": {
+            "type": "integer",
+            "title": "Completion Tokens"
+          },
+          "total_tokens": {
+            "type": "integer",
+            "title": "Total Tokens"
+          },
+          "cached_tokens": {
+            "type": "integer",
+            "title": "Cached Tokens"
+          },
+          "batched_calls": {
+            "type": "integer",
+            "title": "Batched Calls"
+          },
+          "models": {
+            "type": "integer",
+            "title": "Models"
+          },
+          "first_call": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Call"
+          },
+          "last_call": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Call"
+          },
+          "purpose": {
+            "type": "string",
+            "title": "Purpose"
+          }
+        },
+        "type": "object",
+        "required": [
+          "calls",
+          "ledger_rows",
+          "priced_calls",
+          "unpriced_calls",
+          "unknown_model_calls",
+          "cost_usd",
+          "prompt_tokens",
+          "completion_tokens",
+          "total_tokens",
+          "cached_tokens",
+          "batched_calls",
+          "models",
+          "first_call",
+          "last_call",
+          "purpose"
+        ],
+        "title": "LedgerPurpose"
+      },
+      "LedgerWithTotals": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "basis": {
+            "type": "string",
+            "title": "Basis"
+          },
+          "timezone": {
+            "type": "string",
+            "title": "Timezone"
+          },
+          "window_days": {
+            "type": "integer",
+            "title": "Window Days"
+          },
+          "note": {
+            "type": "string",
+            "title": "Note"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/LedgerBucket"
+          },
+          "by_purpose": {
+            "items": {
+              "$ref": "#/components/schemas/LedgerPurpose"
+            },
+            "type": "array",
+            "title": "By Purpose"
+          },
+          "by_model": {
+            "items": {
+              "$ref": "#/components/schemas/LedgerModel"
+            },
+            "type": "array",
+            "title": "By Model"
+          },
+          "by_day": {
+            "items": {
+              "$ref": "#/components/schemas/LedgerDay"
+            },
+            "type": "array",
+            "title": "By Day"
+          },
+          "spend_total_usd": {
+            "type": "number",
+            "title": "Spend Total Usd"
+          },
+          "verdict_total_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verdict Total Usd"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source",
+          "basis",
+          "timezone",
+          "window_days",
+          "note",
+          "totals",
+          "by_purpose",
+          "by_model",
+          "by_day",
+          "spend_total_usd",
+          "verdict_total_usd"
+        ],
+        "title": "LedgerWithTotals",
+        "description": "The ledger with the two populations' totals side by side. They answer\ndifferent questions and stay labelled rather than forced to agree."
+      },
       "LevelCount": {
         "properties": {
           "level": {
@@ -31398,6 +32338,109 @@
         "title": "Mention",
         "description": "The whole message, and where the company appears in it.\n\nOffsets rather than a highlighted string, so the client decides how to\nmark it and the body stays exactly what the sender wrote. `start` is null\nwhen the company does not appear verbatim, which is common: the classifier\nreads it off a signature or a logo as often as out of a sentence."
       },
+      "ModelCandidate": {
+        "properties": {
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "eligible": {
+            "type": "boolean",
+            "title": "Eligible"
+          },
+          "rejection": {
+            "type": "string",
+            "title": "Rejection"
+          },
+          "sanctioned": {
+            "type": "boolean",
+            "title": "Sanctioned"
+          },
+          "est_cost_usd": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Est Cost Usd"
+          },
+          "est_cycle_cost_usd": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Est Cycle Cost Usd"
+          },
+          "est_cycle_cost_delta_usd": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Est Cycle Cost Delta Usd"
+          },
+          "price_varies_by_time": {
+            "type": "boolean",
+            "title": "Price Varies By Time"
+          },
+          "health": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelHealth"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "evidence": {
+            "items": {
+              "$ref": "#/components/schemas/ModelEvidence"
+            },
+            "type": "array",
+            "title": "Evidence"
+          }
+        },
+        "type": "object",
+        "required": [
+          "model",
+          "provider",
+          "eligible",
+          "rejection",
+          "sanctioned",
+          "est_cost_usd",
+          "est_cycle_cost_usd",
+          "est_cycle_cost_delta_usd",
+          "price_varies_by_time",
+          "health",
+          "evidence"
+        ],
+        "title": "ModelCandidate",
+        "description": "One model this task could run on, eligible or not, carrying WHY.\n\nEvery dollar figure is a decimal string, never a number: these are\nDecimals and a float would round money on the way out. None means unknown\n- an ineligible model has no price and an unbounded sweep has no cycle\ncost - and rendering either as 0 would make an unknown look like a free\none."
+      },
+      "ModelChangeEffect": {
+        "type": "string",
+        "enum": [
+          "mixes",
+          "reruns"
+        ],
+        "title": "ModelChangeEffect",
+        "description": "What happens to work already done when this task's model changes.\n\nDeclared rather than inferred, because it is a fact about the handler's\ncandidate query and nothing here can see one. Getting it wrong on a screen\nis worse than omitting it: the two answers point in opposite directions."
+      },
       "ModelEntry": {
         "properties": {
           "model": {
@@ -31494,6 +32537,91 @@
           "note"
         ],
         "title": "ModelEntry"
+      },
+      "ModelEvidence": {
+        "properties": {
+          "verdict": {
+            "type": "string",
+            "title": "Verdict"
+          },
+          "finding": {
+            "type": "string",
+            "title": "Finding"
+          },
+          "sample_size": {
+            "type": "integer",
+            "title": "Sample Size"
+          },
+          "measured_on": {
+            "type": "string",
+            "format": "date",
+            "title": "Measured On"
+          }
+        },
+        "type": "object",
+        "required": [
+          "verdict",
+          "finding",
+          "sample_size",
+          "measured_on"
+        ],
+        "title": "ModelEvidence",
+        "description": "A measured finding about one model on this task, carried as data so the\nclient renders it on the option it is about rather than holding its own\ncopy that rots at the next measurement."
+      },
+      "ModelHealth": {
+        "properties": {
+          "in_flight": {
+            "type": "integer",
+            "title": "In Flight"
+          },
+          "last_completed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Completed At"
+          },
+          "oldest_in_flight_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Oldest In Flight At"
+          },
+          "failed_requests": {
+            "type": "integer",
+            "title": "Failed Requests"
+          },
+          "requests": {
+            "type": "integer",
+            "title": "Requests"
+          },
+          "window_days": {
+            "type": "integer",
+            "title": "Window Days"
+          }
+        },
+        "type": "object",
+        "required": [
+          "in_flight",
+          "last_completed_at",
+          "oldest_in_flight_at",
+          "failed_requests",
+          "requests",
+          "window_days"
+        ],
+        "title": "ModelHealth",
+        "description": "The same record on the screen, with the window it was measured over."
       },
       "ModelSpend": {
         "properties": {
@@ -33385,6 +34513,170 @@
         "title": "ProposalAnswered",
         "description": "What answering actually wrote.\n\n`board_status` is present only when a row moved. It used to carry the\nproposed status whenever the answer was `accepted`, including for the\napplications with no board row where the UPDATE matched nothing, so the\ncaller was told a status had moved that no SELECT could find."
       },
+      "ProviderCostDay": {
+        "properties": {
+          "start_time": {
+            "type": "integer",
+            "title": "Start Time"
+          },
+          "end_time": {
+            "type": "integer",
+            "title": "End Time"
+          },
+          "total_usd": {
+            "type": "number",
+            "title": "Total Usd"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderCostItem"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "start_time",
+          "end_time",
+          "total_usd",
+          "items"
+        ],
+        "title": "ProviderCostDay"
+      },
+      "ProviderCostItem": {
+        "properties": {
+          "amount_usd": {
+            "type": "number",
+            "title": "Amount Usd"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id"
+          },
+          "line_item": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line Item"
+          }
+        },
+        "type": "object",
+        "required": [
+          "amount_usd",
+          "project_id",
+          "line_item"
+        ],
+        "title": "ProviderCostItem"
+      },
+      "ProviderCosts": {
+        "properties": {
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "basis": {
+            "type": "string",
+            "title": "Basis"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "scope": {
+            "type": "string",
+            "title": "Scope"
+          },
+          "project_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Project Ids"
+          },
+          "window_basis": {
+            "type": "string",
+            "title": "Window Basis"
+          },
+          "start_time": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Time"
+          },
+          "end_time": {
+            "type": "integer",
+            "title": "End Time"
+          },
+          "fetched_at": {
+            "type": "string",
+            "title": "Fetched At"
+          },
+          "total_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Usd"
+          },
+          "daily": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderCostDay"
+            },
+            "type": "array",
+            "title": "Daily"
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider",
+          "basis",
+          "status",
+          "reason",
+          "scope",
+          "project_ids",
+          "window_basis",
+          "start_time",
+          "end_time",
+          "fetched_at",
+          "total_usd",
+          "daily"
+        ],
+        "title": "ProviderCosts",
+        "description": "What the provider says it charged, as reported now rather than a\nfinalized invoice. A window that could not be read whole reports its\nreason and no total; it never reports zero."
+      },
       "ProviderEntry": {
         "properties": {
           "provider": {
@@ -34866,6 +36158,55 @@
         ],
         "title": "ResolvedForm",
         "description": "What goes in each field, and what the extension needs to put it there.\n\n`profile` is the whole profile as a map, minus the default resume and the\nnotes: a config-driven reader fills a repeated group one row at a time and\na selector that names another fact reads the scalar from it, so the keys\nare read at runtime rather than known here."
+      },
+      "ResolvedModel": {
+        "properties": {
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          },
+          "overridden": {
+            "type": "boolean",
+            "title": "Overridden"
+          },
+          "est_cost_usd": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Est Cost Usd"
+          },
+          "params": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Params"
+          }
+        },
+        "type": "object",
+        "required": [
+          "model",
+          "provider",
+          "reason",
+          "overridden",
+          "est_cost_usd",
+          "params"
+        ],
+        "title": "ResolvedModel",
+        "description": "What would run right now, and the grounds for it."
       },
       "Resume": {
         "properties": {
@@ -36536,6 +37877,183 @@
         "title": "SourcesSwitched",
         "description": "What was asked for, what the selection resolved to, and which rows\nactually moved. `selected` and `changed` differ by the rows that already\nheld the value."
       },
+      "Spend": {
+        "properties": {
+          "window": {
+            "$ref": "#/components/schemas/SpendWindow"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/VerdictTotals"
+          },
+          "by_purpose": {
+            "items": {
+              "$ref": "#/components/schemas/LedgerPurpose"
+            },
+            "type": "array",
+            "title": "By Purpose"
+          },
+          "fleet_budget": {
+            "$ref": "#/components/schemas/FleetBudget"
+          },
+          "ledger": {
+            "$ref": "#/components/schemas/LedgerWithTotals"
+          },
+          "verdict_diagnostics": {
+            "$ref": "#/components/schemas/VerdictDiagnostics"
+          },
+          "batching": {
+            "$ref": "#/components/schemas/BatchingDiagnostics"
+          },
+          "by_check_type": {
+            "items": {
+              "$ref": "#/components/schemas/VerdictCheckTypeSpend"
+            },
+            "type": "array",
+            "title": "By Check Type"
+          },
+          "by_reach": {
+            "items": {
+              "$ref": "#/components/schemas/VerdictReachSpend"
+            },
+            "type": "array",
+            "title": "By Reach"
+          },
+          "by_source_reach": {
+            "items": {
+              "$ref": "#/components/schemas/VerdictSourceReachSpend"
+            },
+            "type": "array",
+            "title": "By Source Reach"
+          },
+          "by_model": {
+            "items": {
+              "$ref": "#/components/schemas/VerdictModelSpend"
+            },
+            "type": "array",
+            "title": "By Model"
+          },
+          "by_day": {
+            "items": {
+              "$ref": "#/components/schemas/VerdictDaySpend"
+            },
+            "type": "array",
+            "title": "By Day"
+          },
+          "waste": {
+            "$ref": "#/components/schemas/Waste"
+          },
+          "interactive_contexts": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Interactive Contexts"
+          }
+        },
+        "type": "object",
+        "required": [
+          "window",
+          "totals",
+          "by_purpose",
+          "fleet_budget",
+          "ledger",
+          "verdict_diagnostics",
+          "batching",
+          "by_check_type",
+          "by_reach",
+          "by_source_reach",
+          "by_model",
+          "by_day",
+          "waste",
+          "interactive_contexts"
+        ],
+        "title": "Spend",
+        "description": "Two populations, kept labelled: the usage ledger, and the verdict log.\n\nEverything under `verdict_diagnostics` is repeated at the top level, which\nis where the clients read it from. Nothing has moved; the nesting names\nthe population the numbers come from."
+      },
+      "SpendCalls": {
+        "properties": {
+          "calls": {
+            "items": {
+              "$ref": "#/components/schemas/UsageCall"
+            },
+            "type": "array",
+            "title": "Calls"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/CallTotals"
+          },
+          "window_days": {
+            "type": "integer",
+            "title": "Window Days"
+          },
+          "filters": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": "object",
+            "title": "Filters"
+          },
+          "filterable": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Filterable"
+          }
+        },
+        "type": "object",
+        "required": [
+          "calls",
+          "totals",
+          "window_days",
+          "filters",
+          "filterable"
+        ],
+        "title": "SpendCalls"
+      },
+      "SpendWindow": {
+        "properties": {
+          "days": {
+            "type": "integer",
+            "title": "Days"
+          },
+          "from": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From"
+          },
+          "to": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "To"
+          }
+        },
+        "type": "object",
+        "required": [
+          "days",
+          "from",
+          "to"
+        ],
+        "title": "SpendWindow",
+        "description": "What the figures cover: the requested window, and the first and last\ncall actually inside it."
+      },
       "Stats": {
         "properties": {
           "totals": {
@@ -36672,6 +38190,16 @@
         ],
         "title": "StatusMeta",
         "description": "What a status MEANS, served beside the names so the board never decides\n\"is this over\" or \"which tone\" by matching a name it hand-copied. A status\nabsent from the table is in play with no outcome."
+      },
+      "StructuredOutput": {
+        "type": "string",
+        "enum": [
+          "none",
+          "json_object",
+          "json_schema"
+        ],
+        "title": "StructuredOutput",
+        "description": "How far a provider can be trusted to return a parseable object."
       },
       "Submitted": {
         "properties": {
@@ -37110,6 +38638,214 @@
         ],
         "title": "Suggestions"
       },
+      "TaskModel": {
+        "properties": {
+          "purpose": {
+            "type": "string",
+            "title": "Purpose"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "notes": {
+            "type": "string",
+            "title": "Notes"
+          },
+          "on_model_change": {
+            "$ref": "#/components/schemas/ModelChangeEffect"
+          },
+          "batched": {
+            "type": "boolean",
+            "title": "Batched"
+          },
+          "structured": {
+            "$ref": "#/components/schemas/StructuredOutput"
+          },
+          "sanctioned": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Sanctioned"
+          },
+          "override": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Override"
+          },
+          "override_is_outside_sanctioned": {
+            "type": "boolean",
+            "title": "Override Is Outside Sanctioned"
+          },
+          "resolved": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResolvedModel"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/ModelCandidate"
+            },
+            "type": "array",
+            "title": "Candidates"
+          },
+          "cost_basis": {
+            "$ref": "#/components/schemas/CostBasis"
+          },
+          "recent_changes": {
+            "items": {
+              "$ref": "#/components/schemas/TaskModelChange"
+            },
+            "type": "array",
+            "title": "Recent Changes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "purpose",
+          "label",
+          "notes",
+          "on_model_change",
+          "batched",
+          "structured",
+          "sanctioned",
+          "override",
+          "override_is_outside_sanctioned",
+          "resolved",
+          "error",
+          "candidates",
+          "cost_basis",
+          "recent_changes"
+        ],
+        "title": "TaskModel",
+        "description": "One configurable task: what runs it, what else could, and what each\nwould cost."
+      },
+      "TaskModelChange": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "overrode_sanctioned": {
+            "type": "boolean",
+            "title": "Overrode Sanctioned"
+          },
+          "acknowledged_cost": {
+            "type": "boolean",
+            "title": "Acknowledged Cost"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "changed_by_email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Changed By Email"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "model",
+          "overrode_sanctioned",
+          "acknowledged_cost",
+          "reason",
+          "created_at",
+          "changed_by_email"
+        ],
+        "title": "TaskModelChange",
+        "description": "One decision, as the append-only table holds it. A cleared override is\na row with no model, not a deletion."
+      },
+      "TaskModelHistory": {
+        "properties": {
+          "purpose": {
+            "type": "string",
+            "title": "Purpose"
+          },
+          "changes": {
+            "items": {
+              "$ref": "#/components/schemas/TaskModelChange"
+            },
+            "type": "array",
+            "title": "Changes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "purpose",
+          "changes"
+        ],
+        "title": "TaskModelHistory"
+      },
+      "TaskModelList": {
+        "properties": {
+          "tasks": {
+            "items": {
+              "$ref": "#/components/schemas/TaskModel"
+            },
+            "type": "array",
+            "title": "Tasks"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tasks"
+        ],
+        "title": "TaskModelList"
+      },
       "TaskModelPut": {
         "properties": {
           "model": {
@@ -37408,6 +39144,173 @@
         "title": "Uploaded",
         "description": "Accepted and rejected separately, with the reason on each rejection: an\nupload is the one place a person chooses the url, so being told now beats\na job that silently never extracts."
       },
+      "Usage": {
+        "properties": {
+          "owner_key": {
+            "type": "boolean",
+            "title": "Owner Key"
+          },
+          "weekly_token_budget": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weekly Token Budget"
+          },
+          "spent_this_week": {
+            "type": "integer",
+            "title": "Spent This Week"
+          },
+          "has_byo_key": {
+            "type": "boolean",
+            "title": "Has Byo Key"
+          },
+          "key_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key Source"
+          },
+          "owner_key_models": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Owner Key Models"
+          },
+          "limits": {
+            "$ref": "#/components/schemas/GrantLimits"
+          },
+          "spend_by_day": {
+            "items": {
+              "$ref": "#/components/schemas/UserSpendDay"
+            },
+            "type": "array",
+            "title": "Spend By Day"
+          },
+          "spend_by_purpose": {
+            "items": {
+              "$ref": "#/components/schemas/UserSpendPurpose"
+            },
+            "type": "array",
+            "title": "Spend By Purpose"
+          }
+        },
+        "type": "object",
+        "required": [
+          "owner_key",
+          "weekly_token_budget",
+          "spent_this_week",
+          "has_byo_key",
+          "key_source",
+          "owner_key_models",
+          "limits",
+          "spend_by_day",
+          "spend_by_purpose"
+        ],
+        "title": "Usage",
+        "description": "The grants, with the spend they have been put to."
+      },
+      "UsageCall": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "purpose": {
+            "type": "string",
+            "title": "Purpose"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "key_source": {
+            "type": "string",
+            "title": "Key Source"
+          },
+          "batched": {
+            "type": "boolean",
+            "title": "Batched"
+          },
+          "prompt_tokens": {
+            "type": "integer",
+            "title": "Prompt Tokens"
+          },
+          "completion_tokens": {
+            "type": "integer",
+            "title": "Completion Tokens"
+          },
+          "total_tokens": {
+            "type": "integer",
+            "title": "Total Tokens"
+          },
+          "cached_tokens": {
+            "type": "integer",
+            "title": "Cached Tokens"
+          },
+          "cost_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Usd"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "created_at",
+          "purpose",
+          "model",
+          "key_source",
+          "batched",
+          "prompt_tokens",
+          "completion_tokens",
+          "total_tokens",
+          "cached_tokens",
+          "cost_usd",
+          "user_id"
+        ],
+        "title": "UsageCall",
+        "description": "One recorded call. A null cost means nobody looked the price up, never\nthat the call was free."
+      },
       "UserJobPatch": {
         "properties": {
           "status": {
@@ -37555,6 +39458,420 @@
         "title": "UserJobsBulkPatch",
         "description": "One patch for a selection. Same field vocabulary as UserJobPatch; the\ncap keeps one request from holding a transaction over a whole catalog."
       },
+      "UserSettings": {
+        "properties": {
+          "effective_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective Model"
+          },
+          "substituted_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Substituted From"
+          },
+          "substitution_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Substitution Reason"
+          },
+          "unavailable_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unavailable Reason"
+          },
+          "unavailable_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unavailable Code"
+          },
+          "unavailable_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unavailable Message"
+          },
+          "column_layout": {
+            "title": "Column Layout"
+          },
+          "prefs": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Prefs"
+          },
+          "ai_provider": {
+            "type": "string",
+            "title": "Ai Provider"
+          },
+          "ai_base_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ai Base Url"
+          },
+          "ai_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ai Model"
+          },
+          "ai_params": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Ai Params"
+          },
+          "bypass_sponsorship_filter": {
+            "type": "boolean",
+            "title": "Bypass Sponsorship Filter"
+          },
+          "criteria": {
+            "$ref": "#/components/schemas/Criteria"
+          },
+          "email_digest": {
+            "type": "boolean",
+            "title": "Email Digest"
+          },
+          "writing_style": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Writing Style"
+          },
+          "has_byo_key": {
+            "type": "boolean",
+            "title": "Has Byo Key"
+          },
+          "default_style": {
+            "type": "string",
+            "title": "Default Style"
+          }
+        },
+        "type": "object",
+        "required": [
+          "effective_model",
+          "unavailable_reason",
+          "unavailable_code",
+          "unavailable_message",
+          "column_layout",
+          "prefs",
+          "ai_provider",
+          "ai_base_url",
+          "ai_model",
+          "ai_params",
+          "bypass_sponsorship_filter",
+          "criteria",
+          "email_digest",
+          "writing_style",
+          "has_byo_key",
+          "default_style"
+        ],
+        "title": "UserSettings",
+        "description": "A person's saved settings, plus the two read-only fields the settings\npage needs beside them: the built-in writing style it uses as a\nplaceholder, and what will actually run."
+      },
+      "UserSettingsSaved": {
+        "properties": {
+          "effective_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective Model"
+          },
+          "substituted_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Substituted From"
+          },
+          "substitution_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Substitution Reason"
+          },
+          "unavailable_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unavailable Reason"
+          },
+          "unavailable_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unavailable Code"
+          },
+          "unavailable_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unavailable Message"
+          },
+          "column_layout": {
+            "title": "Column Layout"
+          },
+          "prefs": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Prefs"
+          },
+          "ai_provider": {
+            "type": "string",
+            "title": "Ai Provider"
+          },
+          "ai_base_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ai Base Url"
+          },
+          "ai_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ai Model"
+          },
+          "ai_params": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Ai Params"
+          },
+          "bypass_sponsorship_filter": {
+            "type": "boolean",
+            "title": "Bypass Sponsorship Filter"
+          },
+          "criteria": {
+            "$ref": "#/components/schemas/Criteria"
+          },
+          "email_digest": {
+            "type": "boolean",
+            "title": "Email Digest"
+          },
+          "writing_style": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Writing Style"
+          },
+          "has_byo_key": {
+            "type": "boolean",
+            "title": "Has Byo Key"
+          },
+          "default_style": {
+            "type": "string",
+            "title": "Default Style"
+          },
+          "ok": {
+            "type": "boolean",
+            "title": "Ok",
+            "default": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "effective_model",
+          "unavailable_reason",
+          "unavailable_code",
+          "unavailable_message",
+          "column_layout",
+          "prefs",
+          "ai_provider",
+          "ai_base_url",
+          "ai_model",
+          "ai_params",
+          "bypass_sponsorship_filter",
+          "criteria",
+          "email_digest",
+          "writing_style",
+          "has_byo_key",
+          "default_style"
+        ],
+        "title": "UserSettingsSaved",
+        "description": "The write's answer: the settings as GET serves them, and that it took.\n\nThe deployed page read criteria off this response to decide whether a\ncriterion was supported, found no criteria in {\"ok\": true}, and told\nKanishk his include list was unsupported by an API that had just stored\nit."
+      },
+      "UserSpendDay": {
+        "properties": {
+          "day": {
+            "type": "string",
+            "format": "date",
+            "title": "Day"
+          },
+          "key_source": {
+            "type": "string",
+            "title": "Key Source"
+          },
+          "tokens": {
+            "type": "integer",
+            "title": "Tokens"
+          },
+          "calls": {
+            "type": "integer",
+            "title": "Calls"
+          },
+          "cost_usd": {
+            "type": "number",
+            "title": "Cost Usd"
+          },
+          "unpriced_calls": {
+            "type": "integer",
+            "title": "Unpriced Calls"
+          }
+        },
+        "type": "object",
+        "required": [
+          "day",
+          "key_source",
+          "tokens",
+          "calls",
+          "cost_usd",
+          "unpriced_calls"
+        ],
+        "title": "UserSpendDay"
+      },
+      "UserSpendPurpose": {
+        "properties": {
+          "purpose": {
+            "type": "string",
+            "title": "Purpose"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "tokens": {
+            "type": "integer",
+            "title": "Tokens"
+          },
+          "calls": {
+            "type": "integer",
+            "title": "Calls"
+          },
+          "cost_usd": {
+            "type": "number",
+            "title": "Cost Usd"
+          },
+          "cached_tokens": {
+            "type": "integer",
+            "title": "Cached Tokens"
+          },
+          "unpriced_calls": {
+            "type": "integer",
+            "title": "Unpriced Calls"
+          }
+        },
+        "type": "object",
+        "required": [
+          "purpose",
+          "model",
+          "tokens",
+          "calls",
+          "cost_usd",
+          "cached_tokens",
+          "unpriced_calls"
+        ],
+        "title": "UserSpendPurpose"
+      },
       "ValidationError": {
         "properties": {
           "loc": {
@@ -37594,6 +39911,350 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "VerdictCheckTypeSpend": {
+        "properties": {
+          "check_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Check Type"
+          },
+          "calls": {
+            "type": "integer",
+            "title": "Calls"
+          },
+          "cost_usd": {
+            "type": "number",
+            "title": "Cost Usd"
+          },
+          "prompt_tokens": {
+            "type": "integer",
+            "title": "Prompt Tokens"
+          },
+          "completion_tokens": {
+            "type": "integer",
+            "title": "Completion Tokens"
+          },
+          "reasoning_tokens": {
+            "type": "integer",
+            "title": "Reasoning Tokens"
+          },
+          "cached_tokens": {
+            "type": "integer",
+            "title": "Cached Tokens"
+          },
+          "batched_calls": {
+            "type": "integer",
+            "title": "Batched Calls"
+          },
+          "joint_call_rows": {
+            "type": "integer",
+            "title": "Joint Call Rows"
+          }
+        },
+        "type": "object",
+        "required": [
+          "check_type",
+          "calls",
+          "cost_usd",
+          "prompt_tokens",
+          "completion_tokens",
+          "reasoning_tokens",
+          "cached_tokens",
+          "batched_calls",
+          "joint_call_rows"
+        ],
+        "title": "VerdictCheckTypeSpend"
+      },
+      "VerdictDaySpend": {
+        "properties": {
+          "day": {
+            "type": "string",
+            "format": "date",
+            "title": "Day"
+          },
+          "cost_usd": {
+            "type": "number",
+            "title": "Cost Usd"
+          },
+          "batched_cost_usd": {
+            "type": "number",
+            "title": "Batched Cost Usd"
+          },
+          "sync_cost_usd": {
+            "type": "number",
+            "title": "Sync Cost Usd"
+          },
+          "calls": {
+            "type": "integer",
+            "title": "Calls"
+          }
+        },
+        "type": "object",
+        "required": [
+          "day",
+          "cost_usd",
+          "batched_cost_usd",
+          "sync_cost_usd",
+          "calls"
+        ],
+        "title": "VerdictDaySpend"
+      },
+      "VerdictDiagnostics": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "basis": {
+            "type": "string",
+            "title": "Basis"
+          },
+          "note": {
+            "type": "string",
+            "title": "Note"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/VerdictTotals"
+          },
+          "batching": {
+            "$ref": "#/components/schemas/BatchingDiagnostics"
+          },
+          "by_check_type": {
+            "items": {
+              "$ref": "#/components/schemas/VerdictCheckTypeSpend"
+            },
+            "type": "array",
+            "title": "By Check Type"
+          },
+          "by_reach": {
+            "items": {
+              "$ref": "#/components/schemas/VerdictReachSpend"
+            },
+            "type": "array",
+            "title": "By Reach"
+          },
+          "by_source_reach": {
+            "items": {
+              "$ref": "#/components/schemas/VerdictSourceReachSpend"
+            },
+            "type": "array",
+            "title": "By Source Reach"
+          },
+          "by_model": {
+            "items": {
+              "$ref": "#/components/schemas/VerdictModelSpend"
+            },
+            "type": "array",
+            "title": "By Model"
+          },
+          "by_day": {
+            "items": {
+              "$ref": "#/components/schemas/VerdictDaySpend"
+            },
+            "type": "array",
+            "title": "By Day"
+          },
+          "waste": {
+            "$ref": "#/components/schemas/Waste"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source",
+          "basis",
+          "note",
+          "totals",
+          "batching",
+          "by_check_type",
+          "by_reach",
+          "by_source_reach",
+          "by_model",
+          "by_day",
+          "waste"
+        ],
+        "title": "VerdictDiagnostics",
+        "description": "The verdict log's own view of spend, labelled apart from the ledger\nbecause rows here are posting verdicts, not unique provider calls."
+      },
+      "VerdictModelSpend": {
+        "properties": {
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "calls": {
+            "type": "integer",
+            "title": "Calls"
+          },
+          "cost_usd": {
+            "type": "number",
+            "title": "Cost Usd"
+          },
+          "total_tokens": {
+            "type": "integer",
+            "title": "Total Tokens"
+          },
+          "unpriced_calls": {
+            "type": "integer",
+            "title": "Unpriced Calls"
+          }
+        },
+        "type": "object",
+        "required": [
+          "model",
+          "calls",
+          "cost_usd",
+          "total_tokens",
+          "unpriced_calls"
+        ],
+        "title": "VerdictModelSpend"
+      },
+      "VerdictReachSpend": {
+        "properties": {
+          "reach": {
+            "type": "string",
+            "title": "Reach"
+          },
+          "calls": {
+            "type": "integer",
+            "title": "Calls"
+          },
+          "unpriced_calls": {
+            "type": "integer",
+            "title": "Unpriced Calls"
+          },
+          "cost_usd": {
+            "type": "number",
+            "title": "Cost Usd"
+          },
+          "total_tokens": {
+            "type": "integer",
+            "title": "Total Tokens"
+          }
+        },
+        "type": "object",
+        "required": [
+          "reach",
+          "calls",
+          "unpriced_calls",
+          "cost_usd",
+          "total_tokens"
+        ],
+        "title": "VerdictReachSpend",
+        "description": "Whether the work was for a posting anybody could still be shown."
+      },
+      "VerdictSourceReachSpend": {
+        "properties": {
+          "reach": {
+            "type": "string",
+            "title": "Reach"
+          },
+          "calls": {
+            "type": "integer",
+            "title": "Calls"
+          },
+          "unpriced_calls": {
+            "type": "integer",
+            "title": "Unpriced Calls"
+          },
+          "cost_usd": {
+            "type": "number",
+            "title": "Cost Usd"
+          },
+          "total_tokens": {
+            "type": "integer",
+            "title": "Total Tokens"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          }
+        },
+        "type": "object",
+        "required": [
+          "reach",
+          "calls",
+          "unpriced_calls",
+          "cost_usd",
+          "total_tokens",
+          "source"
+        ],
+        "title": "VerdictSourceReachSpend"
+      },
+      "VerdictTotals": {
+        "properties": {
+          "cost_usd": {
+            "type": "number",
+            "title": "Cost Usd"
+          },
+          "calls": {
+            "type": "integer",
+            "title": "Calls"
+          },
+          "unpriced_calls": {
+            "type": "integer",
+            "title": "Unpriced Calls"
+          },
+          "prompt_tokens": {
+            "type": "integer",
+            "title": "Prompt Tokens"
+          },
+          "completion_tokens": {
+            "type": "integer",
+            "title": "Completion Tokens"
+          },
+          "cached_tokens": {
+            "type": "integer",
+            "title": "Cached Tokens"
+          },
+          "reasoning_tokens": {
+            "type": "integer",
+            "title": "Reasoning Tokens"
+          },
+          "first_call": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Call"
+          },
+          "last_call": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Call"
+          }
+        },
+        "type": "object",
+        "required": [
+          "cost_usd",
+          "calls",
+          "unpriced_calls",
+          "prompt_tokens",
+          "completion_tokens",
+          "cached_tokens",
+          "reasoning_tokens",
+          "first_call",
+          "last_call"
+        ],
+        "title": "VerdictTotals"
       },
       "View": {
         "properties": {
@@ -37725,6 +40386,35 @@
         },
         "type": "object",
         "title": "ViewPatch"
+      },
+      "Waste": {
+        "properties": {
+          "failed_calls": {
+            "type": "integer",
+            "title": "Failed Calls"
+          },
+          "failed_cost_usd": {
+            "type": "number",
+            "title": "Failed Cost Usd"
+          },
+          "superseded_verdicts": {
+            "type": "integer",
+            "title": "Superseded Verdicts"
+          },
+          "superseded_cost_usd": {
+            "type": "number",
+            "title": "Superseded Cost Usd"
+          }
+        },
+        "type": "object",
+        "required": [
+          "failed_calls",
+          "failed_cost_usd",
+          "superseded_verdicts",
+          "superseded_cost_usd"
+        ],
+        "title": "Waste",
+        "description": "A diagnostic, not proof that earlier work was unnecessary."
       },
       "YearsCount": {
         "properties": {

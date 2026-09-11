@@ -28,6 +28,7 @@ money was spent.
 
 from __future__ import annotations
 
+import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -37,7 +38,8 @@ from api import db
 from api.auth import AuthedUser
 from api.routers.admin import require_admin
 from core import providers
-from core.routing import NoEligibleModel, candidates_for, resolve
+from core.providers.spec import StructuredOutput
+from core.routing import ModelChangeEffect, NoEligibleModel, candidates_for, resolve
 from core.shapes import SHAPES
 
 router = APIRouter(prefix="/admin")
@@ -78,8 +80,22 @@ class TaskModelPut(BaseModel):
     acknowledge_cost: bool = False
 
 
-def _history(purpose: str, limit: int) -> list[dict[str, Any]]:
-    return db.query(
+class TaskModelChange(BaseModel):
+    """One decision, as the append-only table holds it. A cleared override is
+    a row with no model, not a deletion."""
+
+    id: int
+    model: str | None
+    overrode_sanctioned: bool
+    acknowledged_cost: bool
+    reason: str | None
+    created_at: datetime.datetime
+    changed_by_email: str | None
+
+
+def _history(purpose: str, limit: int) -> list[TaskModelChange]:
+    return db.query_as(
+        TaskModelChange,
         """
         SELECT o.id, o.model, o.overrode_sanctioned, o.acknowledged_cost, o.reason, o.created_at,
                u.email AS changed_by_email
@@ -93,7 +109,7 @@ def _history(purpose: str, limit: int) -> list[dict[str, Any]]:
     )
 
 
-def _current(purpose: str) -> dict[str, Any] | None:
+def _current(purpose: str) -> TaskModelChange | None:
     rows = _history(purpose, 1)
     return rows[0] if rows else None
 
@@ -105,7 +121,31 @@ def _current(purpose: str) -> dict[str, Any] | None:
 HEALTH_WINDOW_DAYS = 7
 
 
-def _model_health() -> dict[str, dict[str, Any]]:
+class BatchHealth(BaseModel):
+    """One model's batch record in the window, as the query returns it."""
+
+    model: str
+    in_flight: int
+    last_completed_at: datetime.datetime | None
+    oldest_in_flight_at: datetime.datetime | None
+    requests: int
+    failed_requests: int
+
+
+class ModelHealth(BaseModel):
+    """The same record on the screen, with the window it was measured over."""
+
+    in_flight: int
+    last_completed_at: datetime.datetime | None
+    oldest_in_flight_at: datetime.datetime | None
+    # Numerator and denominator, not a rate. 1 of 3 and 3,000 of 9,000 are
+    # different claims and a percentage renders them identically.
+    failed_requests: int
+    requests: int
+    window_days: int
+
+
+def _model_health() -> dict[str, BatchHealth]:
     """Per model: is it finishing work, and is the work coming back good.
 
     The configuration screen priced models and said nothing about whether they
@@ -118,7 +158,8 @@ def _model_health() -> dict[str, dict[str, Any]]:
     denominator, never as a percentage: 1 of 3 and 3,000 of 9,000 are not the
     same claim.
     """
-    rows = db.query(
+    rows = db.query_as(
+        BatchHealth,
         f"""
         SELECT model,
                COUNT(*) FILTER (WHERE completed_at IS NULL) AS in_flight,
@@ -131,12 +172,12 @@ def _model_health() -> dict[str, dict[str, Any]]:
         WHERE model IS NOT NULL
           AND submitted_at > now() - interval '{HEALTH_WINDOW_DAYS} days'
         GROUP BY model
-        """
+        """,
     )
-    return {r.pop("model"): r for r in rows}
+    return {r.model: r for r in rows}
 
 
-def _health_view(row: dict[str, Any] | None) -> dict[str, Any] | None:
+def _health_view(row: BatchHealth | None) -> ModelHealth | None:
     """One model's health, or absent when it has run nothing to judge.
 
     Absent rather than zeroed: a model nobody has used is not a model with a
@@ -145,16 +186,14 @@ def _health_view(row: dict[str, Any] | None) -> dict[str, Any] | None:
     """
     if not row:
         return None
-    return {
-        "in_flight": row["in_flight"],
-        "last_completed_at": row["last_completed_at"],
-        "oldest_in_flight_at": row["oldest_in_flight_at"],
-        # Numerator and denominator, not a rate. 1 of 3 and 3,000 of 9,000 are
-        # different claims and a percentage renders them identically.
-        "failed_requests": row["failed_requests"],
-        "requests": row["requests"],
-        "window_days": HEALTH_WINDOW_DAYS,
-    }
+    return ModelHealth(
+        in_flight=row.in_flight,
+        last_completed_at=row.last_completed_at,
+        oldest_in_flight_at=row.oldest_in_flight_at,
+        failed_requests=row.failed_requests,
+        requests=row.requests,
+        window_days=HEALTH_WINDOW_DAYS,
+    )
 
 
 def _money(value: Any) -> str | None:
@@ -172,10 +211,96 @@ def _money(value: Any) -> str | None:
     return format(value, "f") if value is not None else None
 
 
-def _view(purpose: str) -> dict[str, Any]:
+class ModelEvidence(BaseModel):
+    """A measured finding about one model on this task, carried as data so the
+    client renders it on the option it is about rather than holding its own
+    copy that rots at the next measurement."""
+
+    verdict: str
+    finding: str
+    sample_size: int
+    measured_on: datetime.date
+
+
+class ModelCandidate(BaseModel):
+    """One model this task could run on, eligible or not, carrying WHY.
+
+    Every dollar figure is a decimal string, never a number: these are
+    Decimals and a float would round money on the way out. None means unknown
+    - an ineligible model has no price and an unbounded sweep has no cycle
+    cost - and rendering either as 0 would make an unknown look like a free
+    one.
+    """
+
+    model: str
+    provider: str
+    eligible: bool
+    rejection: str
+    sanctioned: bool
+    est_cost_usd: str | None
+    est_cycle_cost_usd: str | None
+    # Against whatever runs today, so the screen can show the consequence of
+    # THIS switch rather than an absolute nobody has a reference for. Absent
+    # when either side is unknown.
+    est_cycle_cost_delta_usd: str | None
+    # True when this model is billed by the hour of day, which makes the
+    # figures above the peak ones. A caveat for beside the price, not a state.
+    price_varies_by_time: bool
+    # Absent when the model has run nothing in the window - which is not the
+    # same as healthy, and must not render as zeroes.
+    health: ModelHealth | None
+    evidence: list[ModelEvidence]
+
+
+class ResolvedModel(BaseModel):
+    """What would run right now, and the grounds for it."""
+
+    model: str
+    provider: str
+    reason: str
+    overridden: bool
+    est_cost_usd: str | None
+    params: dict[str, str]
+
+
+class CostBasis(BaseModel):
+    """What a cycle cost is computed FROM, so the client can render it as an
+    estimate with its basis rather than as a price. per_cycle is the handler's
+    own cap; a task with no cap sends 0 and no cycle cost."""
+
+    per_cycle: int
+    est_prompt_tokens: int
+    max_output_tokens: int
+    batched: bool
+
+
+class TaskModel(BaseModel):
+    """One configurable task: what runs it, what else could, and what each
+    would cost."""
+
+    purpose: str
+    label: str
+    notes: str
+    on_model_change: ModelChangeEffect
+    batched: bool
+    structured: StructuredOutput
+    sanctioned: list[str]
+    override: str | None
+    override_is_outside_sanctioned: bool
+    # Absent when nothing eligible is left: a configured model that stopped
+    # being able to do the work is reported rather than raised, because the
+    # screen exists to fix exactly this.
+    resolved: ResolvedModel | None
+    error: str | None
+    candidates: list[ModelCandidate]
+    cost_basis: CostBasis
+    recent_changes: list[TaskModelChange]
+
+
+def _view(purpose: str) -> TaskModel:
     shape = SHAPES[purpose]
     latest = _current(purpose)
-    override = (latest or {}).get("model")
+    override = latest.model if latest else None
     candidacies = candidates_for(shape)
     health = _model_health()
     current_model = override or (shape.candidates[0] if shape.candidates else None)
@@ -184,89 +309,70 @@ def _view(purpose: str) -> dict[str, Any]:
     )
     try:
         chosen = resolve(shape, override=override)
-        resolved: dict[str, Any] | None = {
-            "model": chosen.model,
-            "provider": chosen.provider,
-            "reason": chosen.reason,
-            "overridden": chosen.overridden,
-            "est_cost_usd": str(chosen.est_cost_usd) if chosen.est_cost_usd else None,
-            "params": {k: str(v) for k, v in chosen.params.items()},
-        }
+        resolved: ResolvedModel | None = ResolvedModel(
+            model=chosen.model,
+            provider=chosen.provider,
+            reason=chosen.reason,
+            overridden=chosen.overridden,
+            est_cost_usd=str(chosen.est_cost_usd) if chosen.est_cost_usd else None,
+            params={k: str(v) for k, v in chosen.params.items()},
+        )
         error = None
     except NoEligibleModel as exc:
-        # A configured model that stopped being able to do the work - a
-        # datasheet changed, a provider dropped a capability. Reported rather
-        # than raised: the screen exists to fix exactly this.
         resolved, error = None, str(exc)
-    return {
-        "purpose": purpose,
-        "label": shape.label or purpose,
-        "notes": shape.notes,
-        "on_model_change": shape.on_model_change,
-        "batched": shape.batched,
-        "structured": shape.structured,
-        "sanctioned": list(shape.candidates),
-        "override": override,
-        "override_is_outside_sanctioned": bool(override) and override not in shape.candidates,
-        "resolved": resolved,
-        "error": error,
+    return TaskModel(
+        purpose=purpose,
+        label=shape.label or purpose,
+        notes=shape.notes,
+        on_model_change=shape.on_model_change,
+        batched=shape.batched,
+        structured=shape.structured,
+        sanctioned=list(shape.candidates),
+        override=override,
+        override_is_outside_sanctioned=bool(override) and override not in shape.candidates,
+        resolved=resolved,
+        error=error,
         # Every declared model, eligible or not, each carrying WHY. A short
         # list with the impossible options silently removed is how someone
         # concludes the missing model is a bug; the rejection reason is the
         # useful half.
-        "candidates": [
-            {
-                "model": c.model,
-                "provider": c.provider,
-                "eligible": c.eligible,
-                "rejection": c.rejection,
-                "sanctioned": c.sanctioned,
-                "est_cost_usd": _money(c.est_cost_usd),
-                "est_cycle_cost_usd": _money(c.est_cycle_cost_usd),
-                # Against whatever runs today, so the screen can show the
-                # consequence of THIS switch rather than an absolute nobody
-                # has a reference for. Absent when either side is unknown.
-                "est_cycle_cost_delta_usd": _money(
+        candidates=[
+            ModelCandidate(
+                model=c.model,
+                provider=c.provider,
+                eligible=c.eligible,
+                rejection=c.rejection,
+                sanctioned=c.sanctioned,
+                est_cost_usd=_money(c.est_cost_usd),
+                est_cycle_cost_usd=_money(c.est_cycle_cost_usd),
+                est_cycle_cost_delta_usd=_money(
                     c.est_cycle_cost_usd - current_cycle
                     if c.est_cycle_cost_usd is not None and current_cycle is not None
                     else None
                 ),
-                # True when this model is billed by the hour of day, which
-                # makes the figures above the peak ones. A caveat for beside
-                # the price, not a state.
-                "price_varies_by_time": c.price_varies_by_time,
-                # Whether this model is finishing work and whether the work
-                # comes back good. Absent when it has run nothing in the
-                # window - which is not the same as healthy, and must not
-                # render as zeroes.
-                "health": _health_view(health.get(c.model)),
-                # The measured findings about THIS model on THIS task, so the
-                # client renders them on the option they are about rather than
-                # holding its own copy that rots at the next measurement.
-                "evidence": [
-                    {
-                        "verdict": e.verdict,
-                        "finding": e.finding,
-                        "sample_size": e.sample_size,
-                        "measured_on": e.measured_on.isoformat(),
-                    }
+                price_varies_by_time=c.price_varies_by_time,
+                health=_health_view(health.get(c.model)),
+                evidence=[
+                    ModelEvidence(
+                        verdict=e.verdict,
+                        finding=e.finding,
+                        sample_size=e.sample_size,
+                        measured_on=e.measured_on,
+                    )
                     for e in shape.evidence
                     if e.model == c.model
                 ],
-            }
+            )
             for c in candidacies
         ],
-        # What a cycle cost is computed FROM, so the client can render it as an
-        # estimate with its basis rather than as a price. per_cycle is the
-        # handler's own cap; a task with no cap sends 0 and no cycle cost.
-        "cost_basis": {
-            "per_cycle": shape.per_cycle,
-            "est_prompt_tokens": shape.est_prompt_tokens,
-            "max_output_tokens": shape.max_output_tokens,
-            "batched": shape.batched,
-        },
-        "recent_changes": _history(purpose, RECENT_CHANGES),
-    }
+        cost_basis=CostBasis(
+            per_cycle=shape.per_cycle,
+            est_prompt_tokens=shape.est_prompt_tokens,
+            max_output_tokens=shape.max_output_tokens,
+            batched=shape.batched,
+        ),
+        recent_changes=_history(purpose, RECENT_CHANGES),
+    )
 
 
 def _require_cost_acknowledgement(purpose: str, shape, body: TaskModelPut) -> None:
@@ -283,8 +389,10 @@ def _require_cost_acknowledgement(purpose: str, shape, body: TaskModelPut) -> No
         return
     candidacies = {c.model: c for c in candidates_for(shape)}
     new = candidacies.get(body.model or "")
-    current_model = _current(purpose) or {}
-    current_name = current_model.get("model") or (shape.candidates[0] if shape.candidates else None)
+    latest = _current(purpose)
+    current_name = (latest.model if latest else None) or (
+        shape.candidates[0] if shape.candidates else None
+    )
     current = candidacies.get(current_name or "")
     if new is None or current is None:
         return
@@ -312,8 +420,17 @@ def _require_cost_acknowledgement(purpose: str, shape, body: TaskModelPut) -> No
     )
 
 
+class TaskModelList(BaseModel):
+    tasks: list[TaskModel]
+
+
+class TaskModelHistory(BaseModel):
+    purpose: str
+    changes: list[TaskModelChange]
+
+
 @router.get("/task-models")
-def list_task_models(_: AuthedUser = Depends(require_admin)):
+def list_task_models(_: AuthedUser = Depends(require_admin)) -> TaskModelList:
     """Every configurable task, with its eligible models and what each costs.
 
     Costs are per CALL at the shape's own declared token profile, not per
@@ -322,18 +439,20 @@ def list_task_models(_: AuthedUser = Depends(require_admin)):
     produces a confident wrong total, which is worse on a spending screen than
     an honest small one.
     """
-    return {"tasks": [_view(p) for p in sorted(SHAPES)]}
+    return TaskModelList(tasks=[_view(p) for p in sorted(SHAPES)])
 
 
 @router.get("/task-models/{purpose}")
-def get_task_model(purpose: str, _: AuthedUser = Depends(require_admin)):
+def get_task_model(purpose: str, _: AuthedUser = Depends(require_admin)) -> TaskModel:
     if purpose not in SHAPES:
         raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown task"})
     return _view(purpose)
 
 
 @router.put("/task-models/{purpose}")
-def put_task_model(purpose: str, body: TaskModelPut, user: AuthedUser = Depends(require_admin)):
+def put_task_model(
+    purpose: str, body: TaskModelPut, user: AuthedUser = Depends(require_admin)
+) -> TaskModel:
     """Set or clear the model for a task.
 
     Refuses a model the task's declared needs cannot admit - that is capability,
@@ -374,7 +493,7 @@ def put_task_model(purpose: str, body: TaskModelPut, user: AuthedUser = Depends(
 
 
 @router.get("/task-models/{purpose}/history")
-def task_model_history(purpose: str, _: AuthedUser = Depends(require_admin)):
+def task_model_history(purpose: str, _: AuthedUser = Depends(require_admin)) -> TaskModelHistory:
     """Every decision ever made for this task, newest first.
 
     The table is append-only and a cleared override is a NULL row rather than a
@@ -384,4 +503,4 @@ def task_model_history(purpose: str, _: AuthedUser = Depends(require_admin)):
     """
     if purpose not in SHAPES:
         raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown task"})
-    return {"purpose": purpose, "changes": _history(purpose, 200)}
+    return TaskModelHistory(purpose=purpose, changes=_history(purpose, 200))
