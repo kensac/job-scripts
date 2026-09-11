@@ -2,8 +2,8 @@
 
 A multi-user job-application tracker. Sources (GitHub job boards, Airtable
 views) are ingested hourly into a shared catalog, run through AI filters
-(closed / visa-clearance / per-user custom prompts), and served to a
-spreadsheet UI where each user tracks their applications.
+(closed / visa-clearance / per-user custom prompts), and served to a web app
+where each user tracks their applications.
 
 ## Components
 
@@ -11,8 +11,6 @@ spreadsheet UI where each user tracks their applications.
 |---|---|
 | `src/api/` | FastAPI backend (`api.app`), task worker (`api.worker`), SQLAlchemy models + Alembic migrations |
 | `src/core/` | Shared pipeline: fetching, scraping (headless Chromium), AI checks, verdict/content cache, catalog |
-| `src/trackers/run_tracker.py` | Legacy CLI: appends filtered jobs to a Google Sheet |
-| `src/trackers/backfill.py` | One-time import of sources, filters, presets, and sheet rows onto a user |
 | `alembic/` | Schema migrations, applied automatically on API/worker start |
 | `openapi.json` | Generated API schema (`python -m api.export_schema`), canon for frontend types |
 
@@ -42,7 +40,6 @@ DATABASE_URL=postgresql://...            # required everywhere
 JOBTRACKER_SERVICE_TOKEN=...             # API auth (proxy-held secret)
 APP_ENCRYPTION_KEY=...                   # Fernet key for stored user API keys
 OPENAI_API_KEY=...                       # shared key for budgeted users + ingestion
-GOOGLE_APPLICATION_CREDENTIALS_CUSTOM=   # legacy sheet tracker only
 ```
 
 Optional worker knobs: `JOBTRACKER_WORKER_POLL`, `JOBTRACKER_WORKER_KINDS`
@@ -56,23 +53,18 @@ Optional worker knobs: `JOBTRACKER_WORKER_POLL`, `JOBTRACKER_WORKER_KINDS`
 uv sync --frozen && source .venv/bin/activate
 export PYTHONPATH=src
 
-uvicorn api.app:app --port 8000      # API (migrates + seeds on start)
+uvicorn api.app:app --port 8000      # API (migrates on start)
 python -m api.worker                 # worker (any number, any machine)
-python -m trackers.run_tracker ft    # legacy sheet tracker (config/group name)
-python -m trackers.backfill --help   # one-time user/sheet import
 ```
 
 Container images build for amd64/arm64 via GitHub Actions to
 `ghcr.io/kensac/job-scripts`; `deploy/Dockerfile` bundles Chromium for
 scraping. Healthcheck: `python -m api.healthcheck`.
 
-## Configuration files
+## Configuration
 
-- `configs.toml`: source feeds (name → listings URL + sheet id). Seeds the
-  `sources` and `source_groups` tables; runtime source management is in the
-  DB via the admin API.
-- `filters.toml`: named filter prompts for the legacy CLI
-  (`--apply-filter <name>`); product filters live per-user in the DB.
+Sources, source groups and filters all live in the database: sources through
+the admin API, filters per user. Nothing is read from a file on disk.
 
 ## License
 

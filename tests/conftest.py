@@ -268,7 +268,6 @@ _SYNCED_AT = db.query_one("SELECT value FROM app_config WHERE key = 'testdb_sync
 
 
 def _reseed() -> None:
-    db._seed_sources()
     db.seed_defaults()
 
 

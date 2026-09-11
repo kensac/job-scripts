@@ -102,9 +102,10 @@ HOT_SLICE = 0.05
 HOT_SHARE = 0.5
 
 # Filled by the app's own seed rather than by the profile. Deliberately just
-# these two: `sources` is seeded from configs.toml, which is not in the
-# repository, so on CI the seed writes nothing and the profile's sixteen real
-# source names are the only thing that puts a catalog there at all.
+# these two: nothing seeds `sources` any more, so the profile's sixteen real
+# source names are the only thing that puts a catalog there at all. They used
+# to come from configs.toml, which was never in the repository, so the seed
+# wrote nothing on CI even before it was removed.
 SEEDED = {"app_config", "group_budgets"}
 
 # Never generated. alembic_version says which migration built the schema.
