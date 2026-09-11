@@ -32,7 +32,15 @@ from api.orm.apply import (
     UserResume,
 )
 from api.orm.base import Base
-from api.orm.board import BoardVisible, FilterPreset, SavedView, UserFilter, UserJob, UserJobHistory
+from api.orm.board import (
+    BoardVisible,
+    FilterPreset,
+    SavedView,
+    UserFilter,
+    UserJob,
+    UserJobHistory,
+    UserJobWorkingSet,
+)
 from api.orm.catalog import (
     Job,
     JobEmbedding,
@@ -115,6 +123,7 @@ __all__ = [
     "UserFilter",
     "UserJob",
     "UserJobHistory",
+    "UserJobWorkingSet",
     "UserOAuthToken",
     "UserResume",
     "UserSettings",

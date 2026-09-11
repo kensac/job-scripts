@@ -59,9 +59,10 @@ def write_board_row(user_id: int, job_id: int, patch: dict, *, publish: bool = T
     insert_vals = ", ".join(f"%({key})s" for key in fields)
     written = db.query_one(
         f"""
-        INSERT INTO user_jobs (user_id, job_id, {insert_cols})
-        VALUES (%(uid)s, %(jid)s, {insert_vals})
-        ON CONFLICT (user_id, job_id) DO UPDATE SET {cols}, updated_at = now()
+        INSERT INTO user_jobs (user_id, job_id, person_touched_at, {insert_cols})
+        VALUES (%(uid)s, %(jid)s, now(), {insert_vals})
+        ON CONFLICT (user_id, job_id) DO UPDATE SET
+            {cols}, person_touched_at = now(), updated_at = now()
         RETURNING status, date_applied, hidden
         """,
         {"uid": user_id, "jid": job_id, **fields},

@@ -63,7 +63,9 @@ def upload_links(body: UploadRequest, user: AuthedUser = Depends(require_user)) 
         )
         assert row is not None
         db.execute(
-            "INSERT INTO user_jobs (user_id, job_id) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+            "INSERT INTO user_jobs (user_id, job_id, person_touched_at) VALUES (%s, %s, now()) "
+            "ON CONFLICT (user_id, job_id) DO UPDATE SET "
+            "person_touched_at = now(), updated_at = now()",
             (user.id, row["id"]),
         )
         if row["extraction_status"] == "pending":

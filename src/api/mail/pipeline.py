@@ -391,7 +391,7 @@ def answer_proposal(
         # job, not on user_jobs), so a non-null job_id is not proof there is a
         # row to update - and an UPDATE that matched nothing exits cleanly.
         updated = db.execute_count(
-            "UPDATE user_jobs SET status = %s, updated_at = now() "
+            "UPDATE user_jobs SET status = %s, person_touched_at = now(), updated_at = now() "
             "WHERE user_id = %s AND job_id = %s",
             (status, user_id, app["job_id"]),
         )

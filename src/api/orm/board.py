@@ -39,6 +39,20 @@ class BoardVisible(Base):
     computed_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
 
 
+class UserJobWorkingSet(Base):
+    """Automated discovery scope, rebuildable independently of person state."""
+
+    __tablename__ = "user_job_working_set"
+    __table_args__ = (Index("idx_user_job_working_set_job", "job_id"),)
+
+    user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    job_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("jobs.id", ondelete="CASCADE"), primary_key=True
+    )
+
+
 class UserJob(Base):
     __tablename__ = "user_jobs"
 
@@ -57,6 +71,7 @@ class UserJob(Base):
     connection2: Mapped[str | None] = mapped_column(Text)
     documents: Mapped[str | None] = mapped_column(Text)
     hidden: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    person_touched_at: Mapped[datetime.datetime | None]
     created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
     updated_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
 
