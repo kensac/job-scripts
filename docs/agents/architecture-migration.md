@@ -65,7 +65,7 @@ real only relocates the problem.
 | 4 | ~~Derivations are content addressed~~ | **Dropped 2026-09-10.** Measured; see below |
 | 5 | Files move to the shape | `tasks` is a sibling of `api` and `core`. `apply` is a package. The rest is judgement about churn |
 | 6 | The long files are split | No module does four jobs. `admin.py` 2,136 lines, `mail.py` 2,117, `resolve.py` 1,337, `orm.py` 1,248, `health.py` 1,155, `tasks/runtime.py` 796 |
-| 7 | A row is typed, not a dict | A read returns a shape a type checker knows. 678 SQL call sites return bare dicts today |
+| 7 | Every operation declares what it returns | `openapi.json` generates the frontend's types. 173 of 190 operations declare nothing today |
 
 **The API contract was the invariant, and is now a price.** `openapi.json` is
 canon and `tests/test_openapi_current.py` fails the build when routes and
@@ -218,8 +218,42 @@ that make `api` and `api.tasks` circular are reaching past the handlers for a
 queue primitive. `admin.py` and `mail.py` are bigger and simpler: they are
 long because nothing ever split them, not because anything is tangled.
 
-**7, typed rows.** Reads return bare dicts, so renaming a column is a grep
-across 678 call sites and a typo is found at runtime. The fix is NOT an ORM:
+**7, the schema is the contract.** Measured 2026-09-10: of 190 operations,
+**173 return an undeclared object** and 11 declare a shape. So `openapi.json`
+is a list of routes, not a contract. It cannot be dropped into a frontend and
+generate anything, which is the whole reason it is generated and committed.
+
+That is why the frontend writes those types by hand, and why they drift. One
+had a capture field typed as a string when the extension sends an object, and
+the page crashed on 2026-09-10 when a report with fields was opened. Nothing
+could have caught it: there was no declared shape to disagree with.
+
+The goal is therefore not internal tidiness. It is that a person can point a
+generator at `openapi.json` and get types that work.
+
+Reads returning bare dicts is the same problem seen from inside: renaming a
+column is a grep across 678 call sites, and a typo is found at runtime.
+
+The primitive is `db.query_as(Shape, sql, params)` and its one-row sibling.
+The SQL is unchanged; only what comes back has a name. A column the shape does
+not declare raises there and then, which is the point: a SELECT and its shape
+drift apart in one commit and are caught in the next test run rather than in a
+bug report about a missing field.
+
+Adopt it where a row is READ, not where one becomes JSON for a task payload.
+`tasks/filters.py` puts candidate rows into `payload["jobs"]`, so typing that
+one buys a conversion at the boundary and nothing else. An HTTP response is
+not such a boundary: FastAPI serialises a declared model, and declaring it is
+most of the value, because the shape reaches openapi.json and the frontend
+stops writing those types by hand.
+
+That is also the first place the API contract has been spent. `GET
+/user/apply/reports` returned an undeclared dict, so the frontend's type for
+it was written by reading the query, and it had drifted: a capture field typed
+as a string was an object, and the page crashed on 2026-09-10. The wire format
+did not change, only the declaration, which is the cheap half of the
+permission: additive, no consumer breaks, and the hand-written type can be
+generated instead. The fix is NOT an ORM:
 the hot paths are hand-tuned SQL carrying measured query plans
 (`visibility.FULL` records 320ms to 28ms), and an ORM would hide exactly what
 has to stay readable, while inviting the N+1 shape this codebase has already

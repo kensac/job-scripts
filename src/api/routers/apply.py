@@ -4,6 +4,7 @@ what to improve next. api.apply holds the resolving itself."""
 
 from __future__ import annotations
 
+import datetime
 import json
 import re
 from typing import Any
@@ -550,16 +551,41 @@ def create_report(body: ReportBody, user: AuthedUser = Depends(require_user)):
     return report
 
 
+class ProblemReport(BaseModel):
+    """One row of the problem-report list, declared rather than implied.
+
+    The row shape used to reach the frontend as an untyped dict, so the types
+    on the other side were written by hand from reading this query. They
+    drifted: a capture field typed as a string was an object, and the page
+    crashed on 2026-09-10 when a report with fields was opened. A declared
+    shape puts that in openapi.json, which is where the frontend's types come
+    from.
+    """
+
+    id: int
+    url: str
+    host: str | None
+    note: str
+    created_at: datetime.datetime
+    title: str | None
+    fields: int
+
+
+class ReportList(BaseModel):
+    reports: list[ProblemReport]
+
+
 @router.get("/user/apply/reports")
-def list_reports(limit: int = 50, user: AuthedUser = Depends(require_user)):
-    return {
-        "reports": db.query(
+def list_reports(limit: int = 50, user: AuthedUser = Depends(require_user)) -> ReportList:
+    return ReportList(
+        reports=db.query_as(
+            ProblemReport,
             "SELECT id, url, host, note, created_at, page->>'title' AS title, "
             "jsonb_array_length(COALESCE(page->'fields', '[]'::jsonb)) AS fields "
             "FROM application_reports WHERE user_id = %s ORDER BY created_at DESC LIMIT %s",
             (user.id, max(1, min(limit, 500))),
         )
-    }
+    )
 
 
 @router.get("/user/apply/reports/{report_id}")

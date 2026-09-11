@@ -4261,7 +4261,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ReportList"
+                }
               }
             }
           },
@@ -19938,6 +19940,65 @@
         "type": "object",
         "title": "PresetBody"
       },
+      "ProblemReport": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "host": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Host"
+          },
+          "note": {
+            "type": "string",
+            "title": "Note"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "fields": {
+            "type": "integer",
+            "title": "Fields"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "url",
+          "host",
+          "note",
+          "created_at",
+          "title",
+          "fields"
+        ],
+        "title": "ProblemReport",
+        "description": "One row of the problem-report list, declared rather than implied.\n\nThe row shape used to reach the frontend as an untyped dict, so the types\non the other side were written by hand from reading this query. They\ndrifted: a capture field typed as a string was an object, and the page\ncrashed on 2026-09-10 when a report with fields was opened. A declared\nshape puts that in openapi.json, which is where the frontend's types come\nfrom."
+      },
       "ProfilePut": {
         "properties": {
           "first_name": {
@@ -20401,6 +20462,22 @@
           "instruction"
         ],
         "title": "RefineBody"
+      },
+      "ReportList": {
+        "properties": {
+          "reports": {
+            "items": {
+              "$ref": "#/components/schemas/ProblemReport"
+            },
+            "type": "array",
+            "title": "Reports"
+          }
+        },
+        "type": "object",
+        "required": [
+          "reports"
+        ],
+        "title": "ReportList"
       },
       "ResolveAction": {
         "properties": {
