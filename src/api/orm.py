@@ -101,17 +101,6 @@ class Job(Base):
     # against the posting url, applied uniformly across boards. Job rows serve
     # it as `closed_verdict` ('open' | 'closed' | NULL for never checked).
     active: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
-    # When the feed put this posting back after having dropped it, which is
-    # the one moment a closed verdict is worth re-reading. A closed verdict is
-    # otherwise terminal: demote_closed removes the board row, the reverify
-    # sweep takes its candidates from board rows, and its full run asks for
-    # verdicts that PASSED, so nothing ever looks at the page again. Set only
-    # on the false -> true edge in catalog.upsert_postings, so the work is one
-    # check per real re-listing rather than a sweep over every posting ever
-    # closed - 464 of which, on 2026-09-10, belonged to sources switched off.
-    # Self-clearing: the reverify candidate asks for relisted_at NEWER than
-    # the latest closed verdict, so a fresh verdict settles it.
-    relisted_at: Mapped[datetime.datetime | None]
     date_posted: Mapped[datetime.datetime | None]
     uploaded_by: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id"))
     extraction_status: Mapped[str | None] = mapped_column(Text)
@@ -1160,6 +1149,37 @@ class SuggestionResponse(Base):
     created_at: Mapped[datetime.datetime] = mapped_column(
         TIMESTAMP(timezone=True), server_default=_now
     )
+
+
+class JobListingEvent(Base):
+    """A feed said this posting was listed, or stopped saying so.
+
+    Append only. `jobs.active` is the current answer and this is how it got
+    there, which is a different question and the one nothing could answer: a
+    posting that drops off a board and returns leaves no trace in a boolean,
+    so a closed verdict stayed permanent (#504) and, once that was fixed by
+    re-checking on a return, nothing measured how often a board returns the
+    same posting. A board that flaps bills a re-check every time.
+
+    Written only on a change. A pull that says what the last pull said is not
+    an observation worth a row, and at 74,000 postings an hour it would be
+    millions of rows a day saying nothing.
+
+    The same shape as email_events and application_matches: latest row wins on
+    read, and the index is (job_id, id DESC) for exactly that.
+    """
+
+    __tablename__ = "job_listing_events"
+    __table_args__ = (Index("idx_job_listing_events_latest", "job_id", text("id DESC")),)
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
+    job_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("jobs.id", ondelete="CASCADE"))
+    # Which feed said so. A posting can be carried by more than one.
+    source: Mapped[str] = mapped_column(Text)
+    # True: the pull listed and admitted it. False: the pull did not, and the
+    # board is authoritative, so absence is the board dropping it.
+    listed: Mapped[bool] = mapped_column(Boolean)
+    at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
 
 
 class EmailEvent(Base):

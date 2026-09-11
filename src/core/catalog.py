@@ -67,20 +67,41 @@ def retire_unlisted(source: str, listed_and_admitted: list[str]) -> int:
     through upsert_postings when the board lists them and the pattern admits
     them again, so a pattern change in either direction is one pull away."""
     with pool.connection() as conn:
-        result = conn.execute(
-            "UPDATE jobs SET active = false WHERE source = %s AND active AND url <> ALL(%s)",
+        dropped = conn.execute(
+            "UPDATE jobs SET active = false WHERE source = %s AND active AND url <> ALL(%s) "
+            "RETURNING id",
             (source, listed_and_admitted),
-        )
-        return result.rowcount
+        ).fetchall()
+        # The board stopped listing it, which is an observation. jobs.active
+        # is the current answer; this is how it got there, and a boolean
+        # cannot say how many times it has changed.
+        if dropped:
+            conn.cursor().executemany(
+                "INSERT INTO job_listing_events (job_id, source, listed) VALUES (%s, %s, false)",
+                [(row["id"], source) for row in dropped],
+            )
+        return len(dropped)
 
 
 _BATCH = 500
 
 
 def _upsert_batch(batch: list[tuple], retries: int = 3) -> None:
+    # The urls this pull says are open. Which of them the catalog currently
+    # holds as inactive is read BEFORE the upsert, because afterwards they all
+    # look the same: the transition is only visible from the old row.
+    proposed = [row[0] for row in batch if row[7]]
     for attempt in range(retries):
         try:
             with pool.connection() as conn, conn.cursor() as cur:
+                returning = (
+                    cur.execute(
+                        "SELECT id, url, source FROM jobs WHERE url = ANY(%s) AND NOT active",
+                        (proposed,),
+                    ).fetchall()
+                    if proposed
+                    else []
+                )
                 cur.executemany(
                     """
                 INSERT INTO jobs (url, raw_url, company, title, locations, terms, source, active, date_posted)
@@ -93,14 +114,6 @@ def _upsert_batch(batch: list[tuple], retries: int = 3) -> None:
                     locations = EXCLUDED.locations,
                     terms = EXCLUDED.terms,
                     active = EXCLUDED.active,
-                    -- The false -> true edge, and only that edge: the feed
-                    -- dropped this posting and has put it back. It is the one
-                    -- moment a closed verdict is worth re-reading, and
-                    -- stamping it here costs nothing and needs no second
-                    -- query. jobs.active is the row as it stands, EXCLUDED
-                    -- the row this pull proposes.
-                    relisted_at = CASE WHEN NOT jobs.active AND EXCLUDED.active
-                                       THEN now() ELSE jobs.relisted_at END,
                     date_posted = COALESCE(jobs.date_posted, EXCLUDED.date_posted),
                     source = CASE WHEN jobs.source = 'upload'
                                   THEN EXCLUDED.source ELSE jobs.source END,
@@ -109,6 +122,14 @@ def _upsert_batch(batch: list[tuple], retries: int = 3) -> None:
                         """,
                     batch,
                 )
+                # The feed put these back after having dropped them. One row
+                # per return, which is what makes a flapping board countable.
+                if returning:
+                    cur.executemany(
+                        "INSERT INTO job_listing_events (job_id, source, listed) "
+                        "VALUES (%s, %s, true)",
+                        [(r["id"], r["source"]) for r in returning],
+                    )
             return
         except errors.DeadlockDetected:
             if attempt == retries - 1:
