@@ -48,11 +48,6 @@ class FilterVerdict(BaseModel):
     reason: str
 
 
-class JobClosedVerdict(BaseModel):
-    is_closed: bool
-    reason: str
-
-
 class VerifyVerdict(BaseModel):
     """One call, two independent axes, written as two verdict rows - so the
     reasons are separate fields rather than one shared sentence that would be

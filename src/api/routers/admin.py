@@ -1125,13 +1125,8 @@ async def run_single_check(body: RunCheckBody, user: AuthedUser = Depends(requir
     re-derives from it immediately. No downstream re-run needed, since
     visibility is a read-time predicate rather than stored derived state."""
     from api import verdicts as _verdicts
-    from api.tasks.models import FilterVerdict, JobClosedVerdict
-    from core.checks import (
-        CLEARANCE_INSTRUCTIONS,
-        CLOSED_INSTRUCTIONS,
-        ClearanceRequirementResponse,
-        JobClosedResponse,
-    )
+    from api.tasks.models import FilterVerdict
+    from core.checks import POSTING_CHECKS
     from core.filters import build_custom_instructions
 
     job = db.query_one("SELECT id, url, company, title FROM jobs WHERE id = %s", (body.job_id,))
@@ -1139,16 +1134,13 @@ async def run_single_check(body: RunCheckBody, user: AuthedUser = Depends(requir
         raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown job"})
     filter_name = prompt_hash = None
     check = body.check
-    if check == "closed":
-        instructions = CLOSED_INSTRUCTIONS
-        model_cls = JobClosedResponse if body.with_reason else JobClosedVerdict
-        verdict_of = lambda p: (p.is_closed, getattr(p, "reason", "") or "")
-    elif check == "clearance":
-        instructions, model_cls = CLEARANCE_INSTRUCTIONS, ClearanceRequirementResponse
-        verdict_of = lambda p: (
-            p.requires_clearance_or_restrictions,
-            p.reason or (p.restriction_type or ""),
-        )
+    spec = POSTING_CHECKS.get(check)
+    if spec:
+        instructions = spec.instructions
+        # with_reason picks the cheaper schema where the check has one: the
+        # sweep settles thousands at a time and the reason is read when a
+        # person opens one.
+        model_cls, verdict_of = spec.model_for(body.with_reason), spec.verdict_of
     elif check.startswith(("filter:", "hash:")):
         if check.startswith("hash:"):
             # Verdicts are cached by prompt_hash, not by filter id. Several
@@ -1177,7 +1169,10 @@ async def run_single_check(body: RunCheckBody, user: AuthedUser = Depends(requir
             400,
             detail={
                 "code": "INVALID_CHECK",
-                "message": "check must be closed, clearance, filter:<id>, or hash:<prompt_hash>",
+                "message": (
+                    f"check must be one of {', '.join(POSTING_CHECKS)}, "
+                    "filter:<id>, or hash:<prompt_hash>"
+                ),
             },
         )
     # Re-fetch: a recheck against cached text cannot discover that a posting

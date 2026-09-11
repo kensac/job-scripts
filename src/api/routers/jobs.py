@@ -475,12 +475,7 @@ async def explain_check(job_id: int, body: ExplainBody, user: AuthedUser = Depen
     from api import budget
     from api import verdicts as _verdicts
     from api.tasks.models import FilterVerdict
-    from core.checks import (
-        CLEARANCE_INSTRUCTIONS,
-        CLOSED_INSTRUCTIONS,
-        ClearanceRequirementResponse,
-        JobClosedResponse,
-    )
+    from core.checks import POSTING_CHECKS
     from core.filters import build_custom_instructions
 
     # This route writes a verdict into ai_queries, which has no user_id and is
@@ -515,14 +510,12 @@ async def explain_check(job_id: int, body: ExplainBody, user: AuthedUser = Depen
 
     check = body.check
     filter_name = prompt_hash = None
-    if check == "closed":
-        instructions, model_cls = CLOSED_INSTRUCTIONS, JobClosedResponse
-        verdict_of = lambda p: (p.is_closed, p.reason or "")
-    elif check == "clearance":
-        instructions, model_cls = CLEARANCE_INSTRUCTIONS, ClearanceRequirementResponse
-        verdict_of = lambda p: (
-            p.requires_clearance_or_restrictions,
-            p.reason or (p.restriction_type or ""),
+    spec = POSTING_CHECKS.get(check)
+    if spec:
+        instructions, model_cls, verdict_of = (
+            spec.instructions,
+            spec.response_model,
+            spec.verdict_of,
         )
     elif check.startswith("filter:"):
         flt = db.query_one(
@@ -543,7 +536,7 @@ async def explain_check(job_id: int, body: ExplainBody, user: AuthedUser = Depen
             400,
             detail={
                 "code": "INVALID_CHECK",
-                "message": "check must be closed, clearance, or filter:<id>",
+                "message": f"check must be one of {', '.join(POSTING_CHECKS)}, or filter:<id>",
             },
         )
 

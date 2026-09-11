@@ -1,12 +1,27 @@
-"""The two posting checks: what the model is asked, and what it must answer.
+"""The posting checks: what the model is asked, what it must answer, and how
+a verdict is read out of the answer.
 
-The prompt and the response model are one pair per check; a caller that has
-one without the other cannot run the check. Kept together for that reason.
+THE REGISTRY IS THE ONLY PLACE A CHECK IS DEFINED. Adding one is an entry in
+POSTING_CHECKS, not an arm on a dispatch ladder. There were two such ladders,
+in routers/jobs.py and routers/admin.py, thirty lines each, the same shape,
+and they had already drifted: admin grew a reason-less response schema and a
+second addressing mode that jobs never got.
+
+The prompt, the response model and the reader are one set per check; a caller
+holding one without the others cannot run the check. That is why they are
+together, and why the entry carries the reader rather than leaving each
+caller to write the same lambda.
+
+Not every check is a static entry. A custom filter's instructions are built
+per filter at request time, so `custom` is a family addressed by prompt hash
+rather than a row here. See core/filters.py.
 """
 
 from __future__ import annotations
 
-from typing import Literal
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -44,3 +59,64 @@ class ClearanceRequirementResponse(BaseModel):
         Literal["security_clearance", "citizenship", "visa_sponsorship", "f1_restriction"] | None
     ) = Field(None, description="Type of restriction if any")
     reason: str | None = Field(None, description="Brief explanation of the restriction")
+
+
+class JobClosedVerdict(BaseModel):
+    """The closed check without its reason field.
+
+    The batched sweep asks for this one: it settles thousands of postings at a
+    time and the reason is only read when a person opens one. The admin
+    re-check offers both, so the caller picks per request.
+    """
+
+    is_closed: bool
+    reason: str
+
+
+@dataclass(frozen=True)
+class PostingCheck:
+    """One check over a posting page.
+
+    `name` is the check_type written to ai_queries, and the string every
+    reader of that column compares against. It is here so that comparing
+    against it is an attribute lookup rather than a literal.
+
+    `verdict_of` reads (rejected, reason) out of a parsed response, which is
+    the only shape the recording paths take.
+
+    `terse_model` answers the same question without a reason. None means the
+    check has no cheaper form.
+    """
+
+    name: str
+    instructions: str
+    response_model: type[BaseModel]
+    verdict_of: Callable[[Any], tuple[bool, str]]
+    terse_model: type[BaseModel] | None = None
+
+    def model_for(self, with_reason: bool) -> type[BaseModel]:
+        if with_reason or self.terse_model is None:
+            return self.response_model
+        return self.terse_model
+
+
+CLOSED = PostingCheck(
+    name="closed",
+    instructions=CLOSED_INSTRUCTIONS,
+    response_model=JobClosedResponse,
+    terse_model=JobClosedVerdict,
+    verdict_of=lambda p: (p.is_closed, getattr(p, "reason", "") or ""),
+)
+
+CLEARANCE = PostingCheck(
+    name="clearance",
+    instructions=CLEARANCE_INSTRUCTIONS,
+    response_model=ClearanceRequirementResponse,
+    verdict_of=lambda p: (
+        p.requires_clearance_or_restrictions,
+        p.reason or (p.restriction_type or ""),
+    ),
+)
+
+# The checks a posting page is judged by, in the order a sweep runs them.
+POSTING_CHECKS: dict[str, PostingCheck] = {c.name: c for c in (CLOSED, CLEARANCE)}
