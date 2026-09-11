@@ -22,26 +22,15 @@ jobs:
     permissions:
       contents: write
       actions: write
-    services:
-      postgres:
-        # pgvector, not plain postgres: migrations CREATE EXTENSION vector, so a
-        # base image without it fails the whole suite at conftest import.
-        # -trixie is load-bearing. The default pg18 tag is bookworm (glibc 2.36)
-        # and prod's cluster was initialised under trixie (glibc 2.41); mixing
-        # them emits collation-version mismatches, which is silent text-index
-        # corruption rather than a loud failure.
-        image: pgvector/pgvector:pg18-trixie@sha256:78bf48b801e792f99e3ac62b5036fd3876e9be48afda16c1e331af1c75ceb2ff
-        env:
-          POSTGRES_USER: ci
-          POSTGRES_PASSWORD: ci
-          POSTGRES_DB: jobtracker_ci
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -h 127.0.0.1 -U ci" --health-interval 5s
-          --health-timeout 5s --health-retries 10
+    # No database here. The schema export reads the app's routes, not its
+    # tables: exporting against a DSN pointing at a closed port produces a
+    # file identical to the committed one, byte for byte. Booting Postgres
+    # for it cost the gate about 14 s (7.7 s pulling the image, 5.9 s waiting
+    # on a health check), and every other job waits on the gate. Migrations
+    # are still applied and checked for drift in `static`, on a real
+    # database, and tests/test_openapi_current.py still compares the
+    # committed schema against the live routes.
     env:
-      DATABASE_URL: postgresql://ci:ci@localhost:5432/jobtracker_ci
       PYTHONPATH: src
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -87,12 +76,13 @@ jobs:
         run: |
           ruff check --fix src tests || true
           ruff format src tests
-          # Migrate before exporting: importing the app runs the legacy
-          # IF NOT EXISTS DDL in core.store, and a later migration that adds
-          # one of those columns then fails as a duplicate.
+          # No migration first, and no database at all: the export reads
+          # the route table off the app object. The ordering this replaces
+          # existed because importing the app used to run legacy
+          # IF NOT EXISTS DDL in core.store.
           schema_status=0
           schema_file=$(mktemp)
-          if python -m alembic upgrade head && python -m api.export_schema > "$schema_file"; then
+          if python -m api.export_schema > "$schema_file"; then
             mv "$schema_file" openapi.json
           else
             schema_status=1
@@ -146,9 +136,13 @@ jobs:
           POSTGRES_DB: jobtracker_ci
         ports:
           - 5432:5432
+        # Postgres is ready about a second after it starts; a 5 s interval
+        # with no start period meant the first probe ran too early and the
+        # job waited for the second, 5.9 s measured. Probe sooner and more
+        # often, with the same total patience.
         options: >-
-          --health-cmd "pg_isready -h 127.0.0.1 -U ci" --health-interval 5s
-          --health-timeout 5s --health-retries 10
+          --health-cmd "pg_isready -h 127.0.0.1 -U ci" --health-interval 2s
+          --health-start-period 2s --health-timeout 3s --health-retries 20
     env:
       DATABASE_URL: postgresql://ci:ci@localhost:5432/jobtracker_ci
       PYTHONPATH: src
