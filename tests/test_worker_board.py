@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import pytest
+from psycopg import errors
+
 from api import db
 from core.store import add_ai_result
 from tasks import board as tasks_board
@@ -33,6 +36,13 @@ def _board_row(user_id: int, job_id: int):
     )
 
 
+def _working_set_row(user_id: int, job_id: int):
+    return db.query_one(
+        "SELECT * FROM user_job_working_set WHERE user_id = %s AND job_id = %s",
+        (user_id, job_id),
+    )
+
+
 # ---------------------------------------------------------------------------
 # materialize_passing
 # ---------------------------------------------------------------------------
@@ -45,12 +55,96 @@ def test_materialize_passing_recreates_a_deleted_row(user_headers):
 
     assert tasks_board.materialize_passing(user_id) == 1
     assert _board_row(user_id, job_id) is not None
+    assert _working_set_row(user_id, job_id) is not None
 
     db.execute("DELETE FROM user_jobs WHERE user_id = %s AND job_id = %s", (user_id, job_id))
     assert _board_row(user_id, job_id) is None
 
     assert tasks_board.materialize_passing(user_id) == 1
     assert _board_row(user_id, job_id) is not None
+    assert _working_set_row(user_id, job_id) is not None
+
+
+def test_materialize_passing_rerun_is_idempotent_in_both_relations(user_headers):
+    user_id = _user_id()
+    job_id = _make_passing_job(user_id, "https://jobs.example.com/dual-write-idempotent")
+
+    assert tasks_board.materialize_passing(user_id) == 1
+    assert tasks_board.materialize_passing(user_id) == 0
+    assert (
+        db.query_one(
+            "SELECT count(*) AS n FROM user_jobs WHERE user_id = %s AND job_id = %s",
+            (user_id, job_id),
+        )["n"]
+        == 1
+    )
+    assert (
+        db.query_one(
+            "SELECT count(*) AS n FROM user_job_working_set WHERE user_id = %s AND job_id = %s",
+            (user_id, job_id),
+        )["n"]
+        == 1
+    )
+
+
+def test_materialize_passing_adds_scope_without_changing_existing_person_state(user_headers):
+    user_id = _user_id()
+    job_id = _make_passing_job(user_id, "https://jobs.example.com/person-state-first")
+    db.execute(
+        """
+        INSERT INTO user_jobs
+            (user_id, job_id, status, notes, person_touched_at, created_at, updated_at)
+        VALUES (%s, %s, 'Interview', 'Keep this',
+                '2026-09-01T12:00:00Z', '2026-08-01T12:00:00Z', '2026-09-02T12:00:00Z')
+        """,
+        (user_id, job_id),
+    )
+    before = _board_row(user_id, job_id)
+
+    assert tasks_board.materialize_passing(user_id) == 0
+
+    assert _working_set_row(user_id, job_id) is not None
+    assert _board_row(user_id, job_id) == before
+
+
+def test_materialize_passing_adds_missing_legacy_row_and_returns_one(user_headers):
+    user_id = _user_id()
+    job_id = _make_passing_job(user_id, "https://jobs.example.com/working-set-first")
+    db.execute(
+        "INSERT INTO user_job_working_set (user_id, job_id) VALUES (%s, %s)",
+        (user_id, job_id),
+    )
+
+    assert tasks_board.materialize_passing(user_id) == 1
+
+    assert _board_row(user_id, job_id) is not None
+    assert _working_set_row(user_id, job_id) is not None
+
+
+def test_materialize_passing_rolls_back_legacy_write_when_working_set_write_fails(
+    user_headers,
+):
+    user_id = _user_id()
+    job_id = _make_passing_job(user_id, "https://jobs.example.com/dual-write-rollback")
+    db.execute(
+        """
+        CREATE FUNCTION test_refuse_working_set_insert() RETURNS trigger
+        LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'refuse working set insert'; END $$
+        """
+    )
+    db.execute(
+        "CREATE TRIGGER test_refuse_working_set_insert BEFORE INSERT ON user_job_working_set "
+        "FOR EACH ROW EXECUTE FUNCTION test_refuse_working_set_insert()"
+    )
+    try:
+        with pytest.raises(errors.RaiseException, match="refuse working set insert"):
+            tasks_board.materialize_passing(user_id)
+    finally:
+        db.execute("DROP TRIGGER test_refuse_working_set_insert ON user_job_working_set")
+        db.execute("DROP FUNCTION test_refuse_working_set_insert()")
+
+    assert _board_row(user_id, job_id) is None
+    assert _working_set_row(user_id, job_id) is None
 
 
 def test_materialize_passing_leaves_hidden_row_alone(user_headers):

@@ -60,14 +60,13 @@ def materialize_passing(user_id: int) -> int:
     row WAS the board. That sheet is gone and the row now means something
     else; the docstring said otherwise until 2026-09-10."""
     params = board_eligibility.settings_params(user_id)
-    with db.pool.connection() as conn:
-        result = conn.execute(
-            f"""
+    result = db.query_one(
+        f"""
             WITH enabled AS (
                 {board_eligibility.ENABLED_FILTERS}
             ),
             {board_eligibility.LATEST_CHECK},
-            pass_all AS (
+            pass_all AS MATERIALIZED (
                 SELECT j.id FROM jobs j
                 WHERE ({board_eligibility.SUBSCRIBED}
                        OR j.source = 'sheet_import' OR j.uploaded_by = %(uid)s)
@@ -78,14 +77,25 @@ def materialize_passing(user_id: int) -> int:
                           AND q.check_type = 'custom' AND q.prompt_hash = e.prompt_hash
                           AND q.status IN ('passed', 'rejected')
                         ORDER BY q.id DESC LIMIT 1) = 'passed') = (SELECT COUNT(*) FROM enabled)
+            ),
+            legacy_insert AS (
+                INSERT INTO user_jobs (user_id, job_id)
+                SELECT %(uid)s, id FROM pass_all ORDER BY id
+                ON CONFLICT (user_id, job_id) DO NOTHING
+                RETURNING 1
+            ),
+            working_set_insert AS (
+                INSERT INTO user_job_working_set (user_id, job_id)
+                SELECT %(uid)s, id FROM pass_all ORDER BY id
+                ON CONFLICT (user_id, job_id) DO NOTHING
+                RETURNING 1
             )
-            INSERT INTO user_jobs (user_id, job_id)
-            SELECT %(uid)s, id FROM pass_all
-            ON CONFLICT DO NOTHING
-            """,
-            params,
-        )
-        added = result.rowcount
+            SELECT COUNT(*) AS added FROM legacy_insert
+        """,
+        params,
+    )
+    assert result is not None
+    added = result["added"]
     if added:
         metrics.BOARD_ROWS.labels("materialized").inc(added)
         logger.info(f"Materialized {added} passing jobs onto user {user_id}'s board")
