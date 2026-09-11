@@ -27,7 +27,6 @@ from api.tasks.runtime import (
     submit_or_collect,
     update_parent_progress,
 )
-from core.checks import JobClosedVerdict
 from core.providers.spec import StructuredOutput
 from core.routing import TaskShape, resolve
 from core.store import AI_ELIGIBLE_JOB, CONTENT_LATERAL
@@ -41,15 +40,17 @@ REVERIFY_DAYS = int(os.environ.get("JOBTRACKER_REVERIFY_DAYS", "7"))
 REVERIFY_PER_CYCLE = int(os.environ.get("JOBTRACKER_REVERIFY_PER_CYCLE", "0"))  # 0 = all stale
 
 
-def _newer_closed_evidence(result) -> bool:
+def _newer_evidence(result, check: str) -> bool:
+    """Something decided this check after the batch was submitted, so the
+    batch's answer is stale on arrival and must not overwrite it."""
     if not result.batch_id:
         return False
     return bool(
         db.query_one(
             "SELECT 1 FROM ai_queries q JOIN ai_batches b ON b.provider_batch_id = %s "
-            "WHERE q.url = %s AND q.check_type = 'closed' "
+            "WHERE q.url = %s AND q.check_type = %s "
             "AND q.status IN ('passed', 'rejected') AND q.created_at > b.submitted_at LIMIT 1",
-            (result.batch_id, result.custom_id),
+            (result.batch_id, result.custom_id, check),
         )
     )
 
@@ -67,30 +68,53 @@ def _record_reverify_results(task_id: int, results: list) -> int:
             if res.error or not res.text:
                 receipt.outcome = "failed"
                 continue
-            if _newer_closed_evidence(res):
+            # Stale on one axis is stale on both: the guard is about the page
+            # text being older than somebody else's, not about which question
+            # was asked of it. A parked batch that lost the race on closed
+            # must not write a clearance verdict from the same old page.
+            if any(_newer_evidence(res, check) for check in ("closed", "clearance")):
                 receipt.outcome = "superseded"
                 continue
             try:
-                parsed = JobClosedVerdict.model_validate_json(res.text)
+                parsed = VerifyVerdict.model_validate_json(res.text)
             except ValueError:
                 logger.warning("reverify: unparsable batch output for %s", res.custom_id)
                 receipt.outcome = "invalid_output"
                 continue
-            verdicts.record_ai_verdict(
-                url=res.custom_id,
-                check_type="closed",
-                rejected=parsed.is_closed,
-                reason=parsed.reason,
-                parsed_json=res.text,
-                model=res.model,
-                usage=ai.batch_usage(res.usage),
-                company=job["company"],
-                job_title=job["title"],
-                context="reverify",
-                batched=True,
-                batch_id=res.batch_id,
-            )
-            receipt.outcome = "written"
+            # Both axes, from one answer on one fetch. The sweep used to ask
+            # only whether the posting had closed, which is why a clearance
+            # verdict was written once and never again: nothing else revisits
+            # it. The page is already fetched and the call is already made, so
+            # the second axis costs its output tokens and nothing else.
+            written = False
+            # One call, two rows, and the usage books onto the first one
+            # written. The second is a zero-token decided row, which is the
+            # same spelling handle_verify_new uses below and the shape
+            # routers/spend.py reads as a joint call.
+            usage = ai.batch_usage(res.usage)
+            for check, rejected, reason in (
+                ("closed", parsed.is_closed, parsed.closed_reason),
+                ("clearance", parsed.requires_clearance_or_restrictions, parsed.clearance_reason),
+            ):
+                verdicts.record_ai_verdict(
+                    url=res.custom_id,
+                    check_type=check,
+                    rejected=rejected,
+                    reason=reason,
+                    parsed_json=res.text,
+                    model=res.model,
+                    usage=usage,
+                    company=job["company"],
+                    job_title=job["title"],
+                    context="reverify",
+                    batched=True,
+                    batch_id=res.batch_id,
+                )
+                usage = {}
+                written = True
+            receipt.outcome = "written" if written else "superseded"
+            if not written:
+                continue
             recorded += 1
     return recorded
 
@@ -107,7 +131,6 @@ async def _reverify_jobs(
     from openai.lib._pydantic import to_strict_json_schema
 
     from core.batch import BatchSpec
-    from core.checks import CLOSED_INSTRUCTIONS
 
     if has_batch_work(task_id):
         results = await collect_pending(task_id, batch_event_hook(task_id, "reverify", None))
@@ -197,13 +220,13 @@ async def _reverify_jobs(
         set_progress(task_id, done, total, f"batch of {len(needs_ai)} submitted (half price)")
         if parent_id:
             update_parent_progress(parent_id)
-        schema = to_strict_json_schema(JobClosedVerdict)
+        schema = to_strict_json_schema(VerifyVerdict)
         specs = [
             BatchSpec(
                 url,
-                CLOSED_INSTRUCTIONS,
+                _VERIFY_INSTRUCTIONS,
                 content[:20000],
-                "JobClosedVerdict",
+                "VerifyVerdict",
                 schema,
                 context=by_url[url],
             )

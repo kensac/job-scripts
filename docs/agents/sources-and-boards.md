@@ -76,6 +76,24 @@ Inactive rows are excluded from every sweep and leave boards through
 An aggregator list is not such a signal, and an empty pull is a broken fetch
 rather than an empty board, so neither retires anything.
 
+## A re-check answers both axes, because it has already paid for the page
+
+The re-verification sweep asks `_VERIFY_INSTRUCTIONS` and records both the
+closed and the clearance verdict, which is the same question the first pass
+asks. It used to ask only whether the posting had closed, and that is why a
+clearance verdict was written once and never again: nothing else revisits one.
+On 2026-09-10 that held 12,444 active postings rejected on a clearance verdict
+that had never been re-read, against 1,152 for closed.
+
+The page is already fetched and the call is already made, so the second axis
+costs its output tokens and nothing else. Usage books onto the first row
+written and the second is a zero-token decided row, which is how
+routers/spend.py tells a joint call apart.
+
+Stale on one axis is stale on both. A parked batch carries page text as old as
+its submission, so if anything decided either check after the batch went out,
+the whole answer is dropped rather than the losing axis alone.
+
 ## A re-listing is the only thing that reopens a closed posting
 
 A closed verdict was otherwise permanent. `demote_closed` takes the board row

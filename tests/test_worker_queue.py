@@ -745,7 +745,10 @@ async def test_reverify_records_batch_verdicts_and_reattaches(monkeypatch):
         return [
             core_batch.BatchResult(
                 "https://rv.example.com/1",
-                text='{"is_closed": true, "reason": "position filled"}',
+                text=(
+                    '{"is_closed": true, "closed_reason": "position filled", '
+                    '"requires_clearance_or_restrictions": false, "clearance_reason": ""}'
+                ),
                 usage={"input_tokens": 20, "output_tokens": 3, "total_tokens": 23},
                 batch_id=batch_ids[0],
             )
@@ -768,6 +771,14 @@ async def test_reverify_records_batch_verdicts_and_reattaches(monkeypatch):
         "AND check_type = 'closed' ORDER BY id DESC LIMIT 1"
     )
     assert row["status"] == "rejected" and row["config_name"] == "reverify"
+    # One fetch, one call, both axes: the clearance verdict is refreshed by
+    # the same answer rather than being written once and never revisited.
+    clearance = db.query_one(
+        "SELECT status, config_name FROM ai_queries WHERE url = 'https://rv.example.com/1' "
+        "AND check_type = 'clearance' ORDER BY id DESC LIMIT 1"
+    )
+    assert clearance and clearance["status"] == "passed"
+    assert clearance["config_name"] == "reverify"
     # Collected, so nothing is left to reattach to: a rerun cannot download
     # and re-record the same batch. Reattaching to a batch still in flight is
     # covered in test_batch_stragglers.
@@ -911,20 +922,28 @@ def _submitted_batch(provider_batch_id: str, minutes_ago: int) -> None:
     )
 
 
-def _reverify_result(task_id: int, url: str, batch_id: str, is_closed: bool):
+def _reverify_result(
+    task_id: int, url: str, batch_id: str, is_closed: bool, requires_clearance: bool = False
+):
+    """The sweep asks both axes in one call, the same question the first pass
+    asks, so its answer carries both."""
     from core.batch import BatchSpec
 
     return make_batch_result(
         task_id,
         BatchSpec(
             url,
-            "closed",
+            "verify",
             "original page",
-            "JobClosedVerdict",
+            "VerifyVerdict",
             {},
             context={"company": "C", "title": "T"},
         ),
-        text=f'{{"is_closed": {str(is_closed).lower()}, "reason": "batch fixture"}}',
+        text=(
+            f'{{"is_closed": {str(is_closed).lower()}, "closed_reason": "batch fixture", '
+            f'"requires_clearance_or_restrictions": {str(requires_clearance).lower()}, '
+            f'"clearance_reason": "batch fixture"}}'
+        ),
         usage={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
         model="m",
         batch_id=batch_id,
