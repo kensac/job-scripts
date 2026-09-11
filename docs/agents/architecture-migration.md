@@ -371,9 +371,9 @@ rather than an opinion. A row leaves this list when it is fixed or when a
 measurement says it was never worth fixing, and either way it says which.
 
 **The schema is not a contract.** Was 173 of 190 operations returning an
-undeclared object on 2026-09-10. **143 of 190 on 2026-09-11**, and the ones
-left are concentrated: `routers/admin.py` (44) and the four modules
-`routers/mail/` was split into (33). Phase 7.
+undeclared object on 2026-09-10, then 143. **54 of 190 on 2026-09-11**, and
+what is left is one family: `routers/admin/` holds 52 of them. The other two
+serve a file and a schema rather than a body. Phase 7.
 
 **A failure is not in the contract at all.** 164 `raise HTTPException` sites,
 at least three `detail` shapes among them (69 `{code, message}`, 14 a bare
@@ -381,7 +381,7 @@ string, 1 an f-string), and the schema declares 200, 201, 202 and the 422
 FastAPI adds. No 4xx. Phase 7.
 
 **Reads are untyped, and the goal is all of them.** Was 563 db call sites
-returning bare dicts. **519 on 2026-09-11, of which 26 carry a shape.**
+returning bare dicts. **522 on 2026-09-11, of which 110 carry a shape.**
 `db.query_as` is the primitive and adoption is per domain, on Kanishk's
 instruction of 2026-09-11 that every read should carry a shape.
 
@@ -395,9 +395,9 @@ name, so the rule is enforced rather than remembered.
 
 Two things make it work that are worth knowing before starting a domain.
 
-**A `SELECT *` cannot be typed until it names its columns.** Was 24, then 22.
-**19 on 2026-09-11**: six in `routers/admin/`, three in `routers/mail/debug.py`,
-one left in `core/store.py`, and the rest spread one or two at a time. Naming
+**A `SELECT *` cannot be typed until it names its columns.** Was 24, then 22,
+then 19. **12 on 2026-09-11**: six in `routers/admin/`, five in `tasks/`, and
+the one left in `core/store.py`. Naming
 them is a good change on its own: a star select and the shape that reads it
 drift silently, which is the same defect one level down, and on a wide table it
 fetches a page of text to throw away. Three of `core/store.py`'s four went with
@@ -430,6 +430,14 @@ exact and ERASES the schema, because pydantic derives the serialisation schema
 from the serialiser's return type, so the model becomes `{type: object,
 additionalProperties: true}`. That is the useless generated type this phase
 exists to stop producing, so the null wins and the consumer is checked instead.
+
+The bill for that arrives when a SECOND surface serialises the same model and
+its route can exclude nulls. `ResolveChoice` is built once and served by the
+queue, which excludes them, and by the candidate picker, which cannot: the
+rest of the picker's payload is full of real nulls it has always sent. So one
+omits `reason` and the other sends it as null, saying the same thing two ways,
+and the test that holds the two surfaces to one verb set compares what a
+choice MEANS rather than which spelling it arrived in.
 
 **A timestamp gains `Z`.** `2026-09-11T05:10:00.546051+00:00` becomes
 `2026-09-11T05:10:00.546051Z`, the same instant, because pydantic serialises a

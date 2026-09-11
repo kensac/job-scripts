@@ -31061,8 +31061,7 @@
           },
           "choices": {
             "items": {
-              "additionalProperties": true,
-              "type": "object"
+              "$ref": "#/components/schemas/ResolveChoice"
             },
             "type": "array",
             "title": "Choices"
