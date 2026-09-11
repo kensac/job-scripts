@@ -25,6 +25,7 @@ from __future__ import annotations
 import datetime
 import os
 
+from core.answers import VERIFICATION_REQUEST
 from core.providers.spec import StructuredOutput
 from core.routing import Evidence, TaskShape
 
@@ -243,7 +244,7 @@ VERIFY_TASK = TaskShape(
     ),
     structured=StructuredOutput.JSON_SCHEMA,
     batched=True,
-    max_output_tokens=1000,
+    max_output_tokens=VERIFICATION_REQUEST.max_output_tokens,
     est_prompt_tokens=5500,
     effort="low",
     candidates=("gpt-5-nano",),

@@ -102,19 +102,14 @@ def steps() -> Mapping[str, ExperimentStep]:
     """The measurable steps: how each builds its request and which fields of
     its answer are compared. Imported lazily so the schemas are loaded only
     when an experiment needs the declarations."""
-    from core.answers import (
-        _VERIFY_INSTRUCTIONS,
-        VERIFY_INPUT_CHARS,
-        FilterDecision,
-        VerifyVerdict,
-    )
+    from core.answers import VERIFICATION_REQUEST, FilterDecision
     from core.comp import COMP_INPUT_CHARS, COMP_INSTRUCTIONS, CompExtract
     from core.requirements import (
         REQUIREMENTS_INPUT_CHARS,
         REQUIREMENTS_INSTRUCTIONS,
         RequirementsExtract,
     )
-    from core.shapes import COMP_TASK, REQUIREMENTS_TASK, VERIFY_TASK
+    from core.shapes import COMP_TASK, REQUIREMENTS_TASK
 
     return {
         "filter": ExperimentStep(
@@ -126,10 +121,10 @@ def steps() -> Mapping[str, ExperimentStep]:
             load_deployed=_filter_deployed,
         ),
         "verify": ExperimentStep(
-            instruction_builder=lambda params: _VERIFY_INSTRUCTIONS,
-            answer_model=VerifyVerdict,
-            input_builder=lambda r: r["input_content"][:VERIFY_INPUT_CHARS],
-            max_output_tokens=VERIFY_TASK.max_output_tokens,
+            instruction_builder=lambda params: VERIFICATION_REQUEST.instructions,
+            answer_model=VERIFICATION_REQUEST.response_model,
+            input_builder=lambda r: VERIFICATION_REQUEST.build_input(r["input_content"]),
+            max_output_tokens=VERIFICATION_REQUEST.max_output_tokens,
             comparison_projector=_verify_fields,
             load_deployed=_verify_deployed,
         ),

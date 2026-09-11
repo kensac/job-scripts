@@ -10,7 +10,7 @@ from typing import Any
 from api import ai, db, events
 from api.ai import verdicts
 from api.ai.batch_results import progress_counts
-from core.answers import _VERIFY_INSTRUCTIONS, VERIFY_INPUT_CHARS, VerifyVerdict
+from core.answers import VERIFICATION_REQUEST
 from core.routing import resolve
 from core.shapes import VERIFY_TASK
 from core.store import AI_ELIGIBLE_JOB, CONTENT_LATERAL
@@ -77,7 +77,7 @@ def _record_reverify_results(task_id: int, results: list) -> int:
                 receipt.outcome = "superseded"
                 continue
             try:
-                parsed = VerifyVerdict.model_validate_json(res.text)
+                parsed = VERIFICATION_REQUEST.response_model.model_validate_json(res.text)
             except ValueError:
                 logger.warning("reverify: unparsable batch output for %s", res.custom_id)
                 receipt.outcome = "invalid_output"
@@ -221,13 +221,13 @@ async def _reverify_jobs(
         set_progress(task_id, done, total, f"batch of {len(needs_ai)} submitted (half price)")
         if parent_id:
             update_parent_progress(parent_id)
-        schema = to_strict_json_schema(VerifyVerdict)
+        schema = to_strict_json_schema(VERIFICATION_REQUEST.response_model)
         specs = [
             BatchSpec(
                 url,
-                _VERIFY_INSTRUCTIONS,
-                content[:VERIFY_INPUT_CHARS],
-                "VerifyVerdict",
+                VERIFICATION_REQUEST.instructions,
+                VERIFICATION_REQUEST.build_input(content),
+                VERIFICATION_REQUEST.response_model.__name__,
                 schema,
                 context=by_url[url],
             )
@@ -238,7 +238,7 @@ async def _reverify_jobs(
             specs,
             model,
             VERIFY_TASK.effort or "low",
-            VERIFY_TASK.max_output_tokens,
+            VERIFICATION_REQUEST.max_output_tokens,
             hook,
         )
         _record_reverify_results(task_id, results)
@@ -395,13 +395,13 @@ async def handle_verify_new(task_id: int, payload: dict[str, Any]) -> None:
         if not rows:
             set_progress(task_id, 0, 0, "nothing to verify")
             return
-        schema = to_strict_json_schema(VerifyVerdict)
+        schema = to_strict_json_schema(VERIFICATION_REQUEST.response_model)
         specs = [
             BatchSpec(
                 r["url"],
-                _VERIFY_INSTRUCTIONS,
-                r["input_content"][:VERIFY_INPUT_CHARS],
-                "VerifyVerdict",
+                VERIFICATION_REQUEST.instructions,
+                VERIFICATION_REQUEST.build_input(r["input_content"]),
+                VERIFICATION_REQUEST.response_model.__name__,
                 schema,
                 context={
                     key: r[key] for key in ("company", "title", "needs_closed", "needs_clearance")
@@ -423,7 +423,7 @@ async def handle_verify_new(task_id: int, payload: dict[str, Any]) -> None:
                 receipt.outcome = "failed"
                 continue
             try:
-                parsed = VerifyVerdict.model_validate_json(res.text)
+                parsed = VERIFICATION_REQUEST.response_model.model_validate_json(res.text)
             except ValueError:
                 logger.warning("verify_new: unparsable batch output for %s", res.custom_id)
                 receipt.outcome = "invalid_output"

@@ -12,6 +12,7 @@ import pytest
 
 from api import db
 from api import experiments as exp
+from core import answers
 from core.answers import VERIFY_INPUT_CHARS
 from core.comp import COMP_INPUT_CHARS
 from tasks import comp as task_comp
@@ -46,6 +47,17 @@ def test_experiment_steps_are_typed_immutable_and_own_purpose_behavior():
     with pytest.raises(FrozenInstanceError):
         declared["comp"].max_output_tokens = 1
     assert exp.deployed_verdicts("not-a-step", [], {}) == {}
+
+
+def test_verify_experiment_step_consumes_the_production_request_recipe():
+    recipe = answers.VERIFICATION_REQUEST
+    step = exp.steps()["verify"]
+    content = "v" * (recipe.input_chars + 17)
+
+    assert step.instructions({}) == recipe.instructions
+    assert step.answer_model is recipe.response_model
+    assert step.build_input({"input_content": content}) == recipe.build_input(content)
+    assert step.max_output_tokens == recipe.max_output_tokens
 
 
 @pytest.mark.asyncio
