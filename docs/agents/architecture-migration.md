@@ -63,7 +63,7 @@ real only relocates the problem.
 | 2 | A board row and the working set are told apart | Named and pinned apart (2a). Moving the sweeps' scope off `user_jobs` (2b) waits for a cutover comparison |
 | 3 | Catalog observations are facts | A re-listing is an appended row, not a mutated column |
 | 4 | ~~Derivations are content addressed~~ | **Dropped 2026-09-10.** Measured; see below |
-| 5 | Files move to the shape | Packages match this document. Trialled on `apply`; the rest is a judgement about churn, not a blocked task |
+| 5 | Files move to the shape | Packages match this document. Trialled on `apply`. `api.tasks` becoming a sibling of `api` is no longer cosmetic: see below |
 | 6 | The long files are split | No module does four jobs. `admin.py` 2,136 lines, `mail.py` 2,117, `resolve.py` 1,337, `orm.py` 1,248, `health.py` 1,155, `tasks/runtime.py` 796 |
 | 7 | A row is typed, not a dict | A read returns a shape a type checker knows. 678 SQL call sites return bare dicts today |
 
@@ -159,6 +159,24 @@ for.
 **Never in a loop:** any write to the production database, and any migration
 that can refuse to apply ([migrations.md](migrations.md)). Neither of these is
 covered by the standing instruction above, because neither is gated by CI.
+
+## Phase 5 found its reason, in phase 6
+
+The layering between the services and the handlers cannot be enforced while
+`api.tasks` is a child of `api`. A `forbidden` contract skips a target that
+sits inside its source, so `source_modules = ["api"]` with
+`forbidden_modules = ["api.tasks"]` passes whatever the code does. That was
+not reasoned, it was verified: a violation was added and the contract stayed
+green. Narrowing the source to a single module catches it, so enforcing the
+rule as things stand means enumerating forty-odd modules and leaving a hole
+the day somebody adds the forty-first.
+
+Moving `api/tasks/` to `src/tasks/`, beside `api` and `core`, makes the
+contract one line and expresses what is already true: the handlers are not
+part of the API, they are work the worker runs using it.
+
+That is the first argument for moving a file in this plan that is about
+something other than where a reader looks for it.
 
 ## Phases 6 and 7
 

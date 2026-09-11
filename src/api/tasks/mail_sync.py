@@ -25,7 +25,8 @@ from pathlib import Path
 from typing import Any
 
 from api import db, gmail, mail_store, oauth
-from api.tasks.runtime import enqueue, set_progress
+from api.queue import enqueue
+from api.tasks.runtime import set_progress
 from core.mail_import import read_archive
 
 logger = logging.getLogger("jobtracker_worker")

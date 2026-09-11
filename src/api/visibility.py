@@ -26,6 +26,7 @@ import logging
 
 from api import board_eligibility, criteria, db
 from api.board_eligibility import settings_params
+from api.queue import enqueue
 
 logger = logging.getLogger("jobtracker_api")
 
@@ -133,7 +134,6 @@ def request_refresh(user_id: int) -> None:
     """Ask for a recompute soon: at most one task per person per minute,
     so a burst of preference edits is one recompute, and the fleet's five
     second poll is the latency."""
-    from api.tasks.runtime import enqueue
 
     bucket = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M")
     enqueue("recompute_board", {"user_id": user_id}, dedupe_key=f"board:{user_id}:{bucket}")
