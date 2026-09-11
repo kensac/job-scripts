@@ -95,9 +95,50 @@ cannot collide. A test database must be named `*_test`, `*_ci`, or `test_*`,
 and anything destructive must refuse a name that does not match.
 
 One test process per database, enforced rather than assumed. Two concurrent
-runs against one database truncate each other's rows between tests, and the
+runs against one database delete each other's rows between tests, and the
 failure surfaces in whichever test lost the race, so the reader debugs their
 own change.
+
+**A parallel run gets a database per worker, not a looser lock.** `pytest -n`
+(`make test-par`) derives `jobtracker_gw0_test`, `jobtracker_gw1_test` and so
+on from `TEST_DATABASE_URL`, creates each on demand and migrates it, which
+costs about 1.3 s per worker. The exclusivity above is what parallelism needs
+most, so it is kept rather than relaxed. The databases are reused by later
+runs and are cheap to drop.
+
+## The per-test reset empties what the test filled
+
+The reset between tests must leave no rows outside the persistent tables,
+every sequence back at its start, and the seeded defaults present. How it gets
+there is a cost question, and the cost is per RELATION, not per row: emptying
+a table takes about the same time whether it held one row or none.
+
+So the reset asks which tables have rows (one round trip) and empties only
+those, with `DELETE` rather than `TRUNCATE` unless the table is large.
+Measured 2026-09-11 against one checkout's database, with a middling test's
+state in place: truncating all 51 tables took 360 ms, truncating only the
+dirty ones 159 ms, and deleting the dirty ones 10.7 ms. On two API test files
+the suite went from 20.5 s to 4.5 s. The 159 ms is why the strategy is not
+simply "truncate less": a test that touches `users` drags its 28-table foreign
+key closure along through `CASCADE`, and `TRUNCATE` pays per relation in that
+closure whether or not it holds anything.
+
+Two properties to preserve when touching it:
+
+- **Sequences are reset separately.** `RESTART IDENTITY` only covers the
+  tables in the same `TRUNCATE`, and a test that inserts and then deletes
+  leaves an advanced sequence behind an empty table. Ids start at 1 for every
+  test, and tests are allowed to depend on that.
+- **The deletes run with `session_replication_role = replica`**, so foreign
+  keys do not dictate an order, in ONE statement so the setting is rolled back
+  with the deletes if anything fails. Where the role cannot be set (not
+  superuser), the reset truncates the dirty set instead.
+
+**Corpus tests run last, as one group.** The corpus is generated data that an
+unmarked test's reset empties, so interleaving rebuilt it four times per
+serial run at about six seconds each. They are ordered last, and marked into
+one xdist group so a parallel run builds the corpus on one worker rather than
+on all of them.
 
 ## Fixtures must state what they mean
 
