@@ -64,7 +64,7 @@ real only relocates the problem.
 | 3 | Catalog observations are facts | A re-listing is an appended row, not a mutated column |
 | 4 | ~~Derivations are content addressed~~ | **Dropped 2026-09-10.** Measured; see below |
 | 5 | Files move to the shape | `tasks` is a sibling of `api` and `core`. `apply` is a package. The rest is judgement about churn |
-| 6 | The long files are split | No module does four jobs. `admin.py` 2,136 lines, `mail.py` 2,117, `resolve.py` 1,337, `orm.py` 1,248, `health.py` 1,155, `tasks/runtime.py` 796 |
+| 6 | The long files are split | No module does four jobs. `admin.py` 2,136 lines, `mail.py` 2,117, `resolve.py` 1,337, `health.py` 1,155, `tasks/runtime.py` 796. `orm.py` is done |
 | 7 | Every operation declares what it returns | `openapi.json` generates the frontend's types. 173 of 190 operations declare nothing today |
 
 **The API contract was the invariant, and is now a price.** `openapi.json` is
@@ -376,8 +376,16 @@ the repository after the store.
 before the sweeps are covered would only ratchet in what is already there.
 
 **The long files.** `routers/admin.py` 2,136 lines, `routers/mail.py` 2,117,
-`routers/resolve.py` 1,339, `orm.py` 1,268, `health.py` 1,155. Long because
-nothing split them. Phase 6.
+`routers/resolve.py` 1,339, `health.py` 1,155. Long because nothing split
+them. Phase 6.
+
+`orm.py` was the first taken, and it is the easy shape of this problem: 51
+table definitions with no logic between them, so the split is a partition and
+the only risk is that a table stops being registered. It is now `api/orm/`,
+six modules named for what the tables are for, and `__init__.py` imports all
+six so one metadata still carries all 51. The others are not this shape; a
+router splits along what its handlers do, and that is a reading, not a
+partition.
 
 **`user_jobs` answers two questions.** What a person keeps, and what the
 sweeps carry. Phase 2b, deferred: moving the sweeps' scope changes what gets
