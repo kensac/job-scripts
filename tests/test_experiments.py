@@ -9,7 +9,8 @@ import json
 import pytest
 
 from api import db
-from tasks import experiments as exp
+from api import experiments as exp
+from tasks import experiments as task_exp
 
 
 def _verdict(url: str, rejected: bool) -> str:
@@ -110,8 +111,8 @@ async def test_a_filter_experiment_submits_one_batch_per_arm_and_scores_each(
 
     monkeypatch.setattr("core.batch.submit_responses_batches", fake_submit)
     db.execute("UPDATE tasks SET status = 'running' WHERE id = %s", (task_id,))
-    with pytest.raises(exp.AwaitingBatch):
-        await exp.handle_run_experiment(task_id, {"experiment_id": eid})
+    with pytest.raises(task_exp.AwaitingBatch):
+        await task_exp.handle_run_experiment(task_id, {"experiment_id": eid})
     assert sorted(submitted) == [("gpt-5-nano", "medium", 4), ("gpt-5.6-luna", "high", 4)]
     parked = db.query_one("SELECT status, payload FROM tasks WHERE id = %s", (task_id,))
     assert parked["status"] == "awaiting_batch"
@@ -153,9 +154,9 @@ async def test_a_filter_experiment_submits_one_batch_per_arm_and_scores_each(
             )
         return out
 
-    monkeypatch.setattr(exp, "collect_pending", fake_collect)
+    monkeypatch.setattr(task_exp, "collect_pending", fake_collect)
     db.execute("UPDATE tasks SET status = 'running' WHERE id = %s", (task_id,))
-    await exp.handle_run_experiment(task_id, {"experiment_id": eid})
+    await task_exp.handle_run_experiment(task_id, {"experiment_id": eid})
 
     body = client.get(f"/v1/admin/experiments/{eid}", headers=admin_headers).json()
     assert body["status"] == "done" and len(body["results"]) == 8
@@ -243,7 +244,7 @@ async def test_a_failure_lands_on_the_experiment_row_too(client, admin_headers, 
     monkeypatch.setattr("core.batch.submit_responses_batches", boom)
     db.execute("UPDATE tasks SET status = 'running' WHERE id = %s", (task_id,))
     with pytest.raises(RuntimeError):
-        await exp.handle_run_experiment(task_id, {"experiment_id": eid})
+        await task_exp.handle_run_experiment(task_id, {"experiment_id": eid})
     row = db.query_one("SELECT status, error FROM ai_experiments WHERE id = %s", (eid,))
     assert row["status"] == "failed" and "moment" in row["error"]
 

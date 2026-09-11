@@ -1,5 +1,5 @@
 """Experiments: measure one AI step across models and efforts on a sample,
-through the production path. See tasks.experiments."""
+through the production path."""
 
 from __future__ import annotations
 
@@ -10,9 +10,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from api import db, events
+from api import experiments as exp
 from api.auth import AuthedUser
 from api.routers.admin import require_admin
-from tasks import experiments as exp
 
 router = APIRouter(prefix="/admin")
 
