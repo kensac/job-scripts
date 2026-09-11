@@ -346,5 +346,5 @@ def test_swapping_the_mail_or_requirements_model_carries_its_effort():
         )
 
 
-def _autofix_probe(  a,b ):
-    return   a+b
+def _autofix_probe(a, b):
+    return a + b
