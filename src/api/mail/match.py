@@ -18,9 +18,12 @@ repair.
 
 from __future__ import annotations
 
+import datetime
 import logging
 import re
 from dataclasses import dataclass
+
+from pydantic import BaseModel
 
 from api import db
 from core.fetching.ats import canonicalize
@@ -67,6 +70,26 @@ class Match:
     method: str
     confidence: str
     rationale: str
+
+
+class CurrentMatch(BaseModel):
+    """The match row in force for a message.
+
+    Declared beside the query that reads it, because an admin correction
+    returns it verbatim and the columns were a `SELECT *` - so what reached
+    the client was whatever the table happened to hold. A null
+    `application_id` is a recorded outcome rather than an absence: `method`
+    says which of the two it is."""
+
+    id: int
+    message_id: int
+    application_id: int | None
+    method: str
+    confidence: str | None
+    rationale: str | None
+    # NULL means the matcher wrote this row; an id means a person did.
+    actor_user_id: int | None
+    created_at: datetime.datetime
 
 
 def urls_in(body: str | None) -> list[str]:
@@ -337,14 +360,14 @@ def record(message_id: int, match: Match, *, actor_user_id: int | None = None) -
     """
     if actor_user_id is None:
         current = latest(message_id)
-        if current is not None and current["actor_user_id"] is not None:
+        if current is not None and current.actor_user_id is not None:
             logger.debug(f"message {message_id}: a person decided this; matcher stands down")
             return
         if (
             current is not None
-            and current["application_id"] == match.application_id
-            and current["method"] == match.method
-            and current["confidence"] == match.confidence
+            and current.application_id == match.application_id
+            and current.method == match.method
+            and current.confidence == match.confidence
         ):
             return
     db.execute(
@@ -364,11 +387,14 @@ def record(message_id: int, match: Match, *, actor_user_id: int | None = None) -
     )
 
 
-def latest(message_id: int) -> dict | None:
+def latest(message_id: int) -> CurrentMatch | None:
     """The current match. Append-only, so the newest row wins - the same rule
     as the verdict log, and what makes re-running non-destructive."""
-    return db.query_one(
-        "SELECT * FROM application_matches WHERE message_id = %s ORDER BY id DESC LIMIT 1",
+    return db.query_one_as(
+        CurrentMatch,
+        "SELECT id, message_id, application_id, method, confidence, rationale, "
+        "actor_user_id, created_at FROM application_matches "
+        "WHERE message_id = %s ORDER BY id DESC LIMIT 1",
         (message_id,),
     )
 

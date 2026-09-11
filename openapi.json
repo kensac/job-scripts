@@ -19808,7 +19808,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/MailList"
+                }
               }
             }
           },
@@ -19939,7 +19941,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ClassificationConsistency"
+                }
               }
             }
           },
@@ -20070,7 +20074,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/MailAnalytics"
+                }
               }
             }
           },
@@ -20198,7 +20204,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AdminMailDetail"
+                }
               }
             }
           },
@@ -20354,7 +20362,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Candidates"
+                }
               }
             }
           },
@@ -20492,7 +20502,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Reclassified"
+                }
               }
             }
           },
@@ -20620,7 +20632,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Reverted"
+                }
               }
             }
           },
@@ -20758,7 +20772,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/MatchOverridden"
+                }
               }
             }
           },
@@ -20877,7 +20893,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/PipelineSummary"
+                }
               }
             }
           },
@@ -21146,7 +21164,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Pipeline"
+                }
               }
             }
           },
@@ -21274,7 +21294,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/PipelineDetail"
+                }
               }
             }
           },
@@ -21421,7 +21443,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/MatchMoved"
+                }
               }
             }
           },
@@ -21568,7 +21592,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/MatchMoved"
+                }
               }
             }
           },
@@ -21706,7 +21732,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Ok"
+                }
               }
             }
           },
@@ -21843,7 +21871,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Ok"
+                }
               }
             }
           },
@@ -22085,7 +22115,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/UserMail"
+                }
               }
             }
           },
@@ -22241,7 +22273,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Candidates"
+                }
               }
             }
           },
@@ -22379,7 +22413,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/MessageAssigned"
+                }
               }
             }
           },
@@ -22507,7 +22543,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/MailMessageDetail"
+                }
               }
             }
           },
@@ -22645,7 +22683,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Reclassified"
+                }
               }
             }
           },
@@ -22764,7 +22804,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/MessageKinds"
+                }
               }
             }
           },
@@ -22892,7 +22934,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Reverted"
+                }
               }
             }
           },
@@ -23032,7 +23076,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Thread"
+                }
               }
             }
           },
@@ -23226,7 +23272,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Threads"
+                }
               }
             }
           },
@@ -26210,6 +26258,450 @@
         "title": "ActionClosed",
         "description": "`already` says the item was resolved before this call, so a second\nclick is not reported as a second resolution."
       },
+      "AdminMailDetail": {
+        "properties": {
+          "message": {
+            "$ref": "#/components/schemas/AdminMailMessage"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/AdminMailEvent"
+            },
+            "type": "array",
+            "title": "Events"
+          },
+          "matches": {
+            "items": {
+              "$ref": "#/components/schemas/AdminMailMatch"
+            },
+            "type": "array",
+            "title": "Matches"
+          },
+          "canonical_urls": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Canonical Urls"
+          }
+        },
+        "type": "object",
+        "required": [
+          "message",
+          "events",
+          "matches",
+          "canonical_urls"
+        ],
+        "title": "AdminMailDetail"
+      },
+      "AdminMailEvent": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "message_id": {
+            "type": "integer",
+            "title": "Message Id"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "occurred_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Occurred At"
+          },
+          "deadline_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deadline At"
+          },
+          "deadline_inferred": {
+            "type": "boolean",
+            "title": "Deadline Inferred"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "actor_user_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actor User Id"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "message_id",
+          "kind",
+          "confidence",
+          "occurred_at",
+          "deadline_at",
+          "deadline_inferred",
+          "detail",
+          "model",
+          "actor_user_id",
+          "created_at"
+        ],
+        "title": "AdminMailEvent",
+        "description": "One classification, as written. The log is append-only, so a message\nwith three of these was corrected twice and the last one is in force."
+      },
+      "AdminMailMatch": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "message_id": {
+            "type": "integer",
+            "title": "Message Id"
+          },
+          "application_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Application Id"
+          },
+          "method": {
+            "type": "string",
+            "title": "Method"
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "rationale": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rationale"
+          },
+          "actor_user_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actor User Id"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "company_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company Name"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "message_id",
+          "application_id",
+          "method",
+          "confidence",
+          "rationale",
+          "actor_user_id",
+          "created_at",
+          "company_name",
+          "title",
+          "job_id"
+        ],
+        "title": "AdminMailMatch",
+        "description": "One match attempt, with the application it named. Append-only as well,\nso a tier that keeps being corrected stays visible as history rather than\nbeing papered over one row at a time."
+      },
+      "AdminMailMessage": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "user_id": {
+            "type": "integer",
+            "title": "User Id"
+          },
+          "provider_message_id": {
+            "type": "string",
+            "title": "Provider Message Id"
+          },
+          "provider_thread_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Thread Id"
+          },
+          "thread_topic": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thread Topic"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "from_email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From Email"
+          },
+          "from_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From Name"
+          },
+          "to_emails": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "To Emails"
+          },
+          "subject": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject"
+          },
+          "sent_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sent At"
+          },
+          "body_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Body Text"
+          },
+          "body_html": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Body Html"
+          },
+          "headers": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Headers"
+          },
+          "prefilter_hit": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prefilter Hit"
+          },
+          "prefilter_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prefilter Reason"
+          },
+          "imported_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Imported At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "user_id",
+          "provider_message_id",
+          "provider_thread_id",
+          "thread_topic",
+          "source",
+          "from_email",
+          "from_name",
+          "to_emails",
+          "subject",
+          "sent_at",
+          "body_text",
+          "body_html",
+          "headers",
+          "prefilter_hit",
+          "prefilter_reason",
+          "imported_at"
+        ],
+        "title": "AdminMailMessage",
+        "description": "The stored message, whole, for the one surface that may see everybody's.\n\nThe columns were a `SELECT *`, so what reached the client was whatever the\ntable happened to hold on the day. `body_html` is the markup as it\narrived: the user-facing reader sanitises on read, this one does not,\nbecause an administrator debugging a classification needs what the\nclassifier saw."
+      },
       "Answer": {
         "properties": {
           "key": {
@@ -26406,6 +26898,198 @@
           "default_style"
         ],
         "title": "Application"
+      },
+      "ApplicationAction": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "user_id": {
+            "type": "integer",
+            "title": "User Id"
+          },
+          "application_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Application Id"
+          },
+          "event_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Id"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "due_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Due At"
+          },
+          "resolved_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved At"
+          },
+          "resolution": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolution"
+          },
+          "resolved_by_event_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved By Event Id"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "settles_on": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Settles On"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "user_id",
+          "application_id",
+          "event_id",
+          "kind",
+          "due_at",
+          "resolved_at",
+          "resolution",
+          "resolved_by_event_id",
+          "created_at",
+          "settles_on"
+        ],
+        "title": "ApplicationAction",
+        "description": "An open ask, and what could ever close it without a person.\n\n`settles_on` is `mail_pipeline.settles_on`, not a second reading of it: an\nempty list means nothing that arrives can close this item, which is a\ndifferent thing from an item still waiting, and such an item must not be\nrendered as a live obligation."
+      },
+      "ApplicationEvent": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "occurred_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Occurred At"
+          },
+          "deadline_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deadline At"
+          },
+          "deadline_inferred": {
+            "type": "boolean",
+            "title": "Deadline Inferred"
+          },
+          "message_id": {
+            "type": "integer",
+            "title": "Message Id"
+          },
+          "sent_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sent At"
+          },
+          "subject": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "occurred_at",
+          "deadline_at",
+          "deadline_inferred",
+          "message_id",
+          "sent_at",
+          "subject"
+        ],
+        "title": "ApplicationEvent",
+        "description": "One event reaching an application, through the message it was read from.\n\nThe row `events_for` and `events_by_application` both select, declared\nonce because a list and a detail view disagreeing about an application's\nevents is worse than either being wrong alone. `stage_for` reads `kind`\nand `id`; everything else is what a reader needs to check the stage\nagainst the mail that produced it."
       },
       "AppliedWeek": {
         "properties": {
@@ -28085,6 +28769,311 @@
         "type": "object",
         "title": "CancelTasksBody"
       },
+      "CandidateApplication": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id"
+          },
+          "company_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company Name"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "applied_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Applied At"
+          },
+          "source_provenance": {
+            "type": "string",
+            "title": "Source Provenance"
+          },
+          "dismissed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dismissed At"
+          },
+          "board_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Board Status"
+          },
+          "stage": {
+            "type": "string",
+            "title": "Stage"
+          },
+          "event_count": {
+            "type": "integer",
+            "title": "Event Count"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "job_id",
+          "company_name",
+          "title",
+          "applied_at",
+          "source_provenance",
+          "dismissed_at",
+          "board_status",
+          "stage",
+          "event_count",
+          "reason"
+        ],
+        "title": "CandidateApplication",
+        "description": "One application this message could belong to, and why it is on the list.\n\n`reason` separates a candidate the matcher considered and declined to\nchoose between from a search hit. A dismissed application is listed so the\npicker can show it and refused at the write, so `dismissed_at` is part of\nthe row rather than a reason to omit it."
+      },
+      "CandidateJob": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "company": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          },
+          "date_applied": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date Applied"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "company",
+          "title",
+          "url",
+          "date_applied",
+          "status"
+        ],
+        "title": "CandidateJob",
+        "description": "A posting on the board with no application yet. Attaching mail to one\ncreates the application, which is the correction people most often want."
+      },
+      "CandidateMessage": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "subject": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject"
+          },
+          "from_email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From Email"
+          },
+          "sent_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sent At"
+          },
+          "extracted_company": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Extracted Company"
+          },
+          "extracted_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Extracted Title"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "subject",
+          "from_email",
+          "sent_at",
+          "extracted_company",
+          "extracted_title"
+        ],
+        "title": "CandidateMessage",
+        "description": "The message the picker is deciding about, with what the classifier read\nout of it - which is what the ranking below compared."
+      },
+      "Candidates": {
+        "properties": {
+          "message": {
+            "$ref": "#/components/schemas/CandidateMessage"
+          },
+          "applications": {
+            "items": {
+              "$ref": "#/components/schemas/CandidateApplication"
+            },
+            "type": "array",
+            "title": "Applications"
+          },
+          "choices": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Choices"
+          },
+          "total_applications": {
+            "type": "integer",
+            "title": "Total Applications"
+          },
+          "same_company_candidates": {
+            "type": "integer",
+            "title": "Same Company Candidates"
+          },
+          "board_jobs": {
+            "items": {
+              "$ref": "#/components/schemas/CandidateJob"
+            },
+            "type": "array",
+            "title": "Board Jobs"
+          }
+        },
+        "type": "object",
+        "required": [
+          "message",
+          "applications",
+          "choices",
+          "total_applications",
+          "same_company_candidates",
+          "board_jobs"
+        ],
+        "title": "Candidates"
+      },
       "CatalogCounts": {
         "properties": {
           "sources": {
@@ -28278,6 +29267,87 @@
         ],
         "title": "CheckVerdict",
         "description": "The latest verdict for one posting check."
+      },
+      "ClassificationCell": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "messages": {
+            "type": "integer",
+            "title": "Messages"
+          },
+          "no_company": {
+            "type": "integer",
+            "title": "No Company"
+          },
+          "inferred_deadlines": {
+            "type": "integer",
+            "title": "Inferred Deadlines"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "model",
+          "confidence",
+          "messages",
+          "no_company",
+          "inferred_deadlines"
+        ],
+        "title": "ClassificationCell",
+        "description": "What one model said, at one confidence, about how many messages - with\nthe two things that go wrong inside a correct-looking answer: no company\nextracted, and a deadline the model inferred rather than read."
+      },
+      "ClassificationConsistency": {
+        "properties": {
+          "groups": {
+            "$ref": "#/components/schemas/Rate"
+          },
+          "messages": {
+            "$ref": "#/components/schemas/Rate"
+          },
+          "coverage": {
+            "$ref": "#/components/schemas/ConsistencyCoverage"
+          },
+          "worst": {
+            "items": {
+              "$ref": "#/components/schemas/ConsistencyGroup"
+            },
+            "type": "array",
+            "title": "Worst"
+          }
+        },
+        "type": "object",
+        "required": [
+          "groups",
+          "messages",
+          "coverage",
+          "worst"
+        ],
+        "title": "ClassificationConsistency"
       },
       "ClosePostingBody": {
         "properties": {
@@ -28647,6 +29717,86 @@
         ],
         "title": "ConfigPut"
       },
+      "ConsistencyCoverage": {
+        "properties": {
+          "messages_covered": {
+            "type": "integer",
+            "title": "Messages Covered"
+          },
+          "messages_classified": {
+            "type": "integer",
+            "title": "Messages Classified"
+          },
+          "min_copies": {
+            "type": "integer",
+            "title": "Min Copies"
+          },
+          "min_body_chars": {
+            "type": "integer",
+            "title": "Min Body Chars"
+          }
+        },
+        "type": "object",
+        "required": [
+          "messages_covered",
+          "messages_classified",
+          "min_copies",
+          "min_body_chars"
+        ],
+        "title": "ConsistencyCoverage",
+        "description": "What the rate is a rate OF. Only a repeated body can be checked this\nway, so this is a canary over part of the corpus and never a measure of\nit - a rate quoted without this would describe a canary as a census."
+      },
+      "ConsistencyGroup": {
+        "properties": {
+          "sender": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sender"
+          },
+          "subject": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject"
+          },
+          "copies": {
+            "type": "integer",
+            "title": "Copies"
+          },
+          "kinds": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Kinds"
+          },
+          "example_message_id": {
+            "type": "integer",
+            "title": "Example Message Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sender",
+          "subject",
+          "copies",
+          "kinds",
+          "example_message_id"
+        ],
+        "title": "ConsistencyGroup",
+        "description": "One body the classifier saw more than once, and the answers it gave."
+      },
       "ContextDraft": {
         "properties": {
           "key": {
@@ -28813,6 +29963,84 @@
         ],
         "title": "CurrencyRange",
         "description": "What our extractor read, per currency it read it in.\n\nCurrency is present on 452 of 11,442 extracted rows, so a null currency is\nthe ordinary case and gets its own entry rather than being folded into USD:\nan amount whose currency was never captured is not a dollar figure."
+      },
+      "CurrentMatch": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "message_id": {
+            "type": "integer",
+            "title": "Message Id"
+          },
+          "application_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Application Id"
+          },
+          "method": {
+            "type": "string",
+            "title": "Method"
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "rationale": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rationale"
+          },
+          "actor_user_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actor User Id"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "message_id",
+          "application_id",
+          "method",
+          "confidence",
+          "rationale",
+          "actor_user_id",
+          "created_at"
+        ],
+        "title": "CurrentMatch",
+        "description": "The match row in force for a message.\n\nDeclared beside the query that reads it, because an admin correction\nreturns it verbatim and the columns were a `SELECT *` - so what reached\nthe client was whatever the table happened to hold. A null\n`application_id` is a recorded outcome rather than an absence: `method`\nsays which of the two it is."
       },
       "CustomCheckStage": {
         "properties": {
@@ -29002,6 +30230,38 @@
           "ok"
         ],
         "title": "Deleted"
+      },
+      "DomainPopulation": {
+        "properties": {
+          "messages": {
+            "type": "integer",
+            "title": "Messages"
+          },
+          "excludes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Excludes"
+          },
+          "domains_shown": {
+            "type": "integer",
+            "title": "Domains Shown"
+          },
+          "domains_total": {
+            "type": "integer",
+            "title": "Domains Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "messages",
+          "excludes",
+          "domains_shown",
+          "domains_total"
+        ],
+        "title": "DomainPopulation",
+        "description": "The sender breakdown is also TRUNCATED, so it says how many domains it\nshows against how many exist."
       },
       "DraftRequest": {
         "properties": {
@@ -32080,6 +33340,895 @@
         "title": "LocationPut",
         "description": "One place through country/region/city, or several through places;\nplaces wins when both are sent."
       },
+      "MailAnalytics": {
+        "properties": {
+          "window_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window Days"
+          },
+          "corpus": {
+            "$ref": "#/components/schemas/MailCorpus"
+          },
+          "populations": {
+            "$ref": "#/components/schemas/Populations"
+          },
+          "classification": {
+            "items": {
+              "$ref": "#/components/schemas/ClassificationCell"
+            },
+            "type": "array",
+            "title": "Classification"
+          },
+          "matching": {
+            "items": {
+              "$ref": "#/components/schemas/MatchingCell"
+            },
+            "type": "array",
+            "title": "Matching"
+          },
+          "prefilter": {
+            "$ref": "#/components/schemas/PrefilterSummary"
+          },
+          "sender_domains": {
+            "items": {
+              "$ref": "#/components/schemas/SenderDomainRow"
+            },
+            "type": "array",
+            "title": "Sender Domains"
+          }
+        },
+        "type": "object",
+        "required": [
+          "window_days",
+          "corpus",
+          "populations",
+          "classification",
+          "matching",
+          "prefilter",
+          "sender_domains"
+        ],
+        "title": "MailAnalytics"
+      },
+      "MailCorpus": {
+        "properties": {
+          "messages": {
+            "type": "integer",
+            "title": "Messages"
+          },
+          "unclassified": {
+            "type": "integer",
+            "title": "Unclassified"
+          },
+          "oldest": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Oldest"
+          },
+          "newest": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Newest"
+          },
+          "by_source": {
+            "items": {
+              "$ref": "#/components/schemas/SourceRow"
+            },
+            "type": "array",
+            "title": "By Source"
+          }
+        },
+        "type": "object",
+        "required": [
+          "messages",
+          "unclassified",
+          "oldest",
+          "newest",
+          "by_source"
+        ],
+        "title": "MailCorpus",
+        "description": "The whole import, deliberately NOT windowed: how much mail exists, when\nit starts, and how much nothing has looked at are properties of the\nimport rather than of a slice."
+      },
+      "MailEvent": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "occurred_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Occurred At"
+          },
+          "deadline_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deadline At"
+          },
+          "deadline_inferred": {
+            "type": "boolean",
+            "title": "Deadline Inferred"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "confidence",
+          "occurred_at",
+          "deadline_at",
+          "deadline_inferred",
+          "detail",
+          "model",
+          "created_at"
+        ],
+        "title": "MailEvent",
+        "description": "One classification of this message, as written. The log is append-only\nand the newest wins, so a message with three of these was corrected twice.\nA null `model` is how a human correction is told apart from a model's."
+      },
+      "MailList": {
+        "properties": {
+          "sorts": {
+            "items": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Sorts"
+          },
+          "sortable": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Sortable"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/MailRow"
+            },
+            "type": "array",
+            "title": "Rows"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "page_size": {
+            "type": "integer",
+            "title": "Page Size"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "has_more": {
+            "type": "boolean",
+            "title": "Has More"
+          },
+          "filters": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": "object",
+            "title": "Filters"
+          },
+          "filterable": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Filterable"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sorts",
+          "sortable",
+          "rows",
+          "page",
+          "page_size",
+          "total",
+          "has_more",
+          "filters",
+          "filterable"
+        ],
+        "title": "MailList",
+        "description": "The page, plus what it was sorted and filtered by.\n\n`sortable` and `filterable` are the vocabulary a client builds its controls\nfrom, and `sorts`/`filters` echo what was actually applied, so the page\nnever has to duplicate the default or guess the keys."
+      },
+      "MailMatchRow": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "application_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Application Id"
+          },
+          "method": {
+            "type": "string",
+            "title": "Method"
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "rationale": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rationale"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "company_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company Name"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "application_id",
+          "method",
+          "confidence",
+          "rationale",
+          "created_at",
+          "company_name",
+          "title"
+        ],
+        "title": "MailMatchRow",
+        "description": "One attempt to place this message, with the application it named."
+      },
+      "MailMessage": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "subject": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject"
+          },
+          "from_email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From Email"
+          },
+          "sent_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sent At"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kind"
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "extracted_company": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Extracted Company"
+          },
+          "application_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Application Id"
+          },
+          "method": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Method"
+          },
+          "company_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company Name"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "subject",
+          "from_email",
+          "sent_at",
+          "source",
+          "kind",
+          "confidence",
+          "extracted_company",
+          "application_id",
+          "method",
+          "company_name",
+          "title"
+        ],
+        "title": "MailMessage",
+        "description": "One of a person's own messages: what arrived, what it was read as, and\nwhere it went.\n\nNot the debug row. An admin asks which messages the pipeline handled\nbadly and needs the prefilter and the model; a person asks what arrived\nand which application it reached."
+      },
+      "MailMessageDetail": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "subject": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject"
+          },
+          "from_email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From Email"
+          },
+          "sent_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sent At"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "body_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Body Text"
+          },
+          "body_html": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Body Html"
+          },
+          "blocked_remote_content": {
+            "type": "integer",
+            "title": "Blocked Remote Content"
+          },
+          "provider_message_id": {
+            "type": "string",
+            "title": "Provider Message Id"
+          },
+          "provider_thread_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Thread Id"
+          },
+          "from_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From Name"
+          },
+          "to_emails": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "To Emails"
+          },
+          "prefilter_hit": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prefilter Hit"
+          },
+          "prefilter_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prefilter Reason"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/MailEvent"
+            },
+            "type": "array",
+            "title": "Events"
+          },
+          "matches": {
+            "items": {
+              "$ref": "#/components/schemas/MailMatchRow"
+            },
+            "type": "array",
+            "title": "Matches"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "subject",
+          "from_email",
+          "sent_at",
+          "source",
+          "body_text",
+          "body_html",
+          "blocked_remote_content",
+          "provider_message_id",
+          "provider_thread_id",
+          "from_name",
+          "to_emails",
+          "prefilter_hit",
+          "prefilter_reason",
+          "events",
+          "matches"
+        ],
+        "title": "MailMessageDetail",
+        "description": "The whole message with its history, for when the excerpt is not enough.\n\nRead-only and user-scoped. The body is already stored - withholding it\nwould mean leaving for a mail client to check a decision this system\nmade, which is the same as not being able to check it."
+      },
+      "MailRow": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "provider_message_id": {
+            "type": "string",
+            "title": "Provider Message Id"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "from_email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From Email"
+          },
+          "subject": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject"
+          },
+          "sent_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sent At"
+          },
+          "prefilter_hit": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prefilter Hit"
+          },
+          "prefilter_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prefilter Reason"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kind"
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "deadline_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deadline At"
+          },
+          "deadline_inferred": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deadline Inferred"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "application_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Application Id"
+          },
+          "method": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Method"
+          },
+          "match_confidence": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Match Confidence"
+          },
+          "rationale": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rationale"
+          },
+          "company_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company Name"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "provider_message_id",
+          "source",
+          "from_email",
+          "subject",
+          "sent_at",
+          "prefilter_hit",
+          "prefilter_reason",
+          "kind",
+          "confidence",
+          "deadline_at",
+          "deadline_inferred",
+          "model",
+          "application_id",
+          "method",
+          "match_confidence",
+          "rationale",
+          "company_name",
+          "title"
+        ],
+        "title": "MailRow",
+        "description": "One message as the debug list shows it: what arrived, what the\nclassifier last said, and what the matcher last did with it.\n\nEvery field after `prefilter_reason` is the CURRENT row of an append-only\nlog and can be null for its own reason - no classification yet, no match\nattempted, a match that found nothing. They are not interchangeable and\n`_where` filters on the difference."
+      },
       "Market": {
         "properties": {
           "postings": {
@@ -32201,6 +34350,50 @@
         "title": "MarketFlags",
         "description": "Counts of postings that SAY something, reported beside `postings`\nrather than as shares, for the same reason."
       },
+      "MatchMoved": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "message_id": {
+            "type": "integer",
+            "title": "Message Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ok",
+          "message_id"
+        ],
+        "title": "MatchMoved",
+        "description": "Which message the correction moved. The append is on the MESSAGE, so\nthe id says what changed hands rather than restating the application the\ncaller already named."
+      },
+      "MatchOverridden": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "current": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CurrentMatch"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "ok",
+          "current"
+        ],
+        "title": "MatchOverridden",
+        "description": "The match now in force, which is what the append produced rather than\nwhat was asked for - a refusal is recorded as the matcher's own refusal\nmethod, so agreeing with the matcher looks like agreeing with it."
+      },
       "MatchOverride": {
         "properties": {
           "application_id": {
@@ -32267,6 +34460,30 @@
         ],
         "title": "MatchedPosting",
         "description": "The posting the url matched, when the board holds one."
+      },
+      "MatchingCell": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "method": {
+            "type": "string",
+            "title": "Method"
+          },
+          "messages": {
+            "type": "integer",
+            "title": "Messages"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "method",
+          "messages"
+        ],
+        "title": "MatchingCell",
+        "description": "How many messages of a kind the matcher settled, and by which tier.\n`never attempted` is a method value here because an absence in a\ndistribution is a gap nobody can read."
       },
       "MeasurableModel": {
         "properties": {
@@ -32344,6 +34561,46 @@
         ],
         "title": "Mention",
         "description": "The whole message, and where the company appears in it.\n\nOffsets rather than a highlighted string, so the client decides how to\nmark it and the body stays exactly what the sender wrote. `start` is null\nwhen the company does not appear verbatim, which is common: the classifier\nreads it off a signature or a logo as often as out of a sentence."
+      },
+      "MessageAssigned": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "application_id": {
+            "type": "integer",
+            "title": "Application Id"
+          },
+          "messages_assigned": {
+            "type": "integer",
+            "title": "Messages Assigned"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ok",
+          "application_id",
+          "messages_assigned"
+        ],
+        "title": "MessageAssigned",
+        "description": "What the assignment wrote. `messages_assigned` is how many moved: one\nclick that quietly reassigns a dozen messages should report it rather than\nhave the count discovered later."
+      },
+      "MessageKinds": {
+        "properties": {
+          "kinds": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Kinds"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kinds"
+        ],
+        "title": "MessageKinds"
       },
       "ModelCandidate": {
         "properties": {
@@ -33414,6 +35671,735 @@
         "title": "PhrasingPage",
         "description": "`filters` echoes what narrowed this page, keyed by parameter name, and\ncarries only the parameters that narrowed anything."
       },
+      "Pipeline": {
+        "properties": {
+          "applications": {
+            "items": {
+              "$ref": "#/components/schemas/PipelineApplication"
+            },
+            "type": "array",
+            "title": "Applications"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "has_more": {
+            "type": "boolean",
+            "title": "Has More"
+          },
+          "filters": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": "object",
+            "title": "Filters"
+          },
+          "actions": {
+            "items": {
+              "$ref": "#/components/schemas/PipelineAction"
+            },
+            "type": "array",
+            "title": "Actions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "applications",
+          "total",
+          "has_more",
+          "filters",
+          "actions"
+        ],
+        "title": "Pipeline"
+      },
+      "PipelineAction": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "user_id": {
+            "type": "integer",
+            "title": "User Id"
+          },
+          "application_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Application Id"
+          },
+          "event_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Id"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "due_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Due At"
+          },
+          "resolved_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved At"
+          },
+          "resolution": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolution"
+          },
+          "resolved_by_event_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved By Event Id"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "settles_on": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Settles On"
+          },
+          "company_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company Name"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "user_id",
+          "application_id",
+          "event_id",
+          "kind",
+          "due_at",
+          "resolved_at",
+          "resolution",
+          "resolved_by_event_id",
+          "created_at",
+          "settles_on",
+          "company_name",
+          "title"
+        ],
+        "title": "PipelineAction",
+        "description": "The same item on the list, which names the application it is about\nbecause the list has no application in hand."
+      },
+      "PipelineApplication": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id"
+          },
+          "company_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company Name"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "applied_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Applied At"
+          },
+          "source_provenance": {
+            "type": "string",
+            "title": "Source Provenance"
+          },
+          "dismissed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dismissed At"
+          },
+          "dismissed_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dismissed Reason"
+          },
+          "board_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Board Status"
+          },
+          "stage": {
+            "type": "string",
+            "title": "Stage"
+          },
+          "event_count": {
+            "type": "integer",
+            "title": "Event Count"
+          },
+          "last_event_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Event At"
+          },
+          "strongest_tier": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Strongest Tier"
+          },
+          "tier_confidence": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tier Confidence"
+          },
+          "sender": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SenderSignal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "job_id",
+          "company_name",
+          "title",
+          "applied_at",
+          "source_provenance",
+          "dismissed_at",
+          "dismissed_reason",
+          "board_status",
+          "stage",
+          "event_count",
+          "last_event_at",
+          "strongest_tier",
+          "tier_confidence",
+          "sender"
+        ],
+        "title": "PipelineApplication",
+        "description": "The row plus everything derived from the mail about it.\n\nNothing here is stored. `stage` is recomputed from the events on every\nread, which is what makes a late or reclassified message correct itself\nrather than need repairing, and `strongest_tier` is a property of the\nMATCHES rather than of the application - matches are append-only, so a row\nreports the strongest tier among its current ones."
+      },
+      "PipelineDetail": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id"
+          },
+          "company_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company Name"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "applied_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Applied At"
+          },
+          "source_provenance": {
+            "type": "string",
+            "title": "Source Provenance"
+          },
+          "dismissed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dismissed At"
+          },
+          "dismissed_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dismissed Reason"
+          },
+          "board_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Board Status"
+          },
+          "stage": {
+            "type": "string",
+            "title": "Stage"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/ApplicationEvent"
+            },
+            "type": "array",
+            "title": "Events"
+          },
+          "matches": {
+            "items": {
+              "$ref": "#/components/schemas/PipelineMatch"
+            },
+            "type": "array",
+            "title": "Matches"
+          },
+          "actions": {
+            "items": {
+              "$ref": "#/components/schemas/ApplicationAction"
+            },
+            "type": "array",
+            "title": "Actions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "job_id",
+          "company_name",
+          "title",
+          "applied_at",
+          "source_provenance",
+          "dismissed_at",
+          "dismissed_reason",
+          "board_status",
+          "stage",
+          "events",
+          "matches",
+          "actions"
+        ],
+        "title": "PipelineDetail",
+        "description": "One application with everything that decided it.\n\nThe stored row, the stage derived from the events, and the events and\nmatches themselves. It carries the row's own fields rather than nesting\nthem, which is what the list row does too, so a client holding either\nreads `company_name` the same way."
+      },
+      "PipelineMatch": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "message_id": {
+            "type": "integer",
+            "title": "Message Id"
+          },
+          "application_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Application Id"
+          },
+          "method": {
+            "type": "string",
+            "title": "Method"
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "rationale": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rationale"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "actor_user_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actor User Id"
+          },
+          "subject": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject"
+          },
+          "from_email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From Email"
+          },
+          "sent_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sent At"
+          },
+          "in_force": {
+            "type": "boolean",
+            "title": "In Force"
+          },
+          "evidence": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Evidence"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "corrected_by": {
+            "type": "string",
+            "title": "Corrected By"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "message_id",
+          "application_id",
+          "method",
+          "confidence",
+          "rationale",
+          "created_at",
+          "actor_user_id",
+          "subject",
+          "from_email",
+          "sent_at",
+          "in_force",
+          "evidence",
+          "corrected_by"
+        ],
+        "title": "PipelineMatch",
+        "description": "The attempt, what it was decided FROM, and who decided it.\n\nWithout `evidence` a person has to open their mail client to check a\nmatch, which is the same as not being able to check it. `corrected_by` is\nderived rather than stored: the same actor id reads as \"you\" to the owner\nand as an administrator to anyone else, so there is no second copy of that\ndistinction to drift."
+      },
+      "PipelineStage": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "terminal": {
+            "type": "boolean",
+            "title": "Terminal"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "label",
+          "terminal"
+        ],
+        "title": "PipelineStage",
+        "description": "The stage vocabulary in process order, with which stages are over, so\nthe lenses are read from here rather than copied into the client."
+      },
+      "PipelineSummary": {
+        "properties": {
+          "counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Counts"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "with_evidence": {
+            "type": "integer",
+            "title": "With Evidence"
+          },
+          "without_evidence": {
+            "type": "integer",
+            "title": "Without Evidence"
+          },
+          "dismissed": {
+            "type": "integer",
+            "title": "Dismissed"
+          },
+          "stages": {
+            "items": {
+              "$ref": "#/components/schemas/PipelineStage"
+            },
+            "type": "array",
+            "title": "Stages"
+          }
+        },
+        "type": "object",
+        "required": [
+          "counts",
+          "total",
+          "with_evidence",
+          "without_evidence",
+          "dismissed",
+          "stages"
+        ],
+        "title": "PipelineSummary",
+        "description": "Counts, not a funnel: terminal stages beat progress regardless of\narrival order and a stage is recomputed rather than advanced, so nothing\nflows through anything.\n\nDismissals are counted rather than hidden. They change every other number\nhere, and a total that silently shrinks week to week with nothing\nexplaining why is the failure this whole system keeps producing."
+      },
+      "Population": {
+        "properties": {
+          "messages": {
+            "type": "integer",
+            "title": "Messages"
+          },
+          "excludes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Excludes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "messages",
+          "excludes"
+        ],
+        "title": "Population",
+        "description": "The denominator a section counts over, and what it leaves out. Each\nsection below counts a DIFFERENT population and nothing in the rows says\nso, which invites a subtraction that means nothing."
+      },
+      "Populations": {
+        "properties": {
+          "classification": {
+            "$ref": "#/components/schemas/Population"
+          },
+          "matching": {
+            "$ref": "#/components/schemas/Population"
+          },
+          "prefilter": {
+            "$ref": "#/components/schemas/Population"
+          },
+          "sender_domains": {
+            "$ref": "#/components/schemas/DomainPopulation"
+          }
+        },
+        "type": "object",
+        "required": [
+          "classification",
+          "matching",
+          "prefilter",
+          "sender_domains"
+        ],
+        "title": "Populations"
+      },
       "PostingAge": {
         "properties": {
           "posted_at": {
@@ -33433,6 +36419,56 @@
         ],
         "title": "PostingAge",
         "description": "How long this one listing has been up. Carries no sample size, because\nit is a fact about this posting rather than a rate over many."
+      },
+      "PrefilterCell": {
+        "properties": {
+          "prefilter_hit": {
+            "type": "boolean",
+            "title": "Prefilter Hit"
+          },
+          "job_related": {
+            "type": "boolean",
+            "title": "Job Related"
+          },
+          "messages": {
+            "type": "integer",
+            "title": "Messages"
+          }
+        },
+        "type": "object",
+        "required": [
+          "prefilter_hit",
+          "job_related",
+          "messages"
+        ],
+        "title": "PrefilterCell"
+      },
+      "PrefilterSummary": {
+        "properties": {
+          "cells": {
+            "items": {
+              "$ref": "#/components/schemas/PrefilterCell"
+            },
+            "type": "array",
+            "title": "Cells"
+          },
+          "job_related_a_gate_would_have_dropped": {
+            "type": "integer",
+            "title": "Job Related A Gate Would Have Dropped"
+          },
+          "job_related_total": {
+            "type": "integer",
+            "title": "Job Related Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "cells",
+          "job_related_a_gate_would_have_dropped",
+          "job_related_total"
+        ],
+        "title": "PrefilterSummary",
+        "description": "A rate the prefilter could never report about itself, and the reason it\nwas kept as a signal rather than deleted: the mail a gate WOULD have\ndropped is the one unrecoverable failure."
       },
       "PresetBody": {
         "properties": {
@@ -34983,6 +38019,38 @@
         ],
         "title": "Reclassification"
       },
+      "Reclassified": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "message_id": {
+            "type": "integer",
+            "title": "Message Id"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "affected_application_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Affected Application Ids"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ok",
+          "message_id",
+          "kind",
+          "affected_application_ids"
+        ],
+        "title": "Reclassified",
+        "description": "What a correction moved. The affected applications come back rather\nthan an `ok`, because a changed kind can change what an application is\nwaiting for - including one the person is not currently looking at."
+      },
       "RefineBody": {
         "properties": {
           "instruction": {
@@ -36426,6 +39494,44 @@
         "title": "ResumeRef",
         "description": "Enough to choose one from a menu."
       },
+      "Reverted": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "already": {
+            "type": "boolean",
+            "title": "Already"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "affected_application_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Affected Application Ids"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ok",
+          "already",
+          "kind"
+        ],
+        "title": "Reverted",
+        "description": "What restoring the model's answer moved.\n\n`already` says the model's answer was already in force, and then nothing\nwas resynced - so `affected_application_ids` is absent rather than empty,\nand the routes carry `response_model_exclude_none` to keep it that way. An\nempty list would claim a recomputation that did not run."
+      },
       "ReviewRate": {
         "properties": {
           "method": {
@@ -36832,6 +39938,77 @@
           "has_more"
         ],
         "title": "ScreenedPostings"
+      },
+      "SenderDomainRow": {
+        "properties": {
+          "domain": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Domain"
+          },
+          "messages": {
+            "type": "integer",
+            "title": "Messages"
+          },
+          "matched": {
+            "type": "integer",
+            "title": "Matched"
+          }
+        },
+        "type": "object",
+        "required": [
+          "domain",
+          "messages",
+          "matched"
+        ],
+        "title": "SenderDomainRow"
+      },
+      "SenderSignal": {
+        "properties": {
+          "sender_domain": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sender Domain"
+          },
+          "sender_is_ats": {
+            "type": "boolean",
+            "title": "Sender Is Ats"
+          },
+          "sender_company_count": {
+            "type": "integer",
+            "title": "Sender Company Count"
+          },
+          "review_suggested": {
+            "type": "boolean",
+            "title": "Review Suggested"
+          },
+          "why": {
+            "type": "string",
+            "title": "Why"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sender_domain",
+          "sender_is_ats",
+          "sender_company_count",
+          "review_suggested",
+          "why"
+        ],
+        "title": "SenderSignal",
+        "description": "What an application's first sender says about whether this is an\nemployer relationship at all.\n\nA possibility, never a verdict: nothing filters or hides on this.\n`sender_company_count` is the evidence and `review_suggested` is only a\nreading of it, so both travel and the reader can disagree."
       },
       "SettingsPut": {
         "properties": {
@@ -37658,6 +40835,24 @@
           "requests"
         ],
         "title": "SourceRequestList"
+      },
+      "SourceRow": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "messages": {
+            "type": "integer",
+            "title": "Messages"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source",
+          "messages"
+        ],
+        "title": "SourceRow"
       },
       "SourceStatusCount": {
         "properties": {
@@ -39018,6 +42213,349 @@
         ],
         "title": "Taxonomy"
       },
+      "Thread": {
+        "properties": {
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/ThreadMessage"
+            },
+            "type": "array",
+            "title": "Messages"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated"
+          }
+        },
+        "type": "object",
+        "required": [
+          "messages",
+          "total",
+          "truncated"
+        ],
+        "title": "Thread",
+        "description": "The conversation, and whether it is all of it. A thread silently cut at\nthe cap reads as a conversation that ended, so the cut is said."
+      },
+      "ThreadMessage": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "subject": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject"
+          },
+          "from_email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From Email"
+          },
+          "sent_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sent At"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "body_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Body Text"
+          },
+          "body_html": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Body Html"
+          },
+          "blocked_remote_content": {
+            "type": "integer",
+            "title": "Blocked Remote Content"
+          },
+          "from_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From Name"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kind"
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "extracted_company": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Extracted Company"
+          },
+          "application_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Application Id"
+          },
+          "method": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Method"
+          },
+          "company_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company Name"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "subject",
+          "from_email",
+          "sent_at",
+          "source",
+          "body_text",
+          "body_html",
+          "blocked_remote_content",
+          "from_name",
+          "kind",
+          "confidence",
+          "extracted_company",
+          "application_id",
+          "method",
+          "company_name",
+          "title"
+        ],
+        "title": "ThreadMessage",
+        "description": "One message of a conversation, with what the pipeline made of it.\n\nSanitised per message, same as the single-message reader: a thread is\nwhere a person reads mail in context, so serving it as stripped text here\nand as rendered mail one click away would be the same message in two\nshapes."
+      },
+      "ThreadSummary": {
+        "properties": {
+          "thread_id": {
+            "type": "string",
+            "title": "Thread Id"
+          },
+          "message_count": {
+            "type": "integer",
+            "title": "Message Count"
+          },
+          "last_activity_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Activity At"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "subject": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject"
+          },
+          "participants": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Participants"
+          },
+          "kinds": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kinds"
+          },
+          "needs_attention": {
+            "type": "boolean",
+            "title": "Needs Attention"
+          },
+          "latest_message_id": {
+            "type": "integer",
+            "title": "Latest Message Id"
+          },
+          "application_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Application Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "thread_id",
+          "message_count",
+          "last_activity_at",
+          "started_at",
+          "subject",
+          "participants",
+          "kinds",
+          "needs_attention",
+          "latest_message_id",
+          "application_id"
+        ],
+        "title": "ThreadSummary",
+        "description": "A conversation as a row: when it ran, who was in it, and whether it\nstill needs somebody.\n\n`needs_attention` is the correctable pile - a thread carrying job-related\nmail that reached no application. Not \"unread\": there is no such concept\nhere and inventing one would be a second inbox to maintain."
+      },
+      "Threads": {
+        "properties": {
+          "threads": {
+            "items": {
+              "$ref": "#/components/schemas/ThreadSummary"
+            },
+            "type": "array",
+            "title": "Threads"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "has_more": {
+            "type": "boolean",
+            "title": "Has More"
+          }
+        },
+        "type": "object",
+        "required": [
+          "threads",
+          "total",
+          "has_more"
+        ],
+        "title": "Threads"
+      },
       "TimeToOutcome": {
         "properties": {
           "n": {
@@ -39464,6 +43002,41 @@
         ],
         "title": "UserJobsBulkPatch",
         "description": "One patch for a selection. Same field vocabulary as UserJobPatch; the\ncap keeps one request from holding a transaction over a whole catalog."
+      },
+      "UserMail": {
+        "properties": {
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/MailMessage"
+            },
+            "type": "array",
+            "title": "Messages"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "has_more": {
+            "type": "boolean",
+            "title": "Has More"
+          },
+          "by_kind": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "By Kind"
+          }
+        },
+        "type": "object",
+        "required": [
+          "messages",
+          "total",
+          "has_more",
+          "by_kind"
+        ],
+        "title": "UserMail",
+        "description": "The page, and the per-kind counts over the SAME predicate - so a tab's\nnumber and its contents cannot disagree."
       },
       "UserSettings": {
         "properties": {

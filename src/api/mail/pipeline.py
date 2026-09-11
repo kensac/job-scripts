@@ -24,6 +24,75 @@ from core.fetching import ats
 logger = logging.getLogger(__name__)
 
 
+class ApplicationEvent(BaseModel):
+    """One event reaching an application, through the message it was read from.
+
+    The row `events_for` and `events_by_application` both select, declared
+    once because a list and a detail view disagreeing about an application's
+    events is worse than either being wrong alone. `stage_for` reads `kind`
+    and `id`; everything else is what a reader needs to check the stage
+    against the mail that produced it.
+    """
+
+    id: int
+    kind: str
+    occurred_at: datetime.datetime | None
+    deadline_at: datetime.datetime | None
+    deadline_inferred: bool
+    message_id: int
+    sent_at: datetime.datetime | None
+    subject: str | None
+
+    @classmethod
+    def hypothetical(cls, kind: str, after: int) -> ApplicationEvent:
+        """An event that has NOT arrived, for asking what one would do.
+
+        `after` has to be newer than every real event: `stage_for` breaks ties
+        among terminal events by taking the newest, so a rejection already
+        present would otherwise win over the one being considered and the
+        answer would be "changes nothing" for the case that changes the most.
+
+        There is no message, because there is no event - message_id is 0 and
+        this never leaves the caller that built it.
+        """
+        return cls(
+            id=after,
+            kind=kind,
+            occurred_at=None,
+            deadline_at=None,
+            deadline_inferred=False,
+            message_id=0,
+            sent_at=None,
+            subject=None,
+        )
+
+
+class ApplicationState(BaseModel):
+    """What the events say about one application, and how much they say it
+    from. `last_event_at` is null when nothing has arrived, which is not the
+    same as nothing having been looked at."""
+
+    application_id: int
+    stage: str
+    event_count: int
+    last_event_at: datetime.datetime | None
+
+
+class SenderSignal(BaseModel):
+    """What an application's first sender says about whether this is an
+    employer relationship at all.
+
+    A possibility, never a verdict: nothing filters or hides on this.
+    `sender_company_count` is the evidence and `review_suggested` is only a
+    reading of it, so both travel and the reader can disagree."""
+
+    sender_domain: str | None
+    sender_is_ats: bool
+    sender_company_count: int
+    review_suggested: bool
+    why: str
+
+
 class ProposedFrom(BaseModel):
     """The row `proposals_for` selects: an application, the latest event that
     is evidence about it, and the message that event was read from.
@@ -347,7 +416,7 @@ def answer_proposal(
     )
 
 
-def stage_for(events: list[dict[str, Any]], board_status: str | None = None) -> str:
+def stage_for(events: list[ApplicationEvent], board_status: str | None = None) -> str:
     """Furthest stage reached, with terminal events winning outright.
 
     Terminal beats progress regardless of order because a rejection is not
@@ -359,19 +428,19 @@ def stage_for(events: list[dict[str, Any]], board_status: str | None = None) -> 
     # something inferred from what an employer sent.
     if board_status in WITHDRAWN_STATUSES:
         return "withdrawn"
-    terminal = [e for e in events if _EVENT_TO_STAGE.get(e["kind"]) in TERMINAL]
+    terminal = [e for e in events if _EVENT_TO_STAGE.get(e.kind) in TERMINAL]
     if terminal:
-        newest = max(terminal, key=lambda e: e["id"])
-        return _EVENT_TO_STAGE[newest["kind"]]
+        newest = max(terminal, key=lambda e: e.id)
+        return _EVENT_TO_STAGE[newest.kind]
     best = "applied"
     for event in events:
-        stage = _EVENT_TO_STAGE.get(event["kind"])
+        stage = _EVENT_TO_STAGE.get(event.kind)
         if stage in STAGE_ORDER and STAGE_ORDER.index(stage) > STAGE_ORDER.index(best):
             best = stage
     return best
 
 
-def events_for(application_id: int) -> list[dict[str, Any]]:
+def events_for(application_id: int) -> list[ApplicationEvent]:
     """Events reaching this application through its matched messages.
 
     DISTINCT ON (message_id), not (message_id, kind). A message is ONE thing -
@@ -383,7 +452,8 @@ def events_for(application_id: int) -> list[dict[str, Any]]:
     message counts as well: a message rematched to another application must
     stop contributing to the old one.
     """
-    return db.query(
+    return db.query_as(
+        ApplicationEvent,
         """
         WITH current_match AS (
             SELECT DISTINCT ON (message_id) message_id, application_id
@@ -406,7 +476,7 @@ def events_for(application_id: int) -> list[dict[str, Any]]:
     )
 
 
-def events_by_application(user_id: int) -> dict[int, list[dict[str, Any]]]:
+def events_by_application(user_id: int) -> dict[int, list[ApplicationEvent]]:
     """Every application's events for one user, in one query.
 
     The per-application version is two queries each, which is fine for a
@@ -414,6 +484,10 @@ def events_by_application(user_id: int) -> dict[int, list[dict[str, Any]]]:
     queries to render one page. Same predicates as `events_for` - the two
     must agree, because a list and a detail disagreeing about an
     application's stage is worse than either being wrong alone.
+
+    The application is the KEY rather than a field, so the events are the
+    same shape `events_for` returns and a caller cannot be handed one kind
+    here and another kind there.
     """
     rows = db.query(
         """
@@ -437,13 +511,13 @@ def events_by_application(user_id: int) -> dict[int, list[dict[str, Any]]]:
         """,
         (user_id,),
     )
-    grouped: dict[int, list[dict[str, Any]]] = {}
+    grouped: dict[int, list[ApplicationEvent]] = {}
     for row in rows:
-        grouped.setdefault(row["application_id"], []).append(row)
+        grouped.setdefault(row.pop("application_id"), []).append(ApplicationEvent(**row))
     return grouped
 
 
-def state_of(application_id: int) -> dict[str, Any]:
+def state_of(application_id: int) -> ApplicationState:
     events = events_for(application_id)
     row = db.query_one(
         "SELECT uj.status FROM applications a "
@@ -451,12 +525,12 @@ def state_of(application_id: int) -> dict[str, Any]:
         "WHERE a.id = %s",
         (application_id,),
     )
-    return {
-        "application_id": application_id,
-        "stage": stage_for(events, (row or {}).get("status")),
-        "event_count": len(events),
-        "last_event_at": max((e["sent_at"] for e in events if e["sent_at"]), default=None),
-    }
+    return ApplicationState(
+        application_id=application_id,
+        stage=stage_for(events, (row or {}).get("status")),
+        event_count=len(events),
+        last_event_at=max((e.sent_at for e in events if e.sent_at), default=None),
+    )
 
 
 def sync_action_items(application_id: int) -> dict[str, int]:
@@ -475,12 +549,12 @@ def sync_action_items(application_id: int) -> dict[str, int]:
 
     opened = 0
     for event in events:
-        kind = _EVENT_TO_ACTION.get(event["kind"])
+        kind = _EVENT_TO_ACTION.get(event.kind)
         if not kind:
             continue
         existing = db.query_one(
             "SELECT id FROM action_items WHERE event_id = %s AND kind = %s",
-            (event["id"], kind),
+            (event.id, kind),
         )
         if existing:
             continue
@@ -489,7 +563,7 @@ def sync_action_items(application_id: int) -> dict[str, int]:
             INSERT INTO action_items (user_id, application_id, event_id, kind, due_at)
             VALUES (%s, %s, %s, %s, %s)
             """,
-            (user_id, application_id, event["id"], kind, event["deadline_at"]),
+            (user_id, application_id, event.id, kind, event.deadline_at),
         )
         opened += 1
 
@@ -504,7 +578,7 @@ def sync_action_items(application_id: int) -> dict[str, int]:
     # stays open forever asking for something about an application it is not
     # part of. Matches are append-only, so the event did not disappear - it
     # moved, and the item has to follow.
-    live_events = {e["id"] for e in events}
+    live_events = {e.id for e in events}
     for item in open_items:
         if item["event_id"] is not None and item["event_id"] not in live_events:
             db.execute(
@@ -515,14 +589,14 @@ def sync_action_items(application_id: int) -> dict[str, int]:
     open_items = [i for i in open_items if i["event_id"] in live_events or i["event_id"] is None]
     for item in open_items:
         settling = _RESOLVING_EVENTS.get(item["kind"], ())
-        later = [e for e in events if e["kind"] in settling and e["id"] > (item["event_id"] or 0)]
+        later = [e for e in events if e.kind in settling and e.id > (item["event_id"] or 0)]
         if not later:
             continue
-        by = min(later, key=lambda e: e["id"])
+        by = min(later, key=lambda e: e.id)
         db.execute(
             "UPDATE action_items SET resolved_at = now(), resolution = %s, "
             "resolved_by_event_id = %s WHERE id = %s",
-            (f"superseded by {by['kind']}", by["id"], item["id"]),
+            (f"superseded by {by.kind}", by.id, item["id"]),
         )
         resolved += 1
     return {"opened": opened, "resolved": resolved}
@@ -537,7 +611,7 @@ def sync_action_items(application_id: int) -> dict[str, int]:
 INTERMEDIARY_COMPANY_NAMES = 3
 
 
-def sender_signal(user_id: int) -> dict[int, dict[str, Any]]:
+def sender_signal(user_id: int) -> dict[int, SenderSignal]:
     """Per application, what its FIRST message's sender says about whether this
     is an employer relationship at all.
 
@@ -585,7 +659,7 @@ def sender_signal(user_id: int) -> dict[int, dict[str, Any]]:
         """,
         {"user_id": user_id},
     )
-    out: dict[int, dict[str, Any]] = {}
+    out: dict[int, SenderSignal] = {}
     for row in rows:
         domain = row["domain"] or None
         companies = int(row["companies"] or 0)
@@ -601,16 +675,16 @@ def sender_signal(user_id: int) -> dict[int, dict[str, Any]]:
             )
         else:
             why = "sent from the employer's own domain"
-        out[row["application_id"]] = {
-            "sender_domain": domain,
-            "sender_is_ats": is_ats,
+        out[row["application_id"]] = SenderSignal(
+            sender_domain=domain,
+            sender_is_ats=is_ats,
             # How many distinct companies this user has derived from that
             # sender. Exposed rather than reduced to a flag, because it is the
             # evidence and the flag is only a reading of it.
-            "sender_company_count": companies,
-            "review_suggested": shared,
-            "why": why,
-        }
+            sender_company_count=companies,
+            review_suggested=shared,
+            why=why,
+        )
     return out
 
 

@@ -10,6 +10,7 @@ thread list are here rather than beside the messages they group.
 
 from __future__ import annotations
 
+import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -20,7 +21,10 @@ from api.auth import AuthedUser, require_user
 from api.mail import match as mail_match
 from api.mail import pipeline as mail_pipeline
 from api.routers.mail.shared import (
+    Candidates,
     Reclassification,
+    Reclassified,
+    Reverted,
     _apply_classification,
     _apply_revert,
     _candidates_payload,
@@ -89,6 +93,38 @@ _USER_MAIL_SORTS = {
 }
 
 
+class MailMessage(BaseModel):
+    """One of a person's own messages: what arrived, what it was read as, and
+    where it went.
+
+    Not the debug row. An admin asks which messages the pipeline handled
+    badly and needs the prefilter and the model; a person asks what arrived
+    and which application it reached."""
+
+    id: int
+    subject: str | None
+    from_email: str | None
+    sent_at: datetime.datetime | None
+    source: str
+    kind: str | None
+    confidence: str | None
+    extracted_company: str | None
+    application_id: int | None
+    method: str | None
+    company_name: str | None
+    title: str | None
+
+
+class UserMail(BaseModel):
+    """The page, and the per-kind counts over the SAME predicate - so a tab's
+    number and its contents cannot disagree."""
+
+    messages: list[MailMessage]
+    total: int
+    has_more: bool
+    by_kind: dict[str, int]
+
+
 @router.get("/user/mail")
 def user_mail(
     kind: str | None = Query(default=None),
@@ -101,7 +137,7 @@ def user_mail(
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     user: AuthedUser = Depends(require_user),
-):
+) -> UserMail:
     """The user's own mail, and what the pipeline did with each message.
 
     There was no way to see this without being an admin. `/admin/mail` is the
@@ -197,7 +233,8 @@ def user_mail(
     # reaching the database.
     order = _USER_MAIL_SORTS.get(sort, _USER_MAIL_SORTS["sent_at"])
     direction = "ASC" if dir == "asc" else "DESC"
-    rows = db.query(
+    rows = db.query_as(
+        MailMessage,
         f"""
         SELECT m.id, m.subject, m.from_email, m.sent_at, m.source,
                ce.kind, ce.confidence,
@@ -219,12 +256,12 @@ def user_mail(
         for r in db.query(f"SELECT ce.kind, count(*) AS n {base} GROUP BY ce.kind", params)
         if r["kind"]
     }
-    return {
-        "messages": rows,
-        "total": (total or {}).get("n", 0),
-        "has_more": offset + len(rows) < (total or {}).get("n", 0),
-        "by_kind": by_kind,
-    }
+    return UserMail(
+        messages=rows,
+        total=(total or {}).get("n", 0),
+        has_more=offset + len(rows) < (total or {}).get("n", 0),
+        by_kind=by_kind,
+    )
 
 
 @router.get("/user/messages/{message_id}/candidates")
@@ -233,7 +270,7 @@ def match_candidates(
     q: str | None = Query(default=None),
     limit: int = Query(default=25, ge=1, le=100),
     user: AuthedUser = Depends(require_user),
-):
+) -> Candidates:
     """What this message could belong to, best guesses first.
 
     The default order is not a search ranking, it is the matcher's own
@@ -250,8 +287,20 @@ def match_candidates(
     return _candidates_payload(message, user.id, q, limit)
 
 
+class MessageAssigned(BaseModel):
+    """What the assignment wrote. `messages_assigned` is how many moved: one
+    click that quietly reassigns a dozen messages should report it rather than
+    have the count discovered later."""
+
+    ok: bool
+    application_id: int
+    messages_assigned: int
+
+
 @router.post("/user/messages/{message_id}/assign")
-def assign_message(message_id: int, body: Assignment, user: AuthedUser = Depends(require_user)):
+def assign_message(
+    message_id: int, body: Assignment, user: AuthedUser = Depends(require_user)
+) -> MessageAssigned:
     """Attach this message to an application, creating one if asked.
 
     Appends. The previous match stays in the log and stops counting by
@@ -350,17 +399,76 @@ def assign_message(message_id: int, body: Assignment, user: AuthedUser = Depends
             actor_user_id=user.id,
         )
     mail_pipeline.sync_action_items(application_id)
-    return {
-        "ok": True,
-        "application_id": application_id,
-        # Say how many moved. One click that quietly reassigns a dozen messages
-        # should report it rather than have the count discovered later.
-        "messages_assigned": len(targets),
-    }
+    return MessageAssigned(ok=True, application_id=application_id, messages_assigned=len(targets))
+
+
+class MailEvent(BaseModel):
+    """One classification of this message, as written. The log is append-only
+    and the newest wins, so a message with three of these was corrected twice.
+    A null `model` is how a human correction is told apart from a model's."""
+
+    id: int
+    kind: str
+    confidence: str | None
+    occurred_at: datetime.datetime | None
+    deadline_at: datetime.datetime | None
+    deadline_inferred: bool
+    detail: dict[str, Any] | None
+    model: str | None
+    created_at: datetime.datetime
+
+
+class MailMatchRow(BaseModel):
+    """One attempt to place this message, with the application it named."""
+
+    id: int
+    application_id: int | None
+    method: str
+    confidence: str | None
+    rationale: str | None
+    created_at: datetime.datetime
+    company_name: str | None
+    title: str | None
+
+
+class ReadableMessage(BaseModel):
+    """A message as it can be shown to the person it belongs to.
+
+    `body_html` is SANITISED on read and the stored markup never leaves the
+    server: a caller holding the raw markup will eventually render it, and the
+    sandboxed iframe on the other side is only the second of two layers.
+    `blocked_remote_content` says what was withheld, so a reader offering
+    "load images" knows whether there is anything to load."""
+
+    id: int
+    subject: str | None
+    from_email: str | None
+    sent_at: datetime.datetime | None
+    source: str
+    body_text: str | None
+    body_html: str | None
+    blocked_remote_content: int
+
+
+class MailMessageDetail(ReadableMessage):
+    """The whole message with its history, for when the excerpt is not enough.
+
+    Read-only and user-scoped. The body is already stored - withholding it
+    would mean leaving for a mail client to check a decision this system
+    made, which is the same as not being able to check it."""
+
+    provider_message_id: str
+    provider_thread_id: str | None
+    from_name: str | None
+    to_emails: list[str] | None
+    prefilter_hit: bool | None
+    prefilter_reason: str | None
+    events: list[MailEvent]
+    matches: list[MailMatchRow]
 
 
 @router.get("/user/messages/{message_id}")
-def message_detail(message_id: int, user: AuthedUser = Depends(require_user)):
+def message_detail(message_id: int, user: AuthedUser = Depends(require_user)) -> MailMessageDetail:
     """The whole message, for when the excerpt is not enough.
 
     Read-only and user-scoped. The body is already stored - withholding it
@@ -379,14 +487,16 @@ def message_detail(message_id: int, user: AuthedUser = Depends(require_user)):
     # it arrived, so a better sanitiser improves every message ever received
     # rather than only the ones that come next. The raw markup is deliberately
     # NOT returned - a caller that has it will eventually render it.
-    return {
+    return MailMessageDetail(
         **_readable(row),
-        "events": db.query(
+        events=db.query_as(
+            MailEvent,
             "SELECT id, kind, confidence, occurred_at, deadline_at, deadline_inferred, detail, "
             "model, created_at FROM email_events WHERE message_id = %s ORDER BY id",
             (message_id,),
         ),
-        "matches": db.query(
+        matches=db.query_as(
+            MailMatchRow,
             """
             SELECT am.id, am.application_id, am.method, am.confidence, am.rationale,
                    am.created_at, a.company_name, a.title
@@ -396,13 +506,13 @@ def message_detail(message_id: int, user: AuthedUser = Depends(require_user)):
             """,
             (message_id,),
         ),
-    }
+    )
 
 
 @router.post("/user/messages/{message_id}/classify")
 def correct_classification(
     message_id: int, body: Reclassification, user: AuthedUser = Depends(require_user)
-):
+) -> Reclassified:
     """Say what a message actually is, when the classifier got it wrong.
 
     Every other correction here fixes the MATCH. Nothing fixed the kind - and
@@ -423,19 +533,23 @@ def correct_classification(
     return _apply_classification(message, body, actor_user_id=user.id)
 
 
+class MessageKinds(BaseModel):
+    kinds: list[str]
+
+
 @router.get("/user/message-kinds")
-def message_kinds(user: AuthedUser = Depends(require_user)):
+def message_kinds(user: AuthedUser = Depends(require_user)) -> MessageKinds:
     """The vocabulary, served rather than copied.
 
     The client kept this list in two places and it drifts the moment a kind is
     added - the same failure as the stage vocabulary, which had a terminal
     state the frontend did not know about.
     """
-    return {"kinds": sorted(EVENT_KINDS)}
+    return MessageKinds(kinds=sorted(EVENT_KINDS))
 
 
-@router.post("/user/messages/{message_id}/classify/revert")
-def revert_classification(message_id: int, user: AuthedUser = Depends(require_user)):
+@router.post("/user/messages/{message_id}/classify/revert", response_model_exclude_none=True)
+def revert_classification(message_id: int, user: AuthedUser = Depends(require_user)) -> Reverted:
     """Undo a correction by restoring what the model last said.
 
     Another append, not a delete: a mis-correction has to be recoverable and
@@ -458,12 +572,39 @@ def _readable(row: dict[str, Any]) -> dict[str, Any]:
     return {**row, "body_html": safe, "blocked_remote_content": blocked}
 
 
+class ThreadMessage(ReadableMessage):
+    """One message of a conversation, with what the pipeline made of it.
+
+    Sanitised per message, same as the single-message reader: a thread is
+    where a person reads mail in context, so serving it as stripped text here
+    and as rendered mail one click away would be the same message in two
+    shapes."""
+
+    from_name: str | None
+    kind: str | None
+    confidence: str | None
+    extracted_company: str | None
+    application_id: int | None
+    method: str | None
+    company_name: str | None
+    title: str | None
+
+
+class Thread(BaseModel):
+    """The conversation, and whether it is all of it. A thread silently cut at
+    the cap reads as a conversation that ended, so the cut is said."""
+
+    messages: list[ThreadMessage]
+    total: int
+    truncated: bool
+
+
 @router.get("/user/messages/{message_id}/thread")
 def read_thread(
     message_id: int,
     limit: int = Query(default=MAX_THREAD_FANOUT, ge=1, le=200),
     user: AuthedUser = Depends(require_user),
-):
+) -> Thread:
     """The conversation this message belongs to, oldest first.
 
     Mail is a flat list of messages and the unit a person thinks in is the
@@ -509,18 +650,13 @@ def read_thread(
         {"user": user.id, "msg": message_id, "limit": limit + 1},
     )
     truncated = len(rows) > limit
-    return {
-        # Sanitised per message, same as the single-message reader: a thread
-        # is where a person reads mail in context, so serving it as stripped
-        # text there and as rendered mail one click away would be the same
-        # message in two shapes. 0.7ms each measured on real bodies, so a full
-        # 40-message thread costs about 28ms.
-        "messages": [_readable(row) for row in rows[:limit]],
-        "total": len(rows[:limit]),
-        # Said rather than implied. A conversation silently cut at 40 reads as
-        # a conversation that ended.
-        "truncated": truncated,
-    }
+    return Thread(
+        # 0.7ms per message measured on real bodies, so a full 40-message
+        # thread costs about 28ms to sanitise.
+        messages=[ThreadMessage(**_readable(row)) for row in rows[:limit]],
+        total=len(rows[:limit]),
+        truncated=truncated,
+    )
 
 
 # Aggregates, so they are the ORDER BY expressions rather than column names.
@@ -533,6 +669,34 @@ _THREAD_SORTS = {
 }
 
 
+class ThreadSummary(BaseModel):
+    """A conversation as a row: when it ran, who was in it, and whether it
+    still needs somebody.
+
+    `needs_attention` is the correctable pile - a thread carrying job-related
+    mail that reached no application. Not "unread": there is no such concept
+    here and inventing one would be a second inbox to maintain."""
+
+    thread_id: str
+    message_count: int
+    last_activity_at: datetime.datetime | None
+    started_at: datetime.datetime | None
+    subject: str | None
+    # Null rather than empty when every message in the thread lacks one, which
+    # is what the FILTER on the aggregate produces.
+    participants: list[str] | None
+    kinds: list[str] | None
+    needs_attention: bool
+    latest_message_id: int
+    application_id: int | None
+
+
+class Threads(BaseModel):
+    threads: list[ThreadSummary]
+    total: int
+    has_more: bool
+
+
 @router.get("/user/threads")
 def list_threads(
     needs_attention: bool | None = Query(default=None),
@@ -542,7 +706,7 @@ def list_threads(
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     user: AuthedUser = Depends(require_user),
-):
+) -> Threads:
     """Conversations, newest activity first.
 
     The list form of a thread rather than a list of messages. Grouping a page
@@ -596,7 +760,8 @@ def list_threads(
     # unknown value must fall back rather than reach the database.
     order = _THREAD_SORTS.get(sort, _THREAD_SORTS["last_activity_at"])
     direction = "ASC" if dir == "asc" else "DESC"
-    rows = db.query(
+    rows = db.query_as(
+        ThreadSummary,
         f"""
         SELECT {_THREAD_KEY} AS thread_id,
                count(*) AS message_count,
@@ -619,8 +784,8 @@ def list_threads(
         """,
         params,
     )
-    return {
-        "threads": rows,
-        "total": (total or {}).get("n", 0),
-        "has_more": offset + len(rows) < (total or {}).get("n", 0),
-    }
+    return Threads(
+        threads=rows,
+        total=(total or {}).get("n", 0),
+        has_more=offset + len(rows) < (total or {}).get("n", 0),
+    )

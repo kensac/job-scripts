@@ -533,7 +533,7 @@ _MESSAGE_RANK_REASONS = {
 }
 
 
-def _stage_would_move(kind: str | None, own: list[dict[str, Any]]) -> bool:
+def _stage_would_move(kind: str | None, own: list[mail_pipeline.ApplicationEvent]) -> bool:
     """Would adding an event of this kind change this application's stage?
 
     Asked of the same function the board reads, over the application's real
@@ -550,13 +550,17 @@ def _stage_would_move(kind: str | None, own: list[dict[str, Any]]) -> bool:
     before = mail_pipeline.stage_for(own)
     if before in mail_pipeline.TERMINAL:
         return False
-    newest = max((e.get("id") or 0) for e in own) if own else 0
-    after = mail_pipeline.stage_for([*own, {"kind": kind, "sent_at": None, "id": newest + 1}])
+    newest = max(e.id for e in own) if own else 0
+    after = mail_pipeline.stage_for(
+        [*own, mail_pipeline.ApplicationEvent.hypothetical(kind, newest + 1)]
+    )
     return after != before
 
 
 def _rank(
-    kind: str, candidates: list[dict[str, Any]], events: dict[int, list[dict[str, Any]]]
+    kind: str,
+    candidates: list[dict[str, Any]],
+    events: dict[int, list[mail_pipeline.ApplicationEvent]],
 ) -> int:
     if not candidates:
         return _RANK_REFUSAL_ONLY
@@ -569,7 +573,7 @@ def _rank(
 def _message_items(
     owner_id: int,
     apps_by_company: dict[str, list[dict[str, Any]]],
-    events: dict[int, list[dict[str, Any]]],
+    events: dict[int, list[mail_pipeline.ApplicationEvent]],
 ) -> list[dict[str, Any]]:
     """Mail that reached no application and no deliberate refusal."""
     rows = db.query(
@@ -618,7 +622,9 @@ def _message_items(
     return items
 
 
-def _match_items(owner_id: int, events: dict[int, list[dict[str, Any]]]) -> list[dict[str, Any]]:
+def _match_items(
+    owner_id: int, events: dict[int, list[mail_pipeline.ApplicationEvent]]
+) -> list[dict[str, Any]]:
     """Attachments the matcher made that nobody has been asked about.
 
     The stage a rejection would remove is the same question `_rank` asks of an
@@ -633,7 +639,7 @@ def _match_items(owner_id: int, events: dict[int, list[dict[str, Any]]]) -> list
         # What this message contributes: the stage without it, against the
         # stage with everything. Equal means rejecting it changes nothing a
         # person would see.
-        without = [e for e in own if e.get("message_id") != row["message_id"]]
+        without = [e for e in own if e.message_id != row["message_id"]]
         moves = mail_pipeline.stage_for(without) != mail_pipeline.stage_for(own)
         rank = _RANK_MOVES_STAGE if moves else _RANK_ATTACHABLE
         implies = None
@@ -689,7 +695,9 @@ def _match_items(owner_id: int, events: dict[int, list[dict[str, Any]]]) -> list
     return items
 
 
-def _proposal_items(owner_id: int, events: dict[int, list[dict[str, Any]]]) -> list[dict[str, Any]]:
+def _proposal_items(
+    owner_id: int, events: dict[int, list[mail_pipeline.ApplicationEvent]]
+) -> list[dict[str, Any]]:
     """Where the mail and the board disagree.
 
     Every one of these moves what the product says, by construction - a
@@ -748,7 +756,9 @@ def _proposal_items(owner_id: int, events: dict[int, list[dict[str, Any]]]) -> l
     return items
 
 
-def _action_items(owner_id: int, events: dict[int, list[dict[str, Any]]]) -> list[dict[str, Any]]:
+def _action_items(
+    owner_id: int, events: dict[int, list[mail_pipeline.ApplicationEvent]]
+) -> list[dict[str, Any]]:
     """Open asks, each saying what could ever close it without a person.
 
     All at one rank, deliberately. Marking an ask done closes the ask and moves
