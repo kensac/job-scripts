@@ -4,7 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from api import batch_results, db, worker
+from api import db, worker
+from api.ai import batch_results
 from core import batch
 from core.embeddings import EMBEDDING_DIMENSIONS, EMBEDDING_MODEL
 from tasks import embeddings, runtime

@@ -5,7 +5,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from api import ai, ai_access, db, verdicts
+from api import ai, db
+from api.ai import access as ai_access
+from api.ai import verdicts
 from core import pricing
 from tasks import uploads
 

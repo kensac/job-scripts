@@ -25,9 +25,10 @@ from contextvars import ContextVar
 from decimal import Decimal
 from typing import Any, LiteralString, NamedTuple
 
-from api import ai, batch_results, budget, db, events, metrics
-from api.batch_results import consume_result as consume_result
-from api.batch_results import snapshot_specs as snapshot_specs
+from api import ai, budget, db, events, metrics
+from api.ai import batch_results
+from api.ai.batch_results import consume_result as consume_result
+from api.ai.batch_results import snapshot_specs as snapshot_specs
 from api.budget import Entitlement
 from api.queue import INGEST_INTERVAL_MINUTES, enqueue  # noqa: F401
 from core import pricing

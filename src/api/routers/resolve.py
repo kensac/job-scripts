@@ -32,8 +32,10 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
-from api import db, mail_match, mail_pipeline
+from api import db
 from api.auth import AuthedUser, require_user
+from api.mail import match as mail_match
+from api.mail import pipeline as mail_pipeline
 from api.routers.admin import require_admin
 
 router = APIRouter()

@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import datetime
 
-from api import db, mail_pipeline
+from api import db
+from api.mail import pipeline as mail_pipeline
 from core import ats
 
 

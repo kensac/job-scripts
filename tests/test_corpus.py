@@ -208,8 +208,8 @@ def test_a_board_query_over_real_volume_never_returns_another_users_rows():
     open behind it. The difference only shows with a second user who has data,
     and with enough of it that a missing predicate is not masked by an empty
     table."""
-    from api import criteria
-    from api.visibility import FULL
+    from api.board import criteria
+    from api.board.visibility import FULL
 
     users = db.query("SELECT id FROM users ORDER BY id")
     assert len(users) > 1

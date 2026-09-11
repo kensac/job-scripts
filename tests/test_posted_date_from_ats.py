@@ -7,7 +7,8 @@ import datetime
 
 import pytest
 
-from api import db, verdicts
+from api import db
+from api.ai import verdicts
 from core import ats
 
 

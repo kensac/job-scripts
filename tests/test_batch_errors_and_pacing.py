@@ -13,7 +13,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from api import db, health, verdicts
+from api import db, health
+from api.ai import verdicts
 from core import batch
 from core.store import add_ai_result
 

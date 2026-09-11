@@ -14,13 +14,13 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from api import (
     ai,
-    ai_access,
     apply,
     budget,
     db,
     events,
     telemetry,
 )
+from api.ai import access as ai_access
 from api.apply import policy as extension_policy
 from api.apply import recipes as extension_recipes
 from api.auth import AuthedUser, require_user

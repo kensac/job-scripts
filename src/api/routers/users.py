@@ -6,8 +6,9 @@ from urllib.parse import urlparse
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from api import ai, budget, crypto, db, visibility
+from api import ai, budget, crypto, db
 from api.auth import AuthedUser, require_service, require_user
+from api.board import visibility
 from api.models import ApiKeyPut, Criteria, SettingsPut
 from core import providers as core_providers
 from core.answers import DEFAULT_STYLE

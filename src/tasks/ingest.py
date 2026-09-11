@@ -12,7 +12,8 @@ import re
 from typing import Any
 from urllib.parse import urlparse
 
-from api import db, filter_runs, hosts, metrics, telemetry, verdicts
+from api import db, filter_runs, hosts, metrics, telemetry
+from api.ai import verdicts
 from core.store import add_ai_result
 from tasks.board import content_attempted_urls, content_ready_urls
 from tasks.runtime import Deferred, cancelled, set_progress

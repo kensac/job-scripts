@@ -1,7 +1,8 @@
 import pytest
 
-from api import ai, db, visibility
+from api import ai, db
 from api.apply import writes as application_writes
+from api.board import visibility
 from core import batch
 from core.batch import BatchSpec
 from tasks import application, runtime

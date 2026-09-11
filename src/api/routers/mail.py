@@ -18,9 +18,11 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
-from api import db, mail_match, mail_pipeline, pagination, rates, scoping, sorting
+from api import db, pagination, rates, scoping, sorting
 from api import params as params_
 from api.auth import AuthedUser, require_user
+from api.mail import match as mail_match
+from api.mail import pipeline as mail_pipeline
 from api.routers import resolve
 from api.routers.admin import require_admin
 from core.answers import EVENT_KINDS

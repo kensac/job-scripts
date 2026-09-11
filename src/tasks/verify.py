@@ -7,8 +7,9 @@ import logging
 import os
 from typing import Any
 
-from api import ai, db, events, verdicts
-from api.batch_results import progress_counts
+from api import ai, db, events
+from api.ai import verdicts
+from api.ai.batch_results import progress_counts
 from core.answers import _VERIFY_INSTRUCTIONS, VerifyVerdict
 from core.providers.spec import StructuredOutput
 from core.routing import TaskShape, resolve

@@ -7,8 +7,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from psycopg.errors import UniqueViolation
 from pydantic import BaseModel
 
-from api import ai, ai_access, budget, db, filter_runs, visibility
+from api import ai, budget, db, filter_runs
+from api.ai import access as ai_access
 from api.auth import AuthedUser, require_user
+from api.board import visibility
 from api.config import group_access_allowed
 from api.models import FilterCreate, FilterPatch, ImprovePromptRequest
 from core.filters import ON_AMBIGUOUS_VALUES, compute_filter_hash

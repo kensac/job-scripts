@@ -8,7 +8,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from api import db, fetching, verdicts
+from api import db, fetching
+from api.ai import verdicts
 from core import ats
 
 

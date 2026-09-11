@@ -156,8 +156,8 @@ def test_no_verdict_claims_a_check_type_we_do_not_write():
 def test_visibility_predicate_runs_against_real_volume():
     """Not a correctness assertion - a smoke test that the board query still
     executes over the real catalog, which is 100x the size of any fixture."""
-    from api import criteria
-    from api.visibility import FULL
+    from api.board import criteria
+    from api.board.visibility import FULL
 
     user = db.query_one("SELECT id FROM users ORDER BY id LIMIT 1")
     if user is None:

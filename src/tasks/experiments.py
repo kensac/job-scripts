@@ -19,7 +19,7 @@ from decimal import Decimal
 from typing import Any
 
 from api import db
-from api.batch_results import progress_counts
+from api.ai.batch_results import progress_counts
 from core import pricing, providers
 from core.store import AI_ELIGIBLE_JOB, CONTENT_LATERAL, VERIFIED_OPEN
 from tasks.runtime import (

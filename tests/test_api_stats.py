@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from api import db, visibility
+from api import db
+from api.board import visibility
 from tests.test_api_jobs import _insert_job, _pass_closed, _subscribe, _uid
 
 

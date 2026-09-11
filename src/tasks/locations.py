@@ -9,7 +9,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from api import db
-from api.batch_results import progress_counts
+from api.ai.batch_results import progress_counts
 from core.providers import StructuredOutput
 from core.routing import TaskShape
 from tasks.runtime import consume_result, has_batch_work, run_batched, set_progress

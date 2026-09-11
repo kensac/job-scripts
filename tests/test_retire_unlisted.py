@@ -12,7 +12,8 @@ from __future__ import annotations
 
 import asyncio
 
-from api import db, verdicts
+from api import db
+from api.ai import verdicts
 from core import boards
 from core.posting import JobPosting
 from tasks import ingest

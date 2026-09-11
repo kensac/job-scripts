@@ -130,7 +130,7 @@ def test_an_untouched_board_row_is_the_working_set_and_not_what_a_person_sees(us
     on 2026-09-10: deleting the row was said to remove the posting from the
     board, and it does not.
     """
-    from api import visibility
+    from api.board import visibility
 
     user_id = _user_id()
     job_id = _make_passing_job(user_id, "https://scope.test/1")

@@ -9,7 +9,8 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from api import batch_results, db
+from api import db
+from api.ai import batch_results
 from core import skills as skills_lib
 from core.providers import StructuredOutput
 from core.requirements import (

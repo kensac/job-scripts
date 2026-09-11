@@ -23,7 +23,7 @@ from typing import Any, Literal
 from pydantic import BaseModel
 
 from api import db
-from api.batch_results import progress_counts
+from api.ai.batch_results import progress_counts
 from core.providers.spec import StructuredOutput
 from core.routing import Evidence, TaskShape
 from tasks.runtime import consume_result, has_batch_work, run_batched, set_progress

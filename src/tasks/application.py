@@ -22,8 +22,9 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from api import ai, budget, db, hosts, visibility
+from api import ai, budget, db, hosts
 from api.apply import writes as application_writes
+from api.board import visibility
 from core import forms
 from core.answers import DEFAULT_STYLE
 from core.providers.spec import StructuredOutput
@@ -484,7 +485,7 @@ async def handle_application_sweep(task_id: int, payload: dict[str, Any]) -> Non
     drafts_cap = int(db.get_config("application_drafts_per_cycle"))
 
     # "On their board" is the board's own membership predicate
-    # (api.visibility.FAST), not a fresh spelling of it.
+    # (api.board.visibility.FAST), not a fresh spelling of it.
     unread = db.query(
         visibility.FAST.format(
             columns="j.url",

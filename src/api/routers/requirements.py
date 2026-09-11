@@ -16,9 +16,10 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from api import criteria, db, visibility
+from api import db
 from api.auth import AuthedUser, require_user
-from api.job_access import require_visible_job
+from api.board import criteria, visibility
+from api.board.access import require_visible_job
 from core.requirements import (
     CLEARANCE_LEVELS,
     DEGREE_LEVELS,

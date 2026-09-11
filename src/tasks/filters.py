@@ -6,8 +6,9 @@ import asyncio
 import logging
 from typing import Any
 
-from api import ai, budget, db, events, metrics, verdicts
-from api.batch_results import progress_counts
+from api import ai, budget, db, events, metrics
+from api.ai import verdicts
+from api.ai.batch_results import progress_counts
 from core.answers import FilterDecision, FilterResult
 from core.filters import build_custom_decision_instructions, build_custom_input
 from core.store import get_content, get_contents, get_custom_result

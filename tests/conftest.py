@@ -373,8 +373,8 @@ def client(request):
     opts out with the no_board_recompute marker."""
     from fastapi.testclient import TestClient
 
-    from api import visibility
     from api.app import app
+    from api.board import visibility
 
     tc = TestClient(app)
     if request.node.get_closest_marker("no_board_recompute"):
