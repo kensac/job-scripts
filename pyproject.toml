@@ -171,30 +171,61 @@ type = "forbidden"
 source_modules = ["core"]
 forbidden_modules = ["api"]
 
-# THE SECOND LAYER IS NOW STATABLE, AND IS NOT YET STATED.
+# The second layer. `tasks` is the work the worker runs, and it uses `api`;
+# `api` must not reach back.
 #
-# `tasks` being a sibling of `api` is what makes it possible: import-linter's
-# `forbidden` skips a target inside its source, so while the handlers lived at
-# api.tasks the rule passed whatever the code did. Verified before this move
-# by adding a violation and watching it stay green.
+# One line only because `tasks` is a SIBLING of `api` rather than a child:
+# import-linter's `forbidden` skips a target sitting inside its source, so
+# while the handlers lived at api.tasks this rule passed whatever the code
+# did. Verified before the move by adding a violation and watching it stay
+# green.
 #
-# Turning it on names six imports, and five of them are one smell wearing five
-# hats. Every one reaches past a handler for a SHAPE or a CONSTANT, never for
-# behaviour:
+# Six imports broke it when it was first switched on, and five were one smell:
+# each reached past a handler for a SHAPE or a CONSTANT, never for behaviour.
+# Three of those are gone. The verdict models, the mail event vocabulary and
+# the default drafting style now live in core/answers.py, which is where both
+# layers can read them.
 #
-#   api.budget              -> tasks.SHAPES            price the fleet
-#   api.routers.task_models -> tasks.SHAPES            configure the fleet
-#   api.routers.users       -> tasks.application.DEFAULT_STYLE
-#   api.routers.jobs        -> tasks.models.FilterVerdict
-#   api.routers.mail        -> tasks.mail_classify.EVENT_KINDS
+# What is left is five modules and three causes, which is why the list below
+# is longer than "a third exception is a smell" would allow. They are not
+# five smells; they are two named problems and one correct dependency.
 #
-# The sixth is the dependency pointing the right way round: api.worker IS the
-# task runner and loads HANDLERS to dispatch them.
+# CORRECT. api.worker IS the task runner, sits above the handlers by
+# definition, and loads HANDLERS to dispatch them. This one never goes.
 #
-# Listing five as exceptions would leave a contract that mostly records debt,
-# and one that grows an entry at a time until it means nothing. The shapes
-# move to where both layers can read them instead, and the contract lands with
-# them. tasks/models.py is already a shapes module; it is only under `tasks`
-# by habit. SHAPES is the awkward one: it is assembled BY importing each task
-# module to read the shape that module declares, so the declarations have to
-# invert and live beside TaskShape in core/routing.py.
+# SHAPES, wanted by api.budget to price the fleet and by
+# api.routers.task_models to configure it. It resists the treatment the other
+# constants got, which was tried here and reverted rather than forced: SHAPES
+# is assembled BY importing each task module to read the shape that module
+# declares, so the declarations have to invert, and two do not move cleanly.
+# mail_classify BUILDS its two shapes in a function rather than declaring
+# them, and application reads its purpose from another module.
+#
+# BEHAVIOUR, not a shape, in four routers. apply and application call
+# drafts.resume_text, drafts.writing_style and drafts.instructions; admin
+# calls locations.store; experiments calls into the experiment handler. These
+# are routers using a handler as a service, so the dependency really does
+# point the wrong way, and the fix is to move those functions out of the
+# handlers rather than to move a constant.
+#
+# That is the one category here that is a design error rather than a missing
+# home, and it is the largest, which is worth knowing: the tangle between the
+# services and the handlers is mostly four routers reaching for four helpers
+# that were written inside a task because that is where they were first
+# needed.
+[[tool.importlinter.contracts]]
+name = "the services do not reach into the handlers"
+type = "forbidden"
+source_modules = ["api"]
+forbidden_modules = ["tasks"]
+ignore_imports = [
+    "api.worker -> tasks",
+    "api.worker -> tasks.runtime",
+    "api.budget -> tasks",
+    "api.budget -> tasks.runtime",
+    "api.routers.task_models -> tasks",
+    "api.routers.apply -> tasks.application",
+    "api.routers.experiments -> tasks.experiments",
+    "api.routers.admin -> tasks.locations",
+    "api.routers.application -> tasks.application",
+]

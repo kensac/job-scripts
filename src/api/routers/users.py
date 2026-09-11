@@ -10,6 +10,7 @@ from api import ai, budget, crypto, db, visibility
 from api.auth import AuthedUser, require_service, require_user
 from api.models import ApiKeyPut, Criteria, SettingsPut
 from core import providers as core_providers
+from core.answers import DEFAULT_STYLE
 
 router = APIRouter()
 
@@ -284,8 +285,6 @@ def get_settings(user: AuthedUser = Depends(require_user)):
     # Read-only, beside the field it is the placeholder for: the settings
     # page is where a person writes their style, so it shows the default
     # there without reading a job's application view to find it.
-    from tasks.application import DEFAULT_STYLE
-
     return {**settings, "default_style": DEFAULT_STYLE, **_effective_model(user)}
 
 

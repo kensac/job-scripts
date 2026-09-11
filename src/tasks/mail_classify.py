@@ -180,19 +180,6 @@ BACKFILL_TASK = _classify_task(
 ONGOING_TASK = _classify_task(ONGOING_MODEL, "mail_classify", "Mail classification (ongoing)")
 
 
-EVENT_KINDS = (
-    "acknowledgement",
-    "rejection",
-    "assessment_invite",
-    "interview_invite",
-    "interview_scheduled",
-    "info_request",
-    "offer",
-    "recruiter_outreach",
-    "position_closed",
-    "not_job_related",
-)
-
 _INSTRUCTIONS = """You classify a single email from a job seeker's mailbox.
 
 Return the event kind that best describes what the SENDER is communicating.

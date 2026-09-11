@@ -1,12 +1,12 @@
 from openai.lib._pydantic import to_strict_json_schema
 
+from core.answers import FilterDecision, FilterResult, FilterVerdict
 from core.filters import (
     build_custom_decision_instructions,
     build_custom_instructions,
     compute_filter_hash,
     compute_prompt_hash,
 )
-from tasks.models import FilterDecision, FilterResult, FilterVerdict
 
 
 def test_decision_wire_excludes_reason_without_changing_criteria_identity():

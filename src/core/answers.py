@@ -1,4 +1,11 @@
-"""Structured-output schemas and instruction text for the AI checks."""
+"""The shapes a model must answer in.
+
+Here rather than under `tasks` because both layers read them: a handler asks
+the question, and a router reads the same shape back when a person asks why a
+posting was ruled out. A shape is not behaviour, and reaching past a handler
+for one was five of the six imports that stopped the layering being stated.
+
+Structured-output schemas and instruction text for the AI checks."""
 
 from __future__ import annotations
 
@@ -73,4 +80,34 @@ _VERIFY_INSTRUCTIONS = (
     "closed_reason / clearance_reason: <=20 words each, citing the specific text that "
     "decided that axis. They are read when a human asks why a posting was ruled out, so "
     "quote the signal rather than restating the verdict."
+)
+
+
+# The vocabulary the mail classifier must answer within. Read by the router
+# that serves those kinds to a person, which is why it is not under `tasks`.
+EVENT_KINDS = (
+    "acknowledgement",
+    "rejection",
+    "assessment_invite",
+    "interview_invite",
+    "interview_scheduled",
+    "info_request",
+    "offer",
+    "recruiter_outreach",
+    "position_closed",
+    "not_job_related",
+)
+
+
+# What a stranger's answer sounds like when nobody has said otherwise. A
+# person overrides the whole thing from settings; this is not merged with
+# theirs, it is replaced by it.
+DEFAULT_STYLE = (
+    "Concise but not abrupt: the shortest version that still has enough context to feel "
+    "thoughtful. Natural and conversational, like something a person would actually type, "
+    "not polished corporate language. Professional without being formal. Simple wording over "
+    "jargon or buzzwords. Specific rather than generic: name the actual project, situation or "
+    "reason instead of filler. Confident but understated: show competence through what was "
+    "done and how, never by declaring it. Low fluff: no excessive gratitude, pleasantries or "
+    "repetition."
 )

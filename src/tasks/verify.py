@@ -9,11 +9,11 @@ from typing import Any
 
 from api import ai, db, events, verdicts
 from api.batch_results import progress_counts
+from core.answers import _VERIFY_INSTRUCTIONS, VerifyVerdict
 from core.providers.spec import StructuredOutput
 from core.routing import TaskShape, resolve
 from core.store import AI_ELIGIBLE_JOB, CONTENT_LATERAL
 from tasks.board import UNTOUCHED, demote_closed
-from tasks.models import _VERIFY_INSTRUCTIONS, VerifyVerdict
 from tasks.runtime import (
     CHUNK_SIZE,
     SCRAPE_CONCURRENCY,

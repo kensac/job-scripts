@@ -25,6 +25,7 @@ from pydantic import BaseModel
 from api import ai, budget, db, hosts, visibility
 from api.apply import writes as application_writes
 from core import forms
+from core.answers import DEFAULT_STYLE
 from core.providers.spec import StructuredOutput
 from core.routing import TaskShape
 from core.store import get_content
@@ -46,7 +47,7 @@ IN_FLIGHT = ("pending", "running", "awaiting_batch", "waiting")
 # What a stranger's answer sounds like when nobody has said otherwise. A
 # person overrides the whole thing from settings; this is not merged with
 # theirs, it is replaced by it.
-DEFAULT_STYLE = (
+FAULT_STYLE = (
     "Concise but not abrupt: the shortest version that still has enough context to feel "
     "thoughtful. Natural and conversational, like something a person would actually type, "
     "not polished corporate language. Professional without being formal. Simple wording over "

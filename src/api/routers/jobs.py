@@ -474,9 +474,9 @@ async def explain_check(job_id: int, body: ExplainBody, user: AuthedUser = Depen
 
     from api import budget
     from api import verdicts as _verdicts
+    from core.answers import FilterVerdict
     from core.checks import POSTING_CHECKS
     from core.filters import build_custom_instructions
-    from tasks.models import FilterVerdict
 
     # This route writes a verdict into ai_queries, which has no user_id and is
     # resolved latest-row-per-(url, check_type) for EVERY user. An ungated

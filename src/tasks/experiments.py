@@ -92,8 +92,8 @@ def steps() -> dict[str, dict[str, Any]]:
     """The measurable steps: how each builds its request and which fields of
     its answer are compared. Imported lazily so this module does not pull
     every task module in at import."""
+    from core.answers import FilterDecision, VerifyVerdict
     from tasks import comp, requirements, verify
-    from tasks.models import FilterDecision, VerifyVerdict
 
     return {
         "filter": {
