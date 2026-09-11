@@ -23,7 +23,7 @@ def _filter(client, headers, name="strict"):
     return r.json()["id"]
 
 
-def test_a_filter_run_is_refused_while_one_is_in_flight(client, user_headers):
+def test_a_filter_run_is_refused_while_one_is_in_flight(client, user_headers, runs_permitted):
     fid = _filter(client, user_headers)
     # A save queues nothing unless the person's group re-judges on change
     # (filter_rejudge_on_change_groups is seeded closed); the person presses
@@ -49,7 +49,7 @@ def test_a_filter_run_is_refused_while_one_is_in_flight(client, user_headers):
     assert r.status_code == 200 and r.json()["task_id"] != first
 
 
-def test_run_all_is_one_at_a_time_and_covers_every_filter(client, user_headers):
+def test_run_all_is_one_at_a_time_and_covers_every_filter(client, user_headers, runs_permitted):
     fid = _filter(client, user_headers, "a")
     db.execute("UPDATE tasks SET status = 'done' WHERE kind = 'run_filter'")
     r = client.post("/v1/user/filters/run-all", headers=user_headers)
@@ -66,7 +66,9 @@ def test_run_all_is_one_at_a_time_and_covers_every_filter(client, user_headers):
     assert client.post("/v1/user/filters/run-all", headers=user_headers).status_code == 200
 
 
-def test_another_persons_run_does_not_block_mine(client, user_headers, other_user_headers):
+def test_another_persons_run_does_not_block_mine(
+    client, user_headers, other_user_headers, runs_permitted
+):
     _filter(client, other_user_headers)
     fid = _filter(client, user_headers)
     db.execute(

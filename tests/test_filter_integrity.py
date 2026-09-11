@@ -21,7 +21,9 @@ def test_database_refuses_multiple_enabled_filters(f):
 
 @pytest.mark.parametrize("status", ["pending", "running", "waiting", "awaiting_batch"])
 @pytest.mark.parametrize("admin", [False, True])
-def test_run_all_refuses_existing_individual(client, user_headers, admin_headers, f, status, admin):
+def test_run_all_refuses_existing_individual(
+    client, user_headers, admin_headers, f, status, admin, runs_permitted
+):
     uid = db.query_one("SELECT id FROM users WHERE sub = 'test-user'")["id"]
     flt = f.make_filter(uid, enabled=True)
     task = db.query_one(
@@ -105,7 +107,7 @@ def test_filter_list_reports_run_all_admission(client, user_headers, f):
     assert body["filters"][0]["run_admission"]["allowed"] is False
 
 
-def test_concurrent_run_all_requests_have_one_winner(client, user_headers):
+def test_concurrent_run_all_requests_have_one_winner(client, user_headers, runs_permitted):
     ready = Barrier(2)
 
     def run(_):
