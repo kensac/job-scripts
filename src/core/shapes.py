@@ -29,6 +29,12 @@ from core.answers import VERIFICATION_REQUEST
 from core.providers.spec import StructuredOutput
 from core.routing import Evidence, TaskShape
 
+# Shared by the re-verification sweep and its pre-cutover shadow report. The
+# report compares the full stale population and carries the ordinary cycle cap
+# separately, so a cap cannot make two different populations appear equal.
+REVERIFY_DAYS = int(os.environ.get("JOBTRACKER_REVERIFY_DAYS", "7"))
+REVERIFY_PER_CYCLE = int(os.environ.get("JOBTRACKER_REVERIFY_PER_CYCLE", "0"))
+
 # --- compensation extraction ---
 
 # Comp extraction runs hourly and each pass is bounded, so one task cannot pull

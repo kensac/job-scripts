@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 from typing import Any
 
 from api import ai, db, events
@@ -12,7 +11,7 @@ from api.ai import verdicts
 from api.ai.batch_results import progress_counts
 from core.answers import VERIFICATION_REQUEST
 from core.routing import resolve
-from core.shapes import VERIFY_TASK
+from core.shapes import REVERIFY_DAYS, REVERIFY_PER_CYCLE, VERIFY_TASK
 from core.store import AI_ELIGIBLE_JOB, CONTENT_LATERAL
 from tasks.board import UNTOUCHED, demote_closed
 from tasks.runtime import (
@@ -33,12 +32,6 @@ from tasks.runtime import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-REVERIFY_DAYS = int(os.environ.get("JOBTRACKER_REVERIFY_DAYS", "7"))
-
-
-REVERIFY_PER_CYCLE = int(os.environ.get("JOBTRACKER_REVERIFY_PER_CYCLE", "0"))  # 0 = all stale
 
 
 def _newer_evidence(result, check: str) -> bool:

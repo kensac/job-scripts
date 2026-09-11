@@ -172,6 +172,22 @@ a measurement asks for it.
 Phase 2 still brings its numbers before it merges: it decides what gets paid
 for.
 
+`GET /admin/working-set-shadow` is the read-only cutover report. Run it after
+the split backfill and at least one complete filter cycle. It compares legacy
+and proposed pair membership, AI eligibility, the full stale re-verification
+population, and scheduled users in one database snapshot. It reports bounded
+examples and keeps legacy rows with no surviving provenance in
+`legacy_unknown`; those rows are not evidence for either side. The ordinary
+re-verification cap is shown separately and never narrows the comparison.
+
+Digest candidates remain `cannot_tell`: `user_job_working_set` has no admission
+timestamp, so the proposed population cannot be reconstructed. The report's
+old count uses the current non-force digest cutoff, `last_digest_at` or one day
+ago. `cannot_tell` counts working-set rows that lack admission-time
+classification; it is not presented as a proposed candidate count. Choosing
+what a digest announces is a product decision, not something the report infers
+from the legacy row's timestamp.
+
 The storage cutover also needs three product meanings before its schema can be
 the source of truth:
 

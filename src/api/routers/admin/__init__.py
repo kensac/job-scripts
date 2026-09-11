@@ -28,6 +28,7 @@ from api.routers.admin import (
     people,
     queries,
     sources,
+    working_set_shadow,
 )
 from api.routers.admin.shared import ADMIN_GROUPS, require_admin
 
@@ -40,6 +41,7 @@ router.include_router(fleet.router)
 router.include_router(catalog.router)
 router.include_router(checks.router)
 router.include_router(health.router)
+router.include_router(working_set_shadow.router)
 router.include_router(config.router)
 router.include_router(queries.router)
 router.include_router(extension.router)
