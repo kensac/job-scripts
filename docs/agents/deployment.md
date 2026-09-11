@@ -2,6 +2,19 @@
 
 ## Verify, never infer
 
+**A green check is not always a verdict.** When CI's auto-fix step pushes a
+commit, the pull request's head moves to a commit that the judging run did not
+start from, so the request can show no checks, or gated ones, while a correct
+verdict exists on the previous commit. Read which SHA a check belongs to
+before trusting it, the same way an image digest is read rather than a tag.
+
+Setting the repository secret `AUTOFIX_TOKEN` to a token belonging to a person
+or a GitHub App closes it: a push authenticated that way starts an ordinary
+run on the new head, and its checks attach to the request. The workflow token
+cannot, by design, because a workflow that could trigger itself would not
+stop.
+
+
 **Never claim something is deployed because it merged.** Hosts follow a pinned
 image digest, and main can be many commits ahead of the pin every host is
 correctly running.

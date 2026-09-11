@@ -74,6 +74,16 @@ jobs:
           APP_ENCRYPTION_KEY: ci
           GH_TOKEN: ${{ github.token }}
           HEAD_BRANCH: ${{ github.head_ref }}
+          # A push authenticated by the workflow token starts no ordinary run:
+          # GitHub gates it as action_required so a workflow cannot trigger
+          # itself forever. The gated run sits on the pull request's new head,
+          # which is why the request shows no verdict even though this run
+          # produced one. A token belonging to a person or an app does not
+          # have that restriction, so with AUTOFIX_TOKEN set the pushed commit
+          # gets a real run whose checks land on the request. Without it the
+          # verdict below is still correct, it is just attached to the commit
+          # this run started from.
+          AUTOFIX_TOKEN: ${{ secrets.AUTOFIX_TOKEN }}
         run: |
           ruff check --fix src tests || true
           ruff format src tests
@@ -98,7 +108,12 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add src tests openapi.json
           git commit -m "chore: auto-fix lint, format and schema"
-          git push origin "HEAD:$HEAD_BRANCH"
+          if [ -n "$AUTOFIX_TOKEN" ]; then
+            git push "https://x-access-token:$AUTOFIX_TOKEN@github.com/$GITHUB_REPOSITORY" \
+              "HEAD:$HEAD_BRANCH"
+          else
+            git push origin "HEAD:$HEAD_BRANCH"
+          fi
           echo "changed=true" >> "$GITHUB_OUTPUT"
           echo "::notice::Pushed mechanical fixes as a new commit; this run judges it"
       - id: revision
