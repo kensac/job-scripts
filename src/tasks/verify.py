@@ -10,7 +10,7 @@ from typing import Any
 from api import ai, db, events
 from api.ai import verdicts
 from api.ai.batch_results import progress_counts
-from core.answers import _VERIFY_INSTRUCTIONS, VerifyVerdict
+from core.answers import _VERIFY_INSTRUCTIONS, VERIFY_INPUT_CHARS, VerifyVerdict
 from core.routing import resolve
 from core.shapes import VERIFY_TASK
 from core.store import AI_ELIGIBLE_JOB, CONTENT_LATERAL
@@ -226,7 +226,7 @@ async def _reverify_jobs(
             BatchSpec(
                 url,
                 _VERIFY_INSTRUCTIONS,
-                content[:20000],
+                content[:VERIFY_INPUT_CHARS],
                 "VerifyVerdict",
                 schema,
                 context=by_url[url],
@@ -400,7 +400,7 @@ async def handle_verify_new(task_id: int, payload: dict[str, Any]) -> None:
             BatchSpec(
                 r["url"],
                 _VERIFY_INSTRUCTIONS,
-                r["input_content"][:20000],
+                r["input_content"][:VERIFY_INPUT_CHARS],
                 "VerifyVerdict",
                 schema,
                 context={

@@ -5,12 +5,17 @@ against a reference arm and against what production decided."""
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 import pytest
 
 from api import db
 from api import experiments as exp
+from core.answers import VERIFY_INPUT_CHARS
+from core.comp import COMP_INPUT_CHARS
+from tasks import comp as task_comp
 from tasks import experiments as task_exp
+from tasks import verify as task_verify
 
 
 def _verdict(url: str, rejected: bool) -> str:
@@ -23,6 +28,33 @@ def _sample(f, n: int) -> list[str]:
         _, url = f.make_ready_job(url=f"https://x.test/exp{i}", content="a real posting body " * 40)
         urls.append(url)
     return urls
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("family", "cap"),
+    [("comp", COMP_INPUT_CHARS), ("verify", VERIFY_INPUT_CHARS)],
+)
+async def test_task_and_experiment_inputs_share_the_derivation_cap(f, monkeypatch, family, cap):
+    content = "x" * (cap + 137)
+    captured = []
+
+    async def capture(task_id, shape, specs):
+        captured.extend(specs)
+        return [], SimpleNamespace(model="unused")
+
+    if family == "comp":
+        f.make_ready_job(content=content)
+        monkeypatch.setattr(task_comp, "run_batched", capture)
+        await task_comp.handle_extract_comp(f.make_task("extract_comp", status="running"), {})
+    else:
+        f.make_ready_job(content=content, closed="", clearance="")
+        monkeypatch.setattr(task_verify, "run_batched", capture)
+        await task_verify.handle_verify_new(f.make_task("verify_new", status="running"), {})
+
+    assert len(captured) == 1
+    experiment_input = exp.steps()[family]["input"]({"input_content": content})
+    assert captured[0].input == experiment_input == content[:cap]
 
 
 def test_only_an_admin_creates_and_a_filter_needs_a_filter_id(client, user_headers, admin_headers):

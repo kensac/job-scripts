@@ -60,6 +60,10 @@ class CompExtract(BaseModel):
     display: str = ""
 
 
+# Posting text beyond this point is not sent to the extraction model.
+COMP_INPUT_CHARS = 20000
+
+
 COMP_INSTRUCTIONS = (
     "Extract the advertised compensation for THIS job from the page content. "
     "has_comp=true only when a concrete pay amount or range is stated for this "

@@ -74,8 +74,13 @@ def steps() -> dict[str, dict[str, Any]]:
     """The measurable steps: how each builds its request and which fields of
     its answer are compared. Imported lazily so the schemas are loaded only
     when an experiment needs the declarations."""
-    from core.answers import _VERIFY_INSTRUCTIONS, FilterDecision, VerifyVerdict
-    from core.comp import COMP_INSTRUCTIONS, CompExtract
+    from core.answers import (
+        _VERIFY_INSTRUCTIONS,
+        VERIFY_INPUT_CHARS,
+        FilterDecision,
+        VerifyVerdict,
+    )
+    from core.comp import COMP_INPUT_CHARS, COMP_INSTRUCTIONS, CompExtract
     from core.requirements import (
         REQUIREMENTS_INPUT_CHARS,
         REQUIREMENTS_INSTRUCTIONS,
@@ -94,14 +99,14 @@ def steps() -> dict[str, dict[str, Any]]:
         "verify": {
             "instructions": lambda params: _VERIFY_INSTRUCTIONS,
             "model": VerifyVerdict,
-            "input": lambda r: r["input_content"][:20000],
+            "input": lambda r: r["input_content"][:VERIFY_INPUT_CHARS],
             "max_output_tokens": VERIFY_TASK.max_output_tokens,
             "fields": _verify_fields,
         },
         "comp": {
             "instructions": lambda params: COMP_INSTRUCTIONS,
             "model": CompExtract,
-            "input": lambda r: r["input_content"][:20000],
+            "input": lambda r: r["input_content"][:COMP_INPUT_CHARS],
             "max_output_tokens": COMP_TASK.max_output_tokens,
             "fields": _comp_fields,
         },
