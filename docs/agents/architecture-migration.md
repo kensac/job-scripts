@@ -495,8 +495,8 @@ in the file raises `PydanticUserError: ... is not fully defined`, at import,
 with a message that does not say the cause. Found the hard way on
 `routers/apply.py`.
 
-**The services still reach into the handlers, in four imports.** Nine on
-2026-09-11, and the five that were a shape or a constant are closed. The
+**The services still reach into the handlers, in three imports.** Nine on
+2026-09-11, and six are closed. The
 contract in `pyproject.toml` is enforced in CI and carries only these, each
 with what would move it.
 
@@ -506,14 +506,16 @@ reads the runtime for the same reason. Two lines for one fact, and the fact
 goes away only if the worker stops being an `api` module. Nothing in the code
 would change if it did, so it has not been done for a line in a config file.
 
-`api.routers.admin.catalog -> tasks.locations` and
-`api.routers.experiments -> tasks.experiments` are behaviour, and they are the
-design error rather than a missing home. the catalog calls `locations.store`;
-experiments calls `steps`, `arm_ok`, `arm_name` and `summarise`. What moves
-them is moving the functions, not a constant, and experiments is the bigger
-half: `tasks/experiments.py` is 505 lines of which the handler is about 40 and
-the rest is the experiment domain the router actually wants. That is a phase 6
-split as much as a contract fix, and it should be taken as one.
+`api.routers.admin.catalog -> tasks.locations` is behaviour, and it is a design
+error rather than a missing home. The catalog calls `locations.store`, so the
+functions need a service home rather than another exception.
+
+The experiment edge is closed. Request construction, arm validation, sampling
+and scoring live in `api/experiments.py`, which both the router and the task
+handler call. The extraction answer schemas and instructions that experiments
+also need live beside their vocabularies in `core`, rather than making the
+service reach through the handlers. `tasks/experiments.py` now owns only task
+lifecycle, batch submission and result collection.
 
 The four drafting helpers this list used to name are gone.
 `api/apply/drafting.py` holds `resume_text`, `writing_style`, `instructions`,
