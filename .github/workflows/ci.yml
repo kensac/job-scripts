@@ -14,7 +14,7 @@ on:
 # Pull requests run without production credentials. Forks receive only a
 # read-only workflow token; neither collection nor test lanes may read secrets.
 jobs:
-  prepare:
+  gate:
     runs-on: ubuntu-latest
     outputs:
       corrected: ${{ steps.autofix.outputs.changed }}
@@ -122,6 +122,46 @@ jobs:
         run: ruff check src tests
       - name: Format check
         run: ruff format --check src tests
+  # Everything the gate proved was not needed before the tests can start.
+  # It ran inside prepare, and the lanes waited about twenty seconds for
+  # checks none of them consume: the manifest below is read by `check` at
+  # the end, not by a lane. Now it runs beside them.
+  static:
+    needs: gate
+    if: needs.gate.outputs.corrected != 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    services:
+      postgres:
+        # pgvector, not plain postgres: migrations CREATE EXTENSION vector, so a
+        # base image without it fails the whole suite at conftest import.
+        # -trixie is load-bearing. The default pg18 tag is bookworm (glibc 2.36)
+        # and prod's cluster was initialised under trixie (glibc 2.41); mixing
+        # them emits collation-version mismatches, which is silent text-index
+        # corruption rather than a loud failure.
+        image: pgvector/pgvector:pg18-trixie@sha256:78bf48b801e792f99e3ac62b5036fd3876e9be48afda16c1e331af1c75ceb2ff
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: jobtracker_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -U ci" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/jobtracker_ci
+      PYTHONPATH: src
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.gate.outputs.revision }}
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          enable-cache: true
+      - run: uv sync --frozen
+      - run: echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
       - name: Type check
         run: pyright
       - name: Import contract
@@ -152,8 +192,14 @@ jobs:
             echo "::error::ORM models drifted from migrations - generate a real migration"; cat "$f"; exit 1
           fi
 
+
   tests:
+<<<<<<< HEAD
     needs: prepare
+=======
+    needs: gate
+    if: needs.gate.outputs.corrected != 'true'
+>>>>>>> e464f8f (perf(ci): the lanes stop waiting on checks they do not consume)
     strategy:
       fail-fast: false
       matrix:
@@ -162,7 +208,7 @@ jobs:
     with:
       lane: ${{ matrix.lane }}
       shards: 3
-      revision: ${{ needs.prepare.outputs.revision }}
+      revision: ${{ needs.gate.outputs.revision }}
 
   # Preserve the required check name. Every lane must pass and account for
   # the complete collection before this gate can be green.
@@ -176,28 +222,48 @@ jobs:
   # exactly what it pushed.
   check:
     if: always()
-    needs: [prepare, tests]
+    needs: [gate, static, tests]
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
       - name: Require successful preparation and execution
         env:
-          PREPARE_RESULT: ${{ needs.prepare.result }}
+          PREPARE_RESULT: ${{ needs.gate.result }}
           TEST_RESULT: ${{ needs.tests.result }}
+<<<<<<< HEAD
+=======
+          CORRECTED: ${{ needs.gate.outputs.corrected }}
+>>>>>>> e464f8f (perf(ci): the lanes stop waiting on checks they do not consume)
         run: |
           test "$PREPARE_RESULT" = success
           test "$TEST_RESULT" = success
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+<<<<<<< HEAD
+=======
+        if: needs.gate.outputs.corrected != 'true'
+>>>>>>> e464f8f (perf(ci): the lanes stop waiting on checks they do not consume)
         with:
-          ref: ${{ needs.prepare.outputs.revision }}
+          ref: ${{ needs.gate.outputs.revision }}
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+<<<<<<< HEAD
+=======
+        if: needs.gate.outputs.corrected != 'true'
+>>>>>>> e464f8f (perf(ci): the lanes stop waiting on checks they do not consume)
         with:
           name: test-manifest
           path: collection
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+<<<<<<< HEAD
+=======
+        if: needs.gate.outputs.corrected != 'true'
+>>>>>>> e464f8f (perf(ci): the lanes stop waiting on checks they do not consume)
         with:
           pattern: timings-*
           path: measurements
       - name: Verify every collected test executed exactly once
+<<<<<<< HEAD
+=======
+        if: needs.gate.outputs.corrected != 'true'
+>>>>>>> e464f8f (perf(ci): the lanes stop waiting on checks they do not consume)
         run: python tools/test_performance.py measurements --shards=3 --manifest=collection/manifest.json | tee "$GITHUB_STEP_SUMMARY"
