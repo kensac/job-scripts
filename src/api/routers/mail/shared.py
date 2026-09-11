@@ -242,7 +242,41 @@ def _candidates_payload(
     }
 
 
-def _mention(body: str | None, needle: str | None) -> dict[str, Any] | None:
+class Mention(BaseModel):
+    """The whole message, and where the company appears in it.
+
+    Offsets rather than a highlighted string, so the client decides how to
+    mark it and the body stays exactly what the sender wrote. `start` is null
+    when the company does not appear verbatim, which is common: the classifier
+    reads it off a signature or a logo as often as out of a sentence."""
+
+    text: str
+    start: int | None
+    end: int | None
+    term: str | None
+
+
+class Evidence(BaseModel):
+    """What a match actually rested on.
+
+    The rationale says what the matcher concluded; this says what it concluded
+    it FROM. The company the classifier read out of the mail is what tiers 2
+    and 3 compared, so if that extraction is wrong the match is wrong and no
+    amount of staring at the conclusion reveals it."""
+
+    extracted_company: str | None
+    extracted_title: str | None
+    classified_as: str | None
+    classifier_confidence: str | None
+    classifier_model: str | None
+    # The one fact no model produced. An ATS domain is near proof of a real
+    # application; a .edu sender usually is not.
+    from_domain: str | None
+    mention: Mention | None
+    body_chars: int
+
+
+def _mention(body: str | None, needle: str | None) -> Mention | None:
     """The whole message, and WHERE the company is mentioned in it.
 
     Not an excerpt. An excerpt meant reading a fragment, clicking, and then
@@ -262,15 +296,15 @@ def _mention(body: str | None, needle: str | None) -> dict[str, Any] | None:
         return None
     term = (needle or "").strip()
     found = text.lower().find(term.lower()) if term else -1
-    return {
-        "text": text,
-        "start": found if found >= 0 else None,
-        "end": found + len(term) if found >= 0 else None,
-        "term": term if found >= 0 else None,
-    }
+    return Mention(
+        text=text,
+        start=found if found >= 0 else None,
+        end=found + len(term) if found >= 0 else None,
+        term=term if found >= 0 else None,
+    )
 
 
-def _evidence_for(message_ids: list[int]) -> dict[int, dict[str, Any]]:
+def _evidence_for(message_ids: list[int]) -> dict[int, Evidence]:
     """What each match actually rested on.
 
     The rationale field says what the matcher concluded; this says what it
@@ -295,22 +329,22 @@ def _evidence_for(message_ids: list[int]) -> dict[int, dict[str, Any]]:
         """,
         (message_ids,),
     )
-    out: dict[int, dict[str, Any]] = {}
+    out: dict[int, Evidence] = {}
     for row in rows:
         detail = row["detail"] or {}
         company = detail.get("company")
-        out[row["id"]] = {
+        out[row["id"]] = Evidence(
             # What the classifier read out of the mail. Tier 2 and 3 compare
             # THIS, not the raw text, so a wrong extraction is a wrong match.
-            "extracted_company": company,
-            "extracted_title": detail.get("role_title"),
-            "classified_as": row["kind"],
-            "classifier_confidence": row["confidence"],
-            "classifier_model": row["model"],
+            extracted_company=company,
+            extracted_title=detail.get("role_title"),
+            classified_as=row["kind"],
+            classifier_confidence=row["confidence"],
+            classifier_model=row["model"],
             # The sender is the one fact no model produced. An ATS domain is
             # near-proof of a real application; a .edu sender usually is not.
-            "from_domain": (row["from_email"] or "").split("@")[-1].lower() or None,
-            "mention": _mention(row["body_text"], company),
-            "body_chars": len(row["body_text"] or ""),
-        }
+            from_domain=(row["from_email"] or "").split("@")[-1].lower() or None,
+            mention=_mention(row["body_text"], company),
+            body_chars=len(row["body_text"] or ""),
+        )
     return out

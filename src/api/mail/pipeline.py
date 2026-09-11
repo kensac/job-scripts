@@ -12,13 +12,72 @@ a different set of events, recomputed.
 
 from __future__ import annotations
 
+import datetime
 import logging
 from typing import Any
+
+from pydantic import BaseModel
 
 from api import db
 from core.fetching import ats
 
 logger = logging.getLogger(__name__)
+
+
+class ProposedFrom(BaseModel):
+    """The row `proposals_for` selects: an application, the latest event that
+    is evidence about it, and the message that event was read from.
+
+    `board_updatable` is the LEFT JOIN made explicit. 1,817 of 2,543
+    applications here have no board row, because mail predating the catalog is
+    the normal case, and answering a proposal on one of those moves nothing.
+    Declared so a caller can say that before the click rather than report a
+    status it did not write afterwards."""
+
+    application_id: int
+    company_name: str | None
+    title: str | None
+    job_id: int | None
+    board_status: str | None
+    date_applied: datetime.date | None
+    board_updatable: bool
+    event_id: int
+    kind: str
+    company: str | None
+    role_title: str | None
+    message_id: int
+    subject: str | None
+    from_email: str | None
+    sent_at: datetime.datetime | None
+
+
+class Proposal(ProposedFrom):
+    """A proposal as offered. `suggested_status` is what the event kind means
+    for the board; `board_reason` says why answering will move nothing, and is
+    null when it will."""
+
+    suggested_status: str
+    board_reason: str | None
+
+
+class ProposalAnswered(BaseModel):
+    """What answering actually wrote.
+
+    `board_status` is present only when a row moved. It used to carry the
+    proposed status whenever the answer was `accepted`, including for the
+    applications with no board row where the UPDATE matched nothing, so the
+    caller was told a status had moved that no SELECT could find."""
+
+    ok: bool
+    response: str
+    board_updated: bool
+    board_status: str | None
+    # Whole sentences, capitalised and stopped: the client renders this
+    # verbatim rather than composing its own line, so a lowercase fragment
+    # would land mid-paragraph looking like a bug. Null when a row moved and
+    # there is nothing to explain.
+    reason: str | None
+
 
 # Ordered by how far through a process they are. A later stage never regresses
 # to an earlier one on the strength of an older email: an acknowledgement that
@@ -131,7 +190,7 @@ def with_settling(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [{**row, "settles_on": settles_on(row["kind"])} for row in rows]
 
 
-def proposals_for(user_id: int) -> list[dict[str, Any]]:
+def proposals_for(user_id: int) -> list[Proposal]:
     """Where the mail and the board disagree, as things to confirm.
 
     Never an overwrite. `user_jobs.status` is what the user typed, and a system
@@ -154,7 +213,8 @@ def proposals_for(user_id: int) -> list[dict[str, Any]]:
     states the consequence before the click rather than reporting a status it
     did not write afterwards.
     """
-    rows = db.query(
+    rows = db.query_as(
+        ProposedFrom,
         """
         WITH current_match AS (
             SELECT DISTINCT ON (message_id) message_id, application_id
@@ -193,20 +253,20 @@ def proposals_for(user_id: int) -> list[dict[str, Any]]:
         },
     )
     return [
-        {
-            **row,
-            "suggested_status": STATUS_FROM_EVENT[row["kind"]],
-            "board_reason": None
-            if row["board_updatable"]
+        Proposal(
+            **row.model_dump(),
+            suggested_status=STATUS_FROM_EVENT[row.kind],
+            board_reason=None
+            if row.board_updatable
             else "This application is not on your board, so there is no status to move.",
-        }
+        )
         for row in rows
     ]
 
 
 def answer_proposal(
     user_id: int, application_id: int, event_id: int, response: str
-) -> dict[str, Any] | None:
+) -> ProposalAnswered | None:
     """Record the answer, and move the board only where there is a board.
 
     Returns None when the event is not currently evidence about this
@@ -266,25 +326,25 @@ def answer_proposal(
             "WHERE user_id = %s AND job_id = %s",
             (status, user_id, app["job_id"]),
         )
-    return {
-        "ok": True,
-        "response": response,
-        "board_updated": bool(updated),
+    return ProposalAnswered(
+        ok=True,
+        response=response,
+        board_updated=bool(updated),
         # Present only when a row actually moved. The proposed status is still
         # readable from `suggested_status` on the item that offered it.
-        "board_status": status if updated else None,
+        board_status=status if updated else None,
         # WHOLE SENTENCES, capitalised and stopped. These are shown to a person
         # verbatim - the client is told never to claim a move that did not
         # happen, so it renders this instead of composing its own line, and a
         # lowercase fragment lands mid-paragraph looking like a bug.
-        "reason": None
+        reason=None
         if updated
         else (
             "Recorded. This application is not on your board, so no status moved."
             if response == ACCEPTED
             else "Recorded. Declining moves nothing, by design."
         ),
-    }
+    )
 
 
 def stage_for(events: list[dict[str, Any]], board_status: str | None = None) -> str:
