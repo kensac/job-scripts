@@ -10,7 +10,7 @@ from typing import Any
 from api import ai, db, events, verdicts
 from api.batch_results import progress_counts
 from api.tasks.board import UNTOUCHED, demote_closed
-from api.tasks.models import _VERIFY_INSTRUCTIONS, JobClosedVerdict, VerifyVerdict
+from api.tasks.models import _VERIFY_INSTRUCTIONS, VerifyVerdict
 from api.tasks.runtime import (
     CHUNK_SIZE,
     SCRAPE_CONCURRENCY,
@@ -27,6 +27,7 @@ from api.tasks.runtime import (
     submit_or_collect,
     update_parent_progress,
 )
+from core.checks import JobClosedVerdict
 from core.providers.spec import StructuredOutput
 from core.routing import TaskShape, resolve
 from core.store import AI_ELIGIBLE_JOB, CONTENT_LATERAL
