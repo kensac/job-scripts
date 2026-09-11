@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 from api import ai, db
 from api.auth import AuthedUser
+from api.problem import UNAVAILABLE_REFUSALS
 from api.routers.admin.shared import require_admin
 
 router = APIRouter()
@@ -103,7 +104,9 @@ class RunCheckBody(BaseModel):
     model: str | None = None
 
 
-@router.post("/checks/run")
+# 503 is this route's own: no other route refuses because the fleet holds no
+# server key for the provider the re-check would run on.
+@router.post("/checks/run", responses=UNAVAILABLE_REFUSALS)
 async def run_single_check(
     body: RunCheckBody, user: AuthedUser = Depends(require_admin)
 ) -> CheckRerun | PostingGone:
