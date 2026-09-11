@@ -9,7 +9,7 @@ from fastapi import Header, HTTPException
 
 from api import db, metrics
 
-logger = logging.getLogger("jobtracker_api")
+logger = logging.getLogger(__name__)
 
 SERVICE_TOKEN = os.environ.get("JOBTRACKER_SERVICE_TOKEN", "")
 

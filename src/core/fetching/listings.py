@@ -106,8 +106,8 @@ def fetch_airtable_postings(
 
         except (requests.RequestException, ValueError) as exc:
             if attempt == max_retries:
-                logger.error(
-                    f"Failed to fetch Airtable postings after {max_retries + 1} attempts: {exc}"
+                logger.exception(
+                    f"Failed to fetch Airtable postings after {max_retries + 1} attempts"
                 )
                 return []
             logger.warning(
@@ -190,7 +190,7 @@ def fetch_jobright_postings(url: str, max_retries: int = 3) -> list[JobPosting]:
             return postings
         except Exception as exc:
             if attempt >= max_retries:
-                logger.error(f"Failed to fetch jobright postings: {exc}")
+                logger.exception("Failed to fetch jobright postings")
                 return []
             logger.warning(f"Jobright attempt {attempt + 1} failed: {exc}, retrying...")
             backoff.wait()
@@ -230,7 +230,7 @@ def fetch_job_postings(url: str, timeout: float = 10.0, max_retries: int = 3) ->
 
         except requests.RequestException as exc:
             if attempt == max_retries:
-                logger.error(f"Failed to fetch postings after {max_retries + 1} attempts: {exc}")
+                logger.exception(f"Failed to fetch postings after {max_retries + 1} attempts")
                 return []
 
             logger.warning(f"Attempt {attempt + 1} failed: {exc}, retrying with backoff...")

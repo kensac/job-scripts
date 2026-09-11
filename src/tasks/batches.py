@@ -8,7 +8,7 @@ from typing import Any
 from api import db
 from tasks.runtime import resume_parked, set_progress
 
-logger = logging.getLogger("jobtracker_worker")
+logger = logging.getLogger(__name__)
 
 
 def _record_progress(progress: dict[str, Any]) -> None:

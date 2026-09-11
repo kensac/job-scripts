@@ -38,7 +38,7 @@ from tasks.runtime import (
     update_parent_progress,
 )
 
-logger = logging.getLogger("jobtracker_worker")
+logger = logging.getLogger(__name__)
 
 
 async def _check_filter(

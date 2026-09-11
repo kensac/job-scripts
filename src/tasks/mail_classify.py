@@ -28,7 +28,7 @@ from core.providers.spec import StructuredOutput
 from core.routing import Evidence, TaskShape
 from tasks.runtime import consume_result, has_batch_work, run_batched, set_progress
 
-logger = logging.getLogger("jobtracker_worker")
+logger = logging.getLogger(__name__)
 
 
 # The one-time historical sweep and the ongoing trickle are priced differently

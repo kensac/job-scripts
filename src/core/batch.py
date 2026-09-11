@@ -28,7 +28,7 @@ class BatchEventCounts(TypedDict, total=False):
 
 BatchEventHook = Callable[[str, str, BatchEventCounts], None] | None
 
-logger = logging.getLogger("job_tracker")
+logger = logging.getLogger(__name__)
 
 _batch_client: AsyncOpenAI | None = None
 

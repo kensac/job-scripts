@@ -7,7 +7,7 @@ from api import db, telemetry
 from api.queue import INGEST_INTERVAL_MINUTES
 from core.checks import POSTING_CHECK_NAMES
 
-logger = logging.getLogger("jobtracker_health")
+logger = logging.getLogger(__name__)
 
 # Minimum sample sizes: below these a "rate" is noise, and alerting on noise
 # trains you to ignore alerts. The rate floor is deliberately high because the

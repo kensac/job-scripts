@@ -32,7 +32,7 @@ from tasks.runtime import (
     update_parent_progress,
 )
 
-logger = logging.getLogger("jobtracker_worker")
+logger = logging.getLogger(__name__)
 
 
 REVERIFY_DAYS = int(os.environ.get("JOBTRACKER_REVERIFY_DAYS", "7"))

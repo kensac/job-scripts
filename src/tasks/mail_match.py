@@ -26,7 +26,7 @@ from api.mail import match as mail_match
 from api.mail.pipeline import sync_action_items
 from tasks.runtime import set_progress
 
-logger = logging.getLogger("jobtracker_worker")
+logger = logging.getLogger(__name__)
 
 
 # Kinds that are evidence the user applied. An employer does not acknowledge,

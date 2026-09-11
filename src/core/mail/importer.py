@@ -40,7 +40,7 @@ from xml.etree import ElementTree
 # Past this length a job email is quoted history, signatures and legal
 # boilerplate, none of which changes a classification - and the tail is what
 # makes 38,685 messages expensive.
-logger = logging.getLogger("jobtracker_api")
+logger = logging.getLogger(__name__)
 
 MAX_BODY_CHARS = 20_000
 

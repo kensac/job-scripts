@@ -9,7 +9,7 @@ from typing import Any
 from api import db, metrics
 from tasks.runtime import set_progress
 
-logger = logging.getLogger("jobtracker_worker")
+logger = logging.getLogger(__name__)
 
 
 async def handle_data_health(task_id: int, payload: dict[str, Any]) -> None:

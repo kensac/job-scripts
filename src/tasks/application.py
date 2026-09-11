@@ -40,7 +40,7 @@ from tasks.runtime import (
     set_progress,
 )
 
-logger = logging.getLogger("jobtracker_worker")
+logger = logging.getLogger(__name__)
 
 PURPOSE = application_writes.PURPOSE
 IN_FLIGHT = ("pending", "running", "awaiting_batch", "waiting")

@@ -26,7 +26,7 @@ from api import crypto, db
 from api.config import ALL_GROUPS as ALL_GROUPS
 from api.config import group_access_allowed
 
-logger = logging.getLogger("jobtracker_api")
+logger = logging.getLogger(__name__)
 
 GOOGLE = "google"
 

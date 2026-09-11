@@ -34,7 +34,7 @@ from tasks.runtime import (
     snapshot_specs,
 )
 
-logger = logging.getLogger("jobtracker_worker")
+logger = logging.getLogger(__name__)
 
 PURPOSE = "experiment"
 

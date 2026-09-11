@@ -29,7 +29,7 @@ from tasks.runtime import (
     submit_or_collect,
 )
 
-logger = logging.getLogger("jobtracker_worker")
+logger = logging.getLogger(__name__)
 
 
 # The original synchronous exception was measured at $0.47 for the corpus

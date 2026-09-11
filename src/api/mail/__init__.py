@@ -6,7 +6,7 @@ import smtplib
 from email.message import EmailMessage
 from typing import Any
 
-logger = logging.getLogger("jobtracker_mail")
+logger = logging.getLogger(__name__)
 
 SMTP_HOST = os.environ.get("SMTP_HOST", "")
 SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))

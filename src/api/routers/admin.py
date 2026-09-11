@@ -28,7 +28,7 @@ from api.config import CONFIG_KEYS
 from api.routers.jobs import report_kinds
 from core import pricing, reason_taxonomy
 
-logger = logging.getLogger("jobtracker_api")
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/admin")
 

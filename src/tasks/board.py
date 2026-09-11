@@ -21,7 +21,7 @@ from api import db, metrics
 from api.board import criteria
 from api.board import eligibility as board_eligibility
 
-logger = logging.getLogger("jobtracker_worker")
+logger = logging.getLogger(__name__)
 
 
 # A board row counts as untouched (machine-managed) when the user never set

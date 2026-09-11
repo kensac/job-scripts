@@ -6,7 +6,7 @@ import logging
 from api import budget, db
 from api.ai import batch_results
 
-logger = logging.getLogger("jobtracker_worker")
+logger = logging.getLogger(__name__)
 PURPOSE = "application"
 
 

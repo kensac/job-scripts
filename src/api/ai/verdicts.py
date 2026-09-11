@@ -15,7 +15,7 @@ from api.ai import AIConfig
 from core import pricing
 from core.store import add_ai_result
 
-logger = logging.getLogger("jobtracker_api")
+logger = logging.getLogger(__name__)
 
 T = TypeVar("T", bound=BaseModel)
 

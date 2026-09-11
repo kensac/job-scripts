@@ -31,7 +31,7 @@ from api.queue import enqueue
 from core.mail.importer import read_archive
 from tasks.runtime import set_progress
 
-logger = logging.getLogger("jobtracker_worker")
+logger = logging.getLogger(__name__)
 
 # Messages fetched per sync. Gmail's own page size is 500 and its per-message
 # get is one quota unit, so this is about bounding a single task rather than

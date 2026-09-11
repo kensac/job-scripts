@@ -36,7 +36,7 @@ from tasks.runtime import (
     set_current_claim,
 )
 
-logger = logging.getLogger("jobtracker_worker")
+logger = logging.getLogger(__name__)
 
 
 POLL_SECONDS = float(os.environ.get("JOBTRACKER_WORKER_POLL", "5"))

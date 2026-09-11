@@ -11,7 +11,7 @@ from core import pricing
 from core.checks import POSTING_CHECK_NAMES
 from core.pool import connection
 
-logger = logging.getLogger("jobtracker_store")
+logger = logging.getLogger(__name__)
 
 
 def _as_query(sql: str) -> LiteralString:

@@ -18,7 +18,7 @@ from core.store import add_ai_result
 from tasks.board import content_attempted_urls, content_ready_urls
 from tasks.runtime import Deferred, cancelled, set_progress
 
-logger = logging.getLogger("jobtracker_worker")
+logger = logging.getLogger(__name__)
 
 
 async def handle_ingest_source(task_id: int, payload: dict[str, Any]) -> None:

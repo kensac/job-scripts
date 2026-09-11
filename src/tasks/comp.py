@@ -21,7 +21,7 @@ from tasks.runtime import (
     set_progress,
 )
 
-logger = logging.getLogger("jobtracker_worker")
+logger = logging.getLogger(__name__)
 
 
 # Comp extraction runs hourly and each pass is bounded, so one task cannot pull
