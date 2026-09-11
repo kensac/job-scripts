@@ -4,7 +4,7 @@ import datetime
 import os
 
 from api import db
-from api.routers.jobs import NOT_APPLIED
+from api.routers.job_board import NOT_APPLIED
 from core.store import add_ai_result
 
 SERVICE_TOKEN = os.environ["JOBTRACKER_SERVICE_TOKEN"]
