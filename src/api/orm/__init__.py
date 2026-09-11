@@ -62,6 +62,7 @@ from api.orm.mail import (
     EmailMessage,
     UserOAuthToken,
 )
+from api.orm.managed_boards import ManagedBoard, ManagedBoardJob, ManagedBoardSource
 from api.orm.platform import (
     AppConfig,
     GroupBudget,
@@ -111,6 +112,9 @@ __all__ = [
     "JobSkill",
     "Listing",
     "Location",
+    "ManagedBoard",
+    "ManagedBoardJob",
+    "ManagedBoardSource",
     "Report",
     "SavedView",
     "Source",

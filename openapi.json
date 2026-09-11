@@ -15855,6 +15855,691 @@
         }
       }
     },
+    "/v1/admin/managed-boards": {
+      "get": {
+        "summary": "List Managed Boards",
+        "operationId": "list_managed_boards_v1_admin_managed_boards_get",
+        "parameters": [
+          {
+            "name": "x-service-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-Service-Token"
+            }
+          },
+          {
+            "name": "x-user-sub",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Sub"
+            }
+          },
+          {
+            "name": "x-user-email",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Email"
+            }
+          },
+          {
+            "name": "x-user-name",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Name"
+            }
+          },
+          {
+            "name": "x-user-groups",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Groups"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedBoards"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create Managed Board",
+        "operationId": "create_managed_board_v1_admin_managed_boards_post",
+        "parameters": [
+          {
+            "name": "x-service-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-Service-Token"
+            }
+          },
+          {
+            "name": "x-user-sub",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Sub"
+            }
+          },
+          {
+            "name": "x-user-email",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Email"
+            }
+          },
+          {
+            "name": "x-user-name",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Name"
+            }
+          },
+          {
+            "name": "x-user-groups",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Groups"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManagedBoardCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedBoard"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/managed-boards/bootstrap": {
+      "post": {
+        "summary": "Bootstrap Managed Boards",
+        "description": "Create the two versioned starter boards as drafts for this sponsor.",
+        "operationId": "bootstrap_managed_boards_v1_admin_managed_boards_bootstrap_post",
+        "parameters": [
+          {
+            "name": "x-service-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-Service-Token"
+            }
+          },
+          {
+            "name": "x-user-sub",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Sub"
+            }
+          },
+          {
+            "name": "x-user-email",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Email"
+            }
+          },
+          {
+            "name": "x-user-name",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Name"
+            }
+          },
+          {
+            "name": "x-user-groups",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Groups"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedBoards"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/managed-boards/{board_id}": {
+      "get": {
+        "summary": "Get Managed Board",
+        "operationId": "get_managed_board_v1_admin_managed_boards__board_id__get",
+        "parameters": [
+          {
+            "name": "board_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Board Id"
+            }
+          },
+          {
+            "name": "x-service-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-Service-Token"
+            }
+          },
+          {
+            "name": "x-user-sub",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Sub"
+            }
+          },
+          {
+            "name": "x-user-email",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Email"
+            }
+          },
+          {
+            "name": "x-user-name",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Name"
+            }
+          },
+          {
+            "name": "x-user-groups",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Groups"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedBoard"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "summary": "Patch Managed Board",
+        "operationId": "patch_managed_board_v1_admin_managed_boards__board_id__patch",
+        "parameters": [
+          {
+            "name": "board_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Board Id"
+            }
+          },
+          {
+            "name": "x-service-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-Service-Token"
+            }
+          },
+          {
+            "name": "x-user-sub",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Sub"
+            }
+          },
+          {
+            "name": "x-user-email",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Email"
+            }
+          },
+          {
+            "name": "x-user-name",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Name"
+            }
+          },
+          {
+            "name": "x-user-groups",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Groups"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManagedBoardPatch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedBoard"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/admin/user-job-populations": {
       "get": {
         "summary": "User Job Populations",
@@ -30026,13 +30711,18 @@
           "board_rows": {
             "type": "integer",
             "title": "Board Rows"
+          },
+          "managed_boards": {
+            "type": "integer",
+            "title": "Managed Boards"
           }
         },
         "type": "object",
         "required": [
           "jobs",
           "subscribers",
-          "board_rows"
+          "board_rows",
+          "managed_boards"
         ],
         "title": "Attached",
         "description": "What still hangs off a source, and therefore what deleting it would\norphan."
@@ -38871,6 +39561,281 @@
         "title": "MailRow",
         "description": "One message as the debug list shows it: what arrived, what the\nclassifier last said, and what the matcher last did with it.\n\nEvery field after `prefilter_reason` is the CURRENT row of an append-only\nlog and can be null for its own reason - no classification yet, no match\nattempted, a match that found nothing. They are not interchangeable and\n`_where` filters on the difference."
       },
+      "ManagedBoard": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "slug": {
+            "type": "string",
+            "title": "Slug"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "sponsor_user_id": {
+            "type": "integer",
+            "title": "Sponsor User Id"
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt"
+          },
+          "prompt_hash": {
+            "type": "string",
+            "title": "Prompt Hash"
+          },
+          "requested_model": {
+            "type": "string",
+            "title": "Requested Model"
+          },
+          "on_ambiguous": {
+            "type": "string",
+            "title": "On Ambiguous"
+          },
+          "fail_closed": {
+            "type": "boolean",
+            "title": "Fail Closed"
+          },
+          "criteria": {
+            "$ref": "#/components/schemas/Criteria"
+          },
+          "published": {
+            "type": "boolean",
+            "title": "Published"
+          },
+          "revision": {
+            "type": "integer",
+            "title": "Revision"
+          },
+          "public_revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Public Revision"
+          },
+          "projection_updated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Projection Updated At"
+          },
+          "published_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published At"
+          },
+          "unpublished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unpublished At"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "sources": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Sources"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "slug",
+          "name",
+          "description",
+          "sponsor_user_id",
+          "prompt",
+          "prompt_hash",
+          "requested_model",
+          "on_ambiguous",
+          "fail_closed",
+          "criteria",
+          "published",
+          "revision",
+          "public_revision",
+          "projection_updated_at",
+          "published_at",
+          "unpublished_at",
+          "created_at",
+          "updated_at",
+          "sources"
+        ],
+        "title": "ManagedBoard",
+        "description": "A sponsor-owned board definition.\n\n``on_ambiguous=filter`` excludes postings whose criteria result is\nambiguous; ``keep`` retains them."
+      },
+      "ManagedBoardCreate": {
+        "properties": {
+          "slug": {
+            "type": "string",
+            "maxLength": 100,
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+            "title": "Slug"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 1000,
+            "title": "Description",
+            "default": ""
+          },
+          "sponsor_user_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sponsor User Id"
+          },
+          "prompt": {
+            "type": "string",
+            "maxLength": 8000,
+            "minLength": 1,
+            "title": "Prompt"
+          },
+          "requested_model": {
+            "type": "string",
+            "title": "Requested Model"
+          },
+          "on_ambiguous": {
+            "type": "string",
+            "title": "On Ambiguous",
+            "default": "keep"
+          },
+          "fail_closed": {
+            "type": "boolean",
+            "title": "Fail Closed",
+            "default": false
+          },
+          "criteria": {
+            "$ref": "#/components/schemas/Criteria"
+          },
+          "sources": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 5000,
+            "title": "Sources"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "slug",
+          "name",
+          "prompt",
+          "requested_model"
+        ],
+        "title": "ManagedBoardCreate"
+      },
+      "ManagedBoardPatch": {
+        "properties": {
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Revision"
+          },
+          "name": {
+            "$ref": "#/components/schemas/NonNullUpdate_Annotated_str__FieldInfo_annotation_NoneType__required_True__metadata__MinLen_min_length_1___MaxLen_max_length_120_____"
+          },
+          "description": {
+            "$ref": "#/components/schemas/NonNullUpdate_Annotated_str__FieldInfo_annotation_NoneType__required_True__metadata__MaxLen_max_length_1000_____"
+          },
+          "prompt": {
+            "$ref": "#/components/schemas/NonNullUpdate_Annotated_str__FieldInfo_annotation_NoneType__required_True__metadata__MinLen_min_length_1___MaxLen_max_length_8000_____"
+          },
+          "requested_model": {
+            "$ref": "#/components/schemas/NonNullUpdate_str_"
+          },
+          "on_ambiguous": {
+            "$ref": "#/components/schemas/NonNullUpdate_str_"
+          },
+          "fail_closed": {
+            "$ref": "#/components/schemas/NonNullUpdate_bool_"
+          },
+          "criteria": {
+            "$ref": "#/components/schemas/NonNullUpdate_Criteria_"
+          },
+          "sources": {
+            "$ref": "#/components/schemas/NonNullUpdate_Annotated_list_str___FieldInfo_annotation_NoneType__required_True__metadata__MaxLen_max_length_5000_____"
+          },
+          "published": {
+            "$ref": "#/components/schemas/NonNullUpdate_bool_"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "expected_revision"
+        ],
+        "title": "ManagedBoardPatch"
+      },
+      "ManagedBoards": {
+        "properties": {
+          "boards": {
+            "items": {
+              "$ref": "#/components/schemas/ManagedBoard"
+            },
+            "type": "array",
+            "title": "Boards"
+          }
+        },
+        "type": "object",
+        "required": [
+          "boards"
+        ],
+        "title": "ManagedBoards"
+      },
       "Market": {
         "properties": {
           "postings": {
@@ -39909,6 +40874,22 @@
         "type": "integer",
         "minimum": 0.0
       },
+      "NonNullUpdate_Annotated_list_str___FieldInfo_annotation_NoneType__required_True__metadata__MaxLen_max_length_5000_____": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array",
+        "maxItems": 5000
+      },
+      "NonNullUpdate_Annotated_str__FieldInfo_annotation_NoneType__required_True__metadata__MaxLen_max_length_1000_____": {
+        "type": "string",
+        "maxLength": 1000
+      },
+      "NonNullUpdate_Annotated_str__FieldInfo_annotation_NoneType__required_True__metadata__MinLen_min_length_1___MaxLen_max_length_120_____": {
+        "type": "string",
+        "maxLength": 120,
+        "minLength": 1
+      },
       "NonNullUpdate_Annotated_str__FieldInfo_annotation_NoneType__required_True__metadata__MinLen_min_length_1___MaxLen_max_length_8000_____": {
         "type": "string",
         "maxLength": 8000,
@@ -39923,6 +40904,9 @@
         "type": "string",
         "maxLength": 80,
         "minLength": 1
+      },
+      "NonNullUpdate_Criteria_": {
+        "$ref": "#/components/schemas/Criteria"
       },
       "NonNullUpdate_bool_": {
         "type": "boolean"

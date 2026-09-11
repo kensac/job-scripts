@@ -25,6 +25,7 @@ from api.routers.admin import (
     filters,
     fleet,
     health,
+    managed_boards,
     people,
     queries,
     sources,
@@ -42,6 +43,7 @@ router.include_router(fleet.router)
 router.include_router(catalog.router)
 router.include_router(checks.router)
 router.include_router(health.router)
+router.include_router(managed_boards.router)
 router.include_router(user_job_populations.router)
 router.include_router(working_set_shadow.router)
 router.include_router(config.router)
