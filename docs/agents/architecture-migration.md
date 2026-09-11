@@ -59,12 +59,12 @@ real only relocates the problem.
 | # | Phase | Done when |
 |---|---|---|
 | 0 | The layering is enforced | An import contract fails CI on a new upward edge |
-| 1 | Check types are a registry | A new check type is a registration; no literal names it |
+| 1 | Check types are a registry | **Done.** A new posting check is a `POSTING_CHECKS` registration; dispatch does not grow a purpose ladder |
 | 2 | A board row and the working set are told apart | Named and pinned apart (2a). Moving the sweeps' scope off `user_jobs` (2b) waits for a cutover comparison |
 | 3 | Catalog observations are facts | A re-listing is an appended row, not a mutated column |
 | 4 | ~~Derivations are content addressed~~ | **Dropped 2026-09-10.** Measured; see below |
-| 5 | Files move to the shape | `tasks` is a sibling of `api` and `core`. `apply` is a package. The rest is judgement about churn |
-| 6 | The long files are split | No module does four jobs. `resolve.py` 1,339 lines, `health.py` 1,159. `orm.py`, `mail.py`, `admin.py` and `tasks/runtime.py` are done |
+| 5 | Files move to the shape | **Done.** `tasks` is a sibling of `api` and `core`; domain seams, not directory names, own the remaining moves |
+| 6 | The long files are split | **Done for the named multi-job modules.** `resolve.py` is a 160-line router, `health.py` an 85-line aggregator, and `jobs.py` a 22-line ordered aggregator |
 | 7 | Every operation declares what it returns | **Done 2026-09-11.** 188 of 190 declare a model; the other two serve a file and the schema itself. Guarded, including against a `Decimal` field and a name a generator cannot use |
 
 **The API contract was the invariant, and is now a price.** `openapi.json` is
@@ -104,9 +104,10 @@ protecting. A phase still has to bring its own evidence, and the two below
 still hold.
 
 **Still stop and ask:** a change whose failure would be silent in production
-and invisible in CI. Phase 2 and phase 4 are the named cases: one decides what
-gets paid for, the other migrates verdicts that cost money to produce. Bring
-the parallel cutover's numbers first, then merge.
+and invisible in CI. Phase 2b and phase 3 are the named cases: one changes the
+population the sweeps pay for, and the other decides what a source observation
+means. Bring the parallel cutover's numbers and the product semantics first,
+then merge.
 
 Phase 2 decides who sees what. Its failure mode is two definitions silently
 agreeing in the tests and disagreeing in production, which is the state the
@@ -170,6 +171,37 @@ a measurement asks for it.
 
 Phase 2 still brings its numbers before it merges: it decides what gets paid
 for.
+
+The storage cutover also needs three product meanings before its schema can be
+the source of truth:
+
+- whether a digest announces newly visible postings or newly admitted working
+  set members;
+- whether analytics report person state, working set and visibility as three
+  populations or preserve one overloaded count;
+- whether an all-default legacy `user_jobs` row with no surviving provenance
+  is working-set-only or person-authored state. It is `cannot tell` in a
+  measurement, not evidence for either answer.
+
+Until those are chosen, additive schema work may be designed but not merged as
+the production meaning of the row.
+
+## Phase 3 needs source semantics before tables
+
+`jobs.active` is not an observation log. The current writers do not retain an
+initial active observation, an explicit inactive observation, a run identity,
+or a reason that distinguishes absence from rejection. One URL also cannot
+represent a posting observed through more than one source. Therefore a backfill
+cannot reconstruct complete catalog history and must count unknown state as
+`cannot tell`.
+
+The target remains additive: ingest runs, source postings, append-only listing
+observations and source-to-job links feed a rebuildable availability
+projection. Before that projection can replace `jobs.active`, the product must
+choose canonical job identity, any-source availability for disabled sources,
+the meaning of title-pattern rejection, aggregator absence TTLs, retention and
+whether deletion is permitted for source facts. Do not encode defaults for
+those choices in a migration.
 
 **Never in a loop:** any write to the production database, and any migration
 that can refuse to apply ([migrations.md](migrations.md)). Neither of these is
@@ -582,8 +614,12 @@ unreachable, `_newer_evidence`'s early return for a result with no batch id
 `unknown_request` receipt, whose twin in the reverify path is pinned. None of
 them decides anything a person or an invoice can see.
 
-**The long files.** `routers/resolve.py` 1,339 lines, `health.py` 1,159. Long
-because nothing split them. Phase 6.
+**The named long, multi-job files are split.** `routers/resolve.py` is now a
+160-line ordered router over contracts, choice policy, read models, commands
+and queue construction. `health.py` is an 85-line aggregator. `jobs.py` is a
+22-line ordered router over board reads, person-state commands, detail,
+explanation, uploads, reports and task status. File length alone is not a new
+phase: a further split needs evidence that a module owns multiple behaviors.
 
 `orm.py` was the first taken, and it is the easy shape of this problem: 51
 table definitions with no logic between them, so the split is a partition and

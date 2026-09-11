@@ -126,6 +126,17 @@ fresh copy:
 - **Provider facts**: one datasheet per provider under `core/providers/`.
 - **Task handlers**: `src/tasks/`, one module per family. The task runtime
   imports nothing from the worker; the worker imports only the handler table.
+- **Person-state writes**: `api/board/person_state.py`. HTTP adapters may
+  authorize and shape a command, but the status/date rules, history and board
+  event publication have one service owner.
+- **Experiment semantics**: `api/experiments.py`. Its explicit, immutable
+  `ExperimentStep` declarations own request construction, comparison
+  projection and deployed-result loading. Experiments are opt-in; this is not
+  a universal derivation registry.
+- **Structured batch transport**: `core/batch.py`. Response-model name and
+  strict JSON schema are derived together by `structured_response_spec`.
+  Prompts, inputs, context, output limits, model choice and persistence remain
+  owned by their domain or task.
 - **Listing formats**: `core/boards.py`, one fetcher per board format, chosen
   by the listings URL. See [sources-and-boards.md](sources-and-boards.md).
 - **What the mail implies the board should say**: `mail_pipeline.proposals_for`
