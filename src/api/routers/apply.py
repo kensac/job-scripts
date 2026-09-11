@@ -27,7 +27,7 @@ from api.apply import policy as extension_policy
 from api.apply import recipes as extension_recipes
 from api.auth import AuthedUser, require_user
 from api.models import Ok
-from api.problem import refuse
+from api.problem import AI_REFUSALS, SIZE_REFUSALS, refuse
 from api.routers.jobs import _write_board_row
 from core.fetching.forms import posting_urls
 
@@ -615,7 +615,7 @@ def never_filled(fields: list[SuggestField]) -> list[str]:
     ]
 
 
-@router.post("/user/apply/suggest")
+@router.post("/user/apply/suggest", responses=AI_REFUSALS)
 async def suggest(body: SuggestBody, user: AuthedUser = Depends(require_user)) -> Suggested:
     """Everything the ladder left blank, in one live call on the person's
     own model settings. The extension fills the answers; the person still
@@ -722,7 +722,7 @@ class PageReport(BaseModel):
 MAX_REPORT_BYTES = 2_000_000
 
 
-@router.post("/user/apply/reports", status_code=201)
+@router.post("/user/apply/reports", status_code=201, responses=SIZE_REFUSALS)
 def create_report(body: PageReport, user: AuthedUser = Depends(require_user)) -> ReportCreated:
     """The extension's report button: whatever it saw, kept whole for
     triage. Capped so one page cannot fill the table by itself."""

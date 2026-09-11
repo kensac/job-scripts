@@ -24,7 +24,7 @@ from api.apply import drafting as drafts
 from api.auth import AuthedUser, require_user
 from api.board.access import require_visible_job
 from api.models import Ok
-from api.problem import refuse
+from api.problem import AI_REFUSALS, SIZE_REFUSALS, refuse
 from core.answers import DEFAULT_STYLE
 from core.fetching import forms
 from core.store import get_content
@@ -160,7 +160,7 @@ def list_resumes(user: AuthedUser = Depends(require_user)) -> ResumeList:
     )
 
 
-@router.post("/user/resumes", status_code=201)
+@router.post("/user/resumes", status_code=201, responses=SIZE_REFUSALS)
 def create_resume(body: ResumeCreate, user: AuthedUser = Depends(require_user)) -> Resume:
     """Pasted text or a PDF, base64 in the body. The PDF's text is what is
     kept; the file itself is not stored. Same name replaces the text."""
@@ -381,7 +381,7 @@ class DraftRequest(BaseModel):
     refresh: bool = False
 
 
-@router.post("/user/jobs/{job_id}/application/draft", status_code=202)
+@router.post("/user/jobs/{job_id}/application/draft", status_code=202, responses=AI_REFUSALS)
 def request_drafts(
     job_id: int, body: DraftRequest, user: AuthedUser = Depends(require_user)
 ) -> DraftsQueued:
@@ -453,7 +453,7 @@ def _now() -> str:
     return datetime.datetime.now(datetime.UTC).isoformat()
 
 
-@router.post("/user/jobs/{job_id}/application/answers/{key}/refine")
+@router.post("/user/jobs/{job_id}/application/answers/{key}/refine", responses=AI_REFUSALS)
 async def refine_answer(
     job_id: int, key: str, body: RefineBody, user: AuthedUser = Depends(require_user)
 ) -> Answer:

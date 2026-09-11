@@ -14,6 +14,7 @@ from api.auth import AuthedUser, require_user
 from api.board import visibility
 from api.config import group_access_allowed
 from api.models import FilterCreate, FilterPatch, ImprovePromptRequest, Ok
+from api.problem import AI_REFUSALS
 from core.filters import ON_AMBIGUOUS_VALUES, compute_filter_hash
 
 router = APIRouter()
@@ -549,7 +550,7 @@ class ImprovedPrompt(BaseModel):
     rationale: str
 
 
-@router.post("/ai/improve-prompt")
+@router.post("/ai/improve-prompt", responses=AI_REFUSALS)
 async def improve_prompt(
     body: ImprovePromptRequest, user: AuthedUser = Depends(require_user)
 ) -> ImprovedPrompt:
