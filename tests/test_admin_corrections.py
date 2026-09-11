@@ -109,7 +109,7 @@ def test_the_owner_is_told_a_correction_was_an_administrators(client, admin, f):
         (msg_id, app_id, admin_id),
     )
 
-    from api.routers.mail import _corrected_by
+    from api.routers.mail.pipeline import _corrected_by
 
     assert _corrected_by(admin_id, uid) == "administrator"
     assert _corrected_by(uid, uid) == "you"
