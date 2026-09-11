@@ -178,22 +178,49 @@ def test_demote_closed_removes_untouched_row_when_closed_now_rejected(user_heade
 
     assert tasks_board.demote_closed() == 1
     assert _board_row(user_id, job_id) is None
+    assert _working_set_row(user_id, job_id) is None
 
 
-def test_demote_closed_leaves_touched_row_even_when_closed(user_headers):
+def test_demote_closed_removes_scope_but_leaves_explicit_noop_person_state(client, user_headers):
     user_id = _user_id()
     url = "https://jobs.example.com/board-4"
     job_id = _make_passing_job(user_id, url)
     tasks_board.materialize_passing(user_id)
-    db.execute(
-        "UPDATE user_jobs SET status = 'applied' WHERE user_id = %s AND job_id = %s",
-        (user_id, job_id),
-    )
+    response = client.patch(f"/v1/user/jobs/{job_id}", json={"hidden": False}, headers=user_headers)
+    assert response.status_code == 200, response.text
 
     add_ai_result(url, "rejected", "now closed", "closed")
 
     assert tasks_board.demote_closed() == 0
-    assert _board_row(user_id, job_id) is not None
+    person_row = _board_row(user_id, job_id)
+    assert person_row is not None and person_row["person_touched_at"] is not None
+    assert _working_set_row(user_id, job_id) is None
+
+
+def test_demote_closed_removes_working_set_only_without_counting_legacy(user_headers):
+    user_id = _user_id()
+    url = "https://jobs.example.com/board-working-only"
+    job_id = _make_passing_job(user_id, url)
+    db.execute(
+        "INSERT INTO user_job_working_set (user_id, job_id) VALUES (%s, %s)",
+        (user_id, job_id),
+    )
+    add_ai_result(url, "rejected", "now closed", "closed")
+
+    assert tasks_board.demote_closed() == 0
+    assert _board_row(user_id, job_id) is None
+    assert _working_set_row(user_id, job_id) is None
+
+
+def test_demote_closed_removes_both_relations_when_source_marks_inactive(user_headers):
+    user_id = _user_id()
+    job_id = _make_passing_job(user_id, "https://jobs.example.com/board-inactive")
+    tasks_board.materialize_passing(user_id)
+    db.execute("UPDATE jobs SET active = false WHERE id = %s", (job_id,))
+
+    assert tasks_board.demote_closed() == 1
+    assert _board_row(user_id, job_id) is None
+    assert _working_set_row(user_id, job_id) is None
 
 
 def test_demote_closed_leaves_untouched_row_when_still_open(user_headers):
@@ -204,6 +231,47 @@ def test_demote_closed_leaves_untouched_row_when_still_open(user_headers):
 
     assert tasks_board.demote_closed() == 0
     assert _board_row(user_id, job_id) is not None
+    assert _working_set_row(user_id, job_id) is not None
+
+
+def test_demote_closed_retry_is_idempotent(user_headers):
+    user_id = _user_id()
+    url = "https://jobs.example.com/board-demote-retry"
+    job_id = _make_passing_job(user_id, url)
+    tasks_board.materialize_passing(user_id)
+    add_ai_result(url, "rejected", "now closed", "closed")
+
+    assert tasks_board.demote_closed() == 1
+    assert tasks_board.demote_closed() == 0
+    assert _board_row(user_id, job_id) is None
+    assert _working_set_row(user_id, job_id) is None
+
+
+def test_demote_closed_rolls_back_legacy_delete_when_working_set_delete_fails(user_headers):
+    user_id = _user_id()
+    url = "https://jobs.example.com/board-demote-rollback"
+    job_id = _make_passing_job(user_id, url)
+    tasks_board.materialize_passing(user_id)
+    add_ai_result(url, "rejected", "now closed", "closed")
+    db.execute(
+        """
+        CREATE FUNCTION test_refuse_working_set_delete() RETURNS trigger
+        LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'refuse working set delete'; END $$
+        """
+    )
+    db.execute(
+        "CREATE TRIGGER test_refuse_working_set_delete BEFORE DELETE ON user_job_working_set "
+        "FOR EACH ROW EXECUTE FUNCTION test_refuse_working_set_delete()"
+    )
+    try:
+        with pytest.raises(errors.RaiseException, match="refuse working set delete"):
+            tasks_board.demote_closed()
+    finally:
+        db.execute("DROP TRIGGER test_refuse_working_set_delete ON user_job_working_set")
+        db.execute("DROP FUNCTION test_refuse_working_set_delete()")
+
+    assert _board_row(user_id, job_id) is not None
+    assert _working_set_row(user_id, job_id) is not None
 
 
 # ---------------------------------------------------------------------------
