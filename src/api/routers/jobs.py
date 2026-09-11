@@ -13,6 +13,7 @@ from api.auth import AuthedUser, require_user
 from api.board import visibility
 from api.board.access import require_visible_job
 from api.models import UploadRequest, UserJobPatch, UserJobsBulkIds, UserJobsBulkPatch
+from api.problem import refuse
 from core.fetching.urls import normalize_url
 
 router = APIRouter()
@@ -105,6 +106,43 @@ _STATUS_META: dict[str, tuple[bool, str | None]] = {
     "No Longer Interested": (True, "withdrawn"),
     "Withdrawn": (True, "withdrawn"),
 }
+
+
+class Autofilled(BaseModel):
+    """What the write filled in that the caller did not send.
+
+    A status change can date the row by itself, so the caller is told rather
+    than having to re-read the row to find out.
+
+    An absent key is the answer, not a null: the route sets
+    response_model_exclude_none so `{}` still means "nothing was filled",
+    which is what the board already reads. Declaring the shape must not move
+    the wire.
+    """
+
+    status: str | None = None
+    date_applied: datetime.date | None = None
+
+
+class PatchResult(BaseModel):
+    ok: bool
+    autofilled: Autofilled
+
+
+class BulkPatchResult(BaseModel):
+    """`skipped` names the ids the caller may not touch rather than refusing
+    the whole selection: a selection made from the board can include a row
+    that vanished or was never theirs, and failing everything for one would
+    send the page back to a request per row.
+    """
+
+    ok: bool
+    updated: int
+    skipped: list[int]
+
+
+class Deleted(BaseModel):
+    ok: bool
 
 
 def status_meta(statuses: list[str]) -> list[dict[str, Any]]:
@@ -363,16 +401,20 @@ def _patch_fields(body: UserJobPatch) -> dict:
     return fields
 
 
-@router.patch("/user/jobs/{job_id}")
-def patch_job(job_id: int, body: UserJobPatch, user: AuthedUser = Depends(require_user)):
+@router.patch("/user/jobs/{job_id}", response_model_exclude_none=True)
+def patch_job(
+    job_id: int, body: UserJobPatch, user: AuthedUser = Depends(require_user)
+) -> PatchResult:
     if job_id not in _touchable(user, [job_id]):
-        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown job"})
+        raise refuse(404, "NOT_FOUND", "unknown job")
     fields = _patch_fields(body)
-    return {"ok": True, "autofilled": _write_board_row(user.id, job_id, fields)}
+    return PatchResult(ok=True, autofilled=Autofilled(**_write_board_row(user.id, job_id, fields)))
 
 
 @router.patch("/user/jobs")
-def patch_jobs(body: UserJobsBulkPatch, user: AuthedUser = Depends(require_user)):
+def patch_jobs(
+    body: UserJobsBulkPatch, user: AuthedUser = Depends(require_user)
+) -> BulkPatchResult:
     """One patch across a selection, so a 6,000-row selection is one request
     rather than 6,000. Ids the caller may not touch are skipped and named,
     not refused whole: a selection made from the board can include a row that
@@ -386,11 +428,11 @@ def patch_jobs(body: UserJobsBulkPatch, user: AuthedUser = Depends(require_user)
     # One event for the whole selection, off the per-row path.
     events.publish_board_rows(user.id, changed, fields)
     updated = len(changed)
-    return {
-        "ok": True,
-        "updated": updated,
-        "skipped": [j for j in body.job_ids if j not in allowed],
-    }
+    return BulkPatchResult(
+        ok=True,
+        updated=updated,
+        skipped=[j for j in body.job_ids if j not in allowed],
+    )
 
 
 @router.get("/user/jobs/{job_id}/detail")
@@ -580,12 +622,12 @@ async def explain_check(job_id: int, body: ExplainBody, user: AuthedUser = Depen
 
 
 @router.delete("/user/jobs/{job_id}")
-def delete_user_job(job_id: int, user: AuthedUser = Depends(require_user)):
+def delete_user_job(job_id: int, user: AuthedUser = Depends(require_user)) -> Deleted:
     """Drops the user's board row only (the catalog job is untouched); a later
     run re-materializes it if it still passes their filters. Hide is the
     permanent alternative."""
     db.execute("DELETE FROM user_jobs WHERE user_id = %s AND job_id = %s", (user.id, job_id))
-    return {"ok": True}
+    return Deleted(ok=True)
 
 
 @router.delete("/user/jobs")
