@@ -200,16 +200,13 @@ forbidden_modules = ["api"]
 # api.apply.writes now reads its purpose off the shape rather than spelling it
 # a second time.
 #
-# Three are left, and each says what would move it.
+# Two are left, and both describe the same inherent edge.
 #
 # CORRECT, and this one never goes. api.worker IS the task runner, sits above
 # the handlers by definition, and loads HANDLERS to dispatch them. It reads the
 # runtime for the same reason. Only a worker that stopped being an `api` module
 # would drop these two lines, and it would not change a single import.
 #
-# BEHAVIOUR, in one router, and this is a design error rather than a missing
-# home. admin.catalog calls locations.store, so the router uses a handler as a
-# service. The fix is to move the functions, not the constant.
 [[tool.importlinter.contracts]]
 name = "the services do not reach into the handlers"
 type = "forbidden"
@@ -218,5 +215,4 @@ forbidden_modules = ["tasks"]
 ignore_imports = [
     "api.worker -> tasks",
     "api.worker -> tasks.runtime",
-    "api.routers.admin.catalog -> tasks.locations",
 ]

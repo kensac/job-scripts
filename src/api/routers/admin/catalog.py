@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from api import db, pagination, scoping, task_admission
 from api import params as params_
 from api.auth import AuthedUser
+from api.locations import LocationExtract, Place, store
 from api.routers.admin.shared import require_admin
 from api.routers.jobs import ReportKind, report_kinds
 
@@ -122,8 +123,6 @@ def put_location(
 ) -> PlacedLocation:
     """A person's classification of one string, kept over the model's: the
     sweep never re-asks about a string that has a row."""
-    from tasks.locations import LocationExtract, Place, store
-
     store(
         text.strip(),
         LocationExtract(
