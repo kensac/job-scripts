@@ -221,6 +221,13 @@ def test_the_picker_and_the_queue_agree_on_eligibility(client, me):
     compared the whole dict and so asserted more than its own name - agreeing
     on the field that must not agree would mean one surface was pointing at a
     list the other one owns.
+
+    A field a verb does not have is null on the picker and absent on the queue,
+    because the queue's route excludes nulls and the picker's cannot: the rest
+    of that payload has real nulls it has always sent. The two say the same
+    thing - no `reason` is that the verb is available, no `affects` is one
+    message - so the comparison drops them on both sides rather than asserting
+    which spelling each surface happens to use.
     """
     headers, uid = me
     db.execute(
@@ -234,7 +241,9 @@ def test_the_picker_and_the_queue_agree_on_eligibility(client, me):
     queued = client.get("/v1/user/resolve/queue", headers=headers).json()["items"][0]["choices"]
 
     def without_source(choices):
-        return [{k: v for k, v in c.items() if k != "target_source"} for c in choices]
+        return [
+            {k: v for k, v in c.items() if k != "target_source" and v is not None} for c in choices
+        ]
 
     assert without_source(picker) == without_source(queued)
     sources = [

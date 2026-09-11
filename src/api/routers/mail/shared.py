@@ -13,7 +13,7 @@ import datetime
 from typing import Any
 
 from fastapi import HTTPException
-from pydantic import BaseModel, field_serializer
+from pydantic import BaseModel
 
 from api import db
 from api.mail import match as mail_match
@@ -213,21 +213,20 @@ class Candidates(BaseModel):
     # The verbs, decided by the server. A client reads
     # `payload[choice.target_source]`, which is why this payload's list is
     # called `applications` and the queue's is called `candidates`.
+    #
+    # A verb's optional fields arrive as null here rather than being omitted,
+    # which is what they were. exclude_none is not available on this route -
+    # the rest of the payload has real nulls and has always sent them - and a
+    # serialiser that dropped them would erase ResolveChoice from the schema,
+    # leaving the generated client an untyped object. So the null wins and the
+    # consumer was checked: the picker reads `c.needs_target` and
+    # `c.reason` as optional, and null is falsy exactly as absent was.
     choices: list[resolve.ResolveChoice]
     total_applications: int
     # The count the matcher choked on. Two or more means it refused on purpose
     # rather than finding nothing.
     same_company_candidates: int
     board_jobs: list[CandidateJob]
-
-    @field_serializer("choices")
-    def _omit_absent(self, choices: list[resolve.ResolveChoice]) -> list[dict[str, Any]]:
-        """A verb's absent fields MEAN something: no `affects` is one message,
-        no `reason` is that the verb is available. Serialised as nulls they
-        would say something the contract does not, so they are dropped here
-        rather than by an exclude_none over the whole response - the rest of
-        this payload has real nulls and has always sent them."""
-        return [choice.model_dump(exclude_none=True) for choice in choices]
 
 
 # Why a candidate is on the list at all, and the value `same_company_candidates`
