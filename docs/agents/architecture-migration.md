@@ -67,10 +67,25 @@ real only relocates the problem.
 | 6 | The long files are split | No module does four jobs. `admin.py` 2,136 lines, `mail.py` 2,117, `resolve.py` 1,337, `orm.py` 1,248, `health.py` 1,155, `tasks/runtime.py` 796 |
 | 7 | A row is typed, not a dict | A read returns a shape a type checker knows. 678 SQL call sites return bare dicts today |
 
-**The API contract is the invariant.** `openapi.json` is canon and
-`tests/test_openapi_current.py` fails the build when routes and schema
-disagree. No phase changes an operation's shape. A frontend and a browser
-extension read that contract and are not in this repository.
+**The API contract was the invariant, and is now a price.** `openapi.json` is
+canon and `tests/test_openapi_current.py` fails the build when routes and
+schema disagree. Every phase to this point left it alone.
+
+Kanishk lifted that on 2026-09-10, for the late phases, and left the call to
+whoever is taking one. So the rule is no longer "never"; it is "say what it
+buys, against what it costs".
+
+What it costs is not the backend change. A frontend repository and a browser
+extension read that contract and neither is in this repository, so a changed
+operation is three coordinated changes, and one of them ships to a browser
+somebody has to reload. The extension holds its own copy of what the API
+returns: read `extension/README.md` before assuming a response shape is
+internal.
+
+Nothing in phases 6 or 7 needs it. They are a module split and a row type,
+both of which stop at this repository's edge. Take the permission when a
+phase can say which operation, which consumer, and why the shape it has now
+makes the work worse.
 
 ## What may be done unattended
 
