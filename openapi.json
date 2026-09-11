@@ -1103,7 +1103,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ViewList"
+                }
               }
             }
           },
@@ -1229,7 +1231,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/View"
+                }
               }
             }
           },
@@ -1367,7 +1371,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/View"
+                }
               }
             }
           },
@@ -1492,7 +1498,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ViewDeleted"
+                }
               }
             }
           },
@@ -7768,7 +7776,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/SourceGroupList"
+                }
               }
             }
           },
@@ -7896,7 +7906,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/GroupApplied"
+                }
               }
             }
           },
@@ -8024,7 +8036,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/NewSourceRequest"
+                }
               }
             }
           },
@@ -8140,7 +8154,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/SourceRequestList"
+                }
               }
             }
           },
@@ -8258,7 +8274,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/SourceList"
+                }
               }
             }
           },
@@ -8387,7 +8405,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/SourcesPatched"
+                }
               }
             }
           },
@@ -8513,7 +8533,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/SourcesReplaced"
+                }
               }
             }
           },
@@ -8631,7 +8653,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Stats"
+                }
               }
             }
           },
@@ -8750,7 +8774,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/FunnelReport"
+                }
               }
             }
           },
@@ -26029,6 +26055,25 @@
         ],
         "title": "ApiKeyPut"
       },
+      "AppliedWeek": {
+        "properties": {
+          "week": {
+            "type": "string",
+            "format": "date",
+            "title": "Week"
+          },
+          "applied": {
+            "type": "integer",
+            "title": "Applied"
+          }
+        },
+        "type": "object",
+        "required": [
+          "week",
+          "applied"
+        ],
+        "title": "AppliedWeek"
+      },
       "ApplyGroupBody": {
         "properties": {
           "name": {
@@ -26541,6 +26586,25 @@
         ],
         "title": "Education"
       },
+      "ExcludedStage": {
+        "properties": {
+          "stage": {
+            "type": "string",
+            "title": "Stage"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "stage",
+          "reason"
+        ],
+        "title": "ExcludedStage",
+        "description": "A stage left out, said out loud. A number quietly missing is worse\nthan one that names why it is not here."
+      },
       "Experience": {
         "properties": {
           "company": {
@@ -27026,6 +27090,116 @@
         ],
         "title": "FilterRunBody"
       },
+      "Funnel": {
+        "properties": {
+          "applications": {
+            "type": "integer",
+            "title": "Applications"
+          },
+          "stages": {
+            "items": {
+              "$ref": "#/components/schemas/FunnelStage"
+            },
+            "type": "array",
+            "title": "Stages"
+          },
+          "below_sample_floor": {
+            "type": "boolean",
+            "title": "Below Sample Floor"
+          }
+        },
+        "type": "object",
+        "required": [
+          "applications",
+          "stages",
+          "below_sample_floor"
+        ],
+        "title": "Funnel"
+      },
+      "FunnelReport": {
+        "properties": {
+          "overall": {
+            "$ref": "#/components/schemas/Funnel"
+          },
+          "by_source": {
+            "items": {
+              "$ref": "#/components/schemas/SourceFunnel"
+            },
+            "type": "array",
+            "title": "By Source"
+          },
+          "excluded_stages": {
+            "items": {
+              "$ref": "#/components/schemas/ExcludedStage"
+            },
+            "type": "array",
+            "title": "Excluded Stages"
+          },
+          "min_sample": {
+            "type": "integer",
+            "title": "Min Sample"
+          }
+        },
+        "type": "object",
+        "required": [
+          "overall",
+          "by_source",
+          "excluded_stages",
+          "min_sample"
+        ],
+        "title": "FunnelReport"
+      },
+      "FunnelStage": {
+        "properties": {
+          "stage": {
+            "type": "string",
+            "title": "Stage"
+          },
+          "reached": {
+            "type": "integer",
+            "title": "Reached"
+          },
+          "of": {
+            "type": "integer",
+            "title": "Of"
+          }
+        },
+        "type": "object",
+        "required": [
+          "stage",
+          "reached",
+          "of"
+        ],
+        "title": "FunnelStage",
+        "description": "One stage with its own denominator. `reached` counts applications an\nevent of that kind ever arrived for, so the stages overlap and do not sum\nto `of`."
+      },
+      "GroupApplied": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "enabled": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Enabled"
+          },
+          "mode": {
+            "type": "string",
+            "title": "Mode"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ok",
+          "enabled",
+          "mode"
+        ],
+        "title": "GroupApplied",
+        "description": "Every board the person now holds, not just the bundle's, because\n\"replace\" keeps boards that are switched off and \"add\" keeps everything."
+      },
       "GroupBudgetPut": {
         "properties": {
           "weekly_token_budget": {
@@ -27459,6 +27633,41 @@
           "addable_providers"
         ],
         "title": "ModelsResponse"
+      },
+      "NewSourceRequest": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "note": {
+            "type": "string",
+            "title": "Note"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "url",
+          "note",
+          "status",
+          "created_at"
+        ],
+        "title": "NewSourceRequest",
+        "description": "The receipt for a board someone asked for. Narrower than the row the\nlist returns: a request a moment old has no resolution, and shipping the\nresolution fields as nulls would say it was looked at and left."
       },
       "NonNullUpdate_Annotated_int__FieldInfo_annotation_NoneType__required_True__metadata__Ge_ge_0_____": {
         "type": "integer",
@@ -29245,6 +29454,65 @@
         "title": "SettingsPut",
         "description": "Partial settings update: omitted fields preserve their saved value.\n\nNull resets column_layout, ai_model and writing_style to their defaults.\nOther fields retain their legacy null-as-omission behavior. Supplied\nobjects replace the whole object; {} clears it, subject to the age cap\nwhen criteria are written. False is a saved value, not an omission.\n\nRejects unknown keys rather than dropping them.\n\n`background` was a key here until it was removed, and a client still\nsending it needs to be told. Pydantic's default is to discard an\nunrecognised key silently, which would answer 200 to a write that\nstored nothing - the one failure a caller cannot detect."
       },
+      "Source": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "listings_url": {
+            "type": "string",
+            "title": "Listings Url"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "company": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company"
+          },
+          "active": {
+            "type": "boolean",
+            "title": "Active"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "groups": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Groups"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "listings_url",
+          "description",
+          "company",
+          "active",
+          "enabled",
+          "groups",
+          "kind"
+        ],
+        "title": "Source",
+        "description": "One board on the subscribe page. `enabled` is this caller's own\nsubscription and `kind` is derived from the listings url rather than\nstored, so a board cannot say it is one fetcher while another reads it."
+      },
       "SourceBody": {
         "properties": {
           "name": {
@@ -29336,6 +29604,97 @@
         "type": "object",
         "title": "SourceBody"
       },
+      "SourceCounts": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "with_status": {
+            "type": "integer",
+            "title": "With Status"
+          },
+          "applied": {
+            "type": "integer",
+            "title": "Applied"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source",
+          "total",
+          "with_status",
+          "applied"
+        ],
+        "title": "SourceCounts"
+      },
+      "SourceFunnel": {
+        "properties": {
+          "applications": {
+            "type": "integer",
+            "title": "Applications"
+          },
+          "stages": {
+            "items": {
+              "$ref": "#/components/schemas/FunnelStage"
+            },
+            "type": "array",
+            "title": "Stages"
+          },
+          "below_sample_floor": {
+            "type": "boolean",
+            "title": "Below Sample Floor"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          }
+        },
+        "type": "object",
+        "required": [
+          "applications",
+          "stages",
+          "below_sample_floor",
+          "source"
+        ],
+        "title": "SourceFunnel"
+      },
+      "SourceGroup": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "members": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Members"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "subscribed": {
+            "type": "boolean",
+            "title": "Subscribed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "members",
+          "description",
+          "subscribed"
+        ],
+        "title": "SourceGroup",
+        "description": "A bundle of boards a person can take in one press. `subscribed` is\ncomputed per caller rather than stored: the bundle is theirs only while\nthey hold every board in it."
+      },
       "SourceGroupBody": {
         "properties": {
           "members": {
@@ -29379,6 +29738,98 @@
         "type": "object",
         "title": "SourceGroupBody"
       },
+      "SourceGroupList": {
+        "properties": {
+          "groups": {
+            "items": {
+              "$ref": "#/components/schemas/SourceGroup"
+            },
+            "type": "array",
+            "title": "Groups"
+          }
+        },
+        "type": "object",
+        "required": [
+          "groups"
+        ],
+        "title": "SourceGroupList"
+      },
+      "SourceList": {
+        "properties": {
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/Source"
+            },
+            "type": "array",
+            "title": "Sources"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sources"
+        ],
+        "title": "SourceList"
+      },
+      "SourceRequest": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "note": {
+            "type": "string",
+            "title": "Note"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "resolution_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolution Note"
+          },
+          "resolved_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "url",
+          "note",
+          "status",
+          "created_at",
+          "resolution_note",
+          "resolved_at"
+        ],
+        "title": "SourceRequest",
+        "description": "A request with what an administrator did about it. Both fields are null\nuntil someone answers, which is the difference between this and the\nreceipt the POST returns."
+      },
       "SourceRequestBody": {
         "properties": {
           "url": {
@@ -29399,6 +29850,45 @@
           "url"
         ],
         "title": "SourceRequestBody"
+      },
+      "SourceRequestList": {
+        "properties": {
+          "requests": {
+            "items": {
+              "$ref": "#/components/schemas/SourceRequest"
+            },
+            "type": "array",
+            "title": "Requests"
+          }
+        },
+        "type": "object",
+        "required": [
+          "requests"
+        ],
+        "title": "SourceRequestList"
+      },
+      "SourceStatusCount": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source",
+          "status",
+          "count"
+        ],
+        "title": "SourceStatusCount"
       },
       "SourceSwitchBody": {
         "properties": {
@@ -29486,6 +29976,44 @@
         "type": "object",
         "title": "SourcesPatch"
       },
+      "SourcesPatched": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "added": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Added"
+          },
+          "removed": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Removed"
+          },
+          "enabled": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Enabled"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ok",
+          "added",
+          "removed",
+          "enabled"
+        ],
+        "title": "SourcesPatched",
+        "description": "What the delta actually did, beside what the person now holds. `added`\nand `removed` are what the write touched, so a name already subscribed\nreports as neither."
+      },
       "SourcesPut": {
         "properties": {
           "enabled": {
@@ -29501,6 +30029,82 @@
           "enabled"
         ],
         "title": "SourcesPut"
+      },
+      "SourcesReplaced": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ok"
+        ],
+        "title": "SourcesReplaced"
+      },
+      "Stats": {
+        "properties": {
+          "totals": {
+            "$ref": "#/components/schemas/Totals"
+          },
+          "by_status": {
+            "items": {
+              "$ref": "#/components/schemas/StatusCount"
+            },
+            "type": "array",
+            "title": "By Status"
+          },
+          "by_source": {
+            "items": {
+              "$ref": "#/components/schemas/SourceCounts"
+            },
+            "type": "array",
+            "title": "By Source"
+          },
+          "by_source_status": {
+            "items": {
+              "$ref": "#/components/schemas/SourceStatusCount"
+            },
+            "type": "array",
+            "title": "By Source Status"
+          },
+          "applied_by_week": {
+            "items": {
+              "$ref": "#/components/schemas/AppliedWeek"
+            },
+            "type": "array",
+            "title": "Applied By Week"
+          }
+        },
+        "type": "object",
+        "required": [
+          "totals",
+          "by_status",
+          "by_source",
+          "by_source_status",
+          "applied_by_week"
+        ],
+        "title": "Stats"
+      },
+      "StatusCount": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "count"
+        ],
+        "title": "StatusCount",
+        "description": "A status and how many board rows carry it. The empty string is the\nboard's own name for \"no status yet\", not a missing value, which is why\nthe query coalesces rather than letting null through."
       },
       "SubmittedBody": {
         "properties": {
@@ -29695,6 +30299,30 @@
         },
         "type": "object",
         "title": "TaskModelPut"
+      },
+      "Totals": {
+        "properties": {
+          "tracked": {
+            "type": "integer",
+            "title": "Tracked"
+          },
+          "applied": {
+            "type": "integer",
+            "title": "Applied"
+          },
+          "hidden": {
+            "type": "integer",
+            "title": "Hidden"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tracked",
+          "applied",
+          "hidden"
+        ],
+        "title": "Totals",
+        "description": "The bookkeeping rows, deliberately not the board. Counted from\nuser_jobs, so `tracked` includes rows whose posting has since left."
       },
       "UploadRequest": {
         "properties": {
@@ -29901,6 +30529,58 @@
         ],
         "title": "ValidationError"
       },
+      "View": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "page": {
+            "type": "string",
+            "title": "Page"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "state": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "State"
+          },
+          "is_default": {
+            "type": "boolean",
+            "title": "Is Default"
+          },
+          "position": {
+            "type": "integer",
+            "title": "Position"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "page",
+          "name",
+          "state",
+          "is_default",
+          "position",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "View",
+        "description": "One saved view, the same row every route here returns.\n\n`state` stays a free object. It is the page's own request shape and the\nAPI never reads it, so declaring its keys here would be this module\nclaiming to know a page's vocabulary and going stale the first time a\npage grows a filter."
+      },
       "ViewCreate": {
         "properties": {
           "page": {
@@ -29932,6 +30612,35 @@
           "name"
         ],
         "title": "ViewCreate"
+      },
+      "ViewDeleted": {
+        "properties": {
+          "deleted": {
+            "type": "integer",
+            "title": "Deleted"
+          }
+        },
+        "type": "object",
+        "required": [
+          "deleted"
+        ],
+        "title": "ViewDeleted"
+      },
+      "ViewList": {
+        "properties": {
+          "views": {
+            "items": {
+              "$ref": "#/components/schemas/View"
+            },
+            "type": "array",
+            "title": "Views"
+          }
+        },
+        "type": "object",
+        "required": [
+          "views"
+        ],
+        "title": "ViewList"
       },
       "ViewPatch": {
         "properties": {

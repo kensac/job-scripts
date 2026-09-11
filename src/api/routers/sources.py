@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import datetime
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
@@ -12,8 +14,23 @@ from core.fetching import boards
 router = APIRouter()
 
 
+class SourceGroup(BaseModel):
+    """A bundle of boards a person can take in one press. `subscribed` is
+    computed per caller rather than stored: the bundle is theirs only while
+    they hold every board in it."""
+
+    name: str
+    members: list[str]
+    description: str
+    subscribed: bool
+
+
+class SourceGroupList(BaseModel):
+    groups: list[SourceGroup]
+
+
 @router.get("/source-groups")
-def list_source_groups(user: AuthedUser = Depends(require_user)):
+def list_source_groups(user: AuthedUser = Depends(require_user)) -> SourceGroupList:
     enabled = {
         r["source"]
         for r in db.query("SELECT source FROM user_sources WHERE user_id = %s", (user.id,))
@@ -24,7 +41,7 @@ def list_source_groups(user: AuthedUser = Depends(require_user)):
     for g in groups:
         members = g["members"] or []
         g["subscribed"] = bool(members) and set(members).issubset(enabled)
-    return {"groups": groups}
+    return SourceGroupList(groups=[SourceGroup(**g) for g in groups])
 
 
 class ApplyGroupBody(BaseModel):
@@ -32,8 +49,19 @@ class ApplyGroupBody(BaseModel):
     mode: str = "replace"
 
 
+class GroupApplied(BaseModel):
+    """Every board the person now holds, not just the bundle's, because
+    "replace" keeps boards that are switched off and "add" keeps everything."""
+
+    ok: bool
+    enabled: list[str]
+    mode: str
+
+
 @router.post("/user/sources/apply-group")
-def apply_source_group(body: ApplyGroupBody, user: AuthedUser = Depends(require_user)):
+def apply_source_group(
+    body: ApplyGroupBody, user: AuthedUser = Depends(require_user)
+) -> GroupApplied:
     if body.mode not in ("replace", "add"):
         raise HTTPException(
             400, detail={"code": "INVALID_MODE", "message": "mode must be replace or add"}
@@ -72,7 +100,7 @@ def apply_source_group(body: ApplyGroupBody, user: AuthedUser = Depends(require_
             "SELECT source FROM user_sources WHERE user_id = %s ORDER BY source", (user.id,)
         )
     ]
-    return {"ok": True, "enabled": enabled, "mode": body.mode}
+    return GroupApplied(ok=True, enabled=enabled, mode=body.mode)
 
 
 class SourceRequestBody(BaseModel):
@@ -80,33 +108,83 @@ class SourceRequestBody(BaseModel):
     note: str = Field(default="", max_length=2000)
 
 
+class NewSourceRequest(BaseModel):
+    """The receipt for a board someone asked for. Narrower than the row the
+    list returns: a request a moment old has no resolution, and shipping the
+    resolution fields as nulls would say it was looked at and left."""
+
+    id: int
+    url: str
+    note: str
+    status: str
+    created_at: datetime.datetime
+
+
 @router.post("/user/source-requests")
-def create_source_request(body: SourceRequestBody, user: AuthedUser = Depends(require_user)):
+def create_source_request(
+    body: SourceRequestBody, user: AuthedUser = Depends(require_user)
+) -> NewSourceRequest:
     if not body.url.startswith(("http://", "https://")):
         raise HTTPException(
             400, detail={"code": "INVALID_URL", "message": "the board link must be a URL"}
         )
-    row = db.query_one(
+    row = db.query_one_as(
+        NewSourceRequest,
         "INSERT INTO source_requests (user_id, url, note) VALUES (%s, %s, %s) "
         "RETURNING id, url, note, status, created_at",
         (user.id, body.url, body.note),
     )
+    # An INSERT that did not raise returned its row.
+    assert row
     return row
 
 
+class SourceRequest(NewSourceRequest):
+    """A request with what an administrator did about it. Both fields are null
+    until someone answers, which is the difference between this and the
+    receipt the POST returns."""
+
+    resolution_note: str | None
+    resolved_at: datetime.datetime | None
+
+
+class SourceRequestList(BaseModel):
+    requests: list[SourceRequest]
+
+
 @router.get("/user/source-requests")
-def list_own_source_requests(user: AuthedUser = Depends(require_user)):
-    return {
-        "requests": db.query(
+def list_own_source_requests(user: AuthedUser = Depends(require_user)) -> SourceRequestList:
+    return SourceRequestList(
+        requests=db.query_as(
+            SourceRequest,
             "SELECT id, url, note, status, resolution_note, created_at, resolved_at "
             "FROM source_requests WHERE user_id = %s ORDER BY id DESC",
             (user.id,),
         )
-    }
+    )
+
+
+class Source(BaseModel):
+    """One board on the subscribe page. `enabled` is this caller's own
+    subscription and `kind` is derived from the listings url rather than
+    stored, so a board cannot say it is one fetcher while another reads it."""
+
+    name: str
+    listings_url: str
+    description: str
+    company: str | None
+    active: bool
+    enabled: bool
+    groups: list[str]
+    kind: str
+
+
+class SourceList(BaseModel):
+    sources: list[Source]
 
 
 @router.get("/sources")
-def list_sources(user: AuthedUser = Depends(require_user)):
+def list_sources(user: AuthedUser = Depends(require_user)) -> SourceList:
     rows = db.query(
         """
         SELECT s.name, s.listings_url, s.description, s.company, s.active,
@@ -127,12 +205,27 @@ def list_sources(user: AuthedUser = Depends(require_user)):
     # show a wall of slugs.
     for r in rows:
         r["kind"] = boards.kind(r["listings_url"])
-    return {"sources": rows}
+    return SourceList(sources=[Source(**r) for r in rows])
 
 
 class SourcesPatch(BaseModel):
     add: list[str] = Field(default_factory=list)
     remove: list[str] = Field(default_factory=list)
+
+
+class SourcesPatched(BaseModel):
+    """What the delta actually did, beside what the person now holds. `added`
+    and `removed` are what the write touched, so a name already subscribed
+    reports as neither."""
+
+    ok: bool
+    added: list[str]
+    removed: list[str]
+    enabled: list[str]
+
+
+class SourcesReplaced(BaseModel):
+    ok: bool
 
 
 def _check_names(user_id: int, names: set[str], adding: set[str]) -> None:
@@ -161,7 +254,7 @@ def _check_names(user_id: int, names: set[str], adding: set[str]) -> None:
 
 
 @router.patch("/user/sources")
-def patch_sources(body: SourcesPatch, user: AuthedUser = Depends(require_user)):
+def patch_sources(body: SourcesPatch, user: AuthedUser = Depends(require_user)) -> SourcesPatched:
     """A delta: subscribe to these, unsubscribe from those. One toggle used to
     PUT the whole enabled set, which at 389 boards raced with itself and could
     not express "leave this bundle" at all. Names in both lists end up
@@ -185,16 +278,16 @@ def patch_sources(body: SourcesPatch, user: AuthedUser = Depends(require_user)):
         )
     ]
     visibility.request_refresh(user.id)
-    return {
-        "ok": True,
-        "added": sorted(r["source"] for r in added),
-        "removed": sorted(r["source"] for r in removed),
-        "enabled": enabled,
-    }
+    return SourcesPatched(
+        ok=True,
+        added=sorted(r["source"] for r in added),
+        removed=sorted(r["source"] for r in removed),
+        enabled=enabled,
+    )
 
 
 @router.put("/user/sources")
-def put_sources(body: SourcesPut, user: AuthedUser = Depends(require_user)):
+def put_sources(body: SourcesPut, user: AuthedUser = Depends(require_user)) -> SourcesReplaced:
     _check_names(user.id, set(body.enabled), set(body.enabled))
     with db.pool.connection() as conn:
         conn.execute("DELETE FROM user_sources WHERE user_id = %s", (user.id,))
@@ -204,4 +297,4 @@ def put_sources(body: SourcesPut, user: AuthedUser = Depends(require_user)):
                 (user.id, source),
             )
     visibility.request_refresh(user.id)
-    return {"ok": True}
+    return SourcesReplaced(ok=True)

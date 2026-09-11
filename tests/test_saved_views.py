@@ -219,9 +219,11 @@ def test_concurrent_default_selection_serializes_on_owner(client, user_headers, 
     assert len(results) == 2
     defaults = db.query("SELECT id FROM saved_views WHERE is_default")
     assert len(defaults) == 1
-    assert defaults[0]["id"] in {result["id"] for result in results}
+    # These two call the route functions in-process, so they get the declared
+    # View back rather than the JSON a client would read.
+    assert defaults[0]["id"] in {result.id for result in results}
     if operation == "create":
-        assert sorted(result["position"] for result in results) == [2, 3]
+        assert sorted(result.position for result in results) == [2, 3]
 
 
 def test_default_migration_refuses_ambiguous_existing_choices(client, user_headers):
