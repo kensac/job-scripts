@@ -34,8 +34,9 @@ logger = logging.getLogger(__name__)
 # decided separately and does not consult them, because visibility.FULL admits
 # an untouched row only through a branch that never references user_jobs.
 #
-# Touching a row moves it the other way: it becomes the person's, visible
-# whatever a verdict says, and out of reach of both writers below.
+# Touching a legacy row moves it the other way: it becomes the person's,
+# visible whatever a verdict says, and out of reach of the legacy delete
+# below. Its independent working-set membership remains rebuildable scope.
 UNTOUCHED = """
     (uj.status IS NULL OR uj.status = '') AND uj.date_applied IS NULL
     AND COALESCE(uj.notes, '') = '' AND COALESCE(uj.size, '') = ''
@@ -184,12 +185,18 @@ def content_attempted_urls(urls: list[str]) -> set:
 
 
 def demote_closed() -> int:
-    with db.pool.connection() as conn:
-        result = conn.execute(
-            f"""
-            DELETE FROM user_jobs uj USING jobs j
-            WHERE uj.job_id = j.id AND {UNTOUCHED}
-              AND (
+    result = db.query_one(
+        f"""
+            WITH demotable AS MATERIALIZED (
+                SELECT membership.user_id, membership.job_id
+                FROM (
+                    SELECT user_id, job_id FROM user_job_working_set
+                    UNION
+                    SELECT uj.user_id, uj.job_id FROM user_jobs uj
+                    WHERE uj.person_touched_at IS NULL AND {UNTOUCHED}
+                ) membership
+                JOIN jobs j ON j.id = membership.job_id
+                WHERE (
                 -- A posting that vanished from its source feed is gone even
                 -- if no closed-check ever ran on it. Keying only on the
                 -- verdict left dead postings sitting in the intake view
@@ -199,10 +206,30 @@ def demote_closed() -> int:
                 OR (SELECT q.status FROM ai_queries q WHERE q.url = j.url
                     AND q.check_type = 'closed' AND q.status IN ('passed', 'rejected')
                     ORDER BY q.id DESC LIMIT 1) = 'rejected'
-              )
-            """
-        )
-        demoted = result.rowcount
+                )
+                ORDER BY membership.user_id, membership.job_id
+            ),
+            working_set_delete AS (
+                DELETE FROM user_job_working_set working
+                USING demotable
+                WHERE working.user_id = demotable.user_id
+                  AND working.job_id = demotable.job_id
+                RETURNING 1
+            ),
+            legacy_delete AS (
+                DELETE FROM user_jobs uj
+                USING demotable
+                WHERE uj.user_id = demotable.user_id
+                  AND uj.job_id = demotable.job_id
+                  AND uj.person_touched_at IS NULL
+                  AND {UNTOUCHED}
+                RETURNING 1
+            )
+            SELECT COUNT(*) AS demoted FROM legacy_delete
+        """
+    )
+    assert result is not None
+    demoted = result["demoted"]
     if demoted:
         metrics.BOARD_ROWS.labels("demoted").inc(demoted)
         logger.info(f"Demoted {demoted} closed rows from boards")
