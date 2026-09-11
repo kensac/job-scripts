@@ -17,35 +17,68 @@ router = APIRouter()
 _CONFIG_KEYS = CONFIG_KEYS
 
 
+class Tunable(BaseModel):
+    """One registry entry, as `api.config.ConfigKey` holds it. `type` is the
+    name of a Python type rather than the type, because it travels as JSON and
+    the page only needs to tell an int box from a checkbox."""
+
+    type: str
+    kind: str
+    section: str
+    default: JsonValue
+    help: str
+    choices: list[str]
+
+
+class Tunables(BaseModel):
+    """The stored values beside the registry that describes them, both keyed
+    by the config key. `config` holds only keys app_config has a row for;
+    `keys` holds every key the registry declares, which is what lets the page
+    render one it has never seen."""
+
+    config: dict[str, JsonValue]
+    keys: dict[str, Tunable]
+
+
 @router.get("/config")
-def get_config(user: AuthedUser = Depends(require_admin)):
+def get_config(user: AuthedUser = Depends(require_admin)) -> Tunables:
     rows = db.query("SELECT key, value FROM app_config ORDER BY key")
-    return {
-        "config": {r["key"]: r["value"] for r in rows},
+    return Tunables(
+        config={r["key"]: r["value"] for r in rows},
         # The whole registry entry travels: the page picks its control
         # from kind and type, files the key under section, and marks a
         # value that differs from default as changed, none of which it
         # can infer from the help sentence without guessing.
-        "keys": {
-            key: {
-                "type": spec.type.__name__,
-                "kind": spec.kind,
-                "section": spec.section,
-                "default": spec.default,
-                "help": spec.help,
-                "choices": list(spec.choices),
-            }
+        keys={
+            key: Tunable(
+                type=spec.type.__name__,
+                kind=spec.kind,
+                section=spec.section,
+                default=spec.default,
+                help=spec.help,
+                choices=list(spec.choices),
+            )
             for key, spec in _CONFIG_KEYS.items()
         },
-    }
+    )
 
 
 class ConfigPut(BaseModel):
     value: JsonValue
 
 
+class TunableWritten(BaseModel):
+    """The value as stored, which is not always the value as sent: a spec
+    normalises what it validates, so the caller is told what landed."""
+
+    key: str
+    value: JsonValue
+
+
 @router.put("/config/{key}")
-def put_config(key: str, body: ConfigPut, user: AuthedUser = Depends(require_admin)):
+def put_config(
+    key: str, body: ConfigPut, user: AuthedUser = Depends(require_admin)
+) -> TunableWritten:
     spec = _CONFIG_KEYS.get(key)
     if spec is None:
         raise HTTPException(
@@ -64,4 +97,4 @@ def put_config(key: str, body: ConfigPut, user: AuthedUser = Depends(require_adm
         "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
         (key, db.jsonb(value)),
     )
-    return {"key": key, "value": value}
+    return TunableWritten(key=key, value=value)
