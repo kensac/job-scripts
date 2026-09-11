@@ -11,7 +11,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        lane: [serial, profile, shard-0, shard-1, shard-2, corpus]
+        lane: [serial, profile, shard-0, shard-1, shard-2, shard-3, shard-4, shard-5, corpus]
         repetition: [1, 2]
         exclude:
           - lane: profile
@@ -20,7 +20,7 @@ jobs:
     with:
       lane: ${{ matrix.lane }}
       repetition: ${{ matrix.repetition }}
-      shards: 3
+      shards: 6
       revision: ${{ github.event.pull_request.head.sha || github.sha }}
 
   compare:
@@ -36,4 +36,4 @@ jobs:
           pattern: timings-*
           path: measurements
       - name: Verify coverage and compare timings
-        run: python tools/test_performance.py measurements --repetitions=2 --shards=3 | tee "$GITHUB_STEP_SUMMARY"
+        run: python tools/test_performance.py measurements --repetitions=2 --shards=6 | tee "$GITHUB_STEP_SUMMARY"

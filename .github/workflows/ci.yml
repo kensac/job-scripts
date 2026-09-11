@@ -197,11 +197,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        lane: [shard-0, shard-1, shard-2, corpus]
+        lane: [shard-0, shard-1, shard-2, shard-3, shard-4, shard-5, corpus]
     uses: ./.github/workflows/test-run.yml
     with:
       lane: ${{ matrix.lane }}
-      shards: 3
+      # Six, because the lane is no longer mostly pytest. A three-way shard
+      # ran about 26 s of tests inside a job that took 45-60 s; the rest is
+      # the runner starting, the image pulling and the database coming up,
+      # and that part does not shrink by sharding. Halving the tests per
+      # lane takes the pytest step to roughly 13 s and the job to about 30 s,
+      # at the cost of three more container boots.
+      shards: 6
       revision: ${{ needs.gate.outputs.revision }}
 
   # Preserve the required check name. Every lane must pass and account for
@@ -253,4 +259,4 @@ jobs:
           path: measurements
       - name: Verify every collected test executed exactly once
         if: needs.gate.outputs.corrected != 'true'
-        run: python tools/test_performance.py measurements --shards=3 --manifest=collection/manifest.json | tee "$GITHUB_STEP_SUMMARY"
+        run: python tools/test_performance.py measurements --shards=6 --manifest=collection/manifest.json | tee "$GITHUB_STEP_SUMMARY"
