@@ -5,9 +5,10 @@ on:
   push:
     branches:
       - main
-  # The auto-fix commit below is pushed with the workflow token, and pushes by
-  # that token start no workflow on their own; the run dispatches this
-  # workflow on the branch explicitly instead, so the fixed commit is checked.
+  # A push by the workflow token starts no workflow, so the auto-fix commit
+  # below gets no run of its own. It does not need one: the run that pushes it
+  # takes its revision afterwards and judges what it pushed. Kept for running
+  # the workflow by hand.
   workflow_dispatch:
 
 # Pull requests run without production credentials. Forks receive only a
@@ -47,8 +48,6 @@ jobs:
         with:
           # Test the event's exact revision; fixes push explicitly to its branch.
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
-      - id: revision
-        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           enable-cache: true
@@ -75,7 +74,6 @@ jobs:
           APP_ENCRYPTION_KEY: ci
           GH_TOKEN: ${{ github.token }}
           HEAD_BRANCH: ${{ github.head_ref }}
-          WORKFLOW_NAME: ${{ github.workflow }}
         run: |
           ruff check --fix src tests || true
           ruff format src tests
@@ -90,7 +88,8 @@ jobs:
             schema_status=1
           fi
           # Preserve lint and format fixes even when schema generation fails.
-          # The dispatched run checks migrations and the schema independently.
+          # The steps below check migrations and the schema independently, on
+          # this same run and on the commit this one pushes.
           if git diff --quiet -- src tests openapi.json; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
             exit "$schema_status"
@@ -100,29 +99,23 @@ jobs:
           git add src tests openapi.json
           git commit -m "chore: auto-fix lint, format and schema"
           git push origin "HEAD:$HEAD_BRANCH"
-          gh workflow run "$WORKFLOW_NAME" --ref "$HEAD_BRANCH"
           echo "changed=true" >> "$GITHUB_OUTPUT"
-          echo "::notice::Pushed mechanical fixes as a new commit; its own run judges the branch"
+          echo "::notice::Pushed mechanical fixes as a new commit; this run judges it"
+      - id: revision
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - name: Lint
-        if: steps.autofix.outputs.changed != 'true'
         run: ruff check src tests
       - name: Format check
-        if: steps.autofix.outputs.changed != 'true'
         run: ruff format --check src tests
       - name: Type check
-        if: steps.autofix.outputs.changed != 'true'
         run: pyright
       - name: Import contract
-        if: steps.autofix.outputs.changed != 'true'
         run: lint-imports
       - name: Compile all sources
-        if: steps.autofix.outputs.changed != 'true'
         run: python -m compileall -q src
       - name: Migrations apply cleanly
-        if: steps.autofix.outputs.changed != 'true'
         run: python -m alembic upgrade head
       - name: Collect the complete test manifest
-        if: steps.autofix.outputs.changed != 'true'
         env:
           TEST_DATABASE_URL: postgresql://ci:ci@localhost:5432/jobtracker_ci
           JOBTRACKER_SERVICE_TOKEN: ci
@@ -132,13 +125,11 @@ jobs:
           node --test tests/extension/*.test.cjs
           python -m pytest -p tests.ci_suite --collect-only -q tests --test-report=manifest.json
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        if: steps.autofix.outputs.changed != 'true'
         with:
           name: test-manifest
           path: manifest.json
           if-no-files-found: error
       - name: Models match migrations (autogen must be empty)
-        if: steps.autofix.outputs.changed != 'true'
         run: |
           python -m alembic revision --autogenerate -m ci_drift_check
           f=$(ls alembic/versions/*ci_drift_check*.py)
@@ -148,7 +139,6 @@ jobs:
 
   tests:
     needs: prepare
-    if: needs.prepare.outputs.corrected != 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -161,6 +151,14 @@ jobs:
 
   # Preserve the required check name. Every lane must pass and account for
   # the complete collection before this gate can be green.
+  #
+  # There used to be an exemption here: when the auto-fix step pushed a
+  # commit, the test lanes were skipped and this gate passed on preparation
+  # alone, because a dispatched run was expected to judge the new commit. That
+  # run's checks never attach to the pull request, so the exemption was a
+  # green check that had judged nothing. The fix is not a better token: the
+  # run that pushes the commit now takes its revision afterwards and judges
+  # exactly what it pushed.
   check:
     if: always()
     needs: [prepare, tests]
@@ -172,26 +170,19 @@ jobs:
         env:
           PREPARE_RESULT: ${{ needs.prepare.result }}
           TEST_RESULT: ${{ needs.tests.result }}
-          CORRECTED: ${{ needs.prepare.outputs.corrected }}
         run: |
           test "$PREPARE_RESULT" = success
-          if [ "$CORRECTED" != true ]; then
-            test "$TEST_RESULT" = success
-          fi
+          test "$TEST_RESULT" = success
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        if: needs.prepare.outputs.corrected != 'true'
         with:
           ref: ${{ needs.prepare.outputs.revision }}
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        if: needs.prepare.outputs.corrected != 'true'
         with:
           name: test-manifest
           path: collection
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        if: needs.prepare.outputs.corrected != 'true'
         with:
           pattern: timings-*
           path: measurements
       - name: Verify every collected test executed exactly once
-        if: needs.prepare.outputs.corrected != 'true'
         run: python tools/test_performance.py measurements --shards=3 --manifest=collection/manifest.json | tee "$GITHUB_STEP_SUMMARY"

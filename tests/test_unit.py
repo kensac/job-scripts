@@ -344,3 +344,7 @@ def test_swapping_the_mail_or_requirements_model_carries_its_effort():
         assert effort not in declared.reasoning.rejects, (
             f"{chosen.model} rejects {effort!r}; a batch would fail whole"
         )
+
+
+def _autofix_probe(  a,b ):
+    return   a+b
