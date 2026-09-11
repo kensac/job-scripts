@@ -59,6 +59,14 @@ class FilterList(BaseModel):
     filters: list[FilterRow]
     run_all_task: task_admission.InFlight | None
     run_all_admission: filter_runs.RunDecision
+    # Whether this person may START a run, which is a different question from
+    # whether one may start NOW. `run_all_admission` answers the second: it
+    # carries the budget reason, and the id of a run already in flight so the
+    # page can show its progress. Folding permission into it would throw that
+    # id away for exactly the people who cannot start one, who still have the
+    # hourly sweep running on their behalf and still want to watch it.
+    may_run_by_hand: bool
+    may_run_message: str | None
 
 
 class SavedFilter(Filter):
@@ -164,9 +172,8 @@ def _rejudge_on_change(user: AuthedUser) -> bool:
     return group_access_allowed(REJUDGE_GROUPS_KEY, user.groups)
 
 
-def _run_refusal(user: AuthedUser) -> filter_runs.RunDecision | None:
-    """Whether this person may start a run by hand, as the decision the button
-    already reads, or None when they may.
+def _may_run_by_hand(user: AuthedUser) -> bool:
+    """Whether this person may start a run themselves.
 
     A run re-judges every posting in the catalog against a prompt. It is the
     most expensive thing a button in this product can do: three filter edits on
@@ -174,21 +181,20 @@ def _run_refusal(user: AuthedUser) -> filter_runs.RunDecision | None:
     `filter_rejudge_on_change_groups`. That closed the automatic path and left
     the manual one open, so this closes the other half.
 
-    Returned as a `RunDecision` rather than a boolean so the same answer both
-    disables the button and refuses the request. Two spellings of one rule is
-    how a disabled button and an allowed endpoint come apart.
+    Deliberately NOT folded into `filter_runs.admission`. That answers whether
+    a run may start now, and carries the budget reason and the id of a run
+    already in flight; overwriting it with a permission refusal would throw
+    that id away for exactly the people who cannot start one, who still have
+    the hourly sweep running for them and still want to watch it.
     """
-    if ADMIN_GROUPS.intersection(user.groups) or group_access_allowed(RUN_GROUPS_KEY, user.groups):
-        return None
-    return filter_runs.RunDecision(
-        allowed=False, reason="NOT_PERMITTED", message=NOT_PERMITTED_MESSAGE, task_id=None
+    return bool(ADMIN_GROUPS.intersection(user.groups)) or group_access_allowed(
+        RUN_GROUPS_KEY, user.groups
     )
 
 
 def _refuse_unpermitted_run(user: AuthedUser) -> None:
-    refusal = _run_refusal(user)
-    if refusal:
-        raise HTTPException(403, detail={"code": refusal.reason, "message": refusal.message})
+    if not _may_run_by_hand(user):
+        raise HTTPException(403, detail={"code": "NOT_PERMITTED", "message": NOT_PERMITTED_MESSAGE})
 
 
 def _enqueue_on_change(user: AuthedUser, filter_id: int) -> tuple[int | None, _BLOCKED | None]:
@@ -255,22 +261,24 @@ def list_filters(user: AuthedUser = Depends(require_user)) -> FilterList:
         (user.id,),
     )
     access_failure = budget.access_failure(user)
-    # One refusal, computed once: a person who may not run is told so for every
-    # filter and for run-all, rather than each button asking separately.
-    refusal = _run_refusal(user)
+    may_run = _may_run_by_hand(user)
     return FilterList(
         filters=[
             FilterRow(
                 **row.model_dump(),
                 task=_running(user.id, "run_filter", row.id),
-                run_admission=refusal
-                or filter_runs.admission(user.id, row.id, access_failure=access_failure).decision(),
+                run_admission=filter_runs.admission(
+                    user.id, row.id, access_failure=access_failure
+                ).decision(),
             )
             for row in rows
         ],
         run_all_task=_running(user.id, "run_all_filters"),
-        run_all_admission=refusal
-        or filter_runs.admission(user.id, None, access_failure=access_failure).decision(),
+        run_all_admission=filter_runs.admission(
+            user.id, None, access_failure=access_failure
+        ).decision(),
+        may_run_by_hand=may_run,
+        may_run_message=None if may_run else NOT_PERMITTED_MESSAGE,
     )
 
 

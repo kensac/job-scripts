@@ -487,18 +487,28 @@ def test_a_non_admin_cannot_start_a_run_by_hand(client, user_headers):
     assert every.json()["detail"]["code"] == "NOT_PERMITTED"
 
 
-def test_the_button_is_disabled_from_the_same_answer_that_refuses_the_request(client, user_headers):
-    """Two spellings of one rule is how a disabled button and an allowed
-    endpoint come apart, so the list reports the refusal the route enforces."""
-    _make_filter(client, user_headers, "disabled-button")
+def test_the_list_says_the_person_may_not_run_without_overwriting_the_admission(
+    client, user_headers, f
+):
+    """Permission and admission are two questions, and folding one into the
+    other loses an answer.
+
+    `run_all_admission` says whether a run may start NOW: it carries the budget
+    reason and the id of a run already in flight. A person who may not start
+    one still has the hourly sweep running for them and still wants to watch
+    it, so overwriting that decision with the permission refusal would throw
+    away the task id for exactly the people who cannot start their own.
+    """
+    _make_filter(client, user_headers, "may-not-run")
+    uid = db.query_one("SELECT id FROM users WHERE sub = %s", (user_headers["X-User-Sub"],))["id"]
+    running_id = f.make_task("run_all_filters", {"user_id": uid}, status="running")
 
     listed = client.get("/v1/user/filters", headers=user_headers).json()
 
-    assert listed["run_all_admission"]["allowed"] is False
-    assert listed["run_all_admission"]["reason"] == "NOT_PERMITTED"
-    for row in listed["filters"]:
-        assert row["run_admission"]["allowed"] is False
-        assert row["run_admission"]["reason"] == "NOT_PERMITTED"
+    assert listed["may_run_by_hand"] is False
+    assert "admins" in listed["may_run_message"]
+    # The admission still reports the run in flight, which is the whole point.
+    assert listed["run_all_admission"]["task_id"] == running_id
 
 
 def test_an_admin_may_still_run(client, admin_headers):
@@ -524,5 +534,8 @@ def test_opening_the_group_lets_a_non_admin_run(client, user_headers):
         filter_id = _make_filter(client, user_headers, "now-permitted")
         started = client.post(f"/v1/user/filters/{filter_id}/run", headers=user_headers)
         assert started.status_code != 403, started.text
+        listed = client.get("/v1/user/filters", headers=user_headers).json()
+        assert listed["may_run_by_hand"] is True
+        assert listed["may_run_message"] is None
     finally:
         db.execute("DELETE FROM app_config WHERE key = 'filter_run_groups'")
