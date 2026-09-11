@@ -3,10 +3,27 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
+from pydantic import BaseModel
+
 from api import budget, db, events
 from api.task_admission import ACTIVE_STATUSES, InFlight
 
 AdmissionPolicy = Literal["interactive", "scheduled"]
+
+
+class RunDecision(BaseModel):
+    """Whether a run may start now, said to whoever draws the button.
+
+    Declared here beside the decision rather than in the router that shows
+    it: `reason` is either why access was refused or IN_PROGRESS, and
+    `task_id` is the run already in flight when there is one, otherwise the
+    run this decision would start.
+    """
+
+    allowed: bool
+    reason: str | None
+    message: str | None
+    task_id: int | None
 
 
 def conflict(user_id: int, filter_id: int | None, *, policy: AdmissionPolicy) -> InFlight | None:
@@ -33,22 +50,20 @@ class RunAdmission:
     conflict: InFlight | None = None
     access_failure: budget.AIAccessError | None = None
 
-    def as_dict(self) -> dict:
+    def decision(self) -> RunDecision:
         if self.access_failure:
-            return {
-                "allowed": False,
-                "reason": self.access_failure.reason,
-                "message": self.access_failure.message,
-                "task_id": None,
-            }
-        return {
-            "allowed": self.conflict is None,
-            "reason": "IN_PROGRESS" if self.conflict else None,
-            "message": "An overlapping filter run is already in progress."
-            if self.conflict
-            else None,
-            "task_id": self.conflict.id if self.conflict else self.task_id,
-        }
+            return RunDecision(
+                allowed=False,
+                reason=self.access_failure.reason,
+                message=self.access_failure.message,
+                task_id=None,
+            )
+        return RunDecision(
+            allowed=self.conflict is None,
+            reason="IN_PROGRESS" if self.conflict else None,
+            message="An overlapping filter run is already in progress." if self.conflict else None,
+            task_id=self.conflict.id if self.conflict else self.task_id,
+        )
 
 
 def admission(

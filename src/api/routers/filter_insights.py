@@ -22,9 +22,11 @@ nothing in the schema to say which.
 from __future__ import annotations
 
 import collections
+import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel
 
 from api import db, scoping
 from api import params as params_
@@ -59,15 +61,187 @@ _WINDOW = "created_at >= now() - make_interval(days => %(days)s)"
 UNGROUPED = "ungrouped"
 
 
-def _criterion() -> dict[str, Any]:
-    return {
-        "method": "phrase_match",
-        "description": EVIDENCE_MISSING_DESCRIPTION,
-        "phrases": list(EVIDENCE_MISSING_PHRASES),
-    }
+class EvidenceCriterion(BaseModel):
+    """What "evidence missing" means, in the payload rather than in whoever
+    explained it once."""
+
+    method: str
+    description: str
+    phrases: list[str]
 
 
-def _examples_selection() -> dict[str, Any]:
+class ExamplesSelection(BaseModel):
+    """How the examples were chosen, for the same reason."""
+
+    method: str
+    ordered_by: str
+    description: str
+
+
+class ReasonGroup(BaseModel):
+    key: str
+    label: str
+
+
+class Taxonomy(BaseModel):
+    groups: list[ReasonGroup]
+    evidence_missing_criterion: EvidenceCriterion
+
+
+class Phrasing(BaseModel):
+    """One distinct rejection sentence, with how often it was written."""
+
+    phrasing: str
+    decisions: int
+    distinct_jobs: int
+
+
+class PhrasingPage(BaseModel):
+    """`filters` echoes what narrowed this page, keyed by parameter name, and
+    carries only the parameters that narrowed anything."""
+
+    prompt_hash: str
+    group: str | None
+    window_days: int
+    total_phrasings: int
+    total_decisions: int
+    offset: int
+    limit: int
+    returned: int
+    has_more: bool
+    phrasings: list[Phrasing]
+    filters: dict[str, list[str]]
+    filterable: list[str]
+
+
+class Breakdown(BaseModel):
+    """One bucket of rejections. `examples` is a reproducible sample of
+    `distinct_phrasings`, not a frequency ranking; see `_finish`."""
+
+    decisions: int
+    distinct_jobs: int
+    distinct_phrasings: int
+    evidence_missing_decisions: int
+    evidence_missing_distinct_jobs: int
+    examples: list[str]
+
+
+class GroupBreakdown(Breakdown):
+    """A bucket that a taxonomy group named. The residual bucket is the same
+    shape without the name, and rides on the row as `ungrouped`."""
+
+    key: str
+    label: str
+
+
+class PromptTotals(BaseModel):
+    """`rejected_with_reason` is the denominator the groups are of, which is
+    not `rejected`: the batched paths recorded no reason for a stretch."""
+
+    evaluated: int
+    passed: int
+    rejected: int
+    rejected_with_reason: int
+    distinct_jobs_evaluated: int
+    distinct_jobs_rejected: int
+    evidence_missing_decisions: int
+    evidence_missing_distinct_jobs: int
+
+
+class OwnedFilter(BaseModel):
+    """A filter that carries this prompt today."""
+
+    name: str
+    enabled: bool
+
+
+class OwnerUser(BaseModel):
+    sub: str
+    email: str
+
+
+class PromptOwner(BaseModel):
+    """Who holds this prompt, and whether it can still reject anything.
+
+    `state` is resolved, shared or unknown: a prompt that was edited or
+    deleted resolves to nobody, and 29% of rejections measured over the
+    corpus are in that state. `enabled` is null when no current filter
+    carries this prompt at all, because then there is nothing to ask.
+    """
+
+    state: str
+    user_count: int
+    users: list[OwnerUser]
+    enabled: bool | None
+    filters: list[OwnedFilter]
+
+
+class PromptVersion(BaseModel):
+    """One prompt version, which is the unit here rather than one filter.
+
+    `sibling_hashes_by_name` is per name, not a single number: a hash can
+    carry several names, and a scalar would leave a caller unable to say
+    which name it describes.
+    """
+
+    prompt_hash: str
+    filter_names: list[str]
+    sibling_hashes_by_name: dict[str, int]
+    first_seen: datetime.datetime | None
+    last_seen: datetime.datetime | None
+    owner: PromptOwner
+    sufficient: bool
+    totals: PromptTotals
+    groups: list[GroupBreakdown]
+    ungrouped: Breakdown
+
+
+class MyPromptVersion(BaseModel):
+    """The same prompt version as its owner sees it: their own filter names
+    rather than every name the prompt has been given, and no owner block,
+    because they are it."""
+
+    prompt_hash: str
+    filters: list[OwnedFilter]
+    first_seen: datetime.datetime | None
+    last_seen: datetime.datetime | None
+    sufficient: bool
+    totals: PromptTotals
+    groups: list[GroupBreakdown]
+    ungrouped: Breakdown
+
+
+class ReasonsEnvelope(BaseModel):
+    """What both rejection-reason views say about how they counted, so the
+    two surfaces cannot describe the same prompt differently."""
+
+    window_days: int
+    unit: str = "decisions"
+    min_decisions: int
+    overlapping_groups: bool = True
+    examples_selection: ExamplesSelection
+    evidence_missing_criterion: EvidenceCriterion
+
+
+class RejectionReasons(ReasonsEnvelope):
+    prompt_versions: list[PromptVersion]
+    filters: dict[str, list[str]]
+    filterable: list[str]
+
+
+class MyRejectionReasons(ReasonsEnvelope):
+    prompt_versions: list[MyPromptVersion]
+
+
+def _criterion() -> EvidenceCriterion:
+    return EvidenceCriterion(
+        method="phrase_match",
+        description=EVIDENCE_MISSING_DESCRIPTION,
+        phrases=list(EVIDENCE_MISSING_PHRASES),
+    )
+
+
+def _examples_selection() -> ExamplesSelection:
     """How the examples were chosen, published for the same reason the
     evidence-missing criterion is: a caller that has to narrate a number will
     narrate it from somewhere, and if the derivation is not in the payload it
@@ -76,15 +250,15 @@ def _examples_selection() -> dict[str, Any]:
     a page still rendered "the three most common" over it, because the field
     was named correctly and the sentence around it was not.
     """
-    return {
-        "method": "sample",
-        "ordered_by": "decisions desc, then phrasing",
-        "description": (
+    return ExamplesSelection(
+        method="sample",
+        ordered_by="decisions desc, then phrasing",
+        description=(
             "A reproducible sample of `distinct_phrasings`, not a frequency "
             "ranking. Phrasings in this corpus almost never repeat, so counts "
             "are nearly all 1 and there is no meaningful 'most common'."
         ),
-    }
+    )
 
 
 def _bucket() -> dict[str, Any]:
@@ -130,13 +304,13 @@ def _classify_rejections(
     return grouped, per_hash
 
 
-def _finish(bucket: dict[str, Any], examples: int) -> dict[str, Any]:
-    return {
-        "decisions": bucket["decisions"],
-        "distinct_jobs": len(bucket["distinct_jobs"]),
-        "distinct_phrasings": len(bucket["phrasings"]),
-        "evidence_missing_decisions": bucket["evidence_missing_decisions"],
-        "evidence_missing_distinct_jobs": len(bucket["evidence_missing_jobs"]),
+def _finish(bucket: dict[str, Any], examples: int) -> Breakdown:
+    return Breakdown(
+        decisions=bucket["decisions"],
+        distinct_jobs=len(bucket["distinct_jobs"]),
+        distinct_phrasings=len(bucket["phrasings"]),
+        evidence_missing_decisions=bucket["evidence_missing_decisions"],
+        evidence_missing_distinct_jobs=len(bucket["evidence_missing_jobs"]),
         # Most frequent phrasings rather than arbitrary ones: an example is
         # standing in for a group, so it should be typical of it.
         # Ordered by count then text, which makes the choice reproducible
@@ -147,17 +321,17 @@ def _finish(bucket: dict[str, Any], examples: int) -> dict[str, Any]:
         # meaningful ranking. Treat these as a sample of `distinct_phrasings`,
         # which is why that number ships beside them, and use the phrasings
         # listing when the distribution itself is the question.
-        "examples": [
+        examples=[
             text
             for text, _ in sorted(bucket["phrasings"].items(), key=lambda kv: (-kv[1], kv[0]))[
                 :examples
             ]
         ],
-    }
+    )
 
 
 @router.get("/groups")
-def groups(user: AuthedUser = Depends(require_admin)) -> dict[str, Any]:
+def groups(user: AuthedUser = Depends(require_admin)) -> Taxonomy:
     """The taxonomy itself: keys, labels, and what evidence_missing means.
 
     A drill-through link carries only the key, so the page it lands on has to
@@ -168,10 +342,10 @@ def groups(user: AuthedUser = Depends(require_admin)) -> dict[str, Any]:
     the key does not. `seniority` covers new-grad and first-year mismatches,
     not only over-seniority, and `location` covers work authorisation.
     """
-    return {
-        "groups": [{"key": g.key, "label": GROUP_LABELS[g.key]} for g in GROUPS],
-        "evidence_missing_criterion": _criterion(),
-    }
+    return Taxonomy(
+        groups=[ReasonGroup(key=g.key, label=GROUP_LABELS[g.key]) for g in GROUPS],
+        evidence_missing_criterion=_criterion(),
+    )
 
 
 @router.get("/phrasings")
@@ -183,7 +357,7 @@ def phrasings(
     offset: int = Query(0, ge=0),
     users: str | None = Query(default=None, alias="user"),
     user: AuthedUser = Depends(require_admin),
-) -> dict[str, Any]:
+) -> PhrasingPage:
     """Every distinct phrasing in one group of one prompt version, with counts.
 
     The counts are the point. "159 distinct phrasings" answers a different
@@ -226,7 +400,8 @@ def phrasings(
         f"FROM ai_queries WHERE {clause}",
         params,
     )
-    rows = db.query(
+    rows = db.query_as(
+        Phrasing,
         f"""
         SELECT reason AS phrasing, count(*) AS decisions,
                count(DISTINCT url) AS distinct_jobs
@@ -238,24 +413,24 @@ def phrasings(
         {**params, "limit": limit, "offset": offset},
     )
     total_phrasings = (totals or {}).get("phrasings", 0)
-    return {
-        "prompt_hash": prompt_hash,
-        "group": group,
-        "window_days": days,
-        "total_phrasings": total_phrasings,
-        "total_decisions": (totals or {}).get("decisions", 0),
-        "offset": offset,
-        "limit": limit,
-        "returned": len(rows),
+    return PhrasingPage(
+        prompt_hash=prompt_hash,
+        group=group,
+        window_days=days,
+        total_phrasings=total_phrasings,
+        total_decisions=(totals or {}).get("decisions", 0),
+        offset=offset,
+        limit=limit,
+        returned=len(rows),
         # Stated rather than implied: a caller must be able to say "showing 50
         # of 159" instead of silently presenting a page as the whole set.
-        "has_more": offset + len(rows) < total_phrasings,
-        "phrasings": [dict(r) for r in rows],
-        "filters": params_.applied(
+        has_more=offset + len(rows) < total_phrasings,
+        phrasings=rows,
+        filters=params_.applied(
             prompt_hash=[prompt_hash], group=params_.csv(group), user=scoping.echo(ids)
         ),
-        "filterable": ["prompt_hash", "group", "user"],
-    }
+        filterable=["prompt_hash", "group", "user"],
+    )
 
 
 @router.get("/rejection-reasons")
@@ -266,7 +441,7 @@ def rejection_reasons(
     examples: int = Query(3, ge=0, le=5),
     users: str | None = Query(default=None, alias="user"),
     user: AuthedUser = Depends(require_admin),
-) -> dict[str, Any]:
+) -> RejectionReasons:
     params: dict[str, Any] = {"days": days}
     hash_clause = ""
     if prompt_hash:
@@ -276,10 +451,8 @@ def rejection_reasons(
     if ids:
         hash_clause += " AND " + scoping.filters_of()
         params["user_ids"] = ids
-    scoped = {
-        "filters": params_.applied(prompt_hash=params_.csv(prompt_hash), user=scoping.echo(ids)),
-        "filterable": ["prompt_hash", "user"],
-    }
+    applied = params_.applied(prompt_hash=params_.csv(prompt_hash), user=scoping.echo(ids))
+    filterable = ["prompt_hash", "user"]
 
     totals = db.query(
         f"""
@@ -304,7 +477,15 @@ def rejection_reasons(
         params,
     )
     if not totals:
-        return {**_empty(days, min_decisions), **scoped}
+        return RejectionReasons(
+            window_days=days,
+            min_decisions=min_decisions,
+            examples_selection=_examples_selection(),
+            evidence_missing_criterion=_criterion(),
+            prompt_versions=[],
+            filters=applied,
+            filterable=filterable,
+        )
 
     rejections = db.query(
         f"""
@@ -322,8 +503,8 @@ def rejection_reasons(
     # row per owner. Counting rows reported that prompt as shared between two
     # people when it belongs to one, which is a claim about who to go and talk
     # to. Users are collapsed by sub; the filter rows are reported separately.
-    owners: dict[str, dict[str, dict[str, str]]] = collections.defaultdict(dict)
-    filters_for: dict[str, list[dict[str, Any]]] = collections.defaultdict(list)
+    owners: dict[str, dict[str, OwnerUser]] = collections.defaultdict(dict)
+    filters_for: dict[str, list[OwnedFilter]] = collections.defaultdict(list)
     for row in db.query(
         """
         SELECT f.prompt_hash, f.name, f.enabled, u.sub, u.email FROM user_filters f
@@ -332,11 +513,10 @@ def rejection_reasons(
         """,
         (hashes,),
     ):
-        owners[row["prompt_hash"]][row["sub"]] = {
-            "sub": row["sub"],
-            "email": row["email"] or "",
-        }
-        filters_for[row["prompt_hash"]].append({"name": row["name"], "enabled": row["enabled"]})
+        owners[row["prompt_hash"]][row["sub"]] = OwnerUser(sub=row["sub"], email=row["email"] or "")
+        filters_for[row["prompt_hash"]].append(
+            OwnedFilter(name=row["name"], enabled=row["enabled"])
+        )
 
     # A name that appears under more than one hash in this window spans a
     # prompt edit; the caller needs to know before it presents them as one row.
@@ -359,18 +539,18 @@ def rejection_reasons(
         people = list(owners.get(h, {}).values())
         current = filters_for.get(h, [])
         out.append(
-            {
-                "prompt_hash": h,
-                "filter_names": sorted(row["filter_names"]),
-                "sibling_hashes_by_name": siblings_by_name,
-                "first_seen": row["first_seen"],
-                "last_seen": row["last_seen"],
-                "owner": {
-                    "state": "resolved"
+            PromptVersion(
+                prompt_hash=h,
+                filter_names=sorted(row["filter_names"]),
+                sibling_hashes_by_name=siblings_by_name,
+                first_seen=row["first_seen"],
+                last_seen=row["last_seen"],
+                owner=PromptOwner(
+                    state="resolved"
                     if len(people) == 1
                     else ("shared" if len(people) > 1 else "unknown"),
-                    "user_count": len(people),
-                    "users": people,
+                    user_count=len(people),
+                    users=people,
                     # Whether this prompt can still reject anything. `resolved`
                     # does not answer it: a disabled filter is still a current
                     # row, so a retired prompt resolves to its owner exactly
@@ -379,65 +559,55 @@ def rejection_reasons(
                     # reader's attention on the one thing they cannot act on.
                     # None when no current filter carries this prompt at all,
                     # because then there is nothing to ask.
-                    "enabled": any(f["enabled"] for f in current) if current else None,
-                    "filters": current,
-                },
-                "sufficient": row["rejected"] >= min_decisions,
-                "totals": {
-                    "evaluated": row["evaluated"],
-                    "passed": row["passed"],
-                    "rejected": row["rejected"],
-                    # The groups below are computed over rejections that
-                    # carry a reason, which is NOT all of them: the batched
-                    # paths recorded none between 2026-08-27 and the fix, so
-                    # a caller dividing a group by `rejected` understates it.
-                    # This is the denominator the groups are actually of.
-                    "rejected_with_reason": row["rejected_with_reason"],
-                    "distinct_jobs_evaluated": row["distinct_jobs_evaluated"],
-                    "distinct_jobs_rejected": row["distinct_jobs_rejected"],
-                    "evidence_missing_decisions": missing["decisions"],
-                    "evidence_missing_distinct_jobs": len(missing["jobs"]),
-                },
-                "groups": sorted(
-                    (
-                        {
-                            "key": g.key,
-                            "label": GROUP_LABELS[g.key],
-                            **_finish(buckets[g.key], examples),
-                        }
-                        for g in GROUPS
-                        if g.key in buckets
-                    ),
-                    key=lambda g: g["decisions"],
-                    reverse=True,
+                    enabled=any(f.enabled for f in current) if current else None,
+                    filters=current,
                 ),
-                UNGROUPED: _finish(buckets.get(UNGROUPED) or _bucket(), examples),
-            }
+                sufficient=row["rejected"] >= min_decisions,
+                totals=_totals(row, missing),
+                groups=_groups(buckets, examples),
+                ungrouped=_finish(buckets.get(UNGROUPED) or _bucket(), examples),
+            )
         )
 
-    out.sort(key=lambda r: r["totals"]["rejected"], reverse=True)
-    return {
-        "window_days": days,
-        "unit": "decisions",
-        "min_decisions": min_decisions,
-        "overlapping_groups": True,
-        "examples_selection": _examples_selection(),
-        "evidence_missing_criterion": _criterion(),
-        "prompt_versions": out,
-        **scoped,
-    }
+    out.sort(key=lambda r: r.totals.rejected, reverse=True)
+    return RejectionReasons(
+        window_days=days,
+        min_decisions=min_decisions,
+        examples_selection=_examples_selection(),
+        evidence_missing_criterion=_criterion(),
+        prompt_versions=out,
+        filters=applied,
+        filterable=filterable,
+    )
 
 
-def _empty(days: int, min_decisions: int) -> dict[str, Any]:
-    return {
-        "window_days": days,
-        "unit": "decisions",
-        "min_decisions": min_decisions,
-        "overlapping_groups": True,
-        "examples_selection": _examples_selection(),
-        "evidence_missing_criterion": _criterion(),
-        "prompt_versions": [],
-    }
+def _totals(row: dict[str, Any], missing: dict[str, Any]) -> PromptTotals:
+    return PromptTotals(
+        evaluated=row["evaluated"],
+        passed=row["passed"],
+        rejected=row["rejected"],
+        rejected_with_reason=row["rejected_with_reason"],
+        distinct_jobs_evaluated=row["distinct_jobs_evaluated"],
+        distinct_jobs_rejected=row["distinct_jobs_rejected"],
+        evidence_missing_decisions=missing["decisions"],
+        evidence_missing_distinct_jobs=len(missing["jobs"]),
+    )
+
+
+def _groups(buckets: dict[str, dict[str, Any]], examples: int) -> list[GroupBreakdown]:
+    return sorted(
+        (
+            GroupBreakdown(
+                **_finish(buckets[g.key], examples).model_dump(),
+                key=g.key,
+                label=GROUP_LABELS[g.key],
+            )
+            for g in GROUPS
+            if g.key in buckets
+        ),
+        key=lambda g: g.decisions,
+        reverse=True,
+    )
 
 
 user_router = APIRouter(prefix="/user/filter-insights")
@@ -469,7 +639,7 @@ def my_rejection_reasons(
     min_decisions: int = Query(_DEFAULT_MIN_DECISIONS, ge=1),
     examples: int = Query(3, ge=0, le=5),
     user: AuthedUser = Depends(require_user),
-) -> dict[str, Any]:
+) -> MyRejectionReasons:
     """Why your filters rejected what they rejected.
 
     The admin view answers this across everyone, which means the person who
@@ -479,14 +649,20 @@ def my_rejection_reasons(
     """
     mine = db.query(_USER_HASHES_SQL, {"uid": user.id})
     if not mine:
-        return _empty(days, min_decisions)
+        return MyRejectionReasons(
+            window_days=days,
+            min_decisions=min_decisions,
+            examples_selection=_examples_selection(),
+            evidence_missing_criterion=_criterion(),
+            prompt_versions=[],
+        )
 
     # A hash can carry several of the caller's own filter names - one prompt
     # here is both "default" and "general" - so the row is keyed on the prompt
     # and lists the names, rather than pretending to be one filter.
-    names_for: dict[str, list[dict[str, Any]]] = collections.defaultdict(list)
+    names_for: dict[str, list[OwnedFilter]] = collections.defaultdict(list)
     for row in mine:
-        names_for[row["prompt_hash"]].append({"name": row["name"], "enabled": row["enabled"]})
+        names_for[row["prompt_hash"]].append(OwnedFilter(name=row["name"], enabled=row["enabled"]))
     hashes = sorted(names_for)
     params: dict[str, Any] = {"days": days, "hashes": hashes}
 
@@ -528,37 +704,16 @@ def my_rejection_reasons(
         buckets = grouped[h]
         missing = per_hash[h]
         out.append(
-            {
-                "prompt_hash": h,
-                "filters": names_for[h],
-                "first_seen": row["first_seen"],
-                "last_seen": row["last_seen"],
-                "sufficient": row["rejected"] >= min_decisions,
-                "totals": {
-                    "evaluated": row["evaluated"],
-                    "passed": row["passed"],
-                    "rejected": row["rejected"],
-                    "rejected_with_reason": row["rejected_with_reason"],
-                    "distinct_jobs_evaluated": row["distinct_jobs_evaluated"],
-                    "distinct_jobs_rejected": row["distinct_jobs_rejected"],
-                    "evidence_missing_decisions": missing["decisions"],
-                    "evidence_missing_distinct_jobs": len(missing["jobs"]),
-                },
-                "groups": sorted(
-                    (
-                        {
-                            "key": g.key,
-                            "label": GROUP_LABELS[g.key],
-                            **_finish(buckets[g.key], examples),
-                        }
-                        for g in GROUPS
-                        if g.key in buckets
-                    ),
-                    key=lambda g: g["decisions"],
-                    reverse=True,
-                ),
-                UNGROUPED: _finish(buckets.get(UNGROUPED) or _bucket(), examples),
-            }
+            MyPromptVersion(
+                prompt_hash=h,
+                filters=names_for[h],
+                first_seen=row["first_seen"],
+                last_seen=row["last_seen"],
+                sufficient=row["rejected"] >= min_decisions,
+                totals=_totals(row, missing),
+                groups=_groups(buckets, examples),
+                ungrouped=_finish(buckets.get(UNGROUPED) or _bucket(), examples),
+            )
         )
     # A filter that decided nothing in the window is still the caller's, and
     # showing nothing at all would read as "no problems" rather than "nothing
@@ -566,35 +721,31 @@ def my_rejection_reasons(
     for h in hashes:
         if h not in seen:
             out.append(
-                {
-                    "prompt_hash": h,
-                    "filters": names_for[h],
-                    "first_seen": None,
-                    "last_seen": None,
-                    "sufficient": False,
-                    "totals": dict.fromkeys(
-                        (
-                            "evaluated",
-                            "passed",
-                            "rejected",
-                            "rejected_with_reason",
-                            "distinct_jobs_evaluated",
-                            "distinct_jobs_rejected",
-                            "evidence_missing_decisions",
-                            "evidence_missing_distinct_jobs",
-                        ),
-                        0,
+                MyPromptVersion(
+                    prompt_hash=h,
+                    filters=names_for[h],
+                    first_seen=None,
+                    last_seen=None,
+                    sufficient=False,
+                    totals=PromptTotals(
+                        evaluated=0,
+                        passed=0,
+                        rejected=0,
+                        rejected_with_reason=0,
+                        distinct_jobs_evaluated=0,
+                        distinct_jobs_rejected=0,
+                        evidence_missing_decisions=0,
+                        evidence_missing_distinct_jobs=0,
                     ),
-                    "groups": [],
-                    "ungrouped": _finish(_bucket(), examples),
-                }
+                    groups=[],
+                    ungrouped=_finish(_bucket(), examples),
+                )
             )
-    out.sort(key=lambda r: r["totals"]["rejected"], reverse=True)
-    return {
-        "window_days": days,
-        "unit": "decisions",
-        "min_decisions": min_decisions,
-        "overlapping_groups": True,
-        "evidence_missing_criterion": _criterion(),
-        "prompt_versions": out,
-    }
+    out.sort(key=lambda r: r.totals.rejected, reverse=True)
+    return MyRejectionReasons(
+        window_days=days,
+        min_decisions=min_decisions,
+        examples_selection=_examples_selection(),
+        evidence_missing_criterion=_criterion(),
+        prompt_versions=out,
+    )

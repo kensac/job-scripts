@@ -855,7 +855,7 @@ def _owned_message(message_id: int, owner_id: int) -> None:
 
 def _resolve_message(
     message_id: int, body: ResolveRequest, owner_id: int, actor_user_id: int
-) -> dict:
+) -> ResolveResult:
     _owned_message(message_id, owner_id)
 
     if body.choice == ASSIGN:
@@ -895,7 +895,7 @@ def _resolve_message(
             actor_user_id=actor_user_id,
         )
         mail_pipeline.sync_action_items(body.target)
-        return {"ok": True, "choice": body.choice, "application_id": body.target}
+        return ResolveResult(ok=True, choice=body.choice, application_id=body.target)
 
     if body.choice == NOT_AN_APPLICATION:
         # Recorded as the matcher's own refusal, so every reader that already
@@ -907,7 +907,7 @@ def _resolve_message(
             ),
             actor_user_id=actor_user_id,
         )
-        return {"ok": True, "choice": body.choice}
+        return ResolveResult(ok=True, choice=body.choice)
 
     # not_job_related: an append to the event log, the same retraction rule a
     # reclassification uses. The match is retracted too, because an event that
@@ -922,10 +922,12 @@ def _resolve_message(
         mail_match.Match(None, mail_match.NOT_AN_APPLICATION, "high", "retracted: not job mail"),
         actor_user_id=actor_user_id,
     )
-    return {"ok": True, "choice": body.choice}
+    return ResolveResult(ok=True, choice=body.choice)
 
 
-def _resolve_match(match_id: int, body: ResolveRequest, owner_id: int, actor_user_id: int) -> dict:
+def _resolve_match(
+    match_id: int, body: ResolveRequest, owner_id: int, actor_user_id: int
+) -> ResolveResult:
     """Confirm or reject one attachment.
 
     Bound to the OWNER through the application, not just to the match id.
@@ -961,19 +963,19 @@ def _resolve_match(match_id: int, body: ResolveRequest, owner_id: int, actor_use
 
     if body.choice == CONFIRM_MATCH:
         mail_match.confirm(row["message_id"], row, actor_user_id=actor_user_id, note=body.note)
-        return {"ok": True, "choice": body.choice, "application_id": row["application_id"]}
+        return ResolveResult(ok=True, choice=body.choice, application_id=row["application_id"])
 
     mail_match.reject(row["message_id"], actor_user_id=actor_user_id, note=body.note)
     # The events this message carried stop reaching the application, so
     # anything they opened has to follow rather than sit there asking about an
     # application it is no longer part of.
     mail_pipeline.sync_action_items(row["application_id"])
-    return {"ok": True, "choice": body.choice}
+    return ResolveResult(ok=True, choice=body.choice)
 
 
 def _resolve_proposal(
     application_id: int, event_id: int, body: ResolveRequest, owner_id: int
-) -> dict:
+) -> ResolveResult:
     answered = mail_pipeline.answer_proposal(
         owner_id,
         application_id,
@@ -982,17 +984,17 @@ def _resolve_proposal(
     )
     if answered is None:
         raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown queue item"})
-    return {
-        "ok": True,
-        "choice": body.choice,
-        "application_id": application_id,
-        "board_updated": answered.board_updated,
-        "board_status": answered.board_status,
-        "reason": answered.reason,
-    }
+    return ResolveResult(
+        ok=True,
+        choice=body.choice,
+        application_id=application_id,
+        board_updated=answered.board_updated,
+        board_status=answered.board_status,
+        reason=answered.reason,
+    )
 
 
-def _resolve_action(action_id: int, body: ResolveRequest, owner_id: int) -> dict:
+def _resolve_action(action_id: int, body: ResolveRequest, owner_id: int) -> ResolveResult:
     row = db.query_one(
         "SELECT id, resolved_at FROM action_items WHERE id = %s AND user_id = %s",
         (action_id, owner_id),
@@ -1004,7 +1006,7 @@ def _resolve_action(action_id: int, body: ResolveRequest, owner_id: int) -> dict
             "UPDATE action_items SET resolved_at = now(), resolution = %s WHERE id = %s",
             (body.note or "marked done", action_id),
         )
-    return {"ok": True, "choice": body.choice}
+    return ResolveResult(ok=True, choice=body.choice)
 
 
 # Which verbs each item kind accepts. Declared once and checked here, so a verb
@@ -1017,7 +1019,9 @@ _CHOICES_BY_KIND = {
 }
 
 
-def _resolve(item_id: str, body: ResolveRequest, owner_id: int, actor_user_id: int) -> dict:
+def _resolve(
+    item_id: str, body: ResolveRequest, owner_id: int, actor_user_id: int
+) -> ResolveResult:
     kind, _, raw = item_id.partition(":")
     parts = raw.split(":")
     if kind not in _CHOICES_BY_KIND or not all(p.isdigit() for p in parts):
@@ -1181,7 +1185,9 @@ def resolve_history(
 @router.post(
     "/user/resolve/{item_id}", response_model=ResolveResult, response_model_exclude_none=True
 )
-def resolve_item(item_id: str, body: ResolveRequest, user: AuthedUser = Depends(require_user)):
+def resolve_item(
+    item_id: str, body: ResolveRequest, user: AuthedUser = Depends(require_user)
+) -> ResolveResult:
     return _resolve(item_id, body, owner_id=user.id, actor_user_id=user.id)
 
 
@@ -1224,7 +1230,7 @@ def admin_resolve_item(
     body: ResolveRequest,
     user_id: int = Query(...),
     user: AuthedUser = Depends(require_admin),
-):
+) -> ResolveResult:
     return _resolve(item_id, body, owner_id=user_id, actor_user_id=user.id)
 
 

@@ -4886,7 +4886,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Profile"
+                }
               }
             }
           },
@@ -5013,7 +5015,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Profile"
+                }
               }
             }
           },
@@ -5142,7 +5146,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ApplyContext"
+                }
               }
             }
           },
@@ -5399,7 +5405,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/RememberedAnswer"
+                }
               }
             }
           },
@@ -5524,7 +5532,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Ok"
+                }
               }
             }
           },
@@ -5653,7 +5663,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ResolvedForm"
+                }
               }
             }
           },
@@ -5791,7 +5803,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Submitted"
+                }
               }
             }
           },
@@ -5920,7 +5934,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Suggested"
+                }
               }
             }
           },
@@ -6049,7 +6065,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ReportCreated"
+                }
               }
             }
           },
@@ -6304,7 +6322,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemReportDetail"
+                }
               }
             }
           },
@@ -6554,9 +6574,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Report V1 User Apply Report Get"
+                  "$ref": "#/components/schemas/ApplyReport"
                 }
               }
             }
@@ -6676,7 +6694,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/FilterList"
+                }
               }
             }
           },
@@ -6802,7 +6822,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/SavedFilter"
+                }
               }
             }
           },
@@ -6939,7 +6961,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/SavedFilter"
+                }
               }
             }
           },
@@ -7064,7 +7088,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Ok"
+                }
               }
             }
           },
@@ -7191,7 +7217,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/RunQueued"
+                }
               }
             }
           },
@@ -7309,7 +7337,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/RunQueued"
+                }
               }
             }
           },
@@ -7427,7 +7457,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/PresetList"
+                }
               }
             }
           },
@@ -7554,7 +7586,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/SavedFilter"
+                }
               }
             }
           },
@@ -7682,7 +7716,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ImprovedPrompt"
+                }
               }
             }
           },
@@ -24864,9 +24900,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Groups V1 Admin Filter Insights Groups Get"
+                  "$ref": "#/components/schemas/Taxonomy"
                 }
               }
             }
@@ -25063,9 +25097,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Phrasings V1 Admin Filter Insights Phrasings Get"
+                  "$ref": "#/components/schemas/PhrasingPage"
                 }
               }
             }
@@ -25252,9 +25284,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Rejection Reasons V1 Admin Filter Insights Rejection Reasons Get"
+                  "$ref": "#/components/schemas/RejectionReasons"
                 }
               }
             }
@@ -25410,9 +25440,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response My Rejection Reasons V1 User Filter Insights Rejection Reasons Get"
+                  "$ref": "#/components/schemas/MyRejectionReasons"
                 }
               }
             }
@@ -26313,6 +26341,48 @@
         ],
         "title": "AppliedWeek"
       },
+      "ApplyContext": {
+        "properties": {
+          "job": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MatchedPosting"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "profile": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Profile"
+          },
+          "answers": {
+            "items": {
+              "$ref": "#/components/schemas/RememberedAnswer"
+            },
+            "type": "array",
+            "title": "Answers"
+          },
+          "drafts": {
+            "items": {
+              "$ref": "#/components/schemas/ContextDraft"
+            },
+            "type": "array",
+            "title": "Drafts"
+          }
+        },
+        "type": "object",
+        "required": [
+          "job",
+          "profile",
+          "answers",
+          "drafts"
+        ],
+        "title": "ApplyContext",
+        "description": "The three sources a fill draws from, before anything is filled.\n\n`profile` is a map rather than the profile shape: only the facts that are\nset are listed, because a blank fact fills nothing and listing it would\nsay the profile has something it does not."
+      },
       "ApplyGroupBody": {
         "properties": {
           "name": {
@@ -26330,6 +26400,54 @@
           "name"
         ],
         "title": "ApplyGroupBody"
+      },
+      "ApplyReport": {
+        "properties": {
+          "forms_submitted": {
+            "type": "integer",
+            "title": "Forms Submitted"
+          },
+          "fields": {
+            "type": "integer",
+            "title": "Fields"
+          },
+          "filled_unchanged": {
+            "type": "integer",
+            "title": "Filled Unchanged"
+          },
+          "by_rung": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "By Rung"
+          },
+          "most_often_blank": {
+            "items": {
+              "$ref": "#/components/schemas/LabelCount"
+            },
+            "type": "array",
+            "title": "Most Often Blank"
+          },
+          "most_often_corrected": {
+            "items": {
+              "$ref": "#/components/schemas/LabelCount"
+            },
+            "type": "array",
+            "title": "Most Often Corrected"
+          }
+        },
+        "type": "object",
+        "required": [
+          "forms_submitted",
+          "fields",
+          "filled_unchanged",
+          "by_rung",
+          "most_often_blank",
+          "most_often_corrected"
+        ],
+        "title": "ApplyReport",
+        "description": "How the ladder is doing on this person's submitted forms. `by_rung`\nis keyed by the rung that filled the field, with \"blank\" for the ones\nnothing filled."
       },
       "Arm": {
         "properties": {
@@ -26561,6 +26679,48 @@
         "type": "object",
         "title": "Autofilled",
         "description": "What the write filled in that the caller did not send.\n\nA status change can date the row by itself, so the caller is told rather\nthan having to re-read the row to find out.\n\nAn absent key is the answer, not a null: the route sets\nresponse_model_exclude_none so `{}` still means \"nothing was filled\",\nwhich is what the board already reads. Declaring the shape must not move\nthe wire."
+      },
+      "Breakdown": {
+        "properties": {
+          "decisions": {
+            "type": "integer",
+            "title": "Decisions"
+          },
+          "distinct_jobs": {
+            "type": "integer",
+            "title": "Distinct Jobs"
+          },
+          "distinct_phrasings": {
+            "type": "integer",
+            "title": "Distinct Phrasings"
+          },
+          "evidence_missing_decisions": {
+            "type": "integer",
+            "title": "Evidence Missing Decisions"
+          },
+          "evidence_missing_distinct_jobs": {
+            "type": "integer",
+            "title": "Evidence Missing Distinct Jobs"
+          },
+          "examples": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Examples"
+          }
+        },
+        "type": "object",
+        "required": [
+          "decisions",
+          "distinct_jobs",
+          "distinct_phrasings",
+          "evidence_missing_decisions",
+          "evidence_missing_distinct_jobs",
+          "examples"
+        ],
+        "title": "Breakdown",
+        "description": "One bucket of rejections. `examples` is a reproducible sample of\n`distinct_phrasings`, not a frequency ranking; see `_finish`."
       },
       "BulkPatchResult": {
         "properties": {
@@ -26797,6 +26957,30 @@
           "value"
         ],
         "title": "ConfigPut"
+      },
+      "ContextDraft": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "question": {
+            "type": "string",
+            "title": "Question"
+          },
+          "draft": {
+            "type": "string",
+            "title": "Draft"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "question",
+          "draft"
+        ],
+        "title": "ContextDraft",
+        "description": "A draft already written for this posting. Only drafts that exist are\nlisted, so `draft` is never null here."
       },
       "Correction": {
         "properties": {
@@ -27237,6 +27421,57 @@
         ],
         "title": "Evidence",
         "description": "What a match actually rested on.\n\nThe rationale says what the matcher concluded; this says what it concluded\nit FROM. The company the classifier read out of the mail is what tiers 2\nand 3 compared, so if that extraction is wrong the match is wrong and no\namount of staring at the conclusion reveals it."
+      },
+      "EvidenceCriterion": {
+        "properties": {
+          "method": {
+            "type": "string",
+            "title": "Method"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "phrases": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Phrases"
+          }
+        },
+        "type": "object",
+        "required": [
+          "method",
+          "description",
+          "phrases"
+        ],
+        "title": "EvidenceCriterion",
+        "description": "What \"evidence missing\" means, in the payload rather than in whoever\nexplained it once."
+      },
+      "ExamplesSelection": {
+        "properties": {
+          "method": {
+            "type": "string",
+            "title": "Method"
+          },
+          "ordered_by": {
+            "type": "string",
+            "title": "Ordered By"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          }
+        },
+        "type": "object",
+        "required": [
+          "method",
+          "ordered_by",
+          "description"
+        ],
+        "title": "ExamplesSelection",
+        "description": "How the examples were chosen, for the same reason."
       },
       "ExcludedStage": {
         "properties": {
@@ -28042,6 +28277,37 @@
         ],
         "title": "FilterCreate"
       },
+      "FilterList": {
+        "properties": {
+          "filters": {
+            "items": {
+              "$ref": "#/components/schemas/FilterRow"
+            },
+            "type": "array",
+            "title": "Filters"
+          },
+          "run_all_task": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InFlight"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "run_all_admission": {
+            "$ref": "#/components/schemas/RunDecision"
+          }
+        },
+        "type": "object",
+        "required": [
+          "filters",
+          "run_all_task",
+          "run_all_admission"
+        ],
+        "title": "FilterList"
+      },
       "FilterPatch": {
         "properties": {
           "name": {
@@ -28062,6 +28328,89 @@
         },
         "type": "object",
         "title": "FilterPatch"
+      },
+      "FilterRow": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt"
+          },
+          "on_ambiguous": {
+            "type": "string",
+            "title": "On Ambiguous"
+          },
+          "fail_closed": {
+            "type": "boolean",
+            "title": "Fail Closed"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "prompt_hash": {
+            "type": "string",
+            "title": "Prompt Hash"
+          },
+          "preset_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preset Id"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "task": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InFlight"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "run_admission": {
+            "$ref": "#/components/schemas/RunDecision"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "prompt",
+          "on_ambiguous",
+          "fail_closed",
+          "enabled",
+          "prompt_hash",
+          "preset_id",
+          "created_at",
+          "updated_at",
+          "task",
+          "run_admission"
+        ],
+        "title": "FilterRow",
+        "description": "A filter as the list shows it: the run in flight for this one, and\nwhether another may start."
       },
       "FilterRunBody": {
         "properties": {
@@ -28251,6 +28600,58 @@
         "title": "GroupApplied",
         "description": "Every board the person now holds, not just the bundle's, because\n\"replace\" keeps boards that are switched off and \"add\" keeps everything."
       },
+      "GroupBreakdown": {
+        "properties": {
+          "decisions": {
+            "type": "integer",
+            "title": "Decisions"
+          },
+          "distinct_jobs": {
+            "type": "integer",
+            "title": "Distinct Jobs"
+          },
+          "distinct_phrasings": {
+            "type": "integer",
+            "title": "Distinct Phrasings"
+          },
+          "evidence_missing_decisions": {
+            "type": "integer",
+            "title": "Evidence Missing Decisions"
+          },
+          "evidence_missing_distinct_jobs": {
+            "type": "integer",
+            "title": "Evidence Missing Distinct Jobs"
+          },
+          "examples": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Examples"
+          },
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          }
+        },
+        "type": "object",
+        "required": [
+          "decisions",
+          "distinct_jobs",
+          "distinct_phrasings",
+          "evidence_missing_decisions",
+          "evidence_missing_distinct_jobs",
+          "examples",
+          "key",
+          "label"
+        ],
+        "title": "GroupBreakdown",
+        "description": "A bucket that a taxonomy group named. The residual bucket is the same\nshape without the name, and rides on the row as `ungrouped`."
+      },
       "GroupBudgetPut": {
         "properties": {
           "weekly_token_budget": {
@@ -28311,6 +28712,25 @@
           "prompt"
         ],
         "title": "ImprovePromptRequest"
+      },
+      "ImprovedPrompt": {
+        "properties": {
+          "improved": {
+            "type": "string",
+            "title": "Improved"
+          },
+          "rationale": {
+            "type": "string",
+            "title": "Rationale"
+          }
+        },
+        "type": "object",
+        "required": [
+          "improved",
+          "rationale"
+        ],
+        "title": "ImprovedPrompt",
+        "description": "What the model wrote, and what it says it changed. The same shape it\nis asked for and the shape this route returns, because there is nothing\nin between."
       },
       "InFlight": {
         "properties": {
@@ -28555,6 +28975,24 @@
         "title": "JobReport"
       },
       "JsonValue": {},
+      "LabelCount": {
+        "properties": {
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "label",
+          "count"
+        ],
+        "title": "LabelCount"
+      },
       "LevelCount": {
         "properties": {
           "level": {
@@ -28822,6 +29260,44 @@
         ],
         "title": "MatchOverride"
       },
+      "MatchedPosting": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "company": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "company",
+          "title"
+        ],
+        "title": "MatchedPosting",
+        "description": "The posting the url matched, when the board holds one."
+      },
       "MeasurableModel": {
         "properties": {
           "model": {
@@ -29040,6 +29516,119 @@
         ],
         "title": "ModelsResponse"
       },
+      "MyPromptVersion": {
+        "properties": {
+          "prompt_hash": {
+            "type": "string",
+            "title": "Prompt Hash"
+          },
+          "filters": {
+            "items": {
+              "$ref": "#/components/schemas/OwnedFilter"
+            },
+            "type": "array",
+            "title": "Filters"
+          },
+          "first_seen": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Seen"
+          },
+          "last_seen": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Seen"
+          },
+          "sufficient": {
+            "type": "boolean",
+            "title": "Sufficient"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/PromptTotals"
+          },
+          "groups": {
+            "items": {
+              "$ref": "#/components/schemas/GroupBreakdown"
+            },
+            "type": "array",
+            "title": "Groups"
+          },
+          "ungrouped": {
+            "$ref": "#/components/schemas/Breakdown"
+          }
+        },
+        "type": "object",
+        "required": [
+          "prompt_hash",
+          "filters",
+          "first_seen",
+          "last_seen",
+          "sufficient",
+          "totals",
+          "groups",
+          "ungrouped"
+        ],
+        "title": "MyPromptVersion",
+        "description": "The same prompt version as its owner sees it: their own filter names\nrather than every name the prompt has been given, and no owner block,\nbecause they are it."
+      },
+      "MyRejectionReasons": {
+        "properties": {
+          "window_days": {
+            "type": "integer",
+            "title": "Window Days"
+          },
+          "unit": {
+            "type": "string",
+            "title": "Unit",
+            "default": "decisions"
+          },
+          "min_decisions": {
+            "type": "integer",
+            "title": "Min Decisions"
+          },
+          "overlapping_groups": {
+            "type": "boolean",
+            "title": "Overlapping Groups",
+            "default": true
+          },
+          "examples_selection": {
+            "$ref": "#/components/schemas/ExamplesSelection"
+          },
+          "evidence_missing_criterion": {
+            "$ref": "#/components/schemas/EvidenceCriterion"
+          },
+          "prompt_versions": {
+            "items": {
+              "$ref": "#/components/schemas/MyPromptVersion"
+            },
+            "type": "array",
+            "title": "Prompt Versions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "window_days",
+          "min_decisions",
+          "examples_selection",
+          "evidence_missing_criterion",
+          "prompt_versions"
+        ],
+        "title": "MyRejectionReasons"
+      },
       "NameableFilter": {
         "properties": {
           "id": {
@@ -29196,6 +29785,43 @@
         "title": "Ok",
         "description": "It worked and there is nothing to say about it.\n\nReturned where the interesting outcome is the status code. A route with\nsomething to report returns that instead; this is not a wrapper to put\naround a real answer."
       },
+      "OwnedFilter": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "enabled"
+        ],
+        "title": "OwnedFilter",
+        "description": "A filter that carries this prompt today."
+      },
+      "OwnerUser": {
+        "properties": {
+          "sub": {
+            "type": "string",
+            "title": "Sub"
+          },
+          "email": {
+            "type": "string",
+            "title": "Email"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sub",
+          "email"
+        ],
+        "title": "OwnerUser"
+      },
       "PageReport": {
         "properties": {
           "url": {
@@ -29333,6 +29959,118 @@
         ],
         "title": "PatternSamples"
       },
+      "Phrasing": {
+        "properties": {
+          "phrasing": {
+            "type": "string",
+            "title": "Phrasing"
+          },
+          "decisions": {
+            "type": "integer",
+            "title": "Decisions"
+          },
+          "distinct_jobs": {
+            "type": "integer",
+            "title": "Distinct Jobs"
+          }
+        },
+        "type": "object",
+        "required": [
+          "phrasing",
+          "decisions",
+          "distinct_jobs"
+        ],
+        "title": "Phrasing",
+        "description": "One distinct rejection sentence, with how often it was written."
+      },
+      "PhrasingPage": {
+        "properties": {
+          "prompt_hash": {
+            "type": "string",
+            "title": "Prompt Hash"
+          },
+          "group": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group"
+          },
+          "window_days": {
+            "type": "integer",
+            "title": "Window Days"
+          },
+          "total_phrasings": {
+            "type": "integer",
+            "title": "Total Phrasings"
+          },
+          "total_decisions": {
+            "type": "integer",
+            "title": "Total Decisions"
+          },
+          "offset": {
+            "type": "integer",
+            "title": "Offset"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          },
+          "returned": {
+            "type": "integer",
+            "title": "Returned"
+          },
+          "has_more": {
+            "type": "boolean",
+            "title": "Has More"
+          },
+          "phrasings": {
+            "items": {
+              "$ref": "#/components/schemas/Phrasing"
+            },
+            "type": "array",
+            "title": "Phrasings"
+          },
+          "filters": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": "object",
+            "title": "Filters"
+          },
+          "filterable": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Filterable"
+          }
+        },
+        "type": "object",
+        "required": [
+          "prompt_hash",
+          "group",
+          "window_days",
+          "total_phrasings",
+          "total_decisions",
+          "offset",
+          "limit",
+          "returned",
+          "has_more",
+          "phrasings",
+          "filters",
+          "filterable"
+        ],
+        "title": "PhrasingPage",
+        "description": "`filters` echoes what narrowed this page, keyed by parameter name, and\ncarries only the parameters that narrowed anything."
+      },
       "PresetBody": {
         "properties": {
           "name": {
@@ -29409,6 +30147,106 @@
         },
         "type": "object",
         "title": "PresetBody"
+      },
+      "PresetCoverage": {
+        "properties": {
+          "would_show_now": {
+            "type": "integer",
+            "title": "Would Show Now"
+          },
+          "already_judged": {
+            "type": "integer",
+            "title": "Already Judged"
+          },
+          "eligible": {
+            "type": "integer",
+            "title": "Eligible"
+          },
+          "needs_ai": {
+            "type": "integer",
+            "title": "Needs Ai"
+          }
+        },
+        "type": "object",
+        "required": [
+          "would_show_now",
+          "already_judged",
+          "eligible",
+          "needs_ai"
+        ],
+        "title": "PresetCoverage",
+        "description": "Counts, not a rate. \"170 of 7,397 already judged\" is the sentence; a\npercentage hides that the remainder is unjudged rather than rejected."
+      },
+      "PresetList": {
+        "properties": {
+          "presets": {
+            "items": {
+              "$ref": "#/components/schemas/PresetOffer"
+            },
+            "type": "array",
+            "title": "Presets"
+          },
+          "eligible_postings": {
+            "type": "integer",
+            "title": "Eligible Postings"
+          }
+        },
+        "type": "object",
+        "required": [
+          "presets",
+          "eligible_postings"
+        ],
+        "title": "PresetList"
+      },
+      "PresetOffer": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt"
+          },
+          "on_ambiguous": {
+            "type": "string",
+            "title": "On Ambiguous"
+          },
+          "fail_closed": {
+            "type": "boolean",
+            "title": "Fail Closed"
+          },
+          "coverage": {
+            "$ref": "#/components/schemas/PresetCoverage"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "description",
+          "prompt",
+          "on_ambiguous",
+          "fail_closed",
+          "coverage"
+        ],
+        "title": "PresetOffer",
+        "description": "A preset with what it would show today, so adopting one is not blind."
       },
       "Problem": {
         "properties": {
@@ -29488,6 +30326,54 @@
         "title": "ProblemReport",
         "description": "One row of the problem-report list, declared rather than implied.\n\nThe row shape used to reach the frontend as an untyped dict, so the types\non the other side were written by hand from reading this query. They\ndrifted: a capture field typed as a string was an object, and the page\ncrashed on 2026-09-10 when a report with fields was opened. A declared\nshape puts that in openapi.json, which is where the frontend's types come\nfrom."
       },
+      "ProblemReportDetail": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "host": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Host"
+          },
+          "note": {
+            "type": "string",
+            "title": "Note"
+          },
+          "page": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Page"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "url",
+          "host",
+          "note",
+          "page",
+          "created_at"
+        ],
+        "title": "ProblemReportDetail",
+        "description": "One report with the capture itself, which is the part triage reads.\nThe list above carries a title and a field count out of the same column\nrather than the whole page."
+      },
       "ProblemResponse": {
         "properties": {
           "detail": {
@@ -29500,6 +30386,278 @@
         ],
         "title": "ProblemResponse",
         "description": "The wire shape. FastAPI wraps whatever `detail` holds in this key, so\na caller reads `detail.code`, not `code`."
+      },
+      "Profile": {
+        "properties": {
+          "first_name": {
+            "type": "string",
+            "maxLength": 100,
+            "title": "First Name",
+            "default": ""
+          },
+          "middle_name": {
+            "type": "string",
+            "maxLength": 100,
+            "title": "Middle Name",
+            "default": ""
+          },
+          "last_name": {
+            "type": "string",
+            "maxLength": 100,
+            "title": "Last Name",
+            "default": ""
+          },
+          "preferred_name": {
+            "type": "string",
+            "maxLength": 100,
+            "title": "Preferred Name",
+            "default": ""
+          },
+          "pronouns": {
+            "type": "string",
+            "maxLength": 40,
+            "title": "Pronouns",
+            "default": ""
+          },
+          "email": {
+            "type": "string",
+            "maxLength": 200,
+            "title": "Email",
+            "default": ""
+          },
+          "phone": {
+            "type": "string",
+            "maxLength": 40,
+            "title": "Phone",
+            "default": ""
+          },
+          "phone_type": {
+            "type": "string",
+            "maxLength": 20,
+            "title": "Phone Type",
+            "default": "Mobile"
+          },
+          "birthday": {
+            "type": "string",
+            "maxLength": 10,
+            "title": "Birthday",
+            "default": ""
+          },
+          "address": {
+            "type": "string",
+            "maxLength": 200,
+            "title": "Address",
+            "default": ""
+          },
+          "address_2": {
+            "type": "string",
+            "maxLength": 200,
+            "title": "Address 2",
+            "default": ""
+          },
+          "address_3": {
+            "type": "string",
+            "maxLength": 200,
+            "title": "Address 3",
+            "default": ""
+          },
+          "city": {
+            "type": "string",
+            "maxLength": 100,
+            "title": "City",
+            "default": ""
+          },
+          "state": {
+            "type": "string",
+            "maxLength": 100,
+            "title": "State",
+            "default": ""
+          },
+          "postal_code": {
+            "type": "string",
+            "maxLength": 20,
+            "title": "Postal Code",
+            "default": ""
+          },
+          "country": {
+            "type": "string",
+            "maxLength": 100,
+            "title": "Country",
+            "default": ""
+          },
+          "linkedin": {
+            "type": "string",
+            "maxLength": 300,
+            "title": "Linkedin",
+            "default": ""
+          },
+          "github": {
+            "type": "string",
+            "maxLength": 300,
+            "title": "Github",
+            "default": ""
+          },
+          "website": {
+            "type": "string",
+            "maxLength": 300,
+            "title": "Website",
+            "default": ""
+          },
+          "twitter": {
+            "type": "string",
+            "maxLength": 300,
+            "title": "Twitter",
+            "default": ""
+          },
+          "behance": {
+            "type": "string",
+            "maxLength": 300,
+            "title": "Behance",
+            "default": ""
+          },
+          "dribbble": {
+            "type": "string",
+            "maxLength": 300,
+            "title": "Dribbble",
+            "default": ""
+          },
+          "visa_status": {
+            "type": "string",
+            "maxLength": 120,
+            "title": "Visa Status",
+            "default": ""
+          },
+          "referral_source": {
+            "type": "string",
+            "maxLength": 120,
+            "title": "Referral Source",
+            "default": ""
+          },
+          "work_authorized": {
+            "type": "string",
+            "enum": [
+              "",
+              "yes",
+              "no"
+            ],
+            "title": "Work Authorized",
+            "default": ""
+          },
+          "needs_sponsorship": {
+            "type": "string",
+            "enum": [
+              "",
+              "yes",
+              "no"
+            ],
+            "title": "Needs Sponsorship",
+            "default": ""
+          },
+          "willing_to_relocate": {
+            "type": "string",
+            "enum": [
+              "",
+              "yes",
+              "no"
+            ],
+            "title": "Willing To Relocate",
+            "default": ""
+          },
+          "willing_onsite": {
+            "type": "string",
+            "enum": [
+              "",
+              "yes",
+              "no"
+            ],
+            "title": "Willing Onsite",
+            "default": ""
+          },
+          "notes": {
+            "type": "string",
+            "maxLength": 2000,
+            "title": "Notes",
+            "default": ""
+          },
+          "years_experience": {
+            "type": "string",
+            "maxLength": 10,
+            "title": "Years Experience",
+            "default": ""
+          },
+          "desired_salary": {
+            "type": "string",
+            "maxLength": 60,
+            "title": "Desired Salary",
+            "default": ""
+          },
+          "start_date": {
+            "type": "string",
+            "maxLength": 100,
+            "title": "Start Date",
+            "default": ""
+          },
+          "gender": {
+            "type": "string",
+            "maxLength": 80,
+            "title": "Gender",
+            "default": "Decline to self-identify"
+          },
+          "ethnicity": {
+            "type": "string",
+            "maxLength": 80,
+            "title": "Ethnicity",
+            "default": "Decline to self-identify"
+          },
+          "hispanic": {
+            "type": "string",
+            "maxLength": 80,
+            "title": "Hispanic",
+            "default": "Decline to self-identify"
+          },
+          "veteran": {
+            "type": "string",
+            "maxLength": 80,
+            "title": "Veteran",
+            "default": "Decline to self-identify"
+          },
+          "disability": {
+            "type": "string",
+            "maxLength": 80,
+            "title": "Disability",
+            "default": "Decline to self-identify"
+          },
+          "default_resume_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Resume Id"
+          },
+          "experience": {
+            "items": {
+              "$ref": "#/components/schemas/Experience"
+            },
+            "type": "array",
+            "maxItems": 30,
+            "title": "Experience"
+          },
+          "education": {
+            "items": {
+              "$ref": "#/components/schemas/Education"
+            },
+            "type": "array",
+            "maxItems": 10,
+            "title": "Education"
+          }
+        },
+        "type": "object",
+        "title": "Profile",
+        "description": "Every fact a form asks that is not a question about the job. Blank\nmeans unknown, and an unknown fact leaves its field blank rather than\nguessing. EEO answers default to declining."
       },
       "ProfilePut": {
         "properties": {
@@ -29774,6 +30932,183 @@
         "title": "ProfilePut",
         "description": "Replace the whole profile; omitted fields return to their defaults."
       },
+      "PromptOwner": {
+        "properties": {
+          "state": {
+            "type": "string",
+            "title": "State"
+          },
+          "user_count": {
+            "type": "integer",
+            "title": "User Count"
+          },
+          "users": {
+            "items": {
+              "$ref": "#/components/schemas/OwnerUser"
+            },
+            "type": "array",
+            "title": "Users"
+          },
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          },
+          "filters": {
+            "items": {
+              "$ref": "#/components/schemas/OwnedFilter"
+            },
+            "type": "array",
+            "title": "Filters"
+          }
+        },
+        "type": "object",
+        "required": [
+          "state",
+          "user_count",
+          "users",
+          "enabled",
+          "filters"
+        ],
+        "title": "PromptOwner",
+        "description": "Who holds this prompt, and whether it can still reject anything.\n\n`state` is resolved, shared or unknown: a prompt that was edited or\ndeleted resolves to nobody, and 29% of rejections measured over the\ncorpus are in that state. `enabled` is null when no current filter\ncarries this prompt at all, because then there is nothing to ask."
+      },
+      "PromptTotals": {
+        "properties": {
+          "evaluated": {
+            "type": "integer",
+            "title": "Evaluated"
+          },
+          "passed": {
+            "type": "integer",
+            "title": "Passed"
+          },
+          "rejected": {
+            "type": "integer",
+            "title": "Rejected"
+          },
+          "rejected_with_reason": {
+            "type": "integer",
+            "title": "Rejected With Reason"
+          },
+          "distinct_jobs_evaluated": {
+            "type": "integer",
+            "title": "Distinct Jobs Evaluated"
+          },
+          "distinct_jobs_rejected": {
+            "type": "integer",
+            "title": "Distinct Jobs Rejected"
+          },
+          "evidence_missing_decisions": {
+            "type": "integer",
+            "title": "Evidence Missing Decisions"
+          },
+          "evidence_missing_distinct_jobs": {
+            "type": "integer",
+            "title": "Evidence Missing Distinct Jobs"
+          }
+        },
+        "type": "object",
+        "required": [
+          "evaluated",
+          "passed",
+          "rejected",
+          "rejected_with_reason",
+          "distinct_jobs_evaluated",
+          "distinct_jobs_rejected",
+          "evidence_missing_decisions",
+          "evidence_missing_distinct_jobs"
+        ],
+        "title": "PromptTotals",
+        "description": "`rejected_with_reason` is the denominator the groups are of, which is\nnot `rejected`: the batched paths recorded no reason for a stretch."
+      },
+      "PromptVersion": {
+        "properties": {
+          "prompt_hash": {
+            "type": "string",
+            "title": "Prompt Hash"
+          },
+          "filter_names": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Filter Names"
+          },
+          "sibling_hashes_by_name": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Sibling Hashes By Name"
+          },
+          "first_seen": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Seen"
+          },
+          "last_seen": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Seen"
+          },
+          "owner": {
+            "$ref": "#/components/schemas/PromptOwner"
+          },
+          "sufficient": {
+            "type": "boolean",
+            "title": "Sufficient"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/PromptTotals"
+          },
+          "groups": {
+            "items": {
+              "$ref": "#/components/schemas/GroupBreakdown"
+            },
+            "type": "array",
+            "title": "Groups"
+          },
+          "ungrouped": {
+            "$ref": "#/components/schemas/Breakdown"
+          }
+        },
+        "type": "object",
+        "required": [
+          "prompt_hash",
+          "filter_names",
+          "sibling_hashes_by_name",
+          "first_seen",
+          "last_seen",
+          "owner",
+          "sufficient",
+          "totals",
+          "groups",
+          "ungrouped"
+        ],
+        "title": "PromptVersion",
+        "description": "One prompt version, which is the unit here rather than one filter.\n\n`sibling_hashes_by_name` is per name, not a single number: a hash can\ncarry several names, and a scalar would leave a caller unable to say\nwhich name it describes."
+      },
       "ProposalAnswered": {
         "properties": {
           "ok": {
@@ -29963,6 +31298,24 @@
         ],
         "title": "QuestionAdd"
       },
+      "ReasonGroup": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "label"
+        ],
+        "title": "ReasonGroup"
+      },
       "RecipeConfig": {
         "properties": {
           "schema_version": {
@@ -30093,6 +31446,69 @@
         ],
         "title": "RefineBody"
       },
+      "RejectionReasons": {
+        "properties": {
+          "window_days": {
+            "type": "integer",
+            "title": "Window Days"
+          },
+          "unit": {
+            "type": "string",
+            "title": "Unit",
+            "default": "decisions"
+          },
+          "min_decisions": {
+            "type": "integer",
+            "title": "Min Decisions"
+          },
+          "overlapping_groups": {
+            "type": "boolean",
+            "title": "Overlapping Groups",
+            "default": true
+          },
+          "examples_selection": {
+            "$ref": "#/components/schemas/ExamplesSelection"
+          },
+          "evidence_missing_criterion": {
+            "$ref": "#/components/schemas/EvidenceCriterion"
+          },
+          "prompt_versions": {
+            "items": {
+              "$ref": "#/components/schemas/PromptVersion"
+            },
+            "type": "array",
+            "title": "Prompt Versions"
+          },
+          "filters": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": "object",
+            "title": "Filters"
+          },
+          "filterable": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Filterable"
+          }
+        },
+        "type": "object",
+        "required": [
+          "window_days",
+          "min_decisions",
+          "examples_selection",
+          "evidence_missing_criterion",
+          "prompt_versions",
+          "filters",
+          "filterable"
+        ],
+        "title": "RejectionReasons"
+      },
       "RememberedAnswer": {
         "properties": {
           "id": {
@@ -30152,6 +31568,26 @@
         ],
         "title": "RememberedAnswer",
         "description": "One answer the bank kept from a submitted form."
+      },
+      "ReportCreated": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "created_at"
+        ],
+        "title": "ReportCreated",
+        "description": "The extension shows the number, so the person can quote it."
       },
       "ReportList": {
         "properties": {
@@ -30910,6 +32346,139 @@
         ],
         "title": "ResolveSourceRequest"
       },
+      "ResolvedField": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Key"
+          },
+          "label": {
+            "type": "string",
+            "maxLength": 4000,
+            "title": "Label",
+            "default": ""
+          },
+          "kind": {
+            "type": "string",
+            "maxLength": 20,
+            "title": "Kind",
+            "default": "text"
+          },
+          "required": {
+            "type": "boolean",
+            "title": "Required",
+            "default": false
+          },
+          "options": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 200,
+            "title": "Options"
+          },
+          "fact": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 40
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fact"
+          },
+          "rung": {
+            "type": "string",
+            "title": "Rung"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          },
+          "hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hint"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "rung",
+          "value",
+          "hint"
+        ],
+        "title": "ResolvedField",
+        "description": "The field as read, plus what `resolve` decided about it.\n\nDeclared here rather than in the router that returns it, because the\nthree keys are this function's answer and a router that copies them is\nhow the two come apart. `rung` is which source filled it (profile, bank,\ndraft, resume) and is \"\" when nothing did; `hint` is the person's own\nanswer when the options did not recognisably hold it, which is what the\nmodel is given instead of the value."
+      },
+      "ResolvedForm": {
+        "properties": {
+          "fill_id": {
+            "type": "integer",
+            "title": "Fill Id"
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id"
+          },
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/ResolvedField"
+            },
+            "type": "array",
+            "title": "Fields"
+          },
+          "resume": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResumeFile"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "profile": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Profile"
+          }
+        },
+        "type": "object",
+        "required": [
+          "fill_id",
+          "job_id",
+          "fields",
+          "resume",
+          "profile"
+        ],
+        "title": "ResolvedForm",
+        "description": "What goes in each field, and what the extension needs to put it there.\n\n`profile` is the whole profile as a map, minus the default resume and the\nnotes: a config-driven reader fills a repeated group one row at a time and\na selector that names another fact reads the scalar from it, so the keys\nare read at runtime rather than known here."
+      },
       "Resume": {
         "properties": {
           "id": {
@@ -31017,6 +32586,42 @@
           "name"
         ],
         "title": "ResumeCreate"
+      },
+      "ResumeFile": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "filename": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filename"
+          },
+          "has_pdf": {
+            "type": "boolean",
+            "title": "Has Pdf"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "filename",
+          "has_pdf"
+        ],
+        "title": "ResumeFile",
+        "description": "The resume a fill would attach. `has_pdf` false means there is text to\ndraft from and no file to upload."
       },
       "ResumeList": {
         "properties": {
@@ -31211,6 +32816,76 @@
         ],
         "title": "RunCheckBody"
       },
+      "RunDecision": {
+        "properties": {
+          "allowed": {
+            "type": "boolean",
+            "title": "Allowed"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "allowed",
+          "reason",
+          "message",
+          "task_id"
+        ],
+        "title": "RunDecision",
+        "description": "Whether a run may start now, said to whoever draws the button.\n\nDeclared here beside the decision rather than in the router that shows\nit: `reason` is either why access was refused or IN_PROGRESS, and\n`task_id` is the run already in flight when there is one, otherwise the\nrun this decision would start."
+      },
+      "RunQueued": {
+        "properties": {
+          "task_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "task_id"
+        ],
+        "title": "RunQueued"
+      },
       "SavedAnswerPut": {
         "properties": {
           "value": {
@@ -31225,6 +32900,110 @@
           "value"
         ],
         "title": "SavedAnswerPut"
+      },
+      "SavedFilter": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt"
+          },
+          "on_ambiguous": {
+            "type": "string",
+            "title": "On Ambiguous"
+          },
+          "fail_closed": {
+            "type": "boolean",
+            "title": "Fail Closed"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "prompt_hash": {
+            "type": "string",
+            "title": "Prompt Hash"
+          },
+          "preset_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preset Id"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Id"
+          },
+          "run_blocked": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Blocked"
+          },
+          "run_blocked_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Blocked Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "prompt",
+          "on_ambiguous",
+          "fail_closed",
+          "enabled",
+          "prompt_hash",
+          "preset_id",
+          "created_at",
+          "updated_at",
+          "task_id",
+          "run_blocked",
+          "run_blocked_message"
+        ],
+        "title": "SavedFilter",
+        "description": "A filter as it stands after a write, with what the write set running.\n\n`run_blocked` is why nothing was queued: a budget reason, or DEFERRED\nwhen the hourly sweep will judge the board instead of this request."
       },
       "ScreenedPosting": {
         "properties": {
@@ -32377,6 +34156,41 @@
         "title": "StatusCount",
         "description": "A status and how many board rows carry it. The empty string is the\nboard's own name for \"no status yet\", not a missing value, which is why\nthe query coalesces rather than letting null through."
       },
+      "Submitted": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok",
+            "default": true
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id"
+          },
+          "fields": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Fields"
+          }
+        },
+        "type": "object",
+        "required": [
+          "job_id",
+          "fields"
+        ],
+        "title": "Submitted",
+        "description": "The ledger row after the person clicked submit.\n\nAn entry stays a map on purpose. It is the field as read, plus the final\nvalue and whether it changed, plus whatever the model's pass left on it -\nso naming the keys here would silently drop the ones it did not name."
+      },
       "SubmittedBody": {
         "properties": {
           "fields": {
@@ -32512,6 +34326,43 @@
           "label"
         ],
         "title": "SuggestField"
+      },
+      "Suggested": {
+        "properties": {
+          "answers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Answers"
+          },
+          "skipped": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Skipped"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          }
+        },
+        "type": "object",
+        "required": [
+          "answers",
+          "skipped",
+          "model"
+        ],
+        "title": "Suggested",
+        "description": "The model's pass over what the ladder left blank. `answers` is keyed by\nfield key and holds only what came back usable; `skipped` is what the\nadmin list keeps from the model, which is not the same as unanswered."
       },
       "Suggestion": {
         "properties": {
@@ -32775,6 +34626,26 @@
         },
         "type": "object",
         "title": "TaskModelPut"
+      },
+      "Taxonomy": {
+        "properties": {
+          "groups": {
+            "items": {
+              "$ref": "#/components/schemas/ReasonGroup"
+            },
+            "type": "array",
+            "title": "Groups"
+          },
+          "evidence_missing_criterion": {
+            "$ref": "#/components/schemas/EvidenceCriterion"
+          }
+        },
+        "type": "object",
+        "required": [
+          "groups",
+          "evidence_missing_criterion"
+        ],
+        "title": "Taxonomy"
       },
       "Totals": {
         "properties": {

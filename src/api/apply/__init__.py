@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import datetime
 import re
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -128,6 +128,22 @@ class Field_(BaseModel):
     # A config-driven reader knows which fact a selector fills (first_name,
     # needs_sponsorship, resume); when it says so, the label is not read.
     fact: str | None = Field(default=None, max_length=40)
+
+
+class ResolvedField(Field_):
+    """The field as read, plus what `resolve` decided about it.
+
+    Declared here rather than in the router that returns it, because the
+    three keys are this function's answer and a router that copies them is
+    how the two come apart. `rung` is which source filled it (profile, bank,
+    draft, resume) and is "" when nothing did; `hint` is the person's own
+    answer when the options did not recognisably hold it, which is what the
+    model is given instead of the value.
+    """
+
+    rung: str
+    value: str | None
+    hint: str | None
 
 
 def normalize(label: str) -> str:
@@ -426,7 +442,7 @@ def load_profile(user_id: int) -> Profile:
     return Profile.model_validate((row or {}).get("profile") or {})
 
 
-def resolve(user_id: int, job_id: int | None, fields: list[Field_]) -> list[dict[str, Any]]:
+def resolve(user_id: int, job_id: int | None, fields: list[Field_]) -> list[ResolvedField]:
     """One entry per field: the field as read, the rung that filled it and
     the value, or rung "" and value None when nothing did."""
     profile = load_profile(user_id)
@@ -494,5 +510,5 @@ def resolve(user_id: int, job_id: int | None, fields: list[Field_]) -> list[dict
                 hint, rung, value = value, "", None
             else:
                 value = picked
-        out.append({**f.model_dump(), "rung": rung, "value": value, "hint": hint})
+        out.append(ResolvedField(**f.model_dump(), rung=rung, value=value, hint=hint))
     return out
