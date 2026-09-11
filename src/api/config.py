@@ -23,6 +23,18 @@ class ColumnState(BaseModel):
     width: PositiveInt | None = None
 
 
+class SortKey(BaseModel):
+    """One term of the board's ordering. `key` must be a column the board
+    knows how to sort by; the board refuses an unknown one rather than
+    ordering by something else, which is why this is validated here and not
+    at the point it is read."""
+
+    model_config = ConfigDict(strict=True)
+
+    key: str = Field(min_length=1)
+    dir: Literal["asc", "desc"] = "desc"
+
+
 @dataclass(frozen=True)
 class ConfigKey:
     default: JsonValue
@@ -115,6 +127,25 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
         help="Authentik groups whose members may start a filter run by hand. "
         "Admins always may. Everyone else waits for the hourly sweep. "
         '"*" means everyone.',
+    ),
+    # How the board is ordered before anybody touches a header. Two keys,
+    # because one is not enough: date_posted is what a person actually wants
+    # (newest postings first), but 5,814 of 117,460 postings carry no
+    # date_posted and 339 of the 1,976 on Kanishk's board do, measured
+    # 2026-09-11. Every sort here is NULLS LAST, so those 17 percent would
+    # sink together into one arbitrary block. added_at breaks that tie with
+    # the next best thing we know, when we first saw it.
+    #
+    # added_at alone was the old default and is worse than it sounds: it is a
+    # catalog-load timestamp, so the 58,000 postings the reseed of 09-04 and
+    # 09-05 brought in ordered the top of the board by a database rebuild for
+    # days. A lens still overrides this; it is only the starting order.
+    "board_default_sort": ConfigKey(
+        section="Boards",
+        default=[{"key": "date_posted", "dir": "desc"}, {"key": "added_at", "dir": "desc"}],
+        value_type=list[SortKey],
+        help="How the board is ordered before a person sorts it or picks a lens. "
+        "Keys come from the board's sortable columns; later entries break ties.",
     ),
     # The board a person sees before they touch a column: Kanishk's own
     # layout on 2026-09-09 (order, hidden columns, pins, widths; no sort,

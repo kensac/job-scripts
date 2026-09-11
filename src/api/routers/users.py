@@ -11,7 +11,9 @@ from pydantic import BaseModel
 from api import ai, budget, crypto, db
 from api.auth import AuthedUser, require_service, require_user
 from api.board import visibility
+from api.config import SortKey
 from api.models import ApiKeyPut, Criteria, Ok, SettingsPut
+from api.routers import job_board
 from core import providers as core_providers
 from core.answers import DEFAULT_STYLE
 
@@ -321,6 +323,9 @@ class UserSettings(EffectiveModel):
     # vocabulary. Null when neither the person nor the configured default has
     # one.
     column_layout: Any
+    # The order the board opens on, so the page has one answer rather than a
+    # literal of its own. A lens or a header click still overrides it.
+    default_sort: list[SortKey]
     prefs: dict[str, Any]
     ai_provider: str
     ai_base_url: str | None
@@ -393,6 +398,9 @@ def get_settings(user: AuthedUser = Depends(require_user)) -> UserSettings:
     # New accounts and resets use the same configured board layout.
     if settings.get("column_layout") is None:
         settings["column_layout"] = db.get_config("board_default_column_layout") or None
+    # Read through the board's own accessor, so a key it cannot sort by is
+    # dropped in one place rather than two.
+    settings["default_sort"] = job_board.default_sort()
     # Criteria in their full shape, defaults filled, whatever the row holds:
     # a client that reads support for a criterion by the key's presence
     # must not depend on what this user happened to save before the key

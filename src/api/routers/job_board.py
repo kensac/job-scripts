@@ -109,6 +109,24 @@ _SORTABLE = {
 
 NOT_APPLIED = "not_applied"
 
+
+def default_sort() -> list[dict[str, str]]:
+    """How the board is ordered before anybody sorts it, from `app_config`.
+
+    A configured key the board cannot sort by is dropped rather than passed to
+    `sorting.clause`, which would look it up in `_SORTABLE` and raise on a read
+    path. An admin editing this should get a board that ignores the typo, not
+    one that 500s.
+    """
+    configured = db.get_config("board_default_sort") or []
+    kept = [
+        {"key": s["key"], "dir": "asc" if s.get("dir") == "asc" else "desc"}
+        for s in configured
+        if isinstance(s, dict) and s.get("key") in _SORTABLE
+    ]
+    return kept or [{"key": "added_at", "dir": "desc"}]
+
+
 # Canonical status vocabulary, backend-owned. The column stays free text (the
 # sheet import brought arbitrary values), so options are served as this canon
 # unioned with whatever statuses actually exist on the user's rows.
@@ -305,7 +323,10 @@ def list_jobs(
     limit: int = 200,
     offset: int = 0,
     cursor: int | None = None,
-    sort: str = "added_at",
+    # Empty means "whatever the configured default is", so a caller that does
+    # not care gets the same order the page opens on rather than a second
+    # opinion baked into a signature.
+    sort: str = "",
     dir: str = "desc",
     search: str | None = None,
     status: str | None = None,
@@ -323,7 +344,7 @@ def list_jobs(
     sorts = (
         [{"key": "id", "dir": "desc"}]
         if cursor is not None
-        else sorting.parse(sort, dir, _SORTABLE, "added_at")
+        else (sorting.parse(sort, dir, _SORTABLE, "added_at") if sort else default_sort())
     )
     extra = []
     params: dict = {"uid": user.id, "limit": limit + 1, "offset": offset}
