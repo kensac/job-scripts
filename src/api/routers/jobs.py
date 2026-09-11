@@ -15,8 +15,8 @@ from api.board.access import require_visible_job
 from api.board.person_state import touchable_job_ids, write_board_row
 from api.models import UserJobPatch, UserJobsBulkIds, UserJobsBulkPatch
 from api.problem import AI_REFUSALS, refuse
-from api.reports import REPORT_KINDS, ReportKind, report_kinds
-from api.routers import job_tasks, job_uploads
+from api.reports import ReportKind, report_kinds
+from api.routers import job_reports, job_tasks, job_uploads
 from core.comp import CompBasis, CompPeriod
 
 router = APIRouter()
@@ -364,12 +364,6 @@ class Explained(BaseModel):
 class BulkDeleted(BaseModel):
     ok: bool
     deleted: int
-
-
-class ReportFiled(BaseModel):
-    id: int
-    status: str
-    created_at: datetime.datetime
 
 
 class Autofilled(BaseModel):
@@ -825,42 +819,5 @@ def delete_user_jobs(
 
 
 router.include_router(job_uploads.router)
-
-
-class JobReport(BaseModel):
-    kind: str
-    message: str = ""
-    corrections: dict | None = None
-
-
-@router.post("/user/jobs/{job_id}/report")
-def report_job(
-    job_id: int, body: JobReport, user: AuthedUser = Depends(require_user)
-) -> ReportFiled:
-    if body.kind not in REPORT_KINDS:
-        raise HTTPException(
-            400,
-            detail={"code": "INVALID_KIND", "message": f"kind must be one of {REPORT_KINDS}"},
-        )
-    if not db.query_one("SELECT id FROM jobs WHERE id = %s", (job_id,)):
-        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown job"})
-    row = db.query_one_as(
-        ReportFiled,
-        """
-        INSERT INTO reports (user_id, job_id, kind, message, corrections)
-        VALUES (%s, %s, %s, %s, %s)
-        RETURNING id, status, created_at
-        """,
-        (
-            user.id,
-            job_id,
-            body.kind,
-            body.message[:2000],
-            db.jsonb(body.corrections) if body.corrections is not None else None,
-        ),
-    )
-    assert row is not None  # an insert with RETURNING always yields its row
-    return row
-
-
+router.include_router(job_reports.router)
 router.include_router(job_tasks.router)
