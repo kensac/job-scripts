@@ -931,7 +931,7 @@ class WorkerStatus(Base):
 
 
 class ExtensionRecipe(Base):
-    """One publish of a config-driven reader's table (api.extension_recipes):
+    """One publish of a config-driven reader's table (api.apply.recipes):
     the newest enabled row per adapter is what the extension fetches; the
     copy bundled in the extension is its fallback."""
 

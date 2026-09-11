@@ -92,7 +92,7 @@ def enqueue(
             (kind, db.jsonb({**payload, **subject}), dedupe_key),
         )
         if row and kind == "application_draft":
-            from api.application_writes import reserve_task
+            from api.apply.writes import reserve_task
 
             reserve_task(row["id"], subject["user_id"])
     if row:

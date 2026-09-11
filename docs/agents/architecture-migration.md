@@ -63,7 +63,9 @@ real only relocates the problem.
 | 2 | A board row and the working set are told apart | Named and pinned apart (2a). Moving the sweeps' scope off `user_jobs` (2b) waits for a cutover comparison |
 | 3 | Catalog observations are facts | A re-listing is an appended row, not a mutated column |
 | 4 | ~~Derivations are content addressed~~ | **Dropped 2026-09-10.** Measured; see below |
-| 5 | Files move to the shape | Packages match this document |
+| 5 | Files move to the shape | Packages match this document. Trialled on `apply`; the rest is a judgement about churn, not a blocked task |
+| 6 | The long files are split | No module does four jobs. `admin.py` 2,136 lines, `mail.py` 2,117, `resolve.py` 1,337, `orm.py` 1,248, `health.py` 1,155, `tasks/runtime.py` 796 |
+| 7 | A row is typed, not a dict | A read returns a shape a type checker knows. 678 SQL call sites return bare dicts today |
 
 **The API contract is the invariant.** `openapi.json` is canon and
 `tests/test_openapi_current.py` fails the build when routes and schema
@@ -157,6 +159,27 @@ for.
 **Never in a loop:** any write to the production database, and any migration
 that can refuse to apply ([migrations.md](migrations.md)). Neither of these is
 covered by the standing instruction above, because neither is gated by CI.
+
+## Phases 6 and 7
+
+Added on Kanishk's instruction, to be taken after the move lands.
+
+**6, the long files.** `tasks/runtime.py` is the clearest case rather than the
+biggest: 796 lines holding queue primitives, batch orchestration, config
+constants and model routing, imported by 24 modules. Splitting it is what
+would let the layering be stated as layers, because three of the four imports
+that make `api` and `api.tasks` circular are reaching past the handlers for a
+queue primitive. `admin.py` and `mail.py` are bigger and simpler: they are
+long because nothing ever split them, not because anything is tangled.
+
+**7, typed rows.** Reads return bare dicts, so renaming a column is a grep
+across 678 call sites and a typo is found at runtime. The fix is NOT an ORM:
+the hot paths are hand-tuned SQL carrying measured query plans
+(`visibility.FULL` records 320ms to 28ms), and an ORM would hide exactly what
+has to stay readable, while inviting the N+1 shape this codebase has already
+paid to remove. Keep the SQL, map the rows into dataclasses at the boundary,
+one domain at a time. `pyright` already runs clean, so the types would be
+enforced rather than decorative.
 
 ## Revising this document
 

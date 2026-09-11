@@ -3265,7 +3265,7 @@
     "/v1/extension/recipe": {
       "get": {
         "summary": "Extension Recipe",
-        "description": "The published table for a config-driven reader, or 404 when only the\nbundled copy exists. Same public terms as /extension/config: no profile,\nanswers or credentials; the extension pins a revision per fill and keeps\nthe bundled table as its fallback (api.extension_recipes).",
+        "description": "The published table for a config-driven reader, or 404 when only the\nbundled copy exists. Same public terms as /extension/config: no profile,\nanswers or credentials; the extension pins a revision per fill and keeps\nthe bundled table as its fallback (api.apply.recipes).",
         "operationId": "extension_recipe_v1_extension_recipe_get",
         "parameters": [
           {
@@ -11120,7 +11120,7 @@
     "/v1/admin/extension/recipes": {
       "get": {
         "summary": "List Extension Recipes",
-        "description": "Every publish, newest first per adapter; the enabled row is what the\nextension fetches (api.extension_recipes).",
+        "description": "Every publish, newest first per adapter; the enabled row is what the\nextension fetches (api.apply.recipes).",
         "operationId": "list_extension_recipes_v1_admin_extension_recipes_get",
         "parameters": [
           {

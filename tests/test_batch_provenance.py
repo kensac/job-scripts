@@ -108,7 +108,7 @@ async def test_application_collects_paid_drafts_after_resume_removed_and_auto_dr
     )
     payload = {"user_id": uid, "job_id": job_id}
     task_id = _parked(f, kind, payload, "gpt-5-mini")
-    from api.application_writes import reserve_task
+    from api.apply.writes import reserve_task
 
     reserve_task(task_id, uid, [{"job_id": job_id, "key": "why"}])
     _collector(monkeypatch, f"{job_id}|why", '{"answer":"Already paid for."}')

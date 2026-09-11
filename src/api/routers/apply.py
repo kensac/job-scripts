@@ -19,10 +19,10 @@ from api import (
     budget,
     db,
     events,
-    extension_policy,
-    extension_recipes,
     telemetry,
 )
+from api.apply import policy as extension_policy
+from api.apply import recipes as extension_recipes
 from api.auth import AuthedUser, require_user
 from api.routers.jobs import _write_board_row
 from api.tasks import application as drafts
@@ -64,7 +64,7 @@ def extension_recipe(
     """The published table for a config-driven reader, or 404 when only the
     bundled copy exists. Same public terms as /extension/config: no profile,
     answers or credentials; the extension pins a revision per fill and keeps
-    the bundled table as its fallback (api.extension_recipes)."""
+    the bundled table as its fallback (api.apply.recipes)."""
     response.headers["Cache-Control"] = "no-store"
     if schema_version != 1:
         raise _bad(409, "UNSUPPORTED_CONFIG_SCHEMA", "this configuration schema is not supported")
