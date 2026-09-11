@@ -47997,30 +47997,6 @@
         ],
         "title": "Sort"
       },
-      "SortKey": {
-        "properties": {
-          "key": {
-            "type": "string",
-            "minLength": 1,
-            "title": "Key"
-          },
-          "dir": {
-            "type": "string",
-            "enum": [
-              "asc",
-              "desc"
-            ],
-            "title": "Dir",
-            "default": "desc"
-          }
-        },
-        "type": "object",
-        "required": [
-          "key"
-        ],
-        "title": "SortKey",
-        "description": "One term of the board's ordering. `key` must be a column the board\nknows how to sort by; the board refuses an unknown one rather than\nordering by something else, which is why this is validated here and not\nat the point it is read."
-      },
       "Source": {
         "properties": {
           "name": {
@@ -52094,13 +52070,6 @@
           "column_layout": {
             "title": "Column Layout"
           },
-          "default_sort": {
-            "items": {
-              "$ref": "#/components/schemas/SortKey"
-            },
-            "type": "array",
-            "title": "Default Sort"
-          },
           "prefs": {
             "additionalProperties": true,
             "type": "object",
@@ -52175,7 +52144,6 @@
           "unavailable_code",
           "unavailable_message",
           "column_layout",
-          "default_sort",
           "prefs",
           "ai_provider",
           "ai_base_url",
@@ -52262,13 +52230,6 @@
           "column_layout": {
             "title": "Column Layout"
           },
-          "default_sort": {
-            "items": {
-              "$ref": "#/components/schemas/SortKey"
-            },
-            "type": "array",
-            "title": "Default Sort"
-          },
           "prefs": {
             "additionalProperties": true,
             "type": "object",
@@ -52348,7 +52309,6 @@
           "unavailable_code",
           "unavailable_message",
           "column_layout",
-          "default_sort",
           "prefs",
           "ai_provider",
           "ai_base_url",

@@ -60,10 +60,3 @@ def test_an_explicit_sort_still_wins(client, user_headers):
     body = client.get("/v1/user/jobs?limit=1&sort=company&dir=asc", headers=user_headers).json()
 
     assert body["sorts"] == [{"key": "company", "dir": "asc"}]
-
-
-def test_settings_serves_the_same_order_the_board_opens_on(client, user_headers):
-    """One answer, so the page has no literal of its own to drift."""
-    settings = client.get("/v1/user/settings", headers=user_headers).json()
-
-    assert settings["default_sort"] == default_sort()
