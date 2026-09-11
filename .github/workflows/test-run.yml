@@ -32,9 +32,11 @@ jobs:
           POSTGRES_PASSWORD: ci
           POSTGRES_DB: jobtracker_ci
         ports: ['5432:5432']
+        # See ci.yml: probing sooner saves about four seconds a job, and
+        # every lane pays it.
         options: >-
-          --health-cmd "pg_isready -h 127.0.0.1 -U ci" --health-interval 5s
-          --health-timeout 5s --health-retries 10
+          --health-cmd "pg_isready -h 127.0.0.1 -U ci" --health-interval 2s
+          --health-start-period 2s --health-timeout 3s --health-retries 20
     env:
       DATABASE_URL: postgresql://ci:ci@localhost:5432/jobtracker_ci
       TEST_DATABASE_URL: postgresql://ci:ci@localhost:5432/jobtracker_ci
