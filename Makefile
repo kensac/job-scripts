@@ -30,6 +30,9 @@ fmt:            ## format the codebase
 types:          ## type-check the live code (src/api, src/core)
 	pyright
 
+coverage:       ## measure test coverage (never gated, see docs/agents)
+	PYTHONPATH=src pytest -q tests --cov=src --cov-report=term-missing:skip-covered
+
 test:           ## run the test suite
 	node --test tests/extension/*.test.cjs
 	pytest -q tests
