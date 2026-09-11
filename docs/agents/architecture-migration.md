@@ -65,7 +65,7 @@ real only relocates the problem.
 | 4 | ~~Derivations are content addressed~~ | **Dropped 2026-09-10.** Measured; see below |
 | 5 | Files move to the shape | `tasks` is a sibling of `api` and `core`. `apply` is a package. The rest is judgement about churn |
 | 6 | The long files are split | No module does four jobs. `resolve.py` 1,339 lines, `health.py` 1,159. `orm.py`, `mail.py`, `admin.py` and `tasks/runtime.py` are done |
-| 7 | Every operation declares what it returns | `openapi.json` generates the frontend's types. 173 of 190 operations declare nothing today |
+| 7 | Every operation declares what it returns | **Done 2026-09-11.** 188 of 190 declare a model; the other two serve a file and the schema itself. Guarded, including against a `Decimal` field and a name a generator cannot use |
 
 **The API contract was the invariant, and is now a price.** `openapi.json` is
 canon and `tests/test_openapi_current.py` fails the build when routes and
@@ -376,6 +376,14 @@ undeclared object on 2026-09-10, then 143, then 54. **2 of 190 on
 /v1/openapi` serves the schema and `GET /v1/user/resumes/{id}/pdf` serves a
 file. The declaration half of phase 7 is done.
 
+Held there by `tests/test_openapi_current.py`: a route added without a return
+annotation fails, and the one exception, the PDF, is named with its reason and
+asserted to still exist and still have no model. An exception nobody revisits
+silently excuses whatever takes that path next. `GET /v1/openapi` is not an
+exception. It returns the OpenAPI document, which has no narrower pydantic
+shape worth writing, so `dict[str, Any]` is its shape rather than a gap in
+one.
+
 **A failure is in the contract now, but it is not one shape.** The schema
 declares 400, 401, 403, 404 and 409 on 188 of 190 operations, so a client can
 read what a refusal looks like. What it cannot read is which of two spellings
@@ -384,6 +392,27 @@ arrives: of 164 `raise HTTPException` sites, 109 send `detail={"code",
 `routers/mail/`**, and converting them turns `detail` from a string into an
 object for a frontend in another repository, so it is a coordinated change
 rather than a tidy-up. Phase 7.
+
+Both consumers were read before that was written down, and both already
+prefer the object: `client.ts` takes `detail.code` and falls back to the
+string, and the extension reads `res.json?.detail?.code || res.status`. So
+converting upgrades them from `HTTP_404` to a real code rather than breaking
+them. It is still a change to another repository's input, which is why it
+waits for a person.
+
+WHICH statuses are declared is closed. They are named sets by reason rather
+than a dict retyped per site: `REFUSALS` (400, 401, 403, 404, 409) on every
+router, `PROVIDER_REFUSALS` (502) where something outside this application has
+to answer, `AI_REFUSALS` (402 plus that) where a model is asked,
+`SIZE_REFUSALS` (413), `UNAVAILABLE_REFUSALS` (503). Splitting 502 out of the
+AI set was not tidiness: three invite routes and a re-check can return a 502
+and cannot return a 402, and a route should declare what it can actually
+return.
+
+`tests/test_refusals_declared.py` holds both directions. A status raised in
+`src` and declared nowhere fails, and so does a named set declaring a status
+nothing raises. 500 is excluded on purpose: it is a bug rather than a refusal,
+and declaring one invites a client to handle it as an outcome.
 
 **Reads are untyped, and the goal is all of them.** Was 563 db call sites
 returning bare dicts. **521 on 2026-09-11, of which 153 carry a shape.**

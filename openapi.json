@@ -12208,6 +12208,16 @@
             },
             "description": "Conflict"
           },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Bad Gateway"
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -12335,6 +12345,16 @@
               }
             },
             "description": "Conflict"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Bad Gateway"
           },
           "422": {
             "description": "Validation Error",
@@ -12474,6 +12494,16 @@
               }
             },
             "description": "Conflict"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Bad Gateway"
           },
           "422": {
             "description": "Validation Error",
@@ -15236,6 +15266,16 @@
               }
             },
             "description": "Service Unavailable"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Bad Gateway"
           },
           "422": {
             "description": "Validation Error",
@@ -28263,7 +28303,7 @@
     "/v1/openapi": {
       "get": {
         "summary": "Openapi Schema",
-        "description": "The schema itself, so a client can generate against the API it is\ntalking to rather than a file someone remembered to copy.\n\nOne of the two operations that cannot declare a narrower shape, and the\nreason is that this IS the shape: modelling the OpenAPI document in\npydantic to describe a route that returns the OpenAPI document is a\ncircle, not a contract. `tests/test_openapi_current.py` names it, with\nthis reason, so the exception is enforced rather than assumed.",
+        "description": "The schema itself, so a client can generate against the API it is\ntalking to rather than a file someone remembered to copy.\n\n`dict[str, Any]` IS the shape here, not a gap in one. Modelling the\nOpenAPI document in pydantic, to describe the route that returns the\nOpenAPI document, is a circle rather than a contract. So this declares an\nopen object on purpose, and is not an exception to the rule that every\noperation declares what it returns.",
         "operationId": "openapi_schema_v1_openapi_get",
         "parameters": [
           {
@@ -35210,14 +35250,12 @@
           "task_progress": {
             "anyOf": [
               {
-                "additionalProperties": true,
-                "type": "object"
+                "$ref": "#/components/schemas/TaskProgress"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Task Progress"
+            ]
           },
           "task_started_at": {
             "anyOf": [
@@ -36051,14 +36089,12 @@
           "progress": {
             "anyOf": [
               {
-                "additionalProperties": true,
-                "type": "object"
+                "$ref": "#/components/schemas/TaskProgress"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Progress"
+            ]
           },
           "created_at": {
             "type": "string",

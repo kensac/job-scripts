@@ -4,7 +4,7 @@ import datetime
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
 from api import db, events, signals, sorting, task_admission
 from api import params as params_
@@ -14,6 +14,7 @@ from api.board import visibility
 from api.board.access import require_visible_job
 from api.models import UploadRequest, UserJobPatch, UserJobsBulkIds, UserJobsBulkPatch
 from api.problem import AI_REFUSALS, refuse
+from api.task_admission import TaskProgress
 from core.comp import CompBasis, CompPeriod
 from core.fetching.urls import normalize_url
 
@@ -392,23 +393,6 @@ class ReportFiled(BaseModel):
     id: int
     status: str
     created_at: datetime.datetime
-
-
-class TaskProgress(BaseModel):
-    """What `set_progress` writes: how far, out of how much, and a line for a
-    person. A handler may add counts it wants queryable afterwards (what an
-    ingest fetched, kept, cached, failed to fetch) and the health detectors
-    read those keys, so extras are carried rather than dropped.
-
-    The three have defaults because a parent task's progress is written by
-    `jsonb_set` on one key, and a row that has reported nothing should read as
-    nothing rather than fail the request that asks for it."""
-
-    model_config = ConfigDict(extra="allow")
-
-    done: int = 0
-    total: int = 0
-    label: str = ""
 
 
 class TaskState(BaseModel):

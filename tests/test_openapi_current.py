@@ -121,3 +121,75 @@ def test_no_response_model_declares_a_decimal():
     assert not offenders, "these serialise as strings; declare them float:\n  " + "\n  ".join(
         f"{m}.{f}" for m, f, _ in offenders
     )
+
+
+# The one operation that declares no model at all, and the reason. A second
+# entry is a decision, not a detail: adding one means arguing that an
+# operation's body genuinely has no shape, which has been true exactly once.
+#
+# `GET /v1/openapi` is NOT here. It returns the OpenAPI document, which has no
+# narrower pydantic shape worth writing, so it declares `dict[str, Any]`, and
+# that is its shape rather than an exception to having one.
+_UNSHAPED = {
+    ("GET", "/user/resumes/{resume_id}/pdf"): (
+        "returns the uploaded file as application/pdf, which the route "
+        "declares under `responses` where a media type belongs"
+    ),
+}
+
+
+def _api_routes():
+    # Paths are as each route declares them, without the `/v1` an
+    # include_router prefix adds at mount time, because that prefix is not on
+    # the route object this walk reaches.
+    from fastapi.routing import APIRoute
+
+    from api.app import app
+
+    def walk(routes):
+        for route in routes:
+            if isinstance(route, APIRoute):
+                yield route
+                continue
+            # FastAPI stores an included router lazily; the real routes hang
+            # off `original_router`, not off the wrapper.
+            inner = getattr(route, "original_router", None)
+            if inner is not None:
+                yield from walk(inner.routes)
+
+    for route in walk(app.routes):
+        for method in route.methods:
+            if method.lower() in ("get", "post", "put", "patch", "delete"):
+                yield method, route.path, route
+
+
+def test_every_operation_declares_what_it_returns():
+    """The point of the schema is that a generator can be pointed at it.
+
+    173 of 190 operations returned an undeclared object when this started, so
+    `openapi.json` was a list of routes rather than a contract, and the
+    frontend wrote those types by hand and they drifted. One had a capture
+    field typed as a string where the extension sends an object, and the page
+    crashed on 2026-09-10 with nothing able to catch it.
+
+    A route added without a return annotation is that same hole reopening, so
+    it fails here rather than in a bug report.
+    """
+    undeclared = sorted(
+        f"{method} {path}"
+        for method, path, route in _api_routes()
+        if route.response_model is None and (method, path) not in _UNSHAPED
+    )
+    assert not undeclared, (
+        "these return an undeclared object; annotate the handler `-> Model`:\n  "
+        + "\n  ".join(undeclared)
+    )
+
+
+def test_the_unshaped_exceptions_still_exist_and_are_still_unshaped():
+    """An exception that no longer applies is worse than no exception: it
+    silently excuses whatever takes that path next."""
+    live = {(m, p) for m, p, _ in _api_routes()}
+    assert not (set(_UNSHAPED) - live), "an exception names a route that is gone"
+    still = {(m, p) for m, p, route in _api_routes() if route.response_model is None}
+    assert not (set(_UNSHAPED) - still), "an exception names a route that now declares a shape"

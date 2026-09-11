@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from api import db, sorting
 from api.auth import AuthedUser
 from api.models import Ok
+from api.problem import PROVIDER_REFUSALS
 from api.routers.admin.shared import require_admin
 
 router = APIRouter()
@@ -389,7 +390,7 @@ class InviteCreated(BaseModel):
     pk: str
 
 
-@router.post("/invites")
+@router.post("/invites", responses=PROVIDER_REFUSALS)
 def create_invite(body: InviteBody, user: AuthedUser = Depends(require_admin)) -> InviteCreated:
     """Email-only onboarding: creates a single-use Authentik invitation bound
     to the jobtracker enrollment flow and emails the link. The invitee picks
@@ -464,7 +465,7 @@ class InviteList(BaseModel):
     configured: bool
 
 
-@router.get("/invites")
+@router.get("/invites", responses=PROVIDER_REFUSALS)
 def list_invites(user: AuthedUser = Depends(require_admin)) -> InviteList:
     if not _invites_configured():
         return InviteList(rows=[], configured=False)
@@ -491,7 +492,7 @@ def list_invites(user: AuthedUser = Depends(require_admin)) -> InviteList:
     )
 
 
-@router.delete("/invites/{pk}")
+@router.delete("/invites/{pk}", responses=PROVIDER_REFUSALS)
 def revoke_invite(pk: str, user: AuthedUser = Depends(require_admin)) -> Ok:
     if not _invites_configured():
         raise HTTPException(

@@ -123,9 +123,9 @@ def openapi_schema(user=Depends(require_user)) -> dict[str, Any]:
     """The schema itself, so a client can generate against the API it is
     talking to rather than a file someone remembered to copy.
 
-    One of the two operations that cannot declare a narrower shape, and the
-    reason is that this IS the shape: modelling the OpenAPI document in
-    pydantic to describe a route that returns the OpenAPI document is a
-    circle, not a contract. `tests/test_openapi_current.py` names it, with
-    this reason, so the exception is enforced rather than assumed."""
+    `dict[str, Any]` IS the shape here, not a gap in one. Modelling the
+    OpenAPI document in pydantic, to describe the route that returns the
+    OpenAPI document, is a circle rather than a contract. So this declares an
+    open object on purpose, and is not an exception to the rule that every
+    operation declares what it returns."""
     return app.openapi()
