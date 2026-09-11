@@ -6,19 +6,18 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from api import db, events, signals, sorting, task_admission
+from api import db, events, signals, sorting
 from api import params as params_
 from api.ai import access as ai_access
 from api.auth import AuthedUser, require_user
 from api.board import visibility
 from api.board.access import require_visible_job
 from api.board.person_state import touchable_job_ids, write_board_row
-from api.models import UploadRequest, UserJobPatch, UserJobsBulkIds, UserJobsBulkPatch
+from api.models import UserJobPatch, UserJobsBulkIds, UserJobsBulkPatch
 from api.problem import AI_REFUSALS, refuse
 from api.reports import REPORT_KINDS, ReportKind, report_kinds
-from api.routers import job_tasks
+from api.routers import job_tasks, job_uploads
 from core.comp import CompBasis, CompPeriod
-from core.fetching.urls import normalize_url
 
 router = APIRouter()
 
@@ -365,25 +364,6 @@ class Explained(BaseModel):
 class BulkDeleted(BaseModel):
     ok: bool
     deleted: int
-
-
-class AcceptedUpload(BaseModel):
-    job_id: int
-    url: str
-
-
-class RejectedUpload(BaseModel):
-    url: str
-    error: str
-
-
-class Uploaded(BaseModel):
-    """Accepted and rejected separately, with the reason on each rejection: an
-    upload is the one place a person chooses the url, so being told now beats
-    a job that silently never extracts."""
-
-    accepted: list[AcceptedUpload]
-    rejected: list[RejectedUpload]
 
 
 class ReportFiled(BaseModel):
@@ -844,44 +824,7 @@ def delete_user_jobs(
     return BulkDeleted(ok=True, deleted=deleted)
 
 
-@router.post("/uploads")
-def upload_links(body: UploadRequest, user: AuthedUser = Depends(require_user)) -> Uploaded:
-    from api import ssrf
-
-    accepted: list[AcceptedUpload] = []
-    rejected: list[RejectedUpload] = []
-    for submitted in body.urls:
-        raw = submitted.strip()
-        if not raw.startswith(("http://", "https://")):
-            continue
-        # Fail here as well as in the fetcher: an upload is the one place a
-        # user chooses the URL, and rejecting it now gives them an answer
-        # instead of a job that silently never extracts.
-        error = ssrf.validate_public_url(raw)
-        if error:
-            rejected.append(RejectedUpload(url=raw, error=error))
-            continue
-        url = normalize_url(raw)
-        row = db.query_one(
-            """
-            INSERT INTO jobs (url, raw_url, source, uploaded_by, extraction_status)
-            VALUES (%s, %s, 'upload', %s, 'pending')
-            ON CONFLICT (url) DO UPDATE SET
-                extraction_status = CASE WHEN jobs.extraction_status = 'failed'
-                                         THEN 'pending' ELSE jobs.extraction_status END
-            RETURNING id, extraction_status
-            """,
-            (url, raw, user.id),
-        )
-        assert row is not None
-        db.execute(
-            "INSERT INTO user_jobs (user_id, job_id) VALUES (%s, %s) ON CONFLICT DO NOTHING",
-            (user.id, row["id"]),
-        )
-        if row["extraction_status"] == "pending":
-            task_admission.enqueue("extract_upload", {"job_id": row["id"]}, {"user_id": user.id})
-        accepted.append(AcceptedUpload(job_id=row["id"], url=url))
-    return Uploaded(accepted=accepted, rejected=rejected)
+router.include_router(job_uploads.router)
 
 
 class JobReport(BaseModel):
