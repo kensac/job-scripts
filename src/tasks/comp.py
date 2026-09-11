@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict
 
 from api import db
 from api.ai import batch_results
+from core.comp import COMP_BASES, COMP_PERIODS, PERIOD_TO_YEARLY
 from core.shapes import COMP_TASK, EXTRACT_COMP_PER_CYCLE
 from core.store import AI_ELIGIBLE_JOB, CONTENT_LATERAL, VERIFIED_OPEN
 from tasks import rescrape
@@ -20,29 +21,6 @@ from tasks.runtime import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-# Multipliers to a yearly figure. The old version knew only hourly and
-# monthly, so a weekly wage was either stored raw ($5,000/week became
-# $5,000/yr) or multiplied by 2080 ($2,000/week became $4,160,000/yr). Both
-# shapes are in production data today, which is what makes the comp column
-# unsortable. "one_time" is deliberately absent: a stipend or signing bonus
-# has no annual equivalent and must not be invented.
-_PERIOD_TO_YEARLY = {
-    "hourly": 2080.0,
-    "daily": 260.0,
-    "weekly": 52.0,
-    "biweekly": 26.0,
-    "semimonthly": 24.0,
-    "monthly": 12.0,
-    "yearly": 1.0,
-}
-
-
-COMP_PERIODS = (*tuple(_PERIOD_TO_YEARLY), "one_time")
-
-
-COMP_BASES = ("base", "total", "stipend", "unspecified")
 
 
 class CompExtract(BaseModel):
@@ -90,7 +68,7 @@ def _annualize(value: float | None, period: str) -> int | None:
     """
     if value is None:
         return None
-    multiplier = _PERIOD_TO_YEARLY.get((period or "").strip().lower())
+    multiplier = PERIOD_TO_YEARLY.get((period or "").strip().lower())
     if multiplier is None:
         return None
     annual = round(value * multiplier)

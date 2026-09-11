@@ -26645,6 +26645,19 @@
         "properties": {
           "ats": {
             "type": "string",
+            "enum": [
+              "ashby",
+              "greenhouse",
+              "lever",
+              "workable",
+              "workday",
+              "smartrecruiters",
+              "icims",
+              "jobvite",
+              "bamboohr",
+              "rippling",
+              "other"
+            ],
             "title": "Ats"
           },
           "count": {
@@ -26959,6 +26972,19 @@
           },
           "ats": {
             "type": "string",
+            "enum": [
+              "ashby",
+              "greenhouse",
+              "lever",
+              "workable",
+              "workday",
+              "smartrecruiters",
+              "icims",
+              "jobvite",
+              "bamboohr",
+              "rippling",
+              "other"
+            ],
             "title": "Ats"
           },
           "url": {
@@ -27000,7 +27026,12 @@
           "extraction_status": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "enum": [
+                  "pending",
+                  "done",
+                  "failed"
+                ]
               },
               {
                 "type": "null"
@@ -27055,7 +27086,17 @@
           "comp_period": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "enum": [
+                  "hourly",
+                  "daily",
+                  "weekly",
+                  "biweekly",
+                  "semimonthly",
+                  "monthly",
+                  "yearly",
+                  "one_time"
+                ]
               },
               {
                 "type": "null"
@@ -27066,7 +27107,13 @@
           "comp_basis": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "enum": [
+                  "base",
+                  "total",
+                  "stipend",
+                  "unspecified"
+                ]
               },
               {
                 "type": "null"
@@ -27077,7 +27124,11 @@
           "closed_verdict": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "enum": [
+                  "open",
+                  "closed"
+                ]
               },
               {
                 "type": "null"
@@ -27494,6 +27545,10 @@
           },
           "status": {
             "type": "string",
+            "enum": [
+              "passed",
+              "rejected"
+            ],
             "title": "Status"
           },
           "reason": {
@@ -28603,6 +28658,10 @@
           },
           "status": {
             "type": "string",
+            "enum": [
+              "passed",
+              "rejected"
+            ],
             "title": "Status"
           },
           "reason": {
@@ -29125,7 +29184,11 @@
           "status": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "enum": [
+                  "passed",
+                  "rejected"
+                ]
               },
               {
                 "type": "null"
@@ -29842,7 +29905,17 @@
           "comp_period": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "enum": [
+                  "hourly",
+                  "daily",
+                  "weekly",
+                  "biweekly",
+                  "semimonthly",
+                  "monthly",
+                  "yearly",
+                  "one_time"
+                ]
               },
               {
                 "type": "null"
@@ -29853,7 +29926,13 @@
           "comp_basis": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "enum": [
+                  "base",
+                  "total",
+                  "stipend",
+                  "unspecified"
+                ]
               },
               {
                 "type": "null"
@@ -29869,7 +29948,11 @@
           "closed_verdict": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "enum": [
+                  "open",
+                  "closed"
+                ]
               },
               {
                 "type": "null"
@@ -35529,7 +35612,12 @@
           "outcome": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "enum": [
+                  "won",
+                  "lost",
+                  "withdrawn"
+                ]
               },
               {
                 "type": "null"
@@ -36018,6 +36106,29 @@
         "type": "object",
         "title": "TaskModelPut"
       },
+      "TaskProgress": {
+        "properties": {
+          "done": {
+            "type": "integer",
+            "title": "Done",
+            "default": 0
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "default": 0
+          },
+          "label": {
+            "type": "string",
+            "title": "Label",
+            "default": ""
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "title": "TaskProgress",
+        "description": "What `set_progress` writes: how far, out of how much, and a line for a\nperson. A handler may add counts it wants queryable afterwards (what an\ningest fetched, kept, cached, failed to fetch) and the health detectors\nread those keys, so extras are carried rather than dropped.\n\nThe three have defaults because a parent task's progress is written by\n`jsonb_set` on one key, and a row that has reported nothing should read as\nnothing rather than fail the request that asks for it."
+      },
       "TaskState": {
         "properties": {
           "id": {
@@ -36030,19 +36141,26 @@
           },
           "status": {
             "type": "string",
+            "enum": [
+              "pending",
+              "waiting",
+              "running",
+              "awaiting_batch",
+              "done",
+              "failed",
+              "cancelled"
+            ],
             "title": "Status"
           },
           "progress": {
             "anyOf": [
               {
-                "additionalProperties": true,
-                "type": "object"
+                "$ref": "#/components/schemas/TaskProgress"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Progress"
+            ]
           },
           "error": {
             "anyOf": [
