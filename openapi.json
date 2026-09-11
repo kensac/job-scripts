@@ -5228,7 +5228,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AnswerList"
+                }
               }
             }
           },
@@ -6398,7 +6400,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/FillList"
+                }
               }
             }
           },
@@ -25977,6 +25981,22 @@
         "type": "object",
         "title": "ActionAnswer"
       },
+      "AnswerList": {
+        "properties": {
+          "answers": {
+            "items": {
+              "$ref": "#/components/schemas/RememberedAnswer"
+            },
+            "type": "array",
+            "title": "Answers"
+          }
+        },
+        "type": "object",
+        "required": [
+          "answers"
+        ],
+        "title": "AnswerList"
+      },
       "ApiKeyPut": {
         "properties": {
           "api_key": {
@@ -26811,6 +26831,113 @@
         ],
         "title": "Field_",
         "description": "One field as the extension read it. kind is the widget: text, long,\nselect, yesno, file, number, date. options are the select's choices\nas shown, in order."
+      },
+      "Fill": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "host": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Host"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "submitted_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Submitted At"
+          },
+          "company": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "fields": {
+            "type": "integer",
+            "title": "Fields"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "job_id",
+          "url",
+          "host",
+          "created_at",
+          "submitted_at",
+          "company",
+          "title",
+          "fields"
+        ],
+        "title": "Fill",
+        "description": "One pass of the extension over one form. `job_id` is null when the url\nmatched no posting on the board, which is normal rather than an error."
+      },
+      "FillList": {
+        "properties": {
+          "fills": {
+            "items": {
+              "$ref": "#/components/schemas/Fill"
+            },
+            "type": "array",
+            "title": "Fills"
+          }
+        },
+        "type": "object",
+        "required": [
+          "fills"
+        ],
+        "title": "FillList"
       },
       "FilterCreate": {
         "properties": {
@@ -28014,6 +28141,66 @@
           "instruction"
         ],
         "title": "RefineBody"
+      },
+      "RememberedAnswer": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "value": {
+            "type": "string",
+            "title": "Value"
+          },
+          "times_used": {
+            "type": "integer",
+            "title": "Times Used"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Used At"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "label",
+          "kind",
+          "value",
+          "times_used",
+          "last_used_at",
+          "updated_at"
+        ],
+        "title": "RememberedAnswer",
+        "description": "One answer the bank kept from a submitted form."
       },
       "ReportList": {
         "properties": {
