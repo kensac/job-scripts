@@ -6,6 +6,21 @@ import datetime
 
 from api import db, events
 
+# The legacy row is machine-shaped only when every person-editable field still
+# has its exact default. Kept here so migration tasks and live board writers
+# classify the same row without importing one task handler from another.
+UNTOUCHED = """
+    (uj.status IS NULL OR uj.status = '') AND uj.date_applied IS NULL
+    AND COALESCE(uj.notes, '') = '' AND COALESCE(uj.size, '') = ''
+    AND COALESCE(uj.recruiter, '') = '' AND COALESCE(uj.connection1, '') = ''
+    AND COALESCE(uj.connection2, '') = '' AND COALESCE(uj.documents, '') = ''
+    AND NOT uj.hidden
+"""
+
+USER_JOB_SPLIT_VERSION = 1
+USER_JOB_SPLIT_CHECKPOINT = "user_job_split_v1"
+USER_JOB_SPLIT_DEDUPE_PREFIX = "user-job-split:v1"
+
 
 def touchable_job_ids(user_id: int, job_ids: list[int]) -> set[int]:
     """The ids this user may write a board row for.
