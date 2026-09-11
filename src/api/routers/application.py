@@ -22,6 +22,7 @@ from api import ai, budget, db, task_admission
 from api.ai import access as ai_access
 from api.auth import AuthedUser, require_user
 from api.board.access import require_visible_job
+from api.problem import refuse
 from core.answers import DEFAULT_STYLE
 from core.fetching import forms
 from core.store import get_content
@@ -57,10 +58,6 @@ def pdf_text(data: bytes) -> str:
     return "\n".join((page.extract_text() or "") for page in reader.pages).strip()
 
 
-def _bad(status: int, code: str, message: str) -> HTTPException:
-    return HTTPException(status, detail={"code": code, "message": message})
-
-
 @router.get("/user/resumes")
 def list_resumes(user: AuthedUser = Depends(require_user)):
     return {
@@ -81,17 +78,19 @@ def create_resume(body: ResumeCreate, user: AuthedUser = Depends(require_user)):
         try:
             data = base64.b64decode(body.pdf_base64, validate=True)
         except Exception as exc:
-            raise _bad(400, "INVALID_PDF", "the attachment is not valid base64") from exc
+            raise refuse(400, "INVALID_PDF", "the attachment is not valid base64") from exc
         if len(data) > MAX_PDF_BYTES:
-            raise _bad(413, "PDF_TOO_LARGE", "PDFs up to 5 MB")
+            raise refuse(413, "PDF_TOO_LARGE", "PDFs up to 5 MB")
         try:
             text = pdf_text(data)
         except Exception as exc:
-            raise _bad(400, "INVALID_PDF", "could not read that PDF") from exc
+            raise refuse(400, "INVALID_PDF", "could not read that PDF") from exc
         if not text:
-            raise _bad(400, "NO_TEXT", "that PDF has no extractable text; paste the resume instead")
+            raise refuse(
+                400, "NO_TEXT", "that PDF has no extractable text; paste the resume instead"
+            )
     if not text:
-        raise _bad(400, "NO_TEXT", "paste the resume text or attach a PDF")
+        raise refuse(400, "NO_TEXT", "paste the resume text or attach a PDF")
     # The PDF's bytes live in the database and are dumped and archived with
     # it, so the count per person is bounded as well as the size per file.
     kept = db.query_one(
@@ -100,7 +99,7 @@ def create_resume(body: ResumeCreate, user: AuthedUser = Depends(require_user)):
     )
     cap = int(db.get_config("resumes_per_user", 10))
     if kept and kept["n"] >= cap:
-        raise _bad(409, "TOO_MANY_RESUMES", f"up to {cap} resumes; delete one first")
+        raise refuse(409, "TOO_MANY_RESUMES", f"up to {cap} resumes; delete one first")
     row = db.query_one(
         f"""
         INSERT INTO user_resumes (user_id, name, text, filename, pdf)
@@ -126,9 +125,9 @@ def resume_pdf(resume_id: int, user: AuthedUser = Depends(require_user)):
         (resume_id, user.id),
     )
     if not row:
-        raise _bad(404, "NOT_FOUND", "unknown resume")
+        raise refuse(404, "NOT_FOUND", "unknown resume")
     if row["pdf"] is None:
-        raise _bad(404, "NO_FILE", "this resume was pasted; upload the PDF to attach it")
+        raise refuse(404, "NO_FILE", "this resume was pasted; upload the PDF to attach it")
     name = (row["filename"] or "resume.pdf").replace('"', "")
     return Response(
         bytes(row["pdf"]),
@@ -149,7 +148,7 @@ def patch_resume(resume_id: int, body: ResumePatch, user: AuthedUser = Depends(r
         (body.name.strip() if body.name else None, body.text, resume_id, user.id),
     )
     if not row:
-        raise _bad(404, "NOT_FOUND", "unknown resume")
+        raise refuse(404, "NOT_FOUND", "unknown resume")
     return row
 
 
@@ -160,7 +159,7 @@ def delete_resume(resume_id: int, user: AuthedUser = Depends(require_user)):
         (resume_id, user.id),
     )
     if not row:
-        raise _bad(404, "NOT_FOUND", "unknown resume")
+        raise refuse(404, "NOT_FOUND", "unknown resume")
     return {"ok": True}
 
 
@@ -264,7 +263,7 @@ def delete_question(job_id: int, key: str, user: AuthedUser = Depends(require_us
         (user.id, job_id, key),
     )
     if not row:
-        raise _bad(404, "NOT_FOUND", "no pasted question with that key")
+        raise refuse(404, "NOT_FOUND", "no pasted question with that key")
     return {"ok": True}
 
 
@@ -285,9 +284,9 @@ def request_drafts(job_id: int, body: DraftRequest, user: AuthedUser = Depends(r
             "SELECT 1 FROM user_resumes WHERE id = %s AND user_id = %s",
             (body.resume_id, user.id),
         ):
-            raise _bad(404, "NOT_FOUND", "unknown resume")
+            raise refuse(404, "NOT_FOUND", "unknown resume")
     elif not db.query_one("SELECT 1 FROM user_resumes WHERE user_id = %s", (user.id,)):
-        raise _bad(400, "NO_RESUME", "add a resume under settings first")
+        raise refuse(400, "NO_RESUME", "add a resume under settings first")
     ai_access.require_config(user)
     admission = task_admission.enqueue(
         "application_draft",
@@ -328,7 +327,7 @@ def put_answer(job_id: int, key: str, body: AnswerPut, user: AuthedUser = Depend
         (body.draft, json.dumps([turn]), user.id, job_id, key),
     )
     if not row:
-        raise _bad(404, "NOT_FOUND", "unknown question")
+        raise refuse(404, "NOT_FOUND", "unknown question")
     return row
 
 
@@ -355,10 +354,10 @@ async def refine_answer(
         (user.id, job_id, key),
     )
     if not row:
-        raise _bad(404, "NOT_FOUND", "unknown question")
+        raise refuse(404, "NOT_FOUND", "unknown question")
     resume = drafts.resume_text(user.id, body.resume_id)
     if not resume:
-        raise _bad(400, "NO_RESUME", "add a resume under settings first")
+        raise refuse(400, "NO_RESUME", "add a resume under settings first")
     cfg = ai_access.require_config(user)
     instruction = {"role": "user", "kind": "instruction", "text": body.instruction, "at": _now()}
     row = db.query_one(
@@ -368,7 +367,7 @@ async def refine_answer(
         (db.jsonb([instruction]), user.id, job_id, key),
     )
     if row is None:
-        raise _bad(404, "NOT_FOUND", "unknown question")
+        raise refuse(404, "NOT_FOUND", "unknown question")
     with budget.record_parse_failures(user.id, cfg.key_source, drafts.PURPOSE, cfg.model):
         parsed, usage = await ai.parse(
             cfg,
@@ -387,7 +386,7 @@ async def refine_answer(
         )
     budget.record_tokens(user.id, cfg.key_source, drafts.PURPOSE, cfg.model, usage)
     if parsed is None:
-        raise _bad(502, "NO_ANSWER", "the model returned no usable answer; try again")
+        raise refuse(502, "NO_ANSWER", "the model returned no usable answer; try again")
     turns = [
         {"role": "assistant", "kind": "refine", "text": parsed.answer, "at": _now()},
     ]
@@ -402,7 +401,7 @@ async def refine_answer(
         (parsed.answer, cfg.model, json.dumps(turns), user.id, job_id, key, row["draft_revision"]),
     )
     if updated is None:
-        raise _bad(
+        raise refuse(
             409, "ANSWER_CHANGED", "the answer changed while refining; your newer answer was kept"
         )
     return updated

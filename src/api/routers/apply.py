@@ -10,7 +10,7 @@ import re
 from typing import Any
 from urllib.parse import urlsplit
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, Query, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from api import (
@@ -25,6 +25,7 @@ from api.ai import access as ai_access
 from api.apply import policy as extension_policy
 from api.apply import recipes as extension_recipes
 from api.auth import AuthedUser, require_user
+from api.problem import refuse
 from api.routers.jobs import _write_board_row
 from core.fetching.forms import posting_urls
 from tasks import application as drafts
@@ -33,6 +34,65 @@ router = APIRouter()
 
 SUBMITTED_STATUS = "Application Submitted"
 _BANK_COLS = "id, label, kind, value, times_used, last_used_at, updated_at"
+
+
+class RememberedAnswer(BaseModel):
+    """One answer the bank kept from a submitted form."""
+
+    id: int
+    label: str
+    kind: str
+    value: str
+    times_used: int
+    last_used_at: datetime.datetime | None
+    updated_at: datetime.datetime | None
+
+
+class AnswerList(BaseModel):
+    answers: list[RememberedAnswer]
+
+
+class Fill(BaseModel):
+    """One pass of the extension over one form. `job_id` is null when the url
+    matched no posting on the board, which is normal rather than an error."""
+
+    id: int
+    job_id: int | None
+    url: str
+    host: str | None
+    created_at: datetime.datetime
+    submitted_at: datetime.datetime | None
+    company: str | None
+    title: str | None
+    fields: int
+
+
+class FillList(BaseModel):
+    fills: list[Fill]
+
+
+class ProblemReport(BaseModel):
+    """One row of the problem-report list, declared rather than implied.
+
+    The row shape used to reach the frontend as an untyped dict, so the types
+    on the other side were written by hand from reading this query. They
+    drifted: a capture field typed as a string was an object, and the page
+    crashed on 2026-09-10 when a report with fields was opened. A declared
+    shape puts that in openapi.json, which is where the frontend's types come
+    from.
+    """
+
+    id: int
+    url: str
+    host: str | None
+    note: str
+    created_at: datetime.datetime
+    title: str | None
+    fields: int
+
+
+class ReportList(BaseModel):
+    reports: list[ProblemReport]
 
 
 @router.get("/extension/config", response_model=extension_policy.ExtensionConfig)
@@ -46,11 +106,11 @@ def extension_config(
     # extension alone owns the bounded cache and pins a revision per fill.
     response.headers["Cache-Control"] = "no-store"
     if schema_version != 1:
-        raise _bad(409, "UNSUPPORTED_CONFIG_SCHEMA", "this configuration schema is not supported")
+        raise refuse(409, "UNSUPPORTED_CONFIG_SCHEMA", "this configuration schema is not supported")
     try:
         policy = extension_policy.ExtensionPolicy.model_validate(db.get_config("extension_policy"))
     except ValueError as exc:
-        raise _bad(
+        raise refuse(
             503, "INVALID_EXTENSION_POLICY", "extension configuration is unavailable"
         ) from exc
     return extension_policy.resolve(policy, adapter)
@@ -68,23 +128,19 @@ def extension_recipe(
     the bundled table as its fallback (api.apply.recipes)."""
     response.headers["Cache-Control"] = "no-store"
     if schema_version != 1:
-        raise _bad(409, "UNSUPPORTED_CONFIG_SCHEMA", "this configuration schema is not supported")
+        raise refuse(409, "UNSUPPORTED_CONFIG_SCHEMA", "this configuration schema is not supported")
     try:
         policy = extension_policy.ExtensionPolicy.model_validate(db.get_config("extension_policy"))
     except ValueError as exc:
-        raise _bad(
+        raise refuse(
             503, "INVALID_EXTENSION_POLICY", "extension configuration is unavailable"
         ) from exc
     config = extension_recipes.config_for(adapter, policy.max_age_seconds)
     if config is None:
-        raise _bad(
+        raise refuse(
             404, "NO_RECIPE", "no published recipe for this adapter; the bundled table applies"
         )
     return config
-
-
-def _bad(status: int, code: str, message: str) -> HTTPException:
-    return HTTPException(status, detail={"code": code, "message": message})
 
 
 @router.get("/user/profile")
@@ -168,14 +224,15 @@ class AnswerPut(BaseModel):
 
 
 @router.get("/user/answers")
-def list_answers(user: AuthedUser = Depends(require_user)):
-    return {
-        "answers": db.query(
+def list_answers(user: AuthedUser = Depends(require_user)) -> AnswerList:
+    return AnswerList(
+        answers=db.query_as(
+            RememberedAnswer,
             f"SELECT {_BANK_COLS} FROM application_answer_bank WHERE user_id = %s "
             "ORDER BY times_used DESC, updated_at DESC",
             (user.id,),
         )
-    }
+    )
 
 
 @router.put("/user/answers/{answer_id}")
@@ -186,7 +243,7 @@ def put_answer(answer_id: int, body: AnswerPut, user: AuthedUser = Depends(requi
         (body.value.strip(), answer_id, user.id),
     )
     if not row:
-        raise _bad(404, "NOT_FOUND", "unknown answer")
+        raise refuse(404, "NOT_FOUND", "unknown answer")
     return row
 
 
@@ -196,7 +253,7 @@ def delete_answer(answer_id: int, user: AuthedUser = Depends(require_user)):
         "DELETE FROM application_answer_bank WHERE id = %s AND user_id = %s RETURNING id",
         (answer_id, user.id),
     ):
-        raise _bad(404, "NOT_FOUND", "unknown answer")
+        raise refuse(404, "NOT_FOUND", "unknown answer")
     return {"ok": True}
 
 
@@ -313,7 +370,7 @@ def fill_submitted(fill_id: int, body: SubmittedBody, user: AuthedUser = Depends
             (fill_id, user.id),
         )
         if not fill:
-            raise _bad(404, "NOT_FOUND", "unknown fill")
+            raise refuse(404, "NOT_FOUND", "unknown fill")
         if fill["submitted_at"] is not None:
             return {"ok": True, "job_id": fill["job_id"], "fields": fill["fields"]}
         finals = {f.key: f for f in body.fields}
@@ -461,7 +518,7 @@ async def suggest(body: SuggestBody, user: AuthedUser = Depends(require_user)):
         usage,
     )
     if parsed is None:
-        raise _bad(502, "NO_ANSWER", "the model returned no usable answer; try again")
+        raise refuse(502, "NO_ANSWER", "the model returned no usable answer; try again")
     by_key = {f.key: f for f in fields}
     answers = {}
     raw = {}
@@ -533,7 +590,7 @@ def create_report(body: ReportBody, user: AuthedUser = Depends(require_user)):
     """The extension's report button: whatever it saw, kept whole for
     triage. Capped so one page cannot fill the table by itself."""
     if len(json.dumps(body.page)) > MAX_REPORT_BYTES:
-        raise _bad(413, "REPORT_TOO_LARGE", "the page capture is over 2 MB")
+        raise refuse(413, "REPORT_TOO_LARGE", "the page capture is over 2 MB")
     report = db.query_one(
         "INSERT INTO application_reports (user_id, url, host, note, page) "
         "VALUES (%s, %s, %s, %s, %s) RETURNING id, created_at",
@@ -549,30 +606,6 @@ def create_report(body: ReportBody, user: AuthedUser = Depends(require_user)):
         has_note=bool(body.note.strip()),
     )
     return report
-
-
-class ProblemReport(BaseModel):
-    """One row of the problem-report list, declared rather than implied.
-
-    The row shape used to reach the frontend as an untyped dict, so the types
-    on the other side were written by hand from reading this query. They
-    drifted: a capture field typed as a string was an object, and the page
-    crashed on 2026-09-10 when a report with fields was opened. A declared
-    shape puts that in openapi.json, which is where the frontend's types come
-    from.
-    """
-
-    id: int
-    url: str
-    host: str | None
-    note: str
-    created_at: datetime.datetime
-    title: str | None
-    fields: int
-
-
-class ReportList(BaseModel):
-    reports: list[ProblemReport]
 
 
 @router.get("/user/apply/reports")
@@ -596,21 +629,22 @@ def get_report(report_id: int, user: AuthedUser = Depends(require_user)):
         (report_id, user.id),
     )
     if not row:
-        raise _bad(404, "NOT_FOUND", "unknown report")
+        raise refuse(404, "NOT_FOUND", "unknown report")
     return row
 
 
 @router.get("/user/apply/fills")
-def list_fills(limit: int = 50, user: AuthedUser = Depends(require_user)):
-    return {
-        "fills": db.query(
+def list_fills(limit: int = 50, user: AuthedUser = Depends(require_user)) -> FillList:
+    return FillList(
+        fills=db.query_as(
+            Fill,
             "SELECT f.id, f.job_id, f.url, f.host, f.created_at, f.submitted_at, "
             "j.company, j.title, jsonb_array_length(f.fields) AS fields "
             "FROM application_fills f LEFT JOIN jobs j ON j.id = f.job_id "
             "WHERE f.user_id = %s ORDER BY f.created_at DESC LIMIT %s",
             (user.id, max(1, min(limit, 500))),
         )
-    }
+    )
 
 
 @router.get("/user/apply/report")

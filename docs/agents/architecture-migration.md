@@ -303,8 +303,24 @@ at least three `detail` shapes among them (69 `{code, message}`, 14 a bare
 string, 1 an f-string), and the schema declares 200, 201, 202 and the 422
 FastAPI adds. No 4xx. Phase 7.
 
-**Reads are untyped.** 678 SQL call sites return bare dicts. `db.query_as` is
-the primitive; adoption is per domain. Phase 7.
+**Reads are untyped, and the goal is all of them.** 563 db call sites return
+bare dicts. `db.query_as` is the primitive and adoption is per domain, on
+Kanishk's instruction of 2026-09-11 that every read should carry a shape.
+
+Two things make it work that are worth knowing before starting a domain.
+
+**A `SELECT *` cannot be typed until it names its columns.** There are 24, in
+`core/store.py`, `tasks/filters.py`, `tasks/ingest.py`, `tasks/experiments.py`
+and `tasks/uploads.py`. Naming them is a good change on its own: a star select
+and the shape that reads it drift silently, which is the same defect one level
+down.
+
+**A response model must be defined ABOVE the route that returns it.** This
+module uses `from __future__ import annotations`, so a return annotation is a
+string and FastAPI resolves it when the decorator runs. A model defined later
+in the file raises `PydanticUserError: ... is not fully defined`, at import,
+with a message that does not say the cause. Found the hard way on
+`routers/apply.py`.
 
 **The services still reach into the handlers.** Nine ignored imports in three
 causes. The largest is four routers calling four helpers that live inside a
