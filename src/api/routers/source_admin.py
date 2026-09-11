@@ -122,6 +122,11 @@ class Attached(BaseModel):
     jobs: int
     subscribers: int
     board_rows: int
+    managed_boards: int
+
+
+class _ManagedBoardId(BaseModel):
+    id: int
 
 
 class SourceDeleted(BaseModel):
@@ -396,31 +401,49 @@ def delete_source(
         SELECT (SELECT count(*) FROM jobs WHERE source = %(n)s) AS jobs,
                (SELECT count(*) FROM user_sources WHERE source = %(n)s) AS subscribers,
                (SELECT count(*) FROM user_jobs uj JOIN jobs j ON j.id = uj.job_id
-                WHERE j.source = %(n)s) AS board_rows
+                WHERE j.source = %(n)s) AS board_rows,
+               (SELECT count(*) FROM managed_board_sources
+                WHERE source = %(n)s) AS managed_boards
         """,
         {"n": name},
     )
     # The aggregate always returns exactly one row, but assert it rather than
     # subscript an Optional - a silent None here would 500 mid-delete.
     assert attached is not None
-    if not force and (attached["jobs"] or attached["subscribers"] or attached["board_rows"]):
+    if not force and any(attached.values()):
         raise HTTPException(
             409,
             detail={
                 "code": "SOURCE_IN_USE",
                 "message": (
                     f"{name} still has {attached['jobs']} jobs, "
-                    f"{attached['subscribers']} subscribers, {attached['board_rows']} board rows"
+                    f"{attached['subscribers']} subscribers, {attached['board_rows']} board rows, "
+                    f"{attached['managed_boards']} managed boards"
                 ),
                 "attached": attached,
             },
         )
-    db.execute("DELETE FROM user_sources WHERE source = %s", (name,))
-    db.execute(
-        "UPDATE source_groups SET members = array_remove(members, %s) WHERE %s = ANY(members)",
-        (name, name),
-    )
-    db.execute("DELETE FROM sources WHERE name = %s", (name,))
+    with db.transaction():
+        affected_boards = db.query_as(
+            _ManagedBoardId,
+            "SELECT b.id FROM managed_boards b JOIN managed_board_sources s "
+            "ON s.managed_board_id = b.id WHERE s.source = %s ORDER BY b.id FOR UPDATE OF b",
+            (name,),
+        )
+        if affected_boards:
+            db.execute(
+                "UPDATE managed_boards SET revision = revision + 1, "
+                "public_revision = CASE WHEN published THEN COALESCE(public_revision, 0) + 1 "
+                "ELSE public_revision END, updated_at = now() WHERE id = ANY(%s)",
+                ([board.id for board in affected_boards],),
+            )
+        db.execute("DELETE FROM user_sources WHERE source = %s", (name,))
+        db.execute(
+            "UPDATE source_groups SET members = array_remove(members, %s) WHERE %s = ANY(members)",
+            (name, name),
+        )
+        db.execute("DELETE FROM managed_board_sources WHERE source = %s", (name,))
+        db.execute("DELETE FROM sources WHERE name = %s", (name,))
     return SourceDeleted(ok=True, deleted=name, was_attached=Attached(**attached))
 
 

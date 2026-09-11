@@ -86,51 +86,35 @@ def test_no_task_parked_without_batches_to_wait_for():
 
 
 @pytest.mark.corpus
-def test_the_two_visibility_predicates_agree():
-    """The board is defined twice - as a read-time predicate in routers/jobs.py
-    and as a write-time predicate in tasks/board.py. They have already drifted
-    once (zero-enabled-filters behaved differently in each), and the drift is
-    invisible until a user's board is wrong.
-
-    This runs both against real data and compares. It is the single most
-    valuable thing in this file, because no fixture reproduces the
-    combinations real data contains.
-    """
-    from api.board import criteria
-    from api.board.visibility import FULL
+def test_visibility_projection_matches_its_canonical_builder():
+    """The materialized visibility projection stores the canonical answer."""
+    from api.board import visibility
 
     user = db.query_one("SELECT id FROM users ORDER BY id LIMIT 1")
     if user is None:
         pytest.skip("no users in the synced copy")
     uid = user["id"]
-    settings = db.query_one("SELECT * FROM user_settings WHERE user_id = %s", (uid,))
-    params = {"uid": uid, "bypass_sponsorship": False, **criteria.params(settings)}
+    expected = set(visibility.member_ids(uid))
+    assert visibility.recompute(uid) == len(expected)
+    stored = {
+        row["job_id"]
+        for row in db.query(
+            "SELECT job_id FROM board_visible WHERE user_id = %s ORDER BY job_id", (uid,)
+        )
+    }
+    assert stored == expected
 
-    read_side = db.query_one(
-        FULL.format(columns="COUNT(*) AS c", extra="", criteria=criteria.SQL), params
-    )
-    assert read_side is not None
 
-    # Every row the write path materialised must be visible to the read path.
-    # The reverse is not required: the read path also shows jobs a user has
-    # touched, which materialisation never created.
-    materialised_but_hidden = db.query_one(
-        FULL.format(
-            columns="COUNT(*) AS c",
-            extra="",
-            criteria=criteria.SQL,
-        ).replace(
-            "FROM jobs j",
-            "FROM jobs j JOIN user_jobs m ON m.job_id = j.id AND m.user_id = %(uid)s",
-        ),
-        params,
+def test_person_touched_history_is_not_materialized_membership(f):
+    uid = f.make_user()
+    job_id = f.make_job()
+    db.execute(
+        "INSERT INTO user_jobs (user_id, job_id, person_touched_at, notes) "
+        "VALUES (%s, %s, now(), 'person note')",
+        (uid, job_id),
     )
-    assert materialised_but_hidden is not None
-    board_rows = _count("SELECT count(*) FROM user_jobs WHERE user_id = %s", (uid,))
-    assert materialised_but_hidden["c"] == board_rows, (
-        f"{board_rows - materialised_but_hidden['c']} materialised board rows are "
-        "invisible to the read-time predicate - the two spellings have drifted"
-    )
+
+    assert _count("SELECT count(*) FROM user_job_working_set WHERE user_id = %s", (uid,)) == 0
 
 
 @pytest.mark.corpus

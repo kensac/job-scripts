@@ -9,6 +9,7 @@ from typing import Any
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    CheckConstraint,
     ForeignKey,
     Identity,
     Index,
@@ -272,6 +273,10 @@ class ApiUsage(Base):
     __table_args__ = (
         Index("idx_api_usage_user_created", "user_id", "created_at"),
         Index("idx_api_usage_purpose", "purpose", "created_at"),
+        Index("idx_api_usage_managed_board_created", "managed_board_id", "created_at"),
+        CheckConstraint(
+            "user_id IS NULL OR managed_board_id IS NULL", name="ck_api_usage_single_subject"
+        ),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
@@ -280,6 +285,9 @@ class ApiUsage(Base):
     # per-user spend a fiction.
     user_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("users.id", ondelete="CASCADE")
+    )
+    managed_board_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("managed_boards.id", ondelete="RESTRICT")
     )
     created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
     key_source: Mapped[str] = mapped_column(Text)
