@@ -20,6 +20,7 @@ from typing import Any
 from api import db, metrics
 from api.board import criteria
 from api.board import eligibility as board_eligibility
+from api.board.person_state import UNTOUCHED
 
 logger = logging.getLogger(__name__)
 
@@ -37,15 +38,6 @@ logger = logging.getLogger(__name__)
 # Touching a legacy row moves it the other way: it becomes the person's,
 # visible whatever a verdict says, and out of reach of the legacy delete
 # below. Its independent working-set membership remains rebuildable scope.
-UNTOUCHED = """
-    (uj.status IS NULL OR uj.status = '') AND uj.date_applied IS NULL
-    AND COALESCE(uj.notes, '') = '' AND COALESCE(uj.size, '') = ''
-    AND COALESCE(uj.recruiter, '') = '' AND COALESCE(uj.connection1, '') = ''
-    AND COALESCE(uj.connection2, '') = '' AND COALESCE(uj.documents, '') = ''
-    AND NOT uj.hidden
-"""
-
-
 def materialize_passing(user_id: int) -> int:
     """Every job currently passing ALL of the user's enabled filters (and the
     structural gates) gets a board row. Existing rows (including hidden ones)

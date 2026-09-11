@@ -38,6 +38,7 @@ from tasks.mail_sync import (
 from tasks.message_html import handle_backfill_message_html
 from tasks.requirements import handle_extract_requirements
 from tasks.uploads import handle_extract_upload
+from tasks.user_job_backfill import handle_backfill_user_job_split
 from tasks.verify import (
     handle_reverify_chunk,
     handle_reverify_open,
@@ -73,6 +74,7 @@ HANDLERS = {
     "application_draft": handle_application_draft,
     "application_sweep": handle_application_sweep,
     "run_experiment": handle_run_experiment,
+    "backfill_user_job_split": handle_backfill_user_job_split,
 }
 
 __all__ = ["HANDLERS"]
