@@ -160,6 +160,54 @@ anything else was running against it, and whether the container still exists.
 A vanished container and a container with a vanished port mapping present
 identically to a suite as "the database stopped existing".
 
+## What a CI run is made of
+
+Worth knowing before optimising it again, measured 2026-09-11:
+
+| part | cost |
+|---|---|
+| `gate` (auto-fix, lint, format; no database) | 18 s |
+| a test lane: container, checkout and sync | ~17 s |
+| a test lane: pytest startup | 7-8 s |
+| a test lane: the tests themselves | ~10 s at six shards |
+| `check` | 5-8 s |
+
+Two floors set the shape. **A lane pays 7-8 s before its first test**: the
+interpreter, the plugins, conftest provisioning a database, and collecting
+all 1,671 cases to select its own. Sharding divides the tests and nothing
+else, which is why six lanes and not twelve. **Setup and call are now about
+equal** (33 s and 32 s across all lanes, 20 ms and 19 ms a test), so the
+per-test reset is no longer the thing to attack; the remaining per-test cost
+is the application answering real requests against Postgres, about eleven
+queries and 17 ms per request.
+
+`gate` decides whether a revision is worth judging and everything waits on
+it, so it holds only the auto-fix and the two checks that decide that. It
+needs no database: the schema export reads the app's routes, and exported
+against a DSN on a closed port it is byte-identical to the committed file.
+Everything else static runs beside the lanes.
+
+## Measured and rejected
+
+Recorded so the next attempt starts somewhere new. Each of these looked
+obviously right and was not.
+
+- **xdist inside a CI shard.** The lanes' pytest step went 31/28/26 s to
+  27/28/26 s with `-n auto` on a four-vCPU runner: four workers spend on a
+  database create, a migration and an interpreter start about what they win
+  by overlapping. It earns its keep locally, where it runs the WHOLE suite:
+  70.6 s against 35.1 s (`make test-par`).
+- **`synchronous_commit = off` on the test database.** 139 tests took
+  7.90 s and 8.06 s with it on, 9.39 s and 8.41 s with it off. The time is
+  round trips, not WAL flushes. `fsync = off` did nothing to the old
+  truncate-everything reset either.
+- **Caching `.venv`.** `uv sync --frozen` is already 1 s with setup-uv's
+  cache enabled.
+- **Mirroring the pgvector image to GHCR** to cut the 7.7 s pull. A fork
+  pull request's read-only token cannot pull a private package, and package
+  visibility is not settable from the API, so it would trade five seconds
+  for broken fork runs.
+
 ## Investigating test performance
 
 Inspect `.github/workflows/test-performance.yml` for the benchmark matrix and
