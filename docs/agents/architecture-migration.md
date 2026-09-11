@@ -60,7 +60,7 @@ real only relocates the problem.
 |---|---|---|
 | 0 | The layering is enforced | An import contract fails CI on a new upward edge |
 | 1 | Check types are a registry | A new check type is a registration; no literal names it |
-| 2 | One definition of board membership | Deleting `board_visible` and recomputing changes nothing |
+| 2 | A board row and the working set are told apart | `user_jobs` says what a person keeps; something else says what the sweeps carry |
 | 3 | Catalog observations are facts | A re-listing is an appended row, not a mutated column |
 | 4 | Derivations are content addressed | Changing the model does not invalidate a verdict |
 | 5 | Files move to the shape | Packages match this document |
@@ -85,6 +85,26 @@ fails the contract; a registered fake check type needs no other edit.
 Phase 2 decides who sees what. Its failure mode is two definitions silently
 agreeing in the tests and disagreeing in production, which is the state the
 codebase was already in while every test passed.
+
+Phase 2 was first written as "one definition of board membership", on the
+reading that `demote_closed`, `materialize_passing` and `visibility.FULL` were
+three definitions of one thing. Opened, they are not. FULL admits an untouched
+row only through its structural branch, which does not reference `user_jobs`
+at all, so an untouched board row does not make anything visible and the two
+writers cannot disagree with FULL about what a person sees. Visibility already
+has one definition, computed into `board_visible` and never patched in place.
+
+What those rows do instead is carry scope. `AI_ELIGIBLE_JOB` admits any job
+with a board row, and the re-verification sweep takes its candidates from
+`user_jobs`, so an untouched row is what keeps a posting being paid for. That
+is a second job the table was never named for, and `materialize_passing` still
+describes itself as a mirror of the step that wrote a Google Sheet.
+
+Measured before assuming it was expensive: 3,709 board rows, 2,337 untouched,
+and of the jobs eligible only through a board row, 861 are tracked by someone
+and 214 are untouched. 214 is not a cost problem. The reason to separate the
+two meanings is that one table answering two questions is how the next wrong
+answer gets written, not that it is currently wasting money.
 
 Phase 4 migrates the verdict cache. Those rows cost money to produce and
 cannot be casually rebuilt.
