@@ -15,6 +15,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 
 from api import db
 from api.auth import AuthedUser, require_user
@@ -29,6 +30,86 @@ from core.requirements import (
 )
 
 router = APIRouter()
+
+
+class SkillCount(BaseModel):
+    skill: str
+    postings: int
+
+
+class YearsCount(BaseModel):
+    years: int
+    postings: int
+
+
+class YearsExperience(BaseModel):
+    """`stated` is how many postings said anything at all. The silent
+    majority is the finding as often as the stated minority is, which is why
+    this is a count beside the distribution and not a percentage."""
+
+    stated: int
+    distribution: list[YearsCount]
+
+
+class DegreeCount(BaseModel):
+    level: str
+    required: bool
+    postings: int
+
+
+class LevelCount(BaseModel):
+    level: str
+    postings: int
+
+
+class TypeCount(BaseModel):
+    type: str
+    postings: int
+
+
+class MarketFlags(BaseModel):
+    """Counts of postings that SAY something, reported beside `postings`
+    rather than as shares, for the same reason."""
+
+    states_years: int
+    states_degree: int
+    degree_required: int
+    enrollment_required: int
+    needs_clearance: int
+    citizenship_required: int
+    sponsorship_offered: int
+    sponsorship_refused: int
+
+
+class Market(BaseModel):
+    """What the roles this user is targeting ask for. Every count is against
+    `postings`, the size of the slice, because a share hides how thin a slice
+    is: "3 of 7" and "43%" read the same and mean very different things.
+
+    `skills` is keyed by skill kind, which `core.requirements.SKILL_KINDS`
+    defines, so an empty slice still answers with every kind present."""
+
+    postings: int
+    skills: dict[str, list[SkillCount]]
+    years_experience: YearsExperience
+    degree: list[DegreeCount]
+    clearance: list[LevelCount]
+    seniority: list[LevelCount]
+    employment_type: list[TypeCount]
+    flags: MarketFlags | None
+
+
+class Neighbour(BaseModel):
+    id: int
+    company: str | None
+    title: str | None
+    url: str
+    similarity: float
+
+
+class Similar(BaseModel):
+    job_id: int
+    neighbours: list[Neighbour]
 
 
 # How many skills a frequency table returns. Past this the tail is single-
@@ -89,7 +170,7 @@ def market(
     user: AuthedUser = Depends(require_user),
     seniority: str | None = Query(default=None),
     employment_type: str | None = Query(default=None),
-):
+) -> Market:
     """What the roles this user is targeting actually ask for.
 
     Counts are reported against `postings` - the number of postings in the
@@ -101,16 +182,16 @@ def market(
     total = db.query_one(_slice_sql("SELECT COUNT(*) AS postings FROM slice"), params)
     postings = (total or {}).get("postings", 0)
     if not postings:
-        return {
-            "postings": 0,
-            "skills": {kind: [] for kind in SKILL_KINDS},
-            "years_experience": {"stated": 0, "distribution": []},
-            "degree": [],
-            "clearance": [],
-            "seniority": [],
-            "employment_type": [],
-            "flags": {},
-        }
+        return Market(
+            postings=0,
+            skills={kind: [] for kind in SKILL_KINDS},
+            years_experience=YearsExperience(stated=0, distribution=[]),
+            degree=[],
+            clearance=[],
+            seniority=[],
+            employment_type=[],
+            flags=None,
+        )
 
     skills = db.query(
         _slice_sql(
@@ -123,20 +204,22 @@ def market(
         ),
         params,
     )
-    by_kind: dict[str, list[dict]] = {kind: [] for kind in SKILL_KINDS}
+    by_kind: dict[str, list[SkillCount]] = {kind: [] for kind in SKILL_KINDS}
     for row in skills:
         bucket = by_kind.setdefault(row["kind"], [])
         if len(bucket) < TOP_SKILLS:
-            bucket.append({"skill": row["skill"], "postings": row["postings"]})
+            bucket.append(SkillCount(skill=row["skill"], postings=row["postings"]))
 
-    yoe = db.query(
+    yoe = db.query_as(
+        YearsCount,
         _slice_sql(
             "SELECT yoe_min AS years, COUNT(*) AS postings FROM slice "
             "WHERE yoe_min IS NOT NULL GROUP BY yoe_min ORDER BY yoe_min"
         ),
         params,
     )
-    degree = db.query(
+    degree = db.query_as(
+        DegreeCount,
         _slice_sql(
             """
             SELECT degree_min AS level, degree_required AS required, COUNT(*) AS postings
@@ -147,7 +230,8 @@ def market(
         ),
         {**params, "degrees": list(DEGREE_LEVELS)},
     )
-    clearance = db.query(
+    clearance = db.query_as(
+        LevelCount,
         _slice_sql(
             "SELECT clearance AS level, COUNT(*) AS postings FROM slice "
             "WHERE clearance IS NOT NULL GROUP BY clearance "
@@ -155,7 +239,8 @@ def market(
         ),
         {**params, "clearances": list(CLEARANCE_LEVELS)},
     )
-    seniorities = db.query(
+    seniorities = db.query_as(
+        LevelCount,
         _slice_sql(
             "SELECT seniority AS level, COUNT(*) AS postings FROM slice "
             "WHERE seniority IS NOT NULL GROUP BY seniority "
@@ -163,7 +248,8 @@ def market(
         ),
         {**params, "seniorities": list(SENIORITIES)},
     )
-    employment = db.query(
+    employment = db.query_as(
+        TypeCount,
         _slice_sql(
             "SELECT employment_type AS type, COUNT(*) AS postings FROM slice "
             "WHERE employment_type IS NOT NULL GROUP BY employment_type "
@@ -174,7 +260,8 @@ def market(
     # Deliberately reported beside `postings` rather than as percentages: these
     # are counts of postings that SAY something, and the silent majority is the
     # finding as often as the stated minority is.
-    flags = db.query_one(
+    flags = db.query_one_as(
+        MarketFlags,
         _slice_sql(
             """
             SELECT COUNT(*) FILTER (WHERE yoe_min IS NOT NULL) AS states_years,
@@ -191,19 +278,16 @@ def market(
         ),
         params,
     )
-    return {
-        "postings": postings,
-        "skills": by_kind,
-        "years_experience": {
-            "stated": sum(r["postings"] for r in yoe),
-            "distribution": yoe,
-        },
-        "degree": degree,
-        "clearance": clearance,
-        "seniority": seniorities,
-        "employment_type": employment,
-        "flags": flags,
-    }
+    return Market(
+        postings=postings,
+        skills=by_kind,
+        years_experience=YearsExperience(stated=sum(r.postings for r in yoe), distribution=yoe),
+        degree=degree,
+        clearance=clearance,
+        seniority=seniorities,
+        employment_type=employment,
+        flags=flags,
+    )
 
 
 # How many neighbours a similarity query returns. Small on purpose: the answer
@@ -213,7 +297,7 @@ SIMILAR_LIMIT = 10
 
 
 @router.get("/jobs/{job_id}/similar")
-def similar(job_id: int, user: AuthedUser = Depends(require_user)):
+def similar(job_id: int, user: AuthedUser = Depends(require_user)) -> Similar:
     """Postings that read like this one, among the ones this user can see.
 
     Gated through require_visible_job rather than a fresh predicate: this is a
@@ -235,9 +319,10 @@ def similar(job_id: int, user: AuthedUser = Depends(require_user)):
             404, detail={"code": "NOT_EMBEDDED", "message": "no embedding for this posting yet"}
         )
     params = _params(user, None, None)
-    return {
-        "job_id": job_id,
-        "neighbours": db.query(
+    return Similar(
+        job_id=job_id,
+        neighbours=db.query_as(
+            Neighbour,
             _visible_sql(
                 """
                 SELECT j.id, j.company, j.title, j.url,
@@ -257,4 +342,4 @@ def similar(job_id: int, user: AuthedUser = Depends(require_user)):
                 "limit": SIMILAR_LIMIT,
             },
         ),
-    }
+    )

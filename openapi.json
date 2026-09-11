@@ -8951,7 +8951,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Market"
+                }
               }
             }
           },
@@ -9079,7 +9081,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Similar"
+                }
               }
             }
           },
@@ -17514,7 +17518,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentIndex"
+                }
               }
             }
           },
@@ -17640,7 +17646,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentQueued"
+                }
               }
             }
           },
@@ -17768,7 +17776,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Rescored"
+                }
               }
             }
           },
@@ -17911,7 +17921,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentDetail"
+                }
               }
             }
           },
@@ -26314,6 +26326,76 @@
         ],
         "title": "Arm"
       },
+      "ArmResult": {
+        "properties": {
+          "arm": {
+            "type": "string",
+            "title": "Arm"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "output": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output"
+          },
+          "usage": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Usage"
+          },
+          "cost_usd": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Usd"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "arm",
+          "url",
+          "output",
+          "usage",
+          "cost_usd",
+          "error"
+        ],
+        "title": "ArmResult",
+        "description": "One arm's answer for one posting. `output` is shaped by the step being\nmeasured."
+      },
       "Assignment": {
         "properties": {
           "application_id": {
@@ -26846,6 +26928,29 @@
         ],
         "title": "DecisionRow"
       },
+      "DegreeCount": {
+        "properties": {
+          "level": {
+            "type": "string",
+            "title": "Level"
+          },
+          "required": {
+            "type": "boolean",
+            "title": "Required"
+          },
+          "postings": {
+            "type": "integer",
+            "title": "Postings"
+          }
+        },
+        "type": "object",
+        "required": [
+          "level",
+          "required",
+          "postings"
+        ],
+        "title": "DegreeCount"
+      },
       "DeleteQueries": {
         "properties": {
           "ids": {
@@ -27103,6 +27208,104 @@
         ],
         "title": "Experience"
       },
+      "Experiment": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "purpose": {
+            "type": "string",
+            "title": "Purpose"
+          },
+          "params": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Params"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Id"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "purpose",
+          "params",
+          "status",
+          "created_by",
+          "task_id",
+          "summary",
+          "error",
+          "created_at",
+          "finished_at"
+        ],
+        "title": "Experiment",
+        "description": "`_COLS`, in types. `params` is the request as it was made (arms,\nsample, seed) and `summary` is what scoring made of the answers; both are\nshaped by the step being measured, which is why neither is declared\nfurther."
+      },
       "ExperimentCreate": {
         "properties": {
           "purpose": {
@@ -27166,6 +27369,258 @@
           "arms"
         ],
         "title": "ExperimentCreate"
+      },
+      "ExperimentDetail": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "purpose": {
+            "type": "string",
+            "title": "Purpose"
+          },
+          "params": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Params"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Id"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/ArmResult"
+            },
+            "type": "array",
+            "title": "Results"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "purpose",
+          "params",
+          "status",
+          "created_by",
+          "task_id",
+          "summary",
+          "error",
+          "created_at",
+          "finished_at",
+          "results"
+        ],
+        "title": "ExperimentDetail"
+      },
+      "ExperimentIndex": {
+        "properties": {
+          "steps": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Steps"
+          },
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/MeasurableModel"
+            },
+            "type": "array",
+            "title": "Models"
+          },
+          "filters": {
+            "items": {
+              "$ref": "#/components/schemas/NameableFilter"
+            },
+            "type": "array",
+            "title": "Filters"
+          },
+          "experiments": {
+            "items": {
+              "$ref": "#/components/schemas/Experiment"
+            },
+            "type": "array",
+            "title": "Experiments"
+          }
+        },
+        "type": "object",
+        "required": [
+          "steps",
+          "models",
+          "filters",
+          "experiments"
+        ],
+        "title": "ExperimentIndex",
+        "description": "The runs, plus what a form needs to make a new one."
+      },
+      "ExperimentQueued": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "purpose": {
+            "type": "string",
+            "title": "Purpose"
+          },
+          "params": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Params"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Id"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "refused_arms": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Refused Arms"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "purpose",
+          "params",
+          "status",
+          "created_by",
+          "task_id",
+          "summary",
+          "error",
+          "created_at",
+          "finished_at",
+          "refused_arms"
+        ],
+        "title": "ExperimentQueued",
+        "description": "The run as stored, plus the task that will carry it out and the arms\nthat were asked for and cannot run. An arm is refused for a reason the\ncaller can act on, so it is returned rather than dropped."
       },
       "ExplainBody": {
         "properties": {
@@ -27976,6 +28431,24 @@
         "title": "JobReport"
       },
       "JsonValue": {},
+      "LevelCount": {
+        "properties": {
+          "level": {
+            "type": "string",
+            "title": "Level"
+          },
+          "postings": {
+            "type": "integer",
+            "title": "Postings"
+          }
+        },
+        "type": "object",
+        "required": [
+          "level",
+          "postings"
+        ],
+        "title": "LevelCount"
+      },
       "LocationPlace": {
         "properties": {
           "country": {
@@ -28075,6 +28548,127 @@
         "title": "LocationPut",
         "description": "One place through country/region/city, or several through places;\nplaces wins when both are sent."
       },
+      "Market": {
+        "properties": {
+          "postings": {
+            "type": "integer",
+            "title": "Postings"
+          },
+          "skills": {
+            "additionalProperties": {
+              "items": {
+                "$ref": "#/components/schemas/SkillCount"
+              },
+              "type": "array"
+            },
+            "type": "object",
+            "title": "Skills"
+          },
+          "years_experience": {
+            "$ref": "#/components/schemas/YearsExperience"
+          },
+          "degree": {
+            "items": {
+              "$ref": "#/components/schemas/DegreeCount"
+            },
+            "type": "array",
+            "title": "Degree"
+          },
+          "clearance": {
+            "items": {
+              "$ref": "#/components/schemas/LevelCount"
+            },
+            "type": "array",
+            "title": "Clearance"
+          },
+          "seniority": {
+            "items": {
+              "$ref": "#/components/schemas/LevelCount"
+            },
+            "type": "array",
+            "title": "Seniority"
+          },
+          "employment_type": {
+            "items": {
+              "$ref": "#/components/schemas/TypeCount"
+            },
+            "type": "array",
+            "title": "Employment Type"
+          },
+          "flags": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MarketFlags"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "postings",
+          "skills",
+          "years_experience",
+          "degree",
+          "clearance",
+          "seniority",
+          "employment_type",
+          "flags"
+        ],
+        "title": "Market",
+        "description": "What the roles this user is targeting ask for. Every count is against\n`postings`, the size of the slice, because a share hides how thin a slice\nis: \"3 of 7\" and \"43%\" read the same and mean very different things.\n\n`skills` is keyed by skill kind, which `core.requirements.SKILL_KINDS`\ndefines, so an empty slice still answers with every kind present."
+      },
+      "MarketFlags": {
+        "properties": {
+          "states_years": {
+            "type": "integer",
+            "title": "States Years"
+          },
+          "states_degree": {
+            "type": "integer",
+            "title": "States Degree"
+          },
+          "degree_required": {
+            "type": "integer",
+            "title": "Degree Required"
+          },
+          "enrollment_required": {
+            "type": "integer",
+            "title": "Enrollment Required"
+          },
+          "needs_clearance": {
+            "type": "integer",
+            "title": "Needs Clearance"
+          },
+          "citizenship_required": {
+            "type": "integer",
+            "title": "Citizenship Required"
+          },
+          "sponsorship_offered": {
+            "type": "integer",
+            "title": "Sponsorship Offered"
+          },
+          "sponsorship_refused": {
+            "type": "integer",
+            "title": "Sponsorship Refused"
+          }
+        },
+        "type": "object",
+        "required": [
+          "states_years",
+          "states_degree",
+          "degree_required",
+          "enrollment_required",
+          "needs_clearance",
+          "citizenship_required",
+          "sponsorship_offered",
+          "sponsorship_refused"
+        ],
+        "title": "MarketFlags",
+        "description": "Counts of postings that SAY something, reported beside `postings`\nrather than as shares, for the same reason."
+      },
       "MatchOverride": {
         "properties": {
           "application_id": {
@@ -28103,6 +28697,33 @@
           "application_id"
         ],
         "title": "MatchOverride"
+      },
+      "MeasurableModel": {
+        "properties": {
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "efforts": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Efforts"
+          }
+        },
+        "type": "object",
+        "required": [
+          "model",
+          "provider",
+          "efforts"
+        ],
+        "title": "MeasurableModel",
+        "description": "A chat model an experiment may name, with the efforts it accepts. The\nrunner refuses the rest, so the form only offers these."
       },
       "ModelEntry": {
         "properties": {
@@ -28244,6 +28865,86 @@
           "addable_providers"
         ],
         "title": "ModelsResponse"
+      },
+      "NameableFilter": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "user_id": {
+            "type": "integer",
+            "title": "User Id"
+          },
+          "user_email": {
+            "type": "string",
+            "title": "User Email"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "user_id",
+          "user_email",
+          "enabled"
+        ],
+        "title": "NameableFilter"
+      },
+      "Neighbour": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "company": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "similarity": {
+            "type": "number",
+            "title": "Similarity"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "company",
+          "title",
+          "url",
+          "similarity"
+        ],
+        "title": "Neighbour"
       },
       "NewSourceRequest": {
         "properties": {
@@ -29245,6 +29946,25 @@
           "reports"
         ],
         "title": "ReportList"
+      },
+      "Rescored": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "summary": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Summary"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "summary"
+        ],
+        "title": "Rescored"
       },
       "ResolveAction": {
         "properties": {
@@ -30473,6 +31193,45 @@
         "title": "SettingsPut",
         "description": "Partial settings update: omitted fields preserve their saved value.\n\nNull resets column_layout, ai_model and writing_style to their defaults.\nOther fields retain their legacy null-as-omission behavior. Supplied\nobjects replace the whole object; {} clears it, subject to the age cap\nwhen criteria are written. False is a saved value, not an omission.\n\nRejects unknown keys rather than dropping them.\n\n`background` was a key here until it was removed, and a client still\nsending it needs to be told. Pydantic's default is to discard an\nunrecognised key silently, which would answer 200 to a write that\nstored nothing - the one failure a caller cannot detect."
       },
+      "Similar": {
+        "properties": {
+          "job_id": {
+            "type": "integer",
+            "title": "Job Id"
+          },
+          "neighbours": {
+            "items": {
+              "$ref": "#/components/schemas/Neighbour"
+            },
+            "type": "array",
+            "title": "Neighbours"
+          }
+        },
+        "type": "object",
+        "required": [
+          "job_id",
+          "neighbours"
+        ],
+        "title": "Similar"
+      },
+      "SkillCount": {
+        "properties": {
+          "skill": {
+            "type": "string",
+            "title": "Skill"
+          },
+          "postings": {
+            "type": "integer",
+            "title": "Postings"
+          }
+        },
+        "type": "object",
+        "required": [
+          "skill",
+          "postings"
+        ],
+        "title": "SkillCount"
+      },
       "Source": {
         "properties": {
           "name": {
@@ -31614,6 +32373,24 @@
         "title": "Totals",
         "description": "The bookkeeping rows, deliberately not the board. Counted from\nuser_jobs, so `tracked` includes rows whose posting has since left."
       },
+      "TypeCount": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "title": "Type"
+          },
+          "postings": {
+            "type": "integer",
+            "title": "Postings"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "postings"
+        ],
+        "title": "TypeCount"
+      },
       "UploadRequest": {
         "properties": {
           "urls": {
@@ -31949,6 +32726,46 @@
         },
         "type": "object",
         "title": "ViewPatch"
+      },
+      "YearsCount": {
+        "properties": {
+          "years": {
+            "type": "integer",
+            "title": "Years"
+          },
+          "postings": {
+            "type": "integer",
+            "title": "Postings"
+          }
+        },
+        "type": "object",
+        "required": [
+          "years",
+          "postings"
+        ],
+        "title": "YearsCount"
+      },
+      "YearsExperience": {
+        "properties": {
+          "stated": {
+            "type": "integer",
+            "title": "Stated"
+          },
+          "distribution": {
+            "items": {
+              "$ref": "#/components/schemas/YearsCount"
+            },
+            "type": "array",
+            "title": "Distribution"
+          }
+        },
+        "type": "object",
+        "required": [
+          "stated",
+          "distribution"
+        ],
+        "title": "YearsExperience",
+        "description": "`stated` is how many postings said anything at all. The silent\nmajority is the finding as often as the stated minority is, which is why\nthis is a count beside the distribution and not a percentage."
       }
     }
   }
