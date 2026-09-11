@@ -18,7 +18,8 @@ from pydantic import BaseModel
 from api import db
 from api.mail import match as mail_match
 from api.mail import pipeline as mail_pipeline
-from api.routers import resolve
+from api.resolve.choice_policy import by_company, choices_for_message, thread_size
+from api.resolve.contracts import PICKER_APPLICATIONS, ResolveChoice
 from core.answers import EVENT_KINDS
 
 
@@ -221,7 +222,7 @@ class Candidates(BaseModel):
     # leaving the generated client an untyped object. So the null wins and the
     # consumer was checked: the picker reads `c.needs_target` and
     # `c.reason` as optional, and null is falsy exactly as absent was.
-    choices: list[resolve.ResolveChoice]
+    choices: list[ResolveChoice]
     total_applications: int
     # The count the matcher choked on. Two or more means it refused on purpose
     # rather than finding nothing.
@@ -314,19 +315,19 @@ def _candidates_payload(
     # list and the unmatched queue rather than only from a queue page - so it
     # needs the same declared choices the queue rows carry, or its eligibility
     # is a client-side guess.
-    choices = resolve.choices_for_message(
+    choices = choices_for_message(
         # Only the undismissed ones decide eligibility. This list carries
         # dismissed applications so the picker can show them; assigning to
         # one is refused at the write, so they must not make "belongs to an
         # application" look available.
-        resolve.by_company([a for a in apps if a["dismissed_at"] is None]),
+        by_company([a for a in apps if a["dismissed_at"] is None]),
         company,
-        resolve.thread_size(owner_id, message.get("provider_thread_id")),
+        thread_size(owner_id, message.get("provider_thread_id")),
         # This payload calls its list `applications`, not `candidates`. A
         # client reads `payload[choice.target_source]`, so naming the queue's
         # key here would point it at a field this response does not have - the
         # hardcoded fact moved rather than removed.
-        resolve.PICKER_APPLICATIONS,
+        PICKER_APPLICATIONS,
     )
     return Candidates(
         message=CandidateMessage(
@@ -338,7 +339,7 @@ def _candidates_payload(
             extracted_title=detail.get("role_title"),
         ),
         applications=ranked[:limit],
-        choices=[resolve.ResolveChoice.model_validate(choice) for choice in choices],
+        choices=[ResolveChoice.model_validate(choice) for choice in choices],
         total_applications=len(ranked),
         same_company_candidates=ambiguous,
         board_jobs=jobs,

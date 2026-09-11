@@ -27,15 +27,44 @@ from __future__ import annotations
 
 import datetime
 from collections import Counter
-from typing import Any, Literal
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
 
 from api import db
 from api.auth import AuthedUser, require_user
 from api.mail import match as mail_match
 from api.mail import pipeline as mail_pipeline
+from api.resolve.choice_policy import (
+    _choice,
+    _thread_sizes,
+)
+from api.resolve.choice_policy import by_company as by_company
+from api.resolve.choice_policy import choices_for_message as choices_for_message
+from api.resolve.choice_policy import thread_size as thread_size
+from api.resolve.contracts import (
+    ACCEPT_STATUS,
+    ACTION_ITEM,
+    ASSIGN,
+    CANDIDATES,
+    CONFIRM_MATCH,
+    DECLINE_STATUS,
+    ITEM_KINDS,
+    MARK_DONE,
+    NOT_AN_APPLICATION,
+    NOT_JOB_RELATED,
+    REJECT_MATCH,
+    STATUS_PROPOSAL,
+    UNCONFIRMED_MATCH,
+    UNMATCHED_MESSAGE,
+    DecisionHistory,
+    ResolveQueue,
+    ResolveRequest,
+    ResolveResult,
+    ReviewRates,
+)
+from api.resolve.contracts import PICKER_APPLICATIONS as PICKER_APPLICATIONS
+from api.resolve.contracts import ResolveChoice as ResolveChoice
 from api.routers.admin import require_admin
 
 router = APIRouter()
@@ -55,246 +84,6 @@ _AWAITING_KINDS = (
     "offer",
     "position_closed",
 )
-
-ASSIGN = "assign_application"
-NOT_AN_APPLICATION = "not_an_application"
-NOT_JOB_RELATED = "not_job_related"
-CONFIRM_MATCH = "confirm_match"
-REJECT_MATCH = "reject_match"
-ACCEPT_STATUS = "accept_status"
-DECLINE_STATUS = "decline_status"
-MARK_DONE = "mark_done"
-
-# Where a verb's target comes from: the name of the field, ON THIS RESPONSE,
-# holding the options. Not a global constant - the two surfaces that offer
-# these verbs hold their applications under different keys, so each declares
-# its own and a client reads `payload[choice.target_source]` without knowing
-# which surface it is on.
-CANDIDATES = "candidates"
-PICKER_APPLICATIONS = "applications"
-
-UNMATCHED_MESSAGE = "unmatched_message"
-UNCONFIRMED_MATCH = "unconfirmed_match"
-STATUS_PROPOSAL = "status_proposal"
-ACTION_ITEM = "action_item"
-
-# Every kind the queue can hold, in the order a caller sees them declared.
-# Exposed as a filter value rather than as knowledge the client has to carry,
-# so a fifth kind is a server change alone.
-ITEM_KINDS = (UNMATCHED_MESSAGE, UNCONFIRMED_MATCH, STATUS_PROPOSAL, ACTION_ITEM)
-
-
-# DECLARED RESPONSE SCHEMAS, which is not the house style yet and should be.
-# 123 of the 128 operations in openapi.json ship `"schema": {}`, so a client
-# and this server can disagree about an envelope and nothing mechanical
-# notices - four such mismatches were found by hand in one day, every one
-# silent. A generated schema is the only place that drift becomes detectable,
-# and the newest surface is the cheapest place to start rather than a
-# retrofit.
-class ResolveChoiceAffects(BaseModel):
-    messages: int
-
-
-# exclude_none on the routes below is load-bearing, not tidiness. `affects`
-# omitted means one message and `reason` omitted means the verb is available;
-# serialising either as an explicit null would say something the contract does
-# not - and the picker reads presence, not value.
-class ResolveChoice(BaseModel):
-    choice: str
-    label: str
-    eligible: bool
-    reason: str | None = None
-    # Omitted when the verb touches exactly one message, and omission MEANS
-    # one rather than unknown.
-    affects: ResolveChoiceAffects | None = None
-    # Whether pressing this verb can be POSTed straight away or has to collect
-    # a target first. Omitted means it takes no target.
-    #
-    # Without it a client has to know that `assign_application` is the verb
-    # with an argument, which was the last piece of this vocabulary it was
-    # still required to hardcode - and the point of declaring the verbs is that
-    # a new decision type needs no client change. A verb that takes an argument
-    # and cannot say so makes every client wrong the first time there are two
-    # of them.
-    needs_target: bool | None = None
-    # WHERE the options come from, named rather than assumed. Every target
-    # comes from the row's own `candidates` today; a verb that picked from
-    # somewhere else would otherwise be a second silent assumption stacked on
-    # the first.
-    target_source: str | None = None
-
-
-class ResolveCandidate(BaseModel):
-    id: int
-    company_name: str | None = None
-    title: str | None = None
-    applied_at: datetime.datetime | None = None
-
-
-class ResolveMessage(BaseModel):
-    id: int
-    subject: str | None = None
-    from_email: str | None = None
-    sent_at: datetime.datetime | None = None
-    classified_as: str | None = None
-    extracted_company: str | None = None
-    extracted_title: str | None = None
-
-
-class ResolveApplication(BaseModel):
-    """The application a row is about, with the stage the board would show.
-
-    `stage` is `mail_pipeline.stage_for` over that application's real events,
-    not a second reading of them, so the queue and the board cannot disagree
-    about what an application is doing while asking about it.
-    """
-
-    id: int
-    company_name: str | None = None
-    title: str | None = None
-    stage: str | None = None
-    on_board: bool = False
-    # The posting on the board, when there is one. Omitted means the
-    # application has no posting - mail predating the catalog is the normal
-    # case - and a client that wants to open the posting reads presence.
-    job_id: int | None = None
-
-
-class ResolveImplication(BaseModel):
-    """What answering would change beyond the row itself.
-
-    Present only where there is something to say. A control whose effect
-    reaches past the row states that before the click rather than reporting it
-    afterwards, and `board_updated` is the honest half of that: an application
-    with no board row has a status to propose and nothing to move.
-    """
-
-    board_status: str
-    from_status: str | None = None
-    board_updated: bool
-    reason: str | None = None
-
-
-class ResolveMatch(BaseModel):
-    id: int
-    method: str
-    confidence: str | None = None
-    rationale: str | None = None
-    created_at: datetime.datetime | None = None
-
-
-class ResolveAction(BaseModel):
-    id: int
-    kind: str
-    due_at: datetime.datetime | None = None
-    # What could ever close this without a person. Empty means nothing can,
-    # which is why the item is here rather than waiting on the next email.
-    settles_on: list[str]
-
-
-class ResolveItem(BaseModel):
-    id: str
-    kind: str
-    rank: int
-    rank_reason: str
-    choices: list[ResolveChoice]
-    message: ResolveMessage | None = None
-    candidates: list[ResolveCandidate] | None = None
-    application: ResolveApplication | None = None
-    implies: ResolveImplication | None = None
-    match: ResolveMatch | None = None
-    action: ResolveAction | None = None
-
-
-class ResolveQueue(BaseModel):
-    items: list[ResolveItem]
-    total: int
-    # How many sit at each rank, so a page can say "40 need you, 3,623 do
-    # not" rather than implying the first fifty are all there is.
-    by_rank: dict[str, int]
-    # The same honesty per kind, which is what makes the one queue readable as
-    # the four questions it merges rather than as an undifferentiated pile.
-    by_kind: dict[str, int]
-
-
-class ResolveResult(BaseModel):
-    ok: bool
-    choice: str
-    application_id: int | None = None
-    # What the answer actually touched. Omitted where the verb touches nothing
-    # beyond the row, present and false where it was meant to and could not.
-    board_updated: bool | None = None
-    board_status: str | None = None
-    reason: str | None = None
-
-
-class ResolveRequest(BaseModel):
-    choice: Literal[
-        "assign_application",
-        "not_an_application",
-        "not_job_related",
-        "confirm_match",
-        "reject_match",
-        "accept_status",
-        "decline_status",
-        "mark_done",
-    ]
-    target: int | None = None
-    note: str | None = None
-
-
-class DecisionRow(BaseModel):
-    id: str
-    at: datetime.datetime
-    kind: str
-    decision: str
-    by: str
-    summary: str
-    application_id: int | None = None
-    # The decision this one replaced, and whether something later replaced
-    # THIS one. An overturned answer that vanishes takes the evidence that the
-    # rule was wrong with it.
-    superseded_by: str | None = None
-    supersedes: str | None = None
-
-
-class DecisionHistory(BaseModel):
-    decisions: list[DecisionRow]
-    total: int
-
-
-def _choice(
-    choice: str,
-    label: str,
-    *,
-    eligible: bool = True,
-    reason: str | None = None,
-    messages: int = 1,
-    target_source: str | None = None,
-) -> dict[str, Any]:
-    """One verb, as the picker will render it.
-
-    `reason` is PRINTED next to a refused verb rather than hidden behind a
-    hover, so it has to be a short clause that survives being typeset inline.
-
-    `affects` is omitted when the verb touches exactly one message, and
-    omission MEANS one - never "unknown". A verb that can reach further and
-    drops the field would wear a single-message costume, so a producer that
-    cannot count precisely sends its best truth instead of nothing.
-    """
-    out: dict[str, Any] = {"choice": choice, "label": label, "eligible": eligible}
-    if reason:
-        out["reason"] = reason
-    if messages > 1:
-        out["affects"] = {"messages": messages}
-    if target_source:
-        # The two travel together deliberately. A verb that says it needs a
-        # target without saying where the options come from has moved the
-        # guess rather than removed it.
-        out["needs_target"] = True
-        out["target_source"] = target_source
-    return out
-
 
 _QUEUE_SQL = """
 WITH current_event AS (
@@ -369,120 +158,6 @@ WHERE ai.user_id = %(user)s
   AND (a.id IS NULL OR a.dismissed_at IS NULL)
 ORDER BY ai.due_at NULLS LAST, ai.id
 """
-
-
-def _thread_sizes(user_id: int) -> dict[str, int]:
-    """How many messages each conversation holds, in one query.
-
-    Asked per message it was one round trip per row, and the queue ranks
-    before it pages - so a fifty-row page cost a query for every one of the
-    3,251 rows behind it. The count is a property of the thread, not of the
-    message, so it is one GROUP BY.
-    """
-    return {
-        row["provider_thread_id"]: int(row["c"])
-        for row in db.query(
-            "SELECT provider_thread_id, count(*) AS c FROM email_messages "
-            "WHERE user_id = %s AND provider_thread_id IS NOT NULL "
-            "GROUP BY provider_thread_id",
-            (user_id,),
-        )
-    }
-
-
-def thread_size(user_id: int, thread: str | None) -> int:
-    """How many messages one assign would actually move.
-
-    Assign carries the whole conversation by default, so the count belongs in
-    the button rather than in the response afterwards - a person deciding one
-    message should know before clicking that it moves fourteen. For a whole
-    queue page use `_thread_sizes`, which asks once instead of once per row.
-    """
-    if not thread:
-        return 1
-    row = db.query_one(
-        "SELECT count(*) AS c FROM email_messages WHERE user_id = %s AND provider_thread_id = %s",
-        (user_id, thread),
-    )
-    return max(1, int((row or {}).get("c", 1)))
-
-
-def by_company(apps: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
-    """Applications indexed by normalised company, built once per request.
-
-    The queue ranks before it pages, so every helper below ran over the whole
-    application list for every one of 3,251 rows - 8.2 million `norm_company`
-    calls, each two regex substitutions, to answer a question that has 2,543
-    distinct answers. Normalising each side once is the same predicate, and it
-    is the ONLY place the two sides may be compared: `norm_company` is what
-    makes "Stripe" and "Stripe, Inc." one employer, and an index keyed on raw
-    text would silently be a stricter matcher than the one it stands in for.
-    """
-    index: dict[str, list[dict[str, Any]]] = {}
-    for app in apps:
-        key = mail_match.norm_company(app["company_name"])
-        if key:
-            index.setdefault(key, []).append(app)
-    return index
-
-
-def choices_for_message(
-    apps_by_company: dict[str, list[dict[str, Any]]],
-    company: str | None,
-    thread_size: int,
-    target_source: str,
-) -> list[dict[str, Any]]:
-    """The verbs available on one message, decided HERE rather than by the
-    caller.
-
-    Shared with the candidate picker, which is the surface a person actually
-    makes this decision on. A modal that builds the verb list itself has to
-    decide eligibility client-side, and eligibility decided client-side is
-    exactly what a server-declared contract exists to prevent - the first time
-    a verb becomes conditional, one of the two lists is wrong and nothing says
-    which.
-
-    Takes the index, the thread size and the name of its own target list rather
-    than fetching or assuming them. Required, not defaulted: a default is how
-    "I did not have this" hides inside shared code as if it were "there is
-    nothing", and all three are already in hand at every call site.
-
-    `target_source` IS A PER-SURFACE FACT and that is why the caller states it.
-    Two surfaces share these verbs and they hold their applications under
-    different keys - the queue row calls the list `candidates`, the picker
-    calls it `applications`. A constant here would name whichever one was
-    written first and be wrong on the other, which is the same hardcoded fact
-    the field exists to remove, moved one module along.
-
-    ELIGIBILITY IS "AN APPLICATION EXISTS AT THIS COMPANY", not "the list in
-    front of you is non-empty". On the queue those coincide, because the row's
-    candidates and this index are the same set read under the same key. On the
-    picker they do not: its list is search-filtered, and typing a query that
-    matches nothing does not stop the application existing. So the caller that
-    wants the stronger claim - eligible exactly when its own list is non-empty
-    - is the queue, and it holds there by construction rather than by promise.
-    """
-    key = mail_match.norm_company(company)
-    if key and apps_by_company.get(key):
-        assign = _choice(
-            ASSIGN,
-            "Belongs to an application",
-            messages=thread_size,
-            target_source=target_source,
-        )
-    else:
-        assign = _choice(
-            ASSIGN,
-            "Belongs to an application",
-            eligible=False,
-            reason="no application at this company yet",
-            target_source=target_source,
-        )
-    return [
-        assign,
-        _choice(NOT_AN_APPLICATION, "Belongs to no application"),
-        _choice(NOT_JOB_RELATED, "Not job mail"),
-    ]
 
 
 # What a row is worth deciding, highest first. Ordering rather than scoring,
@@ -1242,25 +917,6 @@ def admin_resolve_item(
     user: AuthedUser = Depends(require_admin),
 ) -> ResolveResult:
     return _resolve(item_id, body, owner_id=user_id, actor_user_id=user.id)
-
-
-class ReviewRate(BaseModel):
-    method: str
-    confidence: str | None = None
-    attached: int
-    reviewed: int
-    confirmed: int
-    rejected: int
-    # NULL, not zero. A tier nobody has reviewed has no rate, and rendering
-    # that as 0% says the tier is always wrong.
-    confirm_rate: float | None = None
-    note: str | None = None
-
-
-class ReviewRates(BaseModel):
-    by_method: list[ReviewRate]
-    never_reviewed: int
-    reviewed: int
 
 
 # Confirm and reject rates per tier. The GROUPING IS THE POINT: "is the matcher
