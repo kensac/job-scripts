@@ -15855,6 +15855,137 @@
         }
       }
     },
+    "/v1/admin/working-set-shadow": {
+      "get": {
+        "summary": "Working Set Shadow Report",
+        "description": "Old and proposed scope populations, without changing either one.",
+        "operationId": "working_set_shadow_report_v1_admin_working_set_shadow_get",
+        "parameters": [
+          {
+            "name": "x-service-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-Service-Token"
+            }
+          },
+          {
+            "name": "x-user-sub",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Sub"
+            }
+          },
+          {
+            "name": "x-user-email",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Email"
+            }
+          },
+          {
+            "name": "x-user-name",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Name"
+            }
+          },
+          {
+            "name": "x-user-groups",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Groups"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkingSetShadowReport"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/admin/config": {
       "get": {
         "summary": "Get Config",
@@ -33506,6 +33637,41 @@
         ],
         "title": "Deleted"
       },
+      "DigestComparison": {
+        "properties": {
+          "old_candidates": {
+            "type": "integer",
+            "title": "Old Candidates"
+          },
+          "proposed_candidates": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proposed Candidates"
+          },
+          "cannot_tell": {
+            "type": "integer",
+            "title": "Cannot Tell"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason",
+            "default": "user_job_working_set has no admission timestamp, so newly admitted digest candidates cannot be reconstructed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "old_candidates",
+          "cannot_tell"
+        ],
+        "title": "DigestComparison",
+        "description": "Legacy non-force candidates and unclassifiable proposed rows.\n\n`cannot_tell` is the number of working-set rows with no admission time. It\nis not a proposed candidate count."
+      },
       "DomainPopulation": {
         "properties": {
           "messages": {
@@ -46313,6 +46479,73 @@
         "title": "SenderSignal",
         "description": "What an application's first sender says about whether this is an\nemployer relationship at all.\n\nA possibility, never a verdict: nothing filters or hides on this.\n`sender_company_count` is the evidence and `review_suggested` is only a\nreading of it, so both travel and the reader can disagree."
       },
+      "SetComparison": {
+        "properties": {
+          "old_total": {
+            "type": "integer",
+            "title": "Old Total"
+          },
+          "proposed_total": {
+            "type": "integer",
+            "title": "Proposed Total"
+          },
+          "both": {
+            "type": "integer",
+            "title": "Both"
+          },
+          "old_only": {
+            "type": "integer",
+            "title": "Old Only"
+          },
+          "proposed_only": {
+            "type": "integer",
+            "title": "Proposed Only"
+          },
+          "legacy_unknown": {
+            "type": "integer",
+            "title": "Legacy Unknown"
+          },
+          "old_only_known": {
+            "type": "integer",
+            "title": "Old Only Known"
+          },
+          "sample_old_only_known": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Sample Old Only Known"
+          },
+          "sample_proposed_only": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Sample Proposed Only"
+          },
+          "sample_legacy_unknown": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Sample Legacy Unknown"
+          }
+        },
+        "type": "object",
+        "required": [
+          "old_total",
+          "proposed_total",
+          "both",
+          "old_only",
+          "proposed_only",
+          "legacy_unknown",
+          "old_only_known",
+          "sample_old_only_known",
+          "sample_proposed_only",
+          "sample_legacy_unknown"
+        ],
+        "title": "SetComparison"
+      },
       "SettingsPut": {
         "properties": {
           "column_layout": {
@@ -50412,6 +50645,45 @@
         "title": "UserProfile",
         "description": "A person and their settings, minus anything secret. `criteria` and\n`ai_params` are shaped by what the person saved, so neither is declared\nfurther."
       },
+      "UserScopeComparison": {
+        "properties": {
+          "user_id": {
+            "type": "integer",
+            "title": "User Id"
+          },
+          "pair_membership": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SetComparison"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "stale_reverify_candidates": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SetComparison"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "digest_candidates": {
+            "$ref": "#/components/schemas/DigestComparison"
+          }
+        },
+        "type": "object",
+        "required": [
+          "user_id",
+          "pair_membership",
+          "stale_reverify_candidates",
+          "digest_candidates"
+        ],
+        "title": "UserScopeComparison"
+      },
       "UserSettings": {
         "properties": {
           "effective_model": {
@@ -51412,6 +51684,58 @@
         ],
         "title": "WorkerHeartbeat",
         "description": "The fleet, thinner than /workers: no throughput and no running task,\nbecause this answers \"is anybody there\" beside the queue numbers."
+      },
+      "WorkingSetShadowReport": {
+        "properties": {
+          "generated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Generated At"
+          },
+          "reverify_days": {
+            "type": "integer",
+            "title": "Reverify Days"
+          },
+          "reverify_per_cycle": {
+            "type": "integer",
+            "title": "Reverify Per Cycle"
+          },
+          "pair_membership": {
+            "$ref": "#/components/schemas/SetComparison"
+          },
+          "ai_eligible_jobs": {
+            "$ref": "#/components/schemas/SetComparison"
+          },
+          "stale_reverify_candidates": {
+            "$ref": "#/components/schemas/SetComparison"
+          },
+          "scheduled_users": {
+            "$ref": "#/components/schemas/SetComparison"
+          },
+          "digest_candidates": {
+            "$ref": "#/components/schemas/DigestComparison"
+          },
+          "users": {
+            "items": {
+              "$ref": "#/components/schemas/UserScopeComparison"
+            },
+            "type": "array",
+            "title": "Users"
+          }
+        },
+        "type": "object",
+        "required": [
+          "generated_at",
+          "reverify_days",
+          "reverify_per_cycle",
+          "pair_membership",
+          "ai_eligible_jobs",
+          "stale_reverify_candidates",
+          "scheduled_users",
+          "digest_candidates",
+          "users"
+        ],
+        "title": "WorkingSetShadowReport"
       },
       "YearsCount": {
         "properties": {
