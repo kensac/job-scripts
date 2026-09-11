@@ -112,6 +112,9 @@ jobs:
       - name: Type check
         if: steps.autofix.outputs.changed != 'true'
         run: pyright
+      - name: Import contract
+        if: steps.autofix.outputs.changed != 'true'
+        run: lint-imports
       - name: Compile all sources
         if: steps.autofix.outputs.changed != 'true'
         run: python -m compileall -q src

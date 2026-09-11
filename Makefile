@@ -15,6 +15,7 @@ check:          ## everything CI gates on: lint, format, types, compile, tests
 	ruff check src tests
 	ruff format --check src tests
 	pyright
+	PYTHONPATH=src lint-imports
 	python -m compileall -q src
 	@if git grep -InF -e "—" -e "\\u2014" -- . ':!Makefile' ':!extension/ats/*' ; then echo "em dash found: write a comma, a colon, or a new sentence"; exit 1; fi
 	node --test tests/extension/*.test.cjs
