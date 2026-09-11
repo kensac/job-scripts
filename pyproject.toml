@@ -72,7 +72,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "import-linter==2.6",
+    "import-linter==2.15",
     "pytest==9.1.1",
     "pytest-asyncio==1.4.0",
     "ruff==0.16.6",
