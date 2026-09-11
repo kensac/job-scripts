@@ -25,6 +25,15 @@ logger = logging.getLogger("jobtracker_worker")
 # A board row counts as untouched (machine-managed) when the user never set
 # anything on it; only these are auto-added by materialization and auto-removed
 # by re-verification.
+#
+# An untouched row is THE WORKING SET and not what a person sees. It carries
+# scope: core/store.py's ON_A_BOARD makes the posting worth paying to check,
+# and handle_reverify_open draws its candidates from these rows. Visibility is
+# decided separately and does not consult them, because visibility.FULL admits
+# an untouched row only through a branch that never references user_jobs.
+#
+# Touching a row moves it the other way: it becomes the person's, visible
+# whatever a verdict says, and out of reach of both writers below.
 UNTOUCHED = """
     (uj.status IS NULL OR uj.status = '') AND uj.date_applied IS NULL
     AND COALESCE(uj.notes, '') = '' AND COALESCE(uj.size, '') = ''
@@ -35,11 +44,19 @@ UNTOUCHED = """
 
 
 def materialize_passing(user_id: int) -> int:
-    """Mirror of the old write_to_sheet step: every job currently passing ALL
-    of the user's enabled filters (and the structural gates) becomes a board
-    row. Existing rows (including hidden ones) are untouched, so deleting a
-    row means 'bring it back next run if it still passes' while hiding is
-    permanent."""
+    """Every job currently passing ALL of the user's enabled filters (and the
+    structural gates) gets a board row. Existing rows (including hidden ones)
+    are left alone, so deleting a row means "bring it back next run if it
+    still passes" while hiding is permanent.
+
+    This does NOT decide what the person sees. A passing posting is visible
+    through visibility.FULL whether or not this has run, because FULL's
+    structural branch does not reference user_jobs. What the row does is put
+    the posting in the working set, which is what keeps it being checked.
+
+    It used to be a mirror of the step that wrote a Google Sheet, where the
+    row WAS the board. That sheet is gone and the row now means something
+    else; the docstring said otherwise until 2026-09-10."""
     params = board_eligibility.settings_params(user_id)
     with db.pool.connection() as conn:
         result = conn.execute(

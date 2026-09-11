@@ -110,3 +110,67 @@ def test_demote_closed_leaves_untouched_row_when_still_open(user_headers):
 
     assert tasks_board.demote_closed() == 0
     assert _board_row(user_id, job_id) is not None
+
+
+# ---------------------------------------------------------------------------
+# a board row is scope, not visibility
+# ---------------------------------------------------------------------------
+
+
+def test_an_untouched_board_row_is_the_working_set_and_not_what_a_person_sees(user_headers):
+    """The two meanings that share user_jobs, pinned apart.
+
+    An untouched row carries scope: it makes the posting worth paying to check
+    (core/store.py ON_A_BOARD) and it is where the re-verification sweep finds
+    candidates. It does NOT make the posting visible, because visibility.FULL
+    admits an untouched row only through its structural branch, which never
+    references user_jobs.
+
+    Reading the one as the other is how a board question got answered wrongly
+    on 2026-09-10: deleting the row was said to remove the posting from the
+    board, and it does not.
+    """
+    from api import visibility
+
+    user_id = _user_id()
+    job_id = _make_passing_job(user_id, "https://scope.test/1")
+
+    # Visible with no board row at all: the structural branch decides.
+    assert job_id in visibility.member_ids(user_id)
+    assert _board_row(user_id, job_id) is None
+
+    tasks_board.materialize_passing(user_id)
+    assert _board_row(user_id, job_id) is not None
+    assert job_id in visibility.member_ids(user_id), "the row changed nothing about seeing it"
+
+    # And taking the row away does not take the posting away either.
+    db.execute("DELETE FROM user_jobs WHERE user_id = %s AND job_id = %s", (user_id, job_id))
+    assert job_id in visibility.member_ids(user_id), (
+        "an untouched board row is not what makes a posting visible; if this fails, "
+        "the two meanings have been merged and the comments in board.py and store.py lie"
+    )
+
+
+def test_a_board_row_is_what_keeps_a_posting_worth_checking(user_headers):
+    """The other half: the row is scope. A posting whose source nobody
+    subscribes to stays AI-eligible while somebody keeps it."""
+    from core.store import AI_ELIGIBLE_JOB
+
+    user_id = _user_id()
+    job_id = _make_passing_job(user_id, "https://scope.test/2", source="unsubscribed-src")
+    db.execute(
+        "DELETE FROM user_sources WHERE user_id = %s AND source = 'unsubscribed-src'", (user_id,)
+    )
+    db.execute("INSERT INTO sources (name, listings_url) VALUES ('unsubscribed-src', 'u')")
+
+    def eligible() -> bool:
+        return bool(
+            db.query_one(
+                f"SELECT 1 FROM jobs j WHERE j.id = %s AND {AI_ELIGIBLE_JOB.format(job='j')}",
+                (job_id,),
+            )
+        )
+
+    assert not eligible(), "nobody subscribes to its source, so nothing should pay to check it"
+    db.execute("INSERT INTO user_jobs (user_id, job_id) VALUES (%s, %s)", (user_id, job_id))
+    assert eligible(), "somebody keeps it, so it is checked: that is what the row is for"

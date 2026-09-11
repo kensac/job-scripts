@@ -340,6 +340,19 @@ SUBSCRIBED_SOURCE = """
 #
 # Evaluated on every sweep rather than stamped onto rows, so subscribing to a
 # source makes its jobs eligible on the next cycle and needs no backfill.
+# THE WORKING SET, which is not the same question as what a person sees.
+#
+# A board row means the sweeps carry this posting. It does NOT mean anybody
+# can see it: visibility.FULL admits an untouched row only through its
+# structural branch, which does not reference user_jobs at all. The two
+# meanings share one table and reading the wrong one is how a board question
+# gets answered wrongly (2026-09-10).
+#
+# So this branch is scope, deliberately. A posting somebody tracks keeps being
+# checked even after nobody subscribes to the source that found it, which is
+# the point: it is their job now, not the board's.
+ON_A_BOARD = "EXISTS (SELECT 1 FROM user_jobs uj WHERE uj.job_id = {job}.id)"
+
 AI_ELIGIBLE_JOB = (
     """
     (
@@ -347,7 +360,9 @@ AI_ELIGIBLE_JOB = (
     + SUBSCRIBED_SOURCE.format(source="{job}.source").strip()
     + """
         OR NOT EXISTS (SELECT 1 FROM sources s WHERE s.name = {job}.source)
-        OR EXISTS (SELECT 1 FROM user_jobs uj WHERE uj.job_id = {job}.id)
+        OR """
+    + ON_A_BOARD
+    + """
     )
 """
 )

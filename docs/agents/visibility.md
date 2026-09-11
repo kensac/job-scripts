@@ -3,6 +3,23 @@
 Who sees which posting, who owns a row, and the response shapes every list
 endpoint keeps to.
 
+## A board row is scope, not visibility
+
+`user_jobs` answers two questions and is named for one of them.
+
+An UNTOUCHED row is the working set. It makes the posting worth paying to
+check (`core/store.py` `ON_A_BOARD`) and it is where the re-verification sweep
+finds its candidates. It does not make the posting visible: FULL admits an
+untouched row only through its structural branch, which never references
+`user_jobs`. Deleting one removes nothing from anybody's board.
+
+A TOUCHED row, one carrying a status, a note or a date applied, is the
+person's. It is visible whatever the criteria or the verdicts say, and both
+`materialize_passing` and `demote_closed` leave it alone.
+
+Reading the first as the second is how a board question was answered wrongly
+on 2026-09-10. `tests/test_worker_board.py` pins the two apart.
+
 ## Visibility is computed, never evaluated on read
 
 Job visibility is one predicate, spelled once (`api.visibility.FULL`), and it

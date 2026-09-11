@@ -60,7 +60,7 @@ real only relocates the problem.
 |---|---|---|
 | 0 | The layering is enforced | An import contract fails CI on a new upward edge |
 | 1 | Check types are a registry | A new check type is a registration; no literal names it |
-| 2 | A board row and the working set are told apart | `user_jobs` says what a person keeps; something else says what the sweeps carry |
+| 2 | A board row and the working set are told apart | Named and pinned apart (2a). Moving the sweeps' scope off `user_jobs` (2b) waits for a cutover comparison |
 | 3 | Catalog observations are facts | A re-listing is an appended row, not a mutated column |
 | 4 | ~~Derivations are content addressed~~ | **Dropped 2026-09-10.** Measured; see below |
 | 5 | Files move to the shape | Packages match this document |
