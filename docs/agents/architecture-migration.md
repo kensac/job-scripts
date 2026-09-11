@@ -337,9 +337,27 @@ source is what does not work.
 `logger.exception` and 6 use `logger.error`. The second keeps no traceback.
 Worth reading rather than rewriting in bulk: some are deliberate.
 
-**Test coverage has never been measured.** Nothing in `pyproject.toml`, the
-`Makefile` or CI mentions it. 1,656 tests over 36,500 lines of `src` with no
-number attached to them.
+**Test coverage, measured for the first time on 2026-09-11: 87%.** 11,800
+statements, 1,528 missed, across 1,656 tests. Better than "never measured"
+usually means, and the shape of the miss is the useful part rather than the
+total:
+
+| | |
+|---|---|
+| `core/store.py` | 59%, 50 of 123 statements |
+| `tasks/verify.py` | 70%, 58 of 195 |
+| `tasks/ingest.py` | 81% |
+| `tasks/filters.py` | 82%, 42 of 228 |
+
+The gap is concentrated in the sweeps and the store, which is exactly where
+this session found its two live defects: a closed verdict that could never be
+revisited, and a clearance verdict that was written once and never again.
+Both lived in `tasks/verify.py`. Neither was caught by a test, and the
+coverage number says why: that file is the least covered substantial module in
+the repository after the store.
+
+`make coverage` prints it. Nothing gates on a threshold yet, and adding one
+before the sweeps are covered would only ratchet in what is already there.
 
 **The long files.** `routers/admin.py` 2,136 lines, `routers/mail.py` 2,117,
 `routers/resolve.py` 1,339, `orm.py` 1,268, `health.py` 1,155. Long because
