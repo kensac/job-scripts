@@ -280,9 +280,7 @@ async def handle_run_filter_batch_chunk(task_id: int, payload: dict[str, Any]) -
     """Centralized half-price path: one worker submits the whole chunk to the
     OpenAI Batch API (core/batch.py enforces the enqueued-token budget in
     waves) and records every verdict when results land."""
-    from openai.lib._pydantic import to_strict_json_schema
-
-    from core.batch import BatchSpec
+    from core.batch import structured_response_spec
 
     user_id = payload["user_id"]
     flt = payload["filter"]
@@ -304,7 +302,6 @@ async def handle_run_filter_batch_chunk(task_id: int, payload: dict[str, Any]) -
         else:
             contents = get_contents([job["url"] for job in jobs])
     instructions = build_custom_decision_instructions(flt["prompt"], flt["on_ambiguous"])
-    schema = to_strict_json_schema(FilterDecision)
     specs, by_url = [], {}
     for job in jobs:
         if existing:
@@ -316,12 +313,11 @@ async def handle_run_filter_batch_chunk(task_id: int, payload: dict[str, Any]) -
             continue
         input_text = build_custom_input(job["company"], job["title"], content)
         specs.append(
-            BatchSpec(
+            structured_response_spec(
                 job["url"],
                 instructions,
                 input_text,
-                "FilterDecision",
-                schema,
+                FilterDecision,
                 context={
                     "job": job,
                     "filter": flt,

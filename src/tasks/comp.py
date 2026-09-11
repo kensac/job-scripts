@@ -49,9 +49,7 @@ def _annualize(value: float | None, period: str) -> int | None:
 
 
 async def handle_extract_comp(task_id: int, payload: dict[str, Any]) -> None:
-    from openai.lib._pydantic import to_strict_json_schema
-
-    from core.batch import BatchSpec
+    from core.batch import structured_response_spec
 
     resumed = has_batch_work(task_id)
     rows = (
@@ -77,14 +75,12 @@ async def handle_extract_comp(task_id: int, payload: dict[str, Any]) -> None:
     if not rows and not resumed:
         set_progress(task_id, 0, 0, "nothing to extract")
         return
-    schema = to_strict_json_schema(CompExtract)
     specs = [
-        BatchSpec(
+        structured_response_spec(
             r["url"],
             COMP_INSTRUCTIONS,
             r["input_content"][:COMP_INPUT_CHARS],
-            "CompExtract",
-            schema,
+            CompExtract,
             context={"job_id": r["id"], "content_row_id": r["content_row_id"]},
         )
         for r in rows

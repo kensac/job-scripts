@@ -504,9 +504,7 @@ _SELECTION = f"""
 
 
 async def handle_classify_mail(task_id: int, payload: dict[str, Any]) -> None:
-    from openai.lib._pydantic import to_strict_json_schema
-
-    from core.batch import BatchSpec
+    from core.batch import structured_response_spec
 
     backfill = bool(payload.get("backfill"))
     shape = BACKFILL_TASK if backfill else ONGOING_TASK
@@ -607,14 +605,12 @@ async def handle_classify_mail(task_id: int, payload: dict[str, Any]) -> None:
         (db.jsonb({"claimed_message_ids": [r["id"] for r in rows]}), task_id),
     )
 
-    schema = to_strict_json_schema(MailClassification)
     specs = [
-        BatchSpec(
+        structured_response_spec(
             str(r["id"]),
             _INSTRUCTIONS,
             _spec_text(r),
-            "MailClassification",
-            schema,
+            MailClassification,
             context={"sent_at": r["sent_at"].isoformat() if r["sent_at"] else None},
         )
         for r in rows

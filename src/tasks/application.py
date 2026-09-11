@@ -213,9 +213,7 @@ async def draft_rows(
     how many drafts were written. Scheduled callers require batch transport on the shared key.
     Safe to run again from the top: a resumed
     task collects its original results and applies only its own generations."""
-    from openai.lib._pydantic import to_strict_json_schema
-
-    from core.batch import BatchSpec
+    from core.batch import structured_response_spec
 
     if has_batch_work(task_id):
         return await _batch_drafts(task_id, user_id, [], kind, resumed=True)
@@ -224,7 +222,6 @@ async def draft_rows(
     if not resume:
         raise RuntimeError("no resume on file; add one under settings first")
     text = instructions(writing_style(user_id))
-    schema = to_strict_json_schema(Draft)
     postings: dict[str, str] = {}
     specs = []
     reserved = application_writes.reserve_task(task_id, user_id, rows)
@@ -234,7 +231,7 @@ async def draft_rows(
         if r["url"] not in postings:
             postings[r["url"]] = get_content(r["url"]) or ""
         specs.append(
-            BatchSpec(
+            structured_response_spec(
                 # job first, then the key: a key never carries a bar.
                 f"{r['job_id']}|{r['key']}",
                 text,
@@ -245,8 +242,7 @@ async def draft_rows(
                     postings[r["url"]],
                     resume,
                 ),
-                "Draft",
-                schema,
+                Draft,
                 context=reserved[f"{r['job_id']}|{r['key']}"],
             )
         )

@@ -10,7 +10,9 @@ from dataclasses import dataclass, field
 from typing import Literal, TypedDict
 
 from openai import AsyncOpenAI
+from openai.lib._pydantic import to_strict_json_schema
 from openai.types import Batch
+from pydantic import BaseModel
 
 from core import pricing, store
 
@@ -91,6 +93,25 @@ class BatchSpec:
     context: dict | None = None
     endpoint: BatchEndpoint = BATCH_ENDPOINT
     inputs: list[str] | None = None
+
+
+def structured_response_spec(
+    custom_id: str,
+    instructions: str,
+    input: str,
+    response_model: type[BaseModel],
+    *,
+    context: dict | None = None,
+) -> BatchSpec:
+    """A Responses spec whose schema name and schema come from one model."""
+    return BatchSpec(
+        custom_id,
+        instructions,
+        input,
+        response_model.__name__,
+        to_strict_json_schema(response_model),
+        context=context,
+    )
 
 
 @dataclass

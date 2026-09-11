@@ -45,9 +45,7 @@ async def handle_run_experiment(task_id: int, payload: dict[str, Any]) -> None:
 
 
 async def _run(task_id: int, payload: dict[str, Any]) -> None:
-    from openai.lib._pydantic import to_strict_json_schema
-
-    from core.batch import BatchSpec, submit_responses_batches
+    from core.batch import structured_response_spec, submit_responses_batches
 
     experiment_id = payload["experiment_id"]
     experiment = db.query_one("SELECT * FROM ai_experiments WHERE id = %s", (experiment_id,))
@@ -72,7 +70,6 @@ async def _run(task_id: int, payload: dict[str, Any]) -> None:
             (json.dumps({"sampled": len(rows)}), experiment_id),
         )
         instructions = step.instructions(params)
-        schema = to_strict_json_schema(step.answer_model)
         ids: list[str] = []
         skipped: dict[str, str] = {}
         for arm in params["arms"]:
@@ -82,12 +79,11 @@ async def _run(task_id: int, payload: dict[str, Any]) -> None:
                 skipped[domain.arm_name(model, effort)] = why
                 continue
             specs = [
-                BatchSpec(
+                structured_response_spec(
                     f"{domain.arm_name(model, effort)}|{r['url']}",
                     instructions,
                     step.build_input(r),
-                    step.answer_model.__name__,
-                    schema,
+                    step.answer_model,
                     context={
                         "experiment_id": experiment_id,
                         "purpose": experiment["purpose"],

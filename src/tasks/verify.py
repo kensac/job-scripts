@@ -129,9 +129,7 @@ async def _reverify_jobs(
     """Two phases: gather evidence concurrently (ATS gone-detection, then
     content, the fleet-distributed, network-bound part), then settle every
     remaining verdict in ONE half-price batch instead of a call per job."""
-    from openai.lib._pydantic import to_strict_json_schema
-
-    from core.batch import BatchSpec
+    from core.batch import structured_response_spec
 
     if has_batch_work(task_id):
         results = await collect_pending(task_id, batch_event_hook(task_id, "reverify", None))
@@ -221,14 +219,12 @@ async def _reverify_jobs(
         set_progress(task_id, done, total, f"batch of {len(needs_ai)} submitted (half price)")
         if parent_id:
             update_parent_progress(parent_id)
-        schema = to_strict_json_schema(VERIFICATION_REQUEST.response_model)
         specs = [
-            BatchSpec(
+            structured_response_spec(
                 url,
                 VERIFICATION_REQUEST.instructions,
                 VERIFICATION_REQUEST.build_input(content),
-                VERIFICATION_REQUEST.response_model.__name__,
-                schema,
+                VERIFICATION_REQUEST.response_model,
                 context=by_url[url],
             )
             for url, content in needs_ai
@@ -357,9 +353,7 @@ async def handle_verify_new(task_id: int, payload: dict[str, Any]) -> None:
     half-price call per job yields both verdicts. Idempotent by re-sweep.
     Only successful lines produce verdict rows; anything missed or failed is
     picked up by the next cycle's sweep."""
-    from openai.lib._pydantic import to_strict_json_schema
-
-    from core.batch import BatchSpec
+    from core.batch import structured_response_spec
 
     specs = []
     if not has_batch_work(task_id):
@@ -395,14 +389,12 @@ async def handle_verify_new(task_id: int, payload: dict[str, Any]) -> None:
         if not rows:
             set_progress(task_id, 0, 0, "nothing to verify")
             return
-        schema = to_strict_json_schema(VERIFICATION_REQUEST.response_model)
         specs = [
-            BatchSpec(
+            structured_response_spec(
                 r["url"],
                 VERIFICATION_REQUEST.instructions,
                 VERIFICATION_REQUEST.build_input(r["input_content"]),
-                VERIFICATION_REQUEST.response_model.__name__,
-                schema,
+                VERIFICATION_REQUEST.response_model,
                 context={
                     key: r[key] for key in ("company", "title", "needs_closed", "needs_clearance")
                 },
