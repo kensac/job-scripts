@@ -2046,7 +2046,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/BulkPatchResult"
+                }
               }
             }
           },
@@ -2310,7 +2312,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/PatchResult"
+                }
               }
             }
           },
@@ -2436,7 +2440,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Deleted"
+                }
               }
             }
           },
@@ -26199,6 +26205,63 @@
         "type": "object",
         "title": "AuthorizeRequest"
       },
+      "Autofilled": {
+        "properties": {
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "date_applied": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date Applied"
+          }
+        },
+        "type": "object",
+        "title": "Autofilled",
+        "description": "What the write filled in that the caller did not send.\n\nA status change can date the row by itself, so the caller is told rather\nthan having to re-read the row to find out.\n\nAn absent key is the answer, not a null: the route sets\nresponse_model_exclude_none so `{}` still means \"nothing was filled\",\nwhich is what the board already reads. Declaring the shape must not move\nthe wire."
+      },
+      "BulkPatchResult": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "updated": {
+            "type": "integer",
+            "title": "Updated"
+          },
+          "skipped": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Skipped"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ok",
+          "updated",
+          "skipped"
+        ],
+        "title": "BulkPatchResult",
+        "description": "`skipped` names the ids the caller may not touch rather than refusing\nthe whole selection: a selection made from the board can include a row\nthat vanished or was never theirs, and failing everything for one would\nsend the page back to a request per row."
+      },
       "CallbackRequest": {
         "properties": {
           "code": {
@@ -26473,6 +26536,19 @@
           "ids"
         ],
         "title": "DeleteQueries"
+      },
+      "Deleted": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ok"
+        ],
+        "title": "Deleted"
       },
       "DraftRequest": {
         "properties": {
@@ -27697,6 +27773,23 @@
       },
       "NonNullUpdate_str_": {
         "type": "string"
+      },
+      "PatchResult": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "autofilled": {
+            "$ref": "#/components/schemas/Autofilled"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ok",
+          "autofilled"
+        ],
+        "title": "PatchResult"
       },
       "PatternPreviewBody": {
         "properties": {

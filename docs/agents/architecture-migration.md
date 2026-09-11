@@ -315,6 +315,14 @@ and `tasks/uploads.py`. Naming them is a good change on its own: a star select
 and the shape that reads it drift silently, which is the same defect one level
 down.
 
+**Declaring a shape can move the wire, quietly.** A dict omits a key it has
+no value for; a model emits the key as null. `PATCH /user/jobs/{id}` returned
+`autofilled: {}` when it filled nothing, and declaring the shape turned that
+into `{"status": null, "date_applied": null}`. The existing tests caught it.
+Where the old dict omitted keys, set `response_model_exclude_none=True` on the
+route and say so beside the model. Declaring must not change the payload; that
+is the whole reason it is safe to do everywhere.
+
 **A response model must be defined ABOVE the route that returns it.** This
 module uses `from __future__ import annotations`, so a return annotation is a
 string and FastAPI resolves it when the decorator runs. A model defined later
