@@ -305,12 +305,12 @@ def _no_browser(monkeypatch):
     stubs it, and one arriving here by accident should say so rather than
     quietly read no content and assert on the emptiness.
     """
-    import core.scrape
+    import core.fetching.scrape
 
     def refuse(url):
         raise RuntimeError(f"tests do not launch a browser (asked for {url})")
 
-    monkeypatch.setattr(core.scrape, "extract_url_content_ex", refuse)
+    monkeypatch.setattr(core.fetching.scrape, "extract_url_content_ex", refuse)
 
 
 @pytest.fixture(autouse=True)

@@ -25,8 +25,8 @@ from pydantic import BaseModel
 from api import ai, budget, db, hosts
 from api.apply import writes as application_writes
 from api.board import visibility
-from core import forms
 from core.answers import DEFAULT_STYLE
+from core.fetching import forms
 from core.providers.spec import StructuredOutput
 from core.routing import TaskShape
 from core.store import get_content

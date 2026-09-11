@@ -26,7 +26,7 @@ from pydantic import BaseModel, Field
 from api import db
 from api.auth import AuthedUser
 from api.routers.admin import require_admin
-from core import boards
+from core.fetching import boards
 
 logger = logging.getLogger("jobtracker_api")
 

@@ -201,7 +201,7 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
     ),
     # Host -> seconds between LISTING requests per worker process. Workable
     # limits by address and two workers share hetzner's; six seconds was not
-    # enough, twenty holds. Read by core.boards through the ingest task.
+    # enough, twenty holds. Read by core.fetching.boards through the ingest task.
     "ingest_host_pace_seconds": ConfigKey(
         section="Fetching",
         default={"apply.workable.com": 20},

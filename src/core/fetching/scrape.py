@@ -18,7 +18,7 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.wait import WebDriverWait
 
-from core import ats
+from core.fetching import ats
 
 logger = logging.getLogger(__name__)
 

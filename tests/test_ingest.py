@@ -6,8 +6,8 @@ import asyncio
 
 from api import db
 from api.ai import verdicts
-from core import boards
-from core.posting import JobPosting
+from core.fetching import boards
+from core.fetching.posting import JobPosting
 from tasks import ingest
 
 
@@ -72,7 +72,7 @@ def test_a_posting_whose_fetch_failed_today_is_not_fetched_again_this_hour(monke
     window the posting is skipped; past it, tried again. The window comes from
     the persisted config, so an admin can shorten it without a deploy."""
     from api import fetching
-    from core import ats
+    from core.fetching import ats
 
     f.make_source("acme")
     # date_posted inside the cutoff window, or ingest never considers the page.

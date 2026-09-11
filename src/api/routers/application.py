@@ -22,8 +22,8 @@ from api import ai, budget, db, task_admission
 from api.ai import access as ai_access
 from api.auth import AuthedUser, require_user
 from api.board.access import require_visible_job
-from core import forms
 from core.answers import DEFAULT_STYLE
+from core.fetching import forms
 from core.store import get_content
 from tasks import application as drafts
 

@@ -16,7 +16,7 @@ import logging
 from typing import Any
 
 from api import db
-from core import ats
+from core.fetching import ats
 
 logger = logging.getLogger("jobtracker_worker")
 
@@ -482,7 +482,7 @@ def sender_signal(user_id: int) -> dict[int, dict[str, Any]]:
     is an employer relationship at all.
 
     Computed at read time and deliberately not stored. The ATS half is a
-    property of the sender domain, so it has to move when core.ats learns a new
+    property of the sender domain, so it has to move when core.fetching.ats learns a new
     provider; the spread half is a function of the user's whole message
     history, so a domain that becomes an intermediary after a match was made
     has to change the answer for matches already written. Freezing either at

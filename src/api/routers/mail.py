@@ -26,7 +26,7 @@ from api.mail import pipeline as mail_pipeline
 from api.routers import resolve
 from api.routers.admin import require_admin
 from core.answers import EVENT_KINDS
-from core.mail_html import sanitise
+from core.mail.html import sanitise
 
 router = APIRouter()
 
@@ -752,7 +752,7 @@ def _rows_for(user_id: int) -> list[dict[str, Any]]:
     events = mail_pipeline.events_by_application(user_id)
     tiers = _tiers_by_application(user_id)
     # Derived at read time and attached rather than stored, so it moves when
-    # core.ats learns a provider or when a sender turns out to serve more
+    # core.fetching.ats learns a provider or when a sender turns out to serve more
     # companies than it did when the match was made.
     senders = mail_pipeline.sender_signal(user_id)
     out = []

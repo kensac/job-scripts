@@ -7,7 +7,7 @@ from api import db
 from api.auth import AuthedUser, require_user
 from api.board import visibility
 from api.models import SourcesPut
-from core import boards
+from core.fetching import boards
 
 router = APIRouter()
 

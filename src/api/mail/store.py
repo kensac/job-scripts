@@ -17,8 +17,8 @@ from collections.abc import Iterable, Iterator
 from itertools import islice
 
 from api import db
-from core.mail_import import ImportedMessage
-from core.mail_prefilter import looks_job_related
+from core.mail.importer import ImportedMessage
+from core.mail.prefilter import looks_job_related
 
 logger = logging.getLogger("jobtracker_api")
 

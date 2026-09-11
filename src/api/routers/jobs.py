@@ -13,7 +13,7 @@ from api.auth import AuthedUser, require_user
 from api.board import visibility
 from api.board.access import require_visible_job
 from api.models import UploadRequest, UserJobPatch, UserJobsBulkIds, UserJobsBulkPatch
-from core.urls import normalize_url
+from core.fetching.urls import normalize_url
 
 router = APIRouter()
 

@@ -22,8 +22,9 @@ logger = logging.getLogger("jobtracker_worker")
 
 
 async def handle_ingest_source(task_id: int, payload: dict[str, Any]) -> None:
-    from core import boards, catalog
-    from core.posting import FALLBACK_CUTOFF_TS
+    from core import catalog
+    from core.fetching import boards
+    from core.fetching.posting import FALLBACK_CUTOFF_TS
 
     source = db.query_one("SELECT * FROM sources WHERE name = %s AND active", (payload["source"],))
     if not source:

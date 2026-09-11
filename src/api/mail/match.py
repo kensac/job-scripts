@@ -23,7 +23,7 @@ import re
 from dataclasses import dataclass
 
 from api import db
-from core.ats import canonicalize
+from core.fetching.ats import canonicalize
 
 logger = logging.getLogger("jobtracker_worker")
 
@@ -77,7 +77,7 @@ def canonical_urls(body: str | None) -> set[str]:
     """Canonical posting URLs mentioned anywhere in the message.
 
     ATS mail almost always links back to the posting or the application, and
-    core.ats already knows how to reduce those links to a stable identity -
+    core.fetching.ats already knows how to reduce those links to a stable identity -
     the same function that dedupes the job catalog. Reusing it means a link in
     an email and the job row it points at agree by construction rather than by
     a second, parallel spelling.

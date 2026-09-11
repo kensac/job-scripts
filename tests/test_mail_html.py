@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from core.mail_html import sanitise
+from core.mail.html import sanitise
 
 
 @pytest.mark.parametrize(

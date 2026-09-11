@@ -231,7 +231,7 @@ async def refresh_content(
     resolution is cheap and is the common path, so gating it on the scrape
     budget would throttle the fast case behind the slow one."""
     from api import fetching
-    from core import ats
+    from core.fetching import ats
     from core.store import add_ai_result
 
     ats_res = await asyncio.to_thread(ats.resolve, url)

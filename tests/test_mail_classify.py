@@ -14,7 +14,7 @@ import pytest
 from api import db
 from api.mail import store as mail_store
 from core import pricing, providers
-from core.mail_import import ImportedMessage
+from core.mail.importer import ImportedMessage
 from core.routing import resolve
 from tasks import HANDLERS, mail_classify
 from tests.factories import make_task

@@ -120,7 +120,7 @@ async def test_a_429_from_the_board_defers_the_pull_and_teaches_the_budget(monke
     def refuse(url, company):
         raise requests.HTTPError("429 Client Error", response=resp)
 
-    from core import boards
+    from core.fetching import boards
 
     monkeypatch.setattr(boards, "fetch_listings", refuse)
     with pytest.raises(Deferred) as excinfo:

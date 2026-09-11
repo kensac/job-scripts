@@ -20,7 +20,7 @@ from typing import Any
 import requests
 
 from api import oauth
-from core.mail_import import (
+from core.mail.importer import (
     MAX_BODY_CHARS,
     MAX_HTML_CHARS,
     ImportedMessage,

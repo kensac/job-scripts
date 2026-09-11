@@ -239,7 +239,7 @@ class UserResume(Base):
 
 class ApplicationForm(Base):
     """The questions a posting's application form asks, read once per url
-    from the ATS (core.forms). questions is NULL when the host cannot be
+    from the ATS (core.fetching.forms). questions is NULL when the host cannot be
     read; error says why the last read failed."""
 
     __tablename__ = "application_forms"

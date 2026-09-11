@@ -12,7 +12,7 @@ import datetime
 
 from api import db
 from api.mail import pipeline as mail_pipeline
-from core import ats
+from core.fetching import ats
 
 
 def _app(f, uid: int, company: str, domain: str, day: int) -> int:

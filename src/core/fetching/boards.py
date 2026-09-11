@@ -28,10 +28,10 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-from core.ats import ashby_text, greenhouse_text, lever_text
-from core.listings import fetch_job_postings
-from core.posting import JobPosting
-from core.urls import normalize_url
+from core.fetching.ats import ashby_text, greenhouse_text, lever_text
+from core.fetching.listings import fetch_job_postings
+from core.fetching.posting import JobPosting
+from core.fetching.urls import normalize_url
 
 logger = logging.getLogger(__name__)
 

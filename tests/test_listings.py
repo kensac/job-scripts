@@ -9,8 +9,8 @@ import dataclasses
 
 from api import db
 from api.ai import verdicts
-from core import boards
-from core.posting import JobPosting
+from core.fetching import boards
+from core.fetching.posting import JobPosting
 from tasks import ingest
 
 TODAY = 2_000_000_000
