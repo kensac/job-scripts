@@ -124,6 +124,12 @@ def test_repeated_uploads_share_extraction_and_admin_admission(
     response = client.post("/v1/uploads", json={"urls": [url, url]}, headers=user_headers)
     assert response.status_code == 200, response.text
     job_id = response.json()["accepted"][0]["job_id"]
+    assert (
+        db.query_one("SELECT person_touched_at FROM user_jobs WHERE job_id = %s", (job_id,))[
+            "person_touched_at"
+        ]
+        is not None
+    )
     rows = db.query("SELECT id FROM tasks WHERE kind = 'extract_upload'")
     assert len(rows) == 1
     refused = client.post(f"/v1/admin/jobs/{job_id}/reparse", headers=admin_headers)

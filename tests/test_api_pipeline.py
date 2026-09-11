@@ -554,9 +554,9 @@ def test_a_rejection_is_suggested_not_applied(client, user_headers):
     assert s["suggested_status"] == "Rejected"
     assert s["evidence"]["from_domain"] is not None, "a suggestion he cannot check is faith"
 
-    assert db.query_one("SELECT status FROM user_jobs WHERE job_id = %s", (job,))["status"] == (
-        "Application Submitted"
-    ), "nothing moves until he says so"
+    row = db.query_one("SELECT status, person_touched_at FROM user_jobs WHERE job_id = %s", (job,))
+    assert row["status"] == "Application Submitted", "nothing moves until he says so"
+    assert row["person_touched_at"] is None
 
 
 def test_accepting_moves_the_board(client, user_headers):
@@ -570,9 +570,9 @@ def test_accepting_moves_the_board(client, user_headers):
         f"/v1/user/suggestions/{app_id}/{ev}", headers=user_headers, json={"response": "accepted"}
     )
     assert resp.status_code == 200
-    assert db.query_one("SELECT status FROM user_jobs WHERE job_id = %s", (job,))["status"] == (
-        "Rejected"
-    )
+    row = db.query_one("SELECT status, person_touched_at FROM user_jobs WHERE job_id = %s", (job,))
+    assert row["status"] == "Rejected"
+    assert row["person_touched_at"] is not None
     assert client.get("/v1/user/suggestions", headers=user_headers).json()["total"] == 0
 
 
