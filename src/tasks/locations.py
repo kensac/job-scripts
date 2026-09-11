@@ -81,9 +81,7 @@ def _custom_id(text: str) -> str:
 
 
 async def handle_classify_locations(task_id: int, payload: dict[str, Any]) -> None:
-    from openai.lib._pydantic import to_strict_json_schema
-
-    from core.batch import BatchSpec
+    from core.batch import structured_response_spec
 
     specs = []
     if not has_batch_work(task_id):
@@ -101,14 +99,12 @@ async def handle_classify_locations(task_id: int, payload: dict[str, Any]) -> No
         if not texts:
             set_progress(task_id, 0, 0, "nothing to classify")
             return
-        schema = to_strict_json_schema(LocationAnswer)
         specs = [
-            BatchSpec(
+            structured_response_spec(
                 _custom_id(text),
                 _INSTRUCTIONS,
                 text,
-                "LocationAnswer",
-                schema,
+                LocationAnswer,
                 context={"text": text},
             )
             for text in texts
