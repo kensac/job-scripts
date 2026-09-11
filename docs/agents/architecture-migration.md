@@ -371,17 +371,22 @@ rather than an opinion. A row leaves this list when it is fixed or when a
 measurement says it was never worth fixing, and either way it says which.
 
 **The schema is not a contract.** Was 173 of 190 operations returning an
-undeclared object on 2026-09-10, then 143. **54 of 190 on 2026-09-11**, and
-what is left is one family: `routers/admin/` holds 52 of them. The other two
-serve a file and a schema rather than a body. Phase 7.
+undeclared object on 2026-09-10, then 143, then 54. **2 of 190 on
+2026-09-11**, and neither returns a body a shape could describe: `GET
+/v1/openapi` serves the schema and `GET /v1/user/resumes/{id}/pdf` serves a
+file. The declaration half of phase 7 is done.
 
-**A failure is not in the contract at all.** 164 `raise HTTPException` sites,
-at least three `detail` shapes among them (69 `{code, message}`, 14 a bare
-string, 1 an f-string), and the schema declares 200, 201, 202 and the 422
-FastAPI adds. No 4xx. Phase 7.
+**A failure is in the contract now, but it is not one shape.** The schema
+declares 400, 401, 403, 404 and 409 on 188 of 190 operations, so a client can
+read what a refusal looks like. What it cannot read is which of two spellings
+arrives: of 164 `raise HTTPException` sites, 109 send `detail={"code",
+"message"}` and 19 send a bare string or an f-string. **All 19 are in
+`routers/mail/`**, and converting them turns `detail` from a string into an
+object for a frontend in another repository, so it is a coordinated change
+rather than a tidy-up. Phase 7.
 
 **Reads are untyped, and the goal is all of them.** Was 563 db call sites
-returning bare dicts. **522 on 2026-09-11, of which 110 carry a shape.**
+returning bare dicts. **521 on 2026-09-11, of which 153 carry a shape.**
 `db.query_as` is the primitive and adoption is per domain, on Kanishk's
 instruction of 2026-09-11 that every read should carry a shape.
 
@@ -396,8 +401,8 @@ name, so the rule is enforced rather than remembered.
 Two things make it work that are worth knowing before starting a domain.
 
 **A `SELECT *` cannot be typed until it names its columns.** Was 24, then 22,
-then 19. **12 on 2026-09-11**: six in `routers/admin/`, five in `tasks/`, and
-the one left in `core/store.py`. Naming
+then 19, then 12. **9 on 2026-09-11**: five in `tasks/`, three in
+`routers/admin/`, and the one left in `core/store.py`. Naming
 them is a good change on its own: a star select and the shape that reads it
 drift silently, which is the same defect one level down, and on a wide table it
 fetches a page of text to throw away. Three of `core/store.py`'s four went with
