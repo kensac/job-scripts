@@ -38,6 +38,7 @@ These are instructions, not history. Follow them.
 | [visibility.md](docs/agents/visibility.md) | Change who sees a posting, who owns a row, or a list response shape |
 | [observability.md](docs/agents/observability.md) | Add a task, batch model calls, or add a metric, alert or event |
 | [reading-production.md](docs/agents/reading-production.md) | Point anything at the production database |
+| [architecture-migration.md](docs/agents/architecture-migration.md) | Take a phase of the move to facts, derivations and projections |
 | [testing.md](docs/agents/testing.md) | Write a test or trust one |
 | [migrations.md](docs/agents/migrations.md) | Touch the schema |
 | [deployment.md](docs/agents/deployment.md) | Claim anything is deployed |

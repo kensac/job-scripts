@@ -72,6 +72,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "import-linter==2.6",
     "pytest==9.1.1",
     "pytest-asyncio==1.4.0",
     "ruff==0.16.6",
@@ -155,3 +156,22 @@ markers = [
 # production, and the integration suite skipped unless the database actually
 # holds a synced copy. That is what lets CI run the whole thing on a pull
 # request with no production credential anywhere.
+
+# The layering, enforced. `core` is the bottom: fetching, scraping, providers,
+# the catalog and the stores, none of which may reach up into the API layer.
+# The one violation when this was added was core/devseed.py, which seeded a
+# development database through api.db and has moved to api/ where it belongs.
+#
+# Deliberately one contract rather than a full stack of layers: api and
+# api.tasks import each other (api.tasks reads api freely, and api defers three
+# imports inside functions to avoid the cycle), so a layer contract over those
+# two would fail today. Untangling them is phase 5 work; see
+# docs/agents/architecture-migration.md.
+[tool.importlinter]
+root_packages = ["api", "core"]
+
+[[tool.importlinter.contracts]]
+name = "core does not depend on api"
+type = "forbidden"
+source_modules = ["core"]
+forbidden_modules = ["api"]

@@ -14,7 +14,7 @@ from __future__ import annotations
 import pytest
 
 from api import db
-from core.devseed import DEV_SUB, seed
+from api.devseed import DEV_SUB, seed
 
 
 @pytest.fixture
