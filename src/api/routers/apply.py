@@ -25,6 +25,7 @@ from api.ai import access as ai_access
 from api.apply import policy as extension_policy
 from api.apply import recipes as extension_recipes
 from api.auth import AuthedUser, require_user
+from api.models import Ok
 from api.problem import refuse
 from api.routers.jobs import _write_board_row
 from core.fetching.forms import posting_urls
@@ -95,6 +96,124 @@ class ReportList(BaseModel):
     reports: list[ProblemReport]
 
 
+class ProblemReportDetail(BaseModel):
+    """One report with the capture itself, which is the part triage reads.
+    The list above carries a title and a field count out of the same column
+    rather than the whole page."""
+
+    id: int
+    url: str
+    host: str | None
+    note: str
+    page: dict[str, Any]
+    created_at: datetime.datetime
+
+
+class ReportCreated(BaseModel):
+    """The extension shows the number, so the person can quote it."""
+
+    id: int
+    created_at: datetime.datetime
+
+
+class MatchedPosting(BaseModel):
+    """The posting the url matched, when the board holds one."""
+
+    id: int
+    company: str | None
+    title: str | None
+
+
+class ContextDraft(BaseModel):
+    """A draft already written for this posting. Only drafts that exist are
+    listed, so `draft` is never null here."""
+
+    key: str
+    question: str
+    draft: str
+
+
+class ApplyContext(BaseModel):
+    """The three sources a fill draws from, before anything is filled.
+
+    `profile` is a map rather than the profile shape: only the facts that are
+    set are listed, because a blank fact fills nothing and listing it would
+    say the profile has something it does not.
+    """
+
+    job: MatchedPosting | None
+    profile: dict[str, Any]
+    answers: list[RememberedAnswer]
+    drafts: list[ContextDraft]
+
+
+class ResumeFile(BaseModel):
+    """The resume a fill would attach. `has_pdf` false means there is text to
+    draft from and no file to upload."""
+
+    id: int
+    name: str
+    filename: str | None
+    has_pdf: bool
+
+
+class ResolvedForm(BaseModel):
+    """What goes in each field, and what the extension needs to put it there.
+
+    `profile` is the whole profile as a map, minus the default resume and the
+    notes: a config-driven reader fills a repeated group one row at a time and
+    a selector that names another fact reads the scalar from it, so the keys
+    are read at runtime rather than known here.
+    """
+
+    fill_id: int
+    job_id: int | None
+    fields: list[apply.ResolvedField]
+    resume: ResumeFile | None
+    profile: dict[str, Any]
+
+
+class Submitted(BaseModel):
+    """The ledger row after the person clicked submit.
+
+    An entry stays a map on purpose. It is the field as read, plus the final
+    value and whether it changed, plus whatever the model's pass left on it -
+    so naming the keys here would silently drop the ones it did not name.
+    """
+
+    ok: bool = True
+    job_id: int | None
+    fields: list[dict[str, Any]]
+
+
+class Suggested(BaseModel):
+    """The model's pass over what the ladder left blank. `answers` is keyed by
+    field key and holds only what came back usable; `skipped` is what the
+    admin list keeps from the model, which is not the same as unanswered."""
+
+    answers: dict[str, str]
+    skipped: list[str]
+    model: str | None
+
+
+class LabelCount(BaseModel):
+    label: str
+    count: int
+
+
+class ApplyReport(BaseModel):
+    """How the ladder is doing on this person's submitted forms. `by_rung`
+    is keyed by the rung that filled the field, with "blank" for the ones
+    nothing filled."""
+
+    forms_submitted: int
+    fields: int
+    filled_unchanged: int
+    by_rung: dict[str, int]
+    most_often_blank: list[LabelCount]
+    most_often_corrected: list[LabelCount]
+
+
 @router.get("/extension/config", response_model=extension_policy.ExtensionConfig)
 def extension_config(
     response: Response,
@@ -144,8 +263,8 @@ def extension_recipe(
 
 
 @router.get("/user/profile")
-def get_profile(user: AuthedUser = Depends(require_user)):
-    return apply.load_profile(user.id).model_dump()
+def get_profile(user: AuthedUser = Depends(require_user)) -> apply.Profile:
+    return apply.load_profile(user.id)
 
 
 class ProfilePut(apply.Profile):
@@ -157,7 +276,7 @@ class ProfilePut(apply.Profile):
 
 
 @router.put("/user/profile")
-def put_profile(body: ProfilePut, user: AuthedUser = Depends(require_user)):
+def put_profile(body: ProfilePut, user: AuthedUser = Depends(require_user)) -> apply.Profile:
     """The whole profile, replaced. A resume id that is not the person's is
     dropped rather than refused, so a deleted resume does not wedge the
     profile."""
@@ -173,11 +292,13 @@ def put_profile(body: ProfilePut, user: AuthedUser = Depends(require_user)):
         """,
         (user.id, db.jsonb(body.model_dump())),
     )
-    return body.model_dump()
+    return body
 
 
 @router.get("/user/apply/context")
-def apply_context(url: str = Query(max_length=2000), user: AuthedUser = Depends(require_user)):
+def apply_context(
+    url: str = Query(max_length=2000), user: AuthedUser = Depends(require_user)
+) -> ApplyContext:
     """What this person already has for the page in front of them, before
     anything is filled: the profile facts that are set, the answer bank, and
     the drafts for the posting when the url matches one.
@@ -189,8 +310,10 @@ def apply_context(url: str = Query(max_length=2000), user: AuthedUser = Depends(
     One call rather than three: the panel wants all of it at once, and the
     job match is the only way to know whether there are drafts at all.
     """
-    job = db.query_one(
-        "SELECT id, company, title FROM jobs WHERE url = ANY(%s) LIMIT 1", (posting_urls(url),)
+    job = db.query_one_as(
+        MatchedPosting,
+        "SELECT id, company, title FROM jobs WHERE url = ANY(%s) LIMIT 1",
+        (posting_urls(url),),
     )
     # Only the facts that are set. A blank fact fills nothing, so listing it
     # would be a row that says the profile has something it does not.
@@ -201,22 +324,24 @@ def apply_context(url: str = Query(max_length=2000), user: AuthedUser = Depends(
         .items()
         if value not in ("", None, [], {})
     }
-    return {
-        "job": job,
-        "profile": facts,
-        "answers": db.query(
+    return ApplyContext(
+        job=job,
+        profile=facts,
+        answers=db.query_as(
+            RememberedAnswer,
             f"SELECT {_BANK_COLS} FROM application_answer_bank WHERE user_id = %s "
             "ORDER BY times_used DESC, updated_at DESC LIMIT 200",
             (user.id,),
         ),
-        "drafts": db.query(
+        drafts=db.query_as(
+            ContextDraft,
             "SELECT key, question, draft FROM application_answers "
             "WHERE user_id = %s AND job_id = %s AND draft IS NOT NULL ORDER BY id",
-            (user.id, job["id"]),
+            (user.id, job.id),
         )
         if job
         else [],
-    }
+    )
 
 
 class SavedAnswerPut(BaseModel):
@@ -236,8 +361,11 @@ def list_answers(user: AuthedUser = Depends(require_user)) -> AnswerList:
 
 
 @router.put("/user/answers/{answer_id}")
-def put_answer(answer_id: int, body: SavedAnswerPut, user: AuthedUser = Depends(require_user)):
-    row = db.query_one(
+def put_answer(
+    answer_id: int, body: SavedAnswerPut, user: AuthedUser = Depends(require_user)
+) -> RememberedAnswer:
+    row = db.query_one_as(
+        RememberedAnswer,
         f"UPDATE application_answer_bank SET value = %s, updated_at = now() "
         f"WHERE id = %s AND user_id = %s RETURNING {_BANK_COLS}",
         (body.value.strip(), answer_id, user.id),
@@ -248,13 +376,13 @@ def put_answer(answer_id: int, body: SavedAnswerPut, user: AuthedUser = Depends(
 
 
 @router.delete("/user/answers/{answer_id}")
-def delete_answer(answer_id: int, user: AuthedUser = Depends(require_user)):
+def delete_answer(answer_id: int, user: AuthedUser = Depends(require_user)) -> Ok:
     if not db.query_one(
         "DELETE FROM application_answer_bank WHERE id = %s AND user_id = %s RETURNING id",
         (answer_id, user.id),
     ):
         raise refuse(404, "NOT_FOUND", "unknown answer")
-    return {"ok": True}
+    return Ok()
 
 
 class ResolveBody(BaseModel):
@@ -287,7 +415,7 @@ def _seen(event: str, user: AuthedUser, **props: Any) -> None:
 
 
 @router.post("/user/apply/resolve")
-def resolve_form(body: ResolveBody, user: AuthedUser = Depends(require_user)):
+def resolve_form(body: ResolveBody, user: AuthedUser = Depends(require_user)) -> ResolvedForm:
     """What goes in each field. Opens a fill in the ledger; the extension
     closes it with /submitted once the person has clicked submit."""
     job = db.query_one("SELECT id FROM jobs WHERE url = ANY(%s) LIMIT 1", (posting_urls(body.url),))
@@ -304,7 +432,10 @@ def resolve_form(body: ResolveBody, user: AuthedUser = Depends(require_user)):
     )
     if open_fill:
         have = {f["key"] for f in open_fill["fields"]}
-        merged = [*open_fill["fields"], *[f for f in fields if f["key"] not in have]]
+        merged = [
+            *open_fill["fields"],
+            *[f.model_dump() for f in fields if f.key not in have],
+        ]
         db.execute(
             "UPDATE application_fills SET fields = %s WHERE id = %s",
             (db.jsonb(merged), open_fill["id"]),
@@ -314,12 +445,19 @@ def resolve_form(body: ResolveBody, user: AuthedUser = Depends(require_user)):
         fill = db.query_one(
             "INSERT INTO application_fills (user_id, job_id, url, host, fields) "
             "VALUES (%s, %s, %s, %s, %s) RETURNING id",
-            (user.id, job_id, body.url, urlsplit(body.url).netloc, db.jsonb(fields)),
+            (
+                user.id,
+                job_id,
+                body.url,
+                urlsplit(body.url).netloc,
+                db.jsonb([f.model_dump() for f in fields]),
+            ),
         )
     assert fill
     profile = apply.load_profile(user.id)
     resume = (
-        db.query_one(
+        db.query_one_as(
+            ResumeFile,
             "SELECT id, name, filename, pdf IS NOT NULL AS has_pdf FROM user_resumes "
             "WHERE id = %s AND user_id = %s",
             (profile.default_resume_id, user.id),
@@ -333,20 +471,17 @@ def resolve_form(body: ResolveBody, user: AuthedUser = Depends(require_user)):
         host=urlsplit(body.url).netloc,
         matched_job=job_id is not None,
         fields=len(fields),
-        filled=sum(1 for f in fields if f.get("value") not in (None, "")),
+        filled=sum(1 for f in fields if f.value not in (None, "")),
         reused_fill=open_fill is not None,
         has_resume=resume is not None,
     )
-    return {
-        "fill_id": fill["id"],
-        "job_id": job_id,
-        "fields": fields,
-        "resume": resume,
-        # The profile itself: a config-driven reader fills a repeated group
-        # (education, experience) one row at a time, and a selector that
-        # names another fact (valueKey) reads the scalar from it.
-        "profile": profile.model_dump(exclude={"default_resume_id", "notes"}),
-    }
+    return ResolvedForm(
+        fill_id=fill["id"],
+        job_id=job_id,
+        fields=fields,
+        resume=resume,
+        profile=profile.model_dump(exclude={"default_resume_id", "notes"}),
+    )
 
 
 class SubmittedField(BaseModel):
@@ -360,7 +495,9 @@ class SubmittedBody(BaseModel):
 
 
 @router.post("/user/apply/fills/{fill_id}/submitted")
-def fill_submitted(fill_id: int, body: SubmittedBody, user: AuthedUser = Depends(require_user)):
+def fill_submitted(
+    fill_id: int, body: SubmittedBody, user: AuthedUser = Depends(require_user)
+) -> Submitted:
     """The person clicked submit. Every field's final value goes on the
     ledger beside what was filled; a field they asked to remember goes in
     the bank; the board row flips to submitted."""
@@ -372,7 +509,7 @@ def fill_submitted(fill_id: int, body: SubmittedBody, user: AuthedUser = Depends
         if not fill:
             raise refuse(404, "NOT_FOUND", "unknown fill")
         if fill["submitted_at"] is not None:
-            return {"ok": True, "job_id": fill["job_id"], "fields": fill["fields"]}
+            return Submitted(job_id=fill["job_id"], fields=fill["fields"])
         finals = {f.key: f for f in body.fields}
         fields = []
         for read in fill["fields"]:
@@ -421,7 +558,7 @@ def fill_submitted(fill_id: int, body: SubmittedBody, user: AuthedUser = Depends
         fields=len(fields),
         changed=sum(1 for f in fields if f["changed"]),
     )
-    return {"ok": True, "job_id": fill["job_id"], "fields": fields}
+    return Submitted(job_id=fill["job_id"], fields=fields)
 
 
 class SuggestField(BaseModel):
@@ -479,7 +616,7 @@ def never_filled(fields: list[SuggestField]) -> list[str]:
 
 
 @router.post("/user/apply/suggest")
-async def suggest(body: SuggestBody, user: AuthedUser = Depends(require_user)):
+async def suggest(body: SuggestBody, user: AuthedUser = Depends(require_user)) -> Suggested:
     """Everything the ladder left blank, in one live call on the person's
     own model settings. The extension fills the answers; the person still
     sees them in the form before submitting, and an answer left in place
@@ -489,7 +626,7 @@ async def suggest(body: SuggestBody, user: AuthedUser = Depends(require_user)):
     if not fields:
         _note_on_fill(user.id, body.fill_id, {}, {}, skipped)
         _seen("apply_ai_suggested", user, asked=0, answered=0, skipped=len(skipped), model=None)
-        return {"answers": {}, "skipped": skipped, "model": None}
+        return Suggested(answers={}, skipped=skipped, model=None)
     profile = apply.load_profile(user.id)
     resume = drafts.resume_text(user.id, profile.default_resume_id) or ""
     cfg = ai_access.require_config(user)
@@ -541,7 +678,7 @@ async def suggest(body: SuggestBody, user: AuthedUser = Depends(require_user)):
         skipped=len(skipped),
         model=cfg.model,
     )
-    return {"answers": answers, "skipped": skipped, "model": cfg.model}
+    return Suggested(answers=answers, skipped=skipped, model=cfg.model)
 
 
 def _note_on_fill(
@@ -586,16 +723,18 @@ MAX_REPORT_BYTES = 2_000_000
 
 
 @router.post("/user/apply/reports", status_code=201)
-def create_report(body: PageReport, user: AuthedUser = Depends(require_user)):
+def create_report(body: PageReport, user: AuthedUser = Depends(require_user)) -> ReportCreated:
     """The extension's report button: whatever it saw, kept whole for
     triage. Capped so one page cannot fill the table by itself."""
     if len(json.dumps(body.page)) > MAX_REPORT_BYTES:
         raise refuse(413, "REPORT_TOO_LARGE", "the page capture is over 2 MB")
-    report = db.query_one(
+    report = db.query_one_as(
+        ReportCreated,
         "INSERT INTO application_reports (user_id, url, host, note, page) "
         "VALUES (%s, %s, %s, %s, %s) RETURNING id, created_at",
         (user.id, body.url, urlsplit(body.url).netloc, body.note.strip(), db.jsonb(body.page)),
     )
+    assert report is not None  # an insert with RETURNING always yields its row
     # The one event that says a reader did not work on a real page. The note is
     # a person's own words about their own application, so only whether there
     # was one ships; the host is what says where to look.
@@ -622,8 +761,9 @@ def list_reports(limit: int = 50, user: AuthedUser = Depends(require_user)) -> R
 
 
 @router.get("/user/apply/reports/{report_id}")
-def get_report(report_id: int, user: AuthedUser = Depends(require_user)):
-    row = db.query_one(
+def get_report(report_id: int, user: AuthedUser = Depends(require_user)) -> ProblemReportDetail:
+    row = db.query_one_as(
+        ProblemReportDetail,
         "SELECT id, url, host, note, page, created_at FROM application_reports "
         "WHERE id = %s AND user_id = %s",
         (report_id, user.id),
@@ -648,7 +788,7 @@ def list_fills(limit: int = 50, user: AuthedUser = Depends(require_user)) -> Fil
 
 
 @router.get("/user/apply/report")
-def report(user: AuthedUser = Depends(require_user)) -> dict[str, Any]:
+def report(user: AuthedUser = Depends(require_user)) -> ApplyReport:
     """How the ladder is doing on this person's submitted forms: fields by
     rung, how many the person changed, and the labels most often left
     blank or corrected. The blank list is the backlog: each label on it
@@ -677,19 +817,19 @@ def report(user: AuthedUser = Depends(require_user)) -> dict[str, Any]:
         else:
             unchanged += 1
 
-    def top(counts: dict[str, int]) -> list[dict[str, Any]]:
+    def top(counts: dict[str, int]) -> list[LabelCount]:
         ranked = sorted(counts.items(), key=lambda kv: -kv[1])[:25]
-        return [{"label": k, "count": v} for k, v in ranked]
+        return [LabelCount(label=k, count=v) for k, v in ranked]
 
     submitted = db.query_one(
         "SELECT count(*) AS n FROM application_fills WHERE user_id = %s AND submitted_at IS NOT NULL",
         (user.id,),
     )
-    return {
-        "forms_submitted": (submitted or {}).get("n", 0),
-        "fields": len(rows),
-        "filled_unchanged": unchanged,
-        "by_rung": by_rung,
-        "most_often_blank": top(blank),
-        "most_often_corrected": top(corrected),
-    }
+    return ApplyReport(
+        forms_submitted=(submitted or {}).get("n", 0),
+        fields=len(rows),
+        filled_unchanged=unchanged,
+        by_rung=by_rung,
+        most_often_blank=top(blank),
+        most_often_corrected=top(corrected),
+    )

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime
 import os
 from typing import Literal
 
@@ -12,7 +13,7 @@ from api.ai import access as ai_access
 from api.auth import AuthedUser, require_user
 from api.board import visibility
 from api.config import group_access_allowed
-from api.models import FilterCreate, FilterPatch, ImprovePromptRequest
+from api.models import FilterCreate, FilterPatch, ImprovePromptRequest, Ok
 from core.filters import ON_AMBIGUOUS_VALUES, compute_filter_hash
 
 router = APIRouter()
@@ -23,6 +24,85 @@ _FILTER_COLS = (
     "id, name, prompt, on_ambiguous, fail_closed, enabled, prompt_hash, preset_id, "
     "created_at, updated_at"
 )
+
+_BLOCKED = budget.AccessReason | Literal["DEFERRED"]
+
+
+class Filter(BaseModel):
+    """`_FILTER_COLS`, in types. `preset_id` names the preset it was adopted
+    from and is null for one written by hand; `prompt_hash` is what a verdict
+    is keyed by, which is why two people on the same preset share verdicts."""
+
+    id: int
+    name: str
+    prompt: str
+    on_ambiguous: str
+    fail_closed: bool
+    enabled: bool
+    prompt_hash: str
+    preset_id: int | None
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+
+
+class FilterRow(Filter):
+    """A filter as the list shows it: the run in flight for this one, and
+    whether another may start."""
+
+    task: task_admission.InFlight | None
+    run_admission: filter_runs.RunDecision
+
+
+class FilterList(BaseModel):
+    filters: list[FilterRow]
+    run_all_task: task_admission.InFlight | None
+    run_all_admission: filter_runs.RunDecision
+
+
+class SavedFilter(Filter):
+    """A filter as it stands after a write, with what the write set running.
+
+    `run_blocked` is why nothing was queued: a budget reason, or DEFERRED
+    when the hourly sweep will judge the board instead of this request.
+    """
+
+    task_id: int | None
+    run_blocked: str | None
+    run_blocked_message: str | None
+
+
+class RunQueued(BaseModel):
+    task_id: int | None
+
+
+class PresetCoverage(BaseModel):
+    """Counts, not a rate. "170 of 7,397 already judged" is the sentence; a
+    percentage hides that the remainder is unjudged rather than rejected."""
+
+    would_show_now: int
+    already_judged: int
+    eligible: int
+    needs_ai: int
+
+
+class FilterPreset(BaseModel):
+    id: int
+    name: str
+    description: str | None
+    prompt: str
+    on_ambiguous: str
+    fail_closed: bool
+
+
+class PresetOffer(FilterPreset):
+    """A preset with what it would show today, so adopting one is not blind."""
+
+    coverage: PresetCoverage
+
+
+class PresetList(BaseModel):
+    presets: list[PresetOffer]
+    eligible_postings: int
 
 
 def _hash(prompt: str, on_ambiguous: str) -> str:
@@ -77,7 +157,7 @@ def _rejudge_on_change(user: AuthedUser) -> bool:
     return group_access_allowed(REJUDGE_GROUPS_KEY, user.groups)
 
 
-def _enqueue_on_change(user: AuthedUser, filter_id: int) -> tuple:
+def _enqueue_on_change(user: AuthedUser, filter_id: int) -> tuple[int | None, _BLOCKED | None]:
     """A save that would run the filter: runs it when the person's group
     re-judges on change, otherwise says the sweep will (Kanishk, 2026-09-09:
     stop recomputing whenever a filter changes, behind a flag)."""
@@ -86,21 +166,25 @@ def _enqueue_on_change(user: AuthedUser, filter_id: int) -> tuple:
     return _enqueue(user, filter_id, defer_conflict=True)
 
 
-def _blocked_message(
-    user: AuthedUser, blocked: budget.AccessReason | Literal["DEFERRED"] | None
-) -> str | None:
+def _blocked_message(user: AuthedUser, blocked: _BLOCKED | None) -> str | None:
     if blocked == "DEFERRED":
         return DEFERRED_MESSAGE
     return budget.access_message(blocked, budget.get_entitlement(user)) if blocked else None
 
 
-def _running(user_id: int, kind: str, filter_id: int | None = None) -> dict | None:
+def _running(
+    user_id: int, kind: str, filter_id: int | None = None
+) -> task_admission.InFlight | None:
     """The run of this kind still in flight for this person (for one filter
     when given), if any. A parent that split into chunks is 'waiting', not
-    'running', and is still in flight."""
-    return db.query_one(
+    'running', and is still in flight.
+
+    `kind` is selected because the shape a task in flight has is declared
+    once, beside `task_admission.in_flight`, rather than copied per query."""
+    return db.query_one_as(
+        task_admission.InFlight,
         """
-        SELECT id, status, progress, created_at FROM tasks
+        SELECT id, kind, status, progress, created_at FROM tasks
         WHERE kind = %(kind)s
           AND status IN ('pending', 'running', 'awaiting_batch', 'waiting')
           AND (payload->>'user_id')::bigint = %(uid)s
@@ -128,29 +212,36 @@ def _refuse_second_run(running: task_admission.InFlight | None) -> None:
 
 
 @router.get("/user/filters")
-def list_filters(user: AuthedUser = Depends(require_user)):
+def list_filters(user: AuthedUser = Depends(require_user)) -> FilterList:
     """Each filter carries its in-flight run, and the list carries the
     in-flight run-all, so a button is disabled from server state."""
-    rows = db.query(
+    rows = db.query_as(
+        Filter,
         f"SELECT {_FILTER_COLS} FROM user_filters WHERE user_id = %s ORDER BY id",
         (user.id,),
     )
     access_failure = budget.access_failure(user)
-    for row in rows:
-        row["task"] = _running(user.id, "run_filter", row["id"])
-        row["run_admission"] = filter_runs.admission(
-            user.id, row["id"], access_failure=access_failure
-        ).as_dict()
-    return {
-        "filters": rows,
-        "run_all_task": _running(user.id, "run_all_filters"),
-        "run_all_admission": filter_runs.admission(
+    return FilterList(
+        filters=[
+            FilterRow(
+                **row.model_dump(),
+                task=_running(user.id, "run_filter", row.id),
+                run_admission=filter_runs.admission(
+                    user.id, row.id, access_failure=access_failure
+                ).decision(),
+            )
+            for row in rows
+        ],
+        run_all_task=_running(user.id, "run_all_filters"),
+        run_all_admission=filter_runs.admission(
             user.id, None, access_failure=access_failure
-        ).as_dict(),
-    }
+        ).decision(),
+    )
 
 
-def _enqueue(user: AuthedUser, filter_id: int | None, *, defer_conflict: bool = False) -> tuple:
+def _enqueue(
+    user: AuthedUser, filter_id: int | None, *, defer_conflict: bool = False
+) -> tuple[int | None, _BLOCKED | None]:
     decision = filter_runs.admission(user.id, filter_id, access_failure=budget.access_failure(user))
     if decision.access_failure:
         return None, decision.access_failure.reason
@@ -166,22 +257,22 @@ def _enqueue(user: AuthedUser, filter_id: int | None, *, defer_conflict: bool = 
     return result.task_id, None
 
 
-def _after_filter_change(user: AuthedUser, row: dict, previous: dict | None) -> dict:
-    needs_judgement = row["enabled"] and (
-        previous is None or not previous["enabled"] or row["prompt_hash"] != previous["prompt_hash"]
+def _after_filter_change(user: AuthedUser, row: Filter, previous: Filter | None) -> SavedFilter:
+    needs_judgement = row.enabled and (
+        previous is None or not previous.enabled or row.prompt_hash != previous.prompt_hash
     )
-    task_id, blocked = _enqueue_on_change(user, row["id"]) if needs_judgement else (None, None)
+    task_id, blocked = _enqueue_on_change(user, row.id) if needs_judgement else (None, None)
     visibility.request_refresh(user.id)
-    return {
-        **row,
-        "task_id": task_id,
-        "run_blocked": blocked,
-        "run_blocked_message": _blocked_message(user, blocked),
-    }
+    return SavedFilter(
+        **row.model_dump(),
+        task_id=task_id,
+        run_blocked=blocked,
+        run_blocked_message=_blocked_message(user, blocked),
+    )
 
 
 @router.post("/user/filters")
-def create_filter(body: FilterCreate, user: AuthedUser = Depends(require_user)):
+def create_filter(body: FilterCreate, user: AuthedUser = Depends(require_user)) -> SavedFilter:
     with db.transaction():
         db.query_one("SELECT id FROM users WHERE id = %s FOR UPDATE", (user.id,))
         _validate_ambiguous(body.on_ambiguous)
@@ -194,7 +285,8 @@ def create_filter(body: FilterCreate, user: AuthedUser = Depends(require_user)):
             )
         if body.enabled:
             _refuse_second_enabled(user.id)
-        row = db.query_one(
+        row = db.query_one_as(
+            Filter,
             f"""
             INSERT INTO user_filters (user_id, name, prompt, on_ambiguous, fail_closed, enabled, prompt_hash)
             VALUES (%s, %s, %s, %s, %s, %s, %s)
@@ -215,11 +307,17 @@ def create_filter(body: FilterCreate, user: AuthedUser = Depends(require_user)):
 
 
 @router.patch("/user/filters/{filter_id}")
-def patch_filter(filter_id: int, body: FilterPatch, user: AuthedUser = Depends(require_user)):
+def patch_filter(
+    filter_id: int, body: FilterPatch, user: AuthedUser = Depends(require_user)
+) -> SavedFilter:
     with db.transaction():
         db.query_one("SELECT id FROM users WHERE id = %s FOR UPDATE", (user.id,))
-        existing = db.query_one(
-            "SELECT * FROM user_filters WHERE id = %s AND user_id = %s", (filter_id, user.id)
+        # The columns, not a star: this row is compared against the one the
+        # update returns, and a star and the shape reading it drift in silence.
+        existing = db.query_one_as(
+            Filter,
+            f"SELECT {_FILTER_COLS} FROM user_filters WHERE id = %s AND user_id = %s",
+            (filter_id, user.id),
         )
         if not existing:
             raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown filter"})
@@ -230,14 +328,15 @@ def patch_filter(filter_id: int, body: FilterPatch, user: AuthedUser = Depends(r
             )
         if "on_ambiguous" in fields:
             _validate_ambiguous(fields["on_ambiguous"])
-        if fields.get("enabled") and not existing["enabled"]:
+        if fields.get("enabled") and not existing.enabled:
             _refuse_second_enabled(user.id, filter_id)
-        prompt = fields.get("prompt", existing["prompt"])
-        on_ambiguous = fields.get("on_ambiguous", existing["on_ambiguous"])
+        prompt = fields.get("prompt", existing.prompt)
+        on_ambiguous = fields.get("on_ambiguous", existing.on_ambiguous)
         fields["prompt_hash"] = _hash(prompt, on_ambiguous)
         cols = ", ".join(f"{k} = %({k})s" for k in fields)
         try:
-            row = db.query_one(
+            row = db.query_one_as(
+                Filter,
                 f"UPDATE user_filters SET {cols}, updated_at = now() "
                 f"WHERE id = %(fid)s AND user_id = %(uid)s RETURNING {_FILTER_COLS}",
                 {"fid": filter_id, "uid": user.id, **fields},
@@ -253,14 +352,14 @@ def patch_filter(filter_id: int, body: FilterPatch, user: AuthedUser = Depends(r
 
 
 @router.delete("/user/filters/{filter_id}")
-def delete_filter(filter_id: int, user: AuthedUser = Depends(require_user)):
+def delete_filter(filter_id: int, user: AuthedUser = Depends(require_user)) -> Ok:
     db.execute("DELETE FROM user_filters WHERE id = %s AND user_id = %s", (filter_id, user.id))
     visibility.request_refresh(user.id)
-    return {"ok": True}
+    return Ok()
 
 
 @router.post("/user/filters/{filter_id}/run")
-def run_filter(filter_id: int, user: AuthedUser = Depends(require_user)):
+def run_filter(filter_id: int, user: AuthedUser = Depends(require_user)) -> RunQueued:
     if not db.query_one(
         "SELECT id FROM user_filters WHERE id = %s AND user_id = %s", (filter_id, user.id)
     ):
@@ -270,17 +369,17 @@ def run_filter(filter_id: int, user: AuthedUser = Depends(require_user)):
         raise HTTPException(
             402, detail={"code": blocked, "message": _blocked_message(user, blocked)}
         )
-    return {"task_id": task_id}
+    return RunQueued(task_id=task_id)
 
 
 @router.post("/user/filters/run-all")
-def run_all_filters(user: AuthedUser = Depends(require_user)):
+def run_all_filters(user: AuthedUser = Depends(require_user)) -> RunQueued:
     task_id, blocked = _enqueue(user, None)
     if blocked:
         raise HTTPException(
             402, detail={"code": blocked, "message": _blocked_message(user, blocked)}
         )
-    return {"task_id": task_id}
+    return RunQueued(task_id=task_id)
 
 
 # What a preset would show TODAY, without spending anything.
@@ -351,53 +450,59 @@ SELECT count(*) AS eligible FROM (
 
 
 @router.get("/filter-presets")
-def list_presets(user: AuthedUser = Depends(require_user)):
-    presets = db.query(
+def list_presets(user: AuthedUser = Depends(require_user)) -> PresetList:
+    presets = db.query_as(
+        FilterPreset,
         "SELECT id, name, description, prompt, on_ambiguous, fail_closed "
-        "FROM filter_presets WHERE active ORDER BY name"
+        "FROM filter_presets WHERE active ORDER BY name",
     )
-    hashes = {p["id"]: _hash(p["prompt"], p["on_ambiguous"]) for p in presets}
+    hashes = {p.id: _hash(p.prompt, p.on_ambiguous) for p in presets}
     coverage = {
         row["prompt_hash"]: row
         for row in db.query(_PRESET_COVERAGE_SQL, {"hashes": list(hashes.values())})
     }
     eligible_row = db.query_one(_ELIGIBLE_SQL)
     eligible = int(eligible_row["eligible"]) if eligible_row else 0
-    return {
-        "presets": [
-            {
-                **preset,
-                "coverage": _coverage(coverage.get(hashes[preset["id"]]), eligible),
-            }
+    return PresetList(
+        presets=[
+            PresetOffer(
+                **preset.model_dump(),
+                coverage=_coverage(coverage.get(hashes[preset.id]), eligible),
+            )
             for preset in presets
         ],
-        "eligible_postings": eligible,
-    }
+        eligible_postings=eligible,
+    )
 
 
-def _coverage(row: dict | None, eligible: int) -> dict:
-    """Counts, not a rate. "170 of 7,397 already judged" is the sentence; a
-    percentage hides that the remainder is unjudged rather than rejected."""
+def _coverage(row: dict | None, eligible: int) -> PresetCoverage:
     judged = int(row["judged"]) if row else 0
-    return {
-        "would_show_now": int(row["would_show"]) if row else 0,
-        "already_judged": judged,
-        "eligible": eligible,
+    return PresetCoverage(
+        would_show_now=int(row["would_show"]) if row else 0,
+        already_judged=judged,
+        eligible=eligible,
         # Postings this preset has never been run against. They are not
         # rejections - nothing has looked at them, and looking costs an AI
         # call the adopter may not be able to make.
-        "needs_ai": max(eligible - judged, 0),
-    }
+        needs_ai=max(eligible - judged, 0),
+    )
 
 
 @router.post("/filter-presets/{preset_id}/adopt")
-def adopt_preset(preset_id: int, user: AuthedUser = Depends(require_user)):
+def adopt_preset(preset_id: int, user: AuthedUser = Depends(require_user)) -> SavedFilter:
     with db.transaction():
         db.query_one("SELECT id FROM users WHERE id = %s FOR UPDATE", (user.id,))
-        preset = db.query_one("SELECT * FROM filter_presets WHERE id = %s AND active", (preset_id,))
+        # Named columns rather than a star, for the same reason as the patch
+        # above: the row and what reads it can then only drift together.
+        preset = db.query_one_as(
+            FilterPreset,
+            "SELECT id, name, description, prompt, on_ambiguous, fail_closed "
+            "FROM filter_presets WHERE id = %s AND active",
+            (preset_id,),
+        )
         if not preset:
             raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown preset"})
-        name = preset["name"]
+        name = preset.name
         # Adopted is a fact on the row (preset_id), not a guess from the name: a
         # renamed adopted filter is still adopted, and a hand-written filter that
         # happens to share the name still blocks, because the name is unique.
@@ -413,7 +518,8 @@ def adopt_preset(preset_id: int, user: AuthedUser = Depends(require_user)):
                 },
             )
         _refuse_second_enabled(user.id)
-        row = db.query_one(
+        row = db.query_one_as(
+            Filter,
             f"""
             INSERT INTO user_filters
                 (user_id, name, prompt, on_ambiguous, fail_closed, enabled, prompt_hash, preset_id)
@@ -423,10 +529,10 @@ def adopt_preset(preset_id: int, user: AuthedUser = Depends(require_user)):
             (
                 user.id,
                 name,
-                preset["prompt"],
-                preset["on_ambiguous"],
-                preset["fail_closed"],
-                _hash(preset["prompt"], preset["on_ambiguous"]),
+                preset.prompt,
+                preset.on_ambiguous,
+                preset.fail_closed,
+                _hash(preset.prompt, preset.on_ambiguous),
                 preset_id,
             ),
         )
@@ -434,13 +540,19 @@ def adopt_preset(preset_id: int, user: AuthedUser = Depends(require_user)):
     return _after_filter_change(user, row, None)
 
 
-class _ImprovedPrompt(BaseModel):
+class ImprovedPrompt(BaseModel):
+    """What the model wrote, and what it says it changed. The same shape it
+    is asked for and the shape this route returns, because there is nothing
+    in between."""
+
     improved: str
     rationale: str
 
 
 @router.post("/ai/improve-prompt")
-async def improve_prompt(body: ImprovePromptRequest, user: AuthedUser = Depends(require_user)):
+async def improve_prompt(
+    body: ImprovePromptRequest, user: AuthedUser = Depends(require_user)
+) -> ImprovedPrompt:
     cfg = ai_access.require_config(user)
 
     if cfg.key_source == "owner":
@@ -472,7 +584,7 @@ async def improve_prompt(body: ImprovePromptRequest, user: AuthedUser = Depends(
                 "those. rationale: <=50 words on what you changed and why."
             ),
             body.prompt,
-            _ImprovedPrompt,
+            ImprovedPrompt,
             timeout=60.0,
         )
     budget.record_tokens(
@@ -484,4 +596,4 @@ async def improve_prompt(body: ImprovePromptRequest, user: AuthedUser = Depends(
     )
     if not parsed:
         raise HTTPException(502, detail={"code": "AI_ERROR", "message": "no response from model"})
-    return {"improved": parsed.improved, "rationale": parsed.rationale}
+    return parsed
