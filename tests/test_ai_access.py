@@ -1,7 +1,9 @@
 from api import crypto, db
 
 
-def test_missing_model_has_same_reason_in_filter_admission_and_ai_errors(client, user_headers):
+def test_missing_model_has_same_reason_in_filter_admission_and_ai_errors(
+    client, user_headers, runs_permitted
+):
     uid = db.query_one("SELECT id FROM users WHERE sub = 'test-user'")["id"]
     db.execute(
         "UPDATE user_settings SET api_key_enc = %s, ai_provider = 'openai_compatible', ai_model = NULL "
@@ -35,7 +37,9 @@ def test_missing_model_has_same_reason_in_filter_admission_and_ai_errors(client,
     assert db.query_one("SELECT count(*) AS n FROM tasks WHERE kind LIKE 'run%'")["n"] == 0
 
 
-def test_filter_admission_refuses_missing_owner_provider_key(client, user_headers, monkeypatch):
+def test_filter_admission_refuses_missing_owner_provider_key(
+    client, user_headers, monkeypatch, runs_permitted
+):
     from api import ai
 
     monkeypatch.setattr(ai, "server_key", lambda provider: "")

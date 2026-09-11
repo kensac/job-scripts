@@ -35907,13 +35907,30 @@
           },
           "run_all_admission": {
             "$ref": "#/components/schemas/RunDecision"
+          },
+          "may_run_by_hand": {
+            "type": "boolean",
+            "title": "May Run By Hand"
+          },
+          "may_run_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "May Run Message"
           }
         },
         "type": "object",
         "required": [
           "filters",
           "run_all_task",
-          "run_all_admission"
+          "run_all_admission",
+          "may_run_by_hand",
+          "may_run_message"
         ],
         "title": "FilterList"
       },

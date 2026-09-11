@@ -102,6 +102,20 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
         help="Authentik groups whose filter saves re-judge the whole board at once; "
         'everyone else waits for the hourly sweep. "*" means everyone.',
     ),
+    # Groups whose members may start a filter run by hand. Seeded closed, so
+    # only admins can: a run re-judges every posting in the catalog against a
+    # prompt, and it is the most expensive thing a button can do. The hourly
+    # sweep still re-judges everyone's board at batch price, so a person who
+    # cannot press Run is not stuck, only slower. "*" opens it to everyone.
+    "filter_run_groups": ConfigKey(
+        section="Boards",
+        default=[],
+        value_type=list[str],
+        kind="groups",
+        help="Authentik groups whose members may start a filter run by hand. "
+        "Admins always may. Everyone else waits for the hourly sweep. "
+        '"*" means everyone.',
+    ),
     # The board a person sees before they touch a column: Kanishk's own
     # layout on 2026-09-09 (order, hidden columns, pins, widths; no sort,
     # the lenses own that). Served by GET /user/settings when the row

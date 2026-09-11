@@ -598,3 +598,26 @@ def f():
     from tests import factories
 
     return factories
+
+
+@pytest.fixture
+def runs_permitted():
+    """Let this test start a filter run by hand.
+
+    Starting one is admin-only (`filter_run_groups`, seeded empty), because a
+    run re-judges every posting in the catalog and three filter edits on one
+    account cost 10.27 dollars in a day on 2026-09-08.
+
+    A test whose subject is what a run DOES - that a second one is refused,
+    that one person's run does not block another's, which reason a missing key
+    reports - is not a test of who may press the button, and asking it to use
+    an admin would change the thing it is actually about. So it opens the
+    policy instead, which is a config row exactly so it can be opened.
+    """
+    db.execute(
+        "INSERT INTO app_config (key, value) VALUES ('filter_run_groups', %s) "
+        "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+        (db.jsonb(["*"]),),
+    )
+    yield
+    db.execute("DELETE FROM app_config WHERE key = 'filter_run_groups'")
