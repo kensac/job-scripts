@@ -120,3 +120,15 @@ CLEARANCE = PostingCheck(
 
 # The checks a posting page is judged by, in the order a sweep runs them.
 POSTING_CHECKS: dict[str, PostingCheck] = {c.name: c for c in (CLOSED, CLEARANCE)}
+
+# The same set as a plain tuple, for the queries that mean "every posting
+# check" rather than one named one. Bind it as a parameter; do not spell the
+# names into SQL, because a spelled list is one a new check does not join.
+#
+# Not every literal in a query is this. `check_type = 'closed'` in the
+# re-verification sweep means the closed check specifically and is correct as
+# it stands, and board_eligibility.STRUCTURAL names both checks because it
+# gives them DIFFERENT policies: closed must pass, clearance must pass unless
+# the person bypasses it. That is a policy per check, not a set, and widening
+# it to whatever is registered would be a silent change to who sees what.
+POSTING_CHECK_NAMES: tuple[str, ...] = tuple(POSTING_CHECKS)

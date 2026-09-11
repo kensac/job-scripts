@@ -8,6 +8,7 @@ from typing import Any, LiteralString, cast
 import dotenv
 
 from core import pricing
+from core.checks import POSTING_CHECK_NAMES
 from core.pool import connection
 
 logger = logging.getLogger("jobtracker_store")
@@ -77,7 +78,7 @@ def _prefetch_row(r: dict[str, Any]) -> dict[str, Any]:
 
 def prefetch(
     urls: list[str],
-    check_types: tuple = ("closed", "clearance"),
+    check_types: tuple = POSTING_CHECK_NAMES,
     prompt_hashes: tuple = (),
 ) -> None:
     """Bulk-load latest-decided verdicts for a batch of urls into the caches.
