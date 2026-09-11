@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
+from typing import Any
 
 from fastapi import Depends, FastAPI, Request
 
 from api import db, metrics, telemetry
 from api.auth import require_user
 from api.board import visibility
+from api.models import Ok
 from api.problem import REFUSALS
 from api.routers import (
     admin,
@@ -111,11 +113,19 @@ telemetry.instrument_app(app)
 
 
 @app.get("/healthz")
-def healthz():
+def healthz() -> Ok:
     db.query_one("SELECT 1 AS ok")
-    return {"ok": True}
+    return Ok()
 
 
 @app.get("/v1/openapi")
-def openapi_schema(user=Depends(require_user)):
+def openapi_schema(user=Depends(require_user)) -> dict[str, Any]:
+    """The schema itself, so a client can generate against the API it is
+    talking to rather than a file someone remembered to copy.
+
+    One of the two operations that cannot declare a narrower shape, and the
+    reason is that this IS the shape: modelling the OpenAPI document in
+    pydantic to describe a route that returns the OpenAPI document is a
+    circle, not a contract. `tests/test_openapi_current.py` names it, with
+    this reason, so the exception is enforced rather than assumed."""
     return app.openapi()

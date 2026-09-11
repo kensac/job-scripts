@@ -26023,7 +26023,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Ok"
+                }
               }
             }
           }
@@ -26033,6 +26035,7 @@
     "/v1/openapi": {
       "get": {
         "summary": "Openapi Schema",
+        "description": "The schema itself, so a client can generate against the API it is\ntalking to rather than a file someone remembered to copy.\n\nOne of the two operations that cannot declare a narrower shape, and the\nreason is that this IS the shape: modelling the OpenAPI document in\npydantic to describe a route that returns the OpenAPI document is a\ncircle, not a contract. `tests/test_openapi_current.py` names it, with\nthis reason, so the exception is enforced rather than assumed.",
         "operationId": "openapi_schema_v1_openapi_get",
         "parameters": [
           {
@@ -26091,7 +26094,11 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Openapi Schema V1 Openapi Get"
+                }
               }
             }
           },
