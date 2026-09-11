@@ -7,7 +7,14 @@ from typing import Any
 
 from api import db
 from api.ai import batch_results
-from core.comp import COMP_BASES, COMP_INSTRUCTIONS, COMP_PERIODS, PERIOD_TO_YEARLY, CompExtract
+from core.comp import (
+    COMP_BASES,
+    COMP_INPUT_CHARS,
+    COMP_INSTRUCTIONS,
+    COMP_PERIODS,
+    PERIOD_TO_YEARLY,
+    CompExtract,
+)
 from core.shapes import COMP_TASK, EXTRACT_COMP_PER_CYCLE
 from core.store import AI_ELIGIBLE_JOB, CONTENT_LATERAL, VERIFIED_OPEN
 from tasks import rescrape
@@ -75,7 +82,7 @@ async def handle_extract_comp(task_id: int, payload: dict[str, Any]) -> None:
         BatchSpec(
             r["url"],
             COMP_INSTRUCTIONS,
-            r["input_content"][:20000],
+            r["input_content"][:COMP_INPUT_CHARS],
             "CompExtract",
             schema,
             context={"job_id": r["id"], "content_row_id": r["content_row_id"]},

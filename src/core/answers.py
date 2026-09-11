@@ -66,6 +66,10 @@ class VerifyVerdict(BaseModel):
     clearance_reason: str
 
 
+# Posting text beyond this point is not sent to the verification model.
+VERIFY_INPUT_CHARS = 20000
+
+
 _VERIFY_INSTRUCTIONS = (
     "Evaluate this job posting on two independent axes.\n"
     "is_closed: true ONLY on posting-specific signals (no longer available/accepting, "
