@@ -26542,8 +26542,7 @@
           "cost_usd": {
             "anyOf": [
               {
-                "type": "string",
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+                "type": "number"
               },
               {
                 "type": "null"
@@ -27012,8 +27011,7 @@
           "comp_min": {
             "anyOf": [
               {
-                "type": "string",
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+                "type": "number"
               },
               {
                 "type": "null"
@@ -27024,8 +27022,7 @@
           "comp_max": {
             "anyOf": [
               {
-                "type": "string",
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+                "type": "number"
               },
               {
                 "type": "null"
@@ -29801,8 +29798,7 @@
           "comp_min": {
             "anyOf": [
               {
-                "type": "string",
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+                "type": "number"
               },
               {
                 "type": "null"
@@ -29813,8 +29809,7 @@
           "comp_max": {
             "anyOf": [
               {
-                "type": "string",
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+                "type": "number"
               },
               {
                 "type": "null"

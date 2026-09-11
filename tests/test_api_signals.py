@@ -43,7 +43,14 @@ def test_signals_that_cannot_clear_their_floor_are_omitted_not_nulled(client, us
     db.execute("UPDATE jobs SET date_posted = NULL WHERE id = %s", (job_id,))
 
     payload = _detail(client, user_headers, job_id)
-    assert payload["signals"] == {}
+    # A signal that cannot clear its floor is null, and null means it does
+    # not exist. It was an absent key until the shape was declared; the one
+    # consumer tests truthiness, so both read the same to it.
+    assert payload["signals"] == {
+        "posting_age": None,
+        "board_reliability": None,
+        "repost": None,
+    }
 
 
 def test_posting_age_is_absent_when_the_board_supplied_no_date(client, user_headers, f):
@@ -56,7 +63,7 @@ def test_posting_age_is_absent_when_the_board_supplied_no_date(client, user_head
     job_id, _ = _own(f, user_id["id"], source="undated")
     db.execute("UPDATE jobs SET date_posted = NULL WHERE id = %s", (job_id,))
 
-    assert "posting_age" not in _detail(client, user_headers, job_id)["signals"]
+    assert _detail(client, user_headers, job_id)["signals"]["posting_age"] is None
 
 
 def test_posting_age_is_days_since_date_posted(client, user_headers, f):
@@ -79,7 +86,7 @@ def test_a_future_date_posted_is_treated_as_a_feed_error(client, user_headers, f
     job_id, _ = _own(f, user_id["id"], source="futured")
     _set_posted(job_id, -5)
 
-    assert "posting_age" not in _detail(client, user_headers, job_id)["signals"]
+    assert _detail(client, user_headers, job_id)["signals"]["posting_age"] is None
 
 
 # --- board reliability -------------------------------------------------------
@@ -91,7 +98,7 @@ def test_board_reliability_needs_its_sample_floor(client, user_headers, f):
     assert user_id is not None
     job_id, _ = _own(f, user_id["id"], source="tiny-board")
 
-    assert "board_reliability" not in _detail(client, user_headers, job_id)["signals"]
+    assert _detail(client, user_headers, job_id)["signals"]["board_reliability"] is None
 
 
 def test_board_reliability_counts_first_check_rejections(client, user_headers, f):
@@ -144,7 +151,7 @@ def test_repost_ignores_the_same_role_seen_on_another_board(client, user_headers
     _set_posted(job_id, 100)
     _set_posted(other, 10)
 
-    assert "repost" not in _detail(client, user_headers, job_id)["signals"]
+    assert _detail(client, user_headers, job_id)["signals"]["repost"] is None
 
 
 def test_repost_ignores_same_day_duplicates(client, user_headers, f):
@@ -158,7 +165,7 @@ def test_repost_ignores_same_day_duplicates(client, user_headers, f):
     _set_posted(job_id, 30)
     _set_posted(twin, 30)
 
-    assert "repost" not in _detail(client, user_headers, job_id)["signals"]
+    assert _detail(client, user_headers, job_id)["signals"]["repost"] is None
 
 
 def test_repost_reports_a_role_relisted_on_the_same_board_over_time(client, user_headers, f):
@@ -190,7 +197,7 @@ def test_repost_excludes_one_role_listed_across_many_locations(client, user_head
     _set_posted(job_id, 90)
     _set_posted(other_store, 10)
 
-    assert "repost" not in _detail(client, user_headers, job_id)["signals"]
+    assert _detail(client, user_headers, job_id)["signals"]["repost"] is None
 
 
 def test_repost_counts_the_same_role_relisted_at_one_location(client, user_headers, f):

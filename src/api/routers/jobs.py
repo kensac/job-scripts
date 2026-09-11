@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import datetime
-import decimal
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -165,8 +164,12 @@ class BoardRow(BaseModel):
     date_posted: datetime.datetime | None
     added_at: datetime.datetime
     extraction_status: str | None
-    comp_min: decimal.Decimal | None
-    comp_max: decimal.Decimal | None
+    # float, not Decimal. psycopg hands back a Decimal and FastAPI's encoder
+    # turned it into a number, which is what the board has always received and
+    # what its type says. Declaring Decimal would make pydantic serialise it as
+    # a STRING, silently, and the schema would agree with neither.
+    comp_min: float | None
+    comp_max: float | None
     comp_text: str | None
     comp_currency: str | None
     comp_period: str | None
@@ -235,8 +238,8 @@ class JobFacts(BaseModel):
     source: str
     active: bool
     date_posted: datetime.datetime | None
-    comp_min: decimal.Decimal | None
-    comp_max: decimal.Decimal | None
+    comp_min: float | None
+    comp_max: float | None
     comp_text: str | None
     comp_currency: str | None
     comp_period: str | None
