@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import datetime
-from typing import Any
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from api import db, events, signals, sorting, task_admission
 from api import params as params_
@@ -14,6 +14,7 @@ from api.board import visibility
 from api.board.access import require_visible_job
 from api.models import UploadRequest, UserJobPatch, UserJobsBulkIds, UserJobsBulkPatch
 from api.problem import refuse
+from core.comp import CompBasis, CompPeriod
 from core.fetching.urls import normalize_url
 
 router = APIRouter()
@@ -27,27 +28,63 @@ router = APIRouter()
 # comparable. Collapsing NULL into 'closed' would reintroduce exactly the bug
 # this column exists to fix: 114 of the applications flagged dead by `active`
 # have a closed-check that says the posting is open.
-# The applicant tracking system a posting's url lives on, as the board
-# filters and labels it. The host names the ATS for the hosted ones; the
-# rest fold into "other", because on a real board the tail is wide (183
-# employer careers hosts against five systems on 2026-09-07) and a select
-# of 188 entries filters nothing. One expression, used by the row, the
-# filter and the options.
-ATS_SQL = """
-    CASE
-      WHEN j.url ILIKE 'https://jobs.ashbyhq.com/%%' THEN 'ashby'
-      WHEN j.url ILIKE '%%greenhouse.io/%%' THEN 'greenhouse'
-      WHEN j.url ILIKE 'https://jobs.lever.co/%%' THEN 'lever'
-      WHEN j.url ILIKE '%%workable.com/%%' THEN 'workable'
-      WHEN j.url ILIKE '%%myworkdayjobs.com/%%' THEN 'workday'
-      WHEN j.url ILIKE '%%smartrecruiters.com/%%' THEN 'smartrecruiters'
-      WHEN j.url ILIKE '%%icims.com/%%' THEN 'icims'
-      WHEN j.url ILIKE '%%jobvite.com/%%' THEN 'jobvite'
-      WHEN j.url ILIKE '%%bamboohr.com/%%' THEN 'bamboohr'
-      WHEN j.url ILIKE '%%rippling.com/%%' THEN 'rippling'
-      ELSE 'other'
-    END
-"""
+# The host names the ATS for the hosted ones; the rest fold into "other",
+# because on a real board the tail is wide (183 employer careers hosts against
+# five systems on 2026-09-07) and a select of 188 entries filters nothing.
+AtsName = Literal[
+    "ashby",
+    "greenhouse",
+    "lever",
+    "workable",
+    "workday",
+    "smartrecruiters",
+    "icims",
+    "jobvite",
+    "bamboohr",
+    "rippling",
+    "other",
+]
+
+# What a posting check answered. The queries that read one restrict to these
+# two, so a third value cannot arrive without the SQL changing with it.
+Verdict = Literal["passed", "rejected"]
+
+# How a status ended, for a board that must not decide "is this over" or
+# "which tone" by matching a name it hand-copied.
+Outcome = Literal["won", "lost", "withdrawn"]
+
+# Whether the posting is still up, as the closed check saw it. Three-valued and
+# it must stay that way: null is "never checked", which is not "open".
+Openness = Literal["open", "closed"]
+
+# Where a posting's own extraction got to. Written only by the upload handler
+# and the extractors.
+ExtractionStatus = Literal["pending", "done", "failed"]
+# The applicant tracking system a posting's url lives on, as one definition
+# used by the row, the filter and the options. The patterns and the names are
+# one table so a system added to the SQL cannot be missing from the type that
+# declares what the column can hold, which is how a Literal turns into a 500.
+_ATS_PATTERNS: dict[AtsName, str] = {
+    "ashby": "https://jobs.ashbyhq.com/%%",
+    "greenhouse": "%%greenhouse.io/%%",
+    "lever": "https://jobs.lever.co/%%",
+    "workable": "%%workable.com/%%",
+    "workday": "%%myworkdayjobs.com/%%",
+    "smartrecruiters": "%%smartrecruiters.com/%%",
+    "icims": "%%icims.com/%%",
+    "jobvite": "%%jobvite.com/%%",
+    "bamboohr": "%%bamboohr.com/%%",
+    "rippling": "%%rippling.com/%%",
+}
+
+ATS_SQL = (
+    "\n    CASE\n"
+    + "".join(
+        f"      WHEN j.url ILIKE '{pattern}' THEN '{name}'\n"
+        for name, pattern in _ATS_PATTERNS.items()
+    )
+    + "      ELSE 'other'\n    END\n"
+)
 
 _JOB_ROW = f"""
     j.id AS job_id, j.company, j.title, j.locations, j.terms, j.source,
@@ -100,7 +137,7 @@ DEFAULT_STATUSES = [
 # "is this over" or "which tone" by matching a name it hand-copied: a status
 # absent here is in play with no outcome. The withdrawn pair mirrors
 # mail_pipeline.WITHDRAWN_STATUSES.
-_STATUS_META: dict[str, tuple[bool, str | None]] = {
+_STATUS_META: dict[str, tuple[bool, Outcome | None]] = {
     "Accepted": (True, "won"),
     "Rejected": (True, "lost"),
     "No Longer Interested": (True, "withdrawn"),
@@ -115,11 +152,11 @@ class StatusMeta(BaseModel):
 
     name: str
     terminal: bool
-    outcome: str | None
+    outcome: Outcome | None
 
 
 class AtsCount(BaseModel):
-    ats: str
+    ats: AtsName
     count: int
 
 
@@ -157,13 +194,13 @@ class BoardRow(BaseModel):
     locations: list[str]
     terms: list[str]
     source: str
-    ats: str
+    ats: AtsName
     url: str
     raw_url: str | None
     active: bool
     date_posted: datetime.datetime | None
     added_at: datetime.datetime
-    extraction_status: str | None
+    extraction_status: ExtractionStatus | None
     # float, not Decimal. psycopg hands back a Decimal and FastAPI's encoder
     # turned it into a number, which is what the board has always received and
     # what its type says. Declaring Decimal would make pydantic serialise it as
@@ -172,9 +209,13 @@ class BoardRow(BaseModel):
     comp_max: float | None
     comp_text: str | None
     comp_currency: str | None
-    comp_period: str | None
-    comp_basis: str | None
-    closed_verdict: str | None
+    # Narrowed on measurement, not on the vocabulary alone: every comp_period
+    # and comp_basis in production is one of these, so the type is the real
+    # value set rather than a hope. `status` below is NOT narrowed, and that is
+    # the same rule going the other way: it is free text by design.
+    comp_period: CompPeriod | None
+    comp_basis: CompBasis | None
+    closed_verdict: Openness | None
     status: str | None
     date_applied: datetime.date | None
     notes: str | None
@@ -242,10 +283,10 @@ class JobFacts(BaseModel):
     comp_max: float | None
     comp_text: str | None
     comp_currency: str | None
-    comp_period: str | None
-    comp_basis: str | None
+    comp_period: CompPeriod | None
+    comp_basis: CompBasis | None
     created_at: datetime.datetime
-    closed_verdict: str | None
+    closed_verdict: Openness | None
 
 
 class OwnRow(BaseModel):
@@ -276,7 +317,7 @@ class CheckVerdict(BaseModel):
     """The latest verdict for one posting check."""
 
     check_type: str
-    status: str
+    status: Verdict
     reason: str | None
     model: str | None
     created_at: datetime.datetime
@@ -288,7 +329,7 @@ class FilterVerdictRow(BaseModel):
 
     name: str
     enabled: bool
-    status: str | None
+    status: Verdict | None
     reason: str | None
     model: str | None
     created_at: datetime.datetime | None
@@ -317,7 +358,7 @@ class Explained(BaseModel):
     an answer about the posting, not a failure to get one."""
 
     check: str
-    status: str
+    status: Verdict
     reason: str | None
     refetched: bool | None = None
     closure_signal: str | None = None
@@ -353,14 +394,33 @@ class ReportFiled(BaseModel):
     created_at: datetime.datetime
 
 
+class TaskProgress(BaseModel):
+    """What `set_progress` writes: how far, out of how much, and a line for a
+    person. A handler may add counts it wants queryable afterwards (what an
+    ingest fetched, kept, cached, failed to fetch) and the health detectors
+    read those keys, so extras are carried rather than dropped.
+
+    The three have defaults because a parent task's progress is written by
+    `jsonb_set` on one key, and a row that has reported nothing should read as
+    nothing rather than fail the request that asks for it."""
+
+    model_config = ConfigDict(extra="allow")
+
+    done: int = 0
+    total: int = 0
+    label: str = ""
+
+
 class TaskState(BaseModel):
     """A task this person started. Ownership lives in the payload, so the
     kinds that stamp no user_id are fleet work with nobody to show them to."""
 
     id: int
     kind: str
-    status: str
-    progress: dict[str, Any] | None
+    status: Literal[
+        "pending", "waiting", "running", "awaiting_batch", "done", "failed", "cancelled"
+    ]
+    progress: TaskProgress | None
     error: str | None
     created_at: datetime.datetime
     started_at: datetime.datetime | None
