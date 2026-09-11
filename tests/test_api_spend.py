@@ -293,30 +293,31 @@ def test_ledger_breakdowns_reconcile_without_verdicts_and_keep_unknown_price(cli
     with db.transaction():
         db.execute("SET LOCAL timezone = 'America/Los_Angeles'")
         body = spend(days=365, user=None)
-    ledger = body["ledger"]
-    assert ledger["basis"] == "recorded_estimate"
-    assert ledger["timezone"] == "UTC"
-    totals = ledger["totals"]
+    # The route declares what it returns, so this reads fields rather than keys.
+    ledger = body.ledger
+    assert ledger.basis == "recorded_estimate"
+    assert ledger.timezone == "UTC"
+    totals = ledger.totals
     assert (
-        totals["calls"],
-        totals["priced_calls"],
-        totals["unpriced_calls"],
-        totals["unknown_model_calls"],
+        totals.calls,
+        totals.priced_calls,
+        totals.unpriced_calls,
+        totals.unknown_model_calls,
     ) == (4, 2, 2, 2)
-    assert totals["cost_usd"] == Decimal("1.25")
-    assert totals["ledger_rows"] == 4
-    assert body["totals"]["calls"] == 0
-    for rows in (ledger["by_model"], ledger["by_day"], body["by_purpose"]):
-        assert sum(row["cost_usd"] for row in rows) == totals["cost_usd"]
-        assert sum(row["calls"] for row in rows) == 4
-        assert sum(row["unpriced_calls"] for row in rows) == 2
-    assert [(str(row["day"]), row["calls"]) for row in ledger["by_day"]] == [
+    assert totals.cost_usd == 1.25
+    assert totals.ledger_rows == 4
+    assert body.totals.calls == 0
+    for rows in (ledger.by_model, ledger.by_day, body.by_purpose):
+        assert sum(row.cost_usd for row in rows) == totals.cost_usd
+        assert sum(row.calls for row in rows) == 4
+        assert sum(row.unpriced_calls for row in rows) == 2
+    assert [(str(row.day), row.calls) for row in ledger.by_day] == [
         (str(day), 2),
         (str(following_day), 2),
     ]
-    unknown = next(row for row in ledger["by_model"] if row["model"] is None)
-    assert unknown["unpriced_calls"] == 2
-    assert body["verdict_diagnostics"]["totals"] == body["totals"]
+    unknown = next(row for row in ledger.by_model if row.model is None)
+    assert unknown.unpriced_calls == 2
+    assert body.verdict_diagnostics.totals == body.totals
 
 
 def test_empty_ledger_has_explicit_zero_coverage(client, admin_headers):

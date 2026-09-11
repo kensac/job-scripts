@@ -412,7 +412,7 @@ Where the old dict omitted keys, set `response_model_exclude_none=True` on the
 route and say so beside the model. Declaring must not change the payload; that
 is the whole reason it is safe to do everywhere.
 
-Two ways it moves that are not obvious, both found the hard way.
+Four ways it moves that are not obvious, each found the hard way.
 
 **A `Decimal` field is served as a JSON string.** psycopg returns a `numeric`
 column as a `Decimal`, and while a route returned a bare dict, FastAPI's
@@ -430,6 +430,15 @@ exact and ERASES the schema, because pydantic derives the serialisation schema
 from the serialiser's return type, so the model becomes `{type: object,
 additionalProperties: true}`. That is the useless generated type this phase
 exists to stop producing, so the null wins and the consumer is checked instead.
+
+**A timestamp gains `Z`.** `2026-09-11T05:10:00.546051+00:00` becomes
+`2026-09-11T05:10:00.546051Z`, the same instant, because pydantic serialises a
+datetime rather than calling `.isoformat()`. Measured against `POST
+/user/views`, which has sent it that way since it was declared.
+
+**A sum is a `Decimal` too.** Postgres returns `numeric` for a sum over a
+bigint column, so a token count arrives as one. Those declare `int`, which is
+what they already were on the wire; the rule above is only about money.
 
 **The completion check for this phase is a generator, not a count.** Running
 `npx openapi-typescript openapi.json` and reading the output is what found the
