@@ -458,3 +458,71 @@ def test_a_filter_save_waits_for_the_sweep_unless_the_group_rejudges_on_change(
         assert at_once["task_id"] is not None or at_once["run_blocked"] is not None
     finally:
         gate([])
+
+
+def _make_filter(client, headers, name="gated"):
+    made = client.post(
+        "/v1/user/filters", json={"name": name, "prompt": "keep backend roles"}, headers=headers
+    )
+    assert made.status_code in (200, 201), made.text
+    return made.json()["id"]
+
+
+def test_a_non_admin_cannot_start_a_run_by_hand(client, user_headers):
+    """A run re-judges every posting in the catalog against a prompt, which is
+    the most expensive thing a button in this product can do.
+
+    Three filter edits on one account cost 10.27 dollars in a day on
+    2026-09-08. That closed the automatic path, `filter_rejudge_on_change_groups`,
+    and left the manual one open; this is the other half.
+    """
+    filter_id = _make_filter(client, user_headers, "no-run-for-you")
+
+    one = client.post(f"/v1/user/filters/{filter_id}/run", headers=user_headers)
+    every = client.post("/v1/user/filters/run-all", headers=user_headers)
+
+    assert one.status_code == 403, one.text
+    assert every.status_code == 403, every.text
+    assert one.json()["detail"]["code"] == "NOT_PERMITTED"
+    assert every.json()["detail"]["code"] == "NOT_PERMITTED"
+
+
+def test_the_button_is_disabled_from_the_same_answer_that_refuses_the_request(client, user_headers):
+    """Two spellings of one rule is how a disabled button and an allowed
+    endpoint come apart, so the list reports the refusal the route enforces."""
+    _make_filter(client, user_headers, "disabled-button")
+
+    listed = client.get("/v1/user/filters", headers=user_headers).json()
+
+    assert listed["run_all_admission"]["allowed"] is False
+    assert listed["run_all_admission"]["reason"] == "NOT_PERMITTED"
+    for row in listed["filters"]:
+        assert row["run_admission"]["allowed"] is False
+        assert row["run_admission"]["reason"] == "NOT_PERMITTED"
+
+
+def test_an_admin_may_still_run(client, admin_headers):
+    """The gate is on who presses it, not on the route existing."""
+    filter_id = _make_filter(client, admin_headers, "admin-may-run")
+
+    started = client.post(f"/v1/user/filters/{filter_id}/run", headers=admin_headers)
+
+    # Anything but the permission refusal: a budget or in-progress block is
+    # this route working, and is not what this test is about.
+    assert started.status_code != 403, started.text
+
+
+def test_opening_the_group_lets_a_non_admin_run(client, user_headers):
+    """The rule is a config row rather than a code literal, so it can be
+    opened without a deploy."""
+    db.execute(
+        "INSERT INTO app_config (key, value) VALUES ('filter_run_groups', %s) "
+        "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+        (db.jsonb(["*"]),),
+    )
+    try:
+        filter_id = _make_filter(client, user_headers, "now-permitted")
+        started = client.post(f"/v1/user/filters/{filter_id}/run", headers=user_headers)
+        assert started.status_code != 403, started.text
+    finally:
+        db.execute("DELETE FROM app_config WHERE key = 'filter_run_groups'")

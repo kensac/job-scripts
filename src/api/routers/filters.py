@@ -15,6 +15,7 @@ from api.board import visibility
 from api.config import group_access_allowed
 from api.models import FilterCreate, FilterPatch, ImprovePromptRequest, Ok
 from api.problem import AI_REFUSALS
+from api.routers.admin.shared import ADMIN_GROUPS
 from core.filters import ON_AMBIGUOUS_VALUES, compute_filter_hash
 
 router = APIRouter()
@@ -148,6 +149,11 @@ def _refuse_second_enabled(user_id: int, except_id: int | None = None) -> None:
 
 
 REJUDGE_GROUPS_KEY = "filter_rejudge_on_change_groups"
+RUN_GROUPS_KEY = "filter_run_groups"
+NOT_PERMITTED_MESSAGE = (
+    "Starting a run by hand is limited to admins. Your board is still re-judged "
+    "by the hourly sweep, at batch price, and fills in as verdicts land."
+)
 DEFERRED_MESSAGE = (
     "The board is re-judged under the new prompt at the next hourly sweep, at batch price, "
     "and fills back in as verdicts land. Press Run to re-evaluate now."
@@ -156,6 +162,33 @@ DEFERRED_MESSAGE = (
 
 def _rejudge_on_change(user: AuthedUser) -> bool:
     return group_access_allowed(REJUDGE_GROUPS_KEY, user.groups)
+
+
+def _run_refusal(user: AuthedUser) -> filter_runs.RunDecision | None:
+    """Whether this person may start a run by hand, as the decision the button
+    already reads, or None when they may.
+
+    A run re-judges every posting in the catalog against a prompt. It is the
+    most expensive thing a button in this product can do: three filter edits on
+    one account cost 10.27 dollars in a day on 2026-09-08, which is what closed
+    `filter_rejudge_on_change_groups`. That closed the automatic path and left
+    the manual one open, so this closes the other half.
+
+    Returned as a `RunDecision` rather than a boolean so the same answer both
+    disables the button and refuses the request. Two spellings of one rule is
+    how a disabled button and an allowed endpoint come apart.
+    """
+    if ADMIN_GROUPS.intersection(user.groups) or group_access_allowed(RUN_GROUPS_KEY, user.groups):
+        return None
+    return filter_runs.RunDecision(
+        allowed=False, reason="NOT_PERMITTED", message=NOT_PERMITTED_MESSAGE, task_id=None
+    )
+
+
+def _refuse_unpermitted_run(user: AuthedUser) -> None:
+    refusal = _run_refusal(user)
+    if refusal:
+        raise HTTPException(403, detail={"code": refusal.reason, "message": refusal.message})
 
 
 def _enqueue_on_change(user: AuthedUser, filter_id: int) -> tuple[int | None, _BLOCKED | None]:
@@ -222,21 +255,22 @@ def list_filters(user: AuthedUser = Depends(require_user)) -> FilterList:
         (user.id,),
     )
     access_failure = budget.access_failure(user)
+    # One refusal, computed once: a person who may not run is told so for every
+    # filter and for run-all, rather than each button asking separately.
+    refusal = _run_refusal(user)
     return FilterList(
         filters=[
             FilterRow(
                 **row.model_dump(),
                 task=_running(user.id, "run_filter", row.id),
-                run_admission=filter_runs.admission(
-                    user.id, row.id, access_failure=access_failure
-                ).decision(),
+                run_admission=refusal
+                or filter_runs.admission(user.id, row.id, access_failure=access_failure).decision(),
             )
             for row in rows
         ],
         run_all_task=_running(user.id, "run_all_filters"),
-        run_all_admission=filter_runs.admission(
-            user.id, None, access_failure=access_failure
-        ).decision(),
+        run_all_admission=refusal
+        or filter_runs.admission(user.id, None, access_failure=access_failure).decision(),
     )
 
 
@@ -361,6 +395,7 @@ def delete_filter(filter_id: int, user: AuthedUser = Depends(require_user)) -> O
 
 @router.post("/user/filters/{filter_id}/run")
 def run_filter(filter_id: int, user: AuthedUser = Depends(require_user)) -> RunQueued:
+    _refuse_unpermitted_run(user)
     if not db.query_one(
         "SELECT id FROM user_filters WHERE id = %s AND user_id = %s", (filter_id, user.id)
     ):
@@ -375,6 +410,7 @@ def run_filter(filter_id: int, user: AuthedUser = Depends(require_user)) -> RunQ
 
 @router.post("/user/filters/run-all")
 def run_all_filters(user: AuthedUser = Depends(require_user)) -> RunQueued:
+    _refuse_unpermitted_run(user)
     task_id, blocked = _enqueue(user, None)
     if blocked:
         raise HTTPException(
