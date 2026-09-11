@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import datetime
 import logging
 import os
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from api import db, sorting
 from api.auth import AuthedUser
+from api.models import Ok
 from api.routers.admin.shared import require_admin
 
 router = APIRouter()
@@ -33,6 +36,46 @@ _USERS_SORTABLE = {
 }
 
 
+class UserLedgerRow(BaseModel):
+    """One person, with the four counts the ledger sorts on. Each is a
+    correlated count rather than a join, so a person with no board rows and no
+    filters still appears with zeros.
+
+    `has_byo_key` says whether they hold their own provider key, which is what
+    decides whose budget their runs come out of. The key itself never leaves
+    the database.
+    """
+
+    id: int
+    sub: str
+    email: str | None
+    name: str | None
+    groups: list[str]
+    created_at: datetime.datetime
+    last_seen_at: datetime.datetime
+    has_byo_key: bool
+    ai_provider: str | None
+    ai_model: str | None
+    bypass_sponsorship_filter: bool | None
+    board_rows: int
+    enabled_filters: int
+    sources: int
+    owner_tokens_week: int
+
+
+class UserLedger(BaseModel):
+    """`sort`, `dir` and `sorts` echo the sort that was applied and `sortable`
+    enumerates the keys, so the page renders the active sort without
+    duplicating the default and never has to guess what it may ask for."""
+
+    users: list[UserLedgerRow]
+    has_more: bool
+    sort: str
+    dir: str
+    sorts: list[dict[str, str]]
+    sortable: list[str]
+
+
 @router.get("/users")
 def list_users(
     limit: int = 50,
@@ -41,7 +84,7 @@ def list_users(
     dir: str = "desc",
     ids: str | None = None,
     user: AuthedUser = Depends(require_admin),
-):
+) -> UserLedger:
     limit = max(1, min(limit, 200))
     sorts = sorting.parse(sort, dir, _USERS_SORTABLE, "last_seen_at")
     # ids= is a bulk lookup: the queue page names workers' tasks by user and
@@ -50,7 +93,8 @@ def list_users(
     # it can.
     wanted = [int(x) for x in (ids or "").split(",") if x.strip().lstrip("-").isdigit()]
     scope = "WHERE u.id = ANY(%(ids)s)" if ids is not None else ""
-    rows = db.query(
+    rows = db.query_as(
+        UserLedgerRow,
         f"""
         SELECT u.id, u.sub, u.email, u.name, u.groups, u.created_at, u.last_seen_at,
                s.api_key_enc IS NOT NULL AS has_byo_key,
@@ -68,22 +112,138 @@ def list_users(
         """,
         {"limit": limit + 1, "offset": max(0, offset), "ids": wanted},
     )
-    return {
-        "users": rows[:limit],
-        "has_more": len(rows) > limit,
+    return UserLedger(
+        users=rows[:limit],
+        has_more=len(rows) > limit,
         # Echoed and enumerated for the same reason as /admin/jobs: the page
         # renders the active sort without duplicating the default and never
         # has to guess the accepted keys.
-        "sort": sorts[0]["key"],
-        "dir": sorts[0]["dir"],
-        "sorts": sorts,
-        "sortable": sorted(_USERS_SORTABLE),
-    }
+        sort=sorts[0]["key"],
+        dir=sorts[0]["dir"],
+        sorts=sorts,
+        sortable=sorted(_USERS_SORTABLE),
+    )
+
+
+class UserProfile(BaseModel):
+    """A person and their settings, minus anything secret. `criteria` and
+    `ai_params` are shaped by what the person saved, so neither is declared
+    further."""
+
+    id: int
+    sub: str
+    email: str | None
+    name: str | None
+    groups: list[str]
+    created_at: datetime.datetime
+    last_seen_at: datetime.datetime
+    ai_provider: str | None
+    ai_model: str | None
+    ai_params: dict[str, Any] | None
+    bypass_sponsorship_filter: bool | None
+    criteria: dict[str, Any] | None
+    has_byo_key: bool
+
+
+class GroupGrant(BaseModel):
+    """A group this person is in that carries a budget. A null budget is
+    uncapped, which is a real answer and not a missing one."""
+
+    group_name: str
+    weekly_token_budget: int | None
+
+
+class UserBudget(BaseModel):
+    """Which cap applies to this person, resolved here rather than left to the
+    page. The Users page showed a weekly total one click from a page showing a
+    5,000,000 budget with nothing saying which cap applied to whom, which
+    invited the reading that an uncapped owner was over budget.
+
+    `owner_key` is whether they spend on the shared key at all; somebody on
+    their own key has no cap to be under.
+    """
+
+    owner_key: bool
+    weekly_token_budget: int | None
+    spent_this_week: int
+    granted_by: list[GroupGrant]
+
+
+class SpendDay(BaseModel):
+    day: datetime.date
+    key_source: str
+    tokens: int
+    calls: int
+
+
+class SpendPurpose(BaseModel):
+    purpose: str
+    model: str | None
+    tokens: int
+    calls: int
+
+
+class BoardStatusCount(BaseModel):
+    """`status` is 'not_applied' where the row has none, so every board row is
+    counted under some heading."""
+
+    status: str
+    count: int
+    hidden: int
+
+
+class UserFilterRow(BaseModel):
+    """A person's filters, without their prompts: this page is about who they
+    are, and the prompt is theirs to read on their own screen."""
+
+    id: int
+    name: str
+    enabled: bool
+    on_ambiguous: str
+    fail_closed: bool
+    updated_at: datetime.datetime
+
+
+class UploadCounts(BaseModel):
+    total: int
+    failed: int
+
+
+class ReportCounts(BaseModel):
+    open: int
+    total: int
+
+
+class RecentTask(BaseModel):
+    id: int
+    kind: str
+    status: str
+    worker: str | None
+    created_at: datetime.datetime
+    finished_at: datetime.datetime | None
+
+
+class UserDetail(BaseModel):
+    """Everything one person's page shows: who they are, what they may spend
+    and what they have spent, what their board and filters look like, and the
+    last ten things the fleet did for them."""
+
+    user: UserProfile
+    budget: UserBudget
+    spend_by_day: list[SpendDay]
+    spend_by_purpose: list[SpendPurpose]
+    board: list[BoardStatusCount]
+    filters: list[UserFilterRow]
+    sources: list[str]
+    uploads: UploadCounts
+    reports: ReportCounts
+    recent_tasks: list[RecentTask]
 
 
 @router.get("/users/{user_id}")
-def user_detail(user_id: int, user: AuthedUser = Depends(require_admin)):
-    u = db.query_one(
+def user_detail(user_id: int, user: AuthedUser = Depends(require_admin)) -> UserDetail:
+    u = db.query_one_as(
+        UserProfile,
         """
         SELECT u.id, u.sub, u.email, u.name, u.groups, u.created_at, u.last_seen_at,
                s.ai_provider, s.ai_model, s.ai_params, s.bypass_sponsorship_filter,
@@ -101,23 +261,38 @@ def user_detail(user_id: int, user: AuthedUser = Depends(require_admin)):
     # a 5,000,000 budget, with nothing saying which cap applied to whom - which
     # invited the reading that the owner was over budget when his group is
     # uncapped. Resolve it here rather than leaving the UI to infer.
-    groups = u.get("groups") or []
+    groups = u.groups
     owner_key, weekly_cap = _budget._owner_budget(groups)
-    granting = db.query(
-        "SELECT group_name, weekly_token_budget FROM group_budgets "
-        "WHERE group_name = ANY(%s) ORDER BY group_name",
-        (groups,),
+    uploads = db.query_one_as(
+        UploadCounts,
+        "SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE extraction_status = 'failed') AS failed "
+        "FROM jobs WHERE uploaded_by = %s",
+        (user_id,),
     )
-    return {
-        "user": u,
-        "budget": {
-            "owner_key": owner_key,
+    reports = db.query_one_as(
+        ReportCounts,
+        "SELECT COUNT(*) FILTER (WHERE status = 'open') AS open, COUNT(*) AS total "
+        "FROM reports WHERE user_id = %s",
+        (user_id,),
+    )
+    # Aggregates with no GROUP BY, so each is exactly one row.
+    assert uploads is not None and reports is not None
+    return UserDetail(
+        user=u,
+        budget=UserBudget(
+            owner_key=owner_key,
             # None means uncapped, which is a real answer and not a missing one.
-            "weekly_token_budget": weekly_cap,
-            "spent_this_week": _budget.spent_this_week(user_id) if owner_key else 0,
-            "granted_by": granting,
-        },
-        "spend_by_day": db.query(
+            weekly_token_budget=weekly_cap,
+            spent_this_week=_budget.spent_this_week(user_id) if owner_key else 0,
+            granted_by=db.query_as(
+                GroupGrant,
+                "SELECT group_name, weekly_token_budget FROM group_budgets "
+                "WHERE group_name = ANY(%s) ORDER BY group_name",
+                (groups,),
+            ),
+        ),
+        spend_by_day=db.query_as(
+            SpendDay,
             """
             SELECT created_at::date AS day, key_source,
                    SUM(total_tokens) AS tokens, COUNT(*) AS calls
@@ -126,14 +301,16 @@ def user_detail(user_id: int, user: AuthedUser = Depends(require_admin)):
             """,
             (user_id,),
         ),
-        "spend_by_purpose": db.query(
+        spend_by_purpose=db.query_as(
+            SpendPurpose,
             """
             SELECT purpose, model, SUM(total_tokens) AS tokens, COUNT(*) AS calls
             FROM api_usage WHERE user_id = %s GROUP BY 1, 2 ORDER BY 3 DESC
             """,
             (user_id,),
         ),
-        "board": db.query(
+        board=db.query_as(
+            BoardStatusCount,
             """
             SELECT COALESCE(NULLIF(status, ''), 'not_applied') AS status,
                    COUNT(*) AS count, COUNT(*) FILTER (WHERE hidden) AS hidden
@@ -141,36 +318,30 @@ def user_detail(user_id: int, user: AuthedUser = Depends(require_admin)):
             """,
             (user_id,),
         ),
-        "filters": db.query(
+        filters=db.query_as(
+            UserFilterRow,
             "SELECT id, name, enabled, on_ambiguous, fail_closed, updated_at "
             "FROM user_filters WHERE user_id = %s ORDER BY id",
             (user_id,),
         ),
-        "sources": [
+        sources=[
             r["source"]
             for r in db.query(
                 "SELECT source FROM user_sources WHERE user_id = %s ORDER BY source",
                 (user_id,),
             )
         ],
-        "uploads": db.query_one(
-            "SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE extraction_status = 'failed') AS failed "
-            "FROM jobs WHERE uploaded_by = %s",
-            (user_id,),
-        ),
-        "reports": db.query_one(
-            "SELECT COUNT(*) FILTER (WHERE status = 'open') AS open, COUNT(*) AS total "
-            "FROM reports WHERE user_id = %s",
-            (user_id,),
-        ),
-        "recent_tasks": db.query(
+        uploads=uploads,
+        reports=reports,
+        recent_tasks=db.query_as(
+            RecentTask,
             """
             SELECT id, kind, status, worker, created_at, finished_at
             FROM tasks WHERE payload->>'user_id' = %s ORDER BY id DESC LIMIT 10
             """,
             (str(user_id),),
         ),
-    }
+    )
 
 
 AUTHENTIK_URL = os.environ.get("AUTHENTIK_URL", "").rstrip("/")
@@ -207,8 +378,19 @@ class InviteBody(BaseModel):
     email: str = Field(min_length=3, max_length=320, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
+class InviteCreated(BaseModel):
+    """`emailed` is false when the invite was created but delivery failed, so
+    the link is returned either way and somebody can send it by hand."""
+
+    ok: bool
+    invite_url: str
+    expires: str
+    emailed: bool
+    pk: str
+
+
 @router.post("/invites")
-def create_invite(body: InviteBody, user: AuthedUser = Depends(require_admin)):
+def create_invite(body: InviteBody, user: AuthedUser = Depends(require_admin)) -> InviteCreated:
     """Email-only onboarding: creates a single-use Authentik invitation bound
     to the jobtracker enrollment flow and emails the link. The invitee picks
     their own username/name/password during enrollment."""
@@ -255,19 +437,37 @@ def create_invite(body: InviteBody, user: AuthedUser = Depends(require_admin)):
             # The invite itself succeeded; only delivery failed. Report it
             # rather than leaving emailed=False unexplained.
             logger.exception(f"invite created but email to {email} failed")
-    return {
-        "ok": True,
-        "invite_url": invite_url,
-        "expires": expires,
-        "emailed": emailed,
-        "pk": inv["pk"],
-    }
+    return InviteCreated(
+        ok=True,
+        invite_url=invite_url,
+        expires=expires,
+        emailed=emailed,
+        pk=inv["pk"],
+    )
+
+
+class Invite(BaseModel):
+    """An outstanding invitation, as Authentik holds it. `pk` is Authentik's
+    id and is what revoking one names."""
+
+    pk: str
+    email: str
+    expires: str | None
+    single_use: bool
+
+
+class InviteList(BaseModel):
+    """`configured` is false when the Authentik environment is missing, which
+    is why the list is empty rather than there being nothing outstanding."""
+
+    rows: list[Invite]
+    configured: bool
 
 
 @router.get("/invites")
-def list_invites(user: AuthedUser = Depends(require_admin)):
+def list_invites(user: AuthedUser = Depends(require_admin)) -> InviteList:
     if not _invites_configured():
-        return {"rows": [], "configured": False}
+        return InviteList(rows=[], configured=False)
     with _authentik_client() as ak:
         resp = ak.get(
             "/stages/invitation/invitations/", params={"flow__slug": AUTHENTIK_INVITE_FLOW}
@@ -277,20 +477,22 @@ def list_invites(user: AuthedUser = Depends(require_admin)):
                 502, detail={"code": "AUTHENTIK_ERROR", "message": "invitation list failed"}
             )
         data = resp.json()
-    rows = [
-        {
-            "pk": r["pk"],
-            "email": (r.get("fixed_data") or {}).get("email", ""),
-            "expires": r.get("expires"),
-            "single_use": r.get("single_use", True),
-        }
-        for r in data.get("results", [])
-    ]
-    return {"rows": rows, "configured": True}
+    return InviteList(
+        rows=[
+            Invite(
+                pk=r["pk"],
+                email=(r.get("fixed_data") or {}).get("email", ""),
+                expires=r.get("expires"),
+                single_use=r.get("single_use", True),
+            )
+            for r in data.get("results", [])
+        ],
+        configured=True,
+    )
 
 
 @router.delete("/invites/{pk}")
-def revoke_invite(pk: str, user: AuthedUser = Depends(require_admin)):
+def revoke_invite(pk: str, user: AuthedUser = Depends(require_admin)) -> Ok:
     if not _invites_configured():
         raise HTTPException(
             503,
@@ -302,7 +504,7 @@ def revoke_invite(pk: str, user: AuthedUser = Depends(require_admin)):
             raise HTTPException(
                 502, detail={"code": "AUTHENTIK_ERROR", "message": "invitation revoke failed"}
             )
-    return {"ok": True}
+    return Ok()
 
 
 class GroupBudgetPut(BaseModel):
@@ -310,25 +512,42 @@ class GroupBudgetPut(BaseModel):
     allowed_models: list[str] | None = Field(default=None, max_length=50)
 
 
+class GroupBudget(BaseModel):
+    """What a group may spend on the shared key. A null budget is uncapped and
+    null allowed_models is every model in the catalog; both are real answers
+    rather than unset ones."""
+
+    group_name: str
+    weekly_token_budget: int | None
+    allowed_models: list[str] | None
+
+
+class GroupBudgets(BaseModel):
+    """`catalog_models` is every model the server can run, so the form offers
+    a closed list rather than a text box that fails on save."""
+
+    groups: list[GroupBudget]
+    catalog_models: list[str]
+
+
 @router.get("/group-budgets")
-def list_group_budgets(user: AuthedUser = Depends(require_admin)):
+def list_group_budgets(user: AuthedUser = Depends(require_admin)) -> GroupBudgets:
     from api import ai
 
-    return {
-        "groups": db.query(
+    return GroupBudgets(
+        groups=db.query_as(
+            GroupBudget,
             "SELECT group_name, weekly_token_budget, allowed_models "
-            "FROM group_budgets ORDER BY group_name"
+            "FROM group_budgets ORDER BY group_name",
         ),
-        "catalog_models": sorted(
-            m["model"] for models in ai.MODEL_CATALOG.values() for m in models
-        ),
-    }
+        catalog_models=sorted(m["model"] for models in ai.MODEL_CATALOG.values() for m in models),
+    )
 
 
 @router.put("/group-budgets/{group_name}")
 def put_group_budget(
     group_name: str, body: GroupBudgetPut, user: AuthedUser = Depends(require_admin)
-):
+) -> GroupBudget:
     from api import ai
 
     if body.allowed_models is not None:
@@ -349,14 +568,14 @@ def put_group_budget(
         """,
         (group_name, body.weekly_token_budget, body.allowed_models),
     )
-    return {
-        "group_name": group_name,
-        "weekly_token_budget": body.weekly_token_budget,
-        "allowed_models": body.allowed_models,
-    }
+    return GroupBudget(
+        group_name=group_name,
+        weekly_token_budget=body.weekly_token_budget,
+        allowed_models=body.allowed_models,
+    )
 
 
 @router.delete("/group-budgets/{group_name}")
-def delete_group_budget(group_name: str, user: AuthedUser = Depends(require_admin)):
+def delete_group_budget(group_name: str, user: AuthedUser = Depends(require_admin)) -> Ok:
     db.execute("DELETE FROM group_budgets WHERE group_name = %s", (group_name,))
-    return {"ok": True}
+    return Ok()
