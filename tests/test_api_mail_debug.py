@@ -307,10 +307,14 @@ def test_a_literal_route_is_registered_before_the_one_that_would_swallow_it():
     """/admin/mail/analytics was silently answered by /admin/mail/{message_id}
     until it was moved above it. FastAPI matches in registration order and does
     not fall through on a failed conversion, so the literal path has to come
-    first - and nothing about the code reads wrong when it does not."""
-    from api.routers import mail
+    first - and nothing about the code reads wrong when it does not.
 
-    paths = [r.path for r in mail.router.routes]
+    Read off the module that declares both, because the mail router is now
+    assembled from several and holds their includes rather than their routes.
+    Order between two paths is decided where they are written down."""
+    from api.routers.mail import debug
+
+    paths = [r.path for r in debug.router.routes]
     assert paths.index("/admin/mail/analytics") < paths.index("/admin/mail/{message_id}")
 
 
@@ -361,7 +365,7 @@ def test_refusing_to_match_is_filterable_apart_from_failing_to(client, admin_hea
 def test_never_attempted_has_a_name_rather_than_being_an_absence(client, admin_headers, f):
     """A third state, and the one worth filtering for when hunting failures.
     Reachable only as a gap in a list is not reachable."""
-    from api.routers.mail import NEVER_ATTEMPTED
+    from api.routers.mail.debug import NEVER_ATTEMPTED
 
     uid = f.make_user()
     _msg_with(f, uid, "rejection", None, "e")

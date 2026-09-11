@@ -64,7 +64,7 @@ real only relocates the problem.
 | 3 | Catalog observations are facts | A re-listing is an appended row, not a mutated column |
 | 4 | ~~Derivations are content addressed~~ | **Dropped 2026-09-10.** Measured; see below |
 | 5 | Files move to the shape | `tasks` is a sibling of `api` and `core`. `apply` is a package. The rest is judgement about churn |
-| 6 | The long files are split | No module does four jobs. `admin.py` 2,136 lines, `mail.py` 2,117, `resolve.py` 1,337, `health.py` 1,155, `tasks/runtime.py` 796. `orm.py` is done |
+| 6 | The long files are split | No module does four jobs. `admin.py` 2,136 lines, `resolve.py` 1,337, `health.py` 1,155, `tasks/runtime.py` 796. `orm.py` and `mail.py` are done |
 | 7 | Every operation declares what it returns | `openapi.json` generates the frontend's types. 173 of 190 operations declare nothing today |
 
 **The API contract was the invariant, and is now a price.** `openapi.json` is
@@ -215,8 +215,9 @@ biggest: 796 lines holding queue primitives, batch orchestration, config
 constants and model routing, imported by 24 modules. Splitting it is what
 would let the layering be stated as layers, because three of the four imports
 that make `api` and `api.tasks` circular are reaching past the handlers for a
-queue primitive. `admin.py` and `mail.py` are bigger and simpler: they are
-long because nothing ever split them, not because anything is tangled.
+queue primitive. `admin.py` is bigger and simpler: long because nothing ever
+split it, not because anything is tangled. `mail.py` was the same and is now
+`routers/mail/`, four surfaces and the helpers two of them share.
 
 **7, the schema is the contract.** Measured 2026-09-10: of 190 operations,
 **173 return an undeclared object** and 11 declare a shape. So `openapi.json`
@@ -383,17 +384,35 @@ the repository after the store.
 `make coverage` prints it. Nothing gates on a threshold yet, and adding one
 before the sweeps are covered would only ratchet in what is already there.
 
-**The long files.** `routers/admin.py` 2,136 lines, `routers/mail.py` 2,117,
-`routers/resolve.py` 1,339, `health.py` 1,155. Long because nothing split
-them. Phase 6.
+**The long files.** `routers/admin.py` 2,136 lines, `routers/resolve.py`
+1,339, `health.py` 1,155. Long because nothing split them. Phase 6.
 
 `orm.py` was the first taken, and it is the easy shape of this problem: 51
 table definitions with no logic between them, so the split is a partition and
 the only risk is that a table stops being registered. It is now `api/orm/`,
 six modules named for what the tables are for, and `__init__.py` imports all
-six so one metadata still carries all 51. The others are not this shape; a
-router splits along what its handlers do, and that is a reading, not a
-partition.
+six so one metadata still carries all 51.
+
+`mail.py` was the second, and it is the other shape: a router splits along
+what its handlers do, which is a reading before it is a move. The reading gave
+four surfaces - the administrator's debug view over everybody's mail, a
+person's applications, a person's own messages and conversations, and the
+queue of proposals and actions the mail produces - plus one module for what
+the administrator and the owner both do, because correcting a classification
+and listing what a message could belong to are the same job over different
+mailboxes.
+
+A router split costs one thing the table split did not: **registration order
+is part of what a router means**. FastAPI matches in that order, so a literal
+path registered after the parameterised one that would swallow it is a live
+defect, and `openapi.json` is keyed in it too. Grouping by subject therefore
+moves routes relative to each other. Four operations moved here, the
+`/user/suggestions` and `/user/actions` pair, which no longer sit between two
+runs of mail routes. No path overlaps another, so nothing changed about what
+matches what, and the generated schema parses equal to the committed one
+document for document. The committed file carries the new key order, because
+CI regenerates it and would otherwise push the reordering back as a commit
+nobody wrote.
 
 **`user_jobs` answers two questions.** What a person keeps, and what the
 sweeps carry. Phase 2b, deferred: moving the sweeps' scope changes what gets
