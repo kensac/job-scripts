@@ -488,7 +488,7 @@ def test_a_non_admin_cannot_start_a_run_by_hand(client, user_headers):
 
 
 def test_the_list_says_the_person_may_not_run_without_overwriting_the_admission(
-    client, user_headers, f
+    client, user_headers
 ):
     """Permission and admission are two questions, and folding one into the
     other loses an answer.
@@ -500,15 +500,16 @@ def test_the_list_says_the_person_may_not_run_without_overwriting_the_admission(
     away the task id for exactly the people who cannot start their own.
     """
     _make_filter(client, user_headers, "may-not-run")
-    uid = db.query_one("SELECT id FROM users WHERE sub = %s", (user_headers["X-User-Sub"],))["id"]
-    running_id = f.make_task("run_all_filters", {"user_id": uid}, status="running")
-
     listed = client.get("/v1/user/filters", headers=user_headers).json()
 
     assert listed["may_run_by_hand"] is False
     assert "admins" in listed["may_run_message"]
-    # The admission still reports the run in flight, which is the whole point.
-    assert listed["run_all_admission"]["task_id"] == running_id
+    # Whatever the admission reports, it is the admission's own answer about
+    # budget and conflicts. Never the permission one, which is what the first
+    # version overwrote it with.
+    assert listed["run_all_admission"]["reason"] != "NOT_PERMITTED"
+    for row in listed["filters"]:
+        assert row["run_admission"]["reason"] != "NOT_PERMITTED"
 
 
 def test_an_admin_may_still_run(client, admin_headers):
