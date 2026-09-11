@@ -26,9 +26,9 @@ from api.apply import drafting as drafts
 from api.apply import policy as extension_policy
 from api.apply import recipes as extension_recipes
 from api.auth import AuthedUser, require_user
+from api.board.person_state import write_board_row as _write_board_row
 from api.models import Ok
 from api.problem import AI_REFUSALS, SIZE_REFUSALS, refuse
-from api.routers.jobs import _write_board_row
 from core.fetching.forms import posting_urls
 
 router = APIRouter()
