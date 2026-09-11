@@ -13,6 +13,7 @@ from api import db, events, health, scoping, task_admission
 from api import params as params_
 from api.auth import AuthedUser
 from api.routers.admin.shared import SUMMARY_MAX_HOURS, require_admin
+from api.task_admission import TaskProgress
 from core import pricing
 
 router = APIRouter()
@@ -303,7 +304,7 @@ class FleetWorker(BaseModel):
     alive: bool
     task_kind: str | None
     task_status: str | None
-    task_progress: dict[str, Any] | None
+    task_progress: TaskProgress | None
     task_started_at: datetime.datetime | None
     done_24h: int | None
     failed_24h: int | None

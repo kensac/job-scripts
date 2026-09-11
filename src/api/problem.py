@@ -56,12 +56,16 @@ def _problems(*statuses: int) -> dict[int | str, dict[str, type[BaseModel]]]:
 # nearly every route in the application.
 REFUSALS = _problems(400, 401, 403, 404, 409)
 
+# A route that depends on something outside this application answering
+# sensibly: a model, or the identity provider. The tokens or the round trip
+# are already spent when it does not, so this has to read as a real outcome
+# rather than a crash.
+PROVIDER_REFUSALS = _problems(502)
+
 # A route that asks a model something. 402 is `require_config` refusing on
 # entitlement or budget, and it is a refusal a client acts on rather than
-# reports: the answer is to add a key or raise a cap. 502 is the model
-# answering with nothing usable after the tokens were already spent, which
-# has to read as a real outcome rather than a crash.
-AI_REFUSALS = _problems(402, 502)
+# reports: the answer is to add a key or raise a cap.
+AI_REFUSALS = _problems(402) | PROVIDER_REFUSALS
 
 # A route that takes a file or a page capture. The cap is stated in the
 # message, because a client that knows the limit can say so before the upload
