@@ -13,7 +13,7 @@ from api import db, pagination, scoping, task_admission
 from api import params as params_
 from api.auth import AuthedUser
 from api.routers.admin.shared import require_admin
-from api.routers.jobs import report_kinds
+from api.routers.jobs import ReportKind, report_kinds
 
 router = APIRouter()
 
@@ -178,11 +178,6 @@ class ReportedPosting(BaseModel):
     posting_closed: bool
 
 
-class ReportKind(BaseModel):
-    kind: str
-    label: str
-
-
 class ReportQueue(BaseModel):
     """`can_close_posting` tells the drawer this build has the close route, so
     it offers the action rather than discovering a 404."""
@@ -246,7 +241,7 @@ def list_reports(
     return ReportQueue(
         rows=rows,
         **paging.metadata(total),
-        report_kinds=[ReportKind(**k) for k in report_kinds()],
+        report_kinds=report_kinds(),
         # The drawer offers "close this posting" only on a build that has it.
         can_close_posting=True,
         filters=params_.applied(status=statuses, user=scoping.echo(ids)),
