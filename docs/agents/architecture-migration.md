@@ -64,7 +64,7 @@ real only relocates the problem.
 | 3 | Catalog observations are facts | A re-listing is an appended row, not a mutated column |
 | 4 | ~~Derivations are content addressed~~ | **Dropped 2026-09-10.** Measured; see below |
 | 5 | Files move to the shape | `tasks` is a sibling of `api` and `core`. `apply` is a package. The rest is judgement about churn |
-| 6 | The long files are split | No module does four jobs. `admin.py` 2,136 lines, `resolve.py` 1,337, `health.py` 1,155, `tasks/runtime.py` 796. `orm.py` and `mail.py` are done |
+| 6 | The long files are split | No module does four jobs. `resolve.py` 1,339 lines, `health.py` 1,159, `tasks/runtime.py` 775. `orm.py`, `mail.py` and `admin.py` are done |
 | 7 | Every operation declares what it returns | `openapi.json` generates the frontend's types. 173 of 190 operations declare nothing today |
 
 **The API contract was the invariant, and is now a price.** `openapi.json` is
@@ -215,9 +215,10 @@ biggest: 796 lines holding queue primitives, batch orchestration, config
 constants and model routing, imported by 24 modules. Splitting it is what
 would let the layering be stated as layers, because three of the four imports
 that make `api` and `api.tasks` circular are reaching past the handlers for a
-queue primitive. `admin.py` is bigger and simpler: long because nothing ever
-split it, not because anything is tangled. `mail.py` was the same and is now
-`routers/mail/`, four surfaces and the helpers two of them share.
+queue primitive. `admin.py` and `mail.py` were bigger and simpler: long
+because nothing ever split them, not because anything was tangled. Both are
+taken. `mail.py` is `routers/mail/`, four surfaces and the helpers two of them
+share; `admin.py` is `routers/admin/`, ten subjects and one shared module.
 
 **7, the schema is the contract.** Measured 2026-09-10: of 190 operations,
 **173 return an undeclared object** and 11 declare a shape. So `openapi.json`
@@ -418,8 +419,8 @@ the repository after the store.
 `make coverage` prints it. Nothing gates on a threshold yet, and adding one
 before the sweeps are covered would only ratchet in what is already there.
 
-**The long files.** `routers/admin.py` 2,136 lines, `routers/resolve.py`
-1,339, `health.py` 1,155. Long because nothing split them. Phase 6.
+**The long files.** `routers/resolve.py` 1,339 lines, `health.py` 1,159. Long
+because nothing split them. Phase 6.
 
 `orm.py` was the first taken, and it is the easy shape of this problem: 51
 table definitions with no logic between them, so the split is a partition and
@@ -447,6 +448,23 @@ matches what, and the generated schema parses equal to the committed one
 document for document. The committed file carries the new key order, because
 CI regenerates it and would otherwise push the reordering back as a commit
 nobody wrote.
+
+`routers/admin.py` was the third, 2,131 lines and 46 routes, and the reading
+found ten subjects plus a `shared.py`: the preset library, the boards, the
+people, the fleet, the catalog, a manual re-check, data health, the tunables,
+the verdict ledger, the extension recipes. Two pairs that looked like separate
+groups were not. A request for a board to be added is about the boards, and a
+report about a posting is about that posting, so neither became a module of
+its own, and the second sits beside the `close_posting` its drawer calls.
+`require_admin` has one definition and the package re-exports it, because ten
+routers outside the package import it from there.
+
+It paid the registration-order cost above, and larger than `mail.py` did: the
+subjects interleave, so 30 of the 162 path entries move. Nothing gains, loses
+or alters an operation, the spec parses equal document for document, and the
+one literal-before-parameter ordering this surface depends on,
+`/queries/options` before `/queries/{query_id}`, is preserved inside the
+module that holds both.
 
 **`user_jobs` answers two questions.** What a person keeps, and what the
 sweeps carry. Phase 2b, deferred: moving the sweeps' scope changes what gets

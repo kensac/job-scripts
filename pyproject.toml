@@ -227,6 +227,6 @@ ignore_imports = [
     "api.routers.task_models -> tasks",
     "api.routers.apply -> tasks.application",
     "api.routers.experiments -> tasks.experiments",
-    "api.routers.admin -> tasks.locations",
+    "api.routers.admin.catalog -> tasks.locations",
     "api.routers.application -> tasks.application",
 ]
