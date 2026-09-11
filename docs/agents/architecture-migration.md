@@ -92,6 +92,17 @@ cannot be casually rebuilt.
 **Never in a loop:** any write to the production database, and any migration
 that can refuse to apply ([migrations.md](migrations.md)).
 
+## Revising this document
+
+This plan was written from a reading of the codebase, and a phase that opens
+the code may find the reading wrong. When it does, change the document in the
+same pull request as the work, and say in the commit what the evidence was.
+A phase that turns out to be unnecessary is a finding; record that it was
+dropped and why, rather than deleting the row.
+
+What may not change without asking: the API contract stays the invariant, and
+a phase marked as needing a person keeps needing one.
+
 ## Parallel cutover
 
 A phase that changes how something is computed builds the new answer beside
