@@ -7,8 +7,9 @@ import datetime
 
 import pytest
 
-from api import db, verdicts
-from core import ats
+from api import db
+from api.ai import verdicts
+from core.fetching import ats
 
 
 def _job(url: str, posted: datetime.date | None) -> int:

@@ -14,7 +14,8 @@ import datetime
 
 import pytest
 
-from api import db, mail_match
+from api import db
+from api.mail import match as mail_match
 from tasks import mail_match as match_task
 from tests.conftest import _auth_headers
 
@@ -321,7 +322,7 @@ def test_an_action_says_what_would_close_it_without_a_person(client, me):
     you", and it is a property of the kind rather than of the item's age. An
     approach you never answered has an empty one by construction; an assessment
     invite is closed by the acknowledgement that follows it."""
-    from api import mail_pipeline
+    from api.mail import pipeline as mail_pipeline
 
     headers, uid = me
     app = _app(uid)
@@ -354,7 +355,7 @@ def test_one_response_carries_all_four_kinds(client, me, f):
     _attach(_msg(uid, "<all1@x>", "rejection", "Acme"), app)
     _attach(_msg(uid, "<all2@x>", "offer", "Acme"), app)
     _msg(uid, "<all3@x>", "rejection", "Nowhere")
-    from api import mail_pipeline
+    from api.mail import pipeline as mail_pipeline
 
     mail_pipeline.sync_action_items(app)
 

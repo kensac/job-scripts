@@ -8,7 +8,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
-from api import batch_results, db
+from api import db
+from api.ai import batch_results
 from core.providers.spec import StructuredOutput
 from core.routing import TaskShape
 from core.store import AI_ELIGIBLE_JOB, CONTENT_LATERAL, VERIFIED_OPEN

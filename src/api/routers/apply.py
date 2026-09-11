@@ -14,18 +14,18 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from api import (
     ai,
-    ai_access,
     apply,
     budget,
     db,
     events,
     telemetry,
 )
+from api.ai import access as ai_access
 from api.apply import policy as extension_policy
 from api.apply import recipes as extension_recipes
 from api.auth import AuthedUser, require_user
 from api.routers.jobs import _write_board_row
-from core.forms import posting_urls
+from core.fetching.forms import posting_urls
 from tasks import application as drafts
 
 router = APIRouter()

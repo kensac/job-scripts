@@ -17,7 +17,9 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from api import board_eligibility, criteria, db, metrics
+from api import db, metrics
+from api.board import criteria
+from api.board import eligibility as board_eligibility
 
 logger = logging.getLogger("jobtracker_worker")
 
@@ -199,7 +201,7 @@ def demote_closed() -> int:
 
 async def handle_recompute_board(task_id: int, payload: dict[str, Any]) -> None:
     """One person's board membership, from the full predicate, in place."""
-    from api import visibility
+    from api.board import visibility
     from tasks.runtime import set_progress
 
     user_id = int(payload["user_id"])

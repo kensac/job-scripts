@@ -18,8 +18,8 @@ from urllib.parse import unquote, urlparse
 import ftfy
 import requests
 
-from core.posting import JobPosting
-from core.urls import normalize_url
+from core.fetching.posting import JobPosting
+from core.fetching.urls import normalize_url
 
 logger = logging.getLogger(__name__)
 

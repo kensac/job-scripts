@@ -57,7 +57,8 @@ async def test_replaying_consumed_filter_result_does_not_duplicate_user_usage(f,
 
 
 def test_receipt_transaction_rolls_back_verdict_usage_and_ack_together(f):
-    from api import batch_results, budget
+    from api import budget
+    from api.ai import batch_results
     from core.batch import BatchSpec
     from core.store import add_ai_result
 
@@ -115,7 +116,7 @@ def test_fleet_usage_and_batch_totals_rollback_together(f, monkeypatch):
 
 
 def test_checkpoint_refuses_receipt_owned_by_another_task(f):
-    from api import batch_results
+    from api.ai import batch_results
 
     first = f.make_task("extract_comp", {})
     second = f.make_task("extract_comp", {"batch_ids": ["same"]})
@@ -127,7 +128,7 @@ def test_checkpoint_refuses_receipt_owned_by_another_task(f):
 
 
 def test_request_snapshot_retries_and_collected_input_use_original_bytes(f):
-    from api.batch_results import checkpoint, snapshot_specs, unconsumed
+    from api.ai.batch_results import checkpoint, snapshot_specs, unconsumed
     from core.batch import BatchSpec
 
     tid = f.make_task("run_filter_batch_chunk", {}, status="running")

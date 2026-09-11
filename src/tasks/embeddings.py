@@ -7,7 +7,8 @@ import math
 import os
 from typing import Any
 
-from api import batch_results, db
+from api import db
+from api.ai import batch_results
 from api.task_admission import ACTIVE_STATUSES
 from core.batch import BatchSpec
 from core.embeddings import (

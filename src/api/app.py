@@ -5,8 +5,9 @@ from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Request
 
-from api import db, metrics, telemetry, visibility
+from api import db, metrics, telemetry
 from api.auth import require_user
+from api.board import visibility
 from api.routers import (
     admin,
     analytics,

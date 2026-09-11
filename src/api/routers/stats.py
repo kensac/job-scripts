@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
-from api import db, visibility
+from api import db
 from api.auth import AuthedUser, require_user
+from api.board import visibility
 
 router = APIRouter()
 

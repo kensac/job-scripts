@@ -9,8 +9,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from api import db, visibility
-from core import forms
+from api import db
+from api.board import visibility
+from core.fetching import forms
 from tasks import application as drafts
 from tests.test_application import GREENHOUSE, _owner_config, _user_id
 from tests.test_application import _job_for as _row_for

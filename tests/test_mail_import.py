@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from core.mail_import import (
+from core.mail.importer import (
     ImportedMessage,
     _olm_entries,
     _olm_parse,

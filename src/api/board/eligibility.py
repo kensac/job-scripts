@@ -7,7 +7,8 @@ while visibility grants uploads and acted-on rows independently of these gates.
 
 from typing import Any
 
-from api import criteria, db
+from api import db
+from api.board import criteria
 
 SUBSCRIBED = "j.source IN (SELECT source FROM user_sources WHERE user_id = %(uid)s)"
 

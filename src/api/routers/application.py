@@ -18,11 +18,12 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from api import ai, ai_access, budget, db, task_admission
+from api import ai, budget, db, task_admission
+from api.ai import access as ai_access
 from api.auth import AuthedUser, require_user
-from api.job_access import require_visible_job
-from core import forms
+from api.board.access import require_visible_job
 from core.answers import DEFAULT_STYLE
+from core.fetching import forms
 from core.store import get_content
 from tasks import application as drafts
 

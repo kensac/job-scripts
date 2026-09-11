@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import datetime
 
-from api import db, mail_match
+from api import db
+from api.mail import match as mail_match
 
 
 def _app(uid: int, company: str, provenance: str, applied_at: datetime.datetime) -> int:

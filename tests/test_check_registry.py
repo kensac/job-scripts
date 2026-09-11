@@ -41,7 +41,8 @@ def registered_check(monkeypatch):
 
 
 def _stub_model(monkeypatch, spec):
-    from api import ai, verdicts
+    from api import ai
+    from api.ai import verdicts
 
     monkeypatch.setattr(ai, "server_key", lambda provider: "sk-test")
 

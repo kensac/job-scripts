@@ -12,7 +12,8 @@ import re
 from typing import Any
 from urllib.parse import urlparse
 
-from api import db, filter_runs, hosts, metrics, telemetry, verdicts
+from api import db, filter_runs, hosts, metrics, telemetry
+from api.ai import verdicts
 from core.store import add_ai_result
 from tasks.board import content_attempted_urls, content_ready_urls
 from tasks.runtime import Deferred, cancelled, set_progress
@@ -21,8 +22,9 @@ logger = logging.getLogger("jobtracker_worker")
 
 
 async def handle_ingest_source(task_id: int, payload: dict[str, Any]) -> None:
-    from core import boards, catalog
-    from core.posting import FALLBACK_CUTOFF_TS
+    from core import catalog
+    from core.fetching import boards
+    from core.fetching.posting import FALLBACK_CUTOFF_TS
 
     source = db.query_one("SELECT * FROM sources WHERE name = %s AND active", (payload["source"],))
     if not source:

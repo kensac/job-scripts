@@ -6,12 +6,14 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from api import ai_access, db, events, signals, sorting, task_admission, visibility
+from api import db, events, signals, sorting, task_admission
 from api import params as params_
+from api.ai import access as ai_access
 from api.auth import AuthedUser, require_user
-from api.job_access import require_visible_job
+from api.board import visibility
+from api.board.access import require_visible_job
 from api.models import UploadRequest, UserJobPatch, UserJobsBulkIds, UserJobsBulkPatch
-from core.urls import normalize_url
+from core.fetching.urls import normalize_url
 
 router = APIRouter()
 
@@ -473,7 +475,7 @@ async def explain_check(job_id: int, body: ExplainBody, user: AuthedUser = Depen
     import dataclasses
 
     from api import budget
-    from api import verdicts as _verdicts
+    from api.ai import verdicts as _verdicts
     from core.answers import FilterVerdict
     from core.checks import POSTING_CHECKS
     from core.filters import build_custom_instructions

@@ -537,7 +537,7 @@ def test_a_human_verdict_is_recorded_even_when_it_repeats_the_matcher(f):
     """Suppressing repeats applies to the MATCHER. That a person looked and
     affirmed the answer is a different fact from the tiers producing it again,
     and it is the fact actor_user_id exists to carry."""
-    from api import mail_match
+    from api.mail import match as mail_match
 
     uid = f.make_user()
     mid = _message(uid, sent_at=datetime.datetime(2026, 3, 2, tzinfo=datetime.UTC))
@@ -564,7 +564,7 @@ def test_an_unattachable_kind_stops_reading_as_a_matching_failure(f):
     were reclassified, so they sat in the user's "say where this belongs"
     queue - work the system already knew belonged nowhere. Re-deciding them
     records the refusal the predicate downstream actually tests for."""
-    from api import mail_match
+    from api.mail import match as mail_match
 
     uid = f.make_user()
     mid = _message(uid, sent_at=datetime.datetime(2026, 3, 2, tzinfo=datetime.UTC))

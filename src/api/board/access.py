@@ -19,8 +19,9 @@ from __future__ import annotations
 
 from fastapi import HTTPException
 
-from api import db, visibility
+from api import db
 from api.auth import AuthedUser
+from api.board import visibility
 
 
 def _visible_job(user: AuthedUser, job_id: int, columns: str) -> dict | None:
@@ -33,7 +34,7 @@ def _visible_job(user: AuthedUser, job_id: int, columns: str) -> dict | None:
     into an append-only log with no user_id - flip a job's closed status for
     EVERY user at once, because latest-row-per-(url, check_type) wins globally.
 
-    The gate is the board's own membership (api.visibility.FAST) rather than
+    The gate is the board's own membership (api.board.visibility.FAST) rather than
     a new predicate. A fourth spelling of "can this user see this job" is how
     the first three drifted.
     """

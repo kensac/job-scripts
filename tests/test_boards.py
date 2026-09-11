@@ -1,4 +1,4 @@
-"""core.boards: the listing fetchers, over rows copied from the live feeds.
+"""core.fetching.boards: the listing fetchers, over rows copied from the live feeds.
 
 Every excerpt below is a verbatim row from the board it names, fetched on
 2026-09-04, so the fixture is the producer's shape rather than an expectation
@@ -12,7 +12,7 @@ import datetime
 
 import pytest
 
-from core import boards
+from core.fetching import boards
 
 NOW = datetime.datetime(2026, 9, 4, 12, tzinfo=datetime.UTC)
 

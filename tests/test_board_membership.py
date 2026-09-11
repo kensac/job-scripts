@@ -6,7 +6,8 @@ from __future__ import annotations
 
 import pytest
 
-from api import db, visibility
+from api import db
+from api.board import visibility
 from tasks import board as board_tasks
 from tests.test_api_jobs import _insert_job, _job_ids, _pass_closed, _subscribe, _uid
 

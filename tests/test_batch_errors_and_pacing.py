@@ -13,7 +13,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from api import db, health, verdicts
+from api import db, health
+from api.ai import verdicts
 from core import batch
 from core.store import add_ai_result
 
@@ -134,7 +135,7 @@ def test_a_paced_host_defers_once_its_hour_is_used(client, admin_headers):
 @pytest.mark.asyncio
 async def test_a_deferred_fetch_writes_nothing_so_the_next_cycle_retries(monkeypatch):
     from api import fetching
-    from core import ats
+    from core.fetching import ats
 
     db.execute(
         "INSERT INTO app_config (key, value) VALUES ('fetch_host_limits', %s) "

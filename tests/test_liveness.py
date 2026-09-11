@@ -96,8 +96,8 @@ def test_the_two_visibility_predicates_agree():
     valuable thing in this file, because no fixture reproduces the
     combinations real data contains.
     """
-    from api import criteria
-    from api.visibility import FULL
+    from api.board import criteria
+    from api.board.visibility import FULL
 
     user = db.query_one("SELECT id FROM users ORDER BY id LIMIT 1")
     if user is None:

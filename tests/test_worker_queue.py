@@ -817,7 +817,7 @@ async def test_non_transient_error_still_fails_immediately(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_content_backfill_caches_pages_and_skips_covered_jobs(monkeypatch):
-    from core import ats as core_ats
+    from core.fetching import ats as core_ats
     from core.store import add_ai_result
 
     db.execute(
@@ -871,8 +871,8 @@ async def test_content_backfill_caches_pages_and_skips_covered_jobs(monkeypatch)
 async def test_full_sweep_rechecks_even_fresh_verdicts(monkeypatch):
     """A forced sweep must overturn verdicts made today. Skipping them is
     exactly what would preserve the stale-evidence verdicts it exists to fix."""
-    from core import ats as core_ats
     from core import batch as core_batch
+    from core.fetching import ats as core_ats
     from core.store import add_ai_result
 
     checked = []

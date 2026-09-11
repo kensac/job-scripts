@@ -24,8 +24,10 @@ from __future__ import annotations
 import datetime
 import logging
 
-from api import board_eligibility, criteria, db
-from api.board_eligibility import settings_params
+from api import db
+from api.board import criteria
+from api.board import eligibility as board_eligibility
+from api.board.eligibility import settings_params
 from api.queue import enqueue
 
 logger = logging.getLogger("jobtracker_api")

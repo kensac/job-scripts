@@ -8,8 +8,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from api import db, fetching, verdicts
-from core import ats
+from api import db, fetching
+from api.ai import verdicts
+from core.fetching import ats
 
 
 def _resp(text: str, status: int = 200, ctype: str = "text/html; charset=utf-8", url: str = ""):

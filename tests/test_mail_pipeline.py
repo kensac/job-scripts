@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import datetime
 
-from api import db, mail_pipeline
+from api import db
+from api.mail import pipeline as mail_pipeline
 
 
 def _app(user_id: int, **kw) -> int:
@@ -180,8 +181,8 @@ def test_detaching_a_message_closes_the_action_it_asked_for(f):
     """An item whose event no longer reaches the application is stranded:
     nothing will ever resolve it, and it stays open forever asking for
     something about an application it is not part of."""
-    from api import mail_match
-    from api.mail_pipeline import sync_action_items
+    from api.mail import match as mail_match
+    from api.mail.pipeline import sync_action_items
 
     uid = f.make_user()
     app = db.query_one(
@@ -216,7 +217,7 @@ def test_withdrawn_is_the_one_stage_only_the_person_can_assert(f):
     """It was declared vocabulary with no producer: TERMINAL named it, the API
     served it, the frontend rendered a column for it, and nothing could ever
     reach it - because no employer sends mail saying you pulled out."""
-    from api.mail_pipeline import WITHDRAWN_STATUSES, stage_for
+    from api.mail.pipeline import WITHDRAWN_STATUSES, stage_for
 
     events = [{"id": 1, "kind": "acknowledgement", "sent_at": None}]
     assert stage_for(events) == "acknowledged"
@@ -228,7 +229,7 @@ def test_withdrawing_beats_a_later_acknowledgement(f):
     """ATS systems send acknowledgements on a schedule that has nothing to do
     with the decision. Withdrawal is asserted by the person rather than
     inferred from what an employer sent, so it outranks all of it."""
-    from api.mail_pipeline import stage_for
+    from api.mail.pipeline import stage_for
 
     events = [
         {"id": 1, "kind": "rejection", "sent_at": None},
@@ -241,7 +242,7 @@ def test_withdrawing_beats_a_later_acknowledgement(f):
 def test_every_declared_stage_has_something_that_produces_it():
     """A stage the API names and nothing can reach is a column the frontend
     renders forever at zero, and a total its parts never sum to."""
-    from api import mail_pipeline
+    from api.mail import pipeline as mail_pipeline
 
     declared = set(mail_pipeline.STAGE_ORDER) | set(mail_pipeline.TERMINAL)
     from_events = set(mail_pipeline._EVENT_TO_STAGE.values())
@@ -261,7 +262,7 @@ def test_settles_on_separates_awaiting_from_never_closeable():
     because no email says "you accepted". Rendering both as open asserts a
     live obligation for the second that has never existed.
     """
-    from api.mail_pipeline import settles_on
+    from api.mail.pipeline import settles_on
 
     assert "acknowledgement" in settles_on("complete_assessment")
     assert "interview_scheduled" in settles_on("schedule_interview")
@@ -275,7 +276,7 @@ def test_every_action_kind_declares_what_settles_it():
     """A kind that opens items but is absent from _RESOLVING_EVENTS would be
     silently never-closeable, which is the same defect as an empty list but
     without saying so."""
-    from api.mail_pipeline import _EVENT_TO_ACTION, _RESOLVING_EVENTS
+    from api.mail.pipeline import _EVENT_TO_ACTION, _RESOLVING_EVENTS
 
     assert set(_EVENT_TO_ACTION.values()) <= set(_RESOLVING_EVENTS), (
         "an action kind with no _RESOLVING_EVENTS entry cannot declare itself never-closeable"

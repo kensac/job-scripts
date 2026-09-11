@@ -101,7 +101,7 @@ async def fetch_page(url: str) -> tuple[str | None, bool]:
     thing that can actually tell a job posting from a careers index.
     """
     from api import ssrf
-    from core.scrape import extract_url_content_ex
+    from core.fetching.scrape import extract_url_content_ex
 
     # The browser runs with --no-sandbox --disable-web-security and will fetch
     # whatever it is pointed at, including cloud metadata and services on the
@@ -169,7 +169,7 @@ async def fetch_static(url: str, min_chars: int) -> str | None:
     whole this way in 0.3s; the rest were shells, which the gate rejects.
     """
     from api import ssrf
-    from core.ats import clean_html
+    from core.fetching.ats import clean_html
 
     error = await asyncio.to_thread(ssrf.public_url_error, url)
     if error:

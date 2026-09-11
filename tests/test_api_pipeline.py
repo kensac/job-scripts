@@ -661,7 +661,7 @@ def test_an_action_nothing_can_close_is_closeable_by_the_person(client, user_hea
 def test_recomputing_does_not_reopen_what_the_person_closed(client, user_headers):
     """sync_action_items runs on every pass. A manual resolution that the next
     recomputation undoes is not a resolution."""
-    from api.mail_pipeline import sync_action_items
+    from api.mail.pipeline import sync_action_items
 
     uid = db.query_one("SELECT id FROM users WHERE email = %s", ("user@example.com",))["id"]
     app_id = _app(uid, company="Acme", title="Engineer")

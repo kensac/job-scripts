@@ -26,8 +26,8 @@ import re
 from dataclasses import dataclass
 
 # Hosts that send application mail. The ATS markers are lifted from
-# core.ats rather than restated, so a resolver added there is picked up here.
-from core.ats import RESOLVERS
+# core.fetching.ats rather than restated, so a resolver added there is picked up here.
+from core.fetching.ats import RESOLVERS
 
 # Domains no ATS resolver covers, either because we never fetch their postings
 # or because the mail comes from a different host than the listing does.

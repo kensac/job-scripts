@@ -3,12 +3,12 @@ from __future__ import annotations
 import hashlib
 
 from api import ai, fetching, ssrf, worker
-from api import criteria as crit
+from api.board import criteria as crit
 from core import filters, pricing
 from tasks import runtime as tasks_runtime
 
 # ---------------------------------------------------------------------------
-# api.criteria
+# api.board.criteria
 # ---------------------------------------------------------------------------
 
 

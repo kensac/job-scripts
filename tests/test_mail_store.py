@@ -9,8 +9,9 @@ from __future__ import annotations
 
 import datetime
 
-from api import db, mail_store
-from core.mail_import import ImportedMessage
+from api import db
+from api.mail import store as mail_store
+from core.mail.importer import ImportedMessage
 
 
 def _msg(**kw) -> ImportedMessage:

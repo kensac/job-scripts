@@ -239,7 +239,7 @@ class UserResume(Base):
 
 class ApplicationForm(Base):
     """The questions a posting's application form asks, read once per url
-    from the ATS (core.forms). questions is NULL when the host cannot be
+    from the ATS (core.fetching.forms). questions is NULL when the host cannot be
     read; error says why the last read failed."""
 
     __tablename__ = "application_forms"
@@ -370,7 +370,7 @@ class AiExperimentResult(Base):
 class BoardVisible(Base):
     """The computed membership of a person's board: every job the full
     visibility predicate admits, written by the recompute_board task and read
-    by every board request. See api.visibility."""
+    by every board request. See api.board.visibility."""
 
     __tablename__ = "board_visible"
     __table_args__ = (Index("idx_board_visible_user", "user_id", "computed_at"),)

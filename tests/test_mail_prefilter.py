@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import pytest
 
-from core.mail_prefilter import ATS_DOMAINS, looks_job_related
+from core.mail.prefilter import ATS_DOMAINS, looks_job_related
 
 
 def _hit(**kw) -> bool:
@@ -76,9 +76,9 @@ def test_reason_identifies_the_rule_that_fired():
 
 
 def test_ats_domains_are_inherited_from_the_resolvers():
-    """core.ats already knows which hosts are ATSes. Restating them here would
+    """core.fetching.ats already knows which hosts are ATSes. Restating them here would
     be a second list free to drift from the one the matcher uses."""
-    from core.ats import RESOLVERS
+    from core.fetching.ats import RESOLVERS
 
     for resolver in RESOLVERS:
         for marker in resolver.markers:

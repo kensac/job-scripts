@@ -11,7 +11,8 @@ import logging
 import os
 from typing import Any
 
-from api import db, verdicts
+from api import db
+from api.ai import verdicts
 from core.store import SUBSCRIBED_SOURCE
 from tasks.board import fetch_retry_interval
 from tasks.runtime import SCRAPE_CONCURRENCY, AdaptiveLimiter, cancelled, set_progress

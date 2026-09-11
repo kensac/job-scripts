@@ -1124,7 +1124,7 @@ async def run_single_check(body: RunCheckBody, user: AuthedUser = Depends(requir
     fresh row becomes the latest for that (url, check_type), so visibility
     re-derives from it immediately. No downstream re-run needed, since
     visibility is a read-time predicate rather than stored derived state."""
-    from api import verdicts as _verdicts
+    from api.ai import verdicts as _verdicts
     from core.answers import FilterVerdict
     from core.checks import POSTING_CHECKS
     from core.filters import build_custom_instructions
@@ -1644,7 +1644,7 @@ def close_posting(job_id: int, body: ClosePostingBody, user: AuthedUser = Depend
     still lists it, and a board can keep listing a posting that should never
     have passed.
     """
-    from api import verdicts as _verdicts
+    from api.ai import verdicts as _verdicts
 
     job = db.query_one("SELECT url, company, title FROM jobs WHERE id = %s", (job_id,))
     if not job:

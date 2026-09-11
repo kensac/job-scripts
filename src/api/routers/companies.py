@@ -28,9 +28,10 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from api import db, mail_pipeline, rates, signals
+from api import db, rates, signals
 from api import params as params_
 from api.auth import AuthedUser
+from api.mail import pipeline as mail_pipeline
 from api.routers.admin import require_admin
 
 router = APIRouter(prefix="/admin")

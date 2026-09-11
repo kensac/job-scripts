@@ -371,7 +371,7 @@ def test_recheck_refetches_and_reports_gone_without_asking_the_model(
 ):
     """The reported bug: a recheck over cached text said 'open' for a posting
     that had since started redirecting to a careers page."""
-    from api import verdicts
+    from api.ai import verdicts
     from core.store import add_ai_result
 
     db.execute(
@@ -772,7 +772,8 @@ def test_a_recheck_runs_on_the_chosen_model_and_that_choice_becomes_the_default(
     """Kanishk: a re-check should offer another model and default to the one
     last used for that option. The choice is per check option, persisted on
     the user's prefs, and offered back with the models the caller may run."""
-    from api import ai, verdicts
+    from api import ai
+    from api.ai import verdicts
     from core.checks import JobClosedResponse
 
     db.execute(

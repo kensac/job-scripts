@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import datetime
 
-from api import db, mail_match
+from api import db
+from api.mail import match as mail_match
 
 
 def _application(user_id: int, *, company=None, title=None, job_id=None, applied_at=None) -> int:
@@ -25,7 +26,7 @@ def _application(user_id: int, *, company=None, title=None, job_id=None, applied
 
 
 def test_exact_link_beats_everything(f):
-    """ATS mail links back to the posting, and core.ats reduces both sides to
+    """ATS mail links back to the posting, and core.fetching.ats reduces both sides to
     the same canonical form - so this tier agrees by construction rather than
     by a parallel spelling."""
     uid = f.make_user()

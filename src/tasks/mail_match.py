@@ -1,6 +1,6 @@
 """Attach classified mail to applications, and create the applications it implies.
 
-The matcher in `api.mail_match` has always worked; it had nothing to work
+The matcher in `api.mail.match` has always worked; it had nothing to work
 against. `applications` was empty, so every tier returned UNMATCHED and the
 whole outcome side of the product stayed dark while 67k messages classified.
 
@@ -21,8 +21,9 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from api import db, mail_match
-from api.mail_pipeline import sync_action_items
+from api import db
+from api.mail import match as mail_match
+from api.mail.pipeline import sync_action_items
 from tasks.runtime import set_progress
 
 logger = logging.getLogger("jobtracker_worker")

@@ -11,8 +11,9 @@ import datetime
 
 import pytest
 
-from api import db, mail_store, oauth
-from core.mail_import import ImportedMessage
+from api import db, oauth
+from api.mail import store as mail_store
+from core.mail.importer import ImportedMessage
 from tasks import mail_sync
 
 

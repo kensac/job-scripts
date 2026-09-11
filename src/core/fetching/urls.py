@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
-from core import ats
+from core.fetching import ats
 
 TRACKING_PARAMS = {
     "utm_source",

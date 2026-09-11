@@ -11,8 +11,8 @@ from types import SimpleNamespace
 import pytest
 
 from api import db
-from core import forms
 from core.answers import DEFAULT_STYLE
+from core.fetching import forms
 from tasks import application as drafts
 
 

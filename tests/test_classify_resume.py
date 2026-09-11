@@ -23,8 +23,9 @@ import datetime
 
 import pytest
 
-from api import db, mail_store
-from api.mail_store import ImportedMessage
+from api import db
+from api.mail import store as mail_store
+from api.mail.store import ImportedMessage
 from tasks import mail_classify
 from tests.factories import finished
 

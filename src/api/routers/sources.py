@@ -3,10 +3,11 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from api import db, visibility
+from api import db
 from api.auth import AuthedUser, require_user
+from api.board import visibility
 from api.models import SourcesPut
-from core import boards
+from core.fetching import boards
 
 router = APIRouter()
 

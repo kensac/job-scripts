@@ -425,7 +425,7 @@ def test_a_draft_never_names_a_gap_and_an_empty_draft_does_not_fill_a_form(clien
 
 
 def test_the_form_page_maps_back_to_the_posting_on_every_host():
-    from core.forms import posting_urls
+    from core.fetching.forms import posting_urls
 
     assert posting_urls("https://jobs.ashbyhq.com/rogo/abc/application?utm=x") == [
         "https://jobs.ashbyhq.com/rogo/abc",

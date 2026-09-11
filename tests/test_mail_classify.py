@@ -11,9 +11,10 @@ import datetime
 
 import pytest
 
-from api import db, mail_store
+from api import db
+from api.mail import store as mail_store
 from core import pricing, providers
-from core.mail_import import ImportedMessage
+from core.mail.importer import ImportedMessage
 from core.routing import resolve
 from tasks import HANDLERS, mail_classify
 from tests.factories import make_task
@@ -53,7 +54,7 @@ def _events(message_id: int):
 
 async def _run(monkeypatch, payload, results):
     async def fake(task_id, shape, specs):
-        from api import batch_results
+        from api.ai import batch_results
         from core.batch import BatchResult
 
         chosen = resolve(shape)

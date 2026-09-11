@@ -3,7 +3,8 @@ from __future__ import annotations
 import datetime
 import logging
 
-from api import batch_results, budget, db
+from api import budget, db
+from api.ai import batch_results
 
 logger = logging.getLogger("jobtracker_worker")
 PURPOSE = "application"

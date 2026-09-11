@@ -1,11 +1,11 @@
-"""core.ats: the Oracle Recruiting and Workable resolvers, over bodies copied
+"""core.fetching.ats: the Oracle Recruiting and Workable resolvers, over bodies copied
 from the live APIs on 2026-09-05 and trimmed to the keys read."""
 
 from __future__ import annotations
 
 import datetime
 
-from core import ats
+from core.fetching import ats
 
 
 class _Resp:

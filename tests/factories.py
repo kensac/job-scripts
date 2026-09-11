@@ -287,7 +287,7 @@ def make_batch_result(
     model: str | None = None,
     batch_id: str | None = None,
 ):
-    from api import batch_results
+    from api.ai import batch_results
     from core.batch import BatchResult
 
     batch_id = batch_id or f"batch-{task_id}"
