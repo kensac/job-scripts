@@ -229,9 +229,9 @@ class TestCustomVerdictCostCliff:
         """The real cost of a model switch, and it is not a forked log.
 
         Model appears in no resolution key, so the board is unaffected. But
-        tasks/filters.py skips a check by calling get_custom_result WITH the
-        model, so the first cycle answered by a different model sees no cached
-        verdicts and re-runs the whole candidate set at full price - about
+        the filter evaluator skips a check by calling get_custom_result WITH
+        the model, so the first cycle answered by a different model sees no
+        cached verdicts and re-runs the whole candidate set at full price - about
         $1.32 for the one enabled filter today, $6.19 if all ten were live.
 
         Pinned here so that widening a call site to two models cannot be done
@@ -249,16 +249,16 @@ class TestCustomVerdictCostCliff:
         # the board never notice a switch at all.
         assert get_custom_result(url, "hash-1") is not None
 
-    def test_the_filter_sweep_is_the_caller_that_scopes_by_model(self):
+    def test_the_filter_evaluator_scopes_cache_by_model(self):
         """If this call site stops passing the model, the cliff above stops
         existing and this test should be deleted with it - not left asserting
         a coupling that no longer holds."""
         import inspect
 
-        from tasks import filters
+        from tasks import filter_execution
 
-        source = inspect.getsource(filters)
-        assert "get_custom_result(url, prompt_hash, model=cfg.model)" in source
+        source = inspect.getsource(filter_execution)
+        assert 'get_custom_result(job["url"], snapshot.prompt_hash, model=cfg.model)' in source
 
 
 def test_no_call_site_still_hardcodes_a_batched_model():
