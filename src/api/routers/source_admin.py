@@ -17,6 +17,7 @@ listed in, and the two are not one module.
 
 from __future__ import annotations
 
+import datetime
 import logging
 import re
 
@@ -33,8 +34,155 @@ logger = logging.getLogger("jobtracker_api")
 router = APIRouter(prefix="/admin")
 
 
+class CatalogSource(BaseModel):
+    """A source row as stored, plus the format read off its URL. `kind` is
+    never a column: it is derived from `listings_url` every time, so it cannot
+    drift from what ingest will do with the row."""
+
+    name: str
+    listings_url: str
+    description: str
+    active: bool
+    created_at: datetime.datetime
+    company: str | None
+    title_pattern: str | None
+    ingest_interval_hours: int
+    kind: str
+
+
+class SourceName(BaseModel):
+    """The vocabulary a picker needs, and nothing that costs a join over
+    jobs."""
+
+    name: str
+    active: bool
+    groups: list[str]
+    kind: str
+
+
+class SourceNames(BaseModel):
+    sources: list[SourceName]
+
+
+class CatalogCounts(BaseModel):
+    """What a dashboard tile needs. `by_kind` counts active sources per board
+    format; `last_ingest` counts sources by how their most recent pull ended."""
+
+    sources: int
+    active: int
+    by_kind: dict[str, int]
+    last_ingest: dict[str, int]
+    bundles: int
+
+
+class Ingesting(BaseModel):
+    """The pull queued or running for a board, so the page can disable its
+    button from server state rather than guessing."""
+
+    id: int
+    status: str
+    created_at: datetime.datetime
+
+
+class SourceLedger(BaseModel):
+    """One row of the full list. `title_pattern` is deliberately absent: it is
+    a regex repeated on most rows and only the edit form reads it, through
+    GET /admin/sources/{name}.
+
+    `last_ingest_at` says the fetch worked. `last_new_posting_at` says the
+    fetch found something we had not already seen. The gap between them is
+    what retires a source."""
+
+    name: str
+    listings_url: str
+    description: str
+    active: bool
+    created_at: datetime.datetime
+    company: str | None
+    ingest_interval_hours: int
+    groups: list[str]
+    jobs: int
+    subscribers: int
+    last_ingest_status: str | None
+    last_ingest_at: datetime.datetime | None
+    last_ingest_error: str | None
+    last_new_posting_at: datetime.datetime | None
+    kind: str
+    task: Ingesting | None
+
+
+class SourceLedgers(BaseModel):
+    sources: list[SourceLedger]
+
+
+class Attached(BaseModel):
+    """What still hangs off a source, and therefore what deleting it would
+    orphan."""
+
+    jobs: int
+    subscribers: int
+    board_rows: int
+
+
+class SourceDeleted(BaseModel):
+    ok: bool
+    deleted: str
+    was_attached: Attached
+
+
+class SourcesSwitched(BaseModel):
+    """What was asked for, what the selection resolved to, and which rows
+    actually moved. `selected` and `changed` differ by the rows that already
+    held the value."""
+
+    active: bool | None
+    ingest_interval_hours: int | None
+    selected: list[str]
+    changed: list[str]
+
+
+class PatternSamples(BaseModel):
+    admitted: list[str]
+    excluded: list[str]
+
+
+class PatternPreview(BaseModel):
+    """What a candidate pattern would admit, against every title this board
+    has listed. `would_add` is screened titles it lets in, `would_drop` is
+    catalog titles it turns away. Nothing is written."""
+
+    source: str
+    title_pattern: str
+    titles: int
+    admitted: int
+    excluded: int
+    would_add: int
+    would_drop: int
+    samples: PatternSamples
+
+
+class ScreenedPosting(BaseModel):
+    url: str
+    company: str
+    title: str
+    locations: list[str]
+    date_posted: datetime.datetime | None
+    pattern: str
+    first_seen_at: datetime.datetime
+    last_seen_at: datetime.datetime
+
+
+class ScreenedPostings(BaseModel):
+    source: str
+    rows: list[ScreenedPosting]
+    total: int
+    has_more: bool
+
+
 @router.get("/sources")
-def admin_list_sources(shape: str = "full", user: AuthedUser = Depends(require_admin)):
+def admin_list_sources(
+    shape: str = "full", user: AuthedUser = Depends(require_admin)
+) -> SourceNames | CatalogCounts | SourceLedgers:
     """shape=full is the ledger. shape=names is the vocabulary (name, active,
     kind, bundles) for pickers and filters; shape=counts is what a dashboard
     tile needs. Both skip the per-source aggregation over jobs, tasks and
@@ -48,9 +196,17 @@ def admin_list_sources(shape: str = "full", user: AuthedUser = Depends(require_a
             FROM sources s ORDER BY s.active DESC, s.name
             """
         )
-        for r in rows:
-            r["kind"] = boards.kind(r.pop("listings_url"))
-        return {"sources": rows}
+        return SourceNames(
+            sources=[
+                SourceName(
+                    name=r["name"],
+                    active=r["active"],
+                    groups=r["groups"],
+                    kind=boards.kind(r["listings_url"]),
+                )
+                for r in rows
+            ]
+        )
     if shape == "counts":
         total = db.query_one(
             "SELECT COUNT(*) AS sources, COUNT(*) FILTER (WHERE active) AS active FROM sources"
@@ -68,13 +224,13 @@ def admin_list_sources(shape: str = "full", user: AuthedUser = Depends(require_a
             ) t GROUP BY status
             """
         )
-        return {
-            "sources": total["sources"] if total else 0,
-            "active": total["active"] if total else 0,
-            "by_kind": by_kind,
-            "last_ingest": {r["status"]: r["n"] for r in last_ingest},
-            "bundles": (db.query_one("SELECT COUNT(*) AS n FROM source_groups") or {}).get("n", 0),
-        }
+        return CatalogCounts(
+            sources=total["sources"] if total else 0,
+            active=total["active"] if total else 0,
+            by_kind=by_kind,
+            last_ingest={r["status"]: r["n"] for r in last_ingest},
+            bundles=(db.query_one("SELECT COUNT(*) AS n FROM source_groups") or {}).get("n", 0),
+        )
 
     # Each fact is aggregated once over its table and joined, rather than
     # computed per source in a correlated subquery. At 751 sources the
@@ -134,7 +290,7 @@ def admin_list_sources(shape: str = "full", user: AuthedUser = Depends(require_a
     # surprise. The last_ingest CTE answers "how did the last one go";
     # this answers "is one going".
     in_flight = {
-        r["source"]: {"id": r["id"], "status": r["status"], "created_at": r["created_at"]}
+        r["source"]: Ingesting(id=r["id"], status=r["status"], created_at=r["created_at"])
         for r in db.query(
             """
             SELECT DISTINCT ON (payload->>'source') payload->>'source' AS source,
@@ -148,10 +304,18 @@ def admin_list_sources(shape: str = "full", user: AuthedUser = Depends(require_a
     # The format is read off the URL, never stored, so it cannot drift from
     # what ingest will actually do with the row. This is the top-level
     # category the switch endpoint selects by.
-    for r in rows:
-        r["kind"] = boards.kind(r["listings_url"])
-        r["task"] = in_flight.get(r["name"])
-    return {"sources": rows}
+    return SourceLedgers(
+        sources=[
+            SourceLedger(**r, kind=boards.kind(r["listings_url"]), task=in_flight.get(r["name"]))
+            for r in rows
+        ]
+    )
+
+
+_SOURCE_COLS = (
+    "name, listings_url, description, active, created_at, company, title_pattern, "
+    "ingest_interval_hours"
+)
 
 
 class SourceBody(BaseModel):
@@ -190,7 +354,7 @@ def _check_source(listings_url: str, company: str | None, title_pattern: str | N
 
 
 @router.post("/sources")
-def create_source(body: SourceBody, user: AuthedUser = Depends(require_admin)):
+def create_source(body: SourceBody, user: AuthedUser = Depends(require_admin)) -> CatalogSource:
     if not body.name or not body.listings_url:
         raise HTTPException(
             400, detail={"code": "MISSING_FIELDS", "message": "name and listings_url are required"}
@@ -198,9 +362,9 @@ def create_source(body: SourceBody, user: AuthedUser = Depends(require_admin)):
     _check_source(body.listings_url, body.company, body.title_pattern)
     if db.query_one("SELECT name FROM sources WHERE name = %s", (body.name,)):
         raise HTTPException(409, detail={"code": "DUPLICATE_NAME", "message": "source name exists"})
-    return db.query_one(
+    row = db.query_one(
         "INSERT INTO sources (name, listings_url, description, active, company, title_pattern, "
-        "ingest_interval_hours) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING *",
+        f"ingest_interval_hours) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING {_SOURCE_COLS}",
         (
             body.name,
             body.listings_url,
@@ -211,10 +375,14 @@ def create_source(body: SourceBody, user: AuthedUser = Depends(require_admin)):
             body.ingest_interval_hours or 1,
         ),
     )
+    assert row is not None  # an insert with RETURNING always yields its row
+    return CatalogSource(**row, kind=boards.kind(row["listings_url"]))
 
 
 @router.delete("/sources/{name}")
-def delete_source(name: str, force: bool = False, user: AuthedUser = Depends(require_admin)):
+def delete_source(
+    name: str, force: bool = False, user: AuthedUser = Depends(require_admin)
+) -> SourceDeleted:
     """Permanently remove a source. Refuses while anything still hangs off it.
     Jobs would be orphaned into a source that no longer exists, and there is no
     undo, so emptiness is proven rather than assumed. force=true is the
@@ -253,40 +421,41 @@ def delete_source(name: str, force: bool = False, user: AuthedUser = Depends(req
         (name, name),
     )
     db.execute("DELETE FROM sources WHERE name = %s", (name,))
-    return {"ok": True, "deleted": name, "was_attached": attached}
+    return SourceDeleted(ok=True, deleted=name, was_attached=Attached(**attached))
 
 
 @router.get("/sources/{name}")
-def get_source(name: str, user: AuthedUser = Depends(require_admin)):
+def get_source(name: str, user: AuthedUser = Depends(require_admin)) -> CatalogSource:
     """One source as stored, title_pattern included; the list shape omits it."""
-    row = db.query_one("SELECT * FROM sources WHERE name = %s", (name,))
+    row = db.query_one(f"SELECT {_SOURCE_COLS} FROM sources WHERE name = %s", (name,))
     if not row:
         raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown source"})
-    row["kind"] = boards.kind(row["listings_url"])
-    return row
+    return CatalogSource(**row, kind=boards.kind(row["listings_url"]))
 
 
 @router.patch("/sources/{name}")
-def patch_source(name: str, body: SourceBody, user: AuthedUser = Depends(require_admin)):
+def patch_source(
+    name: str, body: SourceBody, user: AuthedUser = Depends(require_admin)
+) -> CatalogSource:
     fields = body.model_dump(exclude_unset=True, exclude={"name"})
     if not fields:
         raise HTTPException(400, detail={"code": "EMPTY_PATCH", "message": "no fields to update"})
     for k in ("company", "title_pattern"):
         if k in fields:
             fields[k] = (fields[k] or "").strip() or None
-    current = db.query_one("SELECT * FROM sources WHERE name = %s", (name,))
+    current = db.query_one(f"SELECT {_SOURCE_COLS} FROM sources WHERE name = %s", (name,))
     if not current:
         raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown source"})
     merged = {**current, **fields}
     _check_source(merged["listings_url"], merged["company"], merged["title_pattern"])
     cols = ", ".join(f"{k} = %({k})s" for k in fields)
     row = db.query_one(
-        f"UPDATE sources SET {cols} WHERE name = %(name)s RETURNING *",
+        f"UPDATE sources SET {cols} WHERE name = %(name)s RETURNING {_SOURCE_COLS}",
         {"name": name, **fields},
     )
     if not row:
         raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown source"})
-    return row
+    return CatalogSource(**row, kind=boards.kind(row["listings_url"]))
 
 
 class SourceSwitchBody(BaseModel):
@@ -302,7 +471,9 @@ class SourceSwitchBody(BaseModel):
 
 
 @router.post("/sources/switch")
-def switch_sources(body: SourceSwitchBody, user: AuthedUser = Depends(require_admin)):
+def switch_sources(
+    body: SourceSwitchBody, user: AuthedUser = Depends(require_admin)
+) -> SourcesSwitched:
     """One write sets a whole category of boards: on or off, and how often
     they are pulled.
 
@@ -351,12 +522,12 @@ def switch_sources(body: SourceSwitchBody, user: AuthedUser = Depends(require_ad
         + ") RETURNING name",
         {**sets, "names": sorted(selected)},
     )
-    return {
-        "active": body.active,
-        "ingest_interval_hours": body.ingest_interval_hours,
-        "selected": sorted(selected),
-        "changed": sorted(r["name"] for r in changed),
-    }
+    return SourcesSwitched(
+        active=body.active,
+        ingest_interval_hours=body.ingest_interval_hours,
+        selected=sorted(selected),
+        changed=sorted(r["name"] for r in changed),
+    )
 
 
 class PatternPreviewBody(BaseModel):
@@ -366,7 +537,9 @@ class PatternPreviewBody(BaseModel):
 
 
 @router.post("/sources/{name}/pattern-preview")
-def pattern_preview(name: str, body: PatternPreviewBody, user: AuthedUser = Depends(require_admin)):
+def pattern_preview(
+    name: str, body: PatternPreviewBody, user: AuthedUser = Depends(require_admin)
+) -> PatternPreview:
     """What a candidate title pattern would admit, judged against every
     title this board has listed: the ones in the catalog and the ones the
     current pattern screened out. Nothing is written. The pattern that goes
@@ -392,36 +565,37 @@ def pattern_preview(name: str, body: PatternPreviewBody, user: AuthedUser = Depe
     # The catalog side is what the LIVE pattern admitted; a candidate that
     # excludes some of it is narrowing, one that admits screened rows is
     # widening. Both counts, so the change reads as what it is.
-    return {
-        "source": name,
-        "title_pattern": body.title_pattern,
-        "titles": len(titles),
-        "admitted": len(admitted),
-        "excluded": len(excluded),
-        "would_add": sum(1 for t in admitted if t["held_in"] == "screened"),
-        "would_drop": sum(1 for t in excluded if t["held_in"] == "catalog"),
-        "samples": {
-            "admitted": [t["title"] for t in admitted[: body.samples]],
-            "excluded": [t["title"] for t in excluded[: body.samples]],
-        },
-    }
+    return PatternPreview(
+        source=name,
+        title_pattern=body.title_pattern,
+        titles=len(titles),
+        admitted=len(admitted),
+        excluded=len(excluded),
+        would_add=sum(1 for t in admitted if t["held_in"] == "screened"),
+        would_drop=sum(1 for t in excluded if t["held_in"] == "catalog"),
+        samples=PatternSamples(
+            admitted=[t["title"] for t in admitted[: body.samples]],
+            excluded=[t["title"] for t in excluded[: body.samples]],
+        ),
+    )
 
 
 @router.get("/sources/{name}/screened")
 def screened_postings(
     name: str, limit: int = 100, offset: int = 0, user: AuthedUser = Depends(require_admin)
-):
+) -> ScreenedPostings:
     """The postings this board lists that its title pattern did not admit,
     newest listing first, so an admin can see what a pattern is costing."""
     limit = max(1, min(limit, 500))
     total = db.query_one(
         "SELECT count(*) AS n FROM listings WHERE source = %s AND NOT kept", (name,)
     )
-    rows = db.query(
+    rows = db.query_as(
+        ScreenedPosting,
         "SELECT url, company, title, locations, date_posted, pattern, first_seen_at, last_seen_at "
         "FROM listings WHERE source = %s AND NOT kept "
         "ORDER BY date_posted DESC NULLS LAST, title LIMIT %s OFFSET %s",
         (name, limit, max(0, offset)),
     )
     n = total["n"] if total else 0
-    return {"source": name, "rows": rows, "total": n, "has_more": offset + len(rows) < n}
+    return ScreenedPostings(source=name, rows=rows, total=n, has_more=offset + len(rows) < n)

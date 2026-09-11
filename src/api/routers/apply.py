@@ -219,7 +219,7 @@ def apply_context(url: str = Query(max_length=2000), user: AuthedUser = Depends(
     }
 
 
-class AnswerPut(BaseModel):
+class SavedAnswerPut(BaseModel):
     value: str = Field(min_length=1, max_length=4000)
 
 
@@ -236,7 +236,7 @@ def list_answers(user: AuthedUser = Depends(require_user)) -> AnswerList:
 
 
 @router.put("/user/answers/{answer_id}")
-def put_answer(answer_id: int, body: AnswerPut, user: AuthedUser = Depends(require_user)):
+def put_answer(answer_id: int, body: SavedAnswerPut, user: AuthedUser = Depends(require_user)):
     row = db.query_one(
         f"UPDATE application_answer_bank SET value = %s, updated_at = now() "
         f"WHERE id = %s AND user_id = %s RETURNING {_BANK_COLS}",
@@ -576,7 +576,7 @@ def _note_on_fill(
     )
 
 
-class ReportBody(BaseModel):
+class PageReport(BaseModel):
     url: str = Field(min_length=1, max_length=2000)
     note: str = Field(default="", max_length=4000)
     page: dict[str, Any]
@@ -586,7 +586,7 @@ MAX_REPORT_BYTES = 2_000_000
 
 
 @router.post("/user/apply/reports", status_code=201)
-def create_report(body: ReportBody, user: AuthedUser = Depends(require_user)):
+def create_report(body: PageReport, user: AuthedUser = Depends(require_user)):
     """The extension's report button: whatever it saw, kept whole for
     triage. Capped so one page cannot fill the table by itself."""
     if len(json.dumps(body.page)) > MAX_REPORT_BYTES:
