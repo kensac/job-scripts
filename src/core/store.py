@@ -8,7 +8,6 @@ from typing import Any, LiteralString, cast
 import dotenv
 
 from core import pricing
-from core.checks import POSTING_CHECK_NAMES
 from core.pool import connection
 
 logger = logging.getLogger(__name__)
@@ -16,9 +15,9 @@ logger = logging.getLogger(__name__)
 
 def _as_query(sql: str) -> LiteralString:
     """Same invariant as api.db._as_query: the interpolated fragments here are
-    whitelisted column lists (_PREFETCH_COLS, _INSERT_COLUMNS) or fixed
-    conditions, never a caller-supplied value. Stated once so the claim is
-    auditable in one place instead of per call site.
+    a whitelisted column list (_INSERT_COLUMNS) or a fixed condition, never a
+    caller-supplied value. Stated once so the claim is auditable in one place
+    instead of per call site.
     """
     return cast("LiteralString", sql)
 
@@ -55,67 +54,6 @@ _INSERT_COLUMNS = [
 ]
 
 _WORKER = os.environ.get("JOBTRACKER_WORKER_NAME") or socket.gethostname()
-
-
-# Read-through caches populated by prefetch() to avoid a network round-trip per
-# url. Each maps url -> latest decided row (or None for a confirmed miss). Only
-# `status` is read off these rows, so the heavy text columns are left out.
-_latest_cache: dict[str, dict[str, dict[str, Any] | None]] = {}
-_custom_cache: dict[str, dict[str, dict[str, Any] | None]] = {}
-
-# Heavy text columns no caller reads off a verdict row; omitted to save bandwidth
-# and filled back as None so a cached row keeps the same shape as a full row.
-_PREFETCH_OMIT = ("input_content", "instructions", "parsed_json")
-_PREFETCH_COLS = ["id"] + [c for c in _INSERT_COLUMNS if c not in _PREFETCH_OMIT]
-
-
-def _prefetch_row(r: dict[str, Any]) -> dict[str, Any]:
-    d = dict(r)
-    for c in _PREFETCH_OMIT:
-        d[c] = None
-    return d
-
-
-def prefetch(
-    urls: list[str],
-    check_types: tuple = POSTING_CHECK_NAMES,
-    prompt_hashes: tuple = (),
-) -> None:
-    """Bulk-load latest-decided verdicts for a batch of urls into the caches.
-
-    One query per check_type / prompt_hash instead of one per url, so the
-    per-job cache lookups become in-memory hits.
-    """
-    unique = list({u for u in urls if u})
-    if not unique:
-        return
-    cols = ", ".join(_PREFETCH_COLS)
-    with connection() as conn:
-        for check_type in check_types:
-            sql = _as_query(
-                f"SELECT DISTINCT ON (url) {cols} FROM ai_queries "
-                "WHERE url = ANY(%s) AND check_type = %s "
-                "AND status IN ('passed', 'rejected') ORDER BY url, id DESC"
-            )
-            rows = conn.execute(
-                sql,
-                (unique, check_type),
-            ).fetchall()
-            found = {r["url"]: _prefetch_row(r) for r in rows}
-            for u in unique:
-                _latest_cache.setdefault(u, {})[check_type] = found.get(u)
-        for prompt_hash in prompt_hashes:
-            rows = conn.execute(
-                _as_query(
-                    f"SELECT DISTINCT ON (url) {cols} FROM ai_queries "
-                    "WHERE url = ANY(%s) AND check_type = 'custom' AND prompt_hash = %s "
-                    "AND status IN ('passed', 'rejected') ORDER BY url, id DESC"
-                ),
-                (unique, prompt_hash),
-            ).fetchall()
-            found = {r["url"]: _prefetch_row(r) for r in rows}
-            for u in unique:
-                _custom_cache.setdefault(u, {})[prompt_hash] = found.get(u)
 
 
 def add_ai_result(
@@ -194,38 +132,6 @@ def add_ai_result(
     placeholders = ", ".join(f"%({c})s" for c in _INSERT_COLUMNS)
     with connection() as conn:
         conn.execute(_as_query(f"INSERT INTO ai_queries ({columns}) VALUES ({placeholders})"), row)
-    sub = _latest_cache.get(url)
-    if sub is not None:
-        sub.pop(check_type, None)
-    if check_type == "custom" and prompt_hash is not None:
-        csub = _custom_cache.get(url)
-        if csub is not None:
-            csub.pop(prompt_hash, None)
-
-
-def get_ai_result(url: str) -> dict[str, Any] | None:
-    with connection() as conn:
-        row = conn.execute(
-            "SELECT * FROM ai_queries WHERE url = %s ORDER BY id DESC LIMIT 1", (url,)
-        ).fetchone()
-    return dict(row) if row else None
-
-
-def get_latest(url: str, check_type: str) -> dict[str, Any] | None:
-    """Latest *decided* (passed/rejected) result for a url+check_type.
-
-    Ignores 'failed' rows so failed checks are retried rather than cached.
-    """
-    sub = _latest_cache.get(url)
-    if sub is not None and check_type in sub:
-        return sub[check_type]
-    with connection() as conn:
-        row = conn.execute(
-            "SELECT * FROM ai_queries WHERE url = %s AND check_type = %s "
-            "AND status IN ('passed', 'rejected') ORDER BY id DESC LIMIT 1",
-            (url, check_type),
-        ).fetchone()
-    return dict(row) if row else None
 
 
 def get_custom_result(
@@ -233,13 +139,9 @@ def get_custom_result(
 ) -> dict[str, Any] | None:
     """Latest decided custom result for a url under a specific filter (by hash).
 
-    With `model`, only verdicts produced by that model count (bypasses the
-    in-memory cache); without it, any model's verdict is reused.
+    With `model`, only verdicts produced by that model count; without it, any
+    model's verdict is reused.
     """
-    if model is None:
-        sub = _custom_cache.get(url)
-        if sub is not None and prompt_hash in sub:
-            return sub[prompt_hash]
     clause = " AND model = %s" if model is not None else ""
     params = (url, prompt_hash, model) if model is not None else (url, prompt_hash)
     with connection() as conn:
@@ -425,52 +327,6 @@ def get_content(url: str) -> str | None:
             (url,),
         ).fetchone()
     return row["input_content"] if row else None
-
-
-def is_prelim_rejected(url: str) -> bool:
-    """Rejected by a prompt-independent check (closed or clearance)."""
-    closed = get_latest(url, "closed")
-    if closed and closed["status"] == "rejected":
-        return True
-    clearance = get_latest(url, "clearance")
-    return bool(clearance and clearance["status"] == "rejected")
-
-
-def is_url_rejected(url: str) -> bool:
-    result = get_ai_result(url)
-    return result is not None and result.get("status") == "rejected"
-
-
-def is_url_passed(url: str) -> bool:
-    result = get_ai_result(url)
-    return result is not None and result.get("status") == "passed"
-
-
-def is_url_failed(url: str) -> bool:
-    result = get_ai_result(url)
-    return result is not None and result.get("status") == "failed"
-
-
-def _latest_per_url_where(condition: str, params: tuple) -> list[dict[str, Any]]:
-    with connection() as conn:
-        sql = _as_query(
-            "SELECT * FROM ai_queries q WHERE id = "
-            "(SELECT MAX(id) FROM ai_queries WHERE url = q.url) "
-            f"AND {condition}"
-        )
-        rows = conn.execute(
-            sql,
-            params,
-        ).fetchall()
-    return [dict(row) for row in rows]
-
-
-def get_all_failed_jobs() -> list[dict[str, Any]]:
-    return _latest_per_url_where("status = %s", ("failed",))
-
-
-def get_all_custom_filter_jobs() -> list[dict[str, Any]]:
-    return _latest_per_url_where("check_type = %s", ("custom",))
 
 
 def record_batch_errors(provider_batch_id: str, errors: dict[str, str]) -> None:

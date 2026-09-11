@@ -395,12 +395,14 @@ name, so the rule is enforced rather than remembered.
 
 Two things make it work that are worth knowing before starting a domain.
 
-**A `SELECT *` cannot be typed until it names its columns.** Was 24. **22 on
-2026-09-11**: six in `routers/admin.py`, four in `core/store.py`, three in
-`routers/mail/debug.py`, and the rest spread one or two at a time. Naming them
-is a good change on its own: a star select and the shape that reads it drift
-silently, which is the same defect one level down, and on a wide table it
-fetches a page of text to throw away.
+**A `SELECT *` cannot be typed until it names its columns.** Was 24, then 22.
+**19 on 2026-09-11**: six in `routers/admin/`, three in `routers/mail/debug.py`,
+one left in `core/store.py`, and the rest spread one or two at a time. Naming
+them is a good change on its own: a star select and the shape that reads it
+drift silently, which is the same defect one level down, and on a wide table it
+fetches a page of text to throw away. Three of `core/store.py`'s four went with
+the dead readers named below rather than being named; typing a read nobody
+performs is the cheapest kind of nothing.
 
 **Declaring a shape can move the wire, quietly.** A dict omits a key it has
 no value for; a model emits the key as null. `PATCH /user/jobs/{id}` returned
@@ -457,22 +459,49 @@ statements, 1,528 missed, across 1,656 tests. Better than "never measured"
 usually means, and the shape of the miss is the useful part rather than the
 total:
 
-| | |
-|---|---|
-| `core/store.py` | 59%, 50 of 123 statements |
-| `tasks/verify.py` | 70%, 58 of 195 |
-| `tasks/ingest.py` | 81% |
-| `tasks/filters.py` | 82%, 42 of 228 |
+| | | |
+|---|---|---|
+| `core/store.py` | 59%, 50 of 123 statements | now 98%, 1 of 50 |
+| `tasks/verify.py` | 70%, 58 of 195 | now 94%, 11 of 191 |
+| `tasks/ingest.py` | 81% | |
+| `tasks/filters.py` | 82%, 42 of 228 | |
 
-The gap is concentrated in the sweeps and the store, which is exactly where
+The gap was concentrated in the sweeps and the store, which is exactly where
 this session found its two live defects: a closed verdict that could never be
 revisited, and a clearance verdict that was written once and never again.
 Both lived in `tasks/verify.py`. Neither was caught by a test, and the
-coverage number says why: that file is the least covered substantial module in
-the repository after the store.
+coverage number said why: that file was the least covered substantial module
+in the repository after the store.
+
+Both are now closed, and what closed them is worth knowing before taking
+`ingest.py` or `filters.py`. **The store's miss was not untested code, it was
+dead code.** Thirty-eight of its fifty missed statements were the verdict
+caches and the predicate helpers the sheet-era pipeline called; their last
+caller left with `core/pittcsc_simplify.py` in #394, and the store kept its
+half of the interface for five days. The whole of `prefetch()` was deliberately
+unhooked in #117, which says so in its own message. A test over any of it would
+have measured nothing and hidden the fact that it was unreachable, so it was
+deleted instead: 123 statements to 50, and the one still missed is a guard the
+only caller already makes.
+
+`tasks/verify.py` was the other shape: live code with the splitter untested.
+`handle_reverify_open` decides whether a posting is ever looked at again and
+had no test at all, while the query for its re-listed branch was COPIED into
+`test_ingest.py` rather than called, so the copy could pass while the handler
+drifted. `tests/test_reverify_sweep.py` now drives the handler itself.
 
 `make coverage` prints it. Nothing gates on a threshold yet, and adding one
-before the sweeps are covered would only ratchet in what is already there.
+before the remaining sweeps are covered would only ratchet in what is already
+there.
+
+**What is left uncovered in `tasks/verify.py` is uncovered on purpose**, and
+the list is short enough to state: the `parent_id` progress calls, the every
+fifth posting progress call, the `LookupError` for a missing server key, the
+`if not pending: break` that `AdaptiveLimiter`'s floor of one makes
+unreachable, `_newer_evidence`'s early return for a result with no batch id
+(the query it skips returns the same answer), and `verify_new`'s
+`unknown_request` receipt, whose twin in the reverify path is pinned. None of
+them decides anything a person or an invoice can see.
 
 **The long files.** `routers/resolve.py` 1,339 lines, `health.py` 1,159. Long
 because nothing split them. Phase 6.

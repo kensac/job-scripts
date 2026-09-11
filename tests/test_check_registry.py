@@ -178,9 +178,12 @@ def test_the_set_of_posting_checks_has_one_definition():
     than spelling the names. A spelled list is one a new check does not join,
     and the failure is silent: the check runs, and the reader ignores it.
     """
+    from api.health import sources as health_sources
     from api.routers.analytics import _VERDICT_CHECKS
     from core.checks import POSTING_CHECK_NAMES
-    from core.store import prefetch
 
     assert _VERDICT_CHECKS is POSTING_CHECK_NAMES
-    assert inspect.signature(prefetch).parameters["check_types"].default is POSTING_CHECK_NAMES
+    # The first-verdict comparison binds the set into its query rather than
+    # spelling it, so it covers a new check the day the check is registered.
+    assert health_sources.POSTING_CHECK_NAMES is POSTING_CHECK_NAMES
+    assert "list(POSTING_CHECK_NAMES)" in inspect.getsource(health_sources)
