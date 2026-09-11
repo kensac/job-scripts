@@ -27,7 +27,8 @@ async def test_parked_sweep_cannot_overwrite_newer_answer(f, monkeypatch, interv
 
     async def provider_returns_after_newer_write(*args, **kwargs):
         if intervening == "manual_draft":
-            from api import application_writes, task_admission
+            from api import task_admission
+            from api.apply import writes as application_writes
 
             manual = task_admission.enqueue(
                 "application_draft", {"user_id": uid, "job_id": jid}, {}
@@ -69,7 +70,8 @@ async def test_parked_sweep_cannot_overwrite_newer_answer(f, monkeypatch, interv
 
 
 def test_manual_admission_supersedes_sweep_before_either_completes(f):
-    from api import application_writes, task_admission
+    from api import task_admission
+    from api.apply import writes as application_writes
 
     uid = f.make_user()
     jid = f.make_job()
@@ -122,7 +124,7 @@ def test_manual_admission_supersedes_sweep_before_either_completes(f):
 
 
 def test_legacy_result_is_accounted_without_guessing_answer_generation(f):
-    from api import application_writes
+    from api.apply import writes as application_writes
 
     uid = f.make_user()
     jid = f.make_job()
@@ -187,7 +189,8 @@ async def test_refinement_preserves_concurrent_edit_and_cached_usage(f, monkeypa
 
 
 def test_manual_refresh_keeps_its_reservation_and_question_change_invalidates_others(f):
-    from api import application_writes, task_admission
+    from api import task_admission
+    from api.apply import writes as application_writes
 
     uid = f.make_user()
     jid = f.make_job()
@@ -208,7 +211,8 @@ def test_manual_refresh_keeps_its_reservation_and_question_change_invalidates_ot
 
 
 def test_sweep_never_reserves_over_pending_manual_request_or_explicit_clear(f, monkeypatch):
-    from api import application_writes, task_admission
+    from api import task_admission
+    from api.apply import writes as application_writes
 
     uid = f.make_user()
     jid = f.make_job()
@@ -224,7 +228,7 @@ def test_sweep_never_reserves_over_pending_manual_request_or_explicit_clear(f, m
 
 @pytest.mark.asyncio
 async def test_sweep_cannot_supersede_pending_refinement(f, monkeypatch):
-    from api import application_writes
+    from api.apply import writes as application_writes
 
     uid = f.make_user()
     jid = f.make_job()
@@ -280,7 +284,7 @@ async def test_draft_uses_question_read_under_reservation(f, monkeypatch):
 
 
 def test_recorded_failed_live_result_is_not_submitted_again_on_task_retry(f):
-    from api import application_writes
+    from api.apply import writes as application_writes
 
     uid = f.make_user()
     jid = f.make_job()
@@ -310,7 +314,7 @@ def test_recorded_failed_live_result_is_not_submitted_again_on_task_retry(f):
 async def test_application_receipt_rolls_back_usage_and_answer_until_acknowledged(
     f, monkeypatch, kind
 ):
-    from api import application_writes
+    from api.apply import writes as application_writes
     from core.batch import BatchSpec
 
     uid = f.make_user()

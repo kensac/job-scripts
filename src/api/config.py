@@ -6,7 +6,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, PositiveInt, TypeAdapter
 
-from api.extension_policy import ExtensionPolicy
+from api.apply.policy import ExtensionPolicy
 
 logger = logging.getLogger("jobtracker_api")
 ALL_GROUPS = "*"

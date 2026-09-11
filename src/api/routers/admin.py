@@ -14,7 +14,6 @@ from api import (
     ai,
     db,
     events,
-    extension_recipes,
     health,
     hosts,
     pagination,
@@ -23,6 +22,7 @@ from api import (
     task_admission,
 )
 from api import params as params_
+from api.apply import recipes as extension_recipes
 from api.auth import AuthedUser, require_user
 from api.config import CONFIG_KEYS
 from api.routers.jobs import report_kinds
@@ -2104,7 +2104,7 @@ class RecipePut(BaseModel):
 @router.get("/extension/recipes")
 def list_extension_recipes(user: AuthedUser = Depends(require_admin)):
     """Every publish, newest first per adapter; the enabled row is what the
-    extension fetches (api.extension_recipes)."""
+    extension fetches (api.apply.recipes)."""
     return {"recipes": extension_recipes.history()}
 
 

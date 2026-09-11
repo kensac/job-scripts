@@ -22,7 +22,8 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from api import ai, application_writes, budget, db, hosts, visibility
+from api import ai, budget, db, hosts, visibility
+from api.apply import writes as application_writes
 from api.tasks import batch_policy
 from api.tasks.runtime import (
     Deferred,

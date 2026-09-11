@@ -7,7 +7,8 @@ import base64
 import json
 import zlib
 
-from api import db, extension_recipes
+from api import db
+from api.apply import recipes as extension_recipes
 
 PATH = "/v1/extension/recipe?schema_version=1&adapter=workday"
 ADMIN = "/v1/admin/extension/recipes"
