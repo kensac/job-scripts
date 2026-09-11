@@ -166,7 +166,7 @@ def test_board_set_filters_scope_rows_total_and_ats_facets(client, user_headers,
 
 
 def test_board_legacy_statuses_alias_merges_into_canonical_echo(client, user_headers, f):
-    from api.routers.jobs import NOT_APPLIED
+    from api.routers.job_board import NOT_APPLIED
 
     uid = db.query_one("SELECT id FROM users WHERE sub = 'test-user'")["id"]
     jobs = [f.make_job(uploaded_by=uid) for _ in range(3)]
