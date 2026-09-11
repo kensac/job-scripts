@@ -710,37 +710,37 @@ def _proposal_items(owner_id: int, events: dict[int, list[dict[str, Any]]]) -> l
     for row in mail_pipeline.proposals_for(owner_id):
         items.append(
             {
-                "id": f"proposal:{row['application_id']}:{row['event_id']}",
+                "id": f"proposal:{row.application_id}:{row.event_id}",
                 "kind": STATUS_PROPOSAL,
                 "rank": _RANK_MOVES_STAGE,
                 "rank_reason": "the mail and your board disagree about this application",
                 "message": {
-                    "id": row["message_id"],
-                    "subject": row["subject"],
-                    "from_email": row["from_email"],
-                    "sent_at": row["sent_at"],
-                    "classified_as": row["kind"],
-                    "extracted_company": row["company"],
-                    "extracted_title": row["role_title"],
+                    "id": row.message_id,
+                    "subject": row.subject,
+                    "from_email": row.from_email,
+                    "sent_at": row.sent_at,
+                    "classified_as": row.kind,
+                    "extracted_company": row.company,
+                    "extracted_title": row.role_title,
                 },
                 "application": {
-                    "id": row["application_id"],
-                    "company_name": row["company_name"],
-                    "title": row["title"],
+                    "id": row.application_id,
+                    "company_name": row.company_name,
+                    "title": row.title,
                     "stage": mail_pipeline.stage_for(
-                        events.get(row["application_id"], []), row["board_status"]
+                        events.get(row.application_id, []), row.board_status
                     ),
-                    "on_board": bool(row["board_updatable"]),
-                    "job_id": row["job_id"],
+                    "on_board": bool(row.board_updatable),
+                    "job_id": row.job_id,
                 },
                 "implies": {
-                    "board_status": row["suggested_status"],
-                    "from_status": row["board_status"],
-                    "board_updated": bool(row["board_updatable"]),
-                    "reason": row["board_reason"],
+                    "board_status": row.suggested_status,
+                    "from_status": row.board_status,
+                    "board_updated": bool(row.board_updatable),
+                    "reason": row.board_reason,
                 },
                 "choices": [
-                    _choice(ACCEPT_STATUS, f"Move it to {row['suggested_status']}"),
+                    _choice(ACCEPT_STATUS, f"Move it to {row.suggested_status}"),
                     _choice(DECLINE_STATUS, "Leave it where it is"),
                 ],
             }
@@ -986,9 +986,9 @@ def _resolve_proposal(
         "ok": True,
         "choice": body.choice,
         "application_id": application_id,
-        "board_updated": answered["board_updated"],
-        "board_status": answered["board_status"],
-        "reason": answered["reason"],
+        "board_updated": answered.board_updated,
+        "board_status": answered.board_status,
+        "reason": answered.reason,
     }
 
 

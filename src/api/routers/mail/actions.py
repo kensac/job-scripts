@@ -13,7 +13,9 @@ from pydantic import BaseModel
 from api import db
 from api.auth import AuthedUser, require_user
 from api.mail import pipeline as mail_pipeline
-from api.routers.mail.shared import _evidence_for
+from api.mail.pipeline import Proposal, ProposalAnswered
+from api.models import Ok
+from api.routers.mail.shared import Evidence, _evidence_for
 
 router = APIRouter()
 
@@ -23,8 +25,29 @@ class SuggestionAnswer(BaseModel):
     note: str | None = None
 
 
+class Suggestion(Proposal):
+    """A proposal with what it rests on. The queue carries the summary
+    instead: the body is a detail view's worth of payload and there are 1,159
+    of these."""
+
+    evidence: Evidence | None
+
+
+class Suggestions(BaseModel):
+    suggestions: list[Suggestion]
+    total: int
+
+
+class ActionClosed(BaseModel):
+    """`already` says the item was resolved before this call, so a second
+    click is not reported as a second resolution."""
+
+    ok: bool
+    already: bool
+
+
 @router.get("/user/suggestions")
-def suggestions(user: AuthedUser = Depends(require_user)):
+def suggestions(user: AuthedUser = Depends(require_user)) -> Suggestions:
     """Where the mail and the board disagree, as things to confirm.
 
     The derivation lives in `mail_pipeline.proposals_for`, because the review
@@ -35,11 +58,13 @@ def suggestions(user: AuthedUser = Depends(require_user)):
     body is a detail view's worth of payload and there are 1,159 of these.
     """
     rows = mail_pipeline.proposals_for(user.id)
-    evidence = _evidence_for(sorted({r["message_id"] for r in rows}))
-    return {
-        "suggestions": [{**row, "evidence": evidence.get(row["message_id"])} for row in rows],
-        "total": len(rows),
-    }
+    evidence = _evidence_for(sorted({r.message_id for r in rows}))
+    return Suggestions(
+        suggestions=[
+            Suggestion(**row.model_dump(), evidence=evidence.get(row.message_id)) for row in rows
+        ],
+        total=len(rows),
+    )
 
 
 @router.post("/user/suggestions/{application_id}/{event_id}")
@@ -48,7 +73,7 @@ def answer_suggestion(
     event_id: int,
     body: SuggestionAnswer,
     user: AuthedUser = Depends(require_user),
-):
+) -> ProposalAnswered:
     """Accept a proposal and the board moves; dismiss it and it stays put.
 
     Reports what it actually wrote. It used to return the proposed status
@@ -72,7 +97,9 @@ class ActionAnswer(BaseModel):
 
 
 @router.post("/user/actions/{action_id}/resolve")
-def resolve_action(action_id: int, body: ActionAnswer, user: AuthedUser = Depends(require_user)):
+def resolve_action(
+    action_id: int, body: ActionAnswer, user: AuthedUser = Depends(require_user)
+) -> ActionClosed:
     """Mark an action done, because for some kinds nothing else ever will.
 
     Auto-resolution carries most of the weight and should: an assessment invite
@@ -95,16 +122,18 @@ def resolve_action(action_id: int, body: ActionAnswer, user: AuthedUser = Depend
     if row is None:
         raise HTTPException(status_code=404, detail="action not found")
     if row["resolved_at"] is not None:
-        return {"ok": True, "already": True}
+        return ActionClosed(ok=True, already=True)
     db.execute(
         "UPDATE action_items SET resolved_at = now(), resolution = %s WHERE id = %s",
         (body.note or "marked done", action_id),
     )
-    return {"ok": True, "already": False}
+    return ActionClosed(ok=True, already=False)
 
 
 @router.post("/user/actions/{action_id}/reopen")
-def reopen_action(action_id: int, body: ActionAnswer, user: AuthedUser = Depends(require_user)):
+def reopen_action(
+    action_id: int, body: ActionAnswer, user: AuthedUser = Depends(require_user)
+) -> Ok:
     """Undo a manual resolution.
 
     Refused on one that a later event settled: that is a fact about the mail
@@ -126,4 +155,4 @@ def reopen_action(action_id: int, body: ActionAnswer, user: AuthedUser = Depends
         "UPDATE action_items SET resolved_at = NULL, resolution = NULL WHERE id = %s",
         (action_id,),
     )
-    return {"ok": True}
+    return Ok()

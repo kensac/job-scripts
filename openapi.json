@@ -23257,7 +23257,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Suggestions"
+                }
               }
             }
           },
@@ -23404,7 +23406,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ProposalAnswered"
+                }
               }
             }
           },
@@ -23542,7 +23546,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ActionClosed"
+                }
               }
             }
           },
@@ -23680,7 +23686,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Ok"
+                }
               }
             }
           },
@@ -26070,6 +26078,25 @@
         "type": "object",
         "title": "ActionAnswer"
       },
+      "ActionClosed": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "already": {
+            "type": "boolean",
+            "title": "Already"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ok",
+          "already"
+        ],
+        "title": "ActionClosed",
+        "description": "`already` says the item was resolved before this call, so a second\nclick is not reported as a second resolution."
+      },
       "Answer": {
         "properties": {
           "key": {
@@ -27113,6 +27140,103 @@
           "school"
         ],
         "title": "Education"
+      },
+      "Evidence": {
+        "properties": {
+          "extracted_company": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Extracted Company"
+          },
+          "extracted_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Extracted Title"
+          },
+          "classified_as": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Classified As"
+          },
+          "classifier_confidence": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Classifier Confidence"
+          },
+          "classifier_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Classifier Model"
+          },
+          "from_domain": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From Domain"
+          },
+          "mention": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Mention"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "body_chars": {
+            "type": "integer",
+            "title": "Body Chars"
+          }
+        },
+        "type": "object",
+        "required": [
+          "extracted_company",
+          "extracted_title",
+          "classified_as",
+          "classifier_confidence",
+          "classifier_model",
+          "from_domain",
+          "mention",
+          "body_chars"
+        ],
+        "title": "Evidence",
+        "description": "What a match actually rested on.\n\nThe rationale says what the matcher concluded; this says what it concluded\nit FROM. The company the classifier read out of the mail is what tiers 2\nand 3 compared, so if that extraction is wrong the match is wrong and no\namount of staring at the conclusion reveals it."
       },
       "ExcludedStage": {
         "properties": {
@@ -28725,6 +28849,56 @@
         "title": "MeasurableModel",
         "description": "A chat model an experiment may name, with the efforts it accepts. The\nrunner refuses the rest, so the form only offers these."
       },
+      "Mention": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "start": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start"
+          },
+          "end": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End"
+          },
+          "term": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Term"
+          }
+        },
+        "type": "object",
+        "required": [
+          "text",
+          "start",
+          "end",
+          "term"
+        ],
+        "title": "Mention",
+        "description": "The whole message, and where the company appears in it.\n\nOffsets rather than a highlighted string, so the client decides how to\nmark it and the body stays exactly what the sender wrote. `start` is null\nwhen the company does not appear verbatim, which is common: the classifier\nreads it off a signature or a logo as often as out of a sentence."
+      },
       "ModelEntry": {
         "properties": {
           "model": {
@@ -29599,6 +29773,54 @@
         "type": "object",
         "title": "ProfilePut",
         "description": "Replace the whole profile; omitted fields return to their defaults."
+      },
+      "ProposalAnswered": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "response": {
+            "type": "string",
+            "title": "Response"
+          },
+          "board_updated": {
+            "type": "boolean",
+            "title": "Board Updated"
+          },
+          "board_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Board Status"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ok",
+          "response",
+          "board_updated",
+          "board_status",
+          "reason"
+        ],
+        "title": "ProposalAnswered",
+        "description": "What answering actually wrote.\n\n`board_status` is present only when a row moved. It used to carry the\nproposed status whenever the answer was `accepted`, including for the\napplications with no board row where the UPDATE matched nothing, so the\ncaller was told a status had moved that no SELECT could find."
       },
       "ProviderEntry": {
         "properties": {
@@ -32291,6 +32513,190 @@
         ],
         "title": "SuggestField"
       },
+      "Suggestion": {
+        "properties": {
+          "application_id": {
+            "type": "integer",
+            "title": "Application Id"
+          },
+          "company_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company Name"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id"
+          },
+          "board_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Board Status"
+          },
+          "date_applied": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date Applied"
+          },
+          "board_updatable": {
+            "type": "boolean",
+            "title": "Board Updatable"
+          },
+          "event_id": {
+            "type": "integer",
+            "title": "Event Id"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "company": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company"
+          },
+          "role_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role Title"
+          },
+          "message_id": {
+            "type": "integer",
+            "title": "Message Id"
+          },
+          "subject": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject"
+          },
+          "from_email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From Email"
+          },
+          "sent_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sent At"
+          },
+          "suggested_status": {
+            "type": "string",
+            "title": "Suggested Status"
+          },
+          "board_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Board Reason"
+          },
+          "evidence": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Evidence"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "application_id",
+          "company_name",
+          "title",
+          "job_id",
+          "board_status",
+          "date_applied",
+          "board_updatable",
+          "event_id",
+          "kind",
+          "company",
+          "role_title",
+          "message_id",
+          "subject",
+          "from_email",
+          "sent_at",
+          "suggested_status",
+          "board_reason",
+          "evidence"
+        ],
+        "title": "Suggestion",
+        "description": "A proposal with what it rests on. The queue carries the summary\ninstead: the body is a detail view's worth of payload and there are 1,159\nof these."
+      },
       "SuggestionAnswer": {
         "properties": {
           "response": {
@@ -32314,6 +32720,27 @@
           "response"
         ],
         "title": "SuggestionAnswer"
+      },
+      "Suggestions": {
+        "properties": {
+          "suggestions": {
+            "items": {
+              "$ref": "#/components/schemas/Suggestion"
+            },
+            "type": "array",
+            "title": "Suggestions"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "suggestions",
+          "total"
+        ],
+        "title": "Suggestions"
       },
       "TaskModelPut": {
         "properties": {
