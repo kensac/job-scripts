@@ -9,6 +9,8 @@ Structured-output schemas and instruction text for the AI checks."""
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from pydantic import BaseModel
 
 
@@ -84,6 +86,25 @@ _VERIFY_INSTRUCTIONS = (
     "closed_reason / clearance_reason: <=20 words each, citing the specific text that "
     "decided that axis. They are read when a human asks why a posting was ruled out, so "
     "quote the signal rather than restating the verdict."
+)
+
+
+@dataclass(frozen=True, slots=True)
+class VerificationRequestRecipe:
+    instructions: str
+    response_model: type[VerifyVerdict]
+    input_chars: int
+    max_output_tokens: int
+
+    def build_input(self, content: str) -> str:
+        return content[: self.input_chars]
+
+
+VERIFICATION_REQUEST = VerificationRequestRecipe(
+    instructions=_VERIFY_INSTRUCTIONS,
+    response_model=VerifyVerdict,
+    input_chars=VERIFY_INPUT_CHARS,
+    max_output_tokens=1000,
 )
 
 
