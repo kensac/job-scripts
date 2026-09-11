@@ -8,6 +8,7 @@ from typing import Any
 
 from api import ai, budget, db, events, metrics, verdicts
 from api.batch_results import progress_counts
+from core.answers import FilterDecision, FilterResult
 from core.filters import build_custom_decision_instructions, build_custom_input
 from core.store import get_content, get_contents, get_custom_result
 from tasks import batch_policy
@@ -18,7 +19,6 @@ from tasks.board import (
     in_flight_urls,
     materialize_passing,
 )
-from tasks.models import FilterDecision, FilterResult
 from tasks.runtime import (
     BATCH_CHUNK_SIZE,
     CHUNK_SIZE,

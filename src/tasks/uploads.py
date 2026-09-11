@@ -5,8 +5,8 @@ from __future__ import annotations
 from typing import Any
 
 from api import ai, budget, db, verdicts
+from core.answers import JobExtract
 from core.store import get_content
-from tasks.models import JobExtract
 from tasks.runtime import load_config
 
 

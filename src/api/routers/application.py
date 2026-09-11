@@ -22,6 +22,7 @@ from api import ai, ai_access, budget, db, task_admission
 from api.auth import AuthedUser, require_user
 from api.job_access import require_visible_job
 from core import forms
+from core.answers import DEFAULT_STYLE
 from core.store import get_content
 from tasks import application as drafts
 
@@ -225,7 +226,7 @@ def get_application(job_id: int, user: AuthedUser = Depends(require_user)):
             (user.id,),
         ),
         "writing_style": drafts.writing_style(user.id),
-        "default_style": drafts.DEFAULT_STYLE,
+        "default_style": DEFAULT_STYLE,
     }
 
 

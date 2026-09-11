@@ -12,6 +12,7 @@ import pytest
 
 from api import db
 from core import forms
+from core.answers import DEFAULT_STYLE
 from tasks import application as drafts
 
 
@@ -262,7 +263,7 @@ class TestResumes:
         r = client.put("/v1/user/settings", json={"writing_style": ""}, headers=user_headers)
         assert r.json()["writing_style"] is None
         # The built-in default travels with the field it stands in for.
-        assert r.json()["default_style"] == drafts.DEFAULT_STYLE
+        assert r.json()["default_style"] == DEFAULT_STYLE
 
 
 def _user_id(sub: str = "test-user") -> int:

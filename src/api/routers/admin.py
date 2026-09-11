@@ -1125,9 +1125,9 @@ async def run_single_check(body: RunCheckBody, user: AuthedUser = Depends(requir
     re-derives from it immediately. No downstream re-run needed, since
     visibility is a read-time predicate rather than stored derived state."""
     from api import verdicts as _verdicts
+    from core.answers import FilterVerdict
     from core.checks import POSTING_CHECKS
     from core.filters import build_custom_instructions
-    from tasks.models import FilterVerdict
 
     job = db.query_one("SELECT id, url, company, title FROM jobs WHERE id = %s", (body.job_id,))
     if not job:

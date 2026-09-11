@@ -23,8 +23,8 @@ from api import params as params_
 from api.auth import AuthedUser, require_user
 from api.routers import resolve
 from api.routers.admin import require_admin
+from core.answers import EVENT_KINDS
 from core.mail_html import sanitise
-from tasks.mail_classify import EVENT_KINDS
 
 router = APIRouter()
 
