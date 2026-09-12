@@ -10,6 +10,7 @@ from api import db, job_profile_derivation
 from api.ai import batch_results
 from core.batch import structured_response_spec
 from core.job_profile import (
+    BACKFILL_SELECTION_VERSION,
     CLASSIFIER_VERSION,
     JOB_PROFILE_INPUT_CHARS,
     JOB_PROFILE_INSTRUCTIONS,
@@ -22,8 +23,6 @@ from tasks import rescrape
 from tasks.runtime import consume_result, has_batch_work, run_batched, set_progress
 
 logger = logging.getLogger(__name__)
-
-BACKFILL_SELECTION_VERSION = 1
 
 
 def _content_hash(content: str) -> str:

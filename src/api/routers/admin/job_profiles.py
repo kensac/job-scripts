@@ -12,8 +12,7 @@ from api import db, events
 from api.auth import AuthedUser
 from api.queue import enqueue
 from api.routers.admin.shared import require_admin
-from core.job_profile import CLASSIFIER_VERSION, JOB_PROFILE_MODEL
-from tasks.job_profiles import BACKFILL_SELECTION_VERSION
+from core.job_profile import BACKFILL_SELECTION_VERSION, CLASSIFIER_VERSION, JOB_PROFILE_MODEL
 
 router = APIRouter()
 

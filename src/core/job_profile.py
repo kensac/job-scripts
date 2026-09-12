@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field, field_validator
 
 CLASSIFIER_VERSION = "job-profile-v1"
 JOB_PROFILE_MODEL = "gpt-5.6-luna"
+BACKFILL_SELECTION_VERSION = 1
 JOB_PROFILE_INPUT_CHARS = 12_000
 
 RoleFamily = Literal[
