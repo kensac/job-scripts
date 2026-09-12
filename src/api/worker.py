@@ -19,7 +19,7 @@ from typing import Any
 
 import psycopg
 
-from api import db, events, hosts, metrics, telemetry
+from api import db, events, hosts, job_profile_derivation, metrics, telemetry
 from api.queue import INGEST_INTERVAL_MINUTES, enqueue
 from tasks import HANDLERS
 from tasks.runtime import (
@@ -308,6 +308,15 @@ def schedule_ingest_cycle() -> None:
         "AND status IN ('pending', 'running', 'waiting', 'awaiting_batch') LIMIT 1"
     ):
         enqueue("classify_locations", {"cycle": cycle}, dedupe_key=f"locations:{cycle}")
+    if job_profile_derivation.has_work() and not db.query_one(
+        "SELECT 1 FROM tasks WHERE kind = 'classify_job_profiles' "
+        "AND status IN ('pending', 'running', 'waiting', 'awaiting_batch') LIMIT 1"
+    ):
+        enqueue(
+            "classify_job_profiles",
+            {"cycle": cycle},
+            dedupe_key=f"job-profile:{cycle}",
+        )
     # The cycle key bounds queued work; the handler refuses fresh submission
     # while an earlier embedding batch is active. The new kind keeps older
     # images from claiming paid snapshots with the former live handler.

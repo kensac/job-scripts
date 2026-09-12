@@ -106,3 +106,25 @@ def test_admin_trigger_is_idempotent_and_report_is_typed(client, admin_headers):
     assert report.json()["classifier_version"] == CLASSIFIER_VERSION
     assert report.json()["model"] == JOB_PROFILE_MODEL
     assert report.json()["classifications"] == 0
+
+
+def test_scheduler_admits_backlog_once_and_skips_no_work(f, monkeypatch):
+    from api import worker
+
+    monkeypatch.setattr(worker, "INGEST_INTERVAL_MINUTES", 60)
+    worker.schedule_ingest_cycle()
+    assert (
+        db.query_one("SELECT count(*) AS n FROM tasks WHERE kind = 'classify_job_profiles'")["n"]
+        == 0
+    )
+
+    source = f.make_source()
+    user_id = f.make_user()
+    f.subscribe(user_id, source)
+    f.make_ready_job(source=source)
+    worker.schedule_ingest_cycle()
+    worker.schedule_ingest_cycle()
+    assert (
+        db.query_one("SELECT count(*) AS n FROM tasks WHERE kind = 'classify_job_profiles'")["n"]
+        == 1
+    )

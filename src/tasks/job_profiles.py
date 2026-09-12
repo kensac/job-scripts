@@ -6,7 +6,7 @@ import hashlib
 import logging
 from typing import Any
 
-from api import db
+from api import db, job_profile_derivation
 from api.ai import batch_results
 from core.batch import structured_response_spec
 from core.job_profile import (
@@ -18,26 +18,10 @@ from core.job_profile import (
     build_job_profile_input,
 )
 from core.shapes import JOB_PROFILE_TASK
-from core.store import AI_ELIGIBLE_JOB, CONTENT_LATERAL, VERIFIED_OPEN
 from tasks import rescrape
 from tasks.runtime import consume_result, has_batch_work, run_batched, set_progress
 
 logger = logging.getLogger(__name__)
-
-_CANDIDATES = f"""
-    SELECT j.url, j.title, q.content_row_id, q.input_content
-    FROM jobs j
-    {CONTENT_LATERAL.format(url="j.url", columns="id AS content_row_id, input_content")}
-    WHERE {AI_ELIGIBLE_JOB.format(job="j")}
-      AND {VERIFIED_OPEN.format(url="j.url")}
-      AND q.input_content IS NOT NULL AND q.input_content <> ''
-      AND NOT EXISTS (
-        SELECT 1 FROM job_profiles p
-        WHERE p.content_row_id = q.content_row_id
-          AND p.classifier_version = %(version)s AND p.model = %(model)s)
-    ORDER BY j.id
-    LIMIT %(cap)s
-"""
 
 
 def _content_hash(content: str) -> str:
@@ -75,18 +59,7 @@ def _store(url: str, context: dict[str, Any], answer: JobProfileAnswer, model: s
 
 async def handle_classify_job_profiles(task_id: int, payload: dict[str, Any]) -> None:
     resumed = has_batch_work(task_id)
-    rows = (
-        []
-        if resumed
-        else db.query(
-            _CANDIDATES,
-            {
-                "version": CLASSIFIER_VERSION,
-                "model": JOB_PROFILE_MODEL,
-                "cap": JOB_PROFILE_TASK.per_cycle,
-            },
-        )
-    )
+    rows = [] if resumed else job_profile_derivation.candidates(JOB_PROFILE_TASK.per_cycle)
     specs = [
         structured_response_spec(
             str(row["content_row_id"]),
