@@ -77,7 +77,7 @@ dev = [
     "pytest-asyncio==1.4.0",
     "pytest-xdist==3.8.0",
     "ruff==0.16.6",
-    "pyright==1.1.412",
+    "pyright==1.1.413",
 ]
 
 [tool.uv]
