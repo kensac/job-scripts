@@ -19,7 +19,17 @@ from core.filters import build_custom_decision_instructions, build_custom_input
 from core.providers import StructuredOutput
 from core.routing import NoEligibleModel, TaskShape, resolve
 
-FILTER_OUTPUT_RESERVATION_TOKENS = 120
+# What one verdict is expected to cost in output tokens, for the pre-run
+# budget reservation. An ESTIMATE, never a cap: it was passed to the model as
+# `max_output_tokens` until 2026-09-12, and every truncated response landed on
+# exactly 120 completion tokens with zero variance. 14.8% of one board's run
+# died that way, against 0% for the identical prompt and model on the
+# user-filter path, which sets no cap at all.
+#
+# 320 is the measured p95 of a successful custom verdict (p50 91, max 1,050
+# over 33,826 decided verdicts on 2026-09-12), so a reservation holds for
+# nineteen runs in twenty rather than being three times short.
+FILTER_OUTPUT_RESERVATION_TOKENS = 320
 MANAGED_FILTER_EXECUTION_VERSION = 2
 MANAGED_FILTER_TRANSPORT = "batch"
 MANAGED_BOARD_RUN_KINDS = ("run_managed_board", "run_managed_board_batch")
