@@ -19,7 +19,7 @@ from typing import Any
 
 import psycopg
 
-from api import db, events, hosts, job_profile_derivation, metrics, telemetry
+from api import db, events, hosts, job_profile_derivation, managed_board_runs, metrics, telemetry
 from api.queue import INGEST_INTERVAL_MINUTES, enqueue
 from tasks import HANDLERS
 from tasks.runtime import (
@@ -95,6 +95,8 @@ EXCLUDE_KINDS = _env_list("JOBTRACKER_WORKER_EXCLUDE_KINDS")
 # failures - e.g. one host's IP getting blocked) to a fleet host. Set it in
 # compose; the container hostname fallback is a random hex id.
 WORKER_NAME = os.environ.get("JOBTRACKER_WORKER_NAME") or socket.gethostname()
+
+_managed_board_schedule_attempts: set[tuple[str, int]] = set()
 
 
 def _claim_task() -> dict[str, Any] | None:
@@ -240,6 +242,27 @@ def schedule_ingest_cycle() -> None:
             {"user_id": u["id"], "cycle": rcycle},
             dedupe_key=f"board:{u['id']}:{rcycle}",
         )
+    _managed_board_schedule_attempts.intersection_update(
+        {key for key in _managed_board_schedule_attempts if key[0] == cycle}
+    )
+    for board in db.query("SELECT id FROM managed_boards WHERE published ORDER BY id"):
+        attempt = (cycle, board["id"])
+        if attempt in _managed_board_schedule_attempts:
+            continue
+        try:
+            managed_board_runs.admit(board["id"], dedupe_key=f"managed-board:{board['id']}:{cycle}")
+        except managed_board_runs.RunRefusal as exc:
+            logger.info(
+                "Managed board %s not scheduled: %s (%s)",
+                board["id"],
+                exc.message,
+                exc.code,
+            )
+            telemetry.capture(
+                "managed_board_schedule_refused",
+                properties={"managed_board_id": board["id"], "code": exc.code},
+            )
+        _managed_board_schedule_attempts.add(attempt)
     # Application answers ahead of need, hourly, for each person who has put
     # a resume in: the forms of the postings on their board are read and
     # every question without a draft rides one half-price batch, so the
