@@ -64,6 +64,7 @@ class _Board:
     prompt: str
     prompt_hash: str
     requested_model: str
+    execution_mode: str
     on_ambiguous: str
     fail_closed: bool
     criteria: dict[str, Any]
@@ -124,7 +125,7 @@ def _board(board_id: int, *, lock: bool = False) -> _Board | None:
     suffix = " FOR UPDATE" if lock else ""
     return db.query_one_as(
         _Board,
-        "SELECT b.id, b.sponsor_user_id, b.prompt, b.prompt_hash, b.requested_model, "
+        "SELECT b.id, b.sponsor_user_id, b.prompt, b.prompt_hash, b.requested_model, b.execution_mode, "
         "b.on_ambiguous, b.fail_closed, b.criteria, b.revision, b.published, "
         "COALESCE((SELECT array_agg(s.source ORDER BY s.source) FROM managed_board_sources s "
         "WHERE s.managed_board_id = b.id), '{}') AS sources "
@@ -171,6 +172,38 @@ def _reservation(board: _Board, candidates: list[_Candidate]) -> int:
         // BATCH_CHARS_PER_TOKEN
         + FILTER_OUTPUT_RESERVATION_TOKENS
         for candidate in candidates
+    )
+
+
+def _reuse_candidates(sponsor_id: int, resolved_model: str) -> list[_Candidate]:
+    """Machine-only personal-filter results at one exact verdict identity."""
+    params = {"model": resolved_model, **eligibility.settings_params(sponsor_id)}
+    return db.query_as(
+        _Candidate,
+        f"""
+        WITH enabled AS ({eligibility.ENABLED_FILTERS}),
+        {eligibility.LATEST_CHECK},
+        latest_custom AS (
+          SELECT DISTINCT ON (q.url, q.prompt_hash) q.url, q.prompt_hash, q.status
+          FROM ai_queries q
+          WHERE q.check_type = 'custom' AND q.model = %(model)s
+            AND q.prompt_hash = ANY(ARRAY(SELECT prompt_hash FROM enabled))
+            AND q.status IN ('passed', 'rejected')
+          ORDER BY q.url, q.prompt_hash, q.id DESC
+        )
+        SELECT j.id, j.url, j.company, j.title,
+               COALESCE(j.date_posted::timestamp AT TIME ZONE 'UTC', j.created_at) AS sort_at,
+               NULL::bigint AS content_query_id, NULL::text AS content
+        FROM jobs j
+        WHERE {eligibility.SUBSCRIBED}
+          AND {eligibility.STRUCTURAL.format(criteria=board_criteria.SQL)}
+          AND (SELECT count(*) FROM enabled) > 0
+          AND (SELECT count(*) FROM enabled e JOIN latest_custom q
+               ON q.url = j.url AND q.prompt_hash = e.prompt_hash
+               WHERE q.status = 'passed') = (SELECT count(*) FROM enabled)
+        ORDER BY j.id
+        """,
+        params,
     )
 
 
@@ -222,24 +255,41 @@ def admit(board_id: int) -> ManagedBoardRunQueued:
         )
         if sponsor is None:
             raise RunRefusal("NO_SPONSOR", "managed board sponsor no longer exists")
-        owner, cap = _allowance(sponsor)
-        provider = ai.provider_of_model(board.requested_model)
-        if not owner or provider is None or not ai.server_key(provider):
-            raise RunRefusal("NO_SERVER_KEY", "the sponsor has no server-key allowance")
-        if board.requested_model not in budget.owner_allowed_models(sponsor.groups):
-            raise RunRefusal("MODEL_NOT_ALLOWED", "requested model is not allowed for the sponsor")
-        candidates = _candidates(board)
-        reserved = _reservation(board, candidates)
-        position = _usage_position(sponsor.id)
-        if cap is not None and position.spent + position.reserved + reserved > cap:
-            raise RunRefusal("BUDGET_EXCEEDED", "sponsor weekly allowance cannot cover this run")
+        resolved_model = board.requested_model
+        if board.execution_mode == "sponsor_filter_reuse":
+            try:
+                _entitlement, config = budget.load_config(sponsor.id, ignore_budget=True)
+            except budget.AIAccessError as exc:
+                raise RunRefusal(
+                    exc.reason, "the sponsor has no resolvable personal filter model"
+                ) from exc
+            resolved_model = config.model
+            candidates = _reuse_candidates(sponsor.id, resolved_model)
+            reserved = 0
+        else:
+            owner, cap = _allowance(sponsor)
+            provider = ai.provider_of_model(board.requested_model)
+            if not owner or provider is None or not ai.server_key(provider):
+                raise RunRefusal("NO_SERVER_KEY", "the sponsor has no server-key allowance")
+            if board.requested_model not in budget.owner_allowed_models(sponsor.groups):
+                raise RunRefusal(
+                    "MODEL_NOT_ALLOWED", "requested model is not allowed for the sponsor"
+                )
+            candidates = _candidates(board)
+            reserved = _reservation(board, candidates)
+            position = _usage_position(sponsor.id)
+            if cap is not None and position.spent + position.reserved + reserved > cap:
+                raise RunRefusal(
+                    "BUDGET_EXCEEDED", "sponsor weekly allowance cannot cover this run"
+                )
         payload = {
             "managed_board_id": board.id,
             "sponsor_user_id": board.sponsor_user_id,
             "revision": board.revision,
             "prompt": board.prompt,
             "prompt_hash": board.prompt_hash,
-            "requested_model": board.requested_model,
+            "requested_model": resolved_model,
+            "execution_mode": board.execution_mode,
             "on_ambiguous": board.on_ambiguous,
             "fail_closed": board.fail_closed,
             "sources": board.sources,
@@ -336,9 +386,31 @@ def replace_projection(payload: dict[str, Any]) -> int:
         if board is None:
             raise RuntimeError("managed board configuration changed during its run")
         db.execute("DELETE FROM managed_board_jobs WHERE managed_board_id = %s", (board.id,))
-        result = db.query_one_as(
-            _Count,
-            """
+        if payload.get("execution_mode") == "sponsor_filter_reuse":
+            result = db.query_one_as(
+                _Count,
+                """
+                WITH candidate AS (
+                  SELECT * FROM unnest(%(ids)s::bigint[], %(sort)s::timestamptz[]) AS c(job_id, sort_at)
+                ), inserted AS (
+                  INSERT INTO managed_board_jobs
+                    (managed_board_id, job_id, sort_at, projection_revision, resolved_model)
+                  SELECT %(board)s, job_id, sort_at, %(revision)s, %(model)s
+                  FROM candidate ORDER BY sort_at DESC, job_id DESC RETURNING 1
+                ) SELECT count(*) AS n FROM inserted
+                """,
+                {
+                    "ids": ids,
+                    "sort": sort_at,
+                    "board": board.id,
+                    "revision": payload["revision"],
+                    "model": payload["requested_model"],
+                },
+            )
+        else:
+            result = db.query_one_as(
+                _Count,
+                """
             WITH candidate AS (
               SELECT * FROM unnest(%(ids)s::bigint[], %(sort)s::timestamptz[]) AS c(job_id, sort_at)
             ), latest AS (
@@ -357,17 +429,17 @@ def replace_projection(payload: dict[str, Any]) -> int:
               ORDER BY c.sort_at DESC, c.job_id DESC
               RETURNING 1
             ) SELECT count(*) AS n FROM inserted
-            """,
-            {
-                "ids": ids,
-                "sort": sort_at,
-                "hash": payload["prompt_hash"],
-                "model": payload["requested_model"],
-                "board": board.id,
-                "revision": payload["revision"],
-                "fail_closed": payload["fail_closed"],
-            },
-        )
+                """,
+                {
+                    "ids": ids,
+                    "sort": sort_at,
+                    "hash": payload["prompt_hash"],
+                    "model": payload["requested_model"],
+                    "board": board.id,
+                    "revision": payload["revision"],
+                    "fail_closed": payload["fail_closed"],
+                },
+            )
         db.execute(
             "UPDATE managed_boards SET projection_updated_at = now(), "
             "public_revision = CASE WHEN published THEN COALESCE(public_revision, 0) + 1 "

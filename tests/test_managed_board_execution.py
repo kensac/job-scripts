@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from types import SimpleNamespace
 
 import pytest
 
@@ -73,7 +74,7 @@ def test_sponsor_budget_reserves_across_managed_boards(client, admin_headers, f,
     monkeypatch.setattr(
         budget, "owner_budget", lambda groups: (True, first.json()["reserved_tokens"])
     )
-    second_board = client.get("/v1/admin/managed-boards", headers=admin_headers).json()["boards"][1]
+    second_board = client.get("/v1/admin/managed-boards", headers=admin_headers).json()["boards"][2]
     refused = client.post(
         f"/v1/admin/managed-boards/{second_board['id']}/run", headers=admin_headers
     )
@@ -151,6 +152,79 @@ async def test_handler_attributes_usage_and_atomically_replaces_projection(f, mo
         "projection_revision": board["revision"],
         "resolved_model": "gpt-5.6-luna",
     }
+
+
+@pytest.mark.asyncio
+async def test_sponsor_filter_reuse_projects_only_exact_machine_results_without_calls(
+    client, admin_headers, f, monkeypatch
+):
+    from api import budget
+
+    source = f.make_source("personal-source")
+    other_source = f.make_source("person-only-source")
+    sponsor = db.query_one("SELECT id FROM users WHERE sub = 'test-admin'")["id"]
+    f.subscribe(sponsor, source)
+    flt = f.make_filter(sponsor, prompt="backend only", enabled=True)
+    included_id, included_url = f.make_ready_job(source=source)
+    rejected_id, rejected_url = f.make_ready_job(source=source)
+    wrong_model_id, wrong_model_url = f.make_ready_job(source=source)
+    person_only_id, _person_only_url = f.make_ready_job(source=other_source, uploaded_by=sponsor)
+    f.make_board_row(sponsor, person_only_id, status="Saved")
+    add_ai_result(
+        included_url,
+        "passed",
+        check_type="custom",
+        prompt_hash=flt["prompt_hash"],
+        model="gpt-5.6-luna",
+    )
+    add_ai_result(
+        rejected_url,
+        "rejected",
+        check_type="custom",
+        prompt_hash=flt["prompt_hash"],
+        model="gpt-5.6-luna",
+    )
+    add_ai_result(
+        wrong_model_url,
+        "passed",
+        check_type="custom",
+        prompt_hash=flt["prompt_hash"],
+        model="gpt-5.5",
+    )
+    monkeypatch.setattr(
+        budget,
+        "load_config",
+        lambda user_id, ignore_budget=False: (None, SimpleNamespace(model="gpt-5.6-luna")),
+    )
+    bootstrap = client.post("/v1/admin/managed-boards/bootstrap", headers=admin_headers)
+    assert bootstrap.status_code == 200, bootstrap.text
+    board = bootstrap.json()["boards"][2]
+
+    queued = client.post(f"/v1/admin/managed-boards/{board['id']}/run", headers=admin_headers)
+    assert queued.status_code == 200, queued.text
+    assert queued.json()["reserved_tokens"] == 0
+    payload = db.query_one("SELECT payload FROM tasks WHERE id = %s", (queued.json()["task_id"],))[
+        "payload"
+    ]
+    assert payload["execution_mode"] == "sponsor_filter_reuse"
+    assert [job["id"] for job in payload["jobs"]] == [included_id]
+    assert rejected_id not in [job["id"] for job in payload["jobs"]]
+    assert wrong_model_id not in [job["id"] for job in payload["jobs"]]
+    assert person_only_id not in [job["id"] for job in payload["jobs"]]
+
+    monkeypatch.setattr(
+        managed_task,
+        "execute_live",
+        lambda *args, **kwargs: pytest.fail("reuse mode must not make model calls"),
+    )
+    await managed_task.handle_run_managed_board(queued.json()["task_id"], payload)
+    assert db.query_one("SELECT job_id, resolved_model FROM managed_board_jobs") == {
+        "job_id": included_id,
+        "resolved_model": "gpt-5.6-luna",
+    }
+    assert db.query_one("SELECT count(*) AS n FROM api_usage")["n"] == 0
+    cost = client.get(f"/v1/admin/managed-boards/{board['id']}/cost", headers=admin_headers)
+    assert cost.json()["calls"] == 0 and cost.json()["total_tokens"] == 0
 
 
 def test_projection_revision_cas_preserves_previous_projection(f):

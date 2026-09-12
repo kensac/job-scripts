@@ -19,6 +19,11 @@ class _Content:
 
 
 async def handle_run_managed_board(task_id: int, payload: dict[str, Any]) -> None:
+    if payload.get("execution_mode") == "sponsor_filter_reuse":
+        set_progress(task_id, 0, len(payload["jobs"]), "projecting stored filter outcomes")
+        runs.replace_projection(payload)
+        set_progress(task_id, len(payload["jobs"]), len(payload["jobs"]), "projected")
+        return
     if compute_filter_hash(payload["prompt"], payload["on_ambiguous"]) != payload["prompt_hash"]:
         raise ValueError("managed board task snapshot has an invalid prompt hash")
     provider = ai.provider_of_model(payload["requested_model"])

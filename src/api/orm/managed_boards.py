@@ -30,6 +30,10 @@ class ManagedBoard(Base):
         CheckConstraint(
             "on_ambiguous IN ('keep', 'filter')", name="ck_managed_boards_on_ambiguous"
         ),
+        CheckConstraint(
+            "execution_mode IN ('managed_filter', 'sponsor_filter_reuse')",
+            name="ck_managed_boards_execution_mode",
+        ),
         CheckConstraint("revision >= 1", name="ck_managed_boards_revision_positive"),
         CheckConstraint(
             "public_revision IS NULL OR public_revision >= 1",
@@ -52,6 +56,7 @@ class ManagedBoard(Base):
     prompt: Mapped[str] = mapped_column(Text)
     prompt_hash: Mapped[str] = mapped_column(Text)
     requested_model: Mapped[str] = mapped_column(Text)
+    execution_mode: Mapped[str] = mapped_column(Text, server_default=text("'managed_filter'"))
     on_ambiguous: Mapped[str] = mapped_column(Text, server_default=text("'keep'"))
     fail_closed: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     criteria: Mapped[dict] = mapped_column(server_default=text("'{}'::jsonb"))

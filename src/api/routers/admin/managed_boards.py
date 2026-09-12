@@ -39,11 +39,17 @@ Include only internship opportunities in software engineering or product managem
         """Managed board bootstrap prompt v1.
 Include only full-time entry-level or new-graduate opportunities in software engineering or product management at technology or technology-adjacent companies. The opportunity must satisfy the existing high-achiever standard: either the company qualifies for the prestigious company tier, or the particular role is demonstrably selective and top-tier. Exclude internships, apprenticeships, experienced roles, unrelated functions, and opportunities whose prestige or selectivity is unclear.""",
     ),
+    (
+        "kanishks-job-list",
+        "Kanishk's Job List",
+        "Jobs selected by Kanishk's enabled personal machine filters, without personal activity or fields.",
+        "This board reuses the sponsor's enabled personal machine-filter outcomes.",
+    ),
 )
 
 _BOARD_COLS = (
     "b.id, b.slug, b.name, b.description, b.sponsor_user_id, b.prompt, b.prompt_hash, "
-    "b.requested_model, b.on_ambiguous, b.fail_closed, b.criteria, b.published, b.revision, "
+    "b.requested_model, b.execution_mode, b.on_ambiguous, b.fail_closed, b.criteria, b.published, b.revision, "
     "b.public_revision, b.projection_updated_at, b.published_at, b.unpublished_at, "
     "b.created_at, b.updated_at, "
     "COALESCE((SELECT array_agg(s.source ORDER BY s.source) FROM managed_board_sources s "
@@ -66,6 +72,7 @@ class ManagedBoard(BaseModel):
     prompt: str
     prompt_hash: str
     requested_model: str
+    execution_mode: str
     on_ambiguous: str
     fail_closed: bool
     criteria: Criteria
@@ -109,6 +116,7 @@ class ManagedBoardCreate(BaseModel):
     sponsor_user_id: int | None = None
     prompt: str = Field(min_length=1, max_length=8000)
     requested_model: str
+    execution_mode: str = "managed_filter"
     on_ambiguous: str = "keep"
     fail_closed: bool = False
     criteria: Criteria = Field(default_factory=Criteria)
@@ -119,10 +127,14 @@ class ManagedBoardPatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     expected_revision: int = Field(ge=1)
+    slug: NonNullUpdate[
+        Annotated[str, Field(pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$", max_length=100)]
+    ] = None
     name: NonNullUpdate[Annotated[str, Field(min_length=1, max_length=120)]] = None
     description: NonNullUpdate[Annotated[str, Field(max_length=1000)]] = None
     prompt: NonNullUpdate[Annotated[str, Field(min_length=1, max_length=8000)]] = None
     requested_model: NonNullUpdate[str] = None
+    execution_mode: NonNullUpdate[str] = None
     on_ambiguous: NonNullUpdate[str] = None
     fail_closed: NonNullUpdate[bool] = None
     criteria: NonNullUpdate[Criteria] = None
@@ -145,6 +157,14 @@ def _validate_model(value: str) -> None:
     if value not in providers.MODELS:
         raise HTTPException(
             400, detail={"code": "UNKNOWN_MODEL", "message": "unknown requested model"}
+        )
+
+
+def _validate_execution_mode(value: str) -> None:
+    if value not in {"managed_filter", "sponsor_filter_reuse"}:
+        raise HTTPException(
+            400,
+            detail={"code": "INVALID_EXECUTION_MODE", "message": "unknown execution mode"},
         )
 
 
@@ -201,6 +221,9 @@ def bootstrap_managed_boards(
         criteria_json = _BOOTSTRAP_CRITERIA.model_dump(mode="json")
         boards: list[ManagedBoard] = []
         for slug, name, description, prompt in _BOOTSTRAP_DEFINITIONS:
+            execution_mode = (
+                "sponsor_filter_reuse" if slug == "kanishks-job-list" else "managed_filter"
+            )
             board = db.query_one_as(
                 ManagedBoard,
                 f"SELECT {_BOARD_COLS} FROM managed_boards b WHERE b.slug = %s FOR UPDATE",
@@ -214,6 +237,7 @@ def bootstrap_managed_boards(
                     and board.prompt == prompt
                     and board.prompt_hash == compute_filter_hash(prompt, "filter")
                     and board.requested_model == _BOOTSTRAP_MODEL
+                    and board.execution_mode == execution_mode
                     and board.on_ambiguous == "filter"
                     and board.fail_closed is True
                     and board.criteria.model_dump(mode="json") == criteria_json
@@ -234,9 +258,9 @@ def bootstrap_managed_boards(
             row = db.query_one_as(
                 _Id,
                 "INSERT INTO managed_boards "
-                "(slug, name, description, sponsor_user_id, prompt, prompt_hash, requested_model, "
+                "(slug, name, description, sponsor_user_id, prompt, prompt_hash, requested_model, execution_mode, "
                 "on_ambiguous, fail_closed, criteria) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, 'filter', true, %s) RETURNING id",
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'filter', true, %s) RETURNING id",
                 (
                     slug,
                     name,
@@ -245,6 +269,7 @@ def bootstrap_managed_boards(
                     prompt,
                     compute_filter_hash(prompt, "filter"),
                     _BOOTSTRAP_MODEL,
+                    execution_mode,
                     db.jsonb(criteria_json),
                 ),
             )
@@ -306,6 +331,7 @@ def create_managed_board(
 ) -> ManagedBoard:
     _validate_ambiguity(body.on_ambiguous)
     _validate_model(body.requested_model)
+    _validate_execution_mode(body.execution_mode)
     sponsor_user_id = body.sponsor_user_id or user.id
     try:
         with db.transaction():
@@ -320,8 +346,8 @@ def create_managed_board(
             row = db.query_one_as(
                 _Id,
                 "INSERT INTO managed_boards "
-                "(slug, name, description, sponsor_user_id, prompt, prompt_hash, requested_model, "
-                "on_ambiguous, fail_closed, criteria) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                "(slug, name, description, sponsor_user_id, prompt, prompt_hash, requested_model, execution_mode, "
+                "on_ambiguous, fail_closed, criteria) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
                 "RETURNING id",
                 (
                     body.slug,
@@ -331,6 +357,7 @@ def create_managed_board(
                     body.prompt,
                     compute_filter_hash(body.prompt, body.on_ambiguous),
                     body.requested_model,
+                    body.execution_mode,
                     body.on_ambiguous,
                     body.fail_closed,
                     db.jsonb(body.criteria.model_dump(mode="json")),
@@ -363,6 +390,8 @@ def patch_managed_board(
         _validate_ambiguity(fields["on_ambiguous"])
     if "requested_model" in fields:
         _validate_model(fields["requested_model"])
+    if "execution_mode" in fields:
+        _validate_execution_mode(fields["execution_mode"])
     requested_sources = fields.pop("sources") if "sources" in fields else None
     with db.transaction():
         existing = _get(board_id, lock=True)
@@ -379,6 +408,24 @@ def patch_managed_board(
                     "current_revision": existing.revision,
                 },
             )
+        if "slug" in fields:
+            db.execute(
+                "SELECT pg_advisory_xact_lock(hashtext('managed-board-slug:' || %s))",
+                (fields["slug"],),
+            )
+            duplicate = db.query_one_as(
+                _Id,
+                "SELECT id FROM managed_boards WHERE slug = %s AND id <> %s",
+                (fields["slug"], board_id),
+            )
+            if duplicate is not None:
+                raise HTTPException(
+                    409,
+                    detail={
+                        "code": "DUPLICATE_SLUG",
+                        "message": "managed board slug exists",
+                    },
+                )
         sources = _validate_sources(requested_sources) if requested_sources is not None else None
         if sources is not None:
             db.execute("DELETE FROM managed_board_sources WHERE managed_board_id = %s", (board_id,))

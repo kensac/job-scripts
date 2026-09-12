@@ -40204,6 +40204,10 @@
             "type": "string",
             "title": "Requested Model"
           },
+          "execution_mode": {
+            "type": "string",
+            "title": "Execution Mode"
+          },
           "on_ambiguous": {
             "type": "string",
             "title": "On Ambiguous"
@@ -40298,6 +40302,7 @@
           "prompt",
           "prompt_hash",
           "requested_model",
+          "execution_mode",
           "on_ambiguous",
           "fail_closed",
           "criteria",
@@ -40398,6 +40403,11 @@
             "type": "string",
             "title": "Requested Model"
           },
+          "execution_mode": {
+            "type": "string",
+            "title": "Execution Mode",
+            "default": "managed_filter"
+          },
           "on_ambiguous": {
             "type": "string",
             "title": "On Ambiguous",
@@ -40456,6 +40466,9 @@
             "minimum": 1.0,
             "title": "Expected Revision"
           },
+          "slug": {
+            "$ref": "#/components/schemas/NonNullUpdate_Annotated_str__FieldInfo_annotation_NoneType__required_True__metadata__MaxLen_max_length_100____PydanticGeneralMetadata_pattern____a-z0-9_____a-z0-9___________"
+          },
           "name": {
             "$ref": "#/components/schemas/NonNullUpdate_Annotated_str__FieldInfo_annotation_NoneType__required_True__metadata__MinLen_min_length_1___MaxLen_max_length_120_____"
           },
@@ -40466,6 +40479,9 @@
             "$ref": "#/components/schemas/NonNullUpdate_Annotated_str__FieldInfo_annotation_NoneType__required_True__metadata__MinLen_min_length_1___MaxLen_max_length_8000_____"
           },
           "requested_model": {
+            "$ref": "#/components/schemas/NonNullUpdate_str_"
+          },
+          "execution_mode": {
             "$ref": "#/components/schemas/NonNullUpdate_str_"
           },
           "on_ambiguous": {
@@ -41666,6 +41682,11 @@
       "NonNullUpdate_Annotated_str__FieldInfo_annotation_NoneType__required_True__metadata__MaxLen_max_length_1000_____": {
         "type": "string",
         "maxLength": 1000
+      },
+      "NonNullUpdate_Annotated_str__FieldInfo_annotation_NoneType__required_True__metadata__MaxLen_max_length_100____PydanticGeneralMetadata_pattern____a-z0-9_____a-z0-9___________": {
+        "type": "string",
+        "maxLength": 100,
+        "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
       },
       "NonNullUpdate_Annotated_str__FieldInfo_annotation_NoneType__required_True__metadata__MinLen_min_length_1___MaxLen_max_length_120_____": {
         "type": "string",
