@@ -16,6 +16,8 @@ from api.board import eligibility
 from api.task_admission import ACTIVE_STATUSES, TaskProgress
 from core.batch import BATCH_CHARS_PER_TOKEN
 from core.filters import build_custom_decision_instructions, build_custom_input
+from core.managed_board_title_gate import TitleGateConfig
+from core.managed_board_title_gate import evaluate as evaluate_title_gate
 from core.providers import StructuredOutput
 from core.routing import NoEligibleModel, TaskShape, resolve
 
@@ -63,6 +65,7 @@ class ManagedBoardRun(BaseModel):
     created_at: datetime.datetime
     started_at: datetime.datetime | None
     finished_at: datetime.datetime | None
+    title_gate_report: dict[str, Any] | None
 
 
 class ManagedBoardCost(BaseModel):
@@ -100,6 +103,7 @@ class _Board:
     on_ambiguous: str
     fail_closed: bool
     criteria: dict[str, Any]
+    title_gate: dict[str, Any] | None
     revision: int
     published: bool
     sources: list[str]
@@ -117,6 +121,7 @@ class _Candidate:
     url: str
     company: str
     title: str
+    source: str
     sort_at: datetime.datetime
     content_query_id: int | None
     content: str | None
@@ -153,12 +158,18 @@ class _Count:
     n: int
 
 
+@dataclass(frozen=True)
+class _Verdict:
+    job_id: int
+    status: str | None
+
+
 def _board(board_id: int, *, lock: bool = False) -> _Board | None:
     suffix = " FOR UPDATE" if lock else ""
     return db.query_one_as(
         _Board,
         "SELECT b.id, b.sponsor_user_id, b.prompt, b.prompt_hash, b.requested_model, b.execution_mode, "
-        "b.on_ambiguous, b.fail_closed, b.criteria, b.revision, b.published, "
+        "b.on_ambiguous, b.fail_closed, b.criteria, b.title_gate, b.revision, b.published, "
         "COALESCE((SELECT array_agg(s.source ORDER BY s.source) FROM managed_board_sources s "
         "WHERE s.managed_board_id = b.id), '{}') AS sources "
         f"FROM managed_boards b WHERE b.id = %s{suffix}",
@@ -176,7 +187,7 @@ def _candidates(board: _Board) -> list[_Candidate]:
         _Candidate,
         f"""
         WITH {eligibility.LATEST_CHECK}
-        SELECT j.id, j.url, j.company, j.title,
+        SELECT j.id, j.url, j.company, j.title, j.source,
                COALESCE(j.date_posted::timestamp AT TIME ZONE 'UTC', j.created_at) AS sort_at,
                content.id AS content_query_id, content.input_content AS content
         FROM jobs j
@@ -223,7 +234,7 @@ def _reuse_candidates(sponsor_id: int, resolved_model: str) -> list[_Candidate]:
             AND q.status IN ('passed', 'rejected')
           ORDER BY q.url, q.prompt_hash, q.id DESC
         )
-        SELECT j.id, j.url, j.company, j.title,
+        SELECT j.id, j.url, j.company, j.title, j.source,
                COALESCE(j.date_posted::timestamp AT TIME ZONE 'UTC', j.created_at) AS sort_at,
                NULL::bigint AS content_query_id, NULL::text AS content
         FROM jobs j
@@ -272,6 +283,7 @@ def _usage_position(sponsor_id: int) -> _UsagePosition:
 def admit(board_id: int, *, dedupe_key: str | None = None) -> ManagedBoardRunQueued:
     task_id: int | None = None
     reasoning_effort: object | None = None
+    decisions = []
     with db.transaction():
         board = _board(board_id, lock=True)
         if board is None:
@@ -303,6 +315,7 @@ def admit(board_id: int, *, dedupe_key: str | None = None) -> ManagedBoardRunQue
             resolved_model = config.model
             candidates = _reuse_candidates(sponsor.id, resolved_model)
             reserved = 0
+            title_gate = None
         else:
             owner, cap = _allowance(sponsor)
             provider = ai.provider_of_model(board.requested_model)
@@ -326,12 +339,29 @@ def admit(board_id: int, *, dedupe_key: str | None = None) -> ManagedBoardRunQue
                 ) from exc
             reasoning_effort = choice.params.get("reasoning_effort")
             candidates = _candidates(board)
-            reserved = _reservation(board, candidates)
+            title_gate = (
+                TitleGateConfig.model_validate(board.title_gate) if board.title_gate else None
+            )
+            decisions = [
+                evaluate_title_gate(title_gate, title=candidate.title, source=candidate.source)
+                for candidate in candidates
+            ]
+            reservable = [
+                candidate
+                for candidate, decision in zip(candidates, decisions, strict=True)
+                if title_gate is None or title_gate.mode == "shadow" or decision.keep
+            ]
+            reserved = _reservation(board, reservable)
             position = _usage_position(sponsor.id)
             if cap is not None and position.spent + position.reserved + reserved > cap:
                 raise RunRefusal(
                     budget.BUDGET_EXCEEDED, "sponsor weekly allowance cannot cover this run"
                 )
+        if title_gate is None:
+            decisions = [
+                evaluate_title_gate(None, title=candidate.title, source=candidate.source)
+                for candidate in candidates
+            ]
         payload = {
             "managed_board_id": board.id,
             "sponsor_user_id": board.sponsor_user_id,
@@ -344,6 +374,7 @@ def admit(board_id: int, *, dedupe_key: str | None = None) -> ManagedBoardRunQue
             "fail_closed": board.fail_closed,
             "sources": board.sources,
             "criteria": board.criteria,
+            "title_gate": title_gate.model_dump(mode="json") if title_gate else None,
             "published": board.published,
             "reserved_tokens": reserved,
             "jobs": [
@@ -352,10 +383,13 @@ def admit(board_id: int, *, dedupe_key: str | None = None) -> ManagedBoardRunQue
                     "url": candidate.url,
                     "company": candidate.company,
                     "title": candidate.title,
+                    "source": candidate.source,
                     "sort_at": candidate.sort_at.isoformat(),
                     "content_query_id": candidate.content_query_id,
+                    "title_gate_keep": decision.keep,
+                    "title_gate_reason": decision.reason,
                 }
-                for candidate in candidates
+                for candidate, decision in zip(candidates, decisions, strict=True)
             ],
         }
         if board.execution_mode == "managed_filter":
@@ -392,7 +426,8 @@ def latest(board_id: int) -> ManagedBoardRun | None:
         "SELECT id, status, progress, error, (payload->>'revision')::bigint AS snapshot_revision, "
         "payload->>'requested_model' AS requested_model, "
         "(payload->>'reserved_tokens')::bigint AS reserved_tokens, "
-        "created_at, started_at, finished_at FROM tasks WHERE kind = ANY(%s) "
+        "created_at, started_at, finished_at, payload->'title_gate_report' AS title_gate_report "
+        "FROM tasks WHERE kind = ANY(%s) "
         "AND (payload->>'managed_board_id')::bigint = %s ORDER BY id DESC LIMIT 1",
         (list(MANAGED_BOARD_RUN_KINDS), board_id),
     )
@@ -440,8 +475,14 @@ def record_parse_failures(board_id: int, model: str | None):
         raise
 
 
-def replace_projection(payload: dict[str, Any]) -> int:
-    jobs = payload["jobs"]
+def replace_projection(task_id: int, payload: dict[str, Any]) -> int:
+    all_jobs = payload["jobs"]
+    config = payload.get("title_gate")
+    jobs = [
+        job
+        for job in all_jobs
+        if not config or config["mode"] == "shadow" or job["title_gate_keep"]
+    ]
     ids = [job["id"] for job in jobs]
     sort_at = [job["sort_at"] for job in jobs]
     with db.transaction():
@@ -513,4 +554,52 @@ def replace_projection(payload: dict[str, Any]) -> int:
             "ELSE public_revision END WHERE id = %s AND revision = %s",
             (board.id, payload["revision"]),
         )
+        if config:
+            verdicts = db.query_as(
+                _Verdict,
+                """
+                WITH candidate AS (SELECT unnest(%(ids)s::bigint[]) AS job_id)
+                SELECT c.job_id, q.status
+                FROM candidate c JOIN jobs j ON j.id = c.job_id
+                LEFT JOIN LATERAL (
+                  SELECT status FROM ai_queries
+                  WHERE url = j.url AND check_type = 'custom'
+                    AND prompt_hash = %(hash)s AND model = %(model)s
+                    AND status IN ('passed', 'rejected', 'failed')
+                  ORDER BY id DESC LIMIT 1
+                ) q ON true
+                """,
+                {
+                    "ids": [job["id"] for job in all_jobs],
+                    "hash": payload["prompt_hash"],
+                    "model": payload["requested_model"],
+                },
+            )
+            statuses = {row.job_id: row.status for row in verdicts}
+            skipped = [job for job in all_jobs if not job["title_gate_keep"]]
+            disagreements = [job for job in skipped if statuses.get(job["id"]) == "passed"]
+            undecided = [
+                job for job in skipped if statuses.get(job["id"]) not in {"passed", "rejected"}
+            ]
+            report = {
+                "recipe": config["recipe"],
+                "mode": config["mode"],
+                "candidate_count": len(all_jobs),
+                "would_skip_count": len(skipped),
+                "disagreement_count": len(disagreements),
+                "undecided_count": len(undecided),
+                "disagreement_examples": [
+                    {
+                        "job_id": job["id"],
+                        "company": job["company"],
+                        "title": job["title"],
+                        "reason": job["title_gate_reason"],
+                    }
+                    for job in disagreements[:20]
+                ],
+            }
+            db.execute(
+                "UPDATE tasks SET payload = payload || %s WHERE id = %s",
+                (db.jsonb({"title_gate_report": report}), task_id),
+            )
     return result.n if result else 0
