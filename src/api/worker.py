@@ -286,7 +286,7 @@ def schedule_ingest_cycle() -> None:
     # checks so a slow classification does not stop matching from running -
     # matching is cheap and re-runs improve on themselves as new board rows
     # appear, which is exactly when it should not be blocked.
-    if not db.query_one(
+    if db.get_config("mail_classification_enabled") and not db.query_one(
         "SELECT 1 FROM tasks WHERE kind = 'classify_mail' "
         "AND status IN ('pending', 'running', 'waiting', 'awaiting_batch') LIMIT 1"
     ):

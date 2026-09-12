@@ -402,6 +402,13 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
         "consumer is the market table and the deployed arm measured poorly; pick an arm "
         "with an experiment before turning it on.",
     ),
+    "mail_classification_enabled": ConfigKey(
+        section="Mail",
+        default=True,
+        value_type=bool,
+        help="Whether mailbox syncs, archive imports, and the hourly scheduler enqueue new "
+        "mail classification work. Turning it off does not discard already submitted batches.",
+    ),
 }
 
 

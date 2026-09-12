@@ -232,6 +232,20 @@ async def test_resync_does_not_requeue_already_classified_mail(monkeypatch, f):
 
 
 @pytest.mark.asyncio
+async def test_sync_does_not_queue_classification_when_switched_off(monkeypatch, f):
+    uid = f.make_user()
+    _connect(uid)
+    _gmail_stub(monkeypatch, [])
+    queued: list[str] = []
+    monkeypatch.setattr(mail_sync, "enqueue", lambda kind, *_args, **_kwargs: queued.append(kind))
+    db.execute("UPDATE app_config SET value = 'false' WHERE key = 'mail_classification_enabled'")
+
+    await mail_sync.handle_sync_gmail(1, {"user_id": uid})
+
+    assert "classify_mail" not in queued
+
+
+@pytest.mark.asyncio
 async def test_sync_lets_needsreconnect_propagate(monkeypatch, f):
     """The probe is not the only path that can discover a dead grant, and the
     sync must not be the one that swallows it. A no-touch system that silently

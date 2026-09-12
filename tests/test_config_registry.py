@@ -43,6 +43,7 @@ def test_every_key_is_filed_under_a_named_section():
         "Extension",
         "Fetching",
         "Health",
+        "Mail",
     }
     assert not [k for k, s in admin_config._CONFIG_KEYS.items() if s.section == "General"]
 
