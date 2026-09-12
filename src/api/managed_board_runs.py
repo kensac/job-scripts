@@ -233,7 +233,7 @@ def _usage_position(sponsor_id: int) -> _UsagePosition:
     return row
 
 
-def admit(board_id: int) -> ManagedBoardRunQueued:
+def admit(board_id: int, *, dedupe_key: str | None = None) -> ManagedBoardRunQueued:
     task_id: int | None = None
     with db.transaction():
         board = _board(board_id, lock=True)
@@ -310,10 +310,13 @@ def admit(board_id: int) -> ManagedBoardRunQueued:
         }
         row = db.query_one_as(
             _TaskId,
-            "INSERT INTO tasks (kind, payload) VALUES ('run_managed_board', %s) RETURNING id",
-            (db.jsonb(payload),),
+            "INSERT INTO tasks (kind, payload, dedupe_key) "
+            "VALUES ('run_managed_board', %s, %s) "
+            "ON CONFLICT (dedupe_key) DO NOTHING RETURNING id",
+            (db.jsonb(payload), dedupe_key),
         )
-        assert row is not None
+        if row is None:
+            raise RunRefusal("ALREADY_SCHEDULED", "this board was already scheduled this cycle")
         task_id = row.id
     events.publish_task(task_id)
     return ManagedBoardRunQueued(
