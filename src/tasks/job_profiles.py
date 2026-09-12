@@ -23,6 +23,8 @@ from tasks.runtime import consume_result, has_batch_work, run_batched, set_progr
 
 logger = logging.getLogger(__name__)
 
+BACKFILL_SELECTION_VERSION = 1
+
 
 def _content_hash(content: str) -> str:
     frozen = content[:JOB_PROFILE_INPUT_CHARS]
@@ -59,8 +61,23 @@ def _store(url: str, context: dict[str, Any], answer: JobProfileAnswer, model: s
 
 async def handle_classify_job_profiles(task_id: int, payload: dict[str, Any]) -> None:
     resumed = has_batch_work(task_id)
-    rows = [] if resumed else job_profile_derivation.candidates(JOB_PROFILE_TASK.per_cycle)
-    specs = [
+    specs = batch_results.frozen_specs(task_id)
+    if specs or resumed:
+        rows = []
+    elif payload.get("all_eligible") is True:
+        if payload.get("selection_version") != BACKFILL_SELECTION_VERSION:
+            raise ValueError("unsupported job profile selection version")
+        max_age_days = payload.get("max_age_days")
+        if not isinstance(max_age_days, int) or isinstance(max_age_days, bool):
+            raise ValueError("max_age_days must be an integer")
+        if payload.get("classifier_version") != CLASSIFIER_VERSION:
+            raise ValueError("job profile classifier version changed after admission")
+        rows = job_profile_derivation.candidates(
+            None, max_age_days=max_age_days, exclude_active_tasks=True
+        )
+    else:
+        rows = job_profile_derivation.candidates(JOB_PROFILE_TASK.per_cycle)
+    new_specs = [
         structured_response_spec(
             str(row["content_row_id"]),
             JOB_PROFILE_INSTRUCTIONS,
@@ -75,6 +92,8 @@ async def handle_classify_job_profiles(task_id: int, payload: dict[str, Any]) ->
         )
         for row in rows
     ]
+    if not specs:
+        specs = new_specs
     if not specs and not resumed:
         set_progress(task_id, 0, 0, "nothing to classify")
         return

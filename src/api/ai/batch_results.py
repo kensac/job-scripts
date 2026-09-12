@@ -29,6 +29,18 @@ def snapshot_specs(task_id: int, specs: list[BatchSpec]) -> list[BatchSpec]:
     return frozen
 
 
+def frozen_specs(task_id: int) -> list[BatchSpec]:
+    """Return a task's immutable request set, if selection already finished."""
+    return [
+        BatchSpec(**row["snapshot"])
+        for row in db.query(
+            "SELECT snapshot FROM batch_requests WHERE task_id=%s ORDER BY custom_id",
+            (task_id,),
+        )
+        if row["snapshot"] is not None
+    ]
+
+
 def checkpoint(task_id: int, results: list[BatchResult], unfinished: list[str]) -> None:
     with db.transaction():
         for result in results:

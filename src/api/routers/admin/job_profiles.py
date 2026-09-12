@@ -10,8 +10,10 @@ from pydantic import BaseModel
 
 from api import db, events
 from api.auth import AuthedUser
+from api.queue import enqueue
 from api.routers.admin.shared import require_admin
 from core.job_profile import CLASSIFIER_VERSION, JOB_PROFILE_MODEL
+from tasks.job_profiles import BACKFILL_SELECTION_VERSION
 
 router = APIRouter()
 
@@ -68,6 +70,29 @@ class _OutputStats:
     output_tokens_max: int | None
 
 
+BACKFILL_MAX_AGE_DAYS = 7
+BACKFILL_DEDUPE_KEY = (
+    f"job-profile-backfill:{BACKFILL_SELECTION_VERSION}:"
+    f"{BACKFILL_MAX_AGE_DAYS}:{CLASSIFIER_VERSION}:{JOB_PROFILE_MODEL}"
+)
+
+
+def admit_recent_backfill() -> int:
+    payload = {
+        "selection_version": BACKFILL_SELECTION_VERSION,
+        "classifier_version": CLASSIFIER_VERSION,
+        "max_age_days": BACKFILL_MAX_AGE_DAYS,
+        "all_eligible": True,
+    }
+    task_id = enqueue("classify_job_profiles", payload, dedupe_key=BACKFILL_DEDUPE_KEY)
+    if task_id is not None:
+        return task_id
+    existing = db.query_one("SELECT id FROM tasks WHERE dedupe_key=%s", (BACKFILL_DEDUPE_KEY,))
+    if existing is None:
+        raise RuntimeError("job profile backfill admission lost its dedupe row")
+    return existing["id"]
+
+
 def _latest() -> JobProfileTaskStatus | None:
     return db.query_one_as(
         JobProfileTaskStatus,
@@ -95,6 +120,13 @@ def run_job_profiles(user: AuthedUser = Depends(require_admin)) -> JobProfileAdm
         task_id = inserted.id
     events.publish_task(task_id)
     return JobProfileAdmission(task_id=task_id)
+
+
+@router.post("/job-profiles/backfill-recent")
+def run_recent_job_profile_backfill(
+    user: AuthedUser = Depends(require_admin),
+) -> JobProfileAdmission:
+    return JobProfileAdmission(task_id=admit_recent_backfill())
 
 
 @router.get("/job-profiles/report")
