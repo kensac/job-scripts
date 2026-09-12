@@ -210,7 +210,11 @@ async def test_new_execution_contract_uses_batch_only_and_prices_batch(f, monkey
 
     async def fake_batch(task_id, cfg, snapshot, jobs, hooks, **kwargs):
         assert kwargs["purpose"] == "managed_board"
-        assert kwargs["max_output_tokens"] == 120
+        # No cap: a managed board submits like tasks/filters.py does,
+        # which passes none and takes execute_batch's 6000 default.
+        # Capping at 120 truncated the JSON, and 14.8% of one board's
+        # verdicts were recorded as failed then dropped by fail_closed.
+        assert "max_output_tokens" not in kwargs
         assert kwargs["complete_without_submission"] is True
         assert cfg.model == "gpt-5.6-luna"
         hooks.record_usage(

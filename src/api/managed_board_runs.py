@@ -30,6 +30,11 @@ from core.routing import NoEligibleModel, TaskShape, resolve
 # over 33,826 decided verdicts on 2026-09-12), so a reservation holds for
 # nineteen runs in twenty rather than being three times short.
 FILTER_OUTPUT_RESERVATION_TOKENS = 320
+
+# What the batch submission allows, matching `execute_batch`'s own default and
+# therefore the user-filter path. Declared so the routing check compares the
+# model's ceiling against what is really requested, not against a reservation.
+BATCH_OUTPUT_TOKENS = 6000
 MANAGED_FILTER_EXECUTION_VERSION = 2
 MANAGED_FILTER_TRANSPORT = "batch"
 MANAGED_BOARD_RUN_KINDS = ("run_managed_board", "run_managed_board_batch")
@@ -40,7 +45,7 @@ def _batch_shape(model: str, effort: str | None = None) -> TaskShape:
         purpose="managed_board",
         structured=StructuredOutput.JSON_SCHEMA,
         batched=True,
-        max_output_tokens=FILTER_OUTPUT_RESERVATION_TOKENS,
+        max_output_tokens=BATCH_OUTPUT_TOKENS,
         est_prompt_tokens=1000,
         candidates=(model,),
         effort=effort,
