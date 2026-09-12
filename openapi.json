@@ -1246,6 +1246,70 @@
             }
           },
           {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "posted",
+                "added",
+                "company",
+                "title",
+                "comp"
+              ],
+              "type": "string",
+              "default": "posted",
+              "title": "Sort"
+            }
+          },
+          {
+            "name": "dir",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "type": "string",
+              "default": "desc",
+              "title": "Dir"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 200
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "name": "terms",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Terms"
+            }
+          },
+          {
             "name": "if-none-match",
             "in": "header",
             "required": false,
@@ -1269,6 +1333,77 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/PublicJobList"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/public/job-lists/{slug}/jobs/{job_id}": {
+      "get": {
+        "tags": [
+          "public-job-lists"
+        ],
+        "summary": "Get Public Job",
+        "operationId": "get_public_job_v1_public_job_lists__slug__jobs__job_id__get",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          },
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicJobDetail"
                 }
               }
             }
@@ -45262,6 +45397,10 @@
       },
       "PublicJobCard": {
         "properties": {
+          "job_id": {
+            "type": "integer",
+            "title": "Job Id"
+          },
           "company": {
             "anyOf": [
               {
@@ -45291,6 +45430,34 @@
             "type": "array",
             "title": "Locations"
           },
+          "terms": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Terms"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "ats": {
+            "type": "string",
+            "enum": [
+              "ashby",
+              "greenhouse",
+              "lever",
+              "workable",
+              "workday",
+              "smartrecruiters",
+              "icims",
+              "jobvite",
+              "bamboohr",
+              "rippling",
+              "other"
+            ],
+            "title": "Ats"
+          },
           "date_posted": {
             "anyOf": [
               {
@@ -45303,6 +45470,30 @@
             ],
             "title": "Date Posted"
           },
+          "added_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Added At"
+          },
+          "active": {
+            "type": "boolean",
+            "title": "Active"
+          },
+          "closed_verdict": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "open",
+                  "closed"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closed Verdict"
+          },
           "compensation": {
             "$ref": "#/components/schemas/PublicCompensation"
           },
@@ -45313,14 +45504,58 @@
         },
         "type": "object",
         "required": [
+          "job_id",
           "company",
           "title",
           "locations",
+          "terms",
+          "source",
+          "ats",
           "date_posted",
+          "added_at",
+          "active",
+          "closed_verdict",
           "compensation",
           "url"
         ],
         "title": "PublicJobCard"
+      },
+      "PublicJobDetail": {
+        "properties": {
+          "job": {
+            "$ref": "#/components/schemas/PublicJobCard"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content"
+          },
+          "content_fetched_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content Fetched At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "job",
+          "content",
+          "content_fetched_at"
+        ],
+        "title": "PublicJobDetail"
       },
       "PublicJobList": {
         "properties": {
