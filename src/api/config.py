@@ -209,6 +209,17 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
         value_type=PositiveInt,
         help="Pending ingests older than this many hourly cycles mean the fleet is behind.",
     ),
+    # A live handler that has not changed its progress for this long is wedged,
+    # even when its timer heartbeat remains fresh. Measured 2026-09-11: the
+    # completed seven-day sample's p95 finish-after-progress gap was under 0.22
+    # minutes and its maximum was 15.4 minutes across sampled kinds; a live
+    # match_mail task had stopped advancing for 166.5 minutes.
+    "task_progress_stall_minutes": ConfigKey(
+        section="Health",
+        default=30,
+        value_type=PositiveInt,
+        help="Minutes a running task may go without changing its reported progress before it counts as stalled.",
+    ),
     # How long a posting a title pattern screened out stays on record after
     # its board stops listing it. Long enough to evaluate a new pattern
     # against a month of what the boards actually posted.

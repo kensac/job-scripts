@@ -35,6 +35,7 @@ class Entitlement:
 
 
 AccessReason = Literal["NO_API_KEY", "NO_MODEL", "BUDGET_EXCEEDED"]
+BUDGET_EXCEEDED = "BUDGET_EXCEEDED"
 
 
 class AIAccessError(Exception):
@@ -183,7 +184,7 @@ def resolve_ai_config(user_id: int, entitlement: Entitlement):
             entitlement.weekly_token_budget is not None
             and entitlement.spent_this_week >= entitlement.weekly_token_budget
         ):
-            raise AIBudgetExceeded("BUDGET_EXCEEDED", entitlement)
+            raise AIBudgetExceeded(BUDGET_EXCEEDED, entitlement)
         allowed = owner_allowed_models(entitlement.groups or [])
         chosen = settings.get("ai_model")
         model = chosen

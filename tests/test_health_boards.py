@@ -73,6 +73,18 @@ def test_a_feed_that_returned_nothing_fires_only_if_it_ever_returned_anything(f)
     assert _kinds() == {("source_feed_empty", "moved")}
 
 
+def test_an_empty_feed_is_critical_only_with_enough_prior_volume(f):
+    f.make_source("small")
+    f.make_source("clear_break")
+    for source, prior in (("small", 4), ("clear_break", 5)):
+        _ingest(source, "done", age_hours=1, fetched=0, kept=0)
+        _ingest(source, "done", age_hours=30, fetched=prior, kept=prior)
+
+    alerts = {a["subject"]: a for a in health._detect_boards() if a["kind"] == "source_feed_empty"}
+    assert alerts["small"]["severity"] == "warning"
+    assert alerts["clear_break"]["severity"] == "critical"
+
+
 def test_a_pattern_that_admits_nothing_fires_only_when_a_pattern_is_set(f):
     f.make_source("tight")
     f.make_source("no_pattern")

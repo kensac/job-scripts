@@ -13,6 +13,8 @@ health` and `health.detect()` read exactly as they did.
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from api import db, telemetry
@@ -85,42 +87,122 @@ logger = logging.getLogger(__name__)
 RESOLVE_GRACE = "3 hours"
 
 
-def detect() -> list[dict[str, Any]]:
+@dataclass(frozen=True)
+class DetectorOutcome:
+    name: str
+    findings: tuple[dict[str, Any], ...]
+    error: str | None = None
+
+    @property
+    def succeeded(self) -> bool:
+        return self.error is None
+
+
+class DetectionRun(list[dict[str, Any]]):
+    """List-compatible findings plus the outcome of every detector section."""
+
+    def __init__(self, outcomes: tuple[DetectorOutcome, ...]):
+        self.outcomes = outcomes
+        super().__init__(finding for outcome in outcomes for finding in outcome.findings)
+
+    @property
+    def findings(self) -> list[dict[str, Any]]:
+        return list(self)
+
+    @property
+    def failed_detectors(self) -> list[str]:
+        return [outcome.name for outcome in self.outcomes if not outcome.succeeded]
+
+
+_OWNERS = {
+    "ats_text_collapse": "_detect_sources",
+    "extraction_failing": "_detect_sources",
+    "oauth_token_invalid": "_detect_sources",
+    "batch_parked_too_long": "_detect_sources",
+    "batch_failed_whole": "_detect_sources",
+    "ingest_failing": "_detect_boards",
+    "ingest_host_failing": "_detect_boards",
+    "source_feed_empty": "_detect_boards",
+    "source_pattern_admits_all": "_detect_boards",
+    "source_pattern_excludes_all": "_detect_boards",
+    "worker_fetches_failing": "_detect_boards",
+    "resolver_bypassed": "_detect_boards",
+    "queue_stalled": "_detect_queue",
+    "ingest_backlog": "_detect_queue",
+    "fleet_mixed_release": "_detect_fleet",
+    "sweep_did_nothing": "_detect_silent",
+    "task_progress_invalid": "_detect_silent",
+    "task_progress_stalled": "_detect_silent",
+    "task_kind_failing": "_detect_silent",
+    "task_requeued_forever": "_detect_silent",
+    "address_blocked_by_host": "_detect_silent",
+    "alerts_unnotified": "_detect_silent",
+}
+
+
+def _owner(kind: str, subject: str) -> str | None:
+    if kind.endswith("_rate_spike"):
+        return "_detect_sources"
+    if kind == "detector_failed":
+        return subject
+    return _OWNERS.get(kind)
+
+
+def detect() -> DetectionRun:
     """Compares the last 24h against the preceding week, per source, looking for
     the shapes that mean 'something upstream changed' rather than 'the job
     market moved'. Everything here is deliberately relative to each source's
     own baseline. Absolute thresholds would fire constantly on sources that
     are legitimately mostly-closed or legitimately short."""
-    found: list[dict[str, Any]] = []
+    outcomes: list[DetectorOutcome] = []
 
     # Each section on its own: on 2026-09-04 three detectors failed in three
     # ways on one day, the exception took the whole task down, and the open
     # alerts auto-resolved because nothing re-observed them. A raising
     # detector looked exactly like all clear. Now it is an alert of its own.
-    for section in (_detect_sources, _detect_boards, _detect_queue, _detect_fleet, _detect_silent):
+    sections = (
+        ("_detect_sources", _detect_sources),
+        ("_detect_boards", _detect_boards),
+        ("_detect_queue", _detect_queue),
+        ("_detect_fleet", _detect_fleet),
+        ("_detect_silent", _detect_silent),
+    )
+    for name, section in sections:
         try:
-            found.extend(section())
+            outcomes.append(DetectorOutcome(name, tuple(section())))
         except Exception as exc:
-            logger.exception(f"health detector {section.__name__} raised")
-            found.append(
-                {
-                    "kind": "detector_failed",
-                    "subject": section.__name__,
-                    "severity": "critical",
-                    "message": (
-                        f"{section.__name__} raised {type(exc).__name__}: {str(exc)[:200]}. "
-                        "Every alert it owns is unobserved until it runs again."
-                    ),
-                    "detail": {"error": str(exc)[:1000]},
-                }
+            logger.exception(f"health detector {name} raised")
+            finding = {
+                "kind": "detector_failed",
+                "subject": name,
+                "severity": "critical",
+                "message": (
+                    f"{name} raised {type(exc).__name__}: {str(exc)[:200]}. "
+                    "Every alert it owns is unobserved until it runs again."
+                ),
+                "detail": {"error": str(exc)[:1000]},
+            }
+            outcomes.append(
+                DetectorOutcome(name, (finding,), error=f"{type(exc).__name__}: {str(exc)[:1000]}")
             )
-    return found
+    return DetectionRun(tuple(outcomes))
 
 
-def record(found: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def record(run: DetectionRun | Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
     """Upserts open alerts and auto-resolves ones that stopped firing. Returns
     only the newly-opened alerts, so notification never repeats for a condition
     that is merely still true."""
+    if isinstance(run, DetectionRun):
+        found = run.findings
+        successful = {outcome.name for outcome in run.outcomes if outcome.succeeded}
+        resolve_unknown = False
+    else:
+        # Compatibility for callers recording a deliberate synthetic finding.
+        # Detector execution always passes DetectionRun and therefore retains
+        # the distinction between a clear result and an evaluation failure.
+        found = list(run)
+        successful = set(_OWNERS.values())
+        resolve_unknown = True
     seen = {(f["kind"], f["subject"]) for f in found}
     fresh: list[dict[str, Any]] = []
     for f in found:
@@ -166,7 +248,18 @@ def record(found: list[dict[str, Any]]) -> list[dict[str, Any]]:
         "AND last_seen < now() - %s::interval",
         (RESOLVE_GRACE,),
     )
-    stale = [r for r in open_rows if (r["kind"], r["subject"]) not in seen]
+    stale = [
+        r
+        for r in open_rows
+        if (r["kind"], r["subject"]) not in seen
+        # Unknown ownership is not evidence of recovery. A newly added alert
+        # kind must declare its detector before the recorder may auto-resolve
+        # it; preserving an alert is safer than manufacturing a false clear.
+        and (
+            _owner(r["kind"], r["subject"]) in successful
+            or (resolve_unknown and _owner(r["kind"], r["subject"]) is None)
+        )
+    ]
     if stale:
         db.execute(
             "UPDATE health_alerts SET resolved_at = now() WHERE id = ANY(%s)",

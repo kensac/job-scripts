@@ -5,8 +5,9 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from api import db
+from api import budget, db
 from api.health.evidence import (
+    WORKER_FRESH,
     _int_from,
 )
 
@@ -24,6 +25,7 @@ SWEEP_KINDS = frozenset(
         "reverify_chunk",
         "run_filter_chunk",
         "run_filter_batch_chunk",
+        "run_managed_board_batch",
         "classify_locations",
         "classify_mail",
         "embed_postings",
@@ -69,18 +71,97 @@ def _detect_silent() -> list[dict[str, Any]]:
             }
         )
 
+    # A completed sweep with work selected must provide a numeric, internally
+    # consistent outcome. Missing progress is unknown, not evidence that the
+    # sweep succeeded or failed, so it gets its own alert rather than being
+    # folded into sweep_did_nothing.
+    for r in db.query(
+        f"""
+        WITH invalid AS (
+            SELECT id, kind, {_int_from("progress", "total")} AS total,
+                   {_int_from("progress", "done")} AS done
+            FROM tasks
+            WHERE status = 'done' AND finished_at > now() - interval '24 hours'
+              AND {_int_from("progress", "total")} > 0
+              AND (
+                  {_int_from("progress", "done")} IS NULL
+                  OR {_int_from("progress", "done")} < 0
+                  OR {_int_from("progress", "done")} > {_int_from("progress", "total")}
+              )
+              AND kind = ANY(%(kinds)s)
+        )
+        SELECT DISTINCT ON (kind) kind, COUNT(*) OVER (PARTITION BY kind) AS n,
+               id AS task_id, total, done
+        FROM invalid ORDER BY kind, id DESC
+        """,
+        {"kinds": sorted(SWEEP_KINDS)},
+    ):
+        found.append(
+            {
+                "kind": "task_progress_invalid",
+                "subject": r["kind"],
+                "severity": "warning",
+                "message": (
+                    f"{r['n']} completed {r['kind']} task(s) in 24h reported invalid progress; "
+                    f"the latest was task {r['task_id']}. Its completed-row count cannot be "
+                    "determined until the handler's progress reporting is fixed."
+                ),
+                "detail": dict(r),
+            }
+        )
+
+    stall_minutes = int(db.get_config("task_progress_stall_minutes"))
+    for r in db.query(
+        """
+        SELECT id, kind, worker, progress,
+               EXTRACT(EPOCH FROM now() - COALESCE(progress_at, started_at)) / 60
+                   AS stale_minutes
+        FROM tasks
+        WHERE status = 'running'
+          AND last_heartbeat > now() - %(fresh)s::interval
+          AND COALESCE(progress_at, started_at)
+              < now() - make_interval(mins => %(stall)s)
+        """,
+        {"fresh": WORKER_FRESH, "stall": stall_minutes},
+    ):
+        found.append(
+            {
+                "kind": "task_progress_stalled",
+                "subject": str(r["id"]),
+                "severity": "critical",
+                "message": (
+                    f"task {r['id']} ({r['kind']}) on {r['worker']} has a fresh heartbeat but "
+                    f"has not advanced for {r['stale_minutes']:.0f} minutes, past the "
+                    f"{stall_minutes}-minute limit. Inspect the handler, then cancel or retry "
+                    "the task if it cannot make progress."
+                ),
+                "detail": {
+                    "id": r["id"],
+                    "kind": r["kind"],
+                    "worker": r["worker"],
+                    "progress": r["progress"],
+                    "stale_minutes": round(float(r["stale_minutes"]), 1),
+                    "stall_minutes": stall_minutes,
+                },
+            }
+        )
+
     # A kind failing repeatedly. ingest_source has its own per-board and
     # per-host detectors; everything else failed in silence: a rotated
     # encryption key fails probe_credentials three times an hour with no
-    # invalid_at and no alert.
+    # invalid_at and no alert. BUDGET_EXCEEDED is the one canonical policy
+    # refusal stored as a failed task: retrying it cannot succeed until the
+    # allowance changes, and the budget surface already explains that action.
     for r in db.query(
         """
         SELECT kind, COUNT(*) AS n, MAX(LEFT(error, 200)) AS sample_error
         FROM tasks
         WHERE status = 'failed' AND finished_at > now() - interval '3 hours'
           AND kind <> 'ingest_source'
+          AND COALESCE(error, '') NOT LIKE %(budget_exceeded)s
         GROUP BY kind HAVING COUNT(*) >= 3
-        """
+        """,
+        {"budget_exceeded": budget.BUDGET_EXCEEDED + "%"},
     ):
         found.append(
             {

@@ -19,6 +19,11 @@ INGEST_FAILURE_STREAK = 3
 # Below this many page fetches a worker's failure rate is noise.
 MIN_FETCH_SAMPLES = 20
 
+# Fewer prior postings prove only that a feed has worked, not that an empty
+# hour is abnormal. Measured 2026-09-11: six open empty-feed alerts had only
+# one to four prior postings; the two clear breaks had 9 and 26.
+MIN_FEED_BREAK_BASELINE = 5
+
 
 def _detect_boards() -> list[dict[str, Any]]:
     """The ways a board stops delivering without anything reporting an error.
@@ -94,14 +99,15 @@ def _detect_boards() -> list[dict[str, Any]]:
         """
     ):
         if r["fetched"] == 0 and (r["best_prior_fetched"] or 0) > 0:
+            prior = r["best_prior_fetched"]
             found.append(
                 {
                     "kind": "source_feed_empty",
                     "subject": r["source"],
-                    "severity": "critical",
+                    "severity": "critical" if prior >= MIN_FEED_BREAK_BASELINE else "warning",
                     "message": (
                         f"{r['source']} fetched fine and returned 0 postings; it returned "
-                        f"{r['best_prior_fetched']} within the prior week. The feed moved, "
+                        f"{prior} within the prior week. The feed moved, "
                         "the board token changed, or the table shape did."
                     ),
                     "detail": dict(r),
@@ -186,12 +192,12 @@ def _detect_boards() -> list[dict[str, Any]]:
         SELECT worker,
                COALESCE(sum(COALESCE({_int_from("progress", "cached")}, 0) + COALESCE({_int_from("progress", "fetch_failed")}, 0))
                    FILTER (WHERE finished_at > now() - interval '24 hours'), 0) AS recent_total,
-               COALESCE(sum((progress->>'fetch_failed')::int)
+               COALESCE(sum({_int_from("progress", "fetch_failed")})
                    FILTER (WHERE finished_at > now() - interval '24 hours'), 0) AS recent_failed,
                COALESCE(sum(COALESCE({_int_from("progress", "cached")}, 0) + COALESCE({_int_from("progress", "fetch_failed")}, 0))
                    FILTER (WHERE finished_at BETWEEN now() - interval '8 days'
                            AND now() - interval '24 hours'), 0) AS base_total,
-               COALESCE(sum((progress->>'fetch_failed')::int)
+               COALESCE(sum({_int_from("progress", "fetch_failed")})
                    FILTER (WHERE finished_at BETWEEN now() - interval '8 days'
                            AND now() - interval '24 hours'), 0) AS base_failed
         FROM tasks

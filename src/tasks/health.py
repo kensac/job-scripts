@@ -18,16 +18,18 @@ async def handle_data_health(task_id: int, payload: dict[str, Any]) -> None:
     auto-resolve, so the mail stays worth reading."""
     from api import health
 
-    found = health.detect()
-    fresh = health.record(found)
-    metrics.HEALTH_ALERTS.set(len(found))
+    run = health.detect()
+    fresh = health.record(run)
+    row = db.query_one("SELECT COUNT(*) AS n FROM health_alerts WHERE resolved_at IS NULL")
+    open_count = int(row["n"]) if row else 0
+    metrics.HEALTH_ALERTS.set(open_count)
     if fresh:
         await asyncio.to_thread(_notify, fresh)
     set_progress(
         task_id,
-        len(found),
-        len(found),
-        f"{len(found)} open, {len(fresh)} new" if found else "all clear",
+        open_count,
+        open_count,
+        f"{open_count} open, {len(fresh)} new" if open_count else "all clear",
     )
 
 

@@ -44,12 +44,67 @@ def test_a_sweep_that_finished_with_nothing_written_fires():
     assert _silent() == {("sweep_did_nothing", "extract_comp")}
 
 
+def test_managed_board_batch_is_an_honest_sweep():
+    _task("run_managed_board_batch", "done", progress={"done": 0, "total": 20})
+    assert _silent() == {("sweep_did_nothing", "run_managed_board_batch")}
+
+
+def test_completed_sweep_with_invalid_progress_says_it_cannot_tell():
+    _task("extract_comp", "done", progress={"done": "unknown", "total": 20})
+    _task("verify_new", "done", progress={"done": 21, "total": 20})
+    assert _silent() == {
+        ("task_progress_invalid", "extract_comp"),
+        ("task_progress_invalid", "verify_new"),
+    }
+
+
+def test_running_task_with_fresh_heartbeat_and_stale_progress_fires():
+    db.execute(
+        """
+        INSERT INTO tasks (kind, payload, status, worker, started_at, last_heartbeat, progress_at,
+                           progress)
+        VALUES ('match_mail', '{}', 'running', 'worker', now() - interval '2 hours', now(),
+                now() - interval '31 minutes', '{"done": 1, "total": 2}')
+        """
+    )
+    assert _silent() == {("task_progress_stalled", "1")}
+
+
+def test_running_task_without_first_progress_uses_its_start_time():
+    db.execute(
+        """
+        INSERT INTO tasks (kind, payload, status, worker, started_at, last_heartbeat)
+        VALUES ('match_mail', '{}', 'running', 'worker', now() - interval '31 minutes', now())
+        """
+    )
+    assert _silent() == {("task_progress_stalled", "1")}
+
+
+def test_recent_or_dead_worker_is_not_a_progress_stall():
+    db.execute(
+        """
+        INSERT INTO tasks (kind, payload, status, worker, started_at, last_heartbeat, progress_at)
+        VALUES ('match_mail', '{}', 'running', 'fresh', now() - interval '20 minutes', now(),
+                now() - interval '20 minutes'),
+               ('match_mail', '{}', 'running', 'dead', now() - interval '2 hours',
+                now() - interval '10 minutes', now() - interval '2 hours')
+        """
+    )
+    assert _silent() == set()
+
+
 def test_a_kind_failing_three_times_fires_but_ingest_has_its_own():
     for _ in range(3):
         _task("probe_credentials", "failed", error="InvalidToken")
         _task("ingest_source", "failed", error="429")
     _task("extract_comp", "failed", error="once")
     assert _silent() == {("task_kind_failing", "probe_credentials")}
+
+
+def test_budget_refusals_are_not_task_failures_an_operator_can_fix():
+    for _ in range(3):
+        _task("run_all_filters", "failed", error="BUDGET_EXCEEDED after 0/100 checks")
+    assert _silent() == set()
 
 
 def test_a_task_the_reaper_keeps_handing_back_fires():
@@ -101,5 +156,5 @@ def test_a_detector_that_raises_is_an_alert_not_silence(monkeypatch):
     monkeypatch.setattr(health, "_detect_queue", boom)
     found = health.detect()
     failed = [a for a in found if a["kind"] == "detector_failed"]
-    assert len(failed) == 1 and failed[0]["subject"] == "boom"
+    assert len(failed) == 1 and failed[0]["subject"] == "_detect_queue"
     assert "column vanished" in failed[0]["message"]

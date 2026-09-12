@@ -123,6 +123,7 @@ class HealthRun(BaseModel):
     open: int
     new: int
     alerts: list[Finding]
+    failed_detectors: list[str]
 
 
 @router.post("/health/check")
@@ -130,9 +131,14 @@ async def run_health_check(user: AuthedUser = Depends(require_admin)) -> HealthR
     """Run the detectors now instead of waiting for the hourly task."""
     from api import health
 
-    found = health.detect()
-    fresh = health.record(found)
-    return HealthRun(open=len(found), new=len(fresh), alerts=[Finding(**f) for f in found])
+    run = health.detect()
+    fresh = health.record(run)
+    return HealthRun(
+        open=len(run),
+        new=len(fresh),
+        alerts=[Finding(**f) for f in run],
+        failed_detectors=run.failed_detectors,
+    )
 
 
 class FailurePivot(BaseModel):

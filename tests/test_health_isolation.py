@@ -57,6 +57,61 @@ def test_the_other_detectors_still_run_when_one_fails(monkeypatch):
     )
 
 
+def test_a_failing_detector_does_not_resolve_alerts_it_cannot_evaluate(monkeypatch):
+    db.execute(
+        "INSERT INTO health_alerts (kind, subject, severity, message, last_seen) "
+        "VALUES ('source_feed_empty', 'board', 'critical', 'm', now() - interval '1 day')"
+    )
+
+    def boom():
+        raise RuntimeError("board query failed")
+
+    monkeypatch.setattr(health, "_detect_boards", boom)
+    run = health.detect()
+    health.record(run)
+
+    assert run.failed_detectors == ["_detect_boards"]
+    assert (
+        db.query_one("SELECT resolved_at FROM health_alerts WHERE kind = 'source_feed_empty'")[
+            "resolved_at"
+        ]
+        is None
+    )
+
+
+def test_a_recovered_detector_can_resolve_its_old_alert(monkeypatch):
+    db.execute(
+        "INSERT INTO health_alerts (kind, subject, severity, message, last_seen) "
+        "VALUES ('source_feed_empty', 'board', 'critical', 'm', now() - interval '1 day')"
+    )
+    monkeypatch.setattr(health, "_detect_boards", list)
+
+    health.record(health.detect())
+
+    assert (
+        db.query_one("SELECT resolved_at FROM health_alerts WHERE kind = 'source_feed_empty'")[
+            "resolved_at"
+        ]
+        is not None
+    )
+
+
+def test_an_alert_with_unknown_detector_ownership_never_false_clears():
+    db.execute(
+        "INSERT INTO health_alerts (kind, subject, severity, message, last_seen) "
+        "VALUES ('new_detector_kind', 'subject', 'warning', 'm', now() - interval '1 day')"
+    )
+
+    health.record(health.detect())
+
+    assert (
+        db.query_one("SELECT resolved_at FROM health_alerts WHERE kind = 'new_detector_kind'")[
+            "resolved_at"
+        ]
+        is None
+    )
+
+
 def test_a_task_whose_progress_is_not_a_number_does_not_break_a_detector(f):
     """`(progress->>'total')::int` in a WHERE clause is not safe: Postgres does
     not promise to filter before it casts, so one row like this failed the
@@ -79,6 +134,16 @@ def test_a_task_whose_progress_is_not_a_number_does_not_break_a_detector(f):
     assert not [
         x for x in found if x["kind"] == "detector_failed" and x["subject"] == "_detect_silent"
     ], "a non-numeric progress value must drop out of the comparison, not raise"
+
+
+def test_a_non_numeric_fetch_failure_count_does_not_break_board_detection(f):
+    db.execute(
+        "INSERT INTO tasks (kind, status, payload, progress, worker, finished_at) "
+        "VALUES ('ingest_source', 'done', '{}', %s, 'worker', now())",
+        (json.dumps({"cached": 20, "fetch_failed": "unknown"}),),
+    )
+
+    health._detect_boards()
 
 
 @pytest.mark.parametrize("column,key", [("progress", "total"), ("progress", "done")])
