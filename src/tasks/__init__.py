@@ -36,7 +36,7 @@ from tasks.mail_sync import (
     handle_probe_credentials,
     handle_sync_gmail,
 )
-from tasks.managed_boards import handle_run_managed_board
+from tasks.managed_boards import handle_run_managed_board, handle_run_managed_board_batch
 from tasks.message_html import handle_backfill_message_html
 from tasks.requirements import handle_extract_requirements
 from tasks.uploads import handle_extract_upload
@@ -78,6 +78,7 @@ HANDLERS = {
     "run_experiment": handle_run_experiment,
     "backfill_user_job_split": handle_backfill_user_job_split,
     "run_managed_board": handle_run_managed_board,
+    "run_managed_board_batch": handle_run_managed_board_batch,
     "classify_job_profiles": handle_classify_job_profiles,
 }
 

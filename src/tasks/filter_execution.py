@@ -200,6 +200,9 @@ async def execute_batch(
     *,
     contents: dict[str, str],
     unavailable: int,
+    purpose: str = "filter",
+    max_output_tokens: int = 6000,
+    complete_without_submission: bool = False,
     collect: Callable[..., Awaitable[list[Any]]] = collect_pending,
     submit: Callable[..., Awaitable[list[Any]]] = submit_or_collect,
 ) -> None:
@@ -236,6 +239,8 @@ async def execute_batch(
     total = len(jobs)
     if not specs and not existing:
         hooks.progress(0, total, "no content-ready jobs; waiting for a later cycle")
+        if complete_without_submission:
+            hooks.complete()
         return
     hooks.progress(
         0,
@@ -252,7 +257,7 @@ async def execute_batch(
             if hooks.cancelled():
                 raise asyncio.CancelledError
 
-    hook = batch_event_hook(task_id, "filter", cfg.model if cfg else None, charged_to_user=True)
+    hook = batch_event_hook(task_id, purpose, cfg.model if cfg else None, charged_to_user=True)
     heartbeat_task = asyncio.create_task(heartbeat())
     try:
         if existing:
@@ -265,7 +270,7 @@ async def execute_batch(
                 specs,
                 cfg.model,
                 cfg.params.get("reasoning_effort", "medium"),
-                6000,
+                max_output_tokens,
                 hook,
             )
     finally:

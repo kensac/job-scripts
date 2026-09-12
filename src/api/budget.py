@@ -497,6 +497,8 @@ def record_managed_board_tokens(
     purpose: str,
     model: str | None,
     usage: dict[str, int],
+    *,
+    batched: bool = False,
 ) -> None:
     """Record server-key work owned by a managed board, never a fake user."""
     total = usage.get("total_tokens", 0)
@@ -508,7 +510,7 @@ def record_managed_board_tokens(
     db.execute(
         "INSERT INTO api_usage (managed_board_id, key_source, purpose, model, "
         "prompt_tokens, completion_tokens, total_tokens, cached_tokens, batched, cost_usd) "
-        "VALUES (%s, 'owner', %s, %s, %s, %s, %s, %s, false, %s)",
+        "VALUES (%s, 'owner', %s, %s, %s, %s, %s, %s, %s, %s)",
         (
             managed_board_id,
             purpose,
@@ -517,7 +519,10 @@ def record_managed_board_tokens(
             completion,
             total,
             cached,
-            pricing.estimate_cost_usd(model, prompt, completion, cached_tokens=cached),
+            batched,
+            pricing.estimate_cost_usd(
+                model, prompt, completion, cached_tokens=cached, batched=batched
+            ),
         ),
     )
     from api import metrics
