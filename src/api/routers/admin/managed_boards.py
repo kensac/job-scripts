@@ -22,7 +22,7 @@ router = APIRouter()
 
 _BOOTSTRAP_MODEL = "gpt-5.6-luna"
 _BOOTSTRAP_CRITERIA = Criteria(
-    max_age_days=30,
+    max_age_days=7,
     included_locations=["United States", "Canada", "Remote"],
 )
 _BOOTSTRAP_TITLE_GATES = {
@@ -32,17 +32,17 @@ _BOOTSTRAP_TITLE_GATES = {
 _BOOTSTRAP_DEFINITIONS = (
     (
         "software-engineering-internships",
-        "Selective Tech Internships",
-        "Prestigious software engineering and product management internships at tech and tech-adjacent companies.",
-        """Managed board bootstrap prompt v1.
-Include only internship opportunities in software engineering or product management at technology or technology-adjacent companies. The opportunity must satisfy the existing high-achiever standard: either the company qualifies for the prestigious company tier, or the particular role is demonstrably selective and top-tier. Exclude full-time, new-grad, entry-level, apprenticeship, unrelated functions, and opportunities whose prestige or selectivity is unclear.""",
+        "Tech Internships",
+        "Internships in software engineering, product management, data, infrastructure, machine learning, and adjacent roles at tech and tech-adjacent companies.",
+        """Managed board bootstrap prompt v2.
+Include only internship opportunities in software engineering, product management, data, infrastructure, machine learning, or closely adjacent technical or product roles at technology or technology-adjacent companies. Exclude PhD or doctoral opportunities, full-time, new-grad, entry-level, apprenticeship, clearly unrelated functions, and opportunities whose career stage or role family is unclear.""",
     ),
     (
         "software-engineering-new-grad",
-        "Selective Tech New Grad",
-        "Prestigious full-time software engineering and product management opportunities for new graduates at tech and tech-adjacent companies.",
-        """Managed board bootstrap prompt v1.
-Include only full-time entry-level or new-graduate opportunities in software engineering or product management at technology or technology-adjacent companies. The opportunity must satisfy the existing high-achiever standard: either the company qualifies for the prestigious company tier, or the particular role is demonstrably selective and top-tier. Exclude internships, apprenticeships, experienced roles, unrelated functions, and opportunities whose prestige or selectivity is unclear.""",
+        "Tech New Grad",
+        "Entry-level and new-graduate roles in software engineering, product management, data, infrastructure, machine learning, and adjacent fields at tech and tech-adjacent companies.",
+        """Managed board bootstrap prompt v2.
+Include only full-time entry-level or new-graduate opportunities in software engineering, product management, data, infrastructure, machine learning, or closely adjacent technical or product roles at technology or technology-adjacent companies. Exclude internships, apprenticeships, experienced roles, clearly unrelated functions, and opportunities whose career stage or role family is unclear.""",
     ),
     (
         "kanishks-job-list",
@@ -233,7 +233,7 @@ def bootstrap_managed_boards(
 ) -> ManagedBoards:
     """Create the two versioned starter boards as drafts for this sponsor."""
     with db.transaction():
-        db.execute("SELECT pg_advisory_xact_lock(hashtext('managed-boards-bootstrap-v1'))")
+        db.execute("SELECT pg_advisory_xact_lock(hashtext('managed-boards-bootstrap-v2'))")
         sources = [
             row.name
             for row in db.query_as(_Name, "SELECT name FROM sources WHERE active ORDER BY name")
@@ -272,7 +272,7 @@ def bootstrap_managed_boards(
                         409,
                         detail={
                             "code": "BOOTSTRAP_DRIFT",
-                            "message": f"{slug} differs from bootstrap v1",
+                            "message": f"{slug} differs from bootstrap v2",
                         },
                     )
                 boards.append(board)
