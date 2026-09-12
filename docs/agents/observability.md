@@ -471,3 +471,15 @@ person's own key runs live, billed to them, because they were promised no cap
 and their own bill and the collector holds only the server's key. Existing
 batch receipts are collected before current settings are consulted.
 Interactive filter runs keep their live path.
+
+Managed-board admissions freeze an execution version, transport and resolved
+effort in the task payload. New `managed_filter` work uses the persisted batch
+collector only and is admitted as `run_managed_board_batch`, a kind an older
+worker does not register and therefore cannot claim during a rolling deploy.
+Payloads admitted before that contract existed keep the `run_managed_board`
+live handler so work already running at deployment can finish, but a versioned
+task never falls back to live execution. Managed-board batch receipts commit their
+verdict and batch-priced board usage before acknowledgement, and the board
+projection is replaced only after every provider batch in the immutable run
+has reached a terminal state. `sponsor_filter_reuse` remains projection-only
+and makes no inference call.

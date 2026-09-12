@@ -16,8 +16,25 @@ from api.board import eligibility
 from api.task_admission import ACTIVE_STATUSES, TaskProgress
 from core.batch import BATCH_CHARS_PER_TOKEN
 from core.filters import build_custom_decision_instructions, build_custom_input
+from core.providers import StructuredOutput
+from core.routing import NoEligibleModel, TaskShape, resolve
 
 FILTER_OUTPUT_RESERVATION_TOKENS = 120
+MANAGED_FILTER_EXECUTION_VERSION = 2
+MANAGED_FILTER_TRANSPORT = "batch"
+MANAGED_BOARD_RUN_KINDS = ("run_managed_board", "run_managed_board_batch")
+
+
+def _batch_shape(model: str, effort: str | None = None) -> TaskShape:
+    return TaskShape(
+        purpose="managed_board",
+        structured=StructuredOutput.JSON_SCHEMA,
+        batched=True,
+        max_output_tokens=FILTER_OUTPUT_RESERVATION_TOKENS,
+        est_prompt_tokens=1000,
+        candidates=(model,),
+        effort=effort,
+    )
 
 
 class ManagedBoardRun(BaseModel):
@@ -224,10 +241,14 @@ def _usage_position(sponsor_id: int) -> _UsagePosition:
           COALESCE((SELECT SUM((t.payload->>'reserved_tokens')::bigint)
                     FROM tasks t JOIN managed_boards b
                       ON b.id = (t.payload->>'managed_board_id')::bigint
-                    WHERE t.kind = 'run_managed_board' AND t.status = ANY(%(active)s)
+                    WHERE t.kind = ANY(%(kinds)s) AND t.status = ANY(%(active)s)
                       AND b.sponsor_user_id = %(sponsor)s), 0)::bigint AS reserved
         """,
-        {"sponsor": sponsor_id, "active": list(ACTIVE_STATUSES)},
+        {
+            "sponsor": sponsor_id,
+            "active": list(ACTIVE_STATUSES),
+            "kinds": list(MANAGED_BOARD_RUN_KINDS),
+        },
     )
     assert row is not None
     return row
@@ -235,16 +256,17 @@ def _usage_position(sponsor_id: int) -> _UsagePosition:
 
 def admit(board_id: int, *, dedupe_key: str | None = None) -> ManagedBoardRunQueued:
     task_id: int | None = None
+    reasoning_effort: object | None = None
     with db.transaction():
         board = _board(board_id, lock=True)
         if board is None:
             raise RunRefusal("NOT_FOUND", "unknown managed board")
         active = db.query_one_as(
             _ActiveTask,
-            "SELECT id FROM tasks WHERE kind = 'run_managed_board' "
+            "SELECT id FROM tasks WHERE kind = ANY(%s) "
             "AND (payload->>'managed_board_id')::bigint = %s AND status = ANY(%s) "
             "ORDER BY id DESC LIMIT 1",
-            (board_id, list(ACTIVE_STATUSES)),
+            (list(MANAGED_BOARD_RUN_KINDS), board_id, list(ACTIVE_STATUSES)),
         )
         if active:
             raise RunRefusal(
@@ -271,10 +293,23 @@ def admit(board_id: int, *, dedupe_key: str | None = None) -> ManagedBoardRunQue
             provider = ai.provider_of_model(board.requested_model)
             if not owner or provider is None or not ai.server_key(provider):
                 raise RunRefusal("NO_SERVER_KEY", "the sponsor has no server-key allowance")
+            if provider != "openai":
+                raise RunRefusal(
+                    "BATCH_UNSUPPORTED",
+                    "requested model cannot execute through the managed batch collector",
+                )
             if board.requested_model not in budget.owner_allowed_models(sponsor.groups):
                 raise RunRefusal(
                     "MODEL_NOT_ALLOWED", "requested model is not allowed for the sponsor"
                 )
+            try:
+                choice = resolve(_batch_shape(board.requested_model))
+            except NoEligibleModel as exc:
+                raise RunRefusal(
+                    "BATCH_UNSUPPORTED",
+                    "requested model cannot execute managed-board batches",
+                ) from exc
+            reasoning_effort = choice.params.get("reasoning_effort")
             candidates = _candidates(board)
             reserved = _reservation(board, candidates)
             position = _usage_position(sponsor.id)
@@ -308,12 +343,24 @@ def admit(board_id: int, *, dedupe_key: str | None = None) -> ManagedBoardRunQue
                 for candidate in candidates
             ],
         }
+        if board.execution_mode == "managed_filter":
+            payload.update(
+                {
+                    "execution_version": MANAGED_FILTER_EXECUTION_VERSION,
+                    "inference_transport": MANAGED_FILTER_TRANSPORT,
+                    "reasoning_effort": reasoning_effort,
+                }
+            )
+        task_kind = (
+            "run_managed_board_batch"
+            if board.execution_mode == "managed_filter"
+            else "run_managed_board"
+        )
         row = db.query_one_as(
             _TaskId,
-            "INSERT INTO tasks (kind, payload, dedupe_key) "
-            "VALUES ('run_managed_board', %s, %s) "
+            "INSERT INTO tasks (kind, payload, dedupe_key) VALUES (%s, %s, %s) "
             "ON CONFLICT (dedupe_key) DO NOTHING RETURNING id",
-            (db.jsonb(payload), dedupe_key),
+            (task_kind, db.jsonb(payload), dedupe_key),
         )
         if row is None:
             raise RunRefusal("ALREADY_SCHEDULED", "this board was already scheduled this cycle")
@@ -330,9 +377,9 @@ def latest(board_id: int) -> ManagedBoardRun | None:
         "SELECT id, status, progress, error, (payload->>'revision')::bigint AS snapshot_revision, "
         "payload->>'requested_model' AS requested_model, "
         "(payload->>'reserved_tokens')::bigint AS reserved_tokens, "
-        "created_at, started_at, finished_at FROM tasks WHERE kind = 'run_managed_board' "
+        "created_at, started_at, finished_at FROM tasks WHERE kind = ANY(%s) "
         "AND (payload->>'managed_board_id')::bigint = %s ORDER BY id DESC LIMIT 1",
-        (board_id,),
+        (list(MANAGED_BOARD_RUN_KINDS), board_id),
     )
 
 
@@ -359,10 +406,12 @@ def cost(board_id: int) -> ManagedBoardCost:
     )
 
 
-def record_tokens(board_id: int, usage: dict[str, int], model: str | None) -> None:
+def record_tokens(
+    board_id: int, usage: dict[str, int], model: str | None, *, batched: bool = False
+) -> None:
     if not usage.get("total_tokens"):
         return
-    budget.record_managed_board_tokens(board_id, "managed_board", model, usage)
+    budget.record_managed_board_tokens(board_id, "managed_board", model, usage, batched=batched)
 
 
 @contextmanager

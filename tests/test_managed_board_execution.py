@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from api import db
+from core import pricing
 from core.filters import compute_filter_hash
 from core.store import add_ai_result
 from tasks import managed_boards as managed_task
@@ -15,6 +16,7 @@ def test_worker_registry_declares_managed_board_handler():
     from tasks import HANDLERS
 
     assert HANDLERS["run_managed_board"] is managed_task.handle_run_managed_board
+    assert HANDLERS["run_managed_board_batch"] is managed_task.handle_run_managed_board_batch
 
 
 def _admissible(monkeypatch) -> None:
@@ -47,8 +49,14 @@ def test_run_admission_snapshots_board_candidates_and_refuses_overlap(
     payload = db.query_one("SELECT payload FROM tasks WHERE id = %s", (queued["task_id"],))[
         "payload"
     ]
+    assert db.query_one("SELECT kind FROM tasks WHERE id = %s", (queued["task_id"],))["kind"] == (
+        "run_managed_board_batch"
+    )
     assert payload["revision"] == board["revision"]
     assert payload["requested_model"] == "gpt-5.6-luna"
+    assert payload["execution_version"] == 2
+    assert payload["inference_transport"] == "batch"
+    assert payload["reasoning_effort"] == "low"
     assert payload["sources"] == ["managed-source"]
     assert [job["id"] for job in payload["jobs"]] == [job_id]
     assert payload["jobs"][0]["content_query_id"] is not None
@@ -85,6 +93,7 @@ def test_sponsor_budget_reserves_across_managed_boards(client, admin_headers, f,
 
 @pytest.mark.asyncio
 async def test_handler_attributes_usage_and_atomically_replaces_projection(f, monkeypatch):
+    """A pre-cutover payload remains receivable through its original live path."""
     from api import ai
 
     monkeypatch.setattr(ai, "server_key", lambda provider: "test-server-key")
@@ -152,6 +161,135 @@ async def test_handler_attributes_usage_and_atomically_replaces_projection(f, mo
         "projection_revision": board["revision"],
         "resolved_model": "gpt-5.6-luna",
     }
+
+
+@pytest.mark.asyncio
+async def test_new_execution_contract_uses_batch_only_and_prices_batch(f, monkeypatch):
+    from api import ai
+
+    monkeypatch.setattr(ai, "server_key", lambda provider: "test-server-key")
+    sponsor = f.make_user(groups=["infra-admins"])
+    source = f.make_source("managed-batch-source")
+    job_id, url = f.make_ready_job(source=source)
+    prompt_hash = compute_filter_hash("prompt", "filter")
+    board = db.query_one(
+        "INSERT INTO managed_boards (slug, name, sponsor_user_id, prompt, prompt_hash, "
+        "requested_model, on_ambiguous, fail_closed, criteria) "
+        "VALUES ('managed-batch', 'Managed batch', %s, 'prompt', %s, "
+        "'gpt-5.6-luna', 'filter', true, '{}') RETURNING id, revision",
+        (sponsor, prompt_hash),
+    )
+    payload = {
+        "managed_board_id": board["id"],
+        "sponsor_user_id": sponsor,
+        "revision": board["revision"],
+        "prompt": "prompt",
+        "prompt_hash": prompt_hash,
+        "requested_model": "gpt-5.6-luna",
+        "execution_mode": "managed_filter",
+        "execution_version": 2,
+        "inference_transport": "batch",
+        "reasoning_effort": "medium",
+        "on_ambiguous": "filter",
+        "fail_closed": True,
+        "sources": [source],
+        "criteria": {},
+        "published": False,
+        "reserved_tokens": 1000,
+        "jobs": [
+            {
+                "id": job_id,
+                "url": url,
+                "company": "Acme",
+                "title": "Engineer",
+                "sort_at": "2026-09-01T00:00:00+00:00",
+            }
+        ],
+    }
+    task_id = f.make_task("run_managed_board_batch", payload, status="running")
+
+    async def fake_batch(task_id, cfg, snapshot, jobs, hooks, **kwargs):
+        assert kwargs["purpose"] == "managed_board"
+        assert kwargs["max_output_tokens"] == 120
+        assert kwargs["complete_without_submission"] is True
+        assert cfg.model == "gpt-5.6-luna"
+        hooks.record_usage(
+            {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12},
+            cfg.model,
+            True,
+        )
+        add_ai_result(url, "passed", check_type="custom", prompt_hash=prompt_hash, model=cfg.model)
+        db.execute(
+            "UPDATE tasks SET payload = jsonb_set(payload, '{batch_ids}', '[\"still-running\"]') "
+            "WHERE id = %s",
+            (task_id,),
+        )
+        hooks.complete()
+        assert db.query_one("SELECT count(*) AS n FROM managed_board_jobs")["n"] == 0
+        db.execute(
+            "UPDATE tasks SET payload = jsonb_set(payload, '{batch_ids}', '[]') WHERE id = %s",
+            (task_id,),
+        )
+        hooks.complete()
+
+    monkeypatch.setattr(managed_task, "execute_batch", fake_batch)
+    monkeypatch.setattr(
+        managed_task,
+        "execute_live",
+        lambda *args, **kwargs: pytest.fail("versioned managed runs must never execute live"),
+    )
+    await managed_task.handle_run_managed_board_batch(task_id, payload)
+
+    usage = db.query_one("SELECT managed_board_id, batched, total_tokens, cost_usd FROM api_usage")
+    assert usage["managed_board_id"] == board["id"]
+    assert usage["batched"] is True
+    assert usage["total_tokens"] == 12
+    assert usage["cost_usd"] == Decimal("0.000002")
+    assert pricing.estimate_cost_usd(
+        "gpt-5.6-luna", 10, 2, batched=True
+    ) < pricing.estimate_cost_usd("gpt-5.6-luna", 10, 2, batched=False)
+    assert db.query_one("SELECT job_id FROM managed_board_jobs")["job_id"] == job_id
+
+
+@pytest.mark.asyncio
+async def test_versioned_managed_run_never_falls_back_for_an_unknown_contract(f):
+    payload = {
+        "execution_mode": "managed_filter",
+        "execution_version": 2,
+        "inference_transport": "live",
+    }
+    with pytest.raises(ValueError, match="unsupported execution contract"):
+        await managed_task.handle_run_managed_board_batch(
+            f.make_task("run_managed_board_batch", payload), payload
+        )
+
+
+@pytest.mark.asyncio
+async def test_legacy_handler_refuses_versioned_managed_work(f):
+    payload = {
+        "execution_mode": "managed_filter",
+        "execution_version": 2,
+        "inference_transport": "batch",
+    }
+    with pytest.raises(ValueError, match="requires the batch task kind"):
+        await managed_task.handle_run_managed_board(
+            f.make_task("run_managed_board", payload), payload
+        )
+
+
+def test_admission_overlap_includes_legacy_task_kind(client, admin_headers, f, monkeypatch):
+    _admissible(monkeypatch)
+    board, _job_id, _url = _board_and_job(client, admin_headers, f)
+    legacy = f.make_task(
+        "run_managed_board",
+        {"managed_board_id": board["id"]},
+        status="awaiting_batch",
+    )
+
+    response = client.post(f"/v1/admin/managed-boards/{board['id']}/run", headers=admin_headers)
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["task_id"] == legacy
 
 
 @pytest.mark.asyncio
@@ -266,6 +404,16 @@ def test_latest_and_cost_routes_are_board_scoped(client, admin_headers, f, monke
     queued = client.post(
         f"/v1/admin/managed-boards/{board['id']}/run", headers=admin_headers
     ).json()
+    legacy_id = f.make_task(
+        "run_managed_board",
+        {
+            "managed_board_id": board["id"],
+            "revision": board["revision"],
+            "requested_model": "gpt-5.6-luna",
+            "reserved_tokens": 0,
+        },
+        status="done",
+    )
     db.execute(
         "INSERT INTO api_usage (managed_board_id, key_source, purpose, model, total_tokens, cost_usd) "
         "VALUES (%s, 'owner', 'managed_board', 'gpt-5.6-luna', 25, %s)",
@@ -274,7 +422,8 @@ def test_latest_and_cost_routes_are_board_scoped(client, admin_headers, f, monke
     latest = client.get(
         f"/v1/admin/managed-boards/{board['id']}/runs/latest", headers=admin_headers
     ).json()["run"]
-    assert latest["id"] == queued["task_id"]
+    assert queued["task_id"] < legacy_id
+    assert latest["id"] == legacy_id
     assert latest["snapshot_revision"] == board["revision"]
     cost = client.get(f"/v1/admin/managed-boards/{board['id']}/cost", headers=admin_headers).json()
     assert cost["calls"] == cost["week_calls"] == 1
