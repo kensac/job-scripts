@@ -238,6 +238,41 @@ def _ashby(url: str, company: str) -> list[JobPosting]:
 _WORKDAY_PAGE = 20
 
 
+# A count is not a place. Measured 2026-09-12: 1,002 postings in the catalog
+# carry "2 Locations", "3 Locations" and so on as their only location, and 162
+# carry none at all. Both defeat a location filter, in opposite directions. A
+# count never matches the `locations` vocabulary, so those postings are
+# silently EXCLUDED wherever included_locations is set; an empty list is
+# deliberately kept by that same predicate, which is how an Accenture posting
+# in Jakarta reached a United States board.
+_WORKDAY_LOCATION_COUNT = re.compile(r"^\s*\d+\s+locations?\s*$", re.I)
+
+
+def _workday_locations(posting: dict) -> list[str]:
+    """Where a Workday posting is, from whichever field actually says.
+
+    `locationsText` is the intended field and is right when it names a place.
+    Three tenants measured on 2026-09-12 do not send it at all (Accenture,
+    Thomson Reuters) or send a count instead (BlackRock, "2 Locations"). The
+    place is then only in `externalPath`, which is the posting's own url:
+    /job/<Place>/<Title>_<req>. Some postings carry no place segment, and
+    those keep returning nothing rather than inventing one.
+    """
+    text = (posting.get("locationsText") or "").strip()
+    if text and not _WORKDAY_LOCATION_COUNT.match(text):
+        return [text]
+    parts = [segment for segment in (posting.get("externalPath") or "").split("/") if segment]
+    if len(parts) >= 3 and parts[0] == "job":
+        # Workday slugs a place with hyphens and runs them together for its
+        # own separators: "Pernambuco---Recife", "Nova-Lima-Shopping-Alta-Vila".
+        # One pass, because replacing "---" first and "-" second eats the
+        # hyphen the first replacement just wrote.
+        place = re.sub(r"-+", lambda m: " - " if len(m.group()) >= 3 else " ", parts[1]).strip()
+        if place:
+            return [place]
+    return []
+
+
 def _workday(url: str, company: str) -> list[JobPosting]:
     """POST https://{tenant}.wd5.myworkdayjobs.com/wday/cxs/{tenant}/{site}/jobs
 
@@ -270,7 +305,7 @@ def _workday(url: str, company: str) -> list[JobPosting]:
             p = _posting(
                 company,
                 j.get("title"),
-                [j.get("locationsText")],
+                _workday_locations(j),
                 base + j.get("externalPath", "") if j.get("externalPath") else None,
                 posted_ts(j.get("postedOn") or ""),
             )
