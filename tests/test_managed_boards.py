@@ -52,6 +52,7 @@ def test_managed_board_create_get_and_list_are_typed_and_deterministic(client, a
             "excluded_locations": [],
             "included_locations": [],
         },
+        "title_gate": None,
         "published": False,
         "revision": 1,
         "public_revision": None,
@@ -261,9 +262,14 @@ def test_bootstrap_creates_three_draft_boards_and_is_idempotent(client, admin_he
             "excluded_locations": [],
             "included_locations": ["United States", "Canada", "Remote"],
         }
+        assert board["title_gate"] == {
+            "recipe": "internship_v1" if "internships" in board["slug"] else "new_grad_v1",
+            "mode": "shadow",
+        }
         assert board["sources"] == ["active-a"]
         assert board["published"] is False and board["revision"] == 1
     assert boards[2]["execution_mode"] == "sponsor_filter_reuse"
+    assert boards[2]["title_gate"] is None
     assert boards[2]["published"] is False
     for board in boards[:2]:
         prompt = board["prompt"].lower()

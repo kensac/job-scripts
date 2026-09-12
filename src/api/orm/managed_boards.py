@@ -60,6 +60,7 @@ class ManagedBoard(Base):
     on_ambiguous: Mapped[str] = mapped_column(Text, server_default=text("'keep'"))
     fail_closed: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     criteria: Mapped[dict] = mapped_column(server_default=text("'{}'::jsonb"))
+    title_gate: Mapped[dict | None]
     published: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     revision: Mapped[int] = mapped_column(BigInteger, server_default=text("1"))
     public_revision: Mapped[int | None] = mapped_column(BigInteger)

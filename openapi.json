@@ -40819,6 +40819,16 @@
           "criteria": {
             "$ref": "#/components/schemas/Criteria"
           },
+          "title_gate": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TitleGateConfig"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "published": {
             "type": "boolean",
             "title": "Published"
@@ -40906,6 +40916,7 @@
           "on_ambiguous",
           "fail_closed",
           "criteria",
+          "title_gate",
           "published",
           "revision",
           "public_revision",
@@ -41021,6 +41032,16 @@
           "criteria": {
             "$ref": "#/components/schemas/Criteria"
           },
+          "title_gate": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TitleGateConfig"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "sources": {
             "items": {
               "type": "string"
@@ -41092,6 +41113,16 @@
           },
           "criteria": {
             "$ref": "#/components/schemas/NonNullUpdate_Criteria_"
+          },
+          "title_gate": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TitleGateConfig"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "sources": {
             "$ref": "#/components/schemas/NonNullUpdate_Annotated_list_str___FieldInfo_annotation_NoneType__required_True__metadata__MaxLen_max_length_5000_____"
@@ -41178,6 +41209,18 @@
               }
             ],
             "title": "Finished At"
+          },
+          "title_gate_report": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title Gate Report"
           }
         },
         "type": "object",
@@ -41191,7 +41234,8 @@
           "reserved_tokens",
           "created_at",
           "started_at",
-          "finished_at"
+          "finished_at",
+          "title_gate_report"
         ],
         "title": "ManagedBoardRun"
       },
@@ -52662,6 +52706,33 @@
         ],
         "title": "TimelineEntry",
         "description": "One check in a posting's history, thin enough to render as a line. The\ninteresting column is `reason`: a posting's story is the sequence of\nverdicts and why each one was given."
+      },
+      "TitleGateConfig": {
+        "properties": {
+          "recipe": {
+            "type": "string",
+            "enum": [
+              "internship_v1",
+              "new_grad_v1"
+            ],
+            "title": "Recipe"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "shadow",
+              "enforce"
+            ],
+            "title": "Mode",
+            "default": "shadow"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "recipe"
+        ],
+        "title": "TitleGateConfig"
       },
       "Totals": {
         "properties": {

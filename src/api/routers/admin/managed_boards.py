@@ -16,6 +16,7 @@ from api.routers.admin.shared import require_admin
 from api.updates import NonNullUpdate
 from core import providers
 from core.filters import ON_AMBIGUOUS_VALUES, compute_filter_hash
+from core.managed_board_title_gate import TitleGateConfig
 
 router = APIRouter()
 
@@ -24,6 +25,10 @@ _BOOTSTRAP_CRITERIA = Criteria(
     max_age_days=30,
     included_locations=["United States", "Canada", "Remote"],
 )
+_BOOTSTRAP_TITLE_GATES = {
+    "software-engineering-internships": TitleGateConfig(recipe="internship_v1", mode="shadow"),
+    "software-engineering-new-grad": TitleGateConfig(recipe="new_grad_v1", mode="shadow"),
+}
 _BOOTSTRAP_DEFINITIONS = (
     (
         "software-engineering-internships",
@@ -49,7 +54,8 @@ Include only full-time entry-level or new-graduate opportunities in software eng
 
 _BOARD_COLS = (
     "b.id, b.slug, b.name, b.description, b.sponsor_user_id, b.prompt, b.prompt_hash, "
-    "b.requested_model, b.execution_mode, b.on_ambiguous, b.fail_closed, b.criteria, b.published, b.revision, "
+    "b.requested_model, b.execution_mode, b.on_ambiguous, b.fail_closed, b.criteria, b.title_gate, "
+    "b.published, b.revision, "
     "b.public_revision, b.projection_updated_at, b.published_at, b.unpublished_at, "
     "b.created_at, b.updated_at, "
     "COALESCE((SELECT array_agg(s.source ORDER BY s.source) FROM managed_board_sources s "
@@ -76,6 +82,7 @@ class ManagedBoard(BaseModel):
     on_ambiguous: str
     fail_closed: bool
     criteria: Criteria
+    title_gate: TitleGateConfig | None
     published: bool
     revision: int
     public_revision: int | None
@@ -120,6 +127,7 @@ class ManagedBoardCreate(BaseModel):
     on_ambiguous: str = "keep"
     fail_closed: bool = False
     criteria: Criteria = Field(default_factory=Criteria)
+    title_gate: TitleGateConfig | None = None
     sources: list[str] = Field(default_factory=list, max_length=5000)
 
 
@@ -138,6 +146,7 @@ class ManagedBoardPatch(BaseModel):
     on_ambiguous: NonNullUpdate[str] = None
     fail_closed: NonNullUpdate[bool] = None
     criteria: NonNullUpdate[Criteria] = None
+    title_gate: TitleGateConfig | None = None
     sources: NonNullUpdate[Annotated[list[str], Field(max_length=5000)]] = None
     published: NonNullUpdate[bool] = None
 
@@ -165,6 +174,17 @@ def _validate_execution_mode(value: str) -> None:
         raise HTTPException(
             400,
             detail={"code": "INVALID_EXECUTION_MODE", "message": "unknown execution mode"},
+        )
+
+
+def _validate_title_gate(execution_mode: str, title_gate: TitleGateConfig | None) -> None:
+    if title_gate is not None and execution_mode != "managed_filter":
+        raise HTTPException(
+            400,
+            detail={
+                "code": "TITLE_GATE_UNSUPPORTED",
+                "message": "title gates apply only to managed_filter boards",
+            },
         )
 
 
@@ -224,6 +244,7 @@ def bootstrap_managed_boards(
             execution_mode = (
                 "sponsor_filter_reuse" if slug == "kanishks-job-list" else "managed_filter"
             )
+            title_gate = _BOOTSTRAP_TITLE_GATES.get(slug)
             board = db.query_one_as(
                 ManagedBoard,
                 f"SELECT {_BOARD_COLS} FROM managed_boards b WHERE b.slug = %s FOR UPDATE",
@@ -241,6 +262,7 @@ def bootstrap_managed_boards(
                     and board.on_ambiguous == "filter"
                     and board.fail_closed is True
                     and board.criteria.model_dump(mode="json") == criteria_json
+                    and board.title_gate == title_gate
                     and board.sources == sources
                     and board.published is False
                     and board.revision == 1
@@ -259,8 +281,8 @@ def bootstrap_managed_boards(
                 _Id,
                 "INSERT INTO managed_boards "
                 "(slug, name, description, sponsor_user_id, prompt, prompt_hash, requested_model, execution_mode, "
-                "on_ambiguous, fail_closed, criteria) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'filter', true, %s) RETURNING id",
+                "on_ambiguous, fail_closed, criteria, title_gate) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'filter', true, %s, %s) RETURNING id",
                 (
                     slug,
                     name,
@@ -271,6 +293,7 @@ def bootstrap_managed_boards(
                     _BOOTSTRAP_MODEL,
                     execution_mode,
                     db.jsonb(criteria_json),
+                    db.jsonb(title_gate.model_dump(mode="json")) if title_gate else None,
                 ),
             )
             assert row is not None
@@ -332,6 +355,7 @@ def create_managed_board(
     _validate_ambiguity(body.on_ambiguous)
     _validate_model(body.requested_model)
     _validate_execution_mode(body.execution_mode)
+    _validate_title_gate(body.execution_mode, body.title_gate)
     sponsor_user_id = body.sponsor_user_id or user.id
     try:
         with db.transaction():
@@ -347,7 +371,8 @@ def create_managed_board(
                 _Id,
                 "INSERT INTO managed_boards "
                 "(slug, name, description, sponsor_user_id, prompt, prompt_hash, requested_model, execution_mode, "
-                "on_ambiguous, fail_closed, criteria) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                "on_ambiguous, fail_closed, criteria, title_gate) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
                 "RETURNING id",
                 (
                     body.slug,
@@ -361,6 +386,7 @@ def create_managed_board(
                     body.on_ambiguous,
                     body.fail_closed,
                     db.jsonb(body.criteria.model_dump(mode="json")),
+                    db.jsonb(body.title_gate.model_dump(mode="json")) if body.title_gate else None,
                 ),
             )
             assert row is not None
@@ -408,6 +434,10 @@ def patch_managed_board(
                     "current_revision": existing.revision,
                 },
             )
+        _validate_title_gate(
+            fields.get("execution_mode", existing.execution_mode),
+            fields.get("title_gate", existing.title_gate),
+        )
         if "slug" in fields:
             db.execute(
                 "SELECT pg_advisory_xact_lock(hashtext('managed-board-slug:' || %s))",
@@ -452,6 +482,19 @@ def patch_managed_board(
             db.jsonb(fields["criteria"].model_dump(mode="json"))
             if "criteria" in fields
             else db.jsonb(existing.criteria.model_dump(mode="json"))
+        )
+        fields["title_gate"] = (
+            (
+                db.jsonb(fields["title_gate"].model_dump(mode="json"))
+                if fields.get("title_gate") is not None
+                else None
+            )
+            if "title_gate" in fields
+            else (
+                db.jsonb(existing.title_gate.model_dump(mode="json"))
+                if existing.title_gate is not None
+                else None
+            )
         )
         fields["prompt_hash"] = compute_filter_hash(prompt, on_ambiguous)
         fields["published"] = effective_published

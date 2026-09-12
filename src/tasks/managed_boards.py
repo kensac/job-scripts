@@ -23,7 +23,7 @@ async def handle_run_managed_board(task_id: int, payload: dict[str, Any]) -> Non
     """Receive only pre-cutover live work and projection-only reuse work."""
     if payload.get("execution_mode") == "sponsor_filter_reuse":
         set_progress(task_id, 0, len(payload["jobs"]), "projecting stored filter outcomes")
-        runs.replace_projection(payload)
+        runs.replace_projection(task_id, payload)
         set_progress(task_id, len(payload["jobs"]), len(payload["jobs"]), "projected")
         return
     if (
@@ -93,6 +93,11 @@ async def _handle_managed_filter(
         job["content_query_id"]
         for job in payload["jobs"]
         if job.get("content_query_id") is not None
+        and (
+            not payload.get("title_gate")
+            or payload["title_gate"]["mode"] == "shadow"
+            or job["title_gate_keep"]
+        )
     ]
     frozen_contents = {
         row.id: row.input_content
@@ -106,11 +111,14 @@ async def _handle_managed_filter(
     jobs = [
         {**job, "content": frozen_contents.get(job.get("content_query_id"), "")}
         for job in payload["jobs"]
+        if not payload.get("title_gate")
+        or payload["title_gate"]["mode"] == "shadow"
+        or job["title_gate_keep"]
     ]
 
     def complete() -> None:
         if not pending_batch_ids(task_id):
-            runs.replace_projection(payload)
+            runs.replace_projection(task_id, payload)
 
     hooks = ExecutionHooks(
         verdict_label=f"managed-board:{board_id}",
