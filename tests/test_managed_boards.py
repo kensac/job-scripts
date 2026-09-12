@@ -243,13 +243,13 @@ def test_bootstrap_creates_three_draft_boards_and_is_idempotent(client, admin_he
         "kanishks-job-list",
     ]
     assert [board["name"] for board in boards] == [
-        "Selective Tech Internships",
-        "Selective Tech New Grad",
+        "Tech Internships",
+        "Tech New Grad",
         "Kanishk's Job List",
     ]
     assert [board["description"] for board in boards] == [
-        "Prestigious software engineering and product management internships at tech and tech-adjacent companies.",
-        "Prestigious full-time software engineering and product management opportunities for new graduates at tech and tech-adjacent companies.",
+        "Internships in software engineering, product management, data, infrastructure, machine learning, and adjacent roles at tech and tech-adjacent companies.",
+        "Entry-level and new-graduate roles in software engineering, product management, data, infrastructure, machine learning, and adjacent fields at tech and tech-adjacent companies.",
         "Jobs selected by Kanishk's enabled personal machine filters, without personal activity or fields.",
     ]
     for board in boards[:2]:
@@ -258,7 +258,7 @@ def test_bootstrap_creates_three_draft_boards_and_is_idempotent(client, admin_he
         assert board["fail_closed"] is True
         assert board["criteria"] == {
             "date_posted_after": None,
-            "max_age_days": 30,
+            "max_age_days": 7,
             "excluded_locations": [],
             "included_locations": ["United States", "Canada", "Remote"],
         }
@@ -273,11 +273,11 @@ def test_bootstrap_creates_three_draft_boards_and_is_idempotent(client, admin_he
     assert boards[2]["published"] is False
     for board in boards[:2]:
         prompt = board["prompt"].lower()
-        assert "software engineering or product management" in prompt
-        assert "prestigious company tier" in prompt
-        assert "selective and top-tier" in prompt
+        assert "software engineering, product management, data, infrastructure" in prompt
+        assert "machine learning" in prompt
         assert "unclear" in prompt
     assert "internship" in boards[0]["prompt"].lower()
+    assert "phd or doctoral" in boards[0]["prompt"].lower()
     assert "full-time" in boards[1]["prompt"].lower()
 
     repeated = client.post("/v1/admin/managed-boards/bootstrap", headers=admin_headers)
