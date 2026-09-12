@@ -29,6 +29,24 @@ def _budget(host, egress):
     )
 
 
+def test_workday_tenants_share_one_budget_host():
+    from core.fetching import forms
+
+    boeing = "https://boeing.wd1.myworkdayjobs.com/wday/cxs/boeing/jobs"
+    nvidia = "https://nvidia.wd5.myworkdayjobs.com/en-US/jobs/job/engineer/apply"
+
+    assert hosts.host_of(boeing) == "myworkdayjobs.com"
+    assert hosts.host_of(nvidia) == "myworkdayjobs.com"
+    assert forms.budget_host(boeing) == "myworkdayjobs.com"
+    assert forms.budget_host(nvidia) == "myworkdayjobs.com"
+    assert hosts.host_of("https://api.ashbyhq.com/posting-api/job-board/acme") == (
+        "api.ashbyhq.com"
+    )
+    _config("ingest_host_pace_seconds", {"myworkdayjobs.com": 1})
+    assert hosts.take(hosts.host_of(boeing), "shared-address") is None
+    assert hosts.take(hosts.host_of(nvidia), "shared-address") is not None
+
+
 def test_a_slot_is_taken_once_per_gap_and_the_gap_learns():
     _config("ingest_host_pace_seconds", {"apply.workable.com": 20})
     # Unpaced host: every take succeeds, nothing waits.

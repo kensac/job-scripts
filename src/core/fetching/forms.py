@@ -230,6 +230,8 @@ def budget_host(url: str) -> str:
     host = host_of(url)
     if host.endswith("greenhouse.io"):
         return "boards-api.greenhouse.io"
+    if host == "myworkdayjobs.com" or host.endswith(".myworkdayjobs.com"):
+        return "myworkdayjobs.com"
     return host
 
 

@@ -44,7 +44,14 @@ DECAY = 0.9
 
 
 def host_of(url: str) -> str:
-    return urlparse(url).netloc.lower()
+    host = urlparse(url).netloc.lower()
+    # Workday tenants have distinct subdomains but share one upstream
+    # platform. A budget per tenant lets a single egress address issue one
+    # simultaneous burst per company and never learn from another tenant's
+    # refusal. Keep one adaptive clock for the platform instead.
+    if host == "myworkdayjobs.com" or host.endswith(".myworkdayjobs.com"):
+        return "myworkdayjobs.com"
+    return host
 
 
 def floor_for(host: str) -> float:
