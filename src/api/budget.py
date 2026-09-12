@@ -92,6 +92,11 @@ def _owner_budget(groups: list[str]) -> tuple[bool, int | None]:
     return True, max(budgets)
 
 
+def owner_budget(groups: list[str]) -> tuple[bool, int | None]:
+    """Whether these groups have server credits and their shared weekly cap."""
+    return _owner_budget(groups)
+
+
 def spent_this_week(user_id: int) -> int:
     row = db.query_one(
         "SELECT COALESCE(SUM(total_tokens), 0) AS spent FROM api_usage "
@@ -485,6 +490,39 @@ def record_tokens(
         usage.get("cached_tokens", 0),
         batched=batched,
     )
+
+
+def record_managed_board_tokens(
+    managed_board_id: int,
+    purpose: str,
+    model: str | None,
+    usage: dict[str, int],
+) -> None:
+    """Record server-key work owned by a managed board, never a fake user."""
+    total = usage.get("total_tokens", 0)
+    if not total:
+        return
+    prompt = usage.get("prompt_tokens", 0)
+    completion = usage.get("completion_tokens", 0)
+    cached = usage.get("cached_tokens", 0)
+    db.execute(
+        "INSERT INTO api_usage (managed_board_id, key_source, purpose, model, "
+        "prompt_tokens, completion_tokens, total_tokens, cached_tokens, batched, cost_usd) "
+        "VALUES (%s, 'owner', %s, %s, %s, %s, %s, %s, false, %s)",
+        (
+            managed_board_id,
+            purpose,
+            model,
+            prompt,
+            completion,
+            total,
+            cached,
+            pricing.estimate_cost_usd(model, prompt, completion, cached_tokens=cached),
+        ),
+    )
+    from api import metrics
+
+    metrics.AI_TOKENS.labels("owner", purpose).inc(total)
 
 
 @contextmanager

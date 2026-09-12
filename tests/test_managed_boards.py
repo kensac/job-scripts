@@ -19,6 +19,7 @@ def _create(client, headers, **overrides):
         "name": "Software Engineering",
         "prompt": "Prefer backend roles",
         "requested_model": "gpt-5.6-luna",
+        "execution_mode": "managed_filter",
         "sources": ["source-b", "source-a"],
         **overrides,
     }
@@ -42,6 +43,7 @@ def test_managed_board_create_get_and_list_are_typed_and_deterministic(client, a
         "prompt": "Prefer backend roles",
         "prompt_hash": compute_filter_hash("Prefer backend roles", "filter"),
         "requested_model": "gpt-5.6-luna",
+        "execution_mode": "managed_filter",
         "on_ambiguous": "filter",
         "fail_closed": False,
         "criteria": {
@@ -88,7 +90,7 @@ def test_managed_board_create_refusals(client, admin_headers, overrides, status,
     assert db.query_one("SELECT count(*) AS n FROM managed_boards")["n"] == 0
 
 
-def test_managed_board_duplicate_and_immutable_fields_are_refused(client, admin_headers):
+def test_managed_board_duplicate_slug_and_immutable_sponsor_are_refused(client, admin_headers):
     _source("source-a")
     _source("source-b")
     first = _create(client, admin_headers)
@@ -97,13 +99,20 @@ def test_managed_board_duplicate_and_immutable_fields_are_refused(client, admin_
     assert duplicate.status_code == 409
     assert duplicate.json()["detail"]["code"] == "DUPLICATE_SLUG"
     board_id = first.json()["id"]
-    for field, value in (("slug", "changed"), ("sponsor_user_id", 999)):
-        response = client.patch(
-            f"/v1/admin/managed-boards/{board_id}",
-            json={"expected_revision": 1, field: value},
-            headers=admin_headers,
-        )
-        assert response.status_code == 422
+    response = client.patch(
+        f"/v1/admin/managed-boards/{board_id}",
+        json={"expected_revision": 1, "sponsor_user_id": 999},
+        headers=admin_headers,
+    )
+    assert response.status_code == 422
+
+    renamed = client.patch(
+        f"/v1/admin/managed-boards/{board_id}",
+        json={"expected_revision": 1, "slug": "changed"},
+        headers=admin_headers,
+    )
+    assert renamed.status_code == 200
+    assert renamed.json()["slug"] == "changed"
 
 
 def test_managed_board_patch_is_atomic_revisioned_and_publish_is_explicit(client, admin_headers):
@@ -219,7 +228,7 @@ def test_source_delete_reports_and_force_removes_managed_board_membership(client
     ) == {"revision": 2, "sources": 0}
 
 
-def test_bootstrap_creates_exactly_two_draft_boards_and_is_idempotent(client, admin_headers):
+def test_bootstrap_creates_three_draft_boards_and_is_idempotent(client, admin_headers):
     _source("active-a")
     _source("active-b")
     db.execute("UPDATE sources SET active = false WHERE name = 'active-b'")
@@ -230,16 +239,19 @@ def test_bootstrap_creates_exactly_two_draft_boards_and_is_idempotent(client, ad
     assert [board["slug"] for board in boards] == [
         "software-engineering-internships",
         "software-engineering-new-grad",
+        "kanishks-job-list",
     ]
     assert [board["name"] for board in boards] == [
         "Selective Tech Internships",
         "Selective Tech New Grad",
+        "Kanishk's Job List",
     ]
     assert [board["description"] for board in boards] == [
         "Prestigious software engineering and product management internships at tech and tech-adjacent companies.",
         "Prestigious full-time software engineering and product management opportunities for new graduates at tech and tech-adjacent companies.",
+        "Jobs selected by Kanishk's enabled personal machine filters, without personal activity or fields.",
     ]
-    for board in boards:
+    for board in boards[:2]:
         assert board["requested_model"] == "gpt-5.6-luna"
         assert board["on_ambiguous"] == "filter"
         assert board["fail_closed"] is True
@@ -251,7 +263,9 @@ def test_bootstrap_creates_exactly_two_draft_boards_and_is_idempotent(client, ad
         }
         assert board["sources"] == ["active-a"]
         assert board["published"] is False and board["revision"] == 1
-    for board in boards:
+    assert boards[2]["execution_mode"] == "sponsor_filter_reuse"
+    assert boards[2]["published"] is False
+    for board in boards[:2]:
         prompt = board["prompt"].lower()
         assert "software engineering or product management" in prompt
         assert "prestigious company tier" in prompt
@@ -263,7 +277,7 @@ def test_bootstrap_creates_exactly_two_draft_boards_and_is_idempotent(client, ad
     repeated = client.post("/v1/admin/managed-boards/bootstrap", headers=admin_headers)
     assert repeated.status_code == 200
     assert repeated.json() == first.json()
-    assert db.query_one("SELECT count(*) AS n FROM managed_boards")["n"] == 2
+    assert db.query_one("SELECT count(*) AS n FROM managed_boards")["n"] == 3
     assert db.query_one("SELECT count(*) AS n FROM users")["n"] == 1
     assert db.query_one("SELECT count(*) AS n FROM user_jobs")["n"] == 0
 
@@ -278,7 +292,7 @@ def test_bootstrap_drift_refuses_and_rolls_back_both_boards(client, admin_header
     response = client.post("/v1/admin/managed-boards/bootstrap", headers=admin_headers)
     assert response.status_code == 409
     assert response.json()["detail"]["code"] == "BOOTSTRAP_DRIFT"
-    assert db.query_one("SELECT count(*) AS n FROM managed_boards")["n"] == 1
+    assert db.query_one("SELECT count(*) AS n FROM managed_boards")["n"] == 2
     assert (
         db.query_one("SELECT prompt FROM managed_boards WHERE id = %s", (ids[1],))["prompt"]
         == "drift"

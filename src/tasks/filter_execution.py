@@ -96,8 +96,9 @@ async def execute_live(
     scrape_sem = asyncio.Semaphore(SCRAPE_CONCURRENCY)
 
     async def one(job: dict[str, Any]):
-        content = get_content(job["url"])
-        if not content:
+        frozen_content = "content" in job
+        content = job.get("content") if frozen_content else get_content(job["url"])
+        if not content and not frozen_content:
             content, _closure = await verdicts.refresh_content(
                 job["url"],
                 company=job.get("company") or "",
