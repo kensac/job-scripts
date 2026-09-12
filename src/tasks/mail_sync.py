@@ -104,7 +104,8 @@ async def handle_sync_gmail(task_id: int, payload: dict[str, Any]) -> None:
     user_ids = [payload["user_id"]] if payload.get("user_id") else connected_user_ids()
     for user_id in user_ids:
         await asyncio.to_thread(_sync_one, task_id, user_id)
-    enqueue("classify_mail", {}, dedupe_key=None)
+    if db.get_config("mail_classification_enabled"):
+        enqueue("classify_mail", {}, dedupe_key=None)
 
 
 def _sync_one(task_id: int, user_id: int) -> None:
@@ -185,7 +186,8 @@ async def handle_import_archive(task_id: int, payload: dict[str, Any]) -> None:
     await asyncio.to_thread(_import_one, task_id, payload)
     # Backfill classification is a different model and a different cost
     # profile from the ongoing trickle, so it is flagged rather than inferred.
-    enqueue("classify_mail", {"backfill": True}, dedupe_key=None)
+    if db.get_config("mail_classification_enabled"):
+        enqueue("classify_mail", {"backfill": True}, dedupe_key=None)
 
 
 def _import_one(task_id: int, payload: dict[str, Any]) -> None:

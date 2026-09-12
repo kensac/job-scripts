@@ -18,6 +18,7 @@ def test_seed_defaults_restores_missing_rows_and_preserves_overrides():
     assert db.get_config("signups_enabled") is False
     assert db.get_config("gmail_connect_groups") == ["infra-admins"]
     assert db.get_config("requirements_extraction_enabled") is False
+    assert db.get_config("mail_classification_enabled") is True
     assert db.query_one(
         "SELECT weekly_token_budget FROM group_budgets WHERE group_name = 'infra-admins'"
     ) == {"weekly_token_budget": 123}

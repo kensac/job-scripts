@@ -90,6 +90,14 @@ def test_requirements_extraction_runs_only_when_switched_on(f):
     assert db.query_one("SELECT 1 FROM tasks WHERE kind = 'extract_requirements'")
 
 
+def test_mail_classification_is_not_scheduled_when_switched_off(f):
+    from api import worker
+
+    db.execute("UPDATE app_config SET value = 'false' WHERE key = 'mail_classification_enabled'")
+    worker.schedule_ingest_cycle()
+    assert not db.query_one("SELECT 1 FROM tasks WHERE kind = 'classify_mail'")
+
+
 def test_a_board_is_recomputed_only_for_someone_who_can_have_one(f):
     """The cycle queued a recompute for every users row. One row that had
     signed in once, with no subscription, no board row and no upload, drew
