@@ -291,6 +291,7 @@ async def run_batched(
     specs: list,
     *,
     charged_to_user: bool = False,
+    allow_configured_override: bool = True,
 ) -> tuple[list[BatchResult], Choice | BatchProvenance]:
     """Submit using current routing, or collect using persisted batch provenance.
 
@@ -308,7 +309,9 @@ async def run_batched(
         results = await collect_pending(task_id, hook)
         return results, provenance
     specs = snapshot_specs(task_id, specs)
-    chosen = resolve(shape, override=configured_model(purpose))
+    chosen = resolve(
+        shape, override=configured_model(purpose) if allow_configured_override else None
+    )
     if not charged_to_user:
         # Only when about to SUBMIT. A resuming task is collecting work the
         # provider has already been paid for, and refusing that would discard

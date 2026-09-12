@@ -9,12 +9,14 @@ from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    CheckConstraint,
     ForeignKey,
     Identity,
     Index,
     Integer,
     Numeric,
     Text,
+    UniqueConstraint,
     text,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
@@ -143,6 +145,37 @@ class JobEmbedding(Base):
     # rounds up by 1.6% every time - see the migration.
     cost_usd: Mapped[Any | None] = mapped_column(Numeric(14, 10))
     created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+
+
+class JobProfile(Base):
+    """Versioned shadow classification of one exact content observation."""
+
+    __tablename__ = "job_profiles"
+    __table_args__ = (
+        UniqueConstraint(
+            "content_row_id", "classifier_version", "model", name="uq_job_profiles_derivation"
+        ),
+        CheckConstraint("cardinality(role_tracks) <= 2", name="ck_job_profiles_two_tracks"),
+        Index("idx_job_profiles_url_classified", "url", text("classified_at DESC")),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
+    url: Mapped[str] = mapped_column(Text)
+    content_row_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("ai_queries.id", ondelete="CASCADE")
+    )
+    content_hash: Mapped[str] = mapped_column(Text)
+    classifier_version: Mapped[str] = mapped_column(Text)
+    model: Mapped[str] = mapped_column(Text)
+    primary_role_family: Mapped[str] = mapped_column(Text)
+    role_tracks: Mapped[list[str]] = mapped_column(ARRAY(Text), server_default=text("'{}'"))
+    career_stage: Mapped[str] = mapped_column(Text)
+    employment_type: Mapped[str] = mapped_column(Text)
+    organization_sector: Mapped[str] = mapped_column(Text)
+    people_manager: Mapped[bool | None] = mapped_column(Boolean)
+    company_selectivity: Mapped[str] = mapped_column(Text)
+    role_selectivity: Mapped[str] = mapped_column(Text)
+    classified_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
 
 
 class JobSkill(Base):
