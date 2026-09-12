@@ -257,7 +257,7 @@ def test_bootstrap_creates_three_draft_boards_and_is_idempotent(client, admin_he
         assert board["fail_closed"] is True
         assert board["criteria"] == {
             "date_posted_after": None,
-            "max_age_days": 7,
+            "max_age_days": 30,
             "excluded_locations": [],
             "included_locations": ["United States", "Canada", "Remote"],
         }

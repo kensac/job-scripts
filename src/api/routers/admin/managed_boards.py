@@ -21,7 +21,7 @@ router = APIRouter()
 
 _BOOTSTRAP_MODEL = "gpt-5.6-luna"
 _BOOTSTRAP_CRITERIA = Criteria(
-    max_age_days=7,
+    max_age_days=30,
     included_locations=["United States", "Canada", "Remote"],
 )
 _BOOTSTRAP_DEFINITIONS = (
