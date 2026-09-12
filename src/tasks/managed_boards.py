@@ -74,10 +74,12 @@ async def _handle_managed_filter(
             api_key=key,
             key_source="owner",
             model=payload["requested_model"],
-            params={
-                "max_output_tokens": runs.FILTER_OUTPUT_RESERVATION_TOKENS,
-                "reasoning_effort": payload.get("reasoning_effort") or "medium",
-            },
+            # No output cap, matching the user-filter path, which sets none.
+            # A cap here truncated the JSON mid-string and the verdict was
+            # recorded as `failed`; a board with fail_closed then drops it
+            # silently. `FILTER_OUTPUT_RESERVATION_TOKENS` is the budget
+            # estimate, not an instruction to the model.
+            params={"reasoning_effort": payload.get("reasoning_effort") or "medium"},
         )
     )
     board_id = int(payload["managed_board_id"])
@@ -146,6 +148,7 @@ async def _handle_managed_filter(
         contents={job["url"]: job["content"] for job in inference_jobs if job["content"]},
         unavailable=sum(not job["content"] for job in inference_jobs),
         purpose="managed_board",
-        max_output_tokens=runs.FILTER_OUTPUT_RESERVATION_TOKENS,
+        # No cap, exactly as tasks/filters.py submits: execute_batch defaults
+        # to 6000, and a boolean verdict has never needed more than 1,050.
         complete_without_submission=True,
     )
