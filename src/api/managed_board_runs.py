@@ -315,7 +315,7 @@ def admit(board_id: int, *, dedupe_key: str | None = None) -> ManagedBoardRunQue
             position = _usage_position(sponsor.id)
             if cap is not None and position.spent + position.reserved + reserved > cap:
                 raise RunRefusal(
-                    "BUDGET_EXCEEDED", "sponsor weekly allowance cannot cover this run"
+                    budget.BUDGET_EXCEEDED, "sponsor weekly allowance cannot cover this run"
                 )
         payload = {
             "managed_board_id": board.id,

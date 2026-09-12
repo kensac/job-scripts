@@ -38118,13 +38118,21 @@
             },
             "type": "array",
             "title": "Alerts"
+          },
+          "failed_detectors": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Failed Detectors"
           }
         },
         "type": "object",
         "required": [
           "open",
           "new",
-          "alerts"
+          "alerts",
+          "failed_detectors"
         ],
         "title": "HealthRun",
         "description": "`open` is everything the detectors found; `new` is how much of it was\nnot already open, which is what would have been notified."

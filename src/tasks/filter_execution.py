@@ -9,7 +9,7 @@ from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from typing import Any
 
-from api import ai, db
+from api import ai, budget, db
 from api.ai import verdicts
 from api.ai.batch_results import progress_counts
 from core.answers import FilterDecision, FilterResult
@@ -141,7 +141,7 @@ async def execute_live(
         if hooks.budget_exceeded():
             for future in pending:
                 future.cancel()
-            raise PermissionError(f"BUDGET_EXCEEDED after {done}/{total} checks")
+            raise PermissionError(f"{budget.BUDGET_EXCEEDED} after {done}/{total} checks")
     hooks.progress(total, total, snapshot.name)
     hooks.complete()
 

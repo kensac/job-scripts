@@ -266,7 +266,7 @@ class TestAlertSubjectKind:
         assert health.subject_kind_for("ats_text_collapse") == health.SUBJECT_SOURCE
         assert health.subject_kind_for("extraction_failing") == health.SUBJECT_HOST
         assert health.subject_kind_for("oauth_token_invalid") == health.SUBJECT_PROVIDER_USER
-        assert health.subject_kind_for("batch_parked_too_long") == health.SUBJECT_TASK
+        assert health.subject_kind_for("batch_parked_too_long") == health.SUBJECT_TASK_KIND
         assert health.subject_kind_for("batch_failed_whole") == health.SUBJECT_PURPOSE
 
     def test_a_purpose_is_not_a_task_kind(self):
@@ -319,7 +319,7 @@ class TestAlertSubjectKind:
             ]
         )
         body = client.get("/v1/admin/health", headers=admin_headers).json()
-        assert body["open"][0]["subject_kind"] == health.SUBJECT_TASK
+        assert body["open"][0]["subject_kind"] == health.SUBJECT_TASK_KIND
 
 
 class TestPollBatchesDoesNotPileUp:
