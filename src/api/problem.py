@@ -56,6 +56,9 @@ def _problems(*statuses: int) -> dict[int | str, dict[str, type[BaseModel]]]:
 # nearly every route in the application.
 REFUSALS = _problems(400, 401, 403, 404, 409)
 
+# Public reads do not authenticate and therefore cannot return an auth refusal.
+PUBLIC_REFUSALS = _problems(400, 404)
+
 # A route that depends on something outside this application answering
 # sensibly: a model, or the identity provider. The tokens or the round trip
 # are already spent when it does not, so this has to read as a real outcome

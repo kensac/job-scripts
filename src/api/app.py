@@ -10,7 +10,7 @@ from api import db, metrics, telemetry
 from api.auth import require_user
 from api.board import visibility
 from api.models import Ok
-from api.problem import REFUSALS
+from api.problem import PUBLIC_REFUSALS, REFUSALS
 from api.routers import (
     admin,
     analytics,
@@ -23,6 +23,7 @@ from api.routers import (
     gmail,
     jobs,
     mail,
+    public_job_lists,
     requirements,
     resolve,
     source_admin,
@@ -83,6 +84,7 @@ async def _capture_unhandled(request: Request, call_next):
 
 
 app.include_router(users.router, prefix="/v1", responses=REFUSALS)
+app.include_router(public_job_lists.router, prefix="/v1", responses=PUBLIC_REFUSALS)
 app.include_router(
     views.router, prefix="/v1", dependencies=[Depends(require_user)], responses=REFUSALS
 )
