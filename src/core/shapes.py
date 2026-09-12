@@ -429,6 +429,23 @@ APPLICATION_TASK = TaskShape(
 )
 
 
+JOB_PROFILE_TASK = TaskShape(
+    purpose="job_profile",
+    label="Job profile shadow classification",
+    per_cycle=500,
+    notes=(
+        "A shadow-only compact taxonomy used to compare general job classifications. "
+        "It does not participate in filtering or visibility."
+    ),
+    structured=StructuredOutput.JSON_SCHEMA,
+    batched=True,
+    max_output_tokens=1000,
+    est_prompt_tokens=3200,
+    effort_preference=("none",),
+    candidates=("gpt-5.6-luna",),
+)
+
+
 # Every configurable task, keyed by the purpose its own shape declares. This
 # is the list the configuration screen offers and the list resolve() is asked
 # about - one registry, so a task cannot be configurable but unreported, or
@@ -443,5 +460,6 @@ SHAPES = {
         BACKFILL_TASK,
         ONGOING_TASK,
         APPLICATION_TASK,
+        JOB_PROFILE_TASK,
     )
 }

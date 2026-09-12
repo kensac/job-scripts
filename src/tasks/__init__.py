@@ -27,6 +27,7 @@ from tasks.filters import (
 )
 from tasks.health import handle_data_health
 from tasks.ingest import handle_ingest_source
+from tasks.job_profiles import handle_classify_job_profiles
 from tasks.locations import handle_classify_locations
 from tasks.mail_classify import handle_classify_mail
 from tasks.mail_match import handle_match_mail
@@ -77,6 +78,7 @@ HANDLERS = {
     "run_experiment": handle_run_experiment,
     "backfill_user_job_split": handle_backfill_user_job_split,
     "run_managed_board": handle_run_managed_board,
+    "classify_job_profiles": handle_classify_job_profiles,
 }
 
 __all__ = ["HANDLERS"]

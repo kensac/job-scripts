@@ -122,6 +122,7 @@ class BatchResult:
     error: str | None = None
     batch_id: str | None = None
     model: str | None = None
+    finish_reason: str | None = None
     request: BatchSpec | None = None
     embedding_vectors: list[list[float]] | None = None
 
@@ -356,6 +357,8 @@ async def _collect_batch(
                     result.error = "invalid embedding vector indices"
             else:
                 result.text = _extract_output_text(body)
+                incomplete = body.get("incomplete_details") or {}
+                result.finish_reason = incomplete.get("reason") or body.get("status")
                 if result.text is None:
                     result.error = "no output text"
 

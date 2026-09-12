@@ -34,7 +34,12 @@ def checkpoint(task_id: int, results: list[BatchResult], unfinished: list[str]) 
         for result in results:
             if not result.batch_id:
                 raise ValueError("a collected result must identify its provider batch")
-            response = {"text": result.text, "usage": result.usage, "error": result.error}
+            response = {
+                "text": result.text,
+                "usage": result.usage,
+                "error": result.error,
+                "finish_reason": result.finish_reason,
+            }
             if result.embedding_vectors is not None:
                 response["embedding_vectors"] = result.embedding_vectors
             db.execute(
