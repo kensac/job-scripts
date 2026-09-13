@@ -6,12 +6,13 @@ and the GitHub aggregators publish a markdown table or a JSON file. Every
 fetcher returns the same JobPosting, so ingest, the catalog and the checks
 never learn which board a posting came from.
 
-A company board lists every opening, most of them senior. Ingest applies the
-source's title_pattern before anything downstream sees the postings, because
-verify_new checks every active posting with cached text regardless of who
-subscribed: SpaceX listed 2,309 openings on 2026-09-04, of which 68 read as
-entry level, and without the pattern the other 2,241 would each cost a closed
-and a clearance check.
+A company board lists every opening, most of them senior. Ingest normally
+applies the source's title_pattern before anything downstream sees the
+postings, because verify_new checks every active posting with cached text
+regardless of who subscribed: SpaceX listed 2,309 openings on 2026-09-04, of
+which 68 read as entry level, and without the pattern the other 2,241 would
+each cost a closed and a clearance check. The persisted fleet switch can bypass
+admission without deleting the pattern or its match evidence.
 """
 
 from __future__ import annotations

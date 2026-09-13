@@ -58,6 +58,47 @@ def test_title_pattern_keeps_the_rest_of_the_board_out_of_the_catalog(monkeypatc
     assert calls == [("https://rocketlab.test/jobs.json", "Rocket Lab")]
 
 
+def test_title_pattern_bypass_admits_every_posting_but_preserves_pattern_evidence(monkeypatch, f):
+    """Bypass widens the catalog without erasing what the stored pattern would
+    have done, so the experiment remains measurable and reversible."""
+    f.make_source("rocketlab")
+    db.execute(
+        "UPDATE sources SET company = 'Rocket Lab', title_pattern = %s WHERE name = 'rocketlab'",
+        (r"engineer i\b|intern|new grad",),
+    )
+    db.execute("UPDATE app_config SET value = 'false' WHERE key = 'source_title_patterns_enabled'")
+    postings = [
+        _posting("Avionics Design Engineer I"),
+        _posting("Senior Avionics Design Engineer"),
+        _posting("Avionics Development Intern - Electron"),
+    ]
+    monkeypatch.setattr(boards, "fetch_listings", lambda url, company=None: postings)
+
+    async def no_fetch(*a, **kw):
+        return None, None
+
+    monkeypatch.setattr(verdicts, "refresh_content", no_fetch)
+    task_id = f.make_task("ingest_source", {"source": "rocketlab"})
+
+    asyncio.run(ingest.handle_ingest_source(task_id, {"source": "rocketlab"}))
+
+    titles = {r["title"] for r in db.query("SELECT title FROM jobs WHERE source = 'rocketlab'")}
+    assert titles == {posting.title for posting in postings}
+    evidence = {
+        row["title"]: row["kept"]
+        for row in db.query("SELECT title, kept FROM listings WHERE source = 'rocketlab'")
+    }
+    assert evidence == {
+        "Avionics Design Engineer I": True,
+        "Senior Avionics Design Engineer": False,
+        "Avionics Development Intern - Electron": True,
+    }
+    progress = db.query_one("SELECT progress FROM tasks WHERE id = %s", (task_id,))["progress"]
+    assert progress["kept"] == 2
+    assert progress["admitted"] == 3
+    assert progress["pattern_enforced"] is False
+
+
 def _failed_fetch(url: str, hours_ago: int) -> None:
     db.execute(
         "INSERT INTO ai_queries (url, check_type, status, reason, created_at) "

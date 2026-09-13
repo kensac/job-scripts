@@ -77,17 +77,19 @@ def _detect_boards() -> list[dict[str, Any]]:
         WITH ingests AS (
             SELECT payload->>'source' AS source, id, finished_at,
                    {_int_from("progress", "fetched")} AS fetched,
-                   {_int_from("progress", "kept")} AS kept
+                   {_int_from("progress", "kept")} AS kept,
+                   COALESCE((progress->>'pattern_enforced')::boolean, true)
+                       AS pattern_enforced
             FROM tasks
             WHERE kind = 'ingest_source' AND status = 'done'
               AND progress ? 'fetched'
               AND created_at > now() - interval '8 days'
         ),
         latest AS (
-            SELECT DISTINCT ON (source) source, fetched, kept, finished_at
+            SELECT DISTINCT ON (source) source, fetched, kept, pattern_enforced, finished_at
             FROM ingests ORDER BY source, finished_at DESC
         )
-        SELECT l.source, l.fetched, l.kept, l.finished_at, s.title_pattern,
+        SELECT l.source, l.fetched, l.kept, l.pattern_enforced, l.finished_at, s.title_pattern,
                (SELECT max(i.fetched) FROM ingests i
                 WHERE i.source = l.source AND i.finished_at < now() - interval '24 hours')
                    AS best_prior_fetched,
@@ -113,7 +115,12 @@ def _detect_boards() -> list[dict[str, Any]]:
                     "detail": dict(r),
                 }
             )
-        elif r["fetched"] >= 50 and r["kept"] == r["fetched"] and r["title_pattern"]:
+        elif (
+            r["pattern_enforced"]
+            and r["fetched"] >= 50
+            and r["kept"] == r["fetched"]
+            and r["title_pattern"]
+        ):
             found.append(
                 {
                     "kind": "source_pattern_admits_all",
@@ -131,6 +138,7 @@ def _detect_boards() -> list[dict[str, Any]]:
         elif (
             r["fetched"] > 0
             and r["kept"] == 0
+            and r["pattern_enforced"]
             and r["title_pattern"]
             # A board that admitted one or two roles last week and none this
             # week has had them filled, not its pattern broken. At 2,293

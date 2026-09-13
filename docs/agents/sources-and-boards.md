@@ -11,8 +11,15 @@ known format is added on the Sources page, and a new format is one fetcher
 returning the same `JobPosting` as the rest.
 
 The row carries what ingest needs and nothing derived: `company` (required
-where the system never names it), a `title_pattern` that gates which titles
-enter the catalog, and an `ingest_interval_hours`.
+where the system never names it), a `title_pattern` that normally gates which
+titles enter the catalog, and an `ingest_interval_hours`.
+
+`source_title_patterns_enabled` is the fleet-wide admission switch. When true,
+only titles matching a source's pattern enter `jobs`. When false, every fetched
+posting enters `jobs`; the pattern remains stored and `listings.kept` continues
+to record whether it matched. Turning enforcement back on retires unmatched
+rows on the next authoritative pull, so the experiment is reversible without
+discarding its counterfactual.
 
 `sources.active = false` stops both the scrape and every AI check on that
 board's postings. It keeps every subscription to it: a person can keep or
@@ -43,7 +50,7 @@ upstream. A worker idle beside pulls whose slots are closed is not stalled.
 
 ## Everything a board returns is stored, once
 
-Every pull records every listing in `listings`, kept by the pattern or not.
+Every pull records every listing in `listings`, matched by the pattern or not.
 Each row holds the posting text the listing call carried and the raw record
 minus that text. Greenhouse (with `content=true`), Lever and Ashby carry the
 text; it is assembled by the same `core/ats.py` helpers the resolvers use, so

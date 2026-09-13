@@ -147,8 +147,10 @@ def record_listings(
     posting text when the listing call carried it (so a backfill never
     scrapes a page the board already handed over), and the raw record minus
     that text (so a backtest can read a field nobody mapped). `kept` names
-    the urls the title pattern admitted. Rows the board has stopped listing
-    age out after retention_days. Nothing downstream reads this table."""
+    the URLs the stored title pattern matched, including while pattern
+    enforcement is disabled and every posting enters the catalog. Rows the
+    board has stopped listing age out after retention_days. Nothing downstream
+    reads this table."""
     rows = [
         (
             p.url,

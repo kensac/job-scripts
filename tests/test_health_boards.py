@@ -101,6 +101,31 @@ def test_a_pattern_that_admits_nothing_fires_only_when_a_pattern_is_set(f):
     assert _kinds() == {("source_pattern_excludes_all", "tight")}
 
 
+def test_pattern_health_is_quiet_when_the_ingest_bypassed_patterns(f):
+    f.make_source("observed")
+    db.execute("UPDATE sources SET title_pattern = 'new grad' WHERE name = 'observed'")
+    _ingest(
+        "observed",
+        "done",
+        age_hours=1,
+        fetched=300,
+        kept=0,
+        admitted=300,
+        pattern_enforced=False,
+    )
+    _ingest(
+        "observed",
+        "done",
+        age_hours=30,
+        fetched=300,
+        kept=12,
+        admitted=300,
+        pattern_enforced=False,
+    )
+
+    assert _kinds() == set()
+
+
 def test_ingests_failing_against_one_host_fire_as_one_alert(f):
     """143 Workable boards failed on one per-address limit and each looked
     like its own transient failure; the host is the alert."""
