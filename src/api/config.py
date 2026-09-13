@@ -230,6 +230,14 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
         help="Days a posting a title pattern screened out stays on record after its "
         "board stops listing it.",
     ),
+    "source_title_patterns_enabled": ConfigKey(
+        section="Catalog",
+        default=True,
+        value_type=bool,
+        help="Whether source title patterns restrict which fetched postings enter the catalog. "
+        "When disabled, every fetched posting is admitted while listings.kept still records "
+        "whether the stored pattern matched, so the bypass remains measurable and reversible.",
+    ),
     # A parked task resumes once every batch is terminal, or once the ones
     # still running are older than this while others have finished: the
     # finished ones are collected and the task parks again on the rest.

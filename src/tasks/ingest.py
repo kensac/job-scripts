@@ -68,9 +68,13 @@ async def handle_ingest_source(task_id: int, payload: dict[str, Any]) -> None:
     hosts.succeeded(host)
     fetched = len(postings)
     listed = postings
+    pattern_enforced = bool(db.get_config("source_title_patterns_enabled"))
     if source["title_pattern"]:
         keep = re.compile(source["title_pattern"], re.IGNORECASE)
-        postings = [p for p in postings if keep.search(p.title)]
+        pattern_matched = [p for p in listed if keep.search(p.title)]
+    else:
+        pattern_matched = listed
+    postings = pattern_matched if pattern_enforced else listed
     # Everything the board returned stays on record, admitted or not, with
     # the text the listing carried: a candidate pattern is judged against the
     # titles the board actually listed, a posting a better pattern admits
@@ -80,7 +84,7 @@ async def handle_ingest_source(task_id: int, payload: dict[str, Any]) -> None:
         listed,
         source["name"],
         source["title_pattern"] or "",
-        {p.url for p in postings},
+        {p.url for p in pattern_matched},
         int(db.get_config("screened_retention_days")),
     )
     upserted = catalog.upsert_postings(postings, source["name"])
@@ -99,11 +103,15 @@ async def handle_ingest_source(task_id: int, payload: dict[str, Any]) -> None:
     else:
         retired = 0
     metrics.INGEST_JOBS.labels(source["name"], "fetched").inc(fetched)
+    metrics.INGEST_JOBS.labels(source["name"], "title_pattern_missed").inc(
+        fetched - len(pattern_matched)
+    )
     metrics.INGEST_JOBS.labels(source["name"], "title_excluded").inc(fetched - len(postings))
     metrics.INGEST_JOBS.labels(source["name"], "upserted").inc(upserted)
     logger.info(
         f"Ingest {source['name']}: fetched {fetched}, "
-        f"title excluded {fetched - len(postings)}, upserted {upserted}"
+        f"pattern missed {fetched - len(pattern_matched)}, "
+        f"admitted {len(postings)}, upserted {upserted}"
     )
 
     # Ingest caches pages but runs NO AI. It reached here through the task
@@ -184,7 +192,9 @@ async def handle_ingest_source(task_id: int, payload: dict[str, Any]) -> None:
         source["name"],
         extra={
             "fetched": fetched,
-            "kept": len(postings),
+            "kept": len(pattern_matched),
+            "admitted": len(postings),
+            "pattern_enforced": pattern_enforced,
             "already_cached": len(have_content),
             "skipped_recent_failure": len(tried_recently),
             "cached": cached,
