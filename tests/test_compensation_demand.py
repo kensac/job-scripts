@@ -7,6 +7,27 @@ from tasks import comp
 
 
 @pytest.mark.asyncio
+async def test_paid_compensation_result_survives_demand_disappearing(f, monkeypatch):
+    db.execute("UPDATE app_config SET value='true' WHERE key='compensation_demand_gate_enabled'")
+    user = f.make_user()
+    job, url = f.make_ready_job()
+    f.make_board_row(user, job)
+
+    async def collect(task_id, shape, specs):
+        assert [s.custom_id for s in specs] == [url]
+        db.execute("DELETE FROM user_jobs WHERE user_id=%s AND job_id=%s", (user, job))
+        results = [
+            f.make_batch_result(task_id, s, text='{"has_comp": false}', model="test-model")
+            for s in specs
+        ]
+        return results, SimpleNamespace()
+
+    monkeypatch.setattr(comp, "run_batched", collect)
+    await comp.handle_extract_comp(f.make_task("extract_comp"), {})
+    assert db.query_one("SELECT comp_extracted FROM jobs WHERE id=%s", (job,))["comp_extracted"]
+
+
+@pytest.mark.asyncio
 async def test_comp_waits_for_current_filter_pass_or_personal_tracking(f, monkeypatch):
     db.execute("UPDATE app_config SET value='true' WHERE key='compensation_demand_gate_enabled'")
     user = f.make_user()
