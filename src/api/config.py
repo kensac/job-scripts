@@ -238,6 +238,14 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
         "When disabled, every fetched posting is admitted while listings.kept still records "
         "whether the stored pattern matched, so the bypass remains measurable and reversible.",
     ),
+    "verification_reachability_gate_enabled": ConfigKey(
+        section="Catalog",
+        default=False,
+        value_type=bool,
+        help="Restrict new posting verification to jobs that can reach an entitled personal "
+        "filter or a published managed board after free date, location and enforced title gates. "
+        "Tracked and directly imported jobs remain eligible.",
+    ),
     # A parked task resumes once every batch is terminal, or once the ones
     # still running are older than this while others have finished: the
     # finished ones are collected and the task parks again on the rest.

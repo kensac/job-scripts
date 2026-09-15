@@ -17,6 +17,8 @@ def test_criteria_params_collapses_unset():
     assert params["crit_date"] is None
     assert params["crit_has_excl"] is False
     assert params["crit_excl"] == []
+    assert params["crit_has_terms"] is False
+    assert params["crit_terms"] == []
 
 
 def test_criteria_params_carries_the_strings_as_written():

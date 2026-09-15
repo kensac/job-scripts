@@ -43,13 +43,50 @@ SQL = f"""
               JOIN locations l ON l.text = btrim(loc)
               JOIN locations x ON x.text = ANY(%(crit_incl)s::text[])
               WHERE {_PLACE_MATCH}))
+        AND (NOT %(crit_has_terms)s OR j.terms && %(crit_terms)s::text[])
 """
+
+
+def json_sql(criteria: str) -> str:
+    """Structural criteria for a JSONB expression in a set-based query.
+
+    Keep this beside ``SQL``: background fleet selection and one-board
+    materialization must mean the same thing by a date or place criterion.
+    """
+    return f"""
+        AND (NULLIF({criteria}->>'date_posted_after', '') IS NULL
+             OR j.date_posted >= ({criteria}->>'date_posted_after')::date)
+        AND (NULLIF({criteria}->>'max_age_days', '') IS NULL
+             OR COALESCE(j.date_posted, j.created_at)
+                >= now() - make_interval(days => ({criteria}->>'max_age_days')::int))
+        AND (jsonb_array_length(COALESCE({criteria}->'excluded_locations', '[]'::jsonb)) = 0
+             OR NOT EXISTS (
+              SELECT 1 FROM unnest(j.locations) loc
+              JOIN locations l ON l.text = btrim(loc)
+              JOIN locations x ON x.text IN (
+                  SELECT jsonb_array_elements_text(
+                      COALESCE({criteria}->'excluded_locations', '[]'::jsonb)))
+              WHERE {_PLACE_MATCH}))
+        AND (jsonb_array_length(COALESCE({criteria}->'included_locations', '[]'::jsonb)) = 0
+             OR cardinality(j.locations) = 0 OR EXISTS (
+              SELECT 1 FROM unnest(j.locations) loc
+              JOIN locations l ON l.text = btrim(loc)
+              JOIN locations x ON x.text IN (
+                  SELECT jsonb_array_elements_text(
+                      COALESCE({criteria}->'included_locations', '[]'::jsonb)))
+              WHERE {_PLACE_MATCH}))
+        AND (jsonb_array_length(COALESCE({criteria}->'included_terms', '[]'::jsonb)) = 0
+             OR j.terms && ARRAY(
+                 SELECT jsonb_array_elements_text(
+                     COALESCE({criteria}->'included_terms', '[]'::jsonb)))::text[])
+    """
 
 
 def params(settings_row: dict[str, Any] | None) -> dict[str, Any]:
     crit = (settings_row or {}).get("criteria") or {}
     excl = [s.strip() for s in crit.get("excluded_locations", []) if s.strip()]
     incl = [s.strip() for s in crit.get("included_locations", []) if s.strip()]
+    terms = [s.strip() for s in crit.get("included_terms", []) if s.strip()]
     return {
         "crit_date": crit.get("date_posted_after"),
         "crit_max_age": crit.get("max_age_days"),
@@ -57,4 +94,6 @@ def params(settings_row: dict[str, Any] | None) -> dict[str, Any]:
         "crit_has_excl": bool(excl),
         "crit_incl": incl,
         "crit_has_incl": bool(incl),
+        "crit_terms": terms,
+        "crit_has_terms": bool(terms),
     }

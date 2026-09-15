@@ -302,6 +302,7 @@ def test_criteria_are_served_in_full_shape_whatever_was_saved(client, user_heade
         "max_age_days": None,
         "excluded_locations": [],
         "included_locations": [],
+        "included_terms": [],
     }
     uid = db.query_one("SELECT id FROM users WHERE sub = %s", (user_headers["X-User-Sub"],))["id"]
     db.execute(
@@ -315,6 +316,7 @@ def test_criteria_are_served_in_full_shape_whatever_was_saved(client, user_heade
         "max_age_days": None,
         "excluded_locations": ["UK"],
         "included_locations": [],
+        "included_terms": [],
     }
 
 
