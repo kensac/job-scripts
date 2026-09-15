@@ -51,6 +51,7 @@ def test_managed_board_create_get_and_list_are_typed_and_deterministic(client, a
             "max_age_days": None,
             "excluded_locations": [],
             "included_locations": [],
+            "included_terms": [],
         },
         "title_gate": None,
         "published": False,
@@ -261,6 +262,7 @@ def test_bootstrap_creates_three_draft_boards_and_is_idempotent(client, admin_he
             "max_age_days": 7,
             "excluded_locations": [],
             "included_locations": ["United States", "Canada", "Remote"],
+            "included_terms": [],
         }
         assert board["title_gate"] == {
             "recipe": "internship_v1" if "internships" in board["slug"] else "new_grad_v1",

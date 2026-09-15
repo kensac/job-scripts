@@ -302,6 +302,7 @@ def test_criteria_are_served_in_full_shape_whatever_was_saved(client, user_heade
         "max_age_days": None,
         "excluded_locations": [],
         "included_locations": [],
+        "included_terms": [],
     }
     uid = db.query_one("SELECT id FROM users WHERE sub = %s", (user_headers["X-User-Sub"],))["id"]
     db.execute(
@@ -315,6 +316,7 @@ def test_criteria_are_served_in_full_shape_whatever_was_saved(client, user_heade
         "max_age_days": None,
         "excluded_locations": ["UK"],
         "included_locations": [],
+        "included_terms": [],
     }
 
 
@@ -333,6 +335,7 @@ def test_put_settings_echoes_the_saved_settings_in_get_shape(client, user_header
         "max_age_days": 30,
         "excluded_locations": [],
         "included_locations": ["United States", "Remote"],
+        "included_terms": [],
     }
     assert body == {"ok": True, **client.get("/v1/user/settings", headers=user_headers).json()}
 

@@ -350,8 +350,12 @@ async def handle_verify_new(task_id: int, payload: dict[str, Any]) -> None:
 
     specs = []
     if not has_batch_work(task_id):
+        from api import verification_candidates
+
+        candidate_params = verification_candidates.params()
         rows = db.query(
             f"""
+            WITH {verification_candidates.TARGETS}, candidates AS (
             SELECT j.url, j.company, j.title, q.input_content,
                    NOT EXISTS (
                        SELECT 1 FROM ai_queries c WHERE c.url = j.url
@@ -363,7 +367,7 @@ async def handle_verify_new(task_id: int, payload: dict[str, Any]) -> None:
                          AND c.status IN ('passed', 'rejected')) AS needs_clearance
             FROM jobs j
             {CONTENT_LATERAL.format(url="j.url", columns="input_content")}
-            WHERE j.active AND {AI_ELIGIBLE_JOB.format(job="j")} AND (
+            WHERE j.active AND {verification_candidates.REACHABLE} AND (
                 NOT EXISTS (
                     SELECT 1 FROM ai_queries c WHERE c.url = j.url
                       AND c.check_type = 'closed' AND c.status IN ('passed', 'rejected'))
@@ -376,8 +380,12 @@ async def handle_verify_new(task_id: int, payload: dict[str, Any]) -> None:
                     SELECT 1 FROM ai_queries c WHERE c.url = j.url
                       AND c.check_type = 'clearance' AND c.status IN ('passed', 'rejected'))
             )
+            ORDER BY j.id
             LIMIT 4000
-            """
+            )
+            SELECT * FROM candidates
+            """,
+            candidate_params,
         )
         if not rows:
             set_progress(task_id, 0, 0, "nothing to verify")

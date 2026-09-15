@@ -42,6 +42,35 @@ _CURATED_INTERNSHIP_SOURCES = frozenset(
 )
 
 
+def sql_for_json(config: str) -> tuple[str, dict[str, object]]:
+    """SQL equivalent of :func:`evaluate` for a JSONB config expression."""
+
+    def postgres_pattern(pattern: re.Pattern[str]) -> str:
+        # Python spells a word boundary \b; PostgreSQL's ARE engine spells
+        # the same assertion \y. Everything else in these recipes is shared.
+        return pattern.pattern.replace(r"\b", r"\y")
+
+    sql = f"""
+        AND (
+            COALESCE({config}->>'mode', 'shadow') <> 'enforce'
+            OR CASE {config}->>'recipe'
+                WHEN 'internship_v1' THEN (
+                    j.source = ANY(%(title_gate_internship_sources)s::text[])
+                    OR j.title ~* %(title_gate_internship_signal)s)
+                WHEN 'new_grad_v1' THEN NOT (
+                    j.title ~* %(title_gate_explicit_internship)s
+                    OR j.title ~* %(title_gate_experienced)s)
+                ELSE FALSE
+            END)
+    """
+    return sql, {
+        "title_gate_internship_sources": sorted(_CURATED_INTERNSHIP_SOURCES),
+        "title_gate_internship_signal": postgres_pattern(_INTERNSHIP_SIGNAL),
+        "title_gate_explicit_internship": postgres_pattern(_EXPLICIT_INTERNSHIP),
+        "title_gate_experienced": postgres_pattern(_EXPERIENCED),
+    }
+
+
 def evaluate(config: TitleGateConfig | None, *, title: str, source: str) -> TitleGateDecision:
     """Return whether a posting deserves the detailed managed-board pass."""
     if config is None:

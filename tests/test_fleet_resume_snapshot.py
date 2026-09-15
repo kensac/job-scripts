@@ -42,6 +42,9 @@ async def test_location_resume_uses_original_text_when_no_candidates_remain(monk
 
 @pytest.mark.asyncio
 async def test_verify_resume_uses_original_subject_when_current_selection_is_empty(monkeypatch, f):
+    db.execute(
+        "UPDATE app_config SET value = 'true' WHERE key = 'verification_reachability_gate_enabled'"
+    )
     task = f.make_task("verify_new", {"batch_ids": ["completed-original-batch"]})
     url = "https://example.test/original-posting"
     result = _result(

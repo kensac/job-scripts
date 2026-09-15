@@ -89,6 +89,9 @@ class Criteria(BaseModel):
     excluded_locations: list[str] = Field(default_factory=list, max_length=100)
     # Places a posting must be in to be shown at all; empty means anywhere.
     included_locations: list[str] = Field(default_factory=list, max_length=100)
+    # Exact normalized employment terms. Empty means any terms; a posting
+    # with no classified term cannot satisfy a nonempty allowlist.
+    included_terms: list[str] = Field(default_factory=list, max_length=20)
 
 
 class SettingsPut(BaseModel):

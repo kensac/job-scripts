@@ -43,13 +43,40 @@ SQL = f"""
               JOIN locations l ON l.text = btrim(loc)
               JOIN locations x ON x.text = ANY(%(crit_incl)s::text[])
               WHERE {_PLACE_MATCH}))
+        AND (NOT %(crit_has_terms)s OR j.terms && %(crit_terms)s::text[])
 """
+
+
+def json_sql(criteria: str) -> str:
+    """Bind the same predicate to stored criteria instead of one user's params.
+
+    Only trusted SQL expressions belong here. Values remain in the database,
+    and list normalization matches params(), including blank entries.
+    """
+    bindings = {
+        "crit_date": f"({criteria}->>'date_posted_after')",
+        "crit_max_age": f"({criteria}->>'max_age_days')",
+    }
+    for suffix, field in (
+        ("excl", "excluded_locations"),
+        ("incl", "included_locations"),
+        ("terms", "included_terms"),
+    ):
+        values = (
+            f"ARRAY(SELECT btrim(value) FROM jsonb_array_elements_text("
+            f"COALESCE({criteria}->'{field}', '[]'::jsonb)) AS entry(value) "
+            "WHERE btrim(value) <> '')"
+        )
+        bindings[f"crit_{suffix}"] = values
+        bindings[f"crit_has_{suffix}"] = f"(cardinality({values}) > 0)"
+    return SQL % {key: value for key, value in bindings.items()}
 
 
 def params(settings_row: dict[str, Any] | None) -> dict[str, Any]:
     crit = (settings_row or {}).get("criteria") or {}
     excl = [s.strip() for s in crit.get("excluded_locations", []) if s.strip()]
     incl = [s.strip() for s in crit.get("included_locations", []) if s.strip()]
+    terms = [s.strip() for s in crit.get("included_terms", []) if s.strip()]
     return {
         "crit_date": crit.get("date_posted_after"),
         "crit_max_age": crit.get("max_age_days"),
@@ -57,4 +84,6 @@ def params(settings_row: dict[str, Any] | None) -> dict[str, Any]:
         "crit_has_excl": bool(excl),
         "crit_incl": incl,
         "crit_has_incl": bool(incl),
+        "crit_terms": terms,
+        "crit_has_terms": bool(terms),
     }
