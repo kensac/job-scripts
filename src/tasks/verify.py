@@ -380,7 +380,17 @@ async def handle_verify_new(task_id: int, payload: dict[str, Any]) -> None:
                     SELECT 1 FROM ai_queries c WHERE c.url = j.url
                       AND c.check_type = 'clearance' AND c.status IN ('passed', 'rejected'))
             )
-            ORDER BY j.id
+            -- Freshest first, as the content sweep already selects. The cap
+            -- makes this a priority queue, and `j.id` is ingest order, so a
+            -- backlog starves the day's postings: on 2026-09-15, 214,306
+            -- active postings held no closed verdict and only 3,440 of them
+            -- were posted within three days. A posting that arrived that
+            -- morning waited out fifty cycles behind postings months old.
+            -- Board candidacy requires this verdict, so the managed boards
+            -- showed nothing new while the sweep worked. Ordered, one cycle
+            -- covers every genuinely fresh posting and the stale remainder
+            -- drains behind it.
+            ORDER BY j.date_posted DESC NULLS LAST
             LIMIT 4000
             )
             SELECT * FROM candidates
