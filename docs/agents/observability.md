@@ -483,3 +483,28 @@ verdict and batch-priced board usage before acknowledgement, and the board
 projection is replaced only after every provider batch in the immutable run
 has reached a terminal state. `sponsor_filter_reuse` remains projection-only
 and makes no inference call.
+
+## Filter routing observations
+
+`filter_routing_policy` provides independent off/shadow controls for shared-profile
+constraints, evidence-backed title screening and an ambiguity-only routing proposal.
+It applies to new submissions through the shared personal/managed batch executor;
+interactive live calls keep their existing path. All controls default off. Shadow
+mode still submits every original request, with the same instructions and schema.
+It makes no additional inference calls and does not promise immediate savings.
+
+Profiles are compared against the exact posting content submitted for review and
+the supported profile version. Policies name the exact filter prompt hash; no
+policy is inferred from prose. Satisfying partial taxonomy rules cannot establish
+acceptance of the entire filter. Missing or unsupported evidence abstains.
+
+The request snapshot retains the route proposal, and collection compares it to
+the paid result in the receipt transaction. Task payload `routing_report` counts
+agreements, false rejects, false accepts, abstentions and unresolved reference
+results separately. These are agreement measurements against the existing filter,
+not ground-truth accuracy. Old paid requests without a proposal collect normally.
+Observations never enter the verdict cache, usage ledger or board projection.
+
+Live enforcement is intentionally not an accepted mode. It requires representative
+held-out validation and a versioned decision/projection invalidation contract so
+disabling a shortcut cannot leave its decisions cached as ordinary paid verdicts.
