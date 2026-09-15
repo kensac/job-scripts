@@ -52,11 +52,15 @@ async def handle_extract_comp(task_id: int, payload: dict[str, Any]) -> None:
     from core.batch import structured_response_spec
 
     resumed = has_batch_work(task_id)
+    cte, eligible = compensation_candidates.selection(
+        bool(db.get_config("compensation_demand_gate_enabled"))
+    )
     rows = (
         []
         if resumed
         else db.query(
             f"""
+        {cte}
         SELECT j.id, j.url, q.input_content, q.id AS content_row_id
         FROM jobs j
         {CONTENT_LATERAL.format(url="j.url", columns="id, input_content")}
@@ -64,17 +68,12 @@ async def handle_extract_comp(task_id: int, payload: dict[str, Any]) -> None:
                OR (j.comp_content_row_id IS NOT NULL AND j.comp_content_row_id <> q.id)
                OR (j.comp_period IS NULL AND (j.comp_min IS NOT NULL OR j.comp_max IS NOT NULL)))
           AND j.active
-          AND {compensation_candidates.ELIGIBLE}
+          AND {eligible}
           AND {VERIFIED_OPEN.format(url="j.url")}
         ORDER BY j.id DESC
         LIMIT %(cap)s
         """,
-            {
-                "cap": EXTRACT_COMP_PER_CYCLE,
-                "compensation_demand_gate_enabled": bool(
-                    db.get_config("compensation_demand_gate_enabled")
-                ),
-            },
+            {"cap": EXTRACT_COMP_PER_CYCLE},
         )
     )
     if not rows and not resumed:
