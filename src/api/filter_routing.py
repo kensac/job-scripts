@@ -12,7 +12,8 @@ logger = logging.getLogger(__name__)
 
 def load_policy() -> RoutingPolicy | None:
     try:
-        policy = RoutingPolicy.model_validate(db.get_config("filter_routing_policy"))
+        with db.transaction():
+            policy = RoutingPolicy.model_validate(db.get_config("filter_routing_policy"))
         if policy.profile_mode == policy.title_mode == policy.ambiguity_mode == "off":
             return None
         return policy
@@ -37,15 +38,28 @@ def observations(
             # A different generation abstains even when its URL is unchanged.
             # The profile's title input is not independently persisted, so these
             # observations remain shadow-only even when cached text agrees.
-            rows = db.query(
-                "SELECT DISTINCT ON (p.url) p.* FROM job_profiles p "
-                "JOIN ai_queries q ON q.id = p.content_row_id "
-                "JOIN unnest(%s::text[], %s::text[]) AS inputs(url, content) "
-                "ON inputs.url = p.url AND inputs.content = q.input_content "
-                "WHERE p.classifier_version = %s AND p.model = %s "
-                "ORDER BY p.url, p.id DESC",
-                (list(contents), list(contents.values()), CLASSIFIER_VERSION, JOB_PROFILE_MODEL),
-            )
+            with db.transaction():
+                previous = db.query_one("SELECT current_setting('statement_timeout') AS value")
+                assert previous is not None
+                db.execute(
+                    "SELECT set_config('statement_timeout', %s, true)",
+                    (f"{policy.observation_timeout_ms}ms",),
+                )
+                rows = db.query(
+                    "SELECT DISTINCT ON (p.url) p.* FROM job_profiles p "
+                    "JOIN ai_queries q ON q.id = p.content_row_id "
+                    "JOIN unnest(%s::text[], %s::text[]) AS inputs(url, content) "
+                    "ON inputs.url = p.url AND inputs.content = q.input_content "
+                    "WHERE p.classifier_version = %s AND p.model = %s "
+                    "ORDER BY p.url, p.id DESC",
+                    (
+                        list(contents),
+                        list(contents.values()),
+                        CLASSIFIER_VERSION,
+                        JOB_PROFILE_MODEL,
+                    ),
+                )
+                db.execute("SELECT set_config('statement_timeout', %s, true)", (previous["value"],))
             for row in rows:
                 profiles[row["url"]] = row
         result = {}

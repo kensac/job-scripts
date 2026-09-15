@@ -24,6 +24,8 @@ class RoutingPolicy(BaseModel):
     profile_mode: Literal["off", "shadow"] = "off"
     title_mode: Literal["off", "shadow"] = "off"
     ambiguity_mode: Literal["off", "shadow"] = "off"
+    # The observer is optional: bound its database overhead independently of review.
+    observation_timeout_ms: int = Field(default=1000, gt=0)
     profiles: dict[str, ProfilePolicy] = Field(default_factory=dict)
     titles: dict[str, TitleScreenArtifact] = Field(default_factory=dict)
 
@@ -57,6 +59,8 @@ def propose(
     reason = "no_applicable_policy"
     artifact = policy.titles.get(prompt_hash) if policy.title_mode == "shadow" else None
     title_decision = screen_title(title, prompt_hash, artifact, model=model)
+    if policy.title_mode == "shadow":
+        reason = title_decision.reason
     if policy.title_mode == "shadow" and title_decision.outcome == "reject":
         outcome, stage, reason = "reject", "title", title_decision.reason
     elif policy.profile_mode == "shadow" and prompt_hash in policy.profiles:

@@ -81,7 +81,7 @@ class ConfigKey:
 
 CONFIG_KEYS: dict[str, ConfigKey] = {
     "filter_routing_policy": ConfigKey(
-        section="Filter routing",
+        section="Boards",
         default=RoutingPolicy().model_dump(mode="json"),
         value_type=RoutingPolicy,
         help="Independent off/shadow controls for shared profiles, title screening and "

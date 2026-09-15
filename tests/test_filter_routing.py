@@ -9,6 +9,7 @@ from core.job_profile import JOB_PROFILE_MODEL, JobProfileAnswer
 from core.profile_rules import ProfileRules
 from tasks import filter_execution, job_profiles
 from tests.factories import make_batch_result
+from tests.test_title_screen import artifact
 
 
 def profile(**overrides):
@@ -113,6 +114,37 @@ def test_bad_configuration_and_failed_observation_preserve_review(monkeypatch):
 
     monkeypatch.setattr(db, "query", unavailable)
     assert filter_routing.observations(policy(), "filter-hash", [], {}) == {}
+
+
+def test_profile_observer_restores_outer_transaction_timeout(f):
+    job = seed_profile(f)
+    with db.transaction():
+        db.execute("SET LOCAL statement_timeout = '10s'")
+        before = db.query_one("SELECT current_setting('statement_timeout') AS value")
+        result = filter_routing.observations(
+            policy(), "filter-hash", [job], {job["url"]: "original input"}
+        )
+        assert result[job["url"]]["outcome"] == "reject"
+        assert db.query_one("SELECT current_setting('statement_timeout') AS value") == before
+
+
+def test_title_observation_keeps_artifact_and_model_provenance():
+    evidence = artifact()
+    configured = RoutingPolicy(
+        title_mode="shadow", ambiguity_mode="shadow", titles={"filter-revision": evidence}
+    )
+    jobs = [{"url": "https://posting.test", "title": "Senior Engineer"}]
+    inputs = {"https://posting.test": "content"}
+    proposal = filter_routing.observations(
+        configured, "filter-revision", jobs, inputs, model="reference-model"
+    )[jobs[0]["url"]]
+    assert proposal["outcome"] == "reject"
+    assert proposal["title_artifact"] == evidence.fingerprint
+    unknown = filter_routing.observations(
+        configured, "filter-revision", jobs, inputs, model="different-model"
+    )[jobs[0]["url"]]
+    assert unknown["outcome"] == "abstain"
+    assert unknown["reason"] == "reference_model_mismatch"
 
 
 def hooks():
