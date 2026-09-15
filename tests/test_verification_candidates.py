@@ -2,13 +2,32 @@ from api import db, verification_candidates
 from tests import factories as f
 
 
+def test_disabled_gate_preserves_subscribed_jobs_without_an_active_filter():
+    source = f.make_source()
+    user = f.make_user()
+    f.subscribe(user, source)
+    job = f.make_job(source=source)
+    assert _reachable() == {job}
+    _enable()
+    assert _reachable() == set()
+
+
+def test_another_personal_target_can_admit_a_job_outside_one_users_window():
+    _enable()
+    source = f.make_source()
+    _paid_personal_target(source, {"max_age_days": 7})
+    _paid_personal_target(source, {"max_age_days": 30})
+    job = f.make_job(source=source)
+    db.execute("UPDATE jobs SET date_posted = current_date - 14 WHERE id = %s", (job,))
+    assert _reachable() == {job}
+
+
 def _reachable() -> set[int]:
     rows = db.query(
         f"""
         WITH {verification_candidates.TARGETS}
         SELECT j.id FROM jobs j
-        WHERE j.active AND {verification_candidates.LEGACY_REACHABLE}
-          AND {verification_candidates.REACHABLE}
+        WHERE j.active AND {verification_candidates.REACHABLE}
         """,
         verification_candidates.params(),
     )

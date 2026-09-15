@@ -27,15 +27,16 @@ verification_targets AS (
 
 REACHABLE = f"""
 (
-    NOT %(verification_reachability_gate_enabled)s
-    OR NOT EXISTS (SELECT 1 FROM sources source WHERE source.name = j.source)
+    (NOT %(verification_reachability_gate_enabled)s AND {AI_ELIGIBLE_JOB.format(job="j")})
+    OR (%(verification_reachability_gate_enabled)s AND (
+    NOT EXISTS (SELECT 1 FROM sources source WHERE source.name = j.source)
     OR EXISTS (SELECT 1 FROM user_jobs tracked WHERE tracked.job_id = j.id)
     OR EXISTS (
         SELECT 1 FROM verification_targets target
         WHERE target.source = j.source
         {criteria.json_sql("target.criteria")}
         {_TITLE_SQL}
-    )
+    )))
 )
 """
 

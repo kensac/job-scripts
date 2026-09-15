@@ -335,6 +335,7 @@ def test_put_settings_echoes_the_saved_settings_in_get_shape(client, user_header
         "max_age_days": 30,
         "excluded_locations": [],
         "included_locations": ["United States", "Remote"],
+        "included_terms": [],
     }
     assert body == {"ok": True, **client.get("/v1/user/settings", headers=user_headers).json()}
 

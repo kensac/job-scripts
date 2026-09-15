@@ -48,38 +48,28 @@ SQL = f"""
 
 
 def json_sql(criteria: str) -> str:
-    """Structural criteria for a JSONB expression in a set-based query.
+    """Bind the same predicate to stored criteria instead of one user's params.
 
-    Keep this beside ``SQL``: background fleet selection and one-board
-    materialization must mean the same thing by a date or place criterion.
+    Only trusted SQL expressions belong here. Values remain in the database,
+    and list normalization matches params(), including blank entries.
     """
-    return f"""
-        AND (NULLIF({criteria}->>'date_posted_after', '') IS NULL
-             OR j.date_posted >= ({criteria}->>'date_posted_after')::date)
-        AND (NULLIF({criteria}->>'max_age_days', '') IS NULL
-             OR COALESCE(j.date_posted, j.created_at)
-                >= now() - make_interval(days => ({criteria}->>'max_age_days')::int))
-        AND (jsonb_array_length(COALESCE({criteria}->'excluded_locations', '[]'::jsonb)) = 0
-             OR NOT EXISTS (
-              SELECT 1 FROM unnest(j.locations) loc
-              JOIN locations l ON l.text = btrim(loc)
-              JOIN locations x ON x.text IN (
-                  SELECT jsonb_array_elements_text(
-                      COALESCE({criteria}->'excluded_locations', '[]'::jsonb)))
-              WHERE {_PLACE_MATCH}))
-        AND (jsonb_array_length(COALESCE({criteria}->'included_locations', '[]'::jsonb)) = 0
-             OR cardinality(j.locations) = 0 OR EXISTS (
-              SELECT 1 FROM unnest(j.locations) loc
-              JOIN locations l ON l.text = btrim(loc)
-              JOIN locations x ON x.text IN (
-                  SELECT jsonb_array_elements_text(
-                      COALESCE({criteria}->'included_locations', '[]'::jsonb)))
-              WHERE {_PLACE_MATCH}))
-        AND (jsonb_array_length(COALESCE({criteria}->'included_terms', '[]'::jsonb)) = 0
-             OR j.terms && ARRAY(
-                 SELECT jsonb_array_elements_text(
-                     COALESCE({criteria}->'included_terms', '[]'::jsonb)))::text[])
-    """
+    bindings = {
+        "crit_date": f"({criteria}->>'date_posted_after')",
+        "crit_max_age": f"({criteria}->>'max_age_days')",
+    }
+    for suffix, field in (
+        ("excl", "excluded_locations"),
+        ("incl", "included_locations"),
+        ("terms", "included_terms"),
+    ):
+        values = (
+            f"ARRAY(SELECT btrim(value) FROM jsonb_array_elements_text("
+            f"COALESCE({criteria}->'{field}', '[]'::jsonb)) AS entry(value) "
+            "WHERE btrim(value) <> '')"
+        )
+        bindings[f"crit_{suffix}"] = values
+        bindings[f"crit_has_{suffix}"] = f"(cardinality({values}) > 0)"
+    return SQL % {key: value for key, value in bindings.items()}
 
 
 def params(settings_row: dict[str, Any] | None) -> dict[str, Any]:

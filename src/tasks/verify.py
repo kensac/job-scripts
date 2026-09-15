@@ -367,8 +367,7 @@ async def handle_verify_new(task_id: int, payload: dict[str, Any]) -> None:
                          AND c.status IN ('passed', 'rejected')) AS needs_clearance
             FROM jobs j
             {CONTENT_LATERAL.format(url="j.url", columns="input_content")}
-            WHERE j.active AND {AI_ELIGIBLE_JOB.format(job="j")}
-              AND {verification_candidates.REACHABLE} AND (
+            WHERE j.active AND {verification_candidates.REACHABLE} AND (
                 NOT EXISTS (
                     SELECT 1 FROM ai_queries c WHERE c.url = j.url
                       AND c.check_type = 'closed' AND c.status IN ('passed', 'rejected'))
