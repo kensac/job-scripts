@@ -9,7 +9,7 @@ from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from typing import Any
 
-from api import ai, budget, db, filter_routing
+from api import ai, budget, db, filter_routing, review_gate
 from api.ai import verdicts
 from api.ai.batch_results import progress_counts
 from core.answers import FilterDecision, FilterResult
@@ -90,6 +90,7 @@ async def execute_live(
     jobs: list[dict[str, Any]],
     hooks: ExecutionHooks,
 ) -> None:
+    jobs, _gate_decisions = review_gate.partition(task_id, snapshot.prompt_hash, jobs, None)
     total = len(jobs)
     done = 0
     limiter = AdaptiveLimiter()
@@ -209,6 +210,9 @@ async def execute_batch(
     from core.batch import structured_response_spec
 
     existing = has_batch_work(task_id)
+    gate_decisions = {}
+    if not existing:
+        jobs, gate_decisions = review_gate.partition(task_id, snapshot.prompt_hash, jobs, contents)
     routing = (
         {}
         if existing
@@ -238,6 +242,7 @@ async def execute_batch(
                 FilterDecision,
                 context={
                     "routing": routing.get(job["url"]),
+                    "review_gate": gate_decisions.get(job["url"]),
                     "job": job,
                     "filter": snapshot.__dict__,
                     "reasoning_effort": cfg.params.get("reasoning_effort")
@@ -332,6 +337,9 @@ async def execute_batch(
             hooks.record_usage(usage, result.model, True)
             filter_routing.record_comparison(
                 task_id, context.get("routing"), parsed.should_filter if parsed else None
+            )
+            review_gate.record_comparison(
+                task_id, context.get("review_gate"), parsed.should_filter if parsed else None
             )
             receipt.outcome = "written" if parsed else "failed"
         if done % 50 == 0:

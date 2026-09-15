@@ -1,5 +1,4 @@
 import pytest
-from core.review_gate import ReviewGatePolicy, profile_rejection, title_rejection
 
 from api import ai, db, review_gate
 from core.batch import structured_response_spec
@@ -9,6 +8,7 @@ from core.job_profile import (
     JOB_PROFILE_MODEL,
     build_job_profile_input,
 )
+from core.review_gate import ReviewGatePolicy, profile_rejection, title_rejection
 from tasks import filter_execution, job_profiles
 from tasks.runtime import consume_result
 from tests.factories import make_batch_result
@@ -71,7 +71,9 @@ def test_ambiguous_or_technical_titles_abstain(title):
 
 
 def test_profiles_reject_only_explicit_nontechnical_families():
-    assert profile_rejection(profile(primary_role_family="legal", role_tracks=["other"]))
+    assert profile_rejection(
+        profile(primary_role_family="legal", role_tracks=["other"]), "Legal Counsel"
+    )
     for fields in (
         {"career_stage": "mid"},
         {"primary_role_family": "unknown", "role_tracks": ["other"]},
@@ -79,11 +81,17 @@ def test_profiles_reject_only_explicit_nontechnical_families():
         {"primary_role_family": "sales", "role_tracks": []},
         {"primary_role_family": "finance", "role_tracks": ["analytics"]},
     ):
-        assert profile_rejection(profile(**fields)) is None
+        assert profile_rejection(profile(**fields), "Analyst") is None
+    assert (
+        profile_rejection(
+            profile(primary_role_family="sales", role_tracks=["other"]), "Solutions Engineer"
+        )
+        is None
+    )
 
 
 def proven_job(f):
-    _, url = f.make_ready_job(content="exact posting content")
+    _, url = f.make_ready_job(content="exact posting content", title="Legal Counsel")
     job = db.query_one("SELECT url,title,company FROM jobs WHERE url=%s", (url,))
     content = db.query_one(
         "SELECT id FROM ai_queries WHERE url=%s AND check_type='content'", (url,)
@@ -222,3 +230,64 @@ def test_profile_lookup_failure_retains_detailed_review(f, monkeypatch):
     job = {"url": "https://example.test", "title": "Analyst"}
     task = f.make_task("run_filter_batch_chunk")
     assert review_gate.partition(task, "test-hash", [job], {job["url"]: "content"})[0] == [job]
+
+
+@pytest.mark.asyncio
+async def test_live_gate_skips_before_content_fetch(f, monkeypatch):
+    configure()
+    task = f.make_task("run_filter_chunk", status="running")
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("excluded titles cannot fetch or call a provider")
+
+    monkeypatch.setattr(filter_execution, "get_content", forbidden)
+    monkeypatch.setattr(filter_execution, "check_filter", forbidden)
+    await filter_execution.execute_live(
+        task,
+        ai.AIConfig("openai", "key", "owner", JOB_PROFILE_MODEL),
+        filter_execution.FilterSnapshot("test", "prompt", "filter", "test-hash"),
+        [{"url": "https://example.test/nurse", "title": "Registered Nurse"}],
+        hooks(),
+    )
+    plan = db.query_one("SELECT payload->'review_gate' plan FROM tasks WHERE id=%s", (task,))[
+        "plan"
+    ]
+    assert plan["detailed"] == 0
+
+
+def test_managed_fail_open_projection_excludes_gate_rejects_and_rollback_restores(f):
+    from api import managed_board_runs
+
+    sponsor = f.make_user()
+    job_id = f.make_job(title="Registered Nurse")
+    job = db.query_one("SELECT id,url,title,company FROM jobs WHERE id=%s", (job_id,))
+    board = db.query_one(
+        "INSERT INTO managed_boards(slug,name,sponsor_user_id,prompt,prompt_hash,requested_model) "
+        "VALUES ('gate','Gate',%s,'prompt','test-hash',%s) RETURNING id",
+        (sponsor, JOB_PROFILE_MODEL),
+    )
+    payload = {
+        "managed_board_id": board["id"],
+        "revision": 1,
+        "prompt_hash": "test-hash",
+        "requested_model": JOB_PROFILE_MODEL,
+        "fail_closed": False,
+        "jobs": [{**job, "sort_at": "2026-09-01T00:00:00+00:00"}],
+    }
+    task = f.make_task("run_managed_board_batch", payload)
+    configure()
+    assert review_gate.partition(task, "test-hash", [job], {})[0] == []
+    assert managed_board_runs.replace_projection(task, payload) == 0
+    configure(title="off")
+    assert review_gate.partition(task, "test-hash", [job], {})[0] == [job]
+    assert managed_board_runs.replace_projection(task, payload) == 1
+
+
+def test_optional_comparison_failure_does_not_abort_receipt_transaction(f):
+    task = f.make_task(
+        "run_filter_batch_chunk", {"review_gate_comparison": {"false_reject": "bad"}}
+    )
+    with db.transaction():
+        review_gate.record_comparison(task, {"stage": "title"}, False)
+        db.execute("UPDATE tasks SET error='still writable' WHERE id=%s", (task,))
+    assert db.query_one("SELECT error FROM tasks WHERE id=%s", (task,))["error"] == "still writable"

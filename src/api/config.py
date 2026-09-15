@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue, PositiveInt, TypeA
 
 from api.apply.policy import ExtensionPolicy
 from core.filter_policy import RoutingPolicy
+from core.review_gate import ReviewGatePolicy
 
 logger = logging.getLogger(__name__)
 ALL_GROUPS = "*"
@@ -80,6 +81,16 @@ class ConfigKey:
 
 
 CONFIG_KEYS: dict[str, ConfigKey] = {
+    "filter_review_gate": ConfigKey(
+        section="Boards",
+        default=ReviewGatePolicy().model_dump(mode="json"),
+        value_type=ReviewGatePolicy,
+        help="Independent off/shadow/enforce controls for conservative nontechnical title "
+        "exclusions and shared-profile reuse. Scopes explicitly opt in exact filter prompt "
+        "hashes. Unknown evidence receives detailed review. Never creates cached verdicts "
+        "or cancels submitted batches. Rollback affects new submissions; skipped jobs "
+        "become eligible again on the next run. Task payloads retain the funnel.",
+    ),
     "filter_routing_policy": ConfigKey(
         section="Boards",
         default=RoutingPolicy().model_dump(mode="json"),
