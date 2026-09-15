@@ -148,6 +148,14 @@ fresh copy:
 
 ## Compensation source provenance
 
+`compensation_demand_gate_enabled` narrows new compensation work to current
+enabled personal-filter passes within their criteria, published managed-board
+members, and personally tracked or uploaded postings. The selector lives in
+`api/compensation_candidates.py`; an empty machine-created `user_jobs` row is
+not personal demand. Verification and content-generation guards still apply.
+The hourly sweep discovers newly selected jobs without a backfill. Already
+submitted batch results are consumed even if demand disappears meanwhile.
+
 `jobs.comp_content_row_id` records the exact cached content used by a successful
 compensation extraction. Writes verify that source in the update statement;
 subsequent content changes make known older generations eligible again. A null

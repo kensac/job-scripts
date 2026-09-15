@@ -79,6 +79,15 @@ class ConfigKey:
 
 
 CONFIG_KEYS: dict[str, ConfigKey] = {
+    "compensation_demand_gate_enabled": ConfigKey(
+        section="Catalog",
+        default=False,
+        value_type=bool,
+        help="Extract compensation only after a posting passes an enabled personal filter, "
+        "appears on a published managed board, or is personally tracked or uploaded. "
+        "Existing verification and content freshness checks still apply. "
+        "Already submitted batches finish normally.",
+    ),
     "extension_policy": ConfigKey(
         section="Extension",
         default=ExtensionPolicy().model_dump(mode="json"),
