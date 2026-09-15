@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from api import db
+from api import compensation_candidates, db
 from api.ai import batch_results
 from core.comp import (
     COMP_BASES,
@@ -16,7 +16,7 @@ from core.comp import (
     CompExtract,
 )
 from core.shapes import COMP_TASK, EXTRACT_COMP_PER_CYCLE
-from core.store import AI_ELIGIBLE_JOB, CONTENT_LATERAL, VERIFIED_OPEN
+from core.store import CONTENT_LATERAL, VERIFIED_OPEN
 from tasks import rescrape
 from tasks.runtime import (
     consume_result,
@@ -64,12 +64,17 @@ async def handle_extract_comp(task_id: int, payload: dict[str, Any]) -> None:
                OR (j.comp_content_row_id IS NOT NULL AND j.comp_content_row_id <> q.id)
                OR (j.comp_period IS NULL AND (j.comp_min IS NOT NULL OR j.comp_max IS NOT NULL)))
           AND j.active
-          AND {AI_ELIGIBLE_JOB.format(job="j")}
+          AND {compensation_candidates.ELIGIBLE}
           AND {VERIFIED_OPEN.format(url="j.url")}
         ORDER BY j.id DESC
         LIMIT %(cap)s
         """,
-            {"cap": EXTRACT_COMP_PER_CYCLE},
+            {
+                "cap": EXTRACT_COMP_PER_CYCLE,
+                "compensation_demand_gate_enabled": bool(
+                    db.get_config("compensation_demand_gate_enabled")
+                ),
+            },
         )
     )
     if not rows and not resumed:
