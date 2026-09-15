@@ -1,4 +1,5 @@
 import pytest
+from core.review_gate import ReviewGatePolicy, profile_rejection, title_rejection
 
 from api import ai, db, review_gate
 from core.batch import structured_response_spec
@@ -8,7 +9,6 @@ from core.job_profile import (
     JOB_PROFILE_MODEL,
     build_job_profile_input,
 )
-from core.review_gate import ReviewGatePolicy, profile_rejection, title_rejection
 from tasks import filter_execution, job_profiles
 from tasks.runtime import consume_result
 from tests.factories import make_batch_result
