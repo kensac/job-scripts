@@ -44,6 +44,7 @@ _CURATED_INTERNSHIP_SOURCES = frozenset(
 
 def sql_for_json(config: str) -> tuple[str, dict[str, object]]:
     """SQL equivalent of :func:`evaluate` for a JSONB config expression."""
+
     def postgres_pattern(pattern: re.Pattern[str]) -> str:
         # Python spells a word boundary \b; PostgreSQL's ARE engine spells
         # the same assertion \y. Everything else in these recipes is shared.
