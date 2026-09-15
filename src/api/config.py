@@ -7,6 +7,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, PositiveInt, TypeAdapter
 
 from api.apply.policy import ExtensionPolicy
+from core.filter_policy import RoutingPolicy
 
 logger = logging.getLogger(__name__)
 ALL_GROUPS = "*"
@@ -79,6 +80,15 @@ class ConfigKey:
 
 
 CONFIG_KEYS: dict[str, ConfigKey] = {
+    "filter_routing_policy": ConfigKey(
+        section="Boards",
+        default=RoutingPolicy().model_dump(mode="json"),
+        value_type=RoutingPolicy,
+        help="Independent off/shadow controls for shared profiles, title screening and "
+        "ambiguity-only review. Profiles are keyed by exact filter prompt hash. "
+        "Shadow mode preserves every detailed review and records comparisons on tasks. "
+        "No live skipping is supported until decision quality and rollback are validated.",
+    ),
     "compensation_demand_gate_enabled": ConfigKey(
         section="Catalog",
         default=False,

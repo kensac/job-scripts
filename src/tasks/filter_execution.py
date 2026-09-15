@@ -9,7 +9,7 @@ from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from typing import Any
 
-from api import ai, budget, db
+from api import ai, budget, db, filter_routing
 from api.ai import verdicts
 from api.ai.batch_results import progress_counts
 from core.answers import FilterDecision, FilterResult
@@ -209,6 +209,17 @@ async def execute_batch(
     from core.batch import structured_response_spec
 
     existing = has_batch_work(task_id)
+    routing = (
+        {}
+        if existing
+        else filter_routing.observations(
+            filter_routing.load_policy(),
+            snapshot.prompt_hash,
+            jobs,
+            contents,
+            model=cfg.model if cfg else None,
+        )
+    )
     instructions = build_custom_decision_instructions(snapshot.prompt, snapshot.on_ambiguous)
     specs, by_url = [], {}
     for job in jobs:
@@ -226,6 +237,7 @@ async def execute_batch(
                 input_text,
                 FilterDecision,
                 context={
+                    "routing": routing.get(job["url"]),
                     "job": job,
                     "filter": snapshot.__dict__,
                     "reasoning_effort": cfg.params.get("reasoning_effort")
@@ -318,6 +330,9 @@ async def execute_batch(
                 reasoning_effort=context.get("reasoning_effort"),
             )
             hooks.record_usage(usage, result.model, True)
+            filter_routing.record_comparison(
+                task_id, context.get("routing"), parsed.should_filter if parsed else None
+            )
             receipt.outcome = "written" if parsed else "failed"
         if done % 50 == 0:
             done_count, total_count = progress_counts(task_id)
