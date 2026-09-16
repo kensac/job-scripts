@@ -477,11 +477,22 @@ def record_parse_failures(board_id: int, model: str | None):
 
 def replace_projection(task_id: int, payload: dict[str, Any]) -> int:
     all_jobs = payload["jobs"]
+    # Exclusions belong to this immutable run, not the shared verdict cache.
+    # Reading the persisted plan also covers resume after partial collection.
+    gate = db.query_one("SELECT payload->'review_gate' AS plan FROM tasks WHERE id=%s", (task_id,))
+    plan = gate["plan"] if gate and gate["plan"] else {}
+    skipped = (
+        plan.get("skipped", {})
+        if plan.get("version") == "review-gate-v1"
+        and plan.get("prompt_hash") == payload["prompt_hash"]
+        else {}
+    )
     config = payload.get("title_gate")
     jobs = [
         job
         for job in all_jobs
-        if not config or config["mode"] == "shadow" or job["title_gate_keep"]
+        if job.get("url") not in skipped
+        and (not config or config["mode"] == "shadow" or job["title_gate_keep"])
     ]
     ids = [job["id"] for job in jobs]
     sort_at = [job["sort_at"] for job in jobs]

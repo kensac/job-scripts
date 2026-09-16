@@ -508,3 +508,26 @@ Observations never enter the verdict cache, usage ledger or board projection.
 Live enforcement is intentionally not an accepted mode. It requires representative
 held-out validation and a versioned decision/projection invalidation contract so
 disabling a shortcut cannot leave its decisions cached as ordinary paid verdicts.
+
+## Reject-only review gates
+
+`filter_review_gate` is separate from the experimental routing observer. Its
+title and profile controls independently accept off, shadow and enforce. Exact
+prompt-hash scopes opt into versioned nontechnical occupation/family recipes;
+unconfigured revisions and uncertain evidence receive detailed review. Profiles
+never accept a posting or decide experience, compensation or prestige.
+
+The shared live/batch executor applies the gates only before new review calls.
+Profile reuse requires exact cached content and a retained, consumed profile
+request proving the original title, instructions, version, model and response.
+Missing provenance or bounded lookup failure retains detailed review. Reuse
+creates no additional classification calls; the existing profile derivation is
+still responsible for producing shared profiles.
+
+Task payload `review_gate` records candidates, proposed exclusions, proven
+profiles, skipped URLs with stage/reason, and the remainder. Batch shadow
+comparisons use receipt transactions. Paid batches bypass replanning, including
+after a switch changes. Skips are not paid verdicts, do not enter the verdict
+cache, and create no usage. Managed projection explicitly excludes this run's
+skips even when fail-open is configured. Switching off restores eligibility on
+the next new run without deleting historical decisions or person-owned state.
