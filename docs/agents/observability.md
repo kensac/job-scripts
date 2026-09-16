@@ -52,6 +52,13 @@ that worker; keep tasks short and let the queue carry the volume.
 
 ## Batched work
 
+`job_profile_collection_enabled` controls new shared-profile collection at
+scheduling, manual admission, and task execution. Pausing retains existing
+profiles and lets paid batches collect their receipts. A task rechecks the
+switch after selecting its inputs, immediately before handing off new work;
+work already handed to the batch runtime may finish submitting. Re-enabling
+the switch resumes normal eligibility selection, not a forced reclassification.
+
 Batched work parks rather than holding a worker. Scheduled filter and draft
 work can still run live when its key/provider path does not use batches.
 Price the actual transport with `core.pricing`, not a blanket batch discount.

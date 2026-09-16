@@ -191,6 +191,40 @@ async def test_disabled_profile_collection_stops_already_queued_unpaid_task(f, m
 
 
 @pytest.mark.asyncio
+async def test_paused_collection_still_saves_paid_receipts_once(f, monkeypatch):
+    source = f.make_source()
+    user_id = f.make_user()
+    f.subscribe(user_id, source)
+    _job_id, url = f.make_ready_job(source=source)
+    row = job_profiles.job_profile_derivation.candidates(1)[0]
+    task_id = f.make_task("classify_job_profiles", {}, status="running")
+    spec = job_profiles.structured_response_spec(
+        str(row["content_row_id"]),
+        job_profiles.JOB_PROFILE_INSTRUCTIONS,
+        job_profiles.build_job_profile_input(row["title"], row["input_content"]),
+        JobProfileAnswer,
+        context={
+            "url": url,
+            "content_row_id": row["content_row_id"],
+            "content_hash": job_profiles._content_hash(row["input_content"]),
+            "classifier_version": CLASSIFIER_VERSION,
+        },
+    )
+    make_batch_result(task_id, spec, text=_answer(), model=JOB_PROFILE_MODEL)
+    _collection_enabled(False)
+
+    def no_selection(*args, **kwargs):
+        pytest.fail("paid collection must not select new work")
+
+    monkeypatch.setattr(job_profiles.job_profile_derivation, "candidates", no_selection)
+    await job_profiles.handle_classify_job_profiles(task_id, {})
+    assert db.query_one("SELECT url FROM job_profiles")["url"] == url
+    assert db.query_one("SELECT outcome FROM batch_result_receipts")["outcome"] == "written"
+    await job_profiles.handle_classify_job_profiles(task_id, {})
+    assert db.query_one("SELECT count(*) AS n FROM job_profiles")["n"] == 1
+
+
+@pytest.mark.asyncio
 async def test_pause_during_selection_prevents_submission(f, monkeypatch):
     task_id = f.make_task("classify_job_profiles", {}, status="running")
     source = f.make_source()

@@ -331,9 +331,13 @@ def schedule_ingest_cycle() -> None:
         "AND status IN ('pending', 'running', 'waiting', 'awaiting_batch') LIMIT 1"
     ):
         enqueue("classify_locations", {"cycle": cycle}, dedupe_key=f"locations:{cycle}")
-    if job_profile_derivation.has_work() and not db.query_one(
-        "SELECT 1 FROM tasks WHERE kind = 'classify_job_profiles' "
-        "AND status IN ('pending', 'running', 'waiting', 'awaiting_batch') LIMIT 1"
+    if (
+        db.get_config("job_profile_collection_enabled")
+        and job_profile_derivation.has_work()
+        and not db.query_one(
+            "SELECT 1 FROM tasks WHERE kind = 'classify_job_profiles' "
+            "AND status IN ('pending', 'running', 'waiting', 'awaiting_batch') LIMIT 1"
+        )
     ):
         enqueue(
             "classify_job_profiles",
