@@ -365,3 +365,36 @@ def test_partial_experiment_summary_counts_unsubmitted_arms():
     assert summary["received_results"] == 1
     assert summary["missing_results"] == 3
     assert summary["missing_arms"] == ["missing@low"]
+
+
+def test_experiment_summary_keeps_missing_cache_write_cost_unpriced():
+    params = {
+        "sampled": 1,
+        "arms": [{"model": "gpt-5.6-luna", "effort": "low"}],
+    }
+    experiment = db.query_one(
+        "INSERT INTO ai_experiments(purpose,params) VALUES ('verify',%s) RETURNING id",
+        (db.jsonb(params),),
+    )["id"]
+    db.execute(
+        "INSERT INTO ai_experiment_results(experiment_id,arm,url,usage,error) "
+        "VALUES (%s,'gpt-5.6-luna@low','https://example.test/unpriced',%s,'missing premium')",
+        (
+            experiment,
+            db.jsonb(
+                {
+                    "input_tokens": 1000,
+                    "output_tokens": 100,
+                    "cached_tokens": 300,
+                    "cache_write_tokens": 400,
+                }
+            ),
+        ),
+    )
+    summary = exp.summarise(experiment)
+    arm = summary["arms"]["gpt-5.6-luna@low"]
+    assert arm["unpriced_results"] == 1
+    assert arm["known_cost_usd"] == 0.0
+    assert arm["cost_usd"] is None and arm["cost_per_100_usd"] is None
+    assert summary["reference"] is None
+    assert summary["reference_reason"] == "cost_incomplete"
