@@ -6,11 +6,13 @@ from collections.abc import Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from api import crypto, db
 from api.auth import AuthedUser
 from core import pricing
+
+_CACHE_WRITE_UNSET = object()
 
 if TYPE_CHECKING:
     from api import ai
@@ -386,7 +388,7 @@ def record_fleet_usage(
     *,
     batched: bool = True,
     cached_tokens: int = 0,
-    cache_write_tokens: int | None = None,
+    cache_write_tokens: int | object | None = _CACHE_WRITE_UNSET,
     request_usage: list[pricing.RequestTokens] | None = None,
 ) -> None:
     """Scheduled work, charged to the fleet rather than to a person.
@@ -407,6 +409,28 @@ def record_fleet_usage(
     particular, and attributing it to whichever admin happens to be user 1
     would make per-user spend a fiction.
     """
+    stored_cache_write = (
+        cache_write_tokens if cache_write_tokens is not _CACHE_WRITE_UNSET else None
+    )
+    if cache_write_tokens is _CACHE_WRITE_UNSET:
+        cost = pricing.estimate_usage_cost_usd(
+            model,
+            prompt_tokens,
+            completion_tokens,
+            cached_tokens=cached_tokens,
+            batched=batched,
+            requests=request_usage,
+        )
+    else:
+        cost = pricing.estimate_usage_cost_usd(
+            model,
+            prompt_tokens,
+            completion_tokens,
+            cached_tokens=cached_tokens,
+            batched=batched,
+            cache_write_tokens=cast(int | None, cache_write_tokens),
+            requests=request_usage,
+        )
     db.execute(
         "INSERT INTO api_usage (user_id, key_source, purpose, model, prompt_tokens, "
         "completion_tokens, total_tokens, cached_tokens, cache_write_tokens, batched, cost_usd) "
@@ -418,17 +442,9 @@ def record_fleet_usage(
             completion_tokens,
             prompt_tokens + completion_tokens,
             cached_tokens,
-            cache_write_tokens,
+            stored_cache_write,
             batched,
-            pricing.estimate_usage_cost_usd(
-                model,
-                prompt_tokens,
-                completion_tokens,
-                cached_tokens=cached_tokens,
-                batched=batched,
-                cache_write_tokens=cache_write_tokens,
-                requests=request_usage,
-            ),
+            cost,
         ),
     )
 
@@ -442,10 +458,30 @@ def record_usage(
     completion_tokens: int,
     total_tokens: int,
     cached_tokens: int = 0,
-    cache_write_tokens: int | None = None,
+    cache_write_tokens: int | object | None = _CACHE_WRITE_UNSET,
     *,
     batched: bool = False,
 ) -> None:
+    stored_cache_write = (
+        cache_write_tokens if cache_write_tokens is not _CACHE_WRITE_UNSET else None
+    )
+    if cache_write_tokens is _CACHE_WRITE_UNSET:
+        cost = pricing.estimate_cost_usd(
+            model,
+            prompt_tokens,
+            completion_tokens,
+            cached_tokens=cached_tokens,
+            batched=batched,
+        )
+    else:
+        cost = pricing.estimate_cost_usd(
+            model,
+            prompt_tokens,
+            completion_tokens,
+            cached_tokens=cached_tokens,
+            batched=batched,
+            cache_write_tokens=cast(int | None, cache_write_tokens),
+        )
     db.execute(
         "INSERT INTO api_usage (user_id, key_source, purpose, model, "
         "prompt_tokens, completion_tokens, total_tokens, cached_tokens, cache_write_tokens, batched, cost_usd) "
@@ -459,16 +495,9 @@ def record_usage(
             completion_tokens,
             total_tokens,
             cached_tokens,
-            cache_write_tokens,
+            stored_cache_write,
             batched,
-            pricing.estimate_cost_usd(
-                model,
-                prompt_tokens,
-                completion_tokens,
-                cached_tokens=cached_tokens,
-                batched=batched,
-                cache_write_tokens=cache_write_tokens,
-            ),
+            cost,
         ),
     )
     from api import metrics
@@ -496,7 +525,7 @@ def record_tokens(
         usage.get("completion_tokens", 0) or 0,
         usage.get("total_tokens", 0) or 0,
         usage.get("cached_tokens", 0) or 0,
-        usage.get("cache_write_tokens"),
+        usage.get("cache_write_tokens", _CACHE_WRITE_UNSET),
         batched=batched,
     )
 
@@ -516,7 +545,21 @@ def record_managed_board_tokens(
     prompt = usage.get("prompt_tokens", 0) or 0
     completion = usage.get("completion_tokens", 0) or 0
     cached = usage.get("cached_tokens", 0)
-    cache_write = usage.get("cache_write_tokens")
+    cache_write = usage.get("cache_write_tokens", _CACHE_WRITE_UNSET)
+    stored_cache_write = cache_write if cache_write is not _CACHE_WRITE_UNSET else None
+    if cache_write is _CACHE_WRITE_UNSET:
+        cost = pricing.estimate_cost_usd(
+            model, prompt, completion, cached_tokens=cached or 0, batched=batched
+        )
+    else:
+        cost = pricing.estimate_cost_usd(
+            model,
+            prompt,
+            completion,
+            cached_tokens=cached or 0,
+            batched=batched,
+            cache_write_tokens=cast(int | None, cache_write),
+        )
     db.execute(
         "INSERT INTO api_usage (managed_board_id, key_source, purpose, model, "
         "prompt_tokens, completion_tokens, total_tokens, cached_tokens, cache_write_tokens, batched, cost_usd) "
@@ -529,16 +572,9 @@ def record_managed_board_tokens(
             completion,
             total,
             cached or 0,
-            cache_write,
+            stored_cache_write,
             batched,
-            pricing.estimate_cost_usd(
-                model,
-                prompt,
-                completion,
-                cached_tokens=cached or 0,
-                cache_write_tokens=cache_write,
-                batched=batched,
-            ),
+            cost,
         ),
     )
     from api import metrics

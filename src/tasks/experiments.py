@@ -137,13 +137,17 @@ async def _run(task_id: int, payload: dict[str, Any]) -> None:
                 receipt.outcome = "unknown_request"
                 continue
             usage = domain.usage(result)
+            cost_kwargs = {
+                "cached_tokens": usage.get("cached_tokens"),
+                "batched": True,
+            }
+            if "cache_write_tokens" in usage:
+                cost_kwargs["cache_write_tokens"] = usage["cache_write_tokens"]
             cost = pricing.estimate_cost_usd(
                 result.model,
                 usage["input_tokens"],
                 usage["output_tokens"],
-                cached_tokens=usage.get("cached_tokens"),
-                cache_write_tokens=usage.get("cache_write_tokens"),
-                batched=True,
+                **cost_kwargs,
             )
             output = None
             error = result.error
