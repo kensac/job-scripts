@@ -15,17 +15,23 @@ def test_fleet_batch_preserves_cache_and_prices_each_request(f, model):
     usage = {
         "input_tokens": 200_000,
         "output_tokens": 100,
-        "input_tokens_details": {"cached_tokens": 100_000},
+        "input_tokens_details": {"cached_tokens": 100_000, "cache_write_tokens": 50_000},
     }
     results = {str(i): batch.BatchResult(str(i), usage=usage, batch_id="paid") for i in range(2)}
     batch._emit_usage(hook, "paid", "completed", results)
     row = db.query_one(
-        "SELECT prompt_tokens,completion_tokens,cached_tokens,cost_usd FROM api_usage"
+        "SELECT prompt_tokens,completion_tokens,cached_tokens,cache_write_tokens,cost_usd FROM api_usage"
     )
     assert row["cached_tokens"] == 200_000
+    assert row["cache_write_tokens"] == 100_000
     assert (row["prompt_tokens"], row["completion_tokens"]) == (400_000, 200)
     per_request = pricing.estimate_cost_usd(
-        model, 200_000, 100, cached_tokens=100_000, batched=True
+        model,
+        200_000,
+        100,
+        cached_tokens=100_000,
+        cache_write_tokens=50_000,
+        batched=True,
     )
     expected = (per_request * 2).quantize(Decimal("0.000001")) if per_request is not None else None
     assert row["cost_usd"] == expected

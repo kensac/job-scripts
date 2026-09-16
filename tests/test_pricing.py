@@ -17,6 +17,7 @@ from core import pricing
 # gpt-5-nano is $0.05/Mtok in, $0.40/Mtok out - the model almost everything
 # here runs on, so the arithmetic below is checkable by hand.
 NANO = "gpt-5-nano"
+LUNA = "gpt-5.6-luna"
 
 
 @pytest.mark.parametrize(
@@ -58,6 +59,17 @@ def test_cached_cannot_exceed_prompt():
 
 def test_none_tokens_are_zero_not_a_crash():
     assert pricing.estimate_cost_usd(NANO, None, None) == 0
+
+
+def test_cache_write_is_distinct_from_a_cache_read_and_unknown_is_not_free():
+    assert pricing.estimate_cost_usd(LUNA, 1_000_000, 0, cache_write_tokens=1_000_000) == Decimal(
+        "0.25"
+    )
+    assert pricing.estimate_cost_usd(LUNA, 1_000_000, 0, cache_write_tokens=0) == Decimal("0.20")
+    assert pricing.estimate_cost_usd(LUNA, 1_000_000, 0, cache_write_tokens=None) is None
+    # A reservation has no receipt, so it reserves the published write rate
+    # rather than silently assuming that no tokens will be written.
+    assert pricing.estimate_cost_usd(LUNA, 1_000_000, 0) == Decimal("0.25")
 
 
 _CASES = [
@@ -106,5 +118,49 @@ def test_sql_and_python_agree(prompt, completion, cached, batched):
     )
     assert row is not None
     py = pricing.estimate_cost_usd(NANO, prompt, completion, cached_tokens=cached, batched=batched)
+    assert py is not None
+    assert Decimal(row["cost"]) == py
+
+
+def test_sql_and_python_agree_with_cache_write_tokens():
+    price = pricing.rates_for(LUNA)
+    assert price is not None
+    tier = price.tiers[0]
+    expr = pricing.cost_sql(
+        model_rate_in="%(rate_in)s::numeric",
+        model_rate_out="%(rate_out)s::numeric",
+        model_rate_cached_in="%(rate_cached)s::numeric",
+        model_rate_cache_write_in="%(rate_write)s::numeric",
+        batch_rate="%(batch_rate)s::numeric",
+        prompt="%(prompt)s::bigint",
+        completion="%(completion)s::bigint",
+        cached="%(cached)s::bigint",
+        cache_write="%(cache_write)s::bigint",
+        batched="%(batched)s::boolean",
+    )
+    row = db.query_one(
+        f"SELECT {expr} AS cost",
+        {
+            "rate_in": str(tier.rate_in),
+            "rate_out": str(tier.rate_out),
+            "rate_cached": str(pricing.cached_rate(tier)),
+            "rate_write": str(pricing.cache_write_rate(tier)),
+            "batch_rate": str(price.batch_rate if price.batch_rate is not None else 1),
+            "prompt": 1_000_000,
+            "completion": 100_000,
+            "cached": 300_000,
+            "cache_write": 500_000,
+            "batched": True,
+        },
+    )
+    assert row is not None
+    py = pricing.estimate_cost_usd(
+        LUNA,
+        1_000_000,
+        100_000,
+        cached_tokens=300_000,
+        cache_write_tokens=500_000,
+        batched=True,
+    )
     assert py is not None
     assert Decimal(row["cost"]) == py
