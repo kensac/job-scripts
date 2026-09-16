@@ -180,11 +180,18 @@ def sample(n: int, seed: str) -> list[dict[str, Any]]:
     )
 
 
-def usage(res: Any) -> dict[str, int]:
+def usage(res: Any) -> dict[str, int | None]:
     u = res.usage or {}
+    input_details = u.get("input_tokens_details") or {}
     return {
         "input_tokens": u.get("input_tokens", 0),
         "output_tokens": u.get("output_tokens", 0),
+        "cached_tokens": input_details.get("cached_tokens", 0) or 0,
+        "cache_write_tokens": (
+            input_details.get("cache_write_tokens")
+            if "cache_write_tokens" in input_details
+            else None
+        ),
         "reasoning_tokens": (u.get("output_tokens_details") or {}).get("reasoning_tokens", 0),
     }
 
@@ -305,6 +312,8 @@ def summarise(experiment_id: int) -> dict[str, Any]:
                 "ok": 0,
                 "failed": 0,
                 "cost_usd": 0.0,
+                "known_cost_usd": 0.0,
+                "unpriced_results": 0,
                 "input_tokens": 0,
                 "output_tokens": 0,
                 "reasoning_tokens": 0,
@@ -315,7 +324,10 @@ def summarise(experiment_id: int) -> dict[str, Any]:
         a["input_tokens"] += u.get("input_tokens", 0)
         a["output_tokens"] += u.get("output_tokens", 0)
         a["reasoning_tokens"] += u.get("reasoning_tokens", 0)
-        a["cost_usd"] += float(r["cost_usd"] or 0)
+        if r["cost_usd"] is None:
+            a["unpriced_results"] += 1
+        else:
+            a["known_cost_usd"] += float(r["cost_usd"])
         if r["output"] is None:
             a["failed"] += 1
         else:
@@ -323,16 +335,25 @@ def summarise(experiment_id: int) -> dict[str, Any]:
             fields_by_arm.setdefault(r["arm"], {})[r["url"]] = step.project(r["output"])
     urls = sorted({r["url"] for r in rows})
     deployed = deployed_verdicts(exp["purpose"], urls, exp["params"])
-    reference = exp["params"].get("reference") or (
-        max(by_arm, key=lambda k: by_arm[k]["cost_usd"]) if by_arm else None
+    explicit_reference = exp["params"].get("reference")
+    incomplete_costs = any(a["unpriced_results"] for a in by_arm.values())
+    reference = explicit_reference or (
+        max(by_arm, key=lambda k: by_arm[k]["known_cost_usd"])
+        if by_arm and not incomplete_costs
+        else None
     )
+    reference_reason = "cost_incomplete" if incomplete_costs and not explicit_reference else None
     for arm, a in by_arm.items():
         n = a["n"] or 1
-        a["cost_per_100_usd"] = round(a["cost_usd"] / n * 100, 4)
+        known_cost = a["known_cost_usd"]
+        a["cost_per_100_usd"] = (
+            round(known_cost / n * 100, 4) if a["unpriced_results"] == 0 else None
+        )
+        a["known_cost_usd"] = round(known_cost, 4)
+        a["cost_usd"] = None if a["unpriced_results"] else a["known_cost_usd"]
         a["input_per_request"] = round(a["input_tokens"] / n)
         a["output_per_request"] = round(a["output_tokens"] / n)
         a["reasoning_per_request"] = round(a["reasoning_tokens"] / n)
-        a["cost_usd"] = round(a["cost_usd"], 4)
         mine = fields_by_arm.get(arm, {})
         for label, other in (
             ("reference", fields_by_arm.get(reference or "", {})),
@@ -362,6 +383,7 @@ def summarise(experiment_id: int) -> dict[str, Any]:
     expected = sampled * len(expected_arms) if sampled is not None else None
     return {
         "reference": reference,
+        "reference_reason": reference_reason,
         "arms": by_arm,
         "postings": len(urls),
         "expected_results": expected,

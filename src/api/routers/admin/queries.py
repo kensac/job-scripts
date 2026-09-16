@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import datetime
 import time
-from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -14,7 +13,7 @@ from api import db, pagination, scoping, sorting
 from api import params as params_
 from api.auth import AuthedUser
 from api.routers.admin.shared import require_admin
-from core import pricing, reason_taxonomy
+from core import reason_taxonomy
 
 router = APIRouter()
 
@@ -33,7 +32,7 @@ _SORTABLE = {
 _LIST_COLS = (
     "id, created_at, config_name, url, check_type, status, reason, model, "
     "company, job_title, prompt_tokens, completion_tokens, total_tokens, "
-    "cached_tokens, reasoning_tokens, duration_ms, error, worker, "
+    "cached_tokens, cache_write_tokens, reasoning_tokens, duration_ms, error, worker, "
     "filter_name, prompt_hash, "
     # Correlated lookups rather than a join: ai_queries and jobs share several
     # column names, so joining would make every existing filter ambiguous.
@@ -196,6 +195,7 @@ class QueryListing(BaseModel):
     completion_tokens: int | None
     total_tokens: int | None
     cached_tokens: int | None
+    cache_write_tokens: int | None
     reasoning_tokens: int | None
     duration_ms: int | None
     error: str | None
@@ -313,7 +313,7 @@ _ROW_COLS = (
     "id, created_at, config_name, url, check_type, status, reason, model, "
     "reasoning_effort, filter_name, prompt_hash, company, job_title, instructions, "
     "input_content, parsed_json, prompt_tokens, completion_tokens, total_tokens, "
-    "cached_tokens, reasoning_tokens, duration_ms, error, cost_usd, worker, batch_id"
+    "cached_tokens, cache_write_tokens, reasoning_tokens, duration_ms, error, cost_usd, worker, batch_id"
 )
 
 
@@ -348,6 +348,7 @@ class QueryRecord(BaseModel):
     completion_tokens: int | None
     total_tokens: int | None
     cached_tokens: int | None
+    cache_write_tokens: int | None
     reasoning_tokens: int | None
     duration_ms: int | None
     error: str | None
@@ -599,14 +600,19 @@ def options(user: AuthedUser = Depends(require_admin)) -> QueryVocabulary:
 
 
 class LedgerTotals(BaseModel):
-    """Lifetime totals over every model call. `cost_usd` is not a column: it
-    is the sum of what each model's tokens priced at, and a model that cannot
-    be priced contributes nothing to it rather than a guess."""
+    """Lifetime totals over every model call.
+
+    `cost_usd` is the sum recorded for each call. Historical rows are not
+    repriced when the provider datasheet changes.
+    """
 
     queries: int
+    unpriced_queries: int
     prompt_tokens: int
     completion_tokens: int
     cached_tokens: int
+    cache_write_tokens: int | None
+    cache_write_unknown_queries: int
     reasoning_tokens: int
     cost_usd: float
 
@@ -631,30 +637,31 @@ class DayTotals(BaseModel):
     queries: int
     failed: int
     rejected: int
+    unpriced_queries: int
     prompt_tokens: int
     completion_tokens: int
     cached_tokens: int
+    cache_write_tokens: int | None
+    cache_write_unknown_queries: int
     reasoning_tokens: int
 
 
 class ModelTotals(BaseModel):
     """What one model has been asked and what that cost.
 
-    The batched columns are carried because batched and synchronous tokens
-    bill at different rates and are priced as two calls: one blended rate over
-    the whole model would be wrong by up to 2x depending on the mix.
-
-    `cost_usd` is null where the model cannot be priced from summed tokens: a
-    tiered model's rate depends on each individual request's prompt length, so
-    a thousand small calls sum into a tier none of them was billed at, and the
-    honest answer is that it is not priced.
+    The batched columns are retained for usage analysis. `cost_usd` is the
+    sum of the per-call values already recorded, so historical rows are not
+    silently repriced from aggregate tokens.
     """
 
     model: str
     queries: int
+    unpriced_queries: int
     prompt_tokens: int
     completion_tokens: int
     cached_tokens: int
+    cache_write_tokens: int | None
+    cache_write_unknown_queries: int
     batched_prompt_tokens: int
     batched_completion_tokens: int
     batched_cached_tokens: int
@@ -692,10 +699,14 @@ def _compute_stats() -> LedgerStats:
     totals = db.query_one(
         """
         SELECT COUNT(*) AS queries,
+               COUNT(*) FILTER (WHERE cost_usd IS NULL) AS unpriced_queries,
                COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
                COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
                COALESCE(SUM(cached_tokens), 0) AS cached_tokens,
-               COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens
+               SUM(cache_write_tokens) AS cache_write_tokens,
+               COUNT(*) FILTER (WHERE cache_write_tokens IS NULL) AS cache_write_unknown_queries,
+               COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens,
+               SUM(cost_usd) AS cost_usd
         FROM ai_queries
         """
     )
@@ -723,61 +734,48 @@ def _compute_stats() -> LedgerStats:
                COUNT(*) AS queries,
                COUNT(*) FILTER (WHERE status = 'failed') AS failed,
                COUNT(*) FILTER (WHERE status = 'rejected') AS rejected,
+               COUNT(*) FILTER (WHERE cost_usd IS NULL) AS unpriced_queries,
                COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
                COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
                COALESCE(SUM(cached_tokens), 0) AS cached_tokens,
+               SUM(cache_write_tokens) AS cache_write_tokens,
+               COUNT(*) FILTER (WHERE cache_write_tokens IS NULL) AS cache_write_unknown_queries,
                COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens
         FROM ai_queries GROUP BY day ORDER BY day ASC
         """,
     )
-    # Cost is computed here, not in the browser. The client had one hardcoded
-    # gpt-5-nano price applied to every token, but PRICES_PER_MTOK spans
-    # $0.05-$5.00 per Mtok - a 100x range - so the headline number was wrong
-    # the moment anything ran on a different model, and silently so.
-    # Batched calls bill at half price, which the client could not know either.
+    # Usage is grouped here for the dashboard. Cost is read from the stored
+    # per-call values rather than recomputed from aggregate tokens, because
+    # rates and cache-write coverage can change after a call was recorded.
     by_model = db.query(
         """
         SELECT model,
                COUNT(*) AS queries,
+               COUNT(*) FILTER (WHERE cost_usd IS NULL) AS unpriced_queries,
                COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
                COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
                COALESCE(SUM(cached_tokens), 0) AS cached_tokens,
+               SUM(cache_write_tokens) AS cache_write_tokens,
+               COUNT(*) FILTER (WHERE cache_write_tokens IS NULL) AS cache_write_unknown_queries,
                COALESCE(SUM(prompt_tokens) FILTER (WHERE batch_id IS NOT NULL), 0) AS batched_prompt_tokens,
                COALESCE(SUM(completion_tokens) FILTER (WHERE batch_id IS NOT NULL), 0) AS batched_completion_tokens,
-               COALESCE(SUM(cached_tokens) FILTER (WHERE batch_id IS NOT NULL), 0) AS batched_cached_tokens
+               COALESCE(SUM(cached_tokens) FILTER (WHERE batch_id IS NOT NULL), 0) AS batched_cached_tokens,
+               SUM(cost_usd) AS cost_usd
         FROM ai_queries WHERE model IS NOT NULL GROUP BY model ORDER BY queries DESC
         """
     )
-    total_cost = Decimal(0)
     priced: list[ModelTotals] = []
     for row in by_model:
-        cost_usd = None
-        if not pricing.is_tiered(row["model"]):
-            # Batched and synchronous tokens bill at different rates, so they
-            # are priced as two separate calls and summed - one blended rate
-            # over the whole model would be wrong by up to 2x depending on the
-            # mix.
-            batched = pricing.estimate_cost_usd(
-                row["model"],
-                row["batched_prompt_tokens"],
-                row["batched_completion_tokens"],
-                cached_tokens=row["batched_cached_tokens"],
-                batched=True,
+        cost_usd = row["cost_usd"]
+        priced.append(
+            ModelTotals(
+                **{**row, "cost_usd": round(float(cost_usd), 6) if cost_usd is not None else None}
             )
-            sync = pricing.estimate_cost_usd(
-                row["model"],
-                int(row["prompt_tokens"]) - int(row["batched_prompt_tokens"]),
-                int(row["completion_tokens"]) - int(row["batched_completion_tokens"]),
-                cached_tokens=int(row["cached_tokens"]) - int(row["batched_cached_tokens"]),
-            )
-            if batched is not None and sync is not None:
-                cost = batched + sync
-                cost_usd = round(float(cost), 6)
-                total_cost += cost
-        priced.append(ModelTotals(**row, cost_usd=cost_usd))
+        )
 
     # COUNT(*) with no GROUP BY, so there is always exactly one row.
     assert totals is not None
+    total_cost = totals.pop("cost_usd") or 0
     return LedgerStats(
         totals=LedgerTotals(**totals, cost_usd=round(float(total_cost), 6)),
         by_check_type=by_check_type,

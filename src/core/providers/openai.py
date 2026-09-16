@@ -35,6 +35,13 @@ _UNSOURCED = Source(
     note="carried over from the original price table, which recorded no source",
 )
 
+_PROMPT_CACHING = Source(
+    url="https://developers.openai.com/api/docs/guides/prompt-caching",
+    read_on=datetime.date(2026, 9, 15),
+    vendor=True,
+    note="GPT-5.6 and later cache writes are 1.25x uncached input; reads are 0.1x",
+)
+
 # The batch lane has always been assumed to halve the bill, and the assumption
 # has held. It is second-hand rather than read off OpenAI's own page, so it is
 # marked as such.
@@ -98,12 +105,27 @@ _SCHEMA = StructuredOutputSpec(
 )
 
 
-def _rates(rate_in: str, rate_out: str, rate_cached_in: str) -> Rates:
+def _rates(
+    rate_in: str,
+    rate_out: str,
+    rate_cached_in: str,
+    *,
+    cache_write_multiplier: str = "1",
+) -> Rates:
     return Rates(
-        tiers=(Tier(None, Decimal(rate_in), Decimal(rate_out), Decimal(rate_cached_in)),),
+        tiers=(
+            Tier(
+                None,
+                Decimal(rate_in),
+                Decimal(rate_out),
+                Decimal(rate_cached_in),
+                Decimal(rate_in) * Decimal(cache_write_multiplier),
+            ),
+        ),
         batch_rate=Decimal("0.5"),
         source=_UNSOURCED,
         batch_source=_BATCH,
+        cache_write_source=_PROMPT_CACHING,
     )
 
 
@@ -153,7 +175,7 @@ PROVIDER = Provider(
             note="Newest small model, fast and cheap",
             context_tokens=None,
             structured_output=_SCHEMA,
-            rates=_rates("0.20", "1.20", "0.020"),
+            rates=_rates("0.20", "1.20", "0.020", cache_write_multiplier="1.25"),
             reasoning=_5_6_GEN,
             output=_OUTPUT,
             # https://developers.openai.com/api/docs/guides/prompt-caching
@@ -164,7 +186,7 @@ PROVIDER = Provider(
             note="Newest mid-tier, strong quality",
             context_tokens=None,
             structured_output=_SCHEMA,
-            rates=_rates("2.00", "12.00", "0.200"),
+            rates=_rates("2.00", "12.00", "0.200", cache_write_multiplier="1.25"),
             reasoning=_5_6_GEN,
             output=_OUTPUT,
         ),
@@ -194,7 +216,7 @@ PROVIDER = Provider(
             note="Newest flagship, highest cost",
             context_tokens=None,
             structured_output=_SCHEMA,
-            rates=_rates("4.00", "20.00", "0.400"),
+            rates=_rates("4.00", "20.00", "0.400", cache_write_multiplier="1.25"),
             reasoning=_5_6_GEN,
             output=_OUTPUT,
         ),

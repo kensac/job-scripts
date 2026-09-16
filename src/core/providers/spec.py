@@ -83,6 +83,9 @@ class Tier:
     # that caching is free. Callers bill it at the full input rate: that
     # overstates a cache hit rather than inventing a discount.
     rate_cached_in: Decimal | None
+    # None means the vendor does not publish a cache-write rate for this
+    # model. A reported write with no rate is unpriced, not free.
+    rate_cache_write_in: Decimal | None = None
 
 
 @dataclass(frozen=True)
@@ -124,6 +127,7 @@ class Rates:
     # its per-token rates are on its own model page and its 20% batch discount
     # appears only second-hand. None means no batch lane is claimed at all.
     batch_source: Source | None = None
+    cache_write_source: Source | None = None
 
     # Some vendors bill by wall-clock time. DeepSeek charges its published rate
     # during peak hours and exactly half outside them, which covers 133 of a

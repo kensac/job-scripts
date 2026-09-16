@@ -138,7 +138,12 @@ async def _run(task_id: int, payload: dict[str, Any]) -> None:
                 continue
             usage = domain.usage(result)
             cost = pricing.estimate_cost_usd(
-                result.model, usage["input_tokens"], usage["output_tokens"], batched=True
+                result.model,
+                usage["input_tokens"],
+                usage["output_tokens"],
+                cached_tokens=usage["cached_tokens"],
+                cache_write_tokens=usage["cache_write_tokens"],
+                batched=True,
             )
             output = None
             error = result.error

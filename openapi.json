@@ -31909,6 +31909,17 @@
             "type": "integer",
             "title": "Output Tokens"
           },
+          "cache_write_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Write Tokens"
+          },
           "est_cost_usd": {
             "anyOf": [
               {
@@ -31949,6 +31960,7 @@
           "est_tokens",
           "input_tokens",
           "output_tokens",
+          "cache_write_tokens",
           "est_cost_usd",
           "prompt_id"
         ],
@@ -32071,6 +32083,17 @@
             ],
             "title": "Cached Tokens"
           },
+          "cache_write_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Write Tokens"
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -32123,6 +32146,7 @@
           "completion_tokens",
           "total_tokens",
           "cached_tokens",
+          "cache_write_tokens",
           "created_at",
           "source",
           "job_id",
@@ -33362,6 +33386,21 @@
           "completion_tokens": {
             "type": "integer",
             "title": "Completion Tokens"
+          },
+          "cache_write_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Write Tokens"
+          },
+          "cache_write_unknown_calls": {
+            "type": "integer",
+            "title": "Cache Write Unknown Calls"
           }
         },
         "type": "object",
@@ -33370,7 +33409,9 @@
           "cost_usd",
           "unpriced_calls",
           "prompt_tokens",
-          "completion_tokens"
+          "completion_tokens",
+          "cache_write_tokens",
+          "cache_write_unknown_calls"
         ],
         "title": "CallTotals"
       },
@@ -35268,6 +35309,10 @@
             "type": "integer",
             "title": "Rejected"
           },
+          "unpriced_queries": {
+            "type": "integer",
+            "title": "Unpriced Queries"
+          },
           "prompt_tokens": {
             "type": "integer",
             "title": "Prompt Tokens"
@@ -35280,6 +35325,21 @@
             "type": "integer",
             "title": "Cached Tokens"
           },
+          "cache_write_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Write Tokens"
+          },
+          "cache_write_unknown_queries": {
+            "type": "integer",
+            "title": "Cache Write Unknown Queries"
+          },
           "reasoning_tokens": {
             "type": "integer",
             "title": "Reasoning Tokens"
@@ -35291,9 +35351,12 @@
           "queries",
           "failed",
           "rejected",
+          "unpriced_queries",
           "prompt_tokens",
           "completion_tokens",
           "cached_tokens",
+          "cache_write_tokens",
+          "cache_write_unknown_queries",
           "reasoning_tokens"
         ],
         "title": "DayTotals",
@@ -39252,6 +39315,21 @@
             "type": "integer",
             "title": "Cached Tokens"
           },
+          "cache_write_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Write Tokens"
+          },
+          "cache_write_unknown_calls": {
+            "type": "integer",
+            "title": "Cache Write Unknown Calls"
+          },
           "batched_calls": {
             "type": "integer",
             "title": "Batched Calls"
@@ -39297,6 +39375,8 @@
           "completion_tokens",
           "total_tokens",
           "cached_tokens",
+          "cache_write_tokens",
+          "cache_write_unknown_calls",
           "batched_calls",
           "models",
           "first_call",
@@ -39346,6 +39426,21 @@
           "cached_tokens": {
             "type": "integer",
             "title": "Cached Tokens"
+          },
+          "cache_write_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Write Tokens"
+          },
+          "cache_write_unknown_calls": {
+            "type": "integer",
+            "title": "Cache Write Unknown Calls"
           },
           "batched_calls": {
             "type": "integer",
@@ -39397,6 +39492,8 @@
           "completion_tokens",
           "total_tokens",
           "cached_tokens",
+          "cache_write_tokens",
+          "cache_write_unknown_calls",
           "batched_calls",
           "models",
           "first_call",
@@ -39446,6 +39543,21 @@
           "cached_tokens": {
             "type": "integer",
             "title": "Cached Tokens"
+          },
+          "cache_write_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Write Tokens"
+          },
+          "cache_write_unknown_calls": {
+            "type": "integer",
+            "title": "Cache Write Unknown Calls"
           },
           "batched_calls": {
             "type": "integer",
@@ -39503,6 +39615,8 @@
           "completion_tokens",
           "total_tokens",
           "cached_tokens",
+          "cache_write_tokens",
+          "cache_write_unknown_calls",
           "batched_calls",
           "models",
           "first_call",
@@ -39553,6 +39667,21 @@
             "type": "integer",
             "title": "Cached Tokens"
           },
+          "cache_write_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Write Tokens"
+          },
+          "cache_write_unknown_calls": {
+            "type": "integer",
+            "title": "Cache Write Unknown Calls"
+          },
           "batched_calls": {
             "type": "integer",
             "title": "Batched Calls"
@@ -39602,6 +39731,8 @@
           "completion_tokens",
           "total_tokens",
           "cached_tokens",
+          "cache_write_tokens",
+          "cache_write_unknown_calls",
           "batched_calls",
           "models",
           "first_call",
@@ -39660,6 +39791,10 @@
             "type": "integer",
             "title": "Queries"
           },
+          "unpriced_queries": {
+            "type": "integer",
+            "title": "Unpriced Queries"
+          },
           "prompt_tokens": {
             "type": "integer",
             "title": "Prompt Tokens"
@@ -39671,6 +39806,21 @@
           "cached_tokens": {
             "type": "integer",
             "title": "Cached Tokens"
+          },
+          "cache_write_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Write Tokens"
+          },
+          "cache_write_unknown_queries": {
+            "type": "integer",
+            "title": "Cache Write Unknown Queries"
           },
           "reasoning_tokens": {
             "type": "integer",
@@ -39684,14 +39834,17 @@
         "type": "object",
         "required": [
           "queries",
+          "unpriced_queries",
           "prompt_tokens",
           "completion_tokens",
           "cached_tokens",
+          "cache_write_tokens",
+          "cache_write_unknown_queries",
           "reasoning_tokens",
           "cost_usd"
         ],
         "title": "LedgerTotals",
-        "description": "Lifetime totals over every model call. `cost_usd` is not a column: it\nis the sum of what each model's tokens priced at, and a model that cannot\nbe priced contributes nothing to it rather than a guess."
+        "description": "Lifetime totals over every model call.\n\n`cost_usd` is the sum recorded for each call. Historical rows are not\nrepriced when the provider datasheet changes."
       },
       "LedgerWithTotals": {
         "properties": {
@@ -41997,6 +42150,10 @@
             "type": "integer",
             "title": "Queries"
           },
+          "unpriced_queries": {
+            "type": "integer",
+            "title": "Unpriced Queries"
+          },
           "prompt_tokens": {
             "type": "integer",
             "title": "Prompt Tokens"
@@ -42008,6 +42165,21 @@
           "cached_tokens": {
             "type": "integer",
             "title": "Cached Tokens"
+          },
+          "cache_write_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Write Tokens"
+          },
+          "cache_write_unknown_queries": {
+            "type": "integer",
+            "title": "Cache Write Unknown Queries"
           },
           "batched_prompt_tokens": {
             "type": "integer",
@@ -42037,16 +42209,19 @@
         "required": [
           "model",
           "queries",
+          "unpriced_queries",
           "prompt_tokens",
           "completion_tokens",
           "cached_tokens",
+          "cache_write_tokens",
+          "cache_write_unknown_queries",
           "batched_prompt_tokens",
           "batched_completion_tokens",
           "batched_cached_tokens",
           "cost_usd"
         ],
         "title": "ModelTotals",
-        "description": "What one model has been asked and what that cost.\n\nThe batched columns are carried because batched and synchronous tokens\nbill at different rates and are priced as two calls: one blended rate over\nthe whole model would be wrong by up to 2x depending on the mix.\n\n`cost_usd` is null where the model cannot be priced from summed tokens: a\ntiered model's rate depends on each individual request's prompt length, so\na thousand small calls sum into a tier none of them was billed at, and the\nhonest answer is that it is not priced."
+        "description": "What one model has been asked and what that cost.\n\nThe batched columns are retained for usage analysis. `cost_usd` is the\nsum of the per-call values already recorded, so historical rows are not\nsilently repriced from aggregate tokens."
       },
       "ModelsResponse": {
         "properties": {
@@ -45055,6 +45230,17 @@
             "type": "integer",
             "title": "Output Tokens"
           },
+          "cache_write_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Write Tokens"
+          },
           "est_cost_usd": {
             "anyOf": [
               {
@@ -45125,6 +45311,7 @@
           "est_tokens",
           "input_tokens",
           "output_tokens",
+          "cache_write_tokens",
           "est_cost_usd",
           "submitted_at",
           "updated_at",
@@ -45945,6 +46132,17 @@
             ],
             "title": "Cached Tokens"
           },
+          "cache_write_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Write Tokens"
+          },
           "reasoning_tokens": {
             "anyOf": [
               {
@@ -46050,6 +46248,7 @@
           "completion_tokens",
           "total_tokens",
           "cached_tokens",
+          "cache_write_tokens",
           "reasoning_tokens",
           "duration_ms",
           "error",
@@ -46345,6 +46544,17 @@
             ],
             "title": "Cached Tokens"
           },
+          "cache_write_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Write Tokens"
+          },
           "reasoning_tokens": {
             "anyOf": [
               {
@@ -46434,6 +46644,7 @@
           "completion_tokens",
           "total_tokens",
           "cached_tokens",
+          "cache_write_tokens",
           "reasoning_tokens",
           "duration_ms",
           "error",
@@ -53055,6 +53266,17 @@
             "type": "integer",
             "title": "Cached Tokens"
           },
+          "cache_write_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Write Tokens"
+          },
           "cost_usd": {
             "anyOf": [
               {
@@ -53090,6 +53312,7 @@
           "completion_tokens",
           "total_tokens",
           "cached_tokens",
+          "cache_write_tokens",
           "cost_usd",
           "user_id"
         ],
@@ -54226,6 +54449,21 @@
             "type": "integer",
             "title": "Cached Tokens"
           },
+          "cache_write_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Write Tokens"
+          },
+          "cache_write_unknown_calls": {
+            "type": "integer",
+            "title": "Cache Write Unknown Calls"
+          },
           "unpriced_calls": {
             "type": "integer",
             "title": "Unpriced Calls"
@@ -54239,6 +54477,8 @@
           "calls",
           "cost_usd",
           "cached_tokens",
+          "cache_write_tokens",
+          "cache_write_unknown_calls",
           "unpriced_calls"
         ],
         "title": "UserSpendPurpose"
@@ -54320,6 +54560,21 @@
             "type": "integer",
             "title": "Cached Tokens"
           },
+          "cache_write_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Write Tokens"
+          },
+          "cache_write_unknown_calls": {
+            "type": "integer",
+            "title": "Cache Write Unknown Calls"
+          },
           "batched_calls": {
             "type": "integer",
             "title": "Batched Calls"
@@ -54338,6 +54593,8 @@
           "completion_tokens",
           "reasoning_tokens",
           "cached_tokens",
+          "cache_write_tokens",
+          "cache_write_unknown_calls",
           "batched_calls",
           "joint_call_rows"
         ],
@@ -54584,6 +54841,21 @@
             "type": "integer",
             "title": "Cached Tokens"
           },
+          "cache_write_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Write Tokens"
+          },
+          "cache_write_unknown_calls": {
+            "type": "integer",
+            "title": "Cache Write Unknown Calls"
+          },
           "reasoning_tokens": {
             "type": "integer",
             "title": "Reasoning Tokens"
@@ -54621,6 +54893,8 @@
           "prompt_tokens",
           "completion_tokens",
           "cached_tokens",
+          "cache_write_tokens",
+          "cache_write_unknown_calls",
           "reasoning_tokens",
           "first_call",
           "last_call"

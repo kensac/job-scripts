@@ -11,7 +11,7 @@ RAW_USAGE = {
     "input_tokens": 1000,
     "output_tokens": 100,
     "total_tokens": 1100,
-    "input_tokens_details": {"cached_tokens": 400},
+    "input_tokens_details": {"cached_tokens": 400, "cache_write_tokens": 500},
     "output_tokens_details": {"reasoning_tokens": 30},
 }
 
@@ -44,6 +44,7 @@ async def test_every_consumed_result_records_transport_and_cached_usage(
             "completion_tokens": 100,
             "total_tokens": 1100,
             "cached_tokens": 400,
+            "cache_write_tokens": 500,
             "reasoning_tokens": 30,
         }
 
@@ -86,9 +87,15 @@ async def test_every_consumed_result_records_transport_and_cached_usage(
     row = ledger[0]
     assert row["batched"] is batched
     assert row["cached_tokens"] == 400
+    assert row["cache_write_tokens"] == 500
     assert row["total_tokens"] == 1100
     assert row["cost_usd"] == pricing.estimate_cost_usd(
-        MODEL, 1000, 100, cached_tokens=400, batched=batched
+        MODEL,
+        1000,
+        100,
+        cached_tokens=400,
+        cache_write_tokens=500,
+        batched=batched,
     )
     if family == "filter":
         verdict = db.query_one("SELECT * FROM ai_queries WHERE check_type = 'custom'")

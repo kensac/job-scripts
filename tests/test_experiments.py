@@ -6,13 +6,14 @@ from __future__ import annotations
 
 import json
 from dataclasses import FrozenInstanceError
+from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
 
 from api import db
 from api import experiments as exp
-from core import answers
+from core import answers, pricing
 from core.answers import VERIFY_INPUT_CHARS
 from core.comp import COMP_INPUT_CHARS
 from tasks import comp as task_comp
@@ -205,6 +206,10 @@ async def test_a_filter_experiment_submits_one_batch_per_arm_and_scores_each(
                         usage={
                             "input_tokens": 1000,
                             "output_tokens": output_tokens,
+                            "input_tokens_details": {
+                                "cached_tokens": 300,
+                                "cache_write_tokens": 400,
+                            },
                             "output_tokens_details": {"reasoning_tokens": reasoning},
                         },
                     )
@@ -236,6 +241,23 @@ async def test_a_filter_experiment_submits_one_batch_per_arm_and_scores_each(
         "SELECT count(*) AS n, sum(total_tokens) AS t FROM api_usage WHERE purpose = 'experiment'"
     )
     assert usage["n"] == 2 and usage["t"] == 8 * 1000 + 4 * 500 + 4 * 100
+    receipts = db.query(
+        "SELECT arm, usage, cost_usd FROM ai_experiment_results WHERE experiment_id = %s",
+        (eid,),
+    )
+    for receipt in receipts:
+        model = receipt["arm"].split("@", 1)[0]
+        assert receipt["usage"]["cached_tokens"] == 300
+        assert receipt["usage"]["cache_write_tokens"] == 400
+        expected_cost = pricing.estimate_cost_usd(
+            model,
+            1000,
+            500 if model == "gpt-5-nano" else 100,
+            cached_tokens=300,
+            cache_write_tokens=400,
+            batched=True,
+        )
+        assert receipt["cost_usd"] == expected_cost.quantize(Decimal("0.000001"))
     # The listing carries what a form needs: the steps, each chat model
     # with the efforts it accepts, and every filter the filter step can name.
     listing = client.get("/v1/admin/experiments", headers=admin_headers).json()
@@ -343,3 +365,56 @@ def test_partial_experiment_summary_counts_unsubmitted_arms():
     assert summary["received_results"] == 1
     assert summary["missing_results"] == 3
     assert summary["missing_arms"] == ["missing@low"]
+
+
+def test_experiment_summary_keeps_missing_cache_write_cost_unpriced():
+    params = {
+        "sampled": 1,
+        "arms": [{"model": "gpt-5.6-luna", "effort": "low"}],
+    }
+    experiment = db.query_one(
+        "INSERT INTO ai_experiments(purpose,params) VALUES ('verify',%s) RETURNING id",
+        (db.jsonb(params),),
+    )["id"]
+    db.execute(
+        "INSERT INTO ai_experiment_results(experiment_id,arm,url,usage,error) "
+        "VALUES (%s,'gpt-5.6-luna@low','https://example.test/unpriced',%s,'missing premium')",
+        (
+            experiment,
+            db.jsonb(
+                {
+                    "input_tokens": 1000,
+                    "output_tokens": 100,
+                    "cached_tokens": 300,
+                    "cache_write_tokens": 400,
+                }
+            ),
+        ),
+    )
+    summary = exp.summarise(experiment)
+    arm = summary["arms"]["gpt-5.6-luna@low"]
+    assert arm["unpriced_results"] == 1
+    assert arm["known_cost_usd"] == 0.0
+    assert arm["cost_usd"] is None and arm["cost_per_100_usd"] is None
+    assert summary["reference"] is None
+    assert summary["reference_reason"] == "cost_incomplete"
+
+
+def test_experiment_summary_scales_cost_before_display_rounding():
+    params = {
+        "sampled": 1,
+        "arms": [{"model": "gpt-5.6-luna", "effort": "low"}],
+    }
+    experiment = db.query_one(
+        "INSERT INTO ai_experiments(purpose,params) VALUES ('verify',%s) RETURNING id",
+        (db.jsonb(params),),
+    )["id"]
+    db.execute(
+        "INSERT INTO ai_experiment_results(experiment_id,arm,url,cost_usd,error) "
+        "VALUES (%s,'gpt-5.6-luna@low','https://example.test/small-cost',0.00009,'ok')",
+        (experiment,),
+    )
+    arm = exp.summarise(experiment)["arms"]["gpt-5.6-luna@low"]
+    assert arm["known_cost_usd"] == 0.0001
+    assert arm["cost_usd"] == 0.0001
+    assert arm["cost_per_100_usd"] == 0.009

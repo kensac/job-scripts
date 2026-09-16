@@ -25,6 +25,7 @@ class BatchEventCounts(TypedDict, total=False):
     input_tokens: int
     output_tokens: int
     cached_tokens: int
+    cache_write_tokens: int | None
     request_usage: list[pricing.RequestTokens]
 
 
@@ -242,20 +243,33 @@ def _emit_usage(
     if on_event is None:
         return
     input_tokens = output_tokens = cached_tokens = 0
+    cache_write_tokens = 0
+    saw_usage = False
+    cache_write_known = True
     request_usage: list[pricing.RequestTokens] = []
     for r in results.values():
-        if r.usage:
-            input_tokens += r.usage.get("input_tokens", 0) or 0
-            output_tokens += r.usage.get("output_tokens", 0) or 0
-            cached = (r.usage.get("input_tokens_details") or {}).get("cached_tokens", 0) or 0
-            cached_tokens += cached
-            request_usage.append(
-                {
-                    "input_tokens": r.usage.get("input_tokens", 0) or 0,
-                    "output_tokens": r.usage.get("output_tokens", 0) or 0,
-                    "cached_tokens": cached,
-                }
-            )
+        if not r.usage:
+            cache_write_known = False
+            continue
+        saw_usage = True
+        input_tokens += r.usage.get("input_tokens", 0) or 0
+        output_tokens += r.usage.get("output_tokens", 0) or 0
+        cached = (r.usage.get("input_tokens_details") or {}).get("cached_tokens", 0) or 0
+        details = r.usage.get("input_tokens_details") or {}
+        write = details.get("cache_write_tokens") if "cache_write_tokens" in details else None
+        if write is None:
+            cache_write_known = False
+        else:
+            cache_write_tokens += write
+        cached_tokens += cached
+        request_usage.append(
+            {
+                "input_tokens": r.usage.get("input_tokens", 0) or 0,
+                "output_tokens": r.usage.get("output_tokens", 0) or 0,
+                "cached_tokens": cached,
+                "cache_write_tokens": write,
+            }
+        )
     try:
         on_event(
             batch_id,
@@ -264,6 +278,9 @@ def _emit_usage(
                 "input_tokens": input_tokens,
                 "output_tokens": output_tokens,
                 "cached_tokens": cached_tokens,
+                "cache_write_tokens": cache_write_tokens
+                if saw_usage and cache_write_known
+                else None,
                 "request_usage": request_usage,
             },
         )
