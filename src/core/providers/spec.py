@@ -214,6 +214,7 @@ class Model:
     # It is still priced: being unofferable and being unpriced are different
     # things, and conflating them is how a real cost becomes invisible.
     selectable: bool = True
+    supports_explicit_prompt_cache: bool | None = None
 
 
 @dataclass(frozen=True)

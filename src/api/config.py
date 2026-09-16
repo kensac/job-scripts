@@ -81,6 +81,16 @@ class ConfigKey:
 
 
 CONFIG_KEYS: dict[str, ConfigKey] = {
+    "managed_board_cache_writes_enabled": ConfigKey(
+        section="Boards",
+        default=True,
+        value_type=bool,
+        help="Allow the provider's default prompt caching for new managed-board reviews. "
+        "Turning this off disables both cache reads and writes on supported models only, "
+        "avoiding cache-write premiums for one-off posting text. Unsupported models and "
+        "personal filters keep their existing policy. Prompts and decision criteria are unchanged; "
+        "submitted requests retain their original policy. Re-enable to restore default caching.",
+    ),
     "filter_review_gate": ConfigKey(
         section="Boards",
         default=ReviewGatePolicy().model_dump(mode="json"),

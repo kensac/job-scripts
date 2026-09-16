@@ -12,6 +12,7 @@ from typing import Any
 from api import ai, budget, db, filter_routing, review_gate
 from api.ai import verdicts
 from api.ai.batch_results import progress_counts
+from core import providers
 from core.answers import FilterDecision, FilterResult
 from core.filters import build_custom_decision_instructions, build_custom_input
 from core.store import get_content, get_contents, get_custom_result
@@ -210,6 +211,15 @@ async def execute_batch(
     from core.batch import structured_response_spec
 
     existing = has_batch_work(task_id)
+    cache_policy = None
+    if not existing and purpose == "managed_board" and cfg:
+        known = providers.model(cfg.model)
+        if (
+            known
+            and known.supports_explicit_prompt_cache
+            and not db.get_config("managed_board_cache_writes_enabled")
+        ):
+            cache_policy = "no_cache"
     gate_decisions = {}
     gate_skipped = 0
     if not existing:
@@ -244,6 +254,7 @@ async def execute_batch(
                 input_text,
                 FilterDecision,
                 context={
+                    **({"prompt_cache_policy": cache_policy} if cache_policy else {}),
                     "routing": routing.get(job["url"]),
                     "review_gate": gate_decisions.get(job["url"]),
                     "job": job,
