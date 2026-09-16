@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 
 import pytest
+
 from core.verification import VerificationEvidence, derive_verification
 
 
