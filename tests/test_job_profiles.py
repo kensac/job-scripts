@@ -128,3 +128,85 @@ def test_scheduler_admits_backlog_once_and_skips_no_work(f, monkeypatch):
         db.query_one("SELECT count(*) AS n FROM tasks WHERE kind = 'classify_job_profiles'")["n"]
         == 1
     )
+
+
+def _collection_enabled(enabled):
+    db.execute(
+        "INSERT INTO app_config (key,value) VALUES ('job_profile_collection_enabled',%s) "
+        "ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value",
+        (db.jsonb(enabled),),
+    )
+
+
+def test_disabled_profile_collection_blocks_manual_admission(client, admin_headers):
+    _collection_enabled(False)
+    response = client.post("/v1/admin/job-profiles/run", headers=admin_headers)
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "PROFILE_COLLECTION_PAUSED"
+    assert (
+        db.query_one("SELECT count(*) AS n FROM tasks WHERE kind='classify_job_profiles'")["n"] == 0
+    )
+    _collection_enabled(True)
+    assert client.post("/v1/admin/job-profiles/run", headers=admin_headers).status_code == 200
+
+
+def test_disabled_profile_collection_skips_scheduled_selection(f, monkeypatch):
+    from api import worker
+
+    source = f.make_source()
+    user_id = f.make_user()
+    f.subscribe(user_id, source)
+    f.make_ready_job(source=source)
+    _collection_enabled(False)
+    monkeypatch.setattr(worker, "INGEST_INTERVAL_MINUTES", 60)
+    worker.schedule_ingest_cycle()
+    assert (
+        db.query_one("SELECT count(*) AS n FROM tasks WHERE kind='classify_job_profiles'")["n"] == 0
+    )
+    _collection_enabled(True)
+    worker.schedule_ingest_cycle()
+    assert (
+        db.query_one("SELECT count(*) AS n FROM tasks WHERE kind='classify_job_profiles'")["n"] == 1
+    )
+
+
+@pytest.mark.asyncio
+async def test_disabled_profile_collection_stops_already_queued_unpaid_task(f, monkeypatch):
+    source = f.make_source()
+    user_id = f.make_user()
+    f.subscribe(user_id, source)
+    f.make_ready_job(source=source)
+    task_id = f.make_task("classify_job_profiles", {}, status="running")
+    _collection_enabled(False)
+
+    async def no_submit(*args, **kwargs):
+        pytest.fail("paused profile collection must not submit unpaid work")
+
+    monkeypatch.setattr(job_profiles, "run_batched", no_submit)
+    await job_profiles.handle_classify_job_profiles(task_id, {})
+    assert (
+        db.query_one("SELECT progress FROM tasks WHERE id=%s", (task_id,))["progress"]["label"]
+        == "profile collection paused"
+    )
+
+
+@pytest.mark.asyncio
+async def test_pause_during_selection_prevents_submission(f, monkeypatch):
+    task_id = f.make_task("classify_job_profiles", {}, status="running")
+    source = f.make_source()
+    user_id = f.make_user()
+    f.subscribe(user_id, source)
+    f.make_ready_job(source=source)
+    original = job_profiles.job_profile_derivation.candidates
+
+    def select_then_pause(cap):
+        rows = original(cap)
+        _collection_enabled(False)
+        return rows
+
+    async def no_submit(*args, **kwargs):
+        pytest.fail("a pause during preparation must prevent submission")
+
+    monkeypatch.setattr(job_profiles.job_profile_derivation, "candidates", select_then_pause)
+    monkeypatch.setattr(job_profiles, "run_batched", no_submit)
+    await job_profiles.handle_classify_job_profiles(task_id, {})
