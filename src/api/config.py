@@ -81,6 +81,16 @@ class ConfigKey:
 
 
 CONFIG_KEYS: dict[str, ConfigKey] = {
+    "embedding_visible_only": ConfigKey(
+        section="Boards",
+        default=True,
+        value_type=bool,
+        help="Buy new similarity embeddings only for postings visible on a personal board, "
+        "including uploads and postings a person acted on. Existing vectors and paid batches "
+        "are retained. Newly visible postings become eligible on the next embedding sweep; "
+        "similar jobs may wait for its batch to complete. Turning this off restores broad "
+        "collection. This does not change filter decisions or public-board membership.",
+    ),
     "managed_board_cache_writes_enabled": ConfigKey(
         section="Boards",
         default=True,

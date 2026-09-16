@@ -9,6 +9,7 @@ from typing import Any
 
 from api import db
 from api.ai import batch_results
+from api.board import visibility
 from api.task_admission import ACTIVE_STATUSES
 from core.batch import BatchSpec
 from core.embeddings import (
@@ -65,14 +66,18 @@ EMBED_POSTINGS_PER_CYCLE = int(os.environ.get("JOBTRACKER_EMBED_POSTINGS_PER_CYC
 # `stored_hash` rides along so the handler can tell a re-scrape that changed the
 # page from one that did not. An identical re-scrape refreshes the id and pays
 # for nothing.
-_CANDIDATES = f"""
+_LEGACY_SCOPE = f"""
+    SELECT DISTINCT a.url FROM ai_queries a
+    LEFT JOIN jobs j ON j.url = a.url
+    WHERE j.url IS NULL OR {AI_ELIGIBLE_JOB.format(job="j")}
+"""
+
+
+def _candidate_sql(scope: str) -> str:
+    return f"""
     WITH current_row AS (
         SELECT c.url, q.content_row_id
-        FROM (
-            SELECT DISTINCT a.url FROM ai_queries a
-            LEFT JOIN jobs j ON j.url = a.url
-            WHERE j.url IS NULL OR {AI_ELIGIBLE_JOB.format(job="j")}
-        ) c
+        FROM ({scope}) c
         {CONTENT_LATERAL.format(url="c.url", columns="id AS content_row_id")}
     ),
     todo AS (
@@ -87,6 +92,10 @@ _CANDIDATES = f"""
     FROM todo t
     {CONTENT_LATERAL.format(url="t.url", columns="input_content")}
 """
+
+
+_CANDIDATES = _candidate_sql(_LEGACY_SCOPE)
+_VISIBLE_CANDIDATES = _candidate_sql(visibility.across_users("j.url"))
 
 
 def _store(rows: list[dict[str, Any]]) -> int:
@@ -140,7 +149,12 @@ async def handle_embed_postings_batch(task_id: int, payload: dict[str, Any]) -> 
             set_progress(task_id, 0, 0, f"embedding task {earlier['id']} is still in flight")
             return
         candidates = rescrape.drop_unchanged(
-            db.query(_CANDIDATES, {"cap": EMBED_POSTINGS_PER_CYCLE}),
+            db.query(
+                _VISIBLE_CANDIDATES
+                if db.get_config("embedding_visible_only", True)
+                else _CANDIDATES,
+                {"cap": EMBED_POSTINGS_PER_CYCLE},
+            ),
             table="job_embeddings",
             limit=EMBEDDING_INPUT_CHARS,
         )

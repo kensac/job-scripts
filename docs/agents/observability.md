@@ -461,6 +461,14 @@ transaction; newer content prevents an older vector replacing it. Progress
 counts packed requests. Fleet usage is exact per provider request; per-posting
 usage remains an approximate equal share, and absent provider usage is NULL.
 
+New embedding purchases default to `embedding_visible_only`: the union of the
+personal visibility read, including uploads and acted-on rows, rather than the
+broader subscribed-source working set. The next sweep admits a posting when it
+becomes visible. Similarity can therefore remain unavailable until that batch
+completes. The switch restores broad collection without deleting vectors or
+canceling paid work; collection never rechecks the current visibility scope.
+Public lists have no similarity consumer and their membership is unaffected.
+
 ## Scheduled filter transport
 
 `managed_board_cache_writes_enabled` controls provider caching on newly built

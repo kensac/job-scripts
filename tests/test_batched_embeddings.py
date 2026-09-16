@@ -162,8 +162,11 @@ async def test_legacy_task_only_queues_new_kind(f, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_submission_parks_packed_requests_and_respects_existing_work(f, monkeypatch):
+    owner = f.make_user()
     for i in range(101):
-        f.make_verdict(f"https://packed.test/{i}", "content", content="a detailed posting " * 30)
+        url = f"https://packed.test/{i}"
+        f.make_job(url=url, uploaded_by=owner)
+        f.make_verdict(url, "content", content="a detailed posting " * 30)
     task_id = f.make_task("embed_postings_batch", {}, status="running")
     monkeypatch.setenv("OPENAI_API_KEY", "test")
     submitted = []

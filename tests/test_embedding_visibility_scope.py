@@ -1,6 +1,7 @@
 import pytest
 
 from api import db
+from api.board import visibility
 from core import batch
 from tasks import embeddings, runtime
 
@@ -42,3 +43,30 @@ async def test_new_embedding_submissions_follow_visibility_with_reversible_scope
         await embeddings.handle_embed_postings_batch(task, {})
     actual = {row["url"] for spec in submitted for row in spec.context["rows"]}
     assert actual == set(urls[:3] if visible_only else urls)
+
+
+def test_scope_tracks_visibility_changes_and_matches_personal_reads(f):
+    owners = [f.make_user(), f.make_user()]
+    jobs = [f.make_job() for _ in range(4)]
+    db.execute("UPDATE jobs SET uploaded_by=%s WHERE id=%s", (owners[0], jobs[0]))
+    db.execute(
+        "INSERT INTO user_jobs(user_id,job_id,status) VALUES (%s,%s,'Applied')",
+        (owners[1], jobs[1]),
+    )
+    db.execute("INSERT INTO user_jobs(user_id,job_id) VALUES (%s,%s)", (owners[0], jobs[2]))
+    db.execute("INSERT INTO board_visible(user_id,job_id) VALUES (%s,%s)", (owners[1], jobs[3]))
+
+    def check(expected):
+        actual = {r["id"] for r in db.query(visibility.across_users("j.id"))}
+        individual = {
+            r["id"]
+            for uid in owners
+            for r in db.query(visibility.FAST.format(columns="j.id", extra=""), {"uid": uid})
+        }
+        assert actual == individual == set(expected)
+
+    check([jobs[0], jobs[1], jobs[3]])
+    db.execute("INSERT INTO board_visible(user_id,job_id) VALUES (%s,%s)", (owners[0], jobs[2]))
+    check(jobs)
+    db.execute("DELETE FROM board_visible WHERE job_id=%s", (jobs[3],))
+    check(jobs[:3])
