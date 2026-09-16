@@ -249,6 +249,6 @@ async def run_single_check(
         check=body.check,
         status="rejected" if rejected else "passed",
         reason=reason,
-        tokens=usage.get("total_tokens", 0),
+        tokens=usage.get("total_tokens", 0) or 0,
         model=model,
     )

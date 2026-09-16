@@ -72,6 +72,8 @@ class UserSpendPurpose(BaseModel):
     calls: int
     cost_usd: float
     cached_tokens: int
+    cache_write_tokens: int | None
+    cache_write_unknown_calls: int
     unpriced_calls: int
 
 
@@ -138,6 +140,8 @@ def usage(user: AuthedUser = Depends(require_user)) -> Usage:
             SELECT purpose, model, SUM(total_tokens) AS tokens, COUNT(*) AS calls,
                    COALESCE(SUM(cost_usd), 0) AS cost_usd,
                    COALESCE(SUM(cached_tokens), 0) AS cached_tokens,
+                   SUM(cache_write_tokens) AS cache_write_tokens,
+                   COUNT(*) FILTER (WHERE cache_write_tokens IS NULL) AS cache_write_unknown_calls,
                    COUNT(*) FILTER (WHERE cost_usd IS NULL) AS unpriced_calls
             FROM api_usage WHERE user_id = %s GROUP BY 1, 2 ORDER BY 3 DESC
             """,

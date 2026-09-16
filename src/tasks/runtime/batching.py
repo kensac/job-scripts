@@ -140,9 +140,16 @@ def batch_event_hook(
             inp = counts.get("input_tokens", 0)
             out = counts.get("output_tokens", 0)
             cached = counts.get("cached_tokens", 0)
+            cache_write = counts.get("cache_write_tokens")
             usage = counts.get("request_usage")
             est = pricing.estimate_usage_cost_usd(
-                event_model, inp, out, cached_tokens=cached, batched=True, requests=usage
+                event_model,
+                inp,
+                out,
+                cached_tokens=cached,
+                cache_write_tokens=cache_write,
+                batched=True,
+                requests=usage,
             )
             cost = round(float(est), 6) if est is not None else None
             # Provider totals are snapshots. Recollecting unchanged totals
@@ -152,10 +159,12 @@ def batch_event_hook(
             # a reachable risk, not an observed incident; retain the distinction.
             written = db.execute_count(
                 "UPDATE ai_batches SET input_tokens = %s, output_tokens = %s, "
+                "cache_write_tokens = %s, "
                 "est_cost_usd = %s, updated_at = now() "
                 "WHERE provider_batch_id = %s "
-                "AND (input_tokens, output_tokens) IS DISTINCT FROM (%s, %s)",
-                (inp, out, cost, batch_id, inp, out),
+                "AND (input_tokens, output_tokens, cache_write_tokens) "
+                "IS DISTINCT FROM (%s, %s, %s)",
+                (inp, out, cache_write, cost, batch_id, inp, out, cache_write),
             )
             if not written:
                 # Already recorded with these exact totals: this is a repeat
@@ -175,6 +184,7 @@ def batch_event_hook(
                     out,
                     batched=True,
                     cached_tokens=cached,
+                    cache_write_tokens=cache_write,
                     request_usage=usage,
                 )
             return

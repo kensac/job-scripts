@@ -45,6 +45,7 @@ _INSERT_COLUMNS = [
     "completion_tokens",
     "total_tokens",
     "cached_tokens",
+    "cache_write_tokens",
     "reasoning_tokens",
     "duration_ms",
     "error",
@@ -79,6 +80,7 @@ def add_ai_result(
     error: str | None = None,
     config_name: str | None = None,
     batch_id: str | None = None,
+    cache_write_tokens: int | None = None,
 ) -> None:
     row = {
         # created_at is DELIBERATELY ABSENT: the column defaults to Postgres
@@ -112,6 +114,7 @@ def add_ai_result(
         "completion_tokens": completion_tokens,
         "total_tokens": total_tokens,
         "cached_tokens": cached_tokens,
+        "cache_write_tokens": cache_write_tokens,
         "reasoning_tokens": reasoning_tokens,
         "duration_ms": duration_ms,
         "error": error,
@@ -123,6 +126,7 @@ def add_ai_result(
             prompt_tokens,
             completion_tokens,
             cached_tokens=cached_tokens,
+            cache_write_tokens=cache_write_tokens,
             batched=batch_id is not None,
         ),
         "worker": _WORKER,

@@ -1,6 +1,11 @@
 from api import ai
 
 
+def test_sync_usage_tuple_preserves_reported_cache_write_tokens():
+    usage = ai._usage_tuple(1174, 52, 1226, cache_write=1171)
+    assert usage["cache_write_tokens"] == 1171
+
+
 def test_batch_usage_preserves_reported_cache_write_tokens_and_unknowns():
     reported = ai.batch_usage(
         {

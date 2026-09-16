@@ -40,7 +40,7 @@ async def run_check[T: BaseModel](
     filter_name: str | None = None,
     prompt_hash: str | None = None,
     context: str = "worker",
-) -> tuple[T | None, dict[str, int]]:
+) -> tuple[T | None, dict[str, int | None]]:
     """Runs one structured check, records a complete verdict row + metrics.
 
     verdict_of maps the parsed response to (rejected, reason). Failures are
@@ -110,7 +110,7 @@ def record_ai_verdict(
     rejected: bool | None,
     reason: str | None,
     parsed_json: str | None,
-    usage: dict[str, int],
+    usage: dict[str, int | None],
     model: str | None,
     provider: str = "openai",
     key_source: str = "owner",
@@ -153,6 +153,7 @@ def record_ai_verdict(
         config_name=context,
         batch_id=batch_id,
         cached_tokens=usage.get("cached_tokens"),
+        cache_write_tokens=usage.get("cache_write_tokens"),
         reasoning_tokens=usage.get("reasoning_tokens"),
         reasoning_effort=reasoning_effort,
         duration_ms=duration_ms,
@@ -171,6 +172,7 @@ def record_ai_verdict(
         usage.get("prompt_tokens"),
         usage.get("completion_tokens"),
         cached_tokens=usage.get("cached_tokens"),
+        cache_write_tokens=usage.get("cache_write_tokens"),
         batched=batched,
     )
     if cost is not None:

@@ -333,6 +333,7 @@ class ProviderBatch(BaseModel):
     est_tokens: int
     input_tokens: int
     output_tokens: int
+    cache_write_tokens: int | None
     # float, not Decimal: a declared Decimal serialises as a JSON string and
     # this has always been a number on the wire.
     est_cost_usd: float | None
@@ -365,7 +366,7 @@ def list_batches(
         f"""
         SELECT b.id, b.provider_batch_id, b.task_id, b.purpose, b.model,
                b.requests, b.completed, b.failed_count, b.status,
-               b.est_tokens, b.input_tokens, b.output_tokens, b.est_cost_usd,
+               b.est_tokens, b.input_tokens, b.output_tokens, b.cache_write_tokens, b.est_cost_usd,
                b.submitted_at, b.updated_at, b.completed_at,
                t.kind AS task_kind, t.status AS task_status
         FROM ai_batches b LEFT JOIN tasks t ON t.id = b.task_id
@@ -546,7 +547,7 @@ def queue_summary(hours: int = 6, user: AuthedUser = Depends(require_admin)) -> 
 _BATCH_COLS = (
     "id, provider_batch_id, task_id, purpose, model, requests, completed, failed_count, "
     "status, submitted_at, updated_at, completed_at, est_tokens, input_tokens, "
-    "output_tokens, est_cost_usd, prompt_id"
+    "output_tokens, cache_write_tokens, est_cost_usd, prompt_id"
 )
 
 
@@ -570,6 +571,7 @@ class BatchRecord(BaseModel):
     est_tokens: int
     input_tokens: int
     output_tokens: int
+    cache_write_tokens: int | None
     est_cost_usd: float | None
     prompt_id: int | None
 
@@ -590,6 +592,7 @@ class BatchedCheck(BaseModel):
     completion_tokens: int | None
     total_tokens: int | None
     cached_tokens: int | None
+    cache_write_tokens: int | None
     created_at: datetime.datetime
     source: str | None
     job_id: int | None
@@ -629,6 +632,7 @@ def batch_jobs(
         """
         SELECT q.id, q.url, q.check_type, q.status, q.reason, q.company, q.job_title,
                q.prompt_tokens, q.completion_tokens, q.total_tokens, q.cached_tokens,
+               q.cache_write_tokens,
                q.created_at, j.source, j.id AS job_id
         FROM ai_queries q LEFT JOIN jobs j ON j.url = q.url
         WHERE q.batch_id = %s ORDER BY q.id LIMIT %s OFFSET %s
@@ -642,6 +646,7 @@ def batch_jobs(
             r["prompt_tokens"],
             r["completion_tokens"],
             cached_tokens=r.get("cached_tokens"),
+            cache_write_tokens=r.get("cache_write_tokens"),
             batched=True,
         )
         priced.append(

@@ -171,8 +171,9 @@ def _usage_tuple(
     completion: int,
     total: int,
     cached: int = 0,
+    cache_write: int | None = None,
     reasoning: int = 0,
-) -> dict[str, int]:
+) -> dict[str, int | None]:
     """Cached and reasoning tokens are SUBSETS of prompt and completion
     respectively, not additions - they are reported so spend can be attributed,
     never summed into the total."""
@@ -181,19 +182,22 @@ def _usage_tuple(
         "completion_tokens": completion or 0,
         "total_tokens": total or (prompt or 0) + (completion or 0),
         "cached_tokens": cached or 0,
+        "cache_write_tokens": cache_write,
         "reasoning_tokens": reasoning or 0,
     }
 
 
-def batch_usage(usage: dict | None) -> dict[str, int]:
+def batch_usage(usage: dict | None) -> dict[str, int | None]:
     if not usage:
         return {}
     values = usage
+    details = values.get("input_tokens_details") or {}
     return _usage_tuple(
         values.get("input_tokens", 0),
         values.get("output_tokens", 0),
         values.get("total_tokens", 0),
-        (values.get("input_tokens_details") or {}).get("cached_tokens", 0),
+        details.get("cached_tokens", 0),
+        details.get("cache_write_tokens") if "cache_write_tokens" in details else None,
         (values.get("output_tokens_details") or {}).get("reasoning_tokens", 0),
     )
 
@@ -204,10 +208,17 @@ def _detail(usage: Any, container: str, field: str) -> int:
     return getattr(getattr(usage, container, None), field, 0) or 0
 
 
+def _optional_detail(usage: Any, container: str, field: str) -> int | None:
+    details = getattr(usage, container, None)
+    if details is None or not hasattr(details, field):
+        return None
+    return getattr(details, field, None)
+
+
 class PaidParseError(ValueError):
     """An unusable provider response whose reported usage must still be recorded."""
 
-    def __init__(self, message: str, usage: dict[str, int]):
+    def __init__(self, message: str, usage: dict[str, int | None]):
         super().__init__(message)
         self.usage = usage
 
@@ -218,7 +229,7 @@ async def parse[T: BaseModel](
     input_text: str,
     response_model: type[T],
     timeout: float = 120.0,
-) -> tuple[T | None, dict[str, int]]:
+) -> tuple[T | None, dict[str, int | None]]:
     import time as _time
 
     from api import metrics
@@ -241,6 +252,7 @@ async def parse[T: BaseModel](
             usage["prompt_tokens"],
             usage["completion_tokens"],
             cached_tokens=usage.get("cached_tokens"),
+            cache_write_tokens=usage.get("cache_write_tokens"),
         )
         if cost is not None:
             metrics.AI_COST_USD.labels(cfg.provider, cfg.model, cfg.key_source).inc(float(cost))
@@ -255,7 +267,7 @@ async def _parse_json_object[T: BaseModel](
     response_model: type[T],
     declared: Model,
     timeout: float,
-) -> tuple[T | None, dict[str, int]]:
+) -> tuple[T | None, dict[str, int | None]]:
     """The path for a provider that returns JSON but will not enforce a schema.
 
     Reached by DECLARED MODE, never by provider name. A provider is on this
@@ -313,6 +325,7 @@ async def _parse_json_object[T: BaseModel](
         getattr(cu, "completion_tokens", 0) or 0,
         getattr(cu, "total_tokens", 0) or 0,
         cached=_detail(cu, "prompt_tokens_details", "cached_tokens"),
+        cache_write=_optional_detail(cu, "prompt_tokens_details", "cache_write_tokens"),
         reasoning=_detail(cu, "completion_tokens_details", "reasoning_tokens"),
     )
     choice = completion.choices[0] if completion.choices else None
@@ -340,7 +353,7 @@ async def _parse[T: BaseModel](
     input_text: str,
     response_model: type[T],
     timeout: float = 120.0,
-) -> tuple[T | None, dict[str, int]]:
+) -> tuple[T | None, dict[str, int | None]]:
     if (
         providers.PROVIDERS.get(cfg.provider, None) is not None
         and providers.PROVIDERS[cfg.provider].wire is providers.Wire.ANTHROPIC_MESSAGES
@@ -401,6 +414,7 @@ async def _parse[T: BaseModel](
             getattr(u, "output_tokens", 0) or 0,
             getattr(u, "total_tokens", 0) or 0,
             cached=_detail(u, "input_tokens_details", "cached_tokens"),
+            cache_write=_optional_detail(u, "input_tokens_details", "cache_write_tokens"),
             reasoning=_detail(u, "output_tokens_details", "reasoning_tokens"),
         )
         return response.output_parsed, usage
@@ -446,6 +460,7 @@ async def _parse[T: BaseModel](
         getattr(cu, "completion_tokens", 0) or 0,
         getattr(cu, "total_tokens", 0) or 0,
         cached=_detail(cu, "prompt_tokens_details", "cached_tokens"),
+        cache_write=_optional_detail(cu, "prompt_tokens_details", "cache_write_tokens"),
         reasoning=_detail(cu, "completion_tokens_details", "reasoning_tokens"),
     )
     parsed = completion.choices[0].message.parsed if completion.choices else None

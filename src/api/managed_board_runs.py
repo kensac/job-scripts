@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime
+from collections.abc import Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from decimal import Decimal
@@ -457,7 +458,7 @@ def cost(board_id: int) -> ManagedBoardCost:
 
 
 def record_tokens(
-    board_id: int, usage: dict[str, int], model: str | None, *, batched: bool = False
+    board_id: int, usage: Mapping[str, int | None], model: str | None, *, batched: bool = False
 ) -> None:
     if not usage.get("total_tokens"):
         return

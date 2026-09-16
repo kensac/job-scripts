@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import datetime
 from decimal import Decimal
-from typing import TypedDict
+from typing import NotRequired, TypedDict
 
 from core import providers
 from core.providers.spec import Rates, Tier
@@ -30,6 +30,14 @@ class RequestTokens(TypedDict):
     input_tokens: int
     output_tokens: int
     cached_tokens: int
+    cache_write_tokens: NotRequired[int | None]
+
+
+class _UnspecifiedCacheWrite:
+    """Reservation pricing has no provider receipt to supply write tokens."""
+
+
+_UNSPECIFIED_CACHE_WRITE = _UnspecifiedCacheWrite()
 
 
 def estimate_usage_cost_usd(
@@ -40,13 +48,19 @@ def estimate_usage_cost_usd(
     cached_tokens: int = 0,
     batched: bool = False,
     requests: list[RequestTokens] | None = None,
+    cache_write_tokens: int | _UnspecifiedCacheWrite | None = _UNSPECIFIED_CACHE_WRITE,
 ) -> Decimal | None:
     """Price request boundaries when supplied; aggregate tiered usage is unknown."""
     if requests is None:
         if is_tiered(model):
             return None
         return estimate_cost_usd(
-            model, prompt_tokens, completion_tokens, cached_tokens=cached_tokens, batched=batched
+            model,
+            prompt_tokens,
+            completion_tokens,
+            cached_tokens=cached_tokens,
+            batched=batched,
+            cache_write_tokens=cache_write_tokens,
         )
     if rates_for(model) is None:
         return None
@@ -58,6 +72,7 @@ def estimate_usage_cost_usd(
             usage["output_tokens"],
             cached_tokens=usage["cached_tokens"],
             batched=batched,
+            cache_write_tokens=usage.get("cache_write_tokens"),
         )
         if cost is None:
             return None
@@ -98,6 +113,11 @@ def cached_rate(tier: Tier) -> Decimal:
     as NULL instead of zero.
     """
     return tier.rate_in if tier.rate_cached_in is None else tier.rate_cached_in
+
+
+def cache_write_rate(tier: Tier) -> Decimal | None:
+    """Return the published rate for input tokens written to the cache."""
+    return tier.rate_cache_write_in
 
 
 def is_off_peak(rates: Rates, at: datetime.datetime | None) -> bool:
@@ -154,6 +174,7 @@ def estimate_cost_usd(
     cached_tokens: int | None = None,
     batched: bool = False,
     at: datetime.datetime | None = None,
+    cache_write_tokens: int | _UnspecifiedCacheWrite | None = _UNSPECIFIED_CACHE_WRITE,
 ) -> Decimal | None:
     """Cost of ONE call, or None when the model has no published price.
 
@@ -177,9 +198,29 @@ def estimate_cost_usd(
     prompt = Decimal(prompt_tokens or 0)
     completion = Decimal(completion_tokens or 0)
     cached = min(Decimal(cached_tokens or 0), prompt)
+    remaining = max(prompt - cached, Decimal(0))
     tier = _tier_for(rates, prompt)
+    write_rate = cache_write_rate(tier)
+    if cache_write_tokens is _UNSPECIFIED_CACHE_WRITE:
+        # A reservation has no provider receipt. Reserve for every uncached
+        # token being written, which is the conservative GPT-5.6+ case.
+        cache_write = remaining if write_rate is not None else Decimal(0)
+    elif cache_write_tokens is None:
+        # A receipt that omits the field is unknown. If the model publishes a
+        # premium write rate, returning NULL avoids inventing zero writes.
+        if write_rate is not None and write_rate != tier.rate_in:
+            return None
+        cache_write = Decimal(0)
+    else:
+        assert isinstance(cache_write_tokens, int)
+        cache_write = min(max(Decimal(cache_write_tokens), Decimal(0)), remaining)
+    if cache_write and write_rate is None:
+        return None
     cost = (
-        (prompt - cached) * tier.rate_in + cached * cached_rate(tier) + completion * tier.rate_out
+        (remaining - cache_write) * tier.rate_in
+        + cached * cached_rate(tier)
+        + cache_write * (write_rate or tier.rate_in)
+        + completion * tier.rate_out
     ) / _PER_MTOK
     if batched and rates.batch_rate is not None:
         cost *= rates.batch_rate
@@ -199,9 +240,11 @@ def cost_sql(
     model_rate_out: str,
     model_rate_cached_in: str,
     batch_rate: str,
+    model_rate_cache_write_in: str | None = None,
     prompt: str = "prompt_tokens",
     completion: str = "completion_tokens",
     cached: str = "cached_tokens",
+    cache_write: str | None = None,
     batched: str,
     off_peak: str = "FALSE",
     off_peak_multiplier: str = "1",
@@ -230,11 +273,25 @@ def cost_sql(
     the backfill already issues one statement per model.
     """
     p, c, k = f"COALESCE({prompt}, 0)", f"COALESCE({completion}, 0)", f"COALESCE({cached}, 0)"
-    uncached = f"({p} - LEAST({k}, {p}))"
-    return (
-        f"(({uncached} * {model_rate_in}"
-        f" + LEAST({k}, {p}) * {model_rate_cached_in}"
+    cached_part = f"LEAST(GREATEST({k}, 0), {p})"
+    remaining = f"GREATEST({p} - {cached_part}, 0)"
+    if cache_write is None:
+        write_part = "0"
+        unknown_guard = ""
+    else:
+        write_part = f"LEAST(GREATEST(COALESCE({cache_write}, 0), 0), {remaining})"
+        unknown_guard = (
+            f"CASE WHEN {cache_write} IS NULL "
+            f"AND {model_rate_cache_write_in or model_rate_in} <> {model_rate_in} "
+            "THEN NULL ELSE "
+        )
+    ordinary = f"({remaining} - {write_part})"
+    expression = (
+        f"(({ordinary} * {model_rate_in}"
+        f" + {cached_part} * {model_rate_cached_in}"
+        f" + {write_part} * {model_rate_cache_write_in or model_rate_in}"
         f" + {c} * {model_rate_out}) / {_PER_MTOK})"
         f" * CASE WHEN {batched} THEN {batch_rate} ELSE 1 END"
         f" * CASE WHEN {off_peak} THEN {off_peak_multiplier} ELSE 1 END"
     )
+    return f"{unknown_guard}{expression} END" if unknown_guard else expression

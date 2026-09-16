@@ -104,6 +104,7 @@ class AiQuery(Base):
     completion_tokens: Mapped[int | None] = mapped_column(BigInteger)
     total_tokens: Mapped[int | None] = mapped_column(BigInteger)
     cached_tokens: Mapped[int | None] = mapped_column(BigInteger)
+    cache_write_tokens: Mapped[int | None] = mapped_column(BigInteger)
     reasoning_tokens: Mapped[int | None] = mapped_column(BigInteger)
     duration_ms: Mapped[int | None] = mapped_column(BigInteger)
     error: Mapped[str | None] = mapped_column(Text)
@@ -184,6 +185,7 @@ class AiBatch(Base):
     prompt_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("ai_prompts.id"))
     input_tokens: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
     output_tokens: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
+    cache_write_tokens: Mapped[int | None] = mapped_column(BigInteger)
     est_cost_usd: Mapped[Any | None] = mapped_column(Numeric(12, 6))
     submitted_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
     updated_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
@@ -298,6 +300,7 @@ class ApiUsage(Base):
     total_tokens: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
     batched: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     cached_tokens: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
+    cache_write_tokens: Mapped[int | None] = mapped_column(BigInteger)
     # NULL means the model had no published price, which must stay distinct
     # from a call that genuinely cost nothing.
     cost_usd: Mapped[Any | None] = mapped_column(Numeric(12, 6))

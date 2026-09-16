@@ -50,6 +50,8 @@ class LedgerBucket(BaseModel):
     completion_tokens: int
     total_tokens: int
     cached_tokens: int
+    cache_write_tokens: int | None
+    cache_write_unknown_calls: int
     batched_calls: int
     models: int
     first_call: datetime.datetime | None
@@ -111,6 +113,8 @@ def _ledger_breakdowns(params: dict) -> Ledger:
                    COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
                    COALESCE(SUM(total_tokens), 0) AS total_tokens,
                    COALESCE(SUM(cached_tokens), 0) AS cached_tokens,
+                   SUM(cache_write_tokens) AS cache_write_tokens,
+                   COUNT(*) FILTER (WHERE cache_write_tokens IS NULL) AS cache_write_unknown_calls,
                    COUNT(*) FILTER (WHERE batched) AS batched_calls,
                    MIN(created_at) AS first_call,
                    MAX(created_at) AS last_call
@@ -128,6 +132,8 @@ def _ledger_breakdowns(params: dict) -> Ledger:
                COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
                COALESCE(SUM(total_tokens), 0) AS total_tokens,
                COALESCE(SUM(cached_tokens), 0) AS cached_tokens,
+               SUM(cache_write_tokens) AS cache_write_tokens,
+               COALESCE(SUM(cache_write_unknown_calls), 0)::bigint AS cache_write_unknown_calls,
                COALESCE(SUM(batched_calls), 0)::bigint AS batched_calls,
                COUNT(DISTINCT model) AS models,
                MIN(first_call) AS first_call,
@@ -194,6 +200,8 @@ class VerdictTotals(BaseModel):
     prompt_tokens: int
     completion_tokens: int
     cached_tokens: int
+    cache_write_tokens: int | None
+    cache_write_unknown_calls: int
     reasoning_tokens: int
     first_call: datetime.datetime | None
     last_call: datetime.datetime | None
@@ -224,6 +232,8 @@ class VerdictCheckTypeSpend(BaseModel):
     completion_tokens: int
     reasoning_tokens: int
     cached_tokens: int
+    cache_write_tokens: int | None
+    cache_write_unknown_calls: int
     batched_calls: int
     # Decided verdicts carrying no tokens: the answer came from a sibling
     # row's call, so their cost lives there.
@@ -349,6 +359,8 @@ def spend(
                COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
                COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
                COALESCE(SUM(cached_tokens), 0) AS cached_tokens,
+               SUM(cache_write_tokens) AS cache_write_tokens,
+               COUNT(*) FILTER (WHERE cache_write_tokens IS NULL) AS cache_write_unknown_calls,
                COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens,
                MIN(created_at) AS first_call,
                MAX(created_at) AS last_call
@@ -392,6 +404,8 @@ def spend(
                COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
                COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens,
                COALESCE(SUM(cached_tokens), 0) AS cached_tokens,
+               SUM(cache_write_tokens) AS cache_write_tokens,
+               COUNT(*) FILTER (WHERE cache_write_tokens IS NULL) AS cache_write_unknown_calls,
                COUNT(*) FILTER (WHERE batch_id IS NOT NULL) AS batched_calls,
                -- Decided verdicts carrying no tokens: the answer came from a
                -- sibling row's call, so their cost lives there.
@@ -589,6 +603,7 @@ class UsageCall(BaseModel):
     completion_tokens: int
     total_tokens: int
     cached_tokens: int
+    cache_write_tokens: int | None
     cost_usd: float | None
     user_id: int | None
 
@@ -599,6 +614,8 @@ class CallTotals(BaseModel):
     unpriced_calls: int
     prompt_tokens: int
     completion_tokens: int
+    cache_write_tokens: int | None
+    cache_write_unknown_calls: int
 
 
 class SpendCalls(BaseModel):
@@ -650,7 +667,9 @@ def spend_calls(
                COALESCE(SUM(cost_usd), 0) AS cost_usd,
                COUNT(*) FILTER (WHERE cost_usd IS NULL) AS unpriced_calls,
                COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
-               COALESCE(SUM(completion_tokens), 0) AS completion_tokens
+               COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
+               SUM(cache_write_tokens) AS cache_write_tokens,
+               COUNT(*) FILTER (WHERE cache_write_tokens IS NULL) AS cache_write_unknown_calls
         FROM api_usage WHERE {predicate}
         """,
         params,
@@ -663,6 +682,7 @@ def spend_calls(
             f"""
             SELECT id, created_at, purpose, model, key_source, batched,
                    prompt_tokens, completion_tokens, total_tokens, cached_tokens,
+                   cache_write_tokens,
                    cost_usd, user_id
             FROM api_usage WHERE {predicate}
             ORDER BY created_at DESC, id DESC
