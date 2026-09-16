@@ -104,4 +104,4 @@ def test_restriction_evidence_is_independent_of_closure():
 
 def test_naive_evaluation_time_is_rejected():
     with pytest.raises(ValueError, match="timezone"):
-        derive_verification(evidence(), "Apply", as_of=datetime(2026, 9, 16))
+        derive_verification(evidence(), "Apply", as_of=datetime(2026, 9, 16))  # noqa: DTZ001
