@@ -195,9 +195,9 @@ def estimate_cost_usd(
     rates = rates_for(model)
     if rates is None:
         return None
-    prompt = Decimal(prompt_tokens or 0)
-    completion = Decimal(completion_tokens or 0)
-    cached = min(Decimal(cached_tokens or 0), prompt)
+    prompt = max(Decimal(prompt_tokens or 0), Decimal(0))
+    completion = max(Decimal(completion_tokens or 0), Decimal(0))
+    cached = min(max(Decimal(cached_tokens or 0), Decimal(0)), prompt)
     remaining = max(prompt - cached, Decimal(0))
     tier = _tier_for(rates, prompt)
     write_rate = cache_write_rate(tier)
@@ -219,7 +219,7 @@ def estimate_cost_usd(
     cost = (
         (remaining - cache_write) * tier.rate_in
         + cached * cached_rate(tier)
-        + cache_write * (write_rate or tier.rate_in)
+        + cache_write * (write_rate if write_rate is not None else tier.rate_in)
         + completion * tier.rate_out
     ) / _PER_MTOK
     if batched and rates.batch_rate is not None:
@@ -272,24 +272,42 @@ def cost_sql(
     tier and restricts each statement to the matching prompt range - the way
     the backfill already issues one statement per model.
     """
-    p, c, k = f"COALESCE({prompt}, 0)", f"COALESCE({completion}, 0)", f"COALESCE({cached}, 0)"
+    p = f"GREATEST(COALESCE({prompt}, 0), 0)"
+    c = f"GREATEST(COALESCE({completion}, 0), 0)"
+    k = f"COALESCE({cached}, 0)"
     cached_part = f"LEAST(GREATEST({k}, 0), {p})"
     remaining = f"GREATEST({p} - {cached_part}, 0)"
     if cache_write is None:
         write_part = "0"
+        write_rate = model_rate_in
         unknown_guard = ""
     else:
         write_part = f"LEAST(GREATEST(COALESCE({cache_write}, 0), 0), {remaining})"
-        unknown_guard = (
-            f"CASE WHEN {cache_write} IS NULL "
-            f"AND {model_rate_cache_write_in or model_rate_in} <> {model_rate_in} "
-            "THEN NULL ELSE "
+        write_rate = (
+            f"COALESCE({model_rate_cache_write_in}, {model_rate_in})"
+            if model_rate_cache_write_in is not None
+            else model_rate_in
         )
+        unknown_conditions = []
+        if model_rate_cache_write_in is not None:
+            unknown_conditions.append(
+                f"{cache_write} IS NULL AND {model_rate_cache_write_in} IS NOT NULL "
+                f"AND {model_rate_cache_write_in} <> {model_rate_in}"
+            )
+        unknown_conditions.append(
+            f"{write_part} > 0"
+            + (
+                f" AND {model_rate_cache_write_in} IS NULL"
+                if model_rate_cache_write_in is not None
+                else ""
+            )
+        )
+        unknown_guard = f"CASE WHEN {' OR '.join(unknown_conditions)} THEN NULL ELSE "
     ordinary = f"({remaining} - {write_part})"
     expression = (
         f"(({ordinary} * {model_rate_in}"
         f" + {cached_part} * {model_rate_cached_in}"
-        f" + {write_part} * {model_rate_cache_write_in or model_rate_in}"
+        f" + {write_part} * {write_rate}"
         f" + {c} * {model_rate_out}) / {_PER_MTOK})"
         f" * CASE WHEN {batched} THEN {batch_rate} ELSE 1 END"
         f" * CASE WHEN {off_peak} THEN {off_peak_multiplier} ELSE 1 END"

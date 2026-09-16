@@ -13,6 +13,7 @@ import pytest
 
 from api import db
 from core import pricing
+from core.providers.spec import Rates, Tier
 
 # gpt-5-nano is $0.05/Mtok in, $0.40/Mtok out - the model almost everything
 # here runs on, so the arithmetic below is checkable by hand.
@@ -81,6 +82,8 @@ _CASES = [
     (3, 7, 1, False),
     (0, 0, 0, True),
     (999_999, 1, 999_999, True),
+    (1_000_000, -100, -500, False),
+    (1_000_000, 100, 2_000_000, False),
 ]
 
 
@@ -164,3 +167,101 @@ def test_sql_and_python_agree_with_cache_write_tokens():
     )
     assert py is not None
     assert Decimal(row["cost"]) == py
+
+
+@pytest.mark.parametrize(
+    ("cached", "cache_write"),
+    [(-100, -200), (2_000_000, 2_000_000), (500_000, 2_000_000)],
+)
+def test_sql_and_python_clamp_cache_counters(cached, cache_write):
+    price = pricing.rates_for(LUNA)
+    assert price is not None
+    tier = price.tiers[0]
+    expr = pricing.cost_sql(
+        model_rate_in="%(rate_in)s::numeric",
+        model_rate_out="%(rate_out)s::numeric",
+        model_rate_cached_in="%(rate_cached)s::numeric",
+        model_rate_cache_write_in="%(rate_write)s::numeric",
+        batch_rate="1",
+        prompt="%(prompt)s::bigint",
+        completion="%(completion)s::bigint",
+        cached="%(cached)s::bigint",
+        cache_write="%(cache_write)s::bigint",
+        batched="FALSE",
+    )
+    row = db.query_one(
+        f"SELECT {expr} AS cost",
+        {
+            "rate_in": str(tier.rate_in),
+            "rate_out": str(tier.rate_out),
+            "rate_cached": str(pricing.cached_rate(tier)),
+            "rate_write": str(pricing.cache_write_rate(tier)),
+            "prompt": 1_000_000,
+            "completion": 100,
+            "cached": cached,
+            "cache_write": cache_write,
+        },
+    )
+    assert row is not None
+    py = pricing.estimate_cost_usd(
+        LUNA,
+        1_000_000,
+        100,
+        cached_tokens=cached,
+        cache_write_tokens=cache_write,
+    )
+    assert py is not None
+    assert Decimal(row["cost"]) == py
+
+
+def test_zero_cache_write_rate_is_not_treated_as_missing(monkeypatch):
+    base = pricing.rates_for(NANO)
+    assert base is not None
+    rates = Rates(
+        tiers=(Tier(None, Decimal("1"), Decimal("2"), Decimal("0.1"), Decimal("0")),),
+        batch_rate=Decimal("1"),
+        source=base.source,
+    )
+    monkeypatch.setattr(pricing, "rates_for", lambda model: rates)
+    py = pricing.estimate_cost_usd("zero-write", 1_000_000, 0, cache_write_tokens=1_000_000)
+    assert py == Decimal("0")
+    expr = pricing.cost_sql(
+        model_rate_in="1::numeric",
+        model_rate_out="2::numeric",
+        model_rate_cached_in="0.1::numeric",
+        model_rate_cache_write_in="0::numeric",
+        batch_rate="1",
+        prompt="1000000::bigint",
+        completion="0::bigint",
+        cached="0::bigint",
+        cache_write="1000000::bigint",
+        batched="FALSE",
+    )
+    row = db.query_one(f"SELECT {expr} AS cost")
+    assert row is not None and Decimal(row["cost"]) == py
+
+
+@pytest.mark.parametrize(
+    ("write_rate", "cache_write", "expected"),
+    [(None, 500_000, None), (None, 0, Decimal("0.20")), ("0.25", None, None)],
+)
+def test_sql_unknown_write_rate_matches_python(write_rate, cache_write, expected):
+    expr = pricing.cost_sql(
+        model_rate_in="0.20::numeric",
+        model_rate_out="12::numeric",
+        model_rate_cached_in="0.02::numeric",
+        model_rate_cache_write_in=(
+            "%(rate_write)s::numeric" if write_rate is not None else "NULL::numeric"
+        ),
+        batch_rate="1",
+        prompt="1000000::bigint",
+        completion="0::bigint",
+        cached="0::bigint",
+        cache_write="%(cache_write)s::bigint",
+        batched="FALSE",
+    )
+    row = db.query_one(
+        f"SELECT {expr} AS cost", {"rate_write": write_rate, "cache_write": cache_write}
+    )
+    assert row is not None
+    assert row["cost"] == expected
