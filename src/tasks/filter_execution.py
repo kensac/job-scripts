@@ -211,8 +211,11 @@ async def execute_batch(
 
     existing = has_batch_work(task_id)
     gate_decisions = {}
+    gate_skipped = 0
     if not existing:
+        before_gate = len(jobs)
         jobs, gate_decisions = review_gate.partition(task_id, snapshot.prompt_hash, jobs, contents)
+        gate_skipped = before_gate - len(jobs)
     routing = (
         {}
         if existing
@@ -255,8 +258,13 @@ async def execute_batch(
         by_url[job["url"]] = (job, input_text)
     total = len(jobs)
     if not specs and not existing:
-        hooks.progress(0, total, "no content-ready jobs; waiting for a later cycle")
-        if complete_without_submission:
+        label = (
+            f"{gate_skipped} pre-review exclusions; {total} awaiting content"
+            if gate_skipped
+            else "no content-ready jobs; waiting for a later cycle"
+        )
+        hooks.progress(0, total, label)
+        if complete_without_submission or (gate_skipped and not jobs):
             hooks.complete()
         return
     hooks.progress(

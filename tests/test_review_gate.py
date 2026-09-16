@@ -255,6 +255,30 @@ async def test_live_gate_skips_before_content_fetch(f, monkeypatch):
     assert plan["detailed"] == 0
 
 
+@pytest.mark.asyncio
+async def test_all_excluded_batch_completes_without_submission(f):
+    from dataclasses import replace
+
+    configure()
+    task = f.make_task("run_filter_batch_chunk", status="running")
+    completed = []
+
+    async def forbidden(*_args):
+        raise AssertionError("empty review selection must not submit")
+
+    await filter_execution.execute_batch(
+        task,
+        ai.AIConfig("openai", "key", "owner", JOB_PROFILE_MODEL),
+        filter_execution.FilterSnapshot("test", "prompt", "filter", "test-hash"),
+        [{"url": "https://example.test/nurse", "title": "Registered Nurse"}],
+        replace(hooks(), complete=lambda: completed.append(True)),
+        contents={},
+        unavailable=1,
+        submit=forbidden,
+    )
+    assert completed == [True]
+
+
 def test_managed_fail_open_projection_excludes_gate_rejects_and_rollback_restores(f):
     from api import managed_board_runs
 
