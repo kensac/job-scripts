@@ -152,24 +152,29 @@ def batch_event_hook(
                 requests=usage,
             )
             cost = round(float(est), 6) if est is not None else None
-            # Provider totals are snapshots. Recollecting unchanged totals
-            # must not append another ledger entry. The pre-checkpoint audit
-            # found 92 batched tasks at attempts=2 (ordinary park/resume), none
-            # at attempts=3 (collect/fail/recollect). Double booking was then
-            # a reachable risk, not an observed incident; retain the distinction.
+            # Provider totals are snapshots. Recollecting unchanged input and
+            # output totals must not append another ledger entry, even when a
+            # mixed-version rollout discovers cache-write metadata later.
             written = db.execute_count(
                 "UPDATE ai_batches SET input_tokens = %s, output_tokens = %s, "
                 "cache_write_tokens = %s, "
                 "est_cost_usd = %s, updated_at = now() "
                 "WHERE provider_batch_id = %s "
-                "AND (input_tokens, output_tokens, cache_write_tokens) "
-                "IS DISTINCT FROM (%s, %s, %s)",
-                (inp, out, cache_write, cost, batch_id, inp, out, cache_write),
+                "AND (input_tokens, output_tokens) IS DISTINCT FROM (%s, %s)",
+                (inp, out, cache_write, cost, batch_id, inp, out),
             )
             if not written:
-                # Already recorded with these exact totals: this is a repeat
-                # collection of a batch that has not changed, so the ledger
-                # must not gain a second row for it either.
+                # Cache-write metadata may be newly available after an older
+                # image recorded the same provider totals. Enrich that row
+                # without changing its historical cost or charging the fleet
+                # a second time.
+                db.execute(
+                    "UPDATE ai_batches SET cache_write_tokens = %s, updated_at = now() "
+                    "WHERE provider_batch_id = %s "
+                    "AND (input_tokens, output_tokens) IS NOT DISTINCT FROM (%s, %s) "
+                    "AND cache_write_tokens IS NULL AND %s IS NOT NULL",
+                    (cache_write, batch_id, inp, out, cache_write),
+                )
                 return
             # The same numbers into the spend ledger. Every batched caller
             # passes through here and already names a purpose, so a new AI

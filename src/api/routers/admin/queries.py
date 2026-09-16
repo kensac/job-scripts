@@ -607,6 +607,7 @@ class LedgerTotals(BaseModel):
     """
 
     queries: int
+    unpriced_queries: int
     prompt_tokens: int
     completion_tokens: int
     cached_tokens: int
@@ -636,6 +637,7 @@ class DayTotals(BaseModel):
     queries: int
     failed: int
     rejected: int
+    unpriced_queries: int
     prompt_tokens: int
     completion_tokens: int
     cached_tokens: int
@@ -654,6 +656,7 @@ class ModelTotals(BaseModel):
 
     model: str
     queries: int
+    unpriced_queries: int
     prompt_tokens: int
     completion_tokens: int
     cached_tokens: int
@@ -696,6 +699,7 @@ def _compute_stats() -> LedgerStats:
     totals = db.query_one(
         """
         SELECT COUNT(*) AS queries,
+               COUNT(*) FILTER (WHERE cost_usd IS NULL) AS unpriced_queries,
                COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
                COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
                COALESCE(SUM(cached_tokens), 0) AS cached_tokens,
@@ -730,6 +734,7 @@ def _compute_stats() -> LedgerStats:
                COUNT(*) AS queries,
                COUNT(*) FILTER (WHERE status = 'failed') AS failed,
                COUNT(*) FILTER (WHERE status = 'rejected') AS rejected,
+               COUNT(*) FILTER (WHERE cost_usd IS NULL) AS unpriced_queries,
                COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
                COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
                COALESCE(SUM(cached_tokens), 0) AS cached_tokens,
@@ -746,6 +751,7 @@ def _compute_stats() -> LedgerStats:
         """
         SELECT model,
                COUNT(*) AS queries,
+               COUNT(*) FILTER (WHERE cost_usd IS NULL) AS unpriced_queries,
                COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
                COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
                COALESCE(SUM(cached_tokens), 0) AS cached_tokens,

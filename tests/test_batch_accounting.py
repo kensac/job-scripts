@@ -7,6 +7,17 @@ from core import batch, pricing
 from tasks import runtime
 
 
+def test_batch_without_usage_keeps_cache_write_unknown():
+    events = []
+    batch._emit_usage(
+        lambda *event: events.append(event),
+        "empty",
+        "completed",
+        {"request": batch.BatchResult("request", usage=None)},
+    )
+    assert events[0][2]["cache_write_tokens"] is None
+
+
 @pytest.mark.parametrize("model", ["gpt-5-mini", "grok-4.3", "unknown-model"])
 def test_fleet_batch_preserves_cache_and_prices_each_request(f, model):
     task_id = f.make_task("extract_comp", {})
@@ -47,6 +58,48 @@ def test_aggregate_only_tiered_batch_is_unpriced(f):
     hook("legacy", "completed", {"input_tokens": 400_000, "output_tokens": 200})
     assert db.query_one("SELECT cost_usd FROM api_usage")["cost_usd"] is None
     assert db.query_one("SELECT est_cost_usd FROM ai_batches")["est_cost_usd"] is None
+
+
+def test_replay_with_new_cache_write_metadata_does_not_recharge(f):
+    task_id = f.make_task("extract_comp", {})
+    hook = runtime.batch_event_hook(task_id, "comp", "gpt-5.6-luna")
+    hook("old-image", "submitted", {"requests": 1})
+    hook(
+        "old-image",
+        "completed",
+        {"input_tokens": 1000, "output_tokens": 10, "cache_write_tokens": None},
+    )
+    before = db.query_one(
+        "SELECT input_tokens, output_tokens, cache_write_tokens, est_cost_usd "
+        "FROM ai_batches WHERE provider_batch_id = 'old-image'"
+    )
+    assert before == {
+        "input_tokens": 1000,
+        "output_tokens": 10,
+        "cache_write_tokens": None,
+        "est_cost_usd": None,
+    }
+    assert db.query_one("SELECT count(*) AS n FROM api_usage")["n"] == 1
+
+    # A newer image has the same provider snapshot plus the write count. It
+    # may enrich ai_batches, but it must not create another spend row or
+    # replace the historical estimate.
+    hook(
+        "old-image",
+        "completed",
+        {"input_tokens": 1000, "output_tokens": 10, "cache_write_tokens": 400},
+    )
+    after = db.query_one(
+        "SELECT input_tokens, output_tokens, cache_write_tokens, est_cost_usd "
+        "FROM ai_batches WHERE provider_batch_id = 'old-image'"
+    )
+    assert after == {
+        "input_tokens": 1000,
+        "output_tokens": 10,
+        "cache_write_tokens": 400,
+        "est_cost_usd": None,
+    }
+    assert db.query_one("SELECT count(*) AS n FROM api_usage")["n"] == 1
 
 
 def test_tier_selection_is_per_request_even_without_cache(f):

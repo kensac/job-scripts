@@ -12,7 +12,7 @@ import pytest
 
 from api import db
 from api import experiments as exp
-from core import answers
+from core import answers, pricing
 from core.answers import VERIFY_INPUT_CHARS
 from core.comp import COMP_INPUT_CHARS
 from tasks import comp as task_comp
@@ -205,6 +205,10 @@ async def test_a_filter_experiment_submits_one_batch_per_arm_and_scores_each(
                         usage={
                             "input_tokens": 1000,
                             "output_tokens": output_tokens,
+                            "input_tokens_details": {
+                                "cached_tokens": 300,
+                                "cache_write_tokens": 400,
+                            },
                             "output_tokens_details": {"reasoning_tokens": reasoning},
                         },
                     )
@@ -236,6 +240,22 @@ async def test_a_filter_experiment_submits_one_batch_per_arm_and_scores_each(
         "SELECT count(*) AS n, sum(total_tokens) AS t FROM api_usage WHERE purpose = 'experiment'"
     )
     assert usage["n"] == 2 and usage["t"] == 8 * 1000 + 4 * 500 + 4 * 100
+    receipts = db.query(
+        "SELECT arm, usage, cost_usd FROM ai_experiment_results WHERE experiment_id = %s",
+        (eid,),
+    )
+    for receipt in receipts:
+        model = receipt["arm"].split("@", 1)[0]
+        assert receipt["usage"]["cached_tokens"] == 300
+        assert receipt["usage"]["cache_write_tokens"] == 400
+        assert receipt["cost_usd"] == pricing.estimate_cost_usd(
+            model,
+            1000,
+            500 if model == "gpt-5-nano" else 100,
+            cached_tokens=300,
+            cache_write_tokens=400,
+            batched=True,
+        )
     # The listing carries what a form needs: the steps, each chat model
     # with the efforts it accepts, and every filter the filter step can name.
     listing = client.get("/v1/admin/experiments", headers=admin_headers).json()

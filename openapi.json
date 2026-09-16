@@ -35309,6 +35309,10 @@
             "type": "integer",
             "title": "Rejected"
           },
+          "unpriced_queries": {
+            "type": "integer",
+            "title": "Unpriced Queries"
+          },
           "prompt_tokens": {
             "type": "integer",
             "title": "Prompt Tokens"
@@ -35347,6 +35351,7 @@
           "queries",
           "failed",
           "rejected",
+          "unpriced_queries",
           "prompt_tokens",
           "completion_tokens",
           "cached_tokens",
@@ -39786,6 +39791,10 @@
             "type": "integer",
             "title": "Queries"
           },
+          "unpriced_queries": {
+            "type": "integer",
+            "title": "Unpriced Queries"
+          },
           "prompt_tokens": {
             "type": "integer",
             "title": "Prompt Tokens"
@@ -39825,6 +39834,7 @@
         "type": "object",
         "required": [
           "queries",
+          "unpriced_queries",
           "prompt_tokens",
           "completion_tokens",
           "cached_tokens",
@@ -42140,6 +42150,10 @@
             "type": "integer",
             "title": "Queries"
           },
+          "unpriced_queries": {
+            "type": "integer",
+            "title": "Unpriced Queries"
+          },
           "prompt_tokens": {
             "type": "integer",
             "title": "Prompt Tokens"
@@ -42195,6 +42209,7 @@
         "required": [
           "model",
           "queries",
+          "unpriced_queries",
           "prompt_tokens",
           "completion_tokens",
           "cached_tokens",

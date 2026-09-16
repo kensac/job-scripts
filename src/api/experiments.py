@@ -180,11 +180,18 @@ def sample(n: int, seed: str) -> list[dict[str, Any]]:
     )
 
 
-def usage(res: Any) -> dict[str, int]:
+def usage(res: Any) -> dict[str, int | None]:
     u = res.usage or {}
+    input_details = u.get("input_tokens_details") or {}
     return {
         "input_tokens": u.get("input_tokens", 0),
         "output_tokens": u.get("output_tokens", 0),
+        "cached_tokens": input_details.get("cached_tokens", 0) or 0,
+        "cache_write_tokens": (
+            input_details.get("cache_write_tokens")
+            if "cache_write_tokens" in input_details
+            else None
+        ),
         "reasoning_tokens": (u.get("output_tokens_details") or {}).get("reasoning_tokens", 0),
     }
 
