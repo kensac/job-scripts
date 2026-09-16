@@ -155,6 +155,8 @@ def batch_event_hook(
             # Provider totals are snapshots. Recollecting unchanged input and
             # output totals must not append another ledger entry, even when a
             # mixed-version rollout discovers cache-write metadata later.
+            # An earlier audit found 92 ordinary two-attempt resumes and no
+            # three-attempt recollections, but the boundary remains required.
             written = db.execute_count(
                 "UPDATE ai_batches SET input_tokens = %s, output_tokens = %s, "
                 "cache_write_tokens = %s, "

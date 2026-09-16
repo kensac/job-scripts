@@ -18,6 +18,30 @@ def test_batch_without_usage_keeps_cache_write_unknown():
     assert events[0][2]["cache_write_tokens"] is None
 
 
+def test_batch_mixed_usage_keeps_cache_write_unknown():
+    events = []
+    batch._emit_usage(
+        lambda *event: events.append(event),
+        "mixed",
+        "completed",
+        {
+            "known": batch.BatchResult(
+                "known",
+                usage={
+                    "input_tokens": 100,
+                    "output_tokens": 10,
+                    "input_tokens_details": {
+                        "cached_tokens": 0,
+                        "cache_write_tokens": 50,
+                    },
+                },
+            ),
+            "missing": batch.BatchResult("missing", usage=None),
+        },
+    )
+    assert events[0][2]["cache_write_tokens"] is None
+
+
 @pytest.mark.parametrize("model", ["gpt-5-mini", "grok-4.3", "unknown-model"])
 def test_fleet_batch_preserves_cache_and_prices_each_request(f, model):
     task_id = f.make_task("extract_comp", {})
