@@ -345,11 +345,12 @@ def summarise(experiment_id: int) -> dict[str, Any]:
     reference_reason = "cost_incomplete" if incomplete_costs and not explicit_reference else None
     for arm, a in by_arm.items():
         n = a["n"] or 1
-        a["known_cost_usd"] = round(a["known_cost_usd"], 4)
-        a["cost_usd"] = None if a["unpriced_results"] else a["known_cost_usd"]
+        known_cost = a["known_cost_usd"]
         a["cost_per_100_usd"] = (
-            round(a["known_cost_usd"] / n * 100, 4) if a["unpriced_results"] == 0 else None
+            round(known_cost / n * 100, 4) if a["unpriced_results"] == 0 else None
         )
+        a["known_cost_usd"] = round(known_cost, 4)
+        a["cost_usd"] = None if a["unpriced_results"] else a["known_cost_usd"]
         a["input_per_request"] = round(a["input_tokens"] / n)
         a["output_per_request"] = round(a["output_tokens"] / n)
         a["reasoning_per_request"] = round(a["reasoning_tokens"] / n)

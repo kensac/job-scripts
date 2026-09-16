@@ -398,3 +398,23 @@ def test_experiment_summary_keeps_missing_cache_write_cost_unpriced():
     assert arm["cost_usd"] is None and arm["cost_per_100_usd"] is None
     assert summary["reference"] is None
     assert summary["reference_reason"] == "cost_incomplete"
+
+
+def test_experiment_summary_scales_cost_before_display_rounding():
+    params = {
+        "sampled": 1,
+        "arms": [{"model": "gpt-5.6-luna", "effort": "low"}],
+    }
+    experiment = db.query_one(
+        "INSERT INTO ai_experiments(purpose,params) VALUES ('verify',%s) RETURNING id",
+        (db.jsonb(params),),
+    )["id"]
+    db.execute(
+        "INSERT INTO ai_experiment_results(experiment_id,arm,url,cost_usd,error) "
+        "VALUES (%s,'gpt-5.6-luna@low','https://example.test/small-cost',0.00009,'ok')",
+        (experiment,),
+    )
+    arm = exp.summarise(experiment)["arms"]["gpt-5.6-luna@low"]
+    assert arm["known_cost_usd"] == 0.0001
+    assert arm["cost_usd"] == 0.0001
+    assert arm["cost_per_100_usd"] == 0.009
