@@ -9,6 +9,7 @@ from typing import Any
 
 from api import db
 from api.ai import batch_results
+from api.board import visibility
 from api.task_admission import ACTIVE_STATUSES
 from core.batch import BatchSpec
 from core.embeddings import (
@@ -45,34 +46,34 @@ EMBED_POSTINGS_PER_CYCLE = int(os.environ.get("JOBTRACKER_EMBED_POSTINGS_PER_CYC
 # Postings never embedded, plus postings whose page has been scraped again
 # since they were. Same shape as the requirements sweep, for the same reason.
 #
-# Scoped to postings a person can reach. This sweep started from every url
-# with an ai_queries row, so a job kept being re-read for as long as it
-# existed, whether or not anyone had enabled its board.
+# The legacy scope below is the subscribed working set, not actual visibility.
+# It remains available as a reversible rollout option. The default scope uses
+# the personal similarity reader's membership, including ownership exceptions.
 #
-# A url with NO job row stays in, and the LEFT JOIN is what keeps it. This
-# sweep is url-keyed on purpose: a fifth of the corpus is postings whose job
-# row is gone and whose page can never be scraped again, and joining `jobs`
-# to reach the gate would have dropped every one of them silently. An orphan
-# has no source to judge, so the gate has nothing to say about it.
+# The legacy LEFT JOIN preserves orphan URLs: historically a fifth of the
+# corpus had no job row. New visible-only purchases exclude these because no
+# similarity route can address them. Existing vectors and paid receipts remain.
 #
-# The change check runs over the whole corpus every cycle, so it must not
-# detoast it: the first stage takes only the id of each url's current content
-# row, which is an index read, and compares it to the id the stored answer came
-# from. Only the survivors of that - and only up to the cap - have their text
-# fetched. Getting this the other way round would read 110 MB an hour to learn
-# that nothing changed.
+# The first stage projects only the current content ID and compares it with
+# stored provenance before returning text for capped survivors. This limits
+# returned text, not database detoasting: CONTENT_LATERAL's length predicate
+# still inspects historical text. Do not claim an index-only scan here.
 #
 # `stored_hash` rides along so the handler can tell a re-scrape that changed the
 # page from one that did not. An identical re-scrape refreshes the id and pays
 # for nothing.
-_CANDIDATES = f"""
+_LEGACY_SCOPE = f"""
+    SELECT DISTINCT a.url FROM ai_queries a
+    LEFT JOIN jobs j ON j.url = a.url
+    WHERE j.url IS NULL OR {AI_ELIGIBLE_JOB.format(job="j")}
+"""
+
+
+def _candidate_sql(scope: str) -> str:
+    return f"""
     WITH current_row AS (
         SELECT c.url, q.content_row_id
-        FROM (
-            SELECT DISTINCT a.url FROM ai_queries a
-            LEFT JOIN jobs j ON j.url = a.url
-            WHERE j.url IS NULL OR {AI_ELIGIBLE_JOB.format(job="j")}
-        ) c
+        FROM ({scope}) c
         {CONTENT_LATERAL.format(url="c.url", columns="id AS content_row_id")}
     ),
     todo AS (
@@ -87,6 +88,10 @@ _CANDIDATES = f"""
     FROM todo t
     {CONTENT_LATERAL.format(url="t.url", columns="input_content")}
 """
+
+
+_CANDIDATES = _candidate_sql(_LEGACY_SCOPE)
+_VISIBLE_CANDIDATES = _candidate_sql(visibility.across_users("j.url"))
 
 
 def _store(rows: list[dict[str, Any]]) -> int:
@@ -140,7 +145,12 @@ async def handle_embed_postings_batch(task_id: int, payload: dict[str, Any]) -> 
             set_progress(task_id, 0, 0, f"embedding task {earlier['id']} is still in flight")
             return
         candidates = rescrape.drop_unchanged(
-            db.query(_CANDIDATES, {"cap": EMBED_POSTINGS_PER_CYCLE}),
+            db.query(
+                _VISIBLE_CANDIDATES
+                if db.get_config("embedding_visible_only", True)
+                else _CANDIDATES,
+                {"cap": EMBED_POSTINGS_PER_CYCLE},
+            ),
             table="job_embeddings",
             limit=EMBEDDING_INPUT_CHARS,
         )

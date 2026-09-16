@@ -32,6 +32,9 @@ from api.queue import enqueue
 
 logger = logging.getLogger(__name__)
 
+_ACTED_ON = """(COALESCE(uj.status, '') <> '' OR COALESCE(uj.notes, '') <> ''
+               OR uj.date_applied IS NOT NULL)"""
+
 FULL = f"""
 WITH enabled_filters AS (
     {board_eligibility.ENABLED_FILTERS}
@@ -68,9 +71,7 @@ WHERE (
     -- kept postings the filter had since rejected on 2026-09-07, when the
     -- untouched branch re-checked the criteria and nothing else, so a
     -- re-judgement on a new model could not remove what the old one let in).
-    OR (uj.user_id IS NOT NULL
-        AND (COALESCE(uj.status, '') <> '' OR COALESCE(uj.notes, '') <> ''
-             OR uj.date_applied IS NOT NULL))
+    OR (uj.user_id IS NOT NULL AND {_ACTED_ON})
     OR (
         {board_eligibility.STRUCTURAL}
         AND {board_eligibility.SUBSCRIBED}
@@ -82,19 +83,34 @@ WHERE (
 {{extra}}
 """
 
-FAST = """
-SELECT {columns}
+FAST = f"""
+SELECT {{columns}}
 FROM jobs j
 LEFT JOIN user_jobs uj ON uj.job_id = j.id AND uj.user_id = %(uid)s
 WHERE (
     j.uploaded_by = %(uid)s
-    OR (uj.user_id IS NOT NULL
-        AND (COALESCE(uj.status, '') <> '' OR COALESCE(uj.notes, '') <> ''
-             OR uj.date_applied IS NOT NULL))
+    OR (uj.user_id IS NOT NULL AND {_ACTED_ON})
     OR EXISTS (SELECT 1 FROM board_visible bv WHERE bv.user_id = %(uid)s AND bv.job_id = j.id)
 )
-{extra}
+{{extra}}
 """
+
+
+def across_users(columns: str) -> str:
+    """Existential projection of FAST for enrichment consumers.
+
+    Enumerating FAST once per user exceeds the sweep's bounded query budget.
+    Union its three membership branches instead, sharing the acted-on rule.
+    Tests compare this projection with the actual per-user read. Columns are
+    internal SQL only, never request parameters.
+    """
+    return f"""
+        SELECT {columns} FROM jobs j JOIN (
+            SELECT job_id FROM board_visible
+            UNION SELECT id FROM jobs WHERE uploaded_by IS NOT NULL
+            UNION SELECT uj.job_id FROM user_jobs uj WHERE {_ACTED_ON}
+        ) visible_ids ON visible_ids.job_id=j.id
+    """
 
 
 def member_ids(user_id: int) -> list[int]:
