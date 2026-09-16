@@ -174,7 +174,7 @@ def batch_event_hook(
                     "UPDATE ai_batches SET cache_write_tokens = %s, updated_at = now() "
                     "WHERE provider_batch_id = %s "
                     "AND (input_tokens, output_tokens) IS NOT DISTINCT FROM (%s, %s) "
-                    "AND cache_write_tokens IS NULL AND %s IS NOT NULL",
+                    "AND cache_write_tokens IS NULL AND %s::bigint IS NOT NULL",
                     (cache_write, batch_id, inp, out, cache_write),
                 )
                 return

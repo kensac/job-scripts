@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import FrozenInstanceError
+from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
@@ -248,7 +249,7 @@ async def test_a_filter_experiment_submits_one_batch_per_arm_and_scores_each(
         model = receipt["arm"].split("@", 1)[0]
         assert receipt["usage"]["cached_tokens"] == 300
         assert receipt["usage"]["cache_write_tokens"] == 400
-        assert receipt["cost_usd"] == pricing.estimate_cost_usd(
+        expected_cost = pricing.estimate_cost_usd(
             model,
             1000,
             500 if model == "gpt-5-nano" else 100,
@@ -256,6 +257,7 @@ async def test_a_filter_experiment_submits_one_batch_per_arm_and_scores_each(
             cache_write_tokens=400,
             batched=True,
         )
+        assert receipt["cost_usd"] == expected_cost.quantize(Decimal("0.000001"))
     # The listing carries what a form needs: the steps, each chat model
     # with the efforts it accepts, and every filter the filter step can name.
     listing = client.get("/v1/admin/experiments", headers=admin_headers).json()
