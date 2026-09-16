@@ -436,6 +436,14 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
         help="Missing application answers the hourly sweep drafts per person per cycle, in one "
         "half-price batch; about $0.0005 each on the sanctioned model.",
     ),
+    "job_profile_collection_enabled": ConfigKey(
+        section="Catalog",
+        default=True,
+        value_type=bool,
+        help="Collect new shared job profiles. Turning this off pauses scheduled, manual, "
+        "and queued work before submission. Existing profiles stay available and submitted "
+        "batches still finish. Turning it back on resumes collection of eligible postings.",
+    ),
     # Whether the hourly requirements extraction runs. Off since 2026-09-07:
     # its one consumer is the market table, and the deployed arm was measured
     # at a third of the reference's skills with seniority mostly blank. Turn

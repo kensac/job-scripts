@@ -59,6 +59,9 @@ def _store(url: str, context: dict[str, Any], answer: JobProfileAnswer, model: s
 
 async def handle_classify_job_profiles(task_id: int, payload: dict[str, Any]) -> None:
     resumed = has_batch_work(task_id)
+    if not resumed and not db.get_config("job_profile_collection_enabled"):
+        set_progress(task_id, 0, 0, "profile collection paused")
+        return
     rows = [] if resumed else job_profile_derivation.candidates(JOB_PROFILE_TASK.per_cycle)
     specs = [
         structured_response_spec(
@@ -77,6 +80,11 @@ async def handle_classify_job_profiles(task_id: int, payload: dict[str, Any]) ->
     ]
     if not specs and not resumed:
         set_progress(task_id, 0, 0, "nothing to classify")
+        return
+    # Selection can outlive an admin changing the switch. Check again at
+    # handoff; paid work bypasses both gates so collection remains reachable.
+    if not resumed and not db.get_config("job_profile_collection_enabled"):
+        set_progress(task_id, 0, 0, "profile collection paused")
         return
     set_progress(task_id, 0, len(specs), "job profile batch")
     results, chosen = await run_batched(
