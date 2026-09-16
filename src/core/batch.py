@@ -14,7 +14,7 @@ from openai.lib._pydantic import to_strict_json_schema
 from openai.types import Batch
 from pydantic import BaseModel
 
-from core import pricing, store
+from core import pricing, providers, store
 
 
 class BatchEventCounts(TypedDict, total=False):
@@ -184,6 +184,16 @@ def _build_line(spec: BatchSpec, model: str, reasoning_effort: str, max_output_t
         }
     if spec.endpoint != "/v1/responses":
         raise ValueError(f"unsupported batch endpoint: {spec.endpoint}")
+    cache_options = {}
+    cache_policy = (spec.context or {}).get("prompt_cache_policy")
+    if cache_policy is not None:
+        known = providers.model(model)
+        if cache_policy != "no_cache" or not known or not known.supports_explicit_prompt_cache:
+            raise ValueError("unsupported prompt cache policy for this model")
+        # No explicit breakpoints means no cache reads or writes. The policy
+        # rides the immutable request context so legacy receipt readers still
+        # accept its snapshot during a rolling deployment.
+        cache_options = {"prompt_cache_options": {"mode": "explicit"}}
     return {
         "custom_id": spec.custom_id,
         "method": "POST",
@@ -191,6 +201,7 @@ def _build_line(spec: BatchSpec, model: str, reasoning_effort: str, max_output_t
         "body": {
             "model": model,
             "instructions": spec.instructions,
+            **cache_options,
             "input": spec.input,
             "reasoning": {"effort": reasoning_effort},
             "max_output_tokens": max_output_tokens,

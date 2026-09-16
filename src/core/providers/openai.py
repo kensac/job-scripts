@@ -156,6 +156,8 @@ PROVIDER = Provider(
             rates=_rates("0.20", "1.20", "0.020"),
             reasoning=_5_6_GEN,
             output=_OUTPUT,
+            # https://developers.openai.com/api/docs/guides/prompt-caching
+            supports_explicit_prompt_cache=True,
         ),
         Model(
             name="gpt-5.6-terra",

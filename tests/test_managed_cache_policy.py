@@ -26,6 +26,8 @@ def test_explicit_cache_policy_preserves_request_and_frozen_snapshot(f):
     after = batch._build_line(replay, "gpt-5.6-luna", "medium", 6000)
     assert after["body"].pop("prompt_cache_options") == {"mode": "explicit"}
     assert after == before
+    with pytest.raises(ValueError, match="unsupported prompt cache policy"):
+        batch._build_line(replay, "gpt-5-nano", "low", 6000)
 
 
 @pytest.mark.asyncio

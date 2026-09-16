@@ -463,6 +463,16 @@ usage remains an approximate equal share, and absent provider usage is NULL.
 
 ## Scheduled filter transport
 
+`managed_board_cache_writes_enabled` controls provider caching on newly built
+managed-board review requests whose model datasheet explicitly supports it.
+When disabled, explicit-only mode with no breakpoints disables reads as well
+as writes. Personal filters keep default caching, since their reusable prefix
+may be valuable. The policy lives in immutable request context, not the
+criteria hash: rollback does not invalidate verdicts or resubmit paid work.
+Legacy snapshot readers accept the context during rollout; verify active
+workers have the new transport before measuring adoption. A cache setting
+does not guarantee identical sampled outputs or a particular saving.
+
 Scheduled filter admission persists `scheduled=true`; older `batched=true`
 parents retain the same meaning for their child chunks. Missing content is
 fetched before submission, never used as a reason to make a live model call.
