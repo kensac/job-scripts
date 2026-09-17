@@ -228,6 +228,12 @@ def test_spend_coverage_separates_unpriced_calls_from_free_ones(client, admin_he
     quietly understates the board's bill."""
     f.make_source("uncosted")
     _, url = f.make_ready_job(source="uncosted")
+    # This fixture represents two explicitly free checks, not missing usage.
+    db.execute(
+        "UPDATE ai_queries SET prompt_tokens=0, completion_tokens=0, cost_usd=0 "
+        "WHERE url=%s AND check_type IN ('closed','clearance')",
+        (url,),
+    )
     db.execute(
         "UPDATE ai_queries SET model = NULL, cost_usd = NULL "
         "WHERE url = %s AND check_type = 'content'",

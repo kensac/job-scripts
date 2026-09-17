@@ -27,7 +27,7 @@ async def test_identity_neutral_live_adapter_has_no_person_state_effects(f, monk
     progress_events = []
     completions = []
 
-    async def checked(cfg, candidate, content, received_snapshot, label):
+    async def checked(cfg, candidate, content, received_snapshot, label, decision_id=None):
         assert cfg.model == "gpt-5.6-luna"
         assert candidate == job
         assert content == "prepared posting"
@@ -49,7 +49,7 @@ async def test_identity_neutral_live_adapter_has_no_person_state_effects(f, monk
     )
 
     await filter_execution.execute_live(
-        987,
+        f.make_task("run_managed_board"),
         ai.AIConfig("openai", "test-key", "owner", "gpt-5.6-luna"),
         snapshot,
         [job],
@@ -68,10 +68,10 @@ async def test_identity_neutral_live_adapter_has_no_person_state_effects(f, monk
 
 
 @pytest.mark.asyncio
-async def test_frozen_content_never_refetches_or_reads_a_later_page(monkeypatch):
+async def test_frozen_content_never_refetches_or_reads_a_later_page(f, monkeypatch):
     seen = []
 
-    async def checked(cfg, candidate, content, snapshot, label):
+    async def checked(cfg, candidate, content, snapshot, label, decision_id=None):
         seen.append(content)
         return None
 
@@ -94,7 +94,7 @@ async def test_frozen_content_never_refetches_or_reads_a_later_page(monkeypatch)
     snapshot = filter_execution.FilterSnapshot("managed", "prompt", "filter", "hash")
 
     await filter_execution.execute_live(
-        1,
+        f.make_task("run_managed_board"),
         ai.AIConfig("openai", "key", "owner", "gpt-5.6-luna"),
         snapshot,
         [{"url": "https://job", "company": "C", "title": "T", "content": "frozen"}],

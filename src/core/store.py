@@ -81,7 +81,7 @@ def add_ai_result(
     config_name: str | None = None,
     batch_id: str | None = None,
     cache_write_tokens: int | None = None,
-) -> None:
+) -> int:
     row = {
         # created_at is DELIBERATELY ABSENT: the column defaults to Postgres
         # now(), and letting the database supply it is what keeps every
@@ -121,13 +121,17 @@ def add_ai_result(
         # Priced at write time, not read time: the rate table changes, and a
         # verdict's cost is what it cost when it ran. batch_id is the only
         # signal that this went through the half-price Batch API.
-        "cost_usd": pricing.estimate_cost_usd(
-            model,
-            prompt_tokens,
-            completion_tokens,
-            cached_tokens=cached_tokens,
-            cache_write_tokens=cache_write_tokens,
-            batched=batch_id is not None,
+        "cost_usd": (
+            pricing.estimate_cost_usd(
+                model,
+                prompt_tokens,
+                completion_tokens,
+                cached_tokens=cached_tokens,
+                cache_write_tokens=cache_write_tokens,
+                batched=batch_id is not None,
+            )
+            if prompt_tokens is not None and completion_tokens is not None
+            else None
         ),
         "worker": _WORKER,
         "batch_id": batch_id,
@@ -135,7 +139,12 @@ def add_ai_result(
     columns = ", ".join(_INSERT_COLUMNS)
     placeholders = ", ".join(f"%({c})s" for c in _INSERT_COLUMNS)
     with connection() as conn:
-        conn.execute(_as_query(f"INSERT INTO ai_queries ({columns}) VALUES ({placeholders})"), row)
+        inserted = conn.execute(
+            _as_query(f"INSERT INTO ai_queries ({columns}) VALUES ({placeholders}) RETURNING id"),
+            row,
+        ).fetchone()
+        assert inserted is not None
+        return inserted["id"]
 
 
 def get_custom_result(

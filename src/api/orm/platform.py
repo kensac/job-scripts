@@ -40,6 +40,21 @@ class AppConfig(Base):
     value: Mapped[Any] = mapped_column(JSONB)
 
 
+class AppConfigChange(Base):
+    __tablename__ = "app_config_changes"
+    __table_args__ = (Index("idx_app_config_changes_key_id", "key", "id"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
+    key: Mapped[str] = mapped_column(Text)
+    old_value: Mapped[Any | None] = mapped_column(JSONB)
+    new_value: Mapped[Any] = mapped_column(JSONB)
+    old_value_present: Mapped[bool] = mapped_column(Boolean)
+    # No cascading foreign key: deleting an account must not rewrite who
+    # changed configuration. Identity is retained without profile data.
+    actor_user_id: Mapped[int] = mapped_column(BigInteger)
+    created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+
+
 class GroupBudget(Base):
     __tablename__ = "group_budgets"
 

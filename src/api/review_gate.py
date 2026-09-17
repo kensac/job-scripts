@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import logging
 from collections import Counter
+from collections.abc import Callable
 from typing import Any
 
-from api import db
+from api import db, review_gate_records
 from core.job_profile import (
     CLASSIFIER_VERSION,
     JOB_PROFILE_INSTRUCTIONS,
@@ -94,10 +95,31 @@ def partition(
     prompt_hash: str,
     jobs: list[dict[str, Any]],
     contents: dict[str, str] | None,
+    *,
+    model: str | None = None,
+    transport: str | None = None,
+    observe: Callable[[list[dict[str, Any]]], dict[str, Any]] | None = None,
+    filter_id: int | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
-    policy = load_policy()
+    # An admission is a fact. Configuration edits only affect a new run.
+    stored = review_gate_records.existing(task_id)
+    if any(row["prompt_hash"] != prompt_hash for row in stored.values()):
+        raise RuntimeError("Review gate prompt changed within an immutable run")
+    for job in jobs:
+        old = stored.get(job["url"])
+        if old:
+            review_gate_records.validate_input(old, job, prompt_hash, contents, model, transport)
+    if stored and all(job["url"] in stored for job in jobs):
+        decisions = {job["url"]: review_gate_records.decision(stored[job["url"]]) for job in jobs}
+        return [job for job in jobs if not decisions[job["url"]]["skip"]], decisions
+    policy = (
+        ReviewGatePolicy.model_validate(next(iter(stored.values()))["policy"])
+        if stored
+        else load_policy()
+    )
     scope = policy.scopes.get(prompt_hash)
     decisions: dict[str, dict[str, Any]] = {}
+    profiles = {}
     if scope is not None:
         profiles = {}
         if policy.profile_mode != "off" and scope.profile_recipe:
@@ -135,6 +157,7 @@ def partition(
                 "profile_id": evidence[0] if evidence else None,
             }
     skipped = {url: decision for url, decision in decisions.items() if decision["skip"]}
+    observations = observe([job for job in jobs if job["url"] not in skipped]) if observe else {}
     report = {
         "version": "review-gate-v1",
         "prompt_hash": prompt_hash,
@@ -149,10 +172,36 @@ def partition(
     }
     # Failure to persist provenance aborts before any requests are submitted.
     # Replace, never increment: retries cannot inflate the funnel.
-    db.execute(
-        "UPDATE tasks SET payload=jsonb_set(payload,'{review_gate}',%s) WHERE id=%s",
-        (db.jsonb(report), task_id),
-    )
+    with db.transaction():
+        persisted = review_gate_records.persist(
+            task_id,
+            prompt_hash,
+            jobs,
+            contents,
+            decisions,
+            policy.model_dump(mode="json"),
+            profiles,
+            model=model,
+            transport=transport,
+            observations=observations,
+            filter_id=filter_id,
+        )
+        decisions = {url: review_gate_records.decision(row) for url, row in persisted.items()}
+        skipped = {url: value for url, value in decisions.items() if value["skip"]}
+        report["skipped"] = skipped
+        report["policy"] = (
+            next(iter(persisted.values()))["policy"] if persisted else report["policy"]
+        )
+        report["candidates"] = len(decisions)
+        report["detailed"] = len(decisions) - len(skipped)
+        report["profile_proven"] = sum(d["profile_id"] is not None for d in decisions.values())
+        report["would_reject"] = dict(
+            Counter(d["stage"] for d in decisions.values() if d["stage"] != "detailed")
+        )
+        db.execute(
+            "UPDATE tasks SET payload=jsonb_set(payload,'{review_gate}',%s) WHERE id=%s",
+            (db.jsonb(report), task_id),
+        )
     return [job for job in jobs if job["url"] not in skipped], decisions
 
 

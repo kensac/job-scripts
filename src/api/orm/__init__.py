@@ -66,6 +66,7 @@ from api.orm.mail import (
 from api.orm.managed_boards import ManagedBoard, ManagedBoardJob, ManagedBoardSource
 from api.orm.platform import (
     AppConfig,
+    AppConfigChange,
     GroupBudget,
     HealthAlert,
     HostBudget,
@@ -76,6 +77,7 @@ from api.orm.platform import (
     UserSettings,
     WorkerStatus,
 )
+from api.orm.review_gate import ReviewGateDecision, ReviewGateOutcome
 
 __all__ = [
     "ActionItem",
@@ -88,6 +90,7 @@ __all__ = [
     "AiQuery",
     "ApiUsage",
     "AppConfig",
+    "AppConfigChange",
     "Application",
     "ApplicationAnswer",
     "ApplicationAnswerBank",
@@ -118,6 +121,8 @@ __all__ = [
     "ManagedBoardJob",
     "ManagedBoardSource",
     "Report",
+    "ReviewGateDecision",
+    "ReviewGateOutcome",
     "SavedView",
     "Source",
     "SourceGroup",

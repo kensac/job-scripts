@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from api import db, pagination, scoping, sorting
 from api import params as params_
 from api.auth import AuthedUser
+from api.review_gate_reads import ReviewDecisions, read_decisions
 from api.routers.admin.shared import require_admin
 from core import reason_taxonomy
 
@@ -557,6 +558,7 @@ class TimelineEntry(BaseModel):
 
 class PostingTimeline(BaseModel):
     rows: list[TimelineEntry]
+    decisions: ReviewDecisions
 
 
 @router.get("/jobs/timeline")
@@ -568,7 +570,13 @@ def job_timeline(url: str, user: AuthedUser = Depends(require_admin)) -> Posting
             "total_tokens, duration_ms, error "
             "FROM ai_queries WHERE url = %s ORDER BY id ASC",
             (url,),
-        )
+        ),
+        decisions=read_decisions(
+            "d.url=%(url)s",
+            {"url": url},
+            pagination.Page.from_params(1, 25, maximum=100),
+            {"url": [url]},
+        ),
     )
 
 
