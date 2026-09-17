@@ -106,6 +106,23 @@ clear the location/date constraints, but the non-admin age limit still applies.
 A null model removes the saved choice; read the returned effective model and
 availability rather than assuming which model will run.
 
+Admin config saves append `app_config_changes` in the same transaction as the
+current value. `GET /admin/config/history` pages newest-first by `before_id`,
+optionally filtered by `key`. A repeated effective stored value is a no-op;
+`old_value_present=false` means no row existed, not that its default was null.
+History begins with writes through this API after deployment. Seeding and
+direct database edits have no recorded actor and are not reconstructed.
+
+`GET /admin/config/filter-scopes` serves current personal filter and managed
+filter names, exact prompt hashes, current activity and managed revisions.
+It excludes sponsor-reuse boards because they do not own an independent
+filter. Recipes are served from the validated review-gate vocabulary. Scope
+opt-in is still an exact prompt hash, so multiple named filters may share it
+and a prompt edit does not silently opt the new revision in. Show unmatched
+saved hashes rather than deleting them. These controls and their history are
+administrator-only; personal surfaces explain decisions without exposing
+other people's filter names or global policy editing.
+
 The implementations are `SettingsPut` and `FilterPatch` in `api/models.py`,
 `put_settings` in `api/routers/users.py`, and the request models and writers in
 `api/routers/views.py` and `api/routers/apply.py`. Filter and view updates share
