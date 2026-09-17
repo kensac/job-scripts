@@ -114,3 +114,31 @@ def test_timeline_exposes_gate_only_history_and_missing_outcomes(client, admin_h
     row = next(row for row in report["rows"] if row["action"] == "review")
     assert row["without_recorded_outcome"] == 1
     assert row["actual_cost_usd"] is None
+
+
+def test_report_drilldown_keeps_exact_window_and_mode(client, admin_headers):
+    decision(action="skip", mode="enforce", stage="title")
+    decision(task=2, mode="shadow", stage="title")
+    decision(task=3, mode="enforce", stage="title", age=10)
+    report = client.get("/v1/admin/review-gates/report?days=7", headers=admin_headers).json()
+    selected = client.get(
+        "/v1/admin/review-gates/decisions",
+        params={
+            "stage": "title",
+            "mode": "enforce",
+            "action": "skip",
+            "window_start": report["window_start"],
+            "window_end": report["window_end"],
+        },
+        headers=admin_headers,
+    )
+    assert selected.status_code == 200, selected.text
+    assert selected.json()["total"] == 1
+    assert (
+        client.get(
+            "/v1/admin/review-gates/decisions",
+            params={"window_start": report["window_start"]},
+            headers=admin_headers,
+        ).status_code
+        == 400
+    )

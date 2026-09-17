@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import datetime
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from api import db, pagination, params
@@ -20,6 +20,7 @@ def selection(
     url: str | None = None,
     prompt_hash: str | None = None,
     stage: str | None = None,
+    mode: str | None = None,
     action: str | None = None,
     user: str | None = None,
     managed_board_id: int | None = None,
@@ -29,6 +30,7 @@ def selection(
         "url": url,
         "prompt_hash": prompt_hash,
         "stage": stage,
+        "mode": mode,
         "action": action,
     }.items():
         if value is not None:
@@ -52,21 +54,46 @@ def decisions(
     url: str | None = None,
     prompt_hash: str | None = None,
     stage: str | None = None,
+    mode: str | None = None,
     action: str | None = None,
     user: str | None = None,
     managed_board_id: int | None = Query(None, ge=1),
     page: int = Query(1, ge=1),
     page_size: int = Query(25, ge=1, le=100),
+    window_start: datetime.datetime | None = None,
+    window_end: datetime.datetime | None = None,
     admin: AuthedUser = Depends(require_admin),
 ) -> ReviewDecisions:
     where, values, filters = selection(
         url=url,
         prompt_hash=prompt_hash,
         stage=stage,
+        mode=mode,
         action=action,
         user=user,
         managed_board_id=managed_board_id,
     )
+    if (window_start is None) != (window_end is None) or (
+        window_start is not None
+        and window_end is not None
+        and (
+            window_start.tzinfo is None
+            or window_end.tzinfo is None
+            or window_start >= window_end
+            or window_end - window_start > datetime.timedelta(days=90)
+        )
+    ):
+        raise HTTPException(
+            400,
+            detail={
+                "code": "INVALID_WINDOW",
+                "message": "Supply both timezone-aware bounds, increasing and at most 90 days apart.",
+            },
+        )
+    if window_start is not None and window_end is not None:
+        where += " AND d.created_at >= %(start)s AND d.created_at < %(end)s"
+        values.update(start=window_start, end=window_end)
+        filters.update(window_start=[window_start.isoformat()], window_end=[window_end.isoformat()])
     return read_decisions(
         where, values, pagination.Page.from_params(page, page_size, maximum=100), filters
     )

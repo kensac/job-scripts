@@ -98,5 +98,15 @@ def read_decisions(
         filters=filters,
         filterable=[]
         if personal
-        else ["url", "prompt_hash", "stage", "action", "user", "managed_board_id"],
+        else [
+            "url",
+            "prompt_hash",
+            "stage",
+            "mode",
+            "action",
+            "user",
+            "managed_board_id",
+            "window_start",
+            "window_end",
+        ],
     )
