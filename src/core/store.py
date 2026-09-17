@@ -136,7 +136,8 @@ def add_ai_result(
     placeholders = ", ".join(f"%({c})s" for c in _INSERT_COLUMNS)
     with connection() as conn:
         inserted = conn.execute(
-            _as_query(f"INSERT INTO ai_queries ({columns}) VALUES ({placeholders}) RETURNING id"), row
+            _as_query(f"INSERT INTO ai_queries ({columns}) VALUES ({placeholders}) RETURNING id"),
+            row,
         ).fetchone()
         assert inserted is not None
         return inserted["id"]
