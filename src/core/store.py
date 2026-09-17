@@ -121,13 +121,17 @@ def add_ai_result(
         # Priced at write time, not read time: the rate table changes, and a
         # verdict's cost is what it cost when it ran. batch_id is the only
         # signal that this went through the half-price Batch API.
-        "cost_usd": pricing.estimate_cost_usd(
-            model,
-            prompt_tokens,
-            completion_tokens,
-            cached_tokens=cached_tokens,
-            cache_write_tokens=cache_write_tokens,
-            batched=batch_id is not None,
+        "cost_usd": (
+            pricing.estimate_cost_usd(
+                model,
+                prompt_tokens,
+                completion_tokens,
+                cached_tokens=cached_tokens,
+                cache_write_tokens=cache_write_tokens,
+                batched=batch_id is not None,
+            )
+            if prompt_tokens is not None and completion_tokens is not None
+            else None
         ),
         "worker": _WORKER,
         "batch_id": batch_id,
