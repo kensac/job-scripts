@@ -32,6 +32,43 @@ def existing(task_id: int) -> dict[str, dict[str, Any]]:
     }
 
 
+def validate_input(
+    old: dict[str, Any],
+    job: dict[str, Any],
+    prompt_hash: str,
+    contents: dict[str, str] | None,
+    model: str | None,
+    transport: str | None,
+) -> None:
+    evidence = old["evidence"]
+    current_content = contents.get(job["url"]) if contents is not None else None
+    current_input_hash = (
+        content_hash(
+            build_custom_input(job.get("company") or "", job.get("title") or "", current_content)
+        )
+        if current_content is not None
+        else None
+    )
+    if (
+        old["prompt_hash"] != prompt_hash
+        or old["title"] != (job.get("title") or "")
+        or evidence.get("company") != job.get("company")
+        or (contents is not None and old["content_hash"] != content_hash(current_content))
+        or (contents is not None and evidence.get("input_hash") != current_input_hash)
+        or (
+            model is not None
+            and evidence.get("planned_model") is not None
+            and evidence["planned_model"] != model
+        )
+        or (
+            transport is not None
+            and evidence.get("transport") is not None
+            and evidence["transport"] != transport
+        )
+    ):
+        raise RuntimeError("Review gate input changed within an immutable run")
+
+
 def persist(
     task_id: int,
     prompt_hash: str,
@@ -44,6 +81,7 @@ def persist(
     model: str | None,
     transport: str | None,
     observations: dict[str, Any],
+    filter_id: int | None,
 ) -> dict[str, dict[str, Any]]:
     task = db.query_one("SELECT payload FROM tasks WHERE id=%s FOR UPDATE", (task_id,))
     if task is None:
@@ -60,9 +98,7 @@ def persist(
     for job in jobs:
         url = job["url"]
         if url in previous:
-            old = previous[url]
-            if old["prompt_hash"] != prompt_hash or old["title"] != (job.get("title") or ""):
-                raise RuntimeError("Review gate input changed within an immutable run")
+            validate_input(previous[url], job, prompt_hash, contents, model, transport)
             continue
         selected = decisions.get(
             url, {"stage": "detailed", "skip": False, "reason": None, "profile_id": None}
@@ -74,7 +110,7 @@ def persist(
                 url,
                 job.get("id") or identities.get(url),
                 payload.get("user_id"),
-                payload.get("filter_id"),
+                filter_id if filter_id is not None else payload.get("filter_id"),
                 payload.get("managed_board_id"),
                 payload.get("revision"),
                 prompt_hash,

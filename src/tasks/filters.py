@@ -102,6 +102,7 @@ async def _process_jobs(
         FilterSnapshot.from_mapping(flt),
         jobs,
         _personal_hooks(task_id, user_id, ent, cfg, flt, parent_id),
+        filter_id=flt.get("id") or flt.get("filter_id"),
     )
 
 
@@ -145,6 +146,7 @@ async def _run_filters(
             {
                 "parent_id": task_id,
                 "user_id": user_id,
+                "filter_id": flt["id"],
                 "filter": {k: flt[k] for k in ("name", "prompt", "on_ambiguous", "prompt_hash")},
                 "jobs": jobs,
                 "ignore_budget": ignore_budget,
@@ -224,6 +226,7 @@ async def handle_run_filter_batch_chunk(task_id: int, payload: dict[str, Any]) -
         hooks,
         contents=contents,
         unavailable=unavailable,
+        filter_id=payload.get("filter_id"),
         collect=collect_pending,
         submit=submit_or_collect,
     )

@@ -99,25 +99,22 @@ def partition(
     model: str | None = None,
     transport: str | None = None,
     observe: Callable[[list[dict[str, Any]]], dict[str, Any]] | None = None,
+    filter_id: int | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
     # An admission is a fact. Configuration edits only affect a new run.
     stored = review_gate_records.existing(task_id)
     for job in jobs:
         old = stored.get(job["url"])
-        if old and (
-            old["prompt_hash"] != prompt_hash
-            or old["title"] != (job.get("title") or "")
-            or (
-                contents is not None
-                and old["content_hash"]
-                != review_gate_records.content_hash(contents.get(job["url"]))
-            )
-        ):
-            raise RuntimeError("Review gate input changed within an immutable run")
+        if old:
+            review_gate_records.validate_input(old, job, prompt_hash, contents, model, transport)
     if stored and all(job["url"] in stored for job in jobs):
         decisions = {job["url"]: review_gate_records.decision(stored[job["url"]]) for job in jobs}
         return [job for job in jobs if not decisions[job["url"]]["skip"]], decisions
-    policy = load_policy()
+    policy = (
+        ReviewGatePolicy.model_validate(next(iter(stored.values()))["policy"])
+        if stored
+        else load_policy()
+    )
     scope = policy.scopes.get(prompt_hash)
     decisions: dict[str, dict[str, Any]] = {}
     profiles = {}
@@ -185,6 +182,7 @@ def partition(
             model=model,
             transport=transport,
             observations=observations,
+            filter_id=filter_id,
         )
         skipped = {url: value for url, value in decisions.items() if value["skip"]}
         report["skipped"] = skipped

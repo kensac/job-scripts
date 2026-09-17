@@ -92,9 +92,17 @@ async def execute_live(
     snapshot: FilterSnapshot,
     jobs: list[dict[str, Any]],
     hooks: ExecutionHooks,
+    *,
+    filter_id: int | None = None,
 ) -> None:
     jobs, _gate_decisions = review_gate.partition(
-        task_id, snapshot.prompt_hash, jobs, None, model=cfg.model, transport="live"
+        task_id,
+        snapshot.prompt_hash,
+        jobs,
+        None,
+        model=cfg.model,
+        transport="live",
+        filter_id=filter_id,
     )
     total = len(jobs)
     done = 0
@@ -216,6 +224,7 @@ async def execute_batch(
     purpose: str = "filter",
     max_output_tokens: int = 6000,
     complete_without_submission: bool = False,
+    filter_id: int | None = None,
     collect: Callable[..., Awaitable[list[Any]]] = collect_pending,
     submit: Callable[..., Awaitable[list[Any]]] = submit_or_collect,
 ) -> None:
@@ -242,6 +251,7 @@ async def execute_batch(
             contents,
             model=cfg.model if cfg else None,
             transport="batch",
+            filter_id=filter_id,
             observe=lambda kept: filter_routing.observations(
                 filter_routing.load_policy(),
                 snapshot.prompt_hash,
