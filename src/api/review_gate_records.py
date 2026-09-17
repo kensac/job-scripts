@@ -28,7 +28,11 @@ def decision(row: dict[str, Any]) -> dict[str, Any]:
 def existing(task_id: int) -> dict[str, dict[str, Any]]:
     return {
         row["url"]: row
-        for row in db.query("SELECT * FROM review_gate_decisions WHERE task_id=%s", (task_id,))
+        for row in db.query(
+            "SELECT id,url,prompt_hash,title,content_hash,policy,evidence,stage,action,reason,"
+            "profile_id FROM review_gate_decisions WHERE task_id=%s",
+            (task_id,),
+        )
     }
 
 
@@ -174,9 +178,11 @@ def record_outcome(decision_id: int | None, query_id: int | None) -> None:
 
 
 def exclusions(task_id: int, prompt_hash: str) -> set[str] | None:
-    rows = existing(task_id)
+    rows = db.query(
+        "SELECT url,prompt_hash,action FROM review_gate_decisions WHERE task_id=%s", (task_id,)
+    )
     if not rows:
         return None
-    if any(row["prompt_hash"] != prompt_hash for row in rows.values()):
+    if any(row["prompt_hash"] != prompt_hash for row in rows):
         raise RuntimeError("Review gate prompt changed within an immutable run")
-    return {url for url, row in rows.items() if row["action"] == "skip"}
+    return {row["url"] for row in rows if row["action"] == "skip"}
