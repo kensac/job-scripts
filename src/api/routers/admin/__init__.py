@@ -29,6 +29,7 @@ from api.routers.admin import (
     managed_boards,
     people,
     queries,
+    review_gates,
     sources,
     user_job_populations,
     working_set_shadow,
@@ -50,6 +51,7 @@ router.include_router(user_job_populations.router)
 router.include_router(working_set_shadow.router)
 router.include_router(config.router)
 router.include_router(queries.router)
+router.include_router(review_gates.router)
 router.include_router(extension.router)
 
 __all__ = ["ADMIN_GROUPS", "require_admin", "router"]
