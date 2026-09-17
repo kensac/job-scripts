@@ -20219,6 +20219,23 @@
             }
           },
           {
+            "name": "filter_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Filter Id"
+            }
+          },
+          {
             "name": "page",
             "in": "query",
             "required": false,
@@ -20464,6 +20481,23 @@
                 }
               ],
               "title": "Managed Board Id"
+            }
+          },
+          {
+            "name": "filter_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Filter Id"
             }
           },
           {
@@ -39038,7 +39072,8 @@
             "default": [
               "prompt_hash",
               "user",
-              "managed_board_id"
+              "managed_board_id",
+              "filter_id"
             ]
           },
           "avoided_cost": {

@@ -119,6 +119,7 @@ def _read_decisions(
             "action",
             "user",
             "managed_board_id",
+            "filter_id",
             "window_start",
             "window_end",
         ],

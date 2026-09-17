@@ -24,6 +24,7 @@ def selection(
     action: str | None = None,
     user: str | None = None,
     managed_board_id: int | None = None,
+    filter_id: int | None = None,
 ) -> tuple[str, dict, dict[str, list[str]]]:
     clauses, values, filters = [], {}, {}
     for key, value in {
@@ -46,6 +47,10 @@ def selection(
         clauses.append("d.managed_board_id=%(managed_board_id)s")
         values["managed_board_id"] = managed_board_id
         filters["managed_board_id"] = [str(managed_board_id)]
+    if filter_id is not None:
+        clauses.append("d.filter_id=%(filter_id)s AND d.managed_board_id IS NULL")
+        values["filter_id"] = filter_id
+        filters["filter_id"] = [str(filter_id)]
     return " AND ".join(clauses) or "TRUE", values, filters
 
 
@@ -58,6 +63,7 @@ def decisions(
     action: str | None = None,
     user: str | None = None,
     managed_board_id: int | None = Query(None, ge=1),
+    filter_id: int | None = Query(None, ge=1),
     page: int = Query(1, ge=1),
     page_size: int = Query(25, ge=1, le=100),
     window_start: datetime.datetime | None = None,
@@ -72,6 +78,7 @@ def decisions(
         action=action,
         user=user,
         managed_board_id=managed_board_id,
+        filter_id=filter_id,
     )
     if (window_start is None) != (window_end is None) or (
         window_start is not None
@@ -139,7 +146,7 @@ class GateReport(BaseModel):
     first_recorded_at: datetime.datetime | None
     rows: list[GateFunnelRow]
     filters: dict[str, list[str]]
-    filterable: list[str] = ["prompt_hash", "user", "managed_board_id"]
+    filterable: list[str] = ["prompt_hash", "user", "managed_board_id", "filter_id"]
     avoided_cost: AvoidedCostEstimate
     actual_cost_basis: str = (
         "Stored costs of linked review outcomes for this decision cohort, including retries. "
@@ -153,20 +160,25 @@ def report(
     prompt_hash: str | None = None,
     user: str | None = None,
     managed_board_id: int | None = Query(None, ge=1),
+    filter_id: int | None = Query(None, ge=1),
     admin: AuthedUser = Depends(require_admin),
 ) -> GateReport:
     with db.transaction():
         db.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
-        return _report(days, prompt_hash, user, managed_board_id)
+        return _report(days, prompt_hash, user, managed_board_id, filter_id)
 
 
 def _report(
-    days: int, prompt_hash: str | None, user: str | None, managed_board_id: int | None
+    days: int,
+    prompt_hash: str | None,
+    user: str | None,
+    managed_board_id: int | None,
+    filter_id: int | None,
 ) -> GateReport:
     end = datetime.datetime.now(datetime.UTC)
     start = end - datetime.timedelta(days=days)
     where, values, filters = selection(
-        prompt_hash=prompt_hash, user=user, managed_board_id=managed_board_id
+        prompt_hash=prompt_hash, user=user, managed_board_id=managed_board_id, filter_id=filter_id
     )
     first = db.query_one(
         f"SELECT min(d.created_at) AS first FROM review_gate_decisions d WHERE {where}", values
