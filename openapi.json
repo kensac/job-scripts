@@ -3161,6 +3161,168 @@
         }
       }
     },
+    "/v1/user/jobs/{job_id}/review-decisions": {
+      "get": {
+        "summary": "Own Review Decisions",
+        "operationId": "own_review_decisions_v1_user_jobs__job_id__review_decisions_get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Job Id"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 25,
+              "title": "Page Size"
+            }
+          },
+          {
+            "name": "x-service-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-Service-Token"
+            }
+          },
+          {
+            "name": "x-user-sub",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Sub"
+            }
+          },
+          {
+            "name": "x-user-email",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Email"
+            }
+          },
+          {
+            "name": "x-user-name",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Name"
+            }
+          },
+          {
+            "name": "x-user-groups",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Groups"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewDecisions"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/user/jobs/{job_id}/explain": {
       "post": {
         "summary": "Explain Check",
@@ -19938,6 +20100,447 @@
         }
       }
     },
+    "/v1/admin/review-gates/decisions": {
+      "get": {
+        "summary": "Decisions",
+        "operationId": "decisions_v1_admin_review_gates_decisions_get",
+        "parameters": [
+          {
+            "name": "url",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Url"
+            }
+          },
+          {
+            "name": "prompt_hash",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Prompt Hash"
+            }
+          },
+          {
+            "name": "stage",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Stage"
+            }
+          },
+          {
+            "name": "action",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Action"
+            }
+          },
+          {
+            "name": "user",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "User"
+            }
+          },
+          {
+            "name": "managed_board_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Managed Board Id"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 25,
+              "title": "Page Size"
+            }
+          },
+          {
+            "name": "x-service-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-Service-Token"
+            }
+          },
+          {
+            "name": "x-user-sub",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Sub"
+            }
+          },
+          {
+            "name": "x-user-email",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Email"
+            }
+          },
+          {
+            "name": "x-user-name",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Name"
+            }
+          },
+          {
+            "name": "x-user-groups",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Groups"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewDecisions"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/review-gates/report": {
+      "get": {
+        "summary": "Report",
+        "operationId": "report_v1_admin_review_gates_report_get",
+        "parameters": [
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 90,
+              "minimum": 1,
+              "default": 7,
+              "title": "Days"
+            }
+          },
+          {
+            "name": "prompt_hash",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Prompt Hash"
+            }
+          },
+          {
+            "name": "user",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "User"
+            }
+          },
+          {
+            "name": "managed_board_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Managed Board Id"
+            }
+          },
+          {
+            "name": "x-service-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-Service-Token"
+            }
+          },
+          {
+            "name": "x-user-sub",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Sub"
+            }
+          },
+          {
+            "name": "x-user-email",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Email"
+            }
+          },
+          {
+            "name": "x-user-name",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Name"
+            }
+          },
+          {
+            "name": "x-user-groups",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Groups"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GateReport"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/admin/extension/recipes": {
       "get": {
         "summary": "List Extension Recipes",
@@ -32096,6 +32699,46 @@
         "title": "Autofilled",
         "description": "What the write filled in that the caller did not send.\n\nA status change can date the row by itself, so the caller is told rather\nthan having to re-read the row to find out.\n\nAn absent key is the answer, not a null: the route sets\nresponse_model_exclude_none so `{}` still means \"nothing was filled\",\nwhich is what the board already reads. Declaring the shape must not move\nthe wire."
       },
+      "AvoidedCostEstimate": {
+        "properties": {
+          "estimated_avoided_cost_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Estimated Avoided Cost Usd"
+          },
+          "estimated_decisions": {
+            "type": "integer",
+            "title": "Estimated Decisions"
+          },
+          "unestimated_decisions": {
+            "type": "integer",
+            "title": "Unestimated Decisions"
+          },
+          "reference_outcomes": {
+            "type": "integer",
+            "title": "Reference Outcomes"
+          },
+          "basis": {
+            "type": "string",
+            "title": "Basis",
+            "default": "Skipped decisions times mean recorded cost per reviewed decision, including retries, in the same decision window, prompt revision, planned model and transport. A workload-dependent estimate, not billed savings or a controlled counterfactual."
+          }
+        },
+        "type": "object",
+        "required": [
+          "estimated_avoided_cost_usd",
+          "estimated_decisions",
+          "unestimated_decisions",
+          "reference_outcomes"
+        ],
+        "title": "AvoidedCostEstimate"
+      },
       "BackfillAdmission": {
         "properties": {
           "task_id": {
@@ -38195,6 +38838,180 @@
         ],
         "title": "FunnelStage",
         "description": "One stage with its own denominator. `reached` counts applications an\nevent of that kind ever arrived for, so the stages overlap and do not sum\nto `of`."
+      },
+      "GateFunnelRow": {
+        "properties": {
+          "stage": {
+            "type": "string",
+            "title": "Stage"
+          },
+          "mode": {
+            "type": "string",
+            "title": "Mode"
+          },
+          "action": {
+            "type": "string",
+            "title": "Action"
+          },
+          "decisions": {
+            "type": "integer",
+            "title": "Decisions"
+          },
+          "distinct_jobs": {
+            "type": "integer",
+            "title": "Distinct Jobs"
+          },
+          "recorded_outcomes": {
+            "type": "integer",
+            "title": "Recorded Outcomes"
+          },
+          "unpriced_outcomes": {
+            "type": "integer",
+            "title": "Unpriced Outcomes"
+          },
+          "without_recorded_outcome": {
+            "type": "integer",
+            "title": "Without Recorded Outcome"
+          },
+          "known_cost_usd": {
+            "type": "number",
+            "title": "Known Cost Usd"
+          },
+          "actual_cost_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actual Cost Usd"
+          },
+          "agreed_reject": {
+            "type": "integer",
+            "title": "Agreed Reject"
+          },
+          "false_reject": {
+            "type": "integer",
+            "title": "False Reject"
+          },
+          "unresolved": {
+            "type": "integer",
+            "title": "Unresolved"
+          }
+        },
+        "type": "object",
+        "required": [
+          "stage",
+          "mode",
+          "action",
+          "decisions",
+          "distinct_jobs",
+          "recorded_outcomes",
+          "unpriced_outcomes",
+          "without_recorded_outcome",
+          "known_cost_usd",
+          "actual_cost_usd",
+          "agreed_reject",
+          "false_reject",
+          "unresolved"
+        ],
+        "title": "GateFunnelRow"
+      },
+      "GateReport": {
+        "properties": {
+          "generated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Generated At"
+          },
+          "window_start": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Window Start"
+          },
+          "window_end": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Window End"
+          },
+          "days": {
+            "type": "integer",
+            "title": "Days"
+          },
+          "population": {
+            "type": "string",
+            "title": "Population",
+            "default": "Review decisions made during the window, not unique postings or provider calls."
+          },
+          "coverage": {
+            "type": "string",
+            "title": "Coverage",
+            "default": "Durable decisions only; earlier task-only history is unavailable."
+          },
+          "first_recorded_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Recorded At"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/GateFunnelRow"
+            },
+            "type": "array",
+            "title": "Rows"
+          },
+          "filters": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": "object",
+            "title": "Filters"
+          },
+          "filterable": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Filterable",
+            "default": [
+              "prompt_hash",
+              "user",
+              "managed_board_id"
+            ]
+          },
+          "avoided_cost": {
+            "$ref": "#/components/schemas/AvoidedCostEstimate"
+          },
+          "actual_cost_basis": {
+            "type": "string",
+            "title": "Actual Cost Basis",
+            "default": "Stored costs of linked review outcomes for this decision cohort, including retries. Not total platform spend or the provider invoice. Missing outcomes are not free reviews."
+          }
+        },
+        "type": "object",
+        "required": [
+          "generated_at",
+          "window_start",
+          "window_end",
+          "days",
+          "first_recorded_at",
+          "rows",
+          "filters",
+          "avoided_cost"
+        ],
+        "title": "GateReport"
       },
       "GmailStatus": {
         "properties": {
@@ -44518,11 +45335,15 @@
             },
             "type": "array",
             "title": "Rows"
+          },
+          "decisions": {
+            "$ref": "#/components/schemas/ReviewDecisions"
           }
         },
         "type": "object",
         "required": [
-          "rows"
+          "rows",
+          "decisions"
         ],
         "title": "PostingTimeline"
       },
@@ -49696,6 +50517,312 @@
         ],
         "title": "Reverted",
         "description": "What restoring the model's answer moved.\n\n`already` says the model's answer was already in force, and then nothing\nwas resynced - so `affected_application_ids` is absent rather than empty,\nand the routes carry `response_model_exclude_none` to keep it that way. An\nempty list would claim a recomputation that did not run."
+      },
+      "ReviewDecision": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "task_id": {
+            "type": "integer",
+            "title": "Task Id"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          },
+          "filter_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filter Id"
+          },
+          "managed_board_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Managed Board Id"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision"
+          },
+          "prompt_hash": {
+            "type": "string",
+            "title": "Prompt Hash"
+          },
+          "stage": {
+            "type": "string",
+            "title": "Stage"
+          },
+          "mode": {
+            "type": "string",
+            "title": "Mode"
+          },
+          "action": {
+            "type": "string",
+            "title": "Action"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "profile_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profile Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "content_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content Hash"
+          },
+          "policy": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "type": "object",
+            "title": "Policy"
+          },
+          "evidence": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "type": "object",
+            "title": "Evidence"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "outcomes": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewOutcome"
+            },
+            "type": "array",
+            "title": "Outcomes",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "task_id",
+          "url",
+          "job_id",
+          "user_id",
+          "filter_id",
+          "managed_board_id",
+          "revision",
+          "prompt_hash",
+          "stage",
+          "mode",
+          "action",
+          "reason",
+          "profile_id",
+          "title",
+          "content_hash",
+          "policy",
+          "evidence",
+          "created_at"
+        ],
+        "title": "ReviewDecision"
+      },
+      "ReviewDecisions": {
+        "properties": {
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewDecision"
+            },
+            "type": "array",
+            "title": "Rows"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "page_size": {
+            "type": "integer",
+            "title": "Page Size"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "has_more": {
+            "type": "boolean",
+            "title": "Has More"
+          },
+          "filters": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": "object",
+            "title": "Filters"
+          },
+          "filterable": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Filterable"
+          },
+          "coverage": {
+            "type": "string",
+            "title": "Coverage",
+            "default": "Durable decisions only. Earlier task-only history is not reconstructed."
+          }
+        },
+        "type": "object",
+        "required": [
+          "rows",
+          "page",
+          "page_size",
+          "total",
+          "has_more",
+          "filters",
+          "filterable"
+        ],
+        "title": "ReviewDecisions"
+      },
+      "ReviewOutcome": {
+        "properties": {
+          "query_id": {
+            "type": "integer",
+            "title": "Query Id"
+          },
+          "batch_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Batch Id"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "rejected": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rejected"
+          },
+          "outcome": {
+            "type": "string",
+            "title": "Outcome"
+          },
+          "recorded_cost_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recorded Cost Usd"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "query_id",
+          "batch_id",
+          "model",
+          "rejected",
+          "outcome",
+          "recorded_cost_usd",
+          "created_at"
+        ],
+        "title": "ReviewOutcome"
       },
       "ReviewRate": {
         "properties": {

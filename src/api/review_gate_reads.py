@@ -96,5 +96,7 @@ def read_decisions(
         rows=rows,
         **page.metadata(count["n"] if count else 0),
         filters=filters,
-        filterable=[] if personal else ["url", "prompt_hash", "stage", "action", "user", "managed_board_id"],
+        filterable=[]
+        if personal
+        else ["url", "prompt_hash", "stage", "action", "user", "managed_board_id"],
     )

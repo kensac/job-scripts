@@ -572,8 +572,10 @@ def job_timeline(url: str, user: AuthedUser = Depends(require_admin)) -> Posting
             (url,),
         ),
         decisions=read_decisions(
-            "d.url=%(url)s", {"url": url},
-            pagination.Page.from_params(1, 25, maximum=100), {"url": [url]},
+            "d.url=%(url)s",
+            {"url": url},
+            pagination.Page.from_params(1, 25, maximum=100),
+            {"url": [url]},
         ),
     )
 

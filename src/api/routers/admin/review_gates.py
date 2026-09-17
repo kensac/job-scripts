@@ -25,7 +25,12 @@ def selection(
     managed_board_id: int | None = None,
 ) -> tuple[str, dict, dict[str, list[str]]]:
     clauses, values, filters = [], {}, {}
-    for key, value in {"url": url, "prompt_hash": prompt_hash, "stage": stage, "action": action}.items():
+    for key, value in {
+        "url": url,
+        "prompt_hash": prompt_hash,
+        "stage": stage,
+        "action": action,
+    }.items():
         if value is not None:
             clauses.append(f"d.{key}=%({key})s")
             values[key] = value
@@ -55,8 +60,12 @@ def decisions(
     admin: AuthedUser = Depends(require_admin),
 ) -> ReviewDecisions:
     where, values, filters = selection(
-        url=url, prompt_hash=prompt_hash, stage=stage, action=action,
-        user=user, managed_board_id=managed_board_id,
+        url=url,
+        prompt_hash=prompt_hash,
+        stage=stage,
+        action=action,
+        user=user,
+        managed_board_id=managed_board_id,
     )
     return read_decisions(
         where, values, pagination.Page.from_params(page, page_size, maximum=100), filters
@@ -85,7 +94,7 @@ class AvoidedCostEstimate(BaseModel):
     unestimated_decisions: int
     reference_outcomes: int
     basis: str = (
-        "Skipped decisions times mean recorded review cost in the same decision window, "
+        "Skipped decisions times mean recorded cost per reviewed decision, including retries, in the same decision window, "
         "prompt revision, planned model and transport. A workload-dependent estimate, "
         "not billed savings or a controlled counterfactual."
     )
@@ -96,7 +105,9 @@ class GateReport(BaseModel):
     window_start: datetime.datetime
     window_end: datetime.datetime
     days: int
-    population: str = "Review decisions made during the window, not unique postings or provider calls."
+    population: str = (
+        "Review decisions made during the window, not unique postings or provider calls."
+    )
     coverage: str = "Durable decisions only; earlier task-only history is unavailable."
     first_recorded_at: datetime.datetime | None
     rows: list[GateFunnelRow]
@@ -126,7 +137,9 @@ def report(
         f"SELECT min(d.created_at) AS first FROM review_gate_decisions d WHERE {where}", values
     )
     cohort = (
-        f"SELECT d.* FROM review_gate_decisions d WHERE {where} "
+        "SELECT d.id,d.url,d.stage,d.mode,d.action,d.prompt_hash,"
+        "d.evidence->>'planned_model' planned_model,d.evidence->>'transport' transport "
+        f"FROM review_gate_decisions d WHERE {where} "
         "AND d.created_at >= %(start)s AND d.created_at < %(end)s"
     )
     bounded = {**values, "start": start, "end": end}
@@ -150,28 +163,37 @@ def report(
         "COALESCE(sum(p.passed) FILTER(WHERE d.mode='shadow' AND d.stage<>'detailed'),0)::bigint false_reject, "
         "COALESCE(sum(p.unresolved) FILTER(WHERE d.mode='shadow' AND d.stage<>'detailed'),0)::bigint unresolved "
         "FROM cohort d LEFT JOIN paid p ON p.decision_id=d.id "
-        "GROUP BY d.stage,d.mode,d.action ORDER BY d.stage,d.mode,d.action", bounded,
+        "GROUP BY d.stage,d.mode,d.action ORDER BY d.stage,d.mode,d.action",
+        bounded,
     )
     estimate = db.query_one(
-        f"WITH cohort AS MATERIALIZED ({cohort}), baseline AS ("
-        "SELECT d.prompt_hash,d.evidence->>'planned_model' model,d.evidence->>'transport' transport, "
-        "avg(o.recorded_cost_usd)::float mean_cost,count(*) n "
-        "FROM cohort d JOIN review_gate_outcomes o ON o.decision_id=d.id "
-        "WHERE d.action='review' "
-        "AND o.model=d.evidence->>'planned_model' "
-        "GROUP BY d.prompt_hash,d.evidence->>'planned_model',d.evidence->>'transport' "
-        "HAVING count(*) FILTER(WHERE o.recorded_cost_usd IS NULL)=0), skipped AS ("
-        "SELECT d.prompt_hash,d.evidence->>'planned_model' model,d.evidence->>'transport' transport,count(*) n "
-        "FROM cohort d WHERE d.action='skip' GROUP BY d.prompt_hash,d.evidence->>'planned_model',d.evidence->>'transport') "
+        f"WITH cohort AS MATERIALIZED ({cohort}), per_decision AS ("
+        "SELECT d.id,d.prompt_hash,d.planned_model model,d.transport, "
+        "sum(o.recorded_cost_usd)::float cost,count(o.id) n, "
+        "count(*) FILTER(WHERE o.recorded_cost_usd IS NULL OR o.model IS DISTINCT FROM "
+        "d.planned_model) unknown "
+        "FROM cohort d LEFT JOIN review_gate_outcomes o ON o.decision_id=d.id "
+        "WHERE d.action='review' GROUP BY d.id,d.prompt_hash,d.planned_model,d.transport), baseline AS ("
+        "SELECT prompt_hash,model,transport,avg(cost)::float mean_cost,sum(n) n "
+        "FROM per_decision GROUP BY prompt_hash,model,transport "
+        "HAVING sum(unknown)=0), skipped AS ("
+        "SELECT d.prompt_hash,d.planned_model model,d.transport,count(*) n "
+        "FROM cohort d WHERE d.action='skip' GROUP BY d.prompt_hash,d.planned_model,d.transport) "
         "SELECT CASE WHEN count(r.mean_cost)>0 THEN sum(s.n*r.mean_cost)::float END estimated_avoided_cost_usd, "
         "COALESCE(sum(s.n) FILTER(WHERE r.mean_cost IS NOT NULL),0)::bigint estimated_decisions, "
         "COALESCE(sum(s.n) FILTER(WHERE r.mean_cost IS NULL),0)::bigint unestimated_decisions, "
         "COALESCE(sum(r.n),0)::bigint reference_outcomes "
-        "FROM skipped s LEFT JOIN baseline r USING(prompt_hash,model,transport)", bounded,
+        "FROM skipped s LEFT JOIN baseline r USING(prompt_hash,model,transport)",
+        bounded,
     )
     assert estimate is not None
     return GateReport(
-        generated_at=end, window_start=start, window_end=end, days=days,
-        first_recorded_at=first["first"] if first else None, rows=rows, filters=filters,
+        generated_at=end,
+        window_start=start,
+        window_end=end,
+        days=days,
+        first_recorded_at=first["first"] if first else None,
+        rows=rows,
+        filters=filters,
         avoided_cost=AvoidedCostEstimate.model_validate(estimate),
     )
