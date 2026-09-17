@@ -103,6 +103,8 @@ def partition(
 ) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
     # An admission is a fact. Configuration edits only affect a new run.
     stored = review_gate_records.existing(task_id)
+    if any(row["prompt_hash"] != prompt_hash for row in stored.values()):
+        raise RuntimeError("Review gate prompt changed within an immutable run")
     for job in jobs:
         old = stored.get(job["url"])
         if old:

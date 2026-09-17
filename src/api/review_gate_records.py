@@ -92,6 +92,8 @@ def persist(
         raise RuntimeError("Review gate task disappeared before admission")
     payload = task["payload"]
     previous = existing(task_id)
+    if any(row["prompt_hash"] != prompt_hash for row in previous.values()):
+        raise RuntimeError("Review gate prompt changed within an immutable run")
     identities = {
         row["url"]: row["id"]
         for row in db.query(
