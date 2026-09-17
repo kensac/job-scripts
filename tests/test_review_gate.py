@@ -147,9 +147,16 @@ def test_independent_controls_revision_scope_rollback_and_no_fake_verdict(f):
     kept, decisions = review_gate.partition(task, "test-hash", [job], content)
     assert kept == []
     assert decisions[job["url"]]["stage"] == "profile"
-    assert review_gate.partition(task, "edited-hash", [job], content)[0] == [job]
+    with pytest.raises(RuntimeError, match="immutable run"):
+        review_gate.partition(task, "edited-hash", [job], content)
+    assert review_gate.partition(
+        f.make_task("run_filter_batch_chunk"), "edited-hash", [job], content
+    )[0] == [job]
     configure(title="off", shared="off")
-    assert review_gate.partition(task, "test-hash", [job], content)[0] == [job]
+    assert review_gate.partition(task, "test-hash", [job], content)[0] == []
+    assert review_gate.partition(
+        f.make_task("run_filter_batch_chunk"), "test-hash", [job], content
+    )[0] == [job]
     assert db.query_one("SELECT count(*) n FROM ai_queries WHERE check_type='custom'")["n"] == 0
 
 
@@ -303,6 +310,8 @@ def test_managed_fail_open_projection_excludes_gate_rejects_and_rollback_restore
     assert review_gate.partition(task, "test-hash", [job], {})[0] == []
     assert managed_board_runs.replace_projection(task, payload) == 0
     configure(title="off")
+    assert review_gate.partition(task, "test-hash", [job], {})[0] == []
+    task = f.make_task("run_managed_board_batch", payload)
     assert review_gate.partition(task, "test-hash", [job], {})[0] == [job]
     assert managed_board_runs.replace_projection(task, payload) == 1
 

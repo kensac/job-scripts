@@ -6,6 +6,8 @@ import hashlib
 from typing import Any
 
 from api import db
+from core.filters import build_custom_input
+from core.job_profile import CLASSIFIER_VERSION, JOB_PROFILE_INSTRUCTIONS, JOB_PROFILE_MODEL
 
 
 def content_hash(content: str | None) -> str | None:
@@ -19,6 +21,7 @@ def decision(row: dict[str, Any]) -> dict[str, Any]:
         "skip": row["action"] == "skip",
         "reason": row["reason"],
         "profile_id": row["profile_id"],
+        "routing": row["evidence"].get("routing"),
     }
 
 
@@ -40,14 +43,27 @@ def persist(
     *,
     model: str | None,
     transport: str | None,
+    observations: dict[str, Any],
 ) -> dict[str, dict[str, Any]]:
     task = db.query_one("SELECT payload FROM tasks WHERE id=%s FOR UPDATE", (task_id,))
     if task is None:
         raise RuntimeError("Review gate task disappeared before admission")
     payload = task["payload"]
+    previous = existing(task_id)
+    identities = {
+        row["url"]: row["id"]
+        for row in db.query(
+            "SELECT id,url FROM jobs WHERE url=ANY(%s::text[])", ([job["url"] for job in jobs],)
+        )
+    }
     rows = []
     for job in jobs:
         url = job["url"]
+        if url in previous:
+            old = previous[url]
+            if old["prompt_hash"] != prompt_hash or old["title"] != (job.get("title") or ""):
+                raise RuntimeError("Review gate input changed within an immutable run")
+            continue
         selected = decisions.get(
             url, {"stage": "detailed", "skip": False, "reason": None, "profile_id": None}
         )
@@ -56,7 +72,7 @@ def persist(
             (
                 task_id,
                 url,
-                job.get("id"),
+                job.get("id") or identities.get(url),
                 payload.get("user_id"),
                 payload.get("filter_id"),
                 payload.get("managed_board_id"),
@@ -76,7 +92,19 @@ def persist(
                         "company": job.get("company"),
                         "planned_model": model,
                         "transport": transport,
+                        "routing": observations.get(url),
+                        "input_hash": content_hash(
+                            build_custom_input(
+                                job.get("company") or "", job.get("title") or "", contents[url]
+                            )
+                        )
+                        if contents and url in contents
+                        else None,
                         "profile": profile[1].model_dump(mode="json") if profile else None,
+                        "profile_classifier_version": CLASSIFIER_VERSION if profile else None,
+                        "profile_model": JOB_PROFILE_MODEL if profile else None,
+                        "profile_instructions": JOB_PROFILE_INSTRUCTIONS if profile else None,
+                        "profile_input_content": (contents or {}).get(url) if profile else None,
                     }
                 ),
             )

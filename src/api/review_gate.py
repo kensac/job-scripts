@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections import Counter
+from collections.abc import Callable
 from typing import Any
 
 from api import db, review_gate_records
@@ -97,6 +98,7 @@ def partition(
     *,
     model: str | None = None,
     transport: str | None = None,
+    observe: Callable[[list[dict[str, Any]]], dict[str, Any]] | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
     # An admission is a fact. Configuration edits only affect a new run.
     stored = review_gate_records.existing(task_id)
@@ -156,6 +158,7 @@ def partition(
                 "profile_id": evidence[0] if evidence else None,
             }
     skipped = {url: decision for url, decision in decisions.items() if decision["skip"]}
+    observations = observe([job for job in jobs if job["url"] not in skipped]) if observe else {}
     report = {
         "version": "review-gate-v1",
         "prompt_hash": prompt_hash,
@@ -181,6 +184,7 @@ def partition(
             profiles,
             model=model,
             transport=transport,
+            observations=observations,
         )
         skipped = {url: value for url, value in decisions.items() if value["skip"]}
         report["skipped"] = skipped

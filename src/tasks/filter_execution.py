@@ -242,19 +242,16 @@ async def execute_batch(
             contents,
             model=cfg.model if cfg else None,
             transport="batch",
+            observe=lambda kept: filter_routing.observations(
+                filter_routing.load_policy(),
+                snapshot.prompt_hash,
+                kept,
+                contents,
+                model=cfg.model if cfg else None,
+            ),
         )
         gate_skipped = before_gate - len(jobs)
-    routing = (
-        {}
-        if existing
-        else filter_routing.observations(
-            filter_routing.load_policy(),
-            snapshot.prompt_hash,
-            jobs,
-            contents,
-            model=cfg.model if cfg else None,
-        )
-    )
+    routing = {url: decision.get("routing") for url, decision in gate_decisions.items()}
     instructions = build_custom_decision_instructions(snapshot.prompt, snapshot.on_ambiguous)
     specs, by_url = [], {}
     for job in jobs:
