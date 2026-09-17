@@ -100,6 +100,24 @@ Use receipt outcome counts for cumulative progress across partial collection and
 replay. Both checkpoint tables expire with their owning task. Legacy requests
 without a snapshot retain unknown input rather than using a current page.
 
+Review-gate admissions have their own durable record in `review_gate_decisions`.
+Each task and posting URL has one immutable decision, including detailed-review
+admissions, with its exact policy, title, available content hash, proven profile
+evidence and shadow-routing observation. Retries preserve that decision;
+different inputs within the same run are refused rather than silently assigned
+its provenance. Configuration changes apply to new runs. These records have no
+cascading references to task or catalog retention. Managed projections prefer
+them and read the legacy task plan only where no durable admissions exist.
+
+`review_gate_outcomes` links an admission to the exact paid verdict written by
+the shared verdict service. Live writes commit their outcome with the verdict;
+batch writes commit it within receipt consumption. Replaying a receipt cannot
+duplicate its outcome, while distinct paid retries remain distinct attempts.
+The stored verdict price is copied at write time, never repriced on read or
+charged again. Missing usage and pre-admission legacy requests stay unknown.
+An admission alone proves neither provider submission nor a successful review;
+skip counts are avoided requests, not observed dollar savings.
+
 Distinguish submission rejection from per-request failure using the stored
 provider errors. Failure counts alone do not establish the cause.
 
