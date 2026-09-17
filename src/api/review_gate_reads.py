@@ -68,6 +68,19 @@ def read_decisions(
     *,
     personal: bool = False,
 ) -> ReviewDecisions:
+    with db.transaction():
+        db.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
+        return _read_decisions(where, parameters, page, filters, personal=personal)
+
+
+def _read_decisions(
+    where: str,
+    parameters: dict,
+    page: pagination.Page,
+    filters: dict[str, list[str]],
+    *,
+    personal: bool,
+) -> ReviewDecisions:
     count = db.query_one(
         f"SELECT count(*) AS n FROM review_gate_decisions d WHERE {where}", parameters
     )

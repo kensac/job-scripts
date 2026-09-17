@@ -155,6 +155,14 @@ def report(
     managed_board_id: int | None = Query(None, ge=1),
     admin: AuthedUser = Depends(require_admin),
 ) -> GateReport:
+    with db.transaction():
+        db.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
+        return _report(days, prompt_hash, user, managed_board_id)
+
+
+def _report(
+    days: int, prompt_hash: str | None, user: str | None, managed_board_id: int | None
+) -> GateReport:
     end = datetime.datetime.now(datetime.UTC)
     start = end - datetime.timedelta(days=days)
     where, values, filters = selection(
