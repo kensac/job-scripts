@@ -9,6 +9,16 @@ from pydantic import BaseModel, JsonValue
 from api import db, pagination
 
 
+class ReviewOutcome(BaseModel):
+    query_id: int
+    batch_id: str | None
+    model: str | None
+    rejected: bool | None
+    outcome: str
+    recorded_cost_usd: float | None
+    created_at: datetime.datetime
+
+
 class ReviewDecision(BaseModel):
     id: int
     task_id: int
@@ -29,6 +39,7 @@ class ReviewDecision(BaseModel):
     policy: dict[str, JsonValue]
     evidence: dict[str, JsonValue]
     created_at: datetime.datetime
+    outcomes: list[ReviewOutcome] = []
 
 
 class ReviewDecisions(BaseModel):
@@ -66,6 +77,17 @@ def read_decisions(
         "ORDER BY d.id DESC LIMIT %(limit)s OFFSET %(offset)s",
         {**parameters, "limit": page.size, "offset": page.offset},
     )
+    if rows:
+        outcomes = db.query(
+            "SELECT decision_id,query_id,batch_id,model,rejected,outcome,recorded_cost_usd,created_at "
+            "FROM review_gate_outcomes WHERE decision_id=ANY(%s) ORDER BY id",
+            ([row.id for row in rows],),
+        )
+        by_id: dict[int, list[ReviewOutcome]] = {}
+        for outcome in outcomes:
+            decision_id = outcome.pop("decision_id")
+            by_id.setdefault(decision_id, []).append(ReviewOutcome.model_validate(outcome))
+        rows = [row.model_copy(update={"outcomes": by_id.get(row.id, [])}) for row in rows]
     if personal:
         # The whole policy contains other opt-in hashes. The owner needs their
         # decision, not an administrator's configuration of unrelated filters.
