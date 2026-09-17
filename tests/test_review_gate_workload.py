@@ -120,6 +120,10 @@ def test_report_1000_decision_workload(client, admin_headers, monkeypatch, reque
 
 
 def test_partition_500_decisions_uses_bulk_admission(monkeypatch, request, no_paid_calls):
+    db.execute(
+        "UPDATE app_config SET value=%s WHERE key='filter_review_gate'",
+        (db.jsonb({"title_mode": "off", "profile_mode": "off", "scopes": {}}),),
+    )
     task = db.query_one(
         "INSERT INTO tasks(kind,payload) VALUES('run_filter_batch_chunk','{}') RETURNING id"
     )
@@ -149,7 +153,7 @@ def test_partition_500_decisions_uses_bulk_admission(monkeypatch, request, no_pa
     initial_calls = dict(calls)
     assert len(kept) == len(decisions) == 500
     assert bulk_rows == [500]
-    # The disabled/default policy has bounded reads plus one bulk write, not
+    # The disabled policy has bounded reads plus one bulk write, not
     # one database helper call per posting. Network round trips differ from
     # helper calls, so this deliberately reports only the latter.
     assert calls == {"query": 4, "query_one": 2, "executemany": 1, "execute": 1}
@@ -166,7 +170,7 @@ def test_partition_500_decisions_uses_bulk_admission(monkeypatch, request, no_pa
             "review_partition_workload",
             json.dumps(
                 {
-                    "fixture": "synthetic, 500 detailed admissions, default policy, no profile lookup",
+                    "fixture": "synthetic, 500 detailed admissions, disabled policy, no profile lookup",
                     "initial_db_helper_calls": initial_calls,
                     "bulk_insert_rows": bulk_rows,
                     "replay_db_helper_calls": dict(calls),
