@@ -9,7 +9,7 @@ from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from typing import Any
 
-from api import ai, budget, db, filter_routing, review_gate
+from api import ai, budget, db, filter_routing, review_gate, review_gate_records
 from api.ai import verdicts
 from api.ai.batch_results import progress_counts
 from core import providers
@@ -61,6 +61,7 @@ async def check_filter(
     content: str,
     snapshot: FilterSnapshot,
     verdict_label: str,
+    decision_id: int | None = None,
 ) -> dict[str, int] | None:
     """Run one check, unless this exact prompt and model already decided it."""
     # Model scope is load-bearing: changing models deliberately invalidates the
@@ -80,6 +81,7 @@ async def check_filter(
         filter_name=verdict_label,
         prompt_hash=snapshot.prompt_hash,
         context="filter-run",
+        on_record=lambda query_id: review_gate_records.record_outcome(decision_id, query_id),
     )
     return usage
 
@@ -91,7 +93,9 @@ async def execute_live(
     jobs: list[dict[str, Any]],
     hooks: ExecutionHooks,
 ) -> None:
-    jobs, _gate_decisions = review_gate.partition(task_id, snapshot.prompt_hash, jobs, None)
+    jobs, _gate_decisions = review_gate.partition(
+        task_id, snapshot.prompt_hash, jobs, None, model=cfg.model, transport="live"
+    )
     total = len(jobs)
     done = 0
     limiter = AdaptiveLimiter()
@@ -110,7 +114,14 @@ async def execute_live(
             )
         if not content:
             return None
-        return await check_filter(cfg, job, content, snapshot, hooks.verdict_label)
+        return await check_filter(
+            cfg,
+            job,
+            content,
+            snapshot,
+            hooks.verdict_label,
+            (_gate_decisions.get(job["url"]) or {}).get("decision_id"),
+        )
 
     index = 0
     pending: dict[asyncio.Task, dict[str, Any]] = {}
@@ -224,7 +235,14 @@ async def execute_batch(
     gate_skipped = 0
     if not existing:
         before_gate = len(jobs)
-        jobs, gate_decisions = review_gate.partition(task_id, snapshot.prompt_hash, jobs, contents)
+        jobs, gate_decisions = review_gate.partition(
+            task_id,
+            snapshot.prompt_hash,
+            jobs,
+            contents,
+            model=cfg.model if cfg else None,
+            transport="batch",
+        )
         gate_skipped = before_gate - len(jobs)
     routing = (
         {}
@@ -331,7 +349,7 @@ async def execute_batch(
                     parsed = FilterResult.model_validate_json(result.text)
                 except ValueError:
                     reason = "batch: unparsable output"
-            verdicts.record_ai_verdict(
+            query_id = verdicts.record_ai_verdict(
                 url=url,
                 check_type="custom",
                 rejected=parsed.should_filter if parsed else None,
@@ -354,6 +372,9 @@ async def execute_batch(
                 reasoning_effort=context.get("reasoning_effort"),
             )
             hooks.record_usage(usage, result.model, True)
+            review_gate_records.record_outcome(
+                (context.get("review_gate") or {}).get("decision_id"), query_id
+            )
             filter_routing.record_comparison(
                 task_id, context.get("routing"), parsed.should_filter if parsed else None
             )

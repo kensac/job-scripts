@@ -477,6 +477,8 @@ def record_parse_failures(board_id: int, model: str | None):
 
 
 def replace_projection(task_id: int, payload: dict[str, Any]) -> int:
+    from api.review_gate_records import exclusions
+
     all_jobs = payload["jobs"]
     # Exclusions belong to this immutable run, not the shared verdict cache.
     # Reading the persisted plan also covers resume after partial collection.
@@ -488,6 +490,9 @@ def replace_projection(task_id: int, payload: dict[str, Any]) -> int:
         and plan.get("prompt_hash") == payload["prompt_hash"]
         else {}
     )
+    durable = exclusions(task_id, payload["prompt_hash"])
+    if durable is not None:
+        skipped = durable
     config = payload.get("title_gate")
     jobs = [
         job

@@ -6,7 +6,7 @@ import logging
 from collections import Counter
 from typing import Any
 
-from api import db
+from api import db, review_gate_records
 from core.job_profile import (
     CLASSIFIER_VERSION,
     JOB_PROFILE_INSTRUCTIONS,
@@ -94,10 +94,31 @@ def partition(
     prompt_hash: str,
     jobs: list[dict[str, Any]],
     contents: dict[str, str] | None,
+    *,
+    model: str | None = None,
+    transport: str | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
+    # An admission is a fact. Configuration edits only affect a new run.
+    stored = review_gate_records.existing(task_id)
+    for job in jobs:
+        old = stored.get(job["url"])
+        if old and (
+            old["prompt_hash"] != prompt_hash
+            or old["title"] != (job.get("title") or "")
+            or (
+                contents is not None
+                and old["content_hash"]
+                != review_gate_records.content_hash(contents.get(job["url"]))
+            )
+        ):
+            raise RuntimeError("Review gate input changed within an immutable run")
+    if stored and all(job["url"] in stored for job in jobs):
+        decisions = {job["url"]: review_gate_records.decision(stored[job["url"]]) for job in jobs}
+        return [job for job in jobs if not decisions[job["url"]]["skip"]], decisions
     policy = load_policy()
     scope = policy.scopes.get(prompt_hash)
     decisions: dict[str, dict[str, Any]] = {}
+    profiles = {}
     if scope is not None:
         profiles = {}
         if policy.profile_mode != "off" and scope.profile_recipe:
@@ -149,10 +170,24 @@ def partition(
     }
     # Failure to persist provenance aborts before any requests are submitted.
     # Replace, never increment: retries cannot inflate the funnel.
-    db.execute(
-        "UPDATE tasks SET payload=jsonb_set(payload,'{review_gate}',%s) WHERE id=%s",
-        (db.jsonb(report), task_id),
-    )
+    with db.transaction():
+        decisions = review_gate_records.persist(
+            task_id,
+            prompt_hash,
+            jobs,
+            contents,
+            decisions,
+            policy.model_dump(mode="json"),
+            profiles,
+            model=model,
+            transport=transport,
+        )
+        skipped = {url: value for url, value in decisions.items() if value["skip"]}
+        report["skipped"] = skipped
+        db.execute(
+            "UPDATE tasks SET payload=jsonb_set(payload,'{review_gate}',%s) WHERE id=%s",
+            (db.jsonb(report), task_id),
+        )
     return [job for job in jobs if job["url"] not in skipped], decisions
 
 

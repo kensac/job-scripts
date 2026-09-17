@@ -77,6 +77,7 @@ from api.orm.platform import (
     UserSettings,
     WorkerStatus,
 )
+from api.orm.review_gate import ReviewGateDecision, ReviewGateOutcome
 
 __all__ = [
     "ActionItem",
@@ -120,6 +121,8 @@ __all__ = [
     "ManagedBoardJob",
     "ManagedBoardSource",
     "Report",
+    "ReviewGateDecision",
+    "ReviewGateOutcome",
     "SavedView",
     "Source",
     "SourceGroup",

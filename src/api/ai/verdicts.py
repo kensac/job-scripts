@@ -40,6 +40,7 @@ async def run_check[T: BaseModel](
     filter_name: str | None = None,
     prompt_hash: str | None = None,
     context: str = "worker",
+    on_record: Callable[[int], None] | None = None,
 ) -> tuple[T | None, dict[str, int | None]]:
     """Runs one structured check, records a complete verdict row + metrics.
 
@@ -62,6 +63,7 @@ async def run_check[T: BaseModel](
         context=context,
         # ai.parse already emits transport metrics for a live call.
         record_call_metrics=False,
+        on_record=on_record,
     )
     start = time.monotonic()
     try:
@@ -127,46 +129,50 @@ def record_ai_verdict(
     duration_ms: int | None = None,
     error: str | None = None,
     record_call_metrics: bool = True,
-) -> None:
+    on_record: Callable[[int], None] | None = None,
+) -> int:
     """Persist the shared result shape. A missing decision is a failed attempt.
 
     Live calls already emit provider metrics inside ai.parse; batch callers
     emit them here. Both paths keep consumed tokens on failed attempts.
     """
     status = "failed" if rejected is None else "rejected" if rejected else "passed"
-    add_ai_result(
-        url,
-        status,
-        reason,
-        check_type,
-        model=model,
-        filter_name=filter_name,
-        prompt_hash=prompt_hash,
-        company=company,
-        job_title=job_title,
-        instructions=instructions,
-        input_content=input_text,
-        parsed_json=parsed_json,
-        prompt_tokens=usage.get("prompt_tokens"),
-        completion_tokens=usage.get("completion_tokens"),
-        total_tokens=usage.get("total_tokens"),
-        config_name=context,
-        batch_id=batch_id,
-        cached_tokens=usage.get("cached_tokens"),
-        cache_write_tokens=usage.get("cache_write_tokens"),
-        reasoning_tokens=usage.get("reasoning_tokens"),
-        reasoning_effort=reasoning_effort,
-        duration_ms=duration_ms,
-        error=error,
-    )
+    with db.transaction():
+        query_id = add_ai_result(
+            url,
+            status,
+            reason,
+            check_type,
+            model=model,
+            filter_name=filter_name,
+            prompt_hash=prompt_hash,
+            company=company,
+            job_title=job_title,
+            instructions=instructions,
+            input_content=input_text,
+            parsed_json=parsed_json,
+            prompt_tokens=usage.get("prompt_tokens"),
+            completion_tokens=usage.get("completion_tokens"),
+            total_tokens=usage.get("total_tokens"),
+            config_name=context,
+            batch_id=batch_id,
+            cached_tokens=usage.get("cached_tokens"),
+            cache_write_tokens=usage.get("cache_write_tokens"),
+            reasoning_tokens=usage.get("reasoning_tokens"),
+            reasoning_effort=reasoning_effort,
+            duration_ms=duration_ms,
+            error=error,
+        )
+        if on_record is not None:
+            on_record(query_id)
     metrics.CHECKS.labels(check_type, status).inc()
     if not record_call_metrics:
-        return
+        return query_id
     metrics.AI_CALLS.labels(
         provider, model or "unknown", "error" if rejected is None else "ok"
     ).inc()
     if not usage:
-        return
+        return query_id
     cost = pricing.estimate_cost_usd(
         model,
         usage.get("prompt_tokens"),
@@ -177,6 +183,7 @@ def record_ai_verdict(
     )
     if cost is not None:
         metrics.AI_COST_USD.labels(provider, model or "unknown", key_source).inc(float(cost))
+    return query_id
 
 
 def host_paced(url: str) -> bool:

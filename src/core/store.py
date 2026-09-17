@@ -81,7 +81,7 @@ def add_ai_result(
     config_name: str | None = None,
     batch_id: str | None = None,
     cache_write_tokens: int | None = None,
-) -> None:
+) -> int:
     row = {
         # created_at is DELIBERATELY ABSENT: the column defaults to Postgres
         # now(), and letting the database supply it is what keeps every
@@ -135,7 +135,11 @@ def add_ai_result(
     columns = ", ".join(_INSERT_COLUMNS)
     placeholders = ", ".join(f"%({c})s" for c in _INSERT_COLUMNS)
     with connection() as conn:
-        conn.execute(_as_query(f"INSERT INTO ai_queries ({columns}) VALUES ({placeholders})"), row)
+        inserted = conn.execute(
+            _as_query(f"INSERT INTO ai_queries ({columns}) VALUES ({placeholders}) RETURNING id"), row
+        ).fetchone()
+        assert inserted is not None
+        return inserted["id"]
 
 
 def get_custom_result(
