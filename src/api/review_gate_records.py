@@ -109,7 +109,9 @@ def persist(
                 task_id,
                 url,
                 job.get("id") or identities.get(url),
-                payload.get("user_id"),
+                payload.get("user_id")
+                if payload.get("user_id") is not None
+                else payload.get("sponsor_user_id"),
                 filter_id if filter_id is not None else payload.get("filter_id"),
                 payload.get("managed_board_id"),
                 payload.get("revision"),
@@ -152,7 +154,7 @@ def persist(
         "ON CONFLICT(task_id,url) DO NOTHING",
         rows,
     )
-    return {url: decision(row) for url, row in existing(task_id).items()}
+    return existing(task_id)
 
 
 def record_outcome(decision_id: int | None, query_id: int | None) -> None:

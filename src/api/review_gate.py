@@ -171,7 +171,7 @@ def partition(
     # Failure to persist provenance aborts before any requests are submitted.
     # Replace, never increment: retries cannot inflate the funnel.
     with db.transaction():
-        decisions = review_gate_records.persist(
+        persisted = review_gate_records.persist(
             task_id,
             prompt_hash,
             jobs,
@@ -184,8 +184,18 @@ def partition(
             observations=observations,
             filter_id=filter_id,
         )
+        decisions = {url: review_gate_records.decision(row) for url, row in persisted.items()}
         skipped = {url: value for url, value in decisions.items() if value["skip"]}
         report["skipped"] = skipped
+        report["policy"] = (
+            next(iter(persisted.values()))["policy"] if persisted else report["policy"]
+        )
+        report["candidates"] = len(decisions)
+        report["detailed"] = len(decisions) - len(skipped)
+        report["profile_proven"] = sum(d["profile_id"] is not None for d in decisions.values())
+        report["would_reject"] = dict(
+            Counter(d["stage"] for d in decisions.values() if d["stage"] != "detailed")
+        )
         db.execute(
             "UPDATE tasks SET payload=jsonb_set(payload,'{review_gate}',%s) WHERE id=%s",
             (db.jsonb(report), task_id),

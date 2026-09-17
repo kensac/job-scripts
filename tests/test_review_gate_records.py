@@ -54,6 +54,39 @@ def test_changed_input_refuses_reuse_in_same_run(f):
     assert db.query_one("SELECT count(*) n FROM review_gate_decisions")["n"] == 1
 
 
+def test_locked_writer_rechecks_input_after_another_admission_wins(f, monkeypatch):
+    task = f.make_task("run_filter_batch_chunk")
+    job = {"url": "https://example.test/a", "title": "Engineer", "company": "Example"}
+    review_gate.partition(task, "test-hash", [job], {job["url"]: "first"})
+    original = review_gate_records.existing
+    reads = 0
+
+    def stale_first_read(task_id):
+        nonlocal reads
+        reads += 1
+        return {} if reads == 1 else original(task_id)
+
+    monkeypatch.setattr(review_gate_records, "existing", stale_first_read)
+    with pytest.raises(RuntimeError, match="immutable run"):
+        review_gate.partition(task, "test-hash", [job], {job["url"]: "second"})
+    assert reads >= 2
+
+
+def test_managed_sponsor_is_frozen_without_guessing_current_ownership(f):
+    sponsor = f.make_user()
+    task = f.make_task(
+        "run_managed_board_batch",
+        {"sponsor_user_id": sponsor, "managed_board_id": 31, "revision": 7},
+    )
+    job = {"url": "https://example.test/a", "title": "Engineer", "company": "Example"}
+    review_gate.partition(task, "test-hash", [job], {})
+    assert db.query_one("SELECT user_id,managed_board_id,revision FROM review_gate_decisions") == {
+        "user_id": sponsor,
+        "managed_board_id": 31,
+        "revision": 7,
+    }
+
+
 @pytest.mark.parametrize(
     "usage",
     [
