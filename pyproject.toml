@@ -25,7 +25,7 @@ dependencies = [
     "httpcore==1.0.9",
     "httplib2==0.32.0",
     "httpx==0.28.1",
-    "idna==3.19",
+    "idna==3.20",
     "jiter==0.17.0",
     "nh3==0.3.7",
     "oauth2client==4.1.3",
