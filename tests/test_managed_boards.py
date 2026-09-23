@@ -18,7 +18,7 @@ def _create(client, headers, **overrides):
         "slug": "software-engineering",
         "name": "Software Engineering",
         "prompt": "Prefer backend roles",
-        "requested_model": "gpt-5.6-luna",
+        "requested_model": "gpt-6-luna",
         "execution_mode": "managed_filter",
         "sources": ["source-b", "source-a"],
         **overrides,
@@ -42,7 +42,7 @@ def test_managed_board_create_get_and_list_are_typed_and_deterministic(client, a
         "sponsor_user_id": sponsor,
         "prompt": "Prefer backend roles",
         "prompt_hash": compute_filter_hash("Prefer backend roles", "filter"),
-        "requested_model": "gpt-5.6-luna",
+        "requested_model": "gpt-6-luna",
         "execution_mode": "managed_filter",
         "on_ambiguous": "filter",
         "fail_closed": False,
@@ -254,7 +254,7 @@ def test_bootstrap_creates_three_draft_boards_and_is_idempotent(client, admin_he
         "Jobs selected by Kanishk's enabled personal machine filters, without personal activity or fields.",
     ]
     for board in boards[:2]:
-        assert board["requested_model"] == "gpt-5.6-luna"
+        assert board["requested_model"] == "gpt-6-luna"
         assert board["on_ambiguous"] == "filter"
         assert board["fail_closed"] is True
         assert board["criteria"] == {

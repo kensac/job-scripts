@@ -255,7 +255,7 @@ def seed() -> dict[str, int]:
         counts["messages"] += 1
         db.execute(
             "INSERT INTO email_events (message_id, kind, confidence, detail, model) "
-            "VALUES (%s, %s, %s, %s, 'gpt-5.6-luna')",
+            "VALUES (%s, %s, %s, %s, 'gpt-6-luna')",
             (
                 message_id,
                 kind,

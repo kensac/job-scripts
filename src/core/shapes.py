@@ -186,7 +186,11 @@ REQUIREMENTS_TASK = TaskShape(
         "failed against zero on the other two, and a failed line leaves a "
         "posting unextracted while looking like a batch that worked. luna is "
         "the only model with a clean record at volume, and its extraction "
-        "quality here has not been audited the way the other two were."
+        "quality here has not been audited the way the other two were. "
+        "This task did NOT move to gpt-6-luna with the rest of the tasks on "
+        "2026-09-22: the model here was chosen on a failure rate measured "
+        "over 60,000 batched requests, and the newer model has no such "
+        "record. JOBTRACKER_REQUIREMENTS_MODEL moves it once one exists."
     ),
     structured=StructuredOutput.JSON_SCHEMA,
     batched=True,
@@ -280,8 +284,8 @@ VERIFY_TASK = TaskShape(
 # The two constants stay separate because their ENV OVERRIDES are separate: the
 # per-task model config can move one path without the other, which is the point
 # of that feature. They simply default to the same model now.
-BACKFILL_MODEL = os.environ.get("JOBTRACKER_MAIL_BACKFILL_MODEL", "gpt-5.6-luna")
-ONGOING_MODEL = os.environ.get("JOBTRACKER_MAIL_ONGOING_MODEL", "gpt-5.6-luna")
+BACKFILL_MODEL = os.environ.get("JOBTRACKER_MAIL_BACKFILL_MODEL", "gpt-6-luna")
+ONGOING_MODEL = os.environ.get("JOBTRACKER_MAIL_ONGOING_MODEL", "gpt-6-luna")
 
 
 # A backfill may ask for more, because it is a ONE-TIME sweep over a mailbox
@@ -301,8 +305,11 @@ MAX_CLASSIFY_PER_CYCLE = int(os.environ.get("JOBTRACKER_MAIL_CLASSIFY_MAX", "500
 # values. Probed against the live APIs, which name the sets in their 400s:
 #
 #   gpt-5-mini    accepts minimal, low, medium, high   REJECTS none
-#   gpt-5.6-luna  accepts none, low, medium, high,     REJECTS minimal
+#   gpt-6-luna    accepts none, low, medium, high,     REJECTS minimal
 #                         xhigh, max
+#
+# gpt-6-luna accepts exactly what gpt-5.6-luna did, which is why the move
+# between them needed nothing here.
 #
 # The intersection is only {low, medium, high}, so a single shared constant
 # would have to give up the cheapest setting on both. Each gets its cheapest
@@ -418,14 +425,15 @@ APPLICATION_TASK = TaskShape(
         "Measured 2026-09-06 over four live questions: gpt-5.6-luna without reasoning picked "
         "the resume facts that fit the role and stayed inside them; gpt-5-nano padded with "
         "generic openers and loosened one claim. Both cost under a tenth of a cent an answer, "
-        "so the better writer is the choice."
+        "so the better writer is the choice. The default moved to gpt-6-luna on 2026-09-22 "
+        "for price; that comparison is of its predecessor and has not been repeated."
     ),
     structured=StructuredOutput.JSON_SCHEMA,
     batched=True,
     max_output_tokens=1200,
     est_prompt_tokens=3500,
     effort_preference=("none", "minimal", "low"),
-    candidates=("gpt-5.6-luna",),
+    candidates=("gpt-6-luna",),
 )
 
 
@@ -442,7 +450,7 @@ JOB_PROFILE_TASK = TaskShape(
     max_output_tokens=1000,
     est_prompt_tokens=3200,
     effort_preference=("none",),
-    candidates=("gpt-5.6-luna",),
+    candidates=("gpt-6-luna",),
 )
 
 

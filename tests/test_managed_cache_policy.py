@@ -9,7 +9,8 @@ from core.answers import FilterDecision
 from tasks import filter_execution
 
 
-def test_explicit_cache_policy_preserves_request_and_frozen_snapshot(f):
+@pytest.mark.parametrize("model", ["gpt-5.6-luna", "gpt-6-luna", "gpt-6-sol", "gpt-6-astra"])
+def test_explicit_cache_policy_preserves_request_and_frozen_snapshot(f, model):
     task = f.make_task("run_managed_board_batch", {}, status="running")
     original = batch.structured_response_spec("job", "criteria", "posting", FilterDecision)
     controlled = batch.structured_response_spec(
@@ -22,8 +23,8 @@ def test_explicit_cache_policy_preserves_request_and_frozen_snapshot(f):
     frozen = snapshot_specs(task, [controlled])[0]
     replay = snapshot_specs(task, [original])[0]
     assert replay.context == frozen.context
-    before = batch._build_line(original, "gpt-5.6-luna", "medium", 6000)
-    after = batch._build_line(replay, "gpt-5.6-luna", "medium", 6000)
+    before = batch._build_line(original, model, "medium", 6000)
+    after = batch._build_line(replay, model, "medium", 6000)
     assert after["body"].pop("prompt_cache_options") == {"mode": "explicit"}
     assert after == before
     with pytest.raises(ValueError, match="unsupported prompt cache policy"):

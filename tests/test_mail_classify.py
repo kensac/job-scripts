@@ -216,6 +216,12 @@ async def test_not_job_related_is_a_real_verdict(monkeypatch, f):
 _PROBED_ACCEPTS = {
     "gpt-5-mini": {"minimal", "low", "medium", "high"},
     "gpt-5.6-luna": {"none", "low", "medium", "high", "xhigh", "max"},
+    # Probed 2026-09-22 the same way, against the live API: sending "minimal"
+    # returns "Unsupported value: 'minimal' is not supported with the
+    # 'gpt-6-luna' model. Supported values are: 'none', 'low', 'medium',
+    # 'high', 'xhigh', and 'max'." The same set as its predecessor, which is
+    # what made the swap a one-line change.
+    "gpt-6-luna": {"none", "low", "medium", "high", "xhigh", "max"},
 }
 
 
