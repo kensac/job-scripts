@@ -73,6 +73,26 @@ _EFFORTS_API = Source(
     note="quoted from the provider's own 400 error text; see comment above",
 )
 
+# gpt-6. Unlike everything above it, these rates were read off OpenAI's own
+# page rather than inherited, so they carry a URL and a date.
+_GPT6_PRICES = Source(
+    url="https://developers.openai.com/api/docs/pricing",
+    read_on=datetime.date(2026, 9, 22),
+    vendor=True,
+    note="short- and long-context rows for gpt-6-luna, gpt-6-sol and gpt-6-astra",
+)
+
+# "Prompts with more than 272K input tokens are priced at 2x input and cache
+# rates and 1.5x output for the full request" - each model's page, read
+# 2026-09-22. The whole request rebills at the tier its prompt selects, which
+# is what Tier already means.
+#
+# Both tiers are written out per model rather than as "twice the base": that
+# the multipliers are currently 2x and 1.5x is a fact about today's price
+# list, not a rule OpenAI has committed to, and arithmetic would absorb a
+# future change silently. Same reasoning as xAI's tiers.
+_GPT6_TIER_TOKENS = 272_000
+
 _EARLIER_GEN = Reasoning(
     param="reasoning_effort",
     accepts=("minimal", "low", "medium", "high"),
@@ -91,8 +111,62 @@ _5_6_GEN = Reasoning(
 
 # Covers reasoning AND output on the Responses API; too small and the JSON gets
 # truncated mid-string after a long reasoning pass.
+# gpt-6, read the same way on 2026-09-22, and the two answers differ per
+# model - astra takes neither "none" nor "minimal", the other two take "none"
+# but not "minimal":
+#
+#   gpt-6-astra  "Unsupported value: 'none' is not supported with the
+#                 'gpt-6-astra' model. Supported values are: 'low', 'medium',
+#                 'high', 'xhigh', and 'max'."
+#   gpt-6-sol    "Unsupported value: 'minimal' is not supported with the
+#                 'gpt-6-sol' model. Supported values are: 'none', 'low',
+#                 'medium', 'high', 'xhigh', and 'max'."
+#
+# WORTH KNOWING FOR THE NEXT READER: an invalid value gets a different 400.
+# Sending effort="__nonsense__" returns "Invalid value ... Supported values
+# are: 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', and 'max'" for all
+# three models - that is the PARAMETER's enum, not the model's. Only a real
+# value the model refuses produces the per-model list above, and only that
+# form is evidence. The first probe here said all three took "minimal"; they
+# do not.
+_EFFORTS_API_GPT6 = Source(
+    url="https://api.openai.com/v1/responses",
+    read_on=datetime.date(2026, 9, 22),
+    vendor=True,
+    note="per-model 400 text; an invalid value returns the parameter enum instead",
+)
+
+# Default stays "low" like every other OpenAI entry here - the value the
+# datasheet says is safe when a task expresses no preference. OpenAI's own
+# default for this generation is "medium", which is the more expensive half of
+# a choice this system already made deliberately.
+_6_GEN = Reasoning(
+    param="reasoning_effort",
+    accepts=("none", "low", "medium", "high", "xhigh", "max"),
+    rejects=("minimal",),
+    default="low",
+    source=_EFFORTS_API_GPT6,
+)
+
+_6_ASTRA = Reasoning(
+    param="reasoning_effort",
+    accepts=("low", "medium", "high", "xhigh", "max"),
+    rejects=("none", "minimal"),
+    default="low",
+    source=_EFFORTS_API_GPT6,
+)
+
 _OUTPUT = Output(
     max_output_tokens=None,
+    default_max_output_tokens=6000,
+    truncation_finish_reason="length",
+    truncates_silently=False,
+)
+
+# gpt-6 publishes both numbers, so they are facts here rather than blanks:
+# "1,050,000 context window", "128,000 max output tokens".
+_OUTPUT_GPT6 = Output(
+    max_output_tokens=128_000,
     default_max_output_tokens=6000,
     truncation_finish_reason="length",
     truncates_silently=False,
@@ -125,6 +199,45 @@ def _rates(
         batch_rate=Decimal("0.5"),
         source=_UNSOURCED,
         batch_source=_BATCH,
+        cache_write_source=_PROMPT_CACHING,
+    )
+
+
+def _gpt6_rates(
+    lo_in: str,
+    lo_out: str,
+    lo_cached: str,
+    hi_in: str,
+    hi_out: str,
+    hi_cached: str,
+) -> Rates:
+    """Two tiers, the second selected by a prompt over _GPT6_TIER_TOKENS.
+
+    Cache writes follow the same 1.25x of uncached input as the 5.6
+    generation: the prompt-caching guide says "GPT-5.6 and later", and the
+    read rates on the pricing page are the 0.1x that sentence also states,
+    so the write half of it is taken to hold too.
+    """
+    return Rates(
+        tiers=(
+            Tier(
+                _GPT6_TIER_TOKENS,
+                Decimal(lo_in),
+                Decimal(lo_out),
+                Decimal(lo_cached),
+                Decimal(lo_in) * Decimal("1.25"),
+            ),
+            Tier(
+                None,
+                Decimal(hi_in),
+                Decimal(hi_out),
+                Decimal(hi_cached),
+                Decimal(hi_in) * Decimal("1.25"),
+            ),
+        ),
+        batch_rate=Decimal("0.5"),
+        source=_GPT6_PRICES,
+        batch_source=_GPT6_PRICES,
         cache_write_source=_PROMPT_CACHING,
     )
 
@@ -172,7 +285,7 @@ PROVIDER = Provider(
         ),
         Model(
             name="gpt-5.6-luna",
-            note="Newest small model, fast and cheap",
+            note="GPT-5.6 small model, fast and cheap",
             context_tokens=None,
             structured_output=_SCHEMA,
             rates=_rates("0.20", "1.20", "0.020", cache_write_multiplier="1.25"),
@@ -183,7 +296,7 @@ PROVIDER = Provider(
         ),
         Model(
             name="gpt-5.6-terra",
-            note="Newest mid-tier, strong quality",
+            note="GPT-5.6 mid-tier, strong quality",
             context_tokens=None,
             structured_output=_SCHEMA,
             rates=_rates("2.00", "12.00", "0.200", cache_write_multiplier="1.25"),
@@ -213,12 +326,44 @@ PROVIDER = Provider(
         ),
         Model(
             name="gpt-5.6-sol",
-            note="Newest flagship, highest cost",
+            note="GPT-5.6 flagship",
             context_tokens=None,
             structured_output=_SCHEMA,
             rates=_rates("4.00", "20.00", "0.400", cache_write_multiplier="1.25"),
             reasoning=_5_6_GEN,
             output=_OUTPUT,
+        ),
+        # gpt-6, cheapest first, which is the order the picker offers them in.
+        # Every number below is off OpenAI's own pages on 2026-09-22; the
+        # batch lane is stated there too ("a 50% discount across all three
+        # models"), so unlike the models above it this generation's batch rate
+        # is vendor-sourced rather than inherited from an aggregator.
+        Model(
+            name="gpt-6-luna",
+            note="GPT-6 small: cheapest of the generation",
+            context_tokens=1_050_000,
+            structured_output=_SCHEMA,
+            rates=_gpt6_rates("0.10", "0.50", "0.01", "0.20", "0.75", "0.02"),
+            reasoning=_6_GEN,
+            output=_OUTPUT_GPT6,
+        ),
+        Model(
+            name="gpt-6-sol",
+            note="GPT-6 mid-tier",
+            context_tokens=1_050_000,
+            structured_output=_SCHEMA,
+            rates=_gpt6_rates("2.00", "10.00", "0.20", "4.00", "15.00", "0.40"),
+            reasoning=_6_GEN,
+            output=_OUTPUT_GPT6,
+        ),
+        Model(
+            name="gpt-6-astra",
+            note="GPT-6 flagship, highest cost",
+            context_tokens=1_050_000,
+            structured_output=_SCHEMA,
+            rates=_gpt6_rates("10.00", "50.00", "1.00", "20.00", "75.00", "2.00"),
+            reasoning=_6_ASTRA,
+            output=_OUTPUT_GPT6,
         ),
     ),
 )
