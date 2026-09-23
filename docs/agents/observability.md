@@ -52,6 +52,13 @@ that worker; keep tasks short and let the queue carry the volume.
 
 ## Batched work
 
+Location classification uses `classify_locations_max_output_tokens` for new
+submissions. The task model screen and fleet budget estimate read the same
+configured shape. A multi-place response needs an array, so the default allows
+more than a single city's answer; short answers still bill only emitted tokens.
+Paid batches keep their original requests and incomplete JSON stays rejected.
+Unclassified strings remain eligible for a later scheduled pass.
+
 `job_profile_collection_enabled` controls new shared-profile collection at
 scheduling, manual admission, and task execution. Pausing retains existing
 profiles and lets paid batches collect their receipts. A task rechecks the

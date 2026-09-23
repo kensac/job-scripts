@@ -18,7 +18,7 @@ from api import budget, db, events
 from api.ai import batch_results
 from api.ai.batch_results import consume_result as consume_result
 from api.ai.batch_results import snapshot_specs as snapshot_specs
-from api.task_config import configured_model
+from api.task_config import configured_model, configured_shape
 from core import pricing
 from core.batch import BatchEventCounts, BatchResult
 from core.prompts import PROMPT_SAMPLE_SIZE, prompt_hash
@@ -326,6 +326,7 @@ async def run_batched(
         results = await collect_pending(task_id, hook)
         return results, provenance
     specs = snapshot_specs(task_id, specs)
+    shape = configured_shape(shape)
     chosen = resolve(
         shape, override=configured_model(purpose) if allow_configured_override else None
     )
