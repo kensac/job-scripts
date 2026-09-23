@@ -1,7 +1,7 @@
 """Scheduled work requires an implemented batch transport for its credentials."""
 
 from api import ai, db
-from core import providers
+from core import batch_capabilities, providers
 from tasks.runtime import set_progress
 
 
@@ -31,8 +31,8 @@ def require_transport(task_id: int, cfg: ai.AIConfig) -> None:
     # by that collector, and falling back would violate the scheduled intent.
     if (
         cfg.key_source != "owner"
-        or cfg.provider != "openai"
-        or providers.PROVIDERS["openai"].batch_endpoint is None
+        or providers.provider_of(cfg.model) != cfg.provider
+        or batch_capabilities.unavailable_reason(cfg.model) is not None
     ):
         _unsupported(task_id, cfg)
 

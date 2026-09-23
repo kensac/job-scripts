@@ -179,6 +179,15 @@ class ModelEntry(BaseModel):
     rate_in_per_mtok: float | None = None
     rate_out_per_mtok: float | None = None
     batch_discount: float | None = None
+    vendor_batch_supported: bool | None = None
+    batch_available: bool = False
+    batch_unavailable_reason: str | None = None
+    rate_cached_in_per_mtok: float | None = None
+    cache_write_5m_per_mtok: float | None = None
+    cache_write_1h_per_mtok: float | None = None
+    max_output_tokens: int | None = None
+    pricing_source_url: str | None = None
+    pricing_verified_on: str | None = None
     structured_output: str | None = None
     reasoning_accepts: list[str] = []
     # Whether THIS caller can run it right now, and if not, why, in words the
@@ -209,6 +218,8 @@ def _catalog(provider: str) -> list[dict]:
     context window nobody has recorded is not unlimited. The page renders the
     gap rather than a confident wrong number.
     """
+    from core import batch_capabilities
+
     known = core_providers.PROVIDERS.get(provider)
     if known is None:
         return list(ai.MODEL_CATALOG.get(provider, []))
@@ -222,6 +233,23 @@ def _catalog(provider: str) -> list[dict]:
                 "model": m.name,
                 "note": m.note,
                 "context_tokens": m.context_tokens,
+                "max_output_tokens": m.output.max_output_tokens,
+                "vendor_batch_supported": batch_capabilities.vendor_support(m.name),
+                "batch_available": batch_capabilities.unavailable_reason(m.name) is None,
+                "batch_unavailable_reason": batch_capabilities.unavailable_reason(m.name),
+                "rate_cached_in_per_mtok": float(tier.rate_cached_in)
+                if tier and tier.rate_cached_in is not None
+                else None,
+                "cache_write_5m_per_mtok": float(m.cache_write_5m_per_mtok)
+                if m.cache_write_5m_per_mtok is not None
+                else None,
+                "cache_write_1h_per_mtok": float(m.cache_write_1h_per_mtok)
+                if m.cache_write_1h_per_mtok is not None
+                else None,
+                "pricing_source_url": m.rates.source.url or None,
+                "pricing_verified_on": m.rates.source.read_on.isoformat()
+                if m.rates.source.read_on
+                else None,
                 "rate_in_per_mtok": float(tier.rate_in) if tier else None,
                 "rate_out_per_mtok": float(tier.rate_out) if tier else None,
                 "batch_discount": float(m.rates.batch_rate)

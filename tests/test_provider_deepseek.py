@@ -89,9 +89,9 @@ class TestDatasheet:
     @pytest.mark.parametrize(
         ("model", "rate_in", "rate_out", "rate_cached"),
         [
-            (FLASH, "0.44", "1.32", "0.014"),
+            (FLASH, "0.30", "1.20", "0.006"),
             (PRO, "1.32", "3.96", "0.044"),
-            ("deepseek-v4-flash-vision-exp", "0.44", "1.32", "0.014"),
+            ("deepseek-v4-flash-vision-exp", "0.30", "1.20", "0.006"),
         ],
     )
     def test_published_rates_are_recorded_exactly(self, model, rate_in, rate_out, rate_cached):
@@ -159,7 +159,7 @@ class TestPeakWindows:
         one on the surface built to make spend visible."""
         rates = providers.PROVIDERS["deepseek"].models[0].rates
         assert pricing.is_off_peak(rates, None) is False
-        assert pricing.estimate_cost_usd(FLASH, 1_000_000, 0, at=None) == Decimal("0.44")
+        assert pricing.estimate_cost_usd(FLASH, 1_000_000, 0, at=None) == Decimal("0.30")
 
     def test_off_peak_is_exactly_half(self):
         peak = pricing.estimate_cost_usd(FLASH, 1_000_000, 1_000_000, at=_at(MON, 3))

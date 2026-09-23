@@ -208,8 +208,8 @@ def test_xai_tiering_rebills_the_whole_request_including_output():
     crosses the threshold, so a long prompt with a short answer still pays the
     higher output rate. A tier that only moved the input rate would understate
     every one of these."""
-    small = pricing.estimate_cost_usd("grok-4.6", 200_000, 1_000)
-    large = pricing.estimate_cost_usd("grok-4.6", 200_001, 1_000)
+    small = pricing.estimate_cost_usd("grok-4.6", 199_999, 1_000)
+    large = pricing.estimate_cost_usd("grok-4.6", 200_000, 1_000)
     assert small is not None and large is not None
     # One extra prompt token roughly doubles the bill, output included.
     assert large > small * Decimal("1.9")
@@ -235,13 +235,10 @@ def test_temperature_follows_the_declared_capability_not_a_provider_name():
     assert ai.validate_params("openai", {"temperature": 0.5}) is not None
 
 
-def test_xai_has_a_batch_lane_but_no_declared_discount():
-    """The lane exists - GET /v1/batches returns 200 - but no vendor page
-    states a discount, so none is claimed. A batched call therefore bills at
-    the synchronous rate: overstating if the reported 20% is real, which is the
-    safe direction and the opposite of what a global 0.5 would have done."""
+def test_xai_batch_discount_is_not_applied_to_other_models():
+    """The September vendor docs discount 4.3, not the newer flagships."""
     assert providers.PROVIDERS["xai"].batch_endpoint == "/v1/batches"
-    for model in ("grok-4.3", "grok-4.5", "grok-4.6"):
+    for model in ("grok-4.5", "grok-4.6", "grok-4.7"):
         rates = pricing.rates_for(model)
         assert rates is not None and rates.batch_rate is None
         batched = pricing.estimate_cost_usd(model, 10_000, 10_000, batched=True)

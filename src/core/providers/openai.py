@@ -1,18 +1,9 @@
-"""OpenAI, as a datasheet.
-
-REVIEW NOTE. Every rate below is UNSOURCED. They were carried over verbatim
-from the table this package replaced, which recorded no provenance, and rather
-than attach a URL after the fact they are marked vendor=False with no read date
-so the gap is visible. This is the first thing to fix at the next review: read
-them off OpenAI's own pricing page and date them.
-
-The reasoning values, by contrast, are empirical and dated - they come from
-this system's own production traffic, including a 400 that took down a batch.
-"""
+"""OpenAI rates and limits, checked against the official model pages."""
 
 from __future__ import annotations
 
 import datetime
+from dataclasses import replace
 from decimal import Decimal
 
 from core.providers.spec import (
@@ -28,11 +19,11 @@ from core.providers.spec import (
     Wire,
 )
 
-_UNSOURCED = Source(
-    url="",
-    read_on=None,
-    vendor=False,
-    note="carried over from the original price table, which recorded no source",
+_PRICES = Source(
+    url="https://developers.openai.com/api/docs/models",
+    read_on=datetime.date(2026, 9, 23),
+    vendor=True,
+    note="Reviewed the individual GPT-5, GPT-5.6 and embedding model pages",
 )
 
 _PROMPT_CACHING = Source(
@@ -42,14 +33,11 @@ _PROMPT_CACHING = Source(
     note="GPT-5.6 and later cache writes are 1.25x uncached input; reads are 0.1x",
 )
 
-# The batch lane has always been assumed to halve the bill, and the assumption
-# has held. It is second-hand rather than read off OpenAI's own page, so it is
-# marked as such.
 _BATCH = Source(
-    url="https://www.digitalapplied.com/blog/llm-batch-api-pricing-landscape-2026",
-    read_on=datetime.date(2026, 9, 2),
-    vendor=False,
-    note="article dated 2026-08-14; agrees with the multiplier this code has always used",
+    url="https://developers.openai.com/api/docs/guides/batch",
+    read_on=datetime.date(2026, 9, 23),
+    vendor=True,
+    note="Batch processing at 50% of standard token pricing",
 )
 
 # Read straight out of OpenAI's own 400s on 2026-09-02, which name the
@@ -157,7 +145,7 @@ _6_ASTRA = Reasoning(
 )
 
 _OUTPUT = Output(
-    max_output_tokens=None,
+    max_output_tokens=128_000,
     default_max_output_tokens=6000,
     truncation_finish_reason="length",
     truncates_silently=False,
@@ -197,7 +185,7 @@ def _rates(
             ),
         ),
         batch_rate=Decimal("0.5"),
-        source=_UNSOURCED,
+        source=_PRICES,
         batch_source=_BATCH,
         cache_write_source=_PROMPT_CACHING,
     )
@@ -242,6 +230,18 @@ def _gpt6_rates(
     )
 
 
+def _long_context_rates(name: str, *values: str) -> Rates:
+    return replace(
+        _gpt6_rates(*values),
+        source=Source(
+            f"https://developers.openai.com/api/docs/models/{name}",
+            datetime.date(2026, 9, 23),
+            True,
+        ),
+        batch_source=_BATCH,
+    )
+
+
 PROVIDER = Provider(
     name="openai",
     wire=Wire.OPENAI_RESPONSES,
@@ -258,8 +258,8 @@ PROVIDER = Provider(
     models=(
         Model(
             name="gpt-5-nano",
-            note="Cheapest, used by default; fine for most filters",
-            context_tokens=None,
+            note="Small previous-generation model; check task quality evidence",
+            context_tokens=400_000,
             structured_output=_SCHEMA,
             rates=_rates("0.05", "0.40", "0.005"),
             reasoning=_EARLIER_GEN,
@@ -268,7 +268,7 @@ PROVIDER = Provider(
         Model(
             name="gpt-5-mini",
             note="Better judgment on nuanced criteria",
-            context_tokens=None,
+            context_tokens=400_000,
             structured_output=_SCHEMA,
             rates=_rates("0.25", "2.00", "0.025"),
             reasoning=_EARLIER_GEN,
@@ -277,7 +277,7 @@ PROVIDER = Provider(
         Model(
             name="gpt-5",
             note="Strong general model",
-            context_tokens=None,
+            context_tokens=400_000,
             structured_output=_SCHEMA,
             rates=_rates("1.25", "10.00", "0.125"),
             reasoning=_EARLIER_GEN,
@@ -286,9 +286,11 @@ PROVIDER = Provider(
         Model(
             name="gpt-5.6-luna",
             note="GPT-5.6 small model, fast and cheap",
-            context_tokens=None,
+            context_tokens=1_050_000,
             structured_output=_SCHEMA,
-            rates=_rates("0.20", "1.20", "0.020", cache_write_multiplier="1.25"),
+            rates=_long_context_rates(
+                "gpt-5.6-luna", "0.20", "1.20", "0.020", "0.40", "1.80", "0.040"
+            ),
             reasoning=_5_6_GEN,
             output=_OUTPUT,
             # https://developers.openai.com/api/docs/guides/prompt-caching
@@ -297,9 +299,11 @@ PROVIDER = Provider(
         Model(
             name="gpt-5.6-terra",
             note="GPT-5.6 mid-tier, strong quality",
-            context_tokens=None,
+            context_tokens=1_050_000,
             structured_output=_SCHEMA,
-            rates=_rates("2.00", "12.00", "0.200", cache_write_multiplier="1.25"),
+            rates=_long_context_rates(
+                "gpt-5.6-terra", "2.00", "12.00", "0.200", "4.00", "18.00", "0.400"
+            ),
             reasoning=_5_6_GEN,
             output=_OUTPUT,
         ),
@@ -313,9 +317,7 @@ PROVIDER = Provider(
             context_tokens=None,
             structured_output=StructuredOutputSpec(mode=StructuredOutput.NONE),
             rates=_rates("0.02", "0.00", "0.02"),
-            reasoning=Reasoning(
-                param=None, accepts=(), rejects=(), default=None, source=_UNSOURCED
-            ),
+            reasoning=Reasoning(param=None, accepts=(), rejects=(), default=None, source=_PRICES),
             output=Output(
                 max_output_tokens=None,
                 default_max_output_tokens=0,
@@ -327,9 +329,11 @@ PROVIDER = Provider(
         Model(
             name="gpt-5.6-sol",
             note="GPT-5.6 flagship",
-            context_tokens=None,
+            context_tokens=1_050_000,
             structured_output=_SCHEMA,
-            rates=_rates("4.00", "20.00", "0.400", cache_write_multiplier="1.25"),
+            rates=_long_context_rates(
+                "gpt-5.6-sol", "4.00", "20.00", "0.400", "8.00", "30.00", "0.800"
+            ),
             reasoning=_5_6_GEN,
             output=_OUTPUT,
         ),

@@ -149,6 +149,9 @@ def validate_params(provider: str, params: dict[str, Any], model: str | None = N
     for key in ("reasoning_effort", "effort"):
         if key not in params:
             continue
+        declared = providers.model(model)
+        if declared is not None and declared.reasoning.param is None:
+            return f"{model} does not support an effort parameter"
         value = params[key]
         if value in rejects:
             return f"{model or provider} rejects {key}={value!r}"
@@ -375,11 +378,14 @@ async def _parse[T: BaseModel](
             output_format=response_model,
             **kwargs,
         )
+        cached = getattr(response.usage, "cache_read_input_tokens", 0) or 0
+        writes = getattr(response.usage, "cache_creation_input_tokens", 0) or 0
         usage = _usage_tuple(
-            getattr(response.usage, "input_tokens", 0),
+            (getattr(response.usage, "input_tokens", 0) or 0) + cached + writes,
             getattr(response.usage, "output_tokens", 0),
             0,
-            cached=getattr(response.usage, "cache_read_input_tokens", 0) or 0,
+            cached=cached,
+            cache_write=writes,
         )
         return response.parsed_output, usage
 

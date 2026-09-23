@@ -14,7 +14,7 @@ from openai.lib._pydantic import to_strict_json_schema
 from openai.types import Batch
 from pydantic import BaseModel
 
-from core import pricing, providers, store
+from core import batch_capabilities, pricing, providers, store
 
 
 class BatchEventCounts(TypedDict, total=False):
@@ -519,6 +519,9 @@ async def submit_batches(
     reason - there is nothing local to ration, so no concurrency limit is
     needed here.
     """
+    reason = batch_capabilities.unavailable_reason(model)
+    if reason:
+        raise ValueError(f"BATCH_UNSUPPORTED: {model}: {reason}")
     client = _client()
     if not client or not specs:
         return []
@@ -595,6 +598,9 @@ async def run_responses_batch(
     max_output_tokens: int,
     on_event: BatchEventHook = None,
 ) -> dict[str, BatchResult]:
+    reason = batch_capabilities.unavailable_reason(model)
+    if reason:
+        raise ValueError(f"BATCH_UNSUPPORTED: {model}: {reason}")
     client = _client()
     if not client:
         return {spec.custom_id: BatchResult(spec.custom_id, error="no api key") for spec in specs}

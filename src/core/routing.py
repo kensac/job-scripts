@@ -59,7 +59,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from enum import StrEnum
 
-from core import providers
+from core import batch_capabilities, providers
 from core.pricing import estimate_cost_usd, is_off_peak
 from core.providers.spec import Model, StructuredOutput
 
@@ -240,12 +240,13 @@ def _rejection(shape: TaskShape, name: str, declared: Model | None, provider: st
             f"declares {declared.structured_output.mode} output, "
             f"task needs at least {shape.structured}"
         )
-    if shape.batched and providers.PROVIDERS[provider].batch_endpoint is None:
-        # Not a missing discount - a missing capability. DeepSeek is the case:
-        # both batch endpoints 404, so batched work cannot run there at all,
-        # however cheap its off-peak window makes it.
-        return "provider has no batch endpoint"
+    if shape.batched:
+        reason = batch_capabilities.unavailable_reason(name)
+        if reason:
+            return reason
     if shape.effort is not None:
+        if declared.reasoning.param is None:
+            return "model does not support an effort parameter"
         accepts = declared.reasoning.accepts
         # An empty accepts tuple means nobody has enumerated the model's values.
         # Rejecting then would block a model that works, so the provider is
