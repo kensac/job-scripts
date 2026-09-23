@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, PositiveInt, TypeAdapter
 
@@ -378,6 +378,20 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
         value_type=PositiveInt,
         help="Minutes a worker may run a different release from the api before it counts as a "
         "host that did not deploy.",
+    ),
+    "health_warning_digest_hour_utc": ConfigKey(
+        section="Health",
+        default=13,
+        value_type=Annotated[int, Field(ge=0, le=23)],
+        help="UTC hour for the daily warning digest. Critical incidents are sent immediately; "
+        "a missed digest is delivered on the next health run. All alerts remain in the UI.",
+    ),
+    "health_notification_repeat_hours": ConfigKey(
+        section="Health",
+        default=24,
+        value_type=PositiveInt,
+        help="Minimum hours between emails for reopened instances of the same incident. "
+        "Task stalls are grouped by task kind. A warning escalating to critical bypasses this delay.",
     ),
     # Distinct location strings classified per hourly cycle. The backlog is
     # 8,735 strings; set low for a first look at GET /admin/locations, then

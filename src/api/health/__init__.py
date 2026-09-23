@@ -244,14 +244,26 @@ def record(run: DetectionRun | Sequence[dict[str, Any]]) -> list[dict[str, Any]]
     # hour and mails again. last_seen is refreshed by the upsert above, so a
     # condition that is still firing never ages into this.
     open_rows = db.query(
-        "SELECT id, kind, subject FROM health_alerts WHERE resolved_at IS NULL "
-        "AND last_seen < now() - %s::interval",
-        (RESOLVE_GRACE,),
+        "SELECT id, kind, subject, last_seen < now() - %s::interval AS past_grace "
+        "FROM health_alerts WHERE resolved_at IS NULL "
+        "AND (last_seen < now() - %s::interval OR kind='task_progress_stalled')",
+        (RESOLVE_GRACE, RESOLVE_GRACE),
     )
     stale = [
         r
         for r in open_rows
         if (r["kind"], r["subject"]) not in seen
+        and (
+            r["past_grace"]
+            or (
+                r["kind"] == "task_progress_stalled"
+                and r["subject"].isdigit()
+                and not db.query_one(
+                    "SELECT 1 FROM tasks WHERE id=%s AND status='running'",
+                    (int(r["subject"]),),
+                )
+            )
+        )
         # Unknown ownership is not evidence of recovery. A newly added alert
         # kind must declare its detector before the recorder may auto-resolve
         # it; preserving an alert is safer than manufacturing a false clear.
