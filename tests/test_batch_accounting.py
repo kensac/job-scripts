@@ -131,12 +131,12 @@ def test_tier_selection_is_per_request_even_without_cache(f):
     hook = runtime.batch_event_hook(task_id, "comp", "grok-4.3")
     hook("tiered", "submitted", {"requests": 2})
     results = {
-        str(i): batch.BatchResult(str(i), usage={"input_tokens": 200_000, "output_tokens": 100})
+        str(i): batch.BatchResult(str(i), usage={"input_tokens": 199_999, "output_tokens": 100})
         for i in range(2)
     }
     batch._emit_usage(hook, "tiered", "completed", results)
-    per_request = pricing.estimate_cost_usd("grok-4.3", 200_000, 100, batched=True)
+    per_request = pricing.estimate_cost_usd("grok-4.3", 199_999, 100, batched=True)
     assert per_request is not None
     expected = (per_request * 2).quantize(Decimal("0.000001"))
-    assert expected != pricing.estimate_cost_usd("grok-4.3", 400_000, 200, batched=True)
+    assert expected != pricing.estimate_cost_usd("grok-4.3", 399_998, 200, batched=True)
     assert db.query_one("SELECT cost_usd FROM api_usage")["cost_usd"] == expected

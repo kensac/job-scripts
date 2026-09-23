@@ -1,7 +1,7 @@
 """Scheduled work requires an implemented batch transport for its credentials."""
 
 from api import ai, db
-from core import providers
+from core import batch_capabilities, providers
 from tasks.runtime import set_progress
 
 
@@ -58,7 +58,7 @@ def require_config(task_id: int, cfg: ai.AIConfig) -> None:
     declared = providers.model(cfg.model)
     if (
         declared is None
-        or providers.provider_of(cfg.model) != "openai"
+        or batch_capabilities.unavailable_reason(cfg.model) is not None
         or declared.structured_output.mode is not providers.StructuredOutput.JSON_SCHEMA
     ):
         _unsupported(task_id, cfg)

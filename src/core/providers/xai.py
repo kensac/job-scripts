@@ -34,8 +34,8 @@ from core.providers.spec import (
 )
 
 _DOCS = Source(
-    url="https://docs.x.ai/docs/models",
-    read_on=datetime.date(2026, 9, 2),
+    url="https://docs.x.ai/developers/pricing",
+    read_on=datetime.date(2026, 9, 23),
     vendor=True,
     note="vendor model page; the page itself carries no last-updated date",
 )
@@ -50,12 +50,26 @@ _PROBED = Source(
     ),
 )
 
+_MODEL_API = Source(
+    "https://api.x.ai/v1/models",
+    datetime.date(2026, 9, 23),
+    True,
+    "Read-only capability enumeration; preserve the application's low-effort default",
+)
+
 # Above this prompt length xAI rebills the WHOLE request - input, cached input
 # and output alike - at the higher tier. Both tiers are written out per model
 # rather than expressed as "twice the base": that the high tier is currently
 # exactly 2x is a fact about today's price list, not a rule xAI has committed
 # to, and encoding it as arithmetic would silently absorb a future change.
-_TIER_TOKENS = 200_000
+_TIER_TOKENS = 199_999
+
+_BATCH = Source(
+    "https://docs.x.ai/developers/advanced-api-usage/batch-api",
+    datetime.date(2026, 9, 23),
+    True,
+    "20% discount only for grok-4.3 and the three grok-4.20-0309 variants",
+)
 
 # json_schema, confirmed live: client.chat.completions.parse() with a Pydantic
 # model returns a parsed object against api.x.ai/v1. Both flags are False and
@@ -66,28 +80,22 @@ _SCHEMA = StructuredOutputSpec(mode=StructuredOutput.JSON_SCHEMA)
 
 
 def _rates(
-    lo_in: str, lo_out: str, lo_cached: str, hi_in: str, hi_out: str, hi_cached: str
+    lo_in: str,
+    lo_out: str,
+    lo_cached: str,
+    hi_in: str,
+    hi_out: str,
+    hi_cached: str,
+    *,
+    batch_rate: str | None = None,
 ) -> Rates:
     return Rates(
         tiers=(
             Tier(_TIER_TOKENS, Decimal(lo_in), Decimal(lo_out), Decimal(lo_cached)),
             Tier(None, Decimal(hi_in), Decimal(hi_out), Decimal(hi_cached)),
         ),
-        # NO BATCH RATE, deliberately, even though the lane exists: GET
-        # /v1/batches returns 200 with an empty list, so xAI does run one.
-        #
-        # What is not established is the DISCOUNT. One aggregator
-        # (digitalapplied.com, 2026-08-14) reports 20% off for exactly four
-        # legacy models - grok-4.3 and the three grok-4.20 builds - with the
-        # flagship excluded, and no xAI page found states any figure. The
-        # discount is not discoverable over the wire either; a batch has to be
-        # run and billed to learn it.
-        #
-        # None means a batched call bills at the synchronous rate, which
-        # OVERSTATES if the 20% is real. That is the safe direction and the
-        # same rule as an unpublished cached rate: overstate rather than invent
-        # a discount. A global 0.5 here would have reported half.
-        batch_rate=None,
+        batch_rate=Decimal(batch_rate) if batch_rate is not None else None,
+        batch_source=_BATCH,
         source=_DOCS,
     )
 
@@ -106,25 +114,40 @@ def _output() -> Output:
 # which is why this is declared per model and never shared across a provider.
 _EFFORT_4_3 = Reasoning(
     param="reasoning_effort",
-    accepts=("none", "minimal", "low", "medium", "high", "xhigh"),
-    rejects=("max",),
+    accepts=("none", "low", "medium", "high", "xhigh"),
+    rejects=("minimal", "max"),
     default="low",
-    source=_PROBED,
+    source=_MODEL_API,
 )
 
 _EFFORT_4_5_AND_4_6 = Reasoning(
     param="reasoning_effort",
-    accepts=("minimal", "low", "medium", "high", "xhigh"),
-    rejects=("none", "max"),
+    accepts=("low", "medium", "high", "xhigh"),
+    rejects=("none", "minimal", "max"),
     default="low",
-    source=_PROBED,
+    source=_MODEL_API,
 )
 
-# Only the three models this system would actually offer are declared. xAI also
-# publishes grok-build-0.1 and three grok-4.20 builds; their rates are on the
-# vendor page above, but declaring a model means asserting its reasoning set,
-# and those four were never probed. An undeclared model is simply unavailable,
-# which is better than a declared one whose accepted values are a guess.
+_EFFORT_4_7 = Reasoning(
+    "reasoning_effort",
+    ("low", "medium", "high", "xhigh"),
+    ("none", "minimal", "max"),
+    "low",
+    Source("https://docs.x.ai/developers/models/grok-4.7", datetime.date(2026, 9, 23), True),
+)
+_UNVERIFIED_EFFORT = Reasoning(
+    "reasoning_effort",
+    (),
+    (),
+    None,
+    Source(
+        "https://docs.x.ai/developers/models/grok-build-0.1",
+        datetime.date(2026, 9, 23),
+        True,
+        "No accepted effort enum is published; omit the parameter",
+    ),
+)
+
 PROVIDER = Provider(
     name="xai",
     wire=Wire.OPENAI_CHAT,
@@ -140,12 +163,14 @@ PROVIDER = Provider(
             note="Cheapest Grok; 1M context",
             context_tokens=1_000_000,
             structured_output=_SCHEMA,
-            rates=_rates("1.25", "2.50", "0.20", "2.50", "5.00", "0.40"),
+            rates=_rates("1.25", "2.50", "0.20", "2.50", "5.00", "0.40", batch_rate="0.8"),
             reasoning=_EFFORT_4_3,
             output=_output(),
+            batch_supported=True,
         ),
         Model(
             name="grok-4.5",
+            batch_supported=False,
             note="Stronger; 500K context",
             context_tokens=500_000,
             structured_output=_SCHEMA,
@@ -155,7 +180,8 @@ PROVIDER = Provider(
         ),
         Model(
             name="grok-4.6",
-            note="Newest flagship, highest cost; 500K context",
+            batch_supported=False,
+            note="Previous flagship; 500K context",
             context_tokens=500_000,
             # 25% of input, against OpenAI's 10%. The single global
             # CACHED_INPUT_MULTIPLIER this package replaced would have
@@ -164,6 +190,46 @@ PROVIDER = Provider(
             rates=_rates("2.00", "6.00", "0.50", "4.00", "12.00", "1.00"),
             reasoning=_EFFORT_4_5_AND_4_6,
             output=_output(),
+        ),
+        Model(
+            name="grok-4.7",
+            note="Current flagship; no Batch API support",
+            context_tokens=500_000,
+            structured_output=_SCHEMA,
+            rates=_rates("2", "6", "0.5", "4", "12", "1"),
+            reasoning=_EFFORT_4_7,
+            output=_output(),
+            batch_supported=False,
+        ),
+        Model(
+            name="grok-build-0.1",
+            note="Coding and workflow model; no Batch API support",
+            context_tokens=256_000,
+            structured_output=_SCHEMA,
+            rates=_rates("1", "2", "0.2", "2", "4", "0.4"),
+            reasoning=_UNVERIFIED_EFFORT,
+            output=_output(),
+            batch_supported=False,
+        ),
+        Model(
+            name="grok-4.20-0309-reasoning",
+            note="Pinned Grok 4.20 reasoning; vendor batch discount 20%",
+            context_tokens=1_000_000,
+            structured_output=_SCHEMA,
+            rates=_rates("1.25", "2.50", "0.20", "2.50", "5.00", "0.40", batch_rate="0.8"),
+            reasoning=_UNVERIFIED_EFFORT,
+            output=_output(),
+            batch_supported=True,
+        ),
+        Model(
+            name="grok-4.20-0309-non-reasoning",
+            note="Pinned Grok 4.20 non-reasoning; vendor batch discount 20%",
+            context_tokens=1_000_000,
+            structured_output=_SCHEMA,
+            rates=_rates("1.25", "2.50", "0.20", "2.50", "5.00", "0.40", batch_rate="0.8"),
+            reasoning=Reasoning(None, (), (), None, _MODEL_API),
+            output=_output(),
+            batch_supported=True,
         ),
     ),
 )

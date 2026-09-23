@@ -36,7 +36,7 @@ from core.providers.spec import (
 
 _PRICING = Source(
     url="https://api-docs.deepseek.com/quick_start/pricing",
-    read_on=datetime.date(2026, 9, 2),
+    read_on=datetime.date(2026, 9, 23),
     vendor=True,
     note="peak rates; off-peak is exactly half - see PEAK_WINDOWS",
 )
@@ -167,16 +167,16 @@ PROVIDER = Provider(
         # generation.
         Model(
             name="deepseek-v4-flash",
-            note="Cheapest DeepSeek; also served by the deepseek-chat alias",
+            note="Legacy alias now served and billed as DeepSeek V4.1 Flash",
             context_tokens=1_000_000,
             structured_output=_SCHEMA,
-            rates=_rates("0.44", "1.32", "0.014"),
+            rates=_rates("0.30", "1.20", "0.006"),
             reasoning=_REASONING,
             output=_OUTPUT,
         ),
         Model(
             name="deepseek-v4-pro",
-            note="Stronger DeepSeek; 3x flash on input and output",
+            note="DeepSeek V4 Pro 0813; off-peak pricing available",
             context_tokens=1_000_000,
             structured_output=_SCHEMA,
             rates=_rates("1.32", "3.96", "0.044"),
@@ -185,12 +185,22 @@ PROVIDER = Provider(
         ),
         Model(
             name="deepseek-v4-flash-vision-exp",
-            note="Experimental vision variant; priced identically to flash",
+            note="Legacy vision alias now served and billed as DeepSeek V4.1 Flash",
             context_tokens=1_000_000,
             structured_output=_SCHEMA,
-            rates=_rates("0.44", "1.32", "0.014"),
+            rates=_rates("0.30", "1.20", "0.006"),
             reasoning=_REASONING,
             output=_OUTPUT,
+        ),
+        Model(
+            name="deepseek-flash",
+            note="Current DeepSeek V4.1 Flash; text and vision, off-peak pricing",
+            context_tokens=1_000_000,
+            structured_output=_SCHEMA,
+            rates=_rates("0.30", "1.20", "0.006"),
+            reasoning=_REASONING,
+            output=_OUTPUT,
+            batch_supported=False,
         ),
     ),
 )

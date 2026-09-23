@@ -219,6 +219,10 @@ class Model:
     # things, and conflating them is how a real cost becomes invisible.
     selectable: bool = True
     supports_explicit_prompt_cache: bool | None = None
+    # Vendor support is not an implemented collector. None is unverified.
+    batch_supported: bool | None = None
+    cache_write_5m_per_mtok: Decimal | None = None
+    cache_write_1h_per_mtok: Decimal | None = None
 
 
 @dataclass(frozen=True)
