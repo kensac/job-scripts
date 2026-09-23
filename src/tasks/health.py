@@ -13,9 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 async def handle_data_health(task_id: int, payload: dict[str, Any]) -> None:
-    """Watches for upstream changes that would otherwise surface as a pile of
-    quietly misclassified jobs weeks later. Alerts fire once per condition and
-    auto-resolve, so the mail stays worth reading."""
+    """Persist findings independently of digest and incident notification policy."""
     from api import health
 
     run = health.detect()
@@ -23,8 +21,7 @@ async def handle_data_health(task_id: int, payload: dict[str, Any]) -> None:
     row = db.query_one("SELECT COUNT(*) AS n FROM health_alerts WHERE resolved_at IS NULL")
     open_count = int(row["n"]) if row else 0
     metrics.HEALTH_ALERTS.set(open_count)
-    if fresh:
-        await asyncio.to_thread(_notify, fresh)
+    await asyncio.to_thread(_notify_pending)
     set_progress(
         task_id,
         open_count,
@@ -33,21 +30,27 @@ async def handle_data_health(task_id: int, payload: dict[str, Any]) -> None:
     )
 
 
+def _notify_pending() -> None:
+    from api.health.notifications import due_alerts
+
+    # One sender across workers; failed delivery leaves the original evidence
+    # unacknowledged and eligible for the next health run.
+    with db.transaction():
+        locked = db.query_one(
+            "SELECT pg_try_advisory_xact_lock(hashtext('health-notifications')) AS acquired"
+        )
+        if not locked or not locked["acquired"]:
+            return
+        pending = due_alerts()
+        if pending:
+            _notify(pending)
+
+
 def _notify(fresh: list[dict[str, Any]]) -> None:
-    """Mail the newly-opened alerts and record on the row whether that worked.
+    """Acknowledge only actual delivery, never a digest delay or cooldown.
 
-    An alert is mailed once, when it opens. Nothing retries and nothing
-    reconciles, so a send that does not happen is a notification lost for the
-    life of the condition. Until now the only evidence either way was a log
-    line in the worker container - and a container is replaced on every roll,
-    of which there were eleven on 2026-09-04. The 17:00 alert that started
-    this cannot be answered for at all: the container that would have logged
-    it was recreated 56 minutes later.
-
-    So the outcome goes on the row. notified_at set means it left the box;
-    still NULL on an open alert means nobody was told, and that is now a
-    question SQL can answer after the fact rather than one that depends on
-    reading a log before the next deploy.
+    SMTP has no transaction with Postgres. A crash after sending but before
+    commit can repeat a message; marking it delivered first would lose it.
     """
     from api import mail
 

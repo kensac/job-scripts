@@ -119,7 +119,7 @@ def test_a_task_the_reaper_keeps_handing_back_fires():
 def test_an_alert_nobody_was_told_about_fires_only_when_mail_is_configured(monkeypatch):
     db.execute(
         "INSERT INTO health_alerts (kind, subject, severity, message, first_seen) "
-        "VALUES ('ingest_failing', 'x', 'warning', 'm', now() - interval '2 hours')"
+        "VALUES ('ingest_failing', 'x', 'critical', 'm', now() - interval '2 hours')"
     )
     monkeypatch.setattr(mail, "configured", lambda: False)
     assert _silent() == set()

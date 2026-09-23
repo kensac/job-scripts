@@ -450,6 +450,22 @@ a bad HTTP answer.
 
 ## A detector that raises is an alert
 
+Health findings remain visible independently of email eligibility. Critical
+incidents are eligible immediately; warnings wait for the daily UTC slot in
+`health_warning_digest_hour_utc`. A late health run catches up. Reopened
+incidents share the `health_notification_repeat_hours` cooldown, with stalled
+tasks grouped by handler rather than task ID. A warning escalating to critical
+bypasses the warning's cooldown. Empty feeds alone are warnings: successful
+fetches returning no jobs do not prove the parser or source is broken.
+
+The sender serializes delivery across workers and retries unacknowledged
+eligible alerts. `notified_at` records successful SMTP delivery, never a delay
+or suppression. SMTP and Postgres cannot commit atomically, so a crash between
+delivery and acknowledgement can repeat a message. The unnotified detector
+counts overdue eligible incidents, not warnings waiting for their digest.
+Stall findings for tasks that stopped running resolve on the next successful
+detector run; other absent findings retain the existing recovery grace.
+
 Each section of `health.detect()` runs on its own. One that raises opens
 `detector_failed` for itself, rather than taking the hour's run down and
 letting every open alert auto-resolve.

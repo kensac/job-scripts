@@ -19,11 +19,6 @@ INGEST_FAILURE_STREAK = 3
 # Below this many page fetches a worker's failure rate is noise.
 MIN_FETCH_SAMPLES = 20
 
-# Fewer prior postings prove only that a feed has worked, not that an empty
-# hour is abnormal. Measured 2026-09-11: six open empty-feed alerts had only
-# one to four prior postings; the two clear breaks had 9 and 26.
-MIN_FEED_BREAK_BASELINE = 5
-
 
 def _detect_boards() -> list[dict[str, Any]]:
     """The ways a board stops delivering without anything reporting an error.
@@ -106,11 +101,11 @@ def _detect_boards() -> list[dict[str, Any]]:
                 {
                     "kind": "source_feed_empty",
                     "subject": r["source"],
-                    "severity": "critical" if prior >= MIN_FEED_BREAK_BASELINE else "warning",
+                    "severity": "warning",
                     "message": (
                         f"{r['source']} fetched fine and returned 0 postings; it returned "
-                        f"{prior} within the prior week. The feed moved, "
-                        "the board token changed, or the table shape did."
+                        f"{prior} within the prior week. This may mean there are no open "
+                        "roles, or the feed or parser changed; emptiness alone cannot distinguish them."
                     ),
                     "detail": dict(r),
                 }

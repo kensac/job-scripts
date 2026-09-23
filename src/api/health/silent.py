@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 from typing import Any
 
 from api import budget, db
@@ -229,28 +230,26 @@ def _detect_silent() -> list[dict[str, Any]]:
             }
         )
 
-    # An alert nobody was told about. _notify returns quietly when mail is not
-    # configured or no admin has an address; notified_at was written but read
-    # nowhere.
     from api import mail
+    from api.health.notifications import due_alerts
 
     if mail.configured():
-        r = db.query_one(
-            """
-            SELECT COUNT(*) AS n, MIN(first_seen) AS oldest
-            FROM health_alerts
-            WHERE resolved_at IS NULL AND notified_at IS NULL
-              AND first_seen < now() - interval '1 hour'
-            """
-        )
-        if r and r["n"]:
+        now = db.query_one("SELECT now() AS now")["now"]
+        overdue = [
+            a
+            for a in due_alerts()
+            if a["kind"] != "alerts_unnotified"
+            and a["notification_due_at"] < now - timedelta(hours=1)
+        ]
+        if overdue:
+            r = {"n": len(overdue), "oldest": min(a["notification_due_at"] for a in overdue)}
             found.append(
                 {
                     "kind": "alerts_unnotified",
                     "subject": "_notify",
                     "severity": "warning",
                     "message": (
-                        f"{r['n']} open alert(s) were never mailed, the oldest from "
+                        f"{r['n']} incident notification(s) are overdue, the oldest due "
                         f"{r['oldest']:%Y-%m-%d %H:%M}. Mail is configured, so the send "
                         "itself is failing or no admin has an address."
                     ),

@@ -1,7 +1,54 @@
+from datetime import UTC, datetime, timedelta
+
 import pytest
 
 from api import db, health, mail
 from tasks import health as health_task
+
+
+def test_digest_catches_up_and_stall_ids_share_a_cooldown():
+    from api.health.notifications import select_due
+
+    now = datetime(2026, 9, 23, 15, tzinfo=UTC)
+    alert = {
+        "kind": "task_progress_stalled",
+        "subject": "2",
+        "severity": "warning",
+        "first_seen": now - timedelta(hours=4),
+        "detail": {"kind": "verify_new"},
+    }
+    assert len(select_due([alert], [], now, 13, 24)) == 1
+    previous = {**alert, "subject": "1", "notified_at": now - timedelta(hours=3)}
+    assert select_due([alert], [previous], now, 13, 24) == []
+    assert len(select_due([alert, {**alert, "subject": "3"}], [], now, 13, 24)) == 1
+    assert len(select_due([{**alert, "severity": "critical"}], [previous], now, 13, 24)) == 1
+    assert (
+        select_due(
+            [{**alert, "severity": "critical"}], [{**previous, "severity": "critical"}], now, 13, 24
+        )
+        == []
+    )
+
+
+def test_finished_task_stall_resolves_without_waiting_for_grace(f):
+    task_id = f.make_task("verify_new")
+    db.execute("UPDATE tasks SET status='running' WHERE id=%s", (task_id,))
+    finding = {
+        "kind": "task_progress_stalled",
+        "subject": str(task_id),
+        "severity": "warning",
+        "message": "Stalled",
+        "detail": {"kind": "verify_new"},
+    }
+    health.record([finding])
+    db.execute("UPDATE tasks SET status='failed' WHERE id=%s", (task_id,))
+    health.record([])
+    assert (
+        db.query_one("SELECT resolved_at FROM health_alerts WHERE subject=%s", (str(task_id),))[
+            "resolved_at"
+        ]
+        is not None
+    )
 
 
 @pytest.mark.asyncio
