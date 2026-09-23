@@ -140,7 +140,9 @@ class TestPriceRanking:
         calls - exactly the traffic a batch discount can never reach."""
         shape = _shape(
             est_prompt_tokens=60_000,
-            structured=SO.JSON_OBJECT, batched=False, candidates=("gpt-5-mini", "deepseek-v4-flash")
+            structured=SO.JSON_OBJECT,
+            batched=False,
+            candidates=("gpt-5-mini", "deepseek-v4-flash"),
         )
         assert resolve(shape, at=MON_PEAK).model == "gpt-5-mini"
         off = resolve(shape, at=MON_OFF)
@@ -154,7 +156,9 @@ class TestPriceRanking:
         double for."""
         shape = _shape(
             est_prompt_tokens=60_000,
-            structured=SO.JSON_OBJECT, batched=False, candidates=("gpt-5-mini", "deepseek-v4-flash")
+            structured=SO.JSON_OBJECT,
+            batched=False,
+            candidates=("gpt-5-mini", "deepseek-v4-flash"),
         )
         assert resolve(shape).model == "gpt-5-mini"
 
