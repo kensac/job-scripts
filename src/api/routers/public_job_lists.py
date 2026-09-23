@@ -64,6 +64,7 @@ class PublicJobList(BaseModel):
     name: str
     description: str
     job_count: int
+    matched_count: int
     updated_at: datetime.datetime | None
     jobs: list[PublicJobCard]
     next_cursor: str | None
@@ -289,9 +290,22 @@ def get_public_job_list(
     dir: SortDirection = "desc",
     q: str | None = Query(default=None, max_length=200),
     terms: str | None = None,
+    location: str | None = Query(default=None, max_length=200),
+    remote: bool | None = None,
+    min_comp: Decimal | None = Query(default=None, ge=0, le=100000000),
+    comp_currency: str | None = Query(default=None, pattern="^[A-Z]{3}$"),
+    comp_period: Literal["year", "month", "week", "day", "hour"] | None = None,
     if_none_match: str | None = Header(default=None),
 ) -> PublicJobList | Response:
     wanted_terms = csv(terms)
+    if min_comp is not None and (comp_currency is None or comp_period is None):
+        raise HTTPException(
+            422,
+            detail={
+                "code": "COMP_UNITS_REQUIRED",
+                "message": "a compensation minimum requires currency and period",
+            },
+        )
     expression = _SORT_EXPRESSIONS[sort]
     cursor_value, cursor_id = _decode_cursor(cursor, sort, dir) if cursor else (None, None)
     filters: list[str] = []
@@ -302,6 +316,25 @@ def get_public_job_list(
     if wanted_terms:
         filters.append("AND j.terms && %(terms)s")
         params["terms"] = wanted_terms
+    if location:
+        filters.append(
+            "AND EXISTS (SELECT 1 FROM unnest(j.locations) AS loc WHERE loc ILIKE %(location)s)"
+        )
+        params["location"] = (
+            "%" + location.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        )
+    if remote is not None:
+        # Absence of classification is unknown, not evidence of an on-site role.
+        filters.append(
+            "AND EXISTS (SELECT 1 FROM locations l WHERE l.text = ANY(j.locations) AND l.remote = %(remote)s)"
+        )
+        params["remote"] = remote
+    if min_comp is not None:
+        filters.append(
+            "AND COALESCE(j.comp_max, j.comp_min) >= %(min_comp)s AND j.comp_currency = %(comp_currency)s AND j.comp_period = %(comp_period)s"
+        )
+        params.update(min_comp=min_comp, comp_currency=comp_currency, comp_period=comp_period)
+    selection = " ".join(filters)
     if cursor:
         filters.append(_cursor_predicate(expression, dir, cursor_value))
         params.update(cursor_value=cursor_value, cursor_id=cursor_id)
@@ -325,6 +358,12 @@ def get_public_job_list(
                 headers={"Cache-Control": "no-store"},
             )
         params["board_id"] = board.id
+        count = db.query_one(
+            "SELECT count(*) AS n FROM managed_board_jobs mj JOIN jobs j ON j.id=mj.job_id "
+            f"WHERE mj.managed_board_id = %(board_id)s {selection}",
+            params,
+        )
+        matched_count = count["n"] if count else 0
         rows = db.query_as(_JobRow, jobs_sql, params)
     page = rows[:limit]
     has_more = len(rows) > limit
@@ -344,6 +383,12 @@ def get_public_job_list(
             sort,
             dir,
             q or "",
+            location or "",
+            str(remote),
+            str(min_comp),
+            comp_currency or "",
+            comp_period or "",
+            str(matched_count),
             "\0".join(wanted_terms),
             next_cursor or "",
             *(card.model_dump_json() for card in cards),
@@ -359,6 +404,7 @@ def get_public_job_list(
         name=board.name,
         description=board.description,
         job_count=board.job_count,
+        matched_count=matched_count,
         updated_at=board.updated_at,
         jobs=cards,
         next_cursor=next_cursor,
