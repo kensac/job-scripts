@@ -712,21 +712,24 @@ def main() -> None:
             "scheduler": ingest_enabled,
         },
     )
-    last_housekeeping = 0.0
-    while True:
-        if time.monotonic() - last_housekeeping > 60:
-            last_housekeeping = time.monotonic()
-            try:
-                reap_stale_tasks()
-                reconcile_chunks()
-                metrics.refresh_queue_gauges()
-                if ingest_enabled:
-                    schedule_ingest_cycle()
-            except Exception:
-                logger.exception("housekeeping failed")
-        worked = asyncio.run(run_once())
-        if not worked:
-            time.sleep(POLL_SECONDS)
+    # Provider clients retain pooled connections across tasks. Their loop must
+    # live as long as the worker, not be closed after each run_once call.
+    with asyncio.Runner() as runner:
+        last_housekeeping = 0.0
+        while True:
+            if time.monotonic() - last_housekeeping > 60:
+                last_housekeeping = time.monotonic()
+                try:
+                    reap_stale_tasks()
+                    reconcile_chunks()
+                    metrics.refresh_queue_gauges()
+                    if ingest_enabled:
+                        schedule_ingest_cycle()
+                except Exception:
+                    logger.exception("housekeeping failed")
+            worked = runner.run(run_once())
+            if not worked:
+                time.sleep(POLL_SECONDS)
 
 
 # The container entrypoint is `python -m api.worker`. Without this the module
