@@ -234,7 +234,9 @@ def _detect_silent() -> list[dict[str, Any]]:
     from api.health.notifications import due_alerts
 
     if mail.configured():
-        now = db.query_one("SELECT now() AS now")["now"]
+        clock = db.query_one("SELECT now() AS now")
+        assert clock is not None
+        now = clock["now"]
         overdue = [
             a
             for a in due_alerts()

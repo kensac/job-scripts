@@ -45,7 +45,9 @@ def select_due(
 
 
 def due_alerts() -> list[dict[str, Any]]:
-    now = db.query_one("SELECT now() AS now")["now"]
+    clock = db.query_one("SELECT now() AS now")
+    assert clock is not None
+    now = clock["now"]
     repeat_hours = int(db.get_config("health_notification_repeat_hours"))
     pending = db.query(
         "SELECT * FROM health_alerts WHERE resolved_at IS NULL AND notified_at IS NULL"
