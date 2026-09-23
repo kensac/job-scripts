@@ -20,7 +20,7 @@ from core.filters import ON_AMBIGUOUS_VALUES, compute_filter_hash
 
 router = APIRouter()
 
-IMPROVE_MODEL = os.environ.get("JOBTRACKER_IMPROVE_MODEL", "gpt-5.6-luna")
+IMPROVE_MODEL = os.environ.get("JOBTRACKER_IMPROVE_MODEL", "gpt-6-luna")
 
 _FILTER_COLS = (
     "id, name, prompt, on_ambiguous, fail_closed, enabled, prompt_hash, preset_id, "

@@ -24,7 +24,7 @@ def _admissible(monkeypatch) -> None:
 
     monkeypatch.setattr(ai, "server_key", lambda provider: "test-server-key")
     monkeypatch.setattr(budget, "owner_budget", lambda groups: (True, 1_000_000))
-    monkeypatch.setattr(budget, "owner_allowed_models", lambda groups: ["gpt-5.6-luna"])
+    monkeypatch.setattr(budget, "owner_allowed_models", lambda groups: ["gpt-6-luna"])
 
 
 def _board_and_job(client, admin_headers, f):
@@ -53,7 +53,7 @@ def test_run_admission_snapshots_board_candidates_and_refuses_overlap(
         "run_managed_board_batch"
     )
     assert payload["revision"] == board["revision"]
-    assert payload["requested_model"] == "gpt-5.6-luna"
+    assert payload["requested_model"] == "gpt-6-luna"
     assert payload["execution_version"] == 2
     assert payload["inference_transport"] == "batch"
     assert payload["reasoning_effort"] == "low"

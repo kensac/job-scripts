@@ -35,7 +35,12 @@ MODEL_CATALOG: dict[str, list[dict[str, str]]] = {
 
 OWNER_KEY_MODELS = {
     m.strip()
-    for m in os.environ.get("JOBTRACKER_OWNER_KEY_MODELS", "gpt-5-nano,gpt-5-mini").split(",")
+    # gpt-6-luna is in the default because the system's own tasks run on it
+    # (core/shapes.py), and a managed board bootstrapped on it refuses its own
+    # runs with MODEL_NOT_ALLOWED when a budgeted sponsor's allowlist omits it.
+    for m in os.environ.get(
+        "JOBTRACKER_OWNER_KEY_MODELS", "gpt-5-nano,gpt-5-mini,gpt-6-luna"
+    ).split(",")
     if m.strip()
 }
 

@@ -20,7 +20,7 @@ from core.managed_board_title_gate import TitleGateConfig
 
 router = APIRouter()
 
-_BOOTSTRAP_MODEL = "gpt-5.6-luna"
+_BOOTSTRAP_MODEL = "gpt-6-luna"
 _BOOTSTRAP_CRITERIA = Criteria(
     max_age_days=7,
     included_locations=["United States", "Canada", "Remote"],
