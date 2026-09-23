@@ -1310,6 +1310,101 @@
             }
           },
           {
+            "name": "location",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 200
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Location"
+            }
+          },
+          {
+            "name": "remote",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Remote"
+            }
+          },
+          {
+            "name": "min_comp",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "maximum": 100000000.0,
+                  "minimum": 0.0
+                },
+                {
+                  "type": "string",
+                  "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Min Comp"
+            }
+          },
+          {
+            "name": "comp_currency",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[A-Z]{3}$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Comp Currency"
+            }
+          },
+          {
+            "name": "comp_period",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "year",
+                    "month",
+                    "week",
+                    "day",
+                    "hour"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Comp Period"
+            }
+          },
+          {
             "name": "if-none-match",
             "in": "header",
             "required": false,
@@ -47317,6 +47412,10 @@
             "type": "integer",
             "title": "Job Count"
           },
+          "matched_count": {
+            "type": "integer",
+            "title": "Matched Count"
+          },
           "updated_at": {
             "anyOf": [
               {
@@ -47358,6 +47457,7 @@
           "name",
           "description",
           "job_count",
+          "matched_count",
           "updated_at",
           "jobs",
           "next_cursor",

@@ -2,7 +2,46 @@ from __future__ import annotations
 
 import datetime
 
+import pytest
+
 from api import db
+
+
+@pytest.mark.parametrize(
+    "query,expected",
+    [
+        ({"location": "Toronto"}, [2]),
+        ({"remote": "true"}, [2]),
+        ({"min_comp": "140000", "comp_currency": "USD", "comp_period": "year"}, [1]),
+        ({"min_comp": "140000", "comp_currency": "CAD", "comp_period": "year"}, [2]),
+        ({"location": "missing"}, []),
+    ],
+)
+def test_public_discovery_filters_apply_before_pagination(client, query, expected):
+    board = _published_board()
+    now = datetime.datetime.now(datetime.UTC)
+    ids = [_job(board, i, now) for i in range(1, 4)]
+    db.execute(
+        "UPDATE jobs SET locations=ARRAY['Toronto Remote'], comp_currency='CAD' WHERE id=%s",
+        (ids[1],),
+    )
+    db.execute("UPDATE jobs SET comp_max=NULL WHERE id=%s", (ids[2],))
+    db.execute(
+        "INSERT INTO locations (text, remote) VALUES ('Toronto Remote', true), ('New York', false)"
+    )
+    result = client.get("/v1/public/job-lists/engineering", params={**query, "limit": 1})
+    assert result.status_code == 200
+    body = result.json()
+    assert [j["job_id"] for j in body["jobs"]] == [ids[i - 1] for i in expected]
+    assert body["matched_count"] == len(expected)
+    assert body["job_count"] == 3
+    assert not body["has_more"]
+
+
+def test_public_compensation_filter_requires_units(client):
+    _published_board()
+    response = client.get("/v1/public/job-lists/engineering?min_comp=100000")
+    assert response.status_code == 422
 
 
 def _published_board() -> int:
