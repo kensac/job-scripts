@@ -85,6 +85,7 @@ def _record_reverify_results(task_id: int, results: list) -> int:
             # same spelling handle_verify_new uses below and the shape
             # routers/spend.py reads as a joint call.
             usage = ai.batch_usage(res.usage)
+            shared_call = False
             for check, rejected, reason in (
                 ("closed", parsed.is_closed, parsed.closed_reason),
                 ("clearance", parsed.requires_clearance_or_restrictions, parsed.clearance_reason),
@@ -97,6 +98,7 @@ def _record_reverify_results(task_id: int, results: list) -> int:
                     parsed_json=res.text,
                     model=res.model,
                     usage=usage,
+                    shared_call=shared_call,
                     company=job["company"],
                     job_title=job["title"],
                     context="reverify",
@@ -104,6 +106,7 @@ def _record_reverify_results(task_id: int, results: list) -> int:
                     batch_id=res.batch_id,
                 )
                 usage = {}
+                shared_call = True
             # Both axes are answered unconditionally here, unlike verify_new,
             # which writes only the checks its request was missing. The
             # staleness guard above is what decides whether this result writes
@@ -459,6 +462,7 @@ async def handle_verify_new(task_id: int, payload: dict[str, Any]) -> None:
                         job_title=job["title"],
                         context="verify-batch",
                         usage=usage,
+                        shared_call=written,
                         batched=True,
                         batch_id=res.batch_id,
                     )
