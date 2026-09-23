@@ -64,13 +64,13 @@ def test_none_tokens_are_zero_not_a_crash():
 
 def test_cache_write_is_distinct_from_a_cache_read_and_unknown_is_not_free():
     assert pricing.estimate_cost_usd(LUNA, 1_000_000, 0, cache_write_tokens=1_000_000) == Decimal(
-        "0.25"
+        "0.50"
     )
-    assert pricing.estimate_cost_usd(LUNA, 1_000_000, 0, cache_write_tokens=0) == Decimal("0.20")
+    assert pricing.estimate_cost_usd(LUNA, 1_000_000, 0, cache_write_tokens=0) == Decimal("0.40")
     assert pricing.estimate_cost_usd(LUNA, 1_000_000, 0, cache_write_tokens=None) is None
     # A reservation has no receipt, so it reserves the published write rate
     # rather than silently assuming that no tokens will be written.
-    assert pricing.estimate_cost_usd(LUNA, 1_000_000, 0) == Decimal("0.25")
+    assert pricing.estimate_cost_usd(LUNA, 1_000_000, 0) == Decimal("0.50")
 
 
 _CASES = [
@@ -128,7 +128,8 @@ def test_sql_and_python_agree(prompt, completion, cached, batched):
 def test_sql_and_python_agree_with_cache_write_tokens():
     price = pricing.rates_for(LUNA)
     assert price is not None
-    tier = price.tiers[0]
+    # These requests contain 1M input tokens, above the 272K tier boundary.
+    tier = price.tiers[-1]
     expr = pricing.cost_sql(
         model_rate_in="%(rate_in)s::numeric",
         model_rate_out="%(rate_out)s::numeric",
@@ -176,7 +177,7 @@ def test_sql_and_python_agree_with_cache_write_tokens():
 def test_sql_and_python_clamp_cache_counters(cached, cache_write):
     price = pricing.rates_for(LUNA)
     assert price is not None
-    tier = price.tiers[0]
+    tier = price.tiers[-1]
     expr = pricing.cost_sql(
         model_rate_in="%(rate_in)s::numeric",
         model_rate_out="%(rate_out)s::numeric",

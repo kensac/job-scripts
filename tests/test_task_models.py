@@ -46,7 +46,7 @@ class TestEligibility:
         assert by_model[REQUIREMENTS_MODEL]["eligible"] is True
         assert by_model["deepseek-v4-flash"]["eligible"] is False
         assert "json_object" in by_model["deepseek-v4-flash"]["rejection"]
-        assert by_model["claude-opus-5"]["rejection"] == "provider has no batch endpoint"
+        assert "batch transport is not implemented" in by_model["claude-opus-5"]["rejection"]
 
     def test_eligibility_is_computed_here_not_by_the_client(self, client, admin_headers):
         """Every candidate carries a server-computed verdict, so the UI's idea

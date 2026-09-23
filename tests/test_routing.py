@@ -139,6 +139,7 @@ class TestPriceRanking:
         has no batch lane, so its discount only ever applies to synchronous
         calls - exactly the traffic a batch discount can never reach."""
         shape = _shape(
+            est_prompt_tokens=60_000,
             structured=SO.JSON_OBJECT, batched=False, candidates=("gpt-5-mini", "deepseek-v4-flash")
         )
         assert resolve(shape, at=MON_PEAK).model == "gpt-5-mini"
@@ -152,6 +153,7 @@ class TestPriceRanking:
         router that assumed off-peak would pick a model the caller then pays
         double for."""
         shape = _shape(
+            est_prompt_tokens=60_000,
             structured=SO.JSON_OBJECT, batched=False, candidates=("gpt-5-mini", "deepseek-v4-flash")
         )
         assert resolve(shape).model == "gpt-5-mini"

@@ -168,7 +168,20 @@ def test_every_ai_caller_appears_in_spend_by_its_purpose(client, admin_headers):
     largest line item in the system was invisible."""
     from api import budget
 
-    budget.record_fleet_usage("mail_classify", "gpt-5.6-luna", 1_000_000, 100_000)
+    budget.record_fleet_usage(
+        "mail_classify",
+        "gpt-5.6-luna",
+        1_000_000,
+        100_000,
+        request_usage=[
+            {
+                "input_tokens": 1_000_000,
+                "output_tokens": 100_000,
+                "cached_tokens": 0,
+                "cache_write_tokens": 0,
+            }
+        ],
+    )
     budget.record_fleet_usage("comp", "gpt-5-nano", 500_000, 50_000)
 
     body = client.get("/v1/admin/spend?days=30", headers=admin_headers).json()

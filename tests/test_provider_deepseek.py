@@ -42,7 +42,7 @@ class TestDatasheet:
         for m in providers.PROVIDERS["deepseek"].models:
             source = m.rates.source
             assert source.vendor, f"{m.name} rates are not vendor-sourced"
-            assert source.read_on == datetime.date(2026, 9, 2)
+            assert source.read_on == datetime.date(2026, 9, 23)
             assert source.url
 
     def test_the_off_peak_discount_carries_its_own_provenance(self):
