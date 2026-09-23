@@ -346,6 +346,7 @@ PROVIDER = Provider(
             rates=_gpt6_rates("0.10", "0.50", "0.01", "0.20", "0.75", "0.02"),
             reasoning=_6_GEN,
             output=_OUTPUT_GPT6,
+            supports_explicit_prompt_cache=True,
         ),
         Model(
             name="gpt-6-sol",
@@ -355,6 +356,7 @@ PROVIDER = Provider(
             rates=_gpt6_rates("2.00", "10.00", "0.20", "4.00", "15.00", "0.40"),
             reasoning=_6_GEN,
             output=_OUTPUT_GPT6,
+            supports_explicit_prompt_cache=True,
         ),
         Model(
             name="gpt-6-astra",
@@ -364,6 +366,7 @@ PROVIDER = Provider(
             rates=_gpt6_rates("10.00", "50.00", "1.00", "20.00", "75.00", "2.00"),
             reasoning=_6_ASTRA,
             output=_OUTPUT_GPT6,
+            supports_explicit_prompt_cache=True,
         ),
     ),
 )
