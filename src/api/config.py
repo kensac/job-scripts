@@ -388,7 +388,7 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
         "a missed digest is delivered on the next health run. All alerts remain in the UI.",
     ),
     "classify_locations_max_output_tokens": ConfigKey(
-        section="AI",
+        section="Catalog",
         default=LOCATIONS_TASK.max_output_tokens,
         value_type=Annotated[int, Field(ge=256, le=64000)],
         help="Output-token ceiling for new location classification batches. Multi-city strings "
