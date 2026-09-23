@@ -8,6 +8,38 @@ from api import ai
 from core import pricing, providers
 
 
+def test_catalog_distinguishes_vendor_batch_from_application_transport():
+    from api.routers.users import _catalog
+
+    anthropic = {m["model"]: m for m in _catalog("anthropic")}
+    opus = anthropic["claude-opus-5"]
+    assert opus["vendor_batch_supported"] is True
+    assert opus["batch_available"] is False
+    assert "not implemented" in opus["batch_unavailable_reason"]
+    assert opus["cache_write_5m_per_mtok"] == 6.25
+    assert opus["cache_write_1h_per_mtok"] == 10
+    assert opus["rate_cached_in_per_mtok"] == 0.5
+
+
+@pytest.mark.asyncio
+async def test_unsupported_batch_never_uses_openai_credentials(monkeypatch):
+    from core import batch
+
+    def wrong_provider_client():
+        pytest.fail("a non-OpenAI model reached the OpenAI batch client")
+
+    monkeypatch.setattr(batch, "_client", wrong_provider_client)
+    with pytest.raises(ValueError, match="BATCH_UNSUPPORTED"):
+        await batch.submit_batches([batch.BatchSpec("one")], "grok-4.3", "low", 256)
+
+
+@pytest.mark.parametrize("model", ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"])
+def test_gpt56_long_context_prices_the_full_request(model):
+    before = pricing.estimate_cost_usd(model, 272_000, 1_000, cache_write_tokens=0)
+    after = pricing.estimate_cost_usd(model, 272_001, 1_000, cache_write_tokens=0)
+    assert after > before * Decimal("1.9")
+
+
 @pytest.mark.parametrize(
     ("name", "input_rate", "output_rate", "cached_rate"),
     [

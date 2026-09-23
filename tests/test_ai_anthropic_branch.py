@@ -73,8 +73,11 @@ async def test_the_anthropic_branch_round_trips_a_recorded_response(monkeypatch)
     parsed, usage = await ai._parse(cfg, "Judge the posting.", "A posting.", Verdict)
 
     assert parsed == Verdict(verdict="keep", reason="fits")
-    assert usage["prompt_tokens"] == 120 and usage["completion_tokens"] == 9
+    # Anthropic's input count excludes cache reads; our normalized prompt
+    # includes them so the pricer can subtract the discounted subset once.
+    assert usage["prompt_tokens"] == 160 and usage["completion_tokens"] == 9
     assert usage["cached_tokens"] == 40
+    assert usage["cache_write_tokens"] == 0
     assert seen["headers"]["x-api-key"] == "test-key"
     assert seen["url"].endswith("/v1/messages")
     body = seen["body"]
