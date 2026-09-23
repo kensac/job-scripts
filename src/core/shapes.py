@@ -226,7 +226,9 @@ LOCATIONS_TASK = TaskShape(
     ),
     structured=StructuredOutput.JSON_SCHEMA,
     batched=True,
-    max_output_tokens=120,
+    # Allow roughly 32 places at 64 tokens per structured place, rather than
+    # truncating multi-city strings. Short answers only pay for tokens emitted.
+    max_output_tokens=2048,
     est_prompt_tokens=260,
     effort_preference=("minimal", "low"),
     candidates=("gpt-5-nano",),

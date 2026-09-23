@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue, PositiveInt, TypeA
 from api.apply.policy import ExtensionPolicy
 from core.filter_policy import RoutingPolicy
 from core.review_gate import ReviewGatePolicy
+from core.shapes import LOCATIONS_TASK
 
 logger = logging.getLogger(__name__)
 ALL_GROUPS = "*"
@@ -385,6 +386,14 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
         value_type=Annotated[int, Field(ge=0, le=23)],
         help="UTC hour for the daily warning digest. Critical incidents are sent immediately; "
         "a missed digest is delivered on the next health run. All alerts remain in the UI.",
+    ),
+    "classify_locations_max_output_tokens": ConfigKey(
+        section="AI",
+        default=LOCATIONS_TASK.max_output_tokens,
+        value_type=Annotated[int, Field(ge=256, le=64000)],
+        help="Output-token ceiling for new location classification batches. Multi-city strings "
+        "need room for every place. Incomplete answers remain rejected; existing paid batches "
+        "keep their original limit. Actual spend uses tokens emitted, not this ceiling.",
     ),
     "health_notification_repeat_hours": ConfigKey(
         section="Health",

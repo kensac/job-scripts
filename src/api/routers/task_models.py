@@ -37,6 +37,7 @@ from pydantic import BaseModel, Field
 from api import db
 from api.auth import AuthedUser
 from api.routers.admin import require_admin
+from api.task_config import configured_shape
 from core import providers
 from core.providers.spec import StructuredOutput
 from core.routing import ModelChangeEffect, NoEligibleModel, candidates_for, resolve
@@ -298,7 +299,7 @@ class TaskModel(BaseModel):
 
 
 def _view(purpose: str) -> TaskModel:
-    shape = SHAPES[purpose]
+    shape = configured_shape(SHAPES[purpose])
     latest = _current(purpose)
     override = latest.model if latest else None
     candidacies = candidates_for(shape)
@@ -463,7 +464,7 @@ def put_task_model(
     """
     if purpose not in SHAPES:
         raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown task"})
-    shape = SHAPES[purpose]
+    shape = configured_shape(SHAPES[purpose])
     if body.model is not None:
         if providers.model(body.model) is None:
             raise HTTPException(

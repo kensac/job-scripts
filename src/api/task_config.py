@@ -8,10 +8,20 @@ price the fleet at the models the fleet is actually running.
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 
 from api import db
+from core.routing import TaskShape
 
 logger = logging.getLogger(__name__)
+
+
+def configured_shape(shape: TaskShape) -> TaskShape:
+    if shape.purpose == "locations":
+        return replace(
+            shape, max_output_tokens=int(db.get_config("classify_locations_max_output_tokens"))
+        )
+    return shape
 
 
 def configured_model(purpose: str) -> str | None:
