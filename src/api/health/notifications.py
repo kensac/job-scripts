@@ -22,7 +22,7 @@ def select_due(
     selected = []
     seen = set()
     for alert in sorted(
-        pending, key=lambda a: (a["severity"] == "critical", a["first_seen"]), reverse=True
+        pending, key=lambda a: (a["severity"] != "critical", a["first_seen"])
     ):
         key = incident_key(alert)
         if key in seen:
