@@ -50,6 +50,13 @@ _PROBED = Source(
     ),
 )
 
+_MODEL_API = Source(
+    "https://api.x.ai/v1/models",
+    datetime.date(2026, 9, 23),
+    True,
+    "Read-only capability enumeration; preserve the application's low-effort default",
+)
+
 # Above this prompt length xAI rebills the WHOLE request - input, cached input
 # and output alike - at the higher tier. Both tiers are written out per model
 # rather than expressed as "twice the base": that the high tier is currently
@@ -107,18 +114,18 @@ def _output() -> Output:
 # which is why this is declared per model and never shared across a provider.
 _EFFORT_4_3 = Reasoning(
     param="reasoning_effort",
-    accepts=("none", "minimal", "low", "medium", "high", "xhigh"),
-    rejects=("max",),
+    accepts=("none", "low", "medium", "high", "xhigh"),
+    rejects=("minimal", "max"),
     default="low",
-    source=_PROBED,
+    source=_MODEL_API,
 )
 
 _EFFORT_4_5_AND_4_6 = Reasoning(
     param="reasoning_effort",
-    accepts=("minimal", "low", "medium", "high", "xhigh"),
-    rejects=("none", "max"),
+    accepts=("low", "medium", "high", "xhigh"),
+    rejects=("none", "minimal", "max"),
     default="low",
-    source=_PROBED,
+    source=_MODEL_API,
 )
 
 _EFFORT_4_7 = Reasoning(
@@ -163,6 +170,7 @@ PROVIDER = Provider(
         ),
         Model(
             name="grok-4.5",
+            batch_supported=False,
             note="Stronger; 500K context",
             context_tokens=500_000,
             structured_output=_SCHEMA,
@@ -172,6 +180,7 @@ PROVIDER = Provider(
         ),
         Model(
             name="grok-4.6",
+            batch_supported=False,
             note="Previous flagship; 500K context",
             context_tokens=500_000,
             # 25% of input, against OpenAI's 10%. The single global
@@ -201,6 +210,26 @@ PROVIDER = Provider(
             reasoning=_UNVERIFIED_EFFORT,
             output=_output(),
             batch_supported=False,
+        ),
+        Model(
+            name="grok-4.20-0309-reasoning",
+            note="Pinned Grok 4.20 reasoning; vendor batch discount 20%",
+            context_tokens=1_000_000,
+            structured_output=_SCHEMA,
+            rates=_rates("1.25", "2.50", "0.20", "2.50", "5.00", "0.40", batch_rate="0.8"),
+            reasoning=_UNVERIFIED_EFFORT,
+            output=_output(),
+            batch_supported=True,
+        ),
+        Model(
+            name="grok-4.20-0309-non-reasoning",
+            note="Pinned Grok 4.20 non-reasoning; vendor batch discount 20%",
+            context_tokens=1_000_000,
+            structured_output=_SCHEMA,
+            rates=_rates("1.25", "2.50", "0.20", "2.50", "5.00", "0.40", batch_rate="0.8"),
+            reasoning=Reasoning(None, (), (), None, _MODEL_API),
+            output=_output(),
+            batch_supported=True,
         ),
     ),
 )

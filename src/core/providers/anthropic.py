@@ -172,6 +172,21 @@ PROVIDER = Provider(
             output=_HAIKU_OUTPUT,
             reasoning=_EFFORT_45,
         ),
+        replace(
+            _current(
+                "claude-sonnet-4-5-20250929",
+                "Pinned legacy Sonnet 4.5; standard 200K context",
+                "3",
+                "15",
+                "0.3",
+            ),
+            # The model API advertises a 1M beta capacity. This client does
+            # not send the long-context beta header, so expose the documented
+            # standard limit rather than promise a capability we do not use.
+            context_tokens=200_000,
+            output=_HAIKU_OUTPUT,
+            reasoning=_HAIKU_EFFORT,
+        ),
         Model(
             name="claude-haiku-4-5-20251001",
             note="Pinned Haiku 4.5 snapshot; no effort parameter",
