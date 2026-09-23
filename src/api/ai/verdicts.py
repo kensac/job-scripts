@@ -129,6 +129,7 @@ def record_ai_verdict(
     duration_ms: int | None = None,
     error: str | None = None,
     record_call_metrics: bool = True,
+    shared_call: bool = False,
     on_record: Callable[[int], None] | None = None,
 ) -> int:
     """Persist the shared result shape. A missing decision is a failed attempt.
@@ -136,6 +137,23 @@ def record_ai_verdict(
     Live calls already emit provider metrics inside ai.parse; batch callers
     emit them here. Both paths keep consumed tokens on failed attempts.
     """
+    if shared_call:
+        if usage:
+            raise ValueError("a companion verdict cannot carry its own provider usage")
+        # The caller already booked this response on another verdict. Explicit
+        # zero allocation is different from an absent provider usage receipt.
+        usage = dict.fromkeys(
+            (
+                "prompt_tokens",
+                "completion_tokens",
+                "total_tokens",
+                "cached_tokens",
+                "cache_write_tokens",
+                "reasoning_tokens",
+            ),
+            0,
+        )
+        record_call_metrics = False
     status = "failed" if rejected is None else "rejected" if rejected else "passed"
     with db.transaction():
         query_id = add_ai_result(
