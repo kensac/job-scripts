@@ -12,6 +12,8 @@
 // asks the top frame to show the panel for it. This file is what runs there.
 // It knows how to paint HTML and report which control the person used; every
 // decision about WHAT to paint stays in content.js.
+import { mountAnswerReview } from "./answer-review";
+
 export function panelSurface() {
   const key = Symbol.for("job-tracker.panel");
   if (window[key]) return window[key];
@@ -29,6 +31,7 @@ export function panelSurface() {
   function build(onEvent) {
     let host = null;
     let panel = null;
+    let review = null;
 
     // The host is a manual popover, so the browser puts it in the TOP LAYER.
     // position: fixed alone is not enough: a transform, filter,
@@ -87,12 +90,26 @@ export function panelSurface() {
         if (host && !host.isConnected) attach();
       },
       paint(html, { theme, collapsed } = {}) {
+        review?.unmount();
+        review = null;
         if (!host) mount();
         else if (!host.isConnected) attach();
         if (theme) panel.setAttribute("data-jt-theme", theme);
         else panel.removeAttribute("data-jt-theme");
         panel.classList.toggle("collapsed", !!collapsed);
         panel.innerHTML = html;
+      },
+      review(model) {
+        const node = byId("jt-answer-review");
+        if (!node) return;
+        if (!review) review = mountAnswerReview(node, onEvent);
+        review.render(model);
+      },
+      appearance({ theme, collapsed }) {
+        if (!panel) return;
+        if (theme) panel.setAttribute("data-jt-theme", theme);
+        else panel.removeAttribute("data-jt-theme");
+        panel.classList.toggle("collapsed", !!collapsed);
       },
       // One region repainted in place, for the report box, which opens and
       // closes without disturbing the result above it.
@@ -107,10 +124,14 @@ export function panelSurface() {
         if (!el) return;
         if ("disabled" in props) el.disabled = props.disabled;
         if ("text" in props) el.textContent = props.text;
+        if ("label" in props) { el.setAttribute("aria-label", props.label); el.setAttribute("title", props.label); }
+        if ("expanded" in props) el.setAttribute("aria-expanded", String(props.expanded));
       },
       // What the panel says, so a page's own text can be read without it.
       text: () => (panel ? panel.innerText : ""),
       remove() {
+        review?.unmount();
+        review = null;
         if (host) host.remove();
         host = null;
         panel = null;
@@ -147,6 +168,10 @@ export function panelSurface() {
         // message port closes cleanly.
         chrome.runtime.sendMessage({ kind: "panel-event", event }).catch(() => {});
       });
+    }
+    if (!["paint", "region", "mark", "ensure", "remove", "review", "appearance"].includes(msg.op) || !Array.isArray(msg.args)) {
+      reply({ ok: false });
+      return;
     }
     served[msg.op](...msg.args);
     if (msg.op === "remove") served = null;

@@ -34,7 +34,7 @@ export async function startApplication(adapter, adapterContext, lifecycle) {
   const reader = adapter || { ready: () => false, submitButton: () => null, submitted: () => false };
   // Stamped into every report, so a report from a build the person has not
   // reloaded yet is told apart from a bug (reports 9 to 11, 2026-09-08).
-  const BUILD = "0.2.0 modules";
+  const BUILD = "0.3.0 answer review";
 
   // A message to the extension's background worker. After the extension is
   // reloaded, a page that was already open keeps the old script, whose
@@ -59,10 +59,10 @@ export async function startApplication(adapter, adapterContext, lifecycle) {
   // in the top frame's. Every event carries the panel's input values, which
   // is what makes the remote surface one way.
   const handlers = new Map();
-  let onAi = null;
   const on = (type, id, fn) => handlers.set(`${type}:${id}`, fn);
-  function dispatch({ type, id, ai, values }) {
-    if (ai && type === "click") return onAi && onAi(ai);
+  function dispatch(event) {
+    const { type, id, values } = event;
+    if (type === "review") return reviewAction(event);
     const fn = handlers.get(`${type}:${id}`);
     if (fn) fn(values || {});
   }
@@ -79,6 +79,8 @@ export async function startApplication(adapter, adapterContext, lifecycle) {
       mark: (...a) => op("mark", ...a),
       ensure: () => op("ensure"),
       remove: () => op("remove"),
+      review: (...a) => op("review", ...a),
+      appearance: (...a) => op("appearance", ...a),
       text: () => "",
     };
   };
@@ -179,6 +181,9 @@ export async function startApplication(adapter, adapterContext, lifecycle) {
   };
   let fill = null;
   let filled = new Map();
+  let reviewState = null;
+  let reviewMessage = "";
+  const touched = new Set();
   let lastError = null;
   // The server's switches, pinned per fill (docs/agents/frontend.md, #494):
   // refreshed before each Autofill, held for that fill, nothing without it.
@@ -194,13 +199,8 @@ export async function startApplication(adapter, adapterContext, lifecycle) {
   // panel.css. The button cycles light, dark, system and names the next.
   const THEME_NEXT = { light: "dark", dark: null, null: "light" };
   const themeLabel = (t) => (t === "light" ? "Light" : t === "dark" ? "Dark" : "System");
-  // The whole panel is repainted from prefs, so the theme button and the
-  // minimise button say what prefs say without anyone patching them by hand.
-  // A repaint is what a preference change does.
-  let painted = "";
   const render = (html) => {
     if (!panelUp) return;
-    painted = html;
     const themeTitle = `Theme: ${themeLabel(prefs.theme)}. Switch to ${themeLabel(THEME_NEXT[String(prefs.theme)])}`;
     surface.paint(`
       <div class="head">
@@ -226,7 +226,7 @@ export async function startApplication(adapter, adapterContext, lifecycle) {
     const paused = operation.state === "paused";
     return `<div class="operation-controls"><span>${paused ? "Autofill paused" : "Autofill is running"}</span><button id="jt-pause" aria-label="${paused ? "Resume autofill" : "Pause autofill"}">${paused ? "Resume" : "Pause"}</button><button id="jt-stop" aria-label="Stop autofill">Stop</button></div>`;
   }
-  operation.subscribe(() => surface.region("jt-operation", operationControls()));
+  operation.subscribe(() => { surface.region("jt-operation", operationControls()); drawReview(); });
   on("click", "jt-pause", () => operation.state === "paused" ? operation.resume() : operation.pause());
   on("click", "jt-stop", () => operation.stop());
 
@@ -257,12 +257,14 @@ export async function startApplication(adapter, adapterContext, lifecycle) {
   on("click", "jt-theme", () => {
     prefs.theme = THEME_NEXT[String(prefs.theme)];
     savePref("theme", prefs.theme);
-    render(painted);
+    surface.appearance({ theme: prefs.theme, collapsed: prefs.collapsed });
+    surface.mark("jt-theme", { text: prefs.theme === "light" ? "☀" : prefs.theme === "dark" ? "☾" : "◐", label: `Theme: ${themeLabel(prefs.theme)}. Switch to ${themeLabel(THEME_NEXT[String(prefs.theme)])}` });
   });
   on("click", "jt-min", () => {
     prefs.collapsed = !prefs.collapsed;
     savePref("collapsed", prefs.collapsed);
-    render(painted);
+    surface.appearance({ theme: prefs.theme, collapsed: prefs.collapsed });
+    surface.mark("jt-min", { text: prefs.collapsed ? "+" : "−", label: prefs.collapsed ? "Expand panel" : "Minimise panel", expanded: !prefs.collapsed });
   });
 
   // Underscore keys are the reader's DOM handles; the API never sees them.
@@ -273,6 +275,16 @@ export async function startApplication(adapter, adapterContext, lifecycle) {
   const readFields = async () => {
     fields = await reader.read();
   };
+  const protectManualEdit = (event) => {
+    if (!event.isTrusted || !(event.target instanceof HTMLElement) || event.target.id === "jt-apply-host") return;
+    for (const field of fields) {
+      const nodes = [field._el, field._ctl, field._box, ...(field._inputs || [])].filter(node => node instanceof Element);
+      if (nodes.some(node => node === event.target || node.contains(event.target))) touched.add(field.key);
+    }
+    if (operation.active) operation.stop();
+    drawReview();
+  };
+  for (const type of ["input", "change"]) lifecycle.addEventListener(document, type, protectManualEdit, true);
 
   // The panel appears when a form is on the page and goes when it is not,
   // so the posting page shows nothing and the form page shows the button
@@ -429,9 +441,14 @@ export async function startApplication(adapter, adapterContext, lifecycle) {
   // after a fill pass (revealed fields), and a fresh field object has no
   // trace, which left report 10 blank where report 8 had them.
   const traces = new Map();
-  async function put(entry, value, file) {
+  async function put(entry, value, file, explicit = false) {
     const field = fieldByKey(entry.key);
     if (!field) return false;
+    const current = reader.current(field);
+    if (!explicit && (touched.has(entry.key) || filled.get(entry.key)?.kept || (current && current !== filled.get(entry.key)?.value))) {
+      filled.set(entry.key, { ok: !!current, value: current, kept: true });
+      return false;
+    }
     let ok = false;
     try {
       ok = await reader.fill(field, value, file);
@@ -483,6 +500,8 @@ export async function startApplication(adapter, adapterContext, lifecycle) {
       url: location.href,
       fields: fields.map(plain),
       step: step,
+      fill_id: fill?.fill_id || null,
+      resume_open: true,
     });
     if (!res.ok) {
       lastError = res;
@@ -500,6 +519,13 @@ export async function startApplication(adapter, adapterContext, lifecycle) {
     }
     fill = res.json;
     filled = new Map();
+    reviewState = null;
+    reviewMessage = "";
+    for (const entry of fill.fields) {
+      const field = fieldByKey(entry.key);
+      const current = field && reader.current(field);
+      if (current) filled.set(entry.key, { ok: true, value: current, kept: true });
+    }
     // A field the reader leaves to the person is never offered to the model.
     for (const entry of fill.fields) if (fieldByKey(entry.key)?._person) entry.never_ai = true;
     // Repeated groups are filled from the profile's rows, not a value.
@@ -522,7 +548,7 @@ export async function startApplication(adapter, adapterContext, lifecycle) {
       await readFields();
     }
     for (const entry of fill.fields) {
-      if (entry.rung !== "resume" && entry.value != null) await put(entry, entry.value, null);
+      if (entry.rung !== "resume" && entry.value != null && !filled.get(entry.key)?.kept) await put(entry, entry.value, null);
     }
     await revealed(file);
     // A search-backed picker that showed options nothing matched: the
@@ -570,6 +596,7 @@ export async function startApplication(adapter, adapterContext, lifecycle) {
       if (reader.ready()) {
         step += 1;
         fields = await reader.read();
+        fill = null;
         return runPage();
       }
     }
@@ -592,7 +619,7 @@ export async function startApplication(adapter, adapterContext, lifecycle) {
     if (!fill) return;
     let reread = false;
     for (const entry of fill.fields) {
-      if (entry.value == null || entry.rung === "resume" || !isFilled(entry)) continue;
+      if (entry.value == null || entry.rung === "resume" || !isFilled(entry) || touched.has(entry.key) || filled.get(entry.key)?.kept) continue;
       let field = fieldByKey(entry.key);
       if (!field || !document.contains(boxOf(field) || field._ctl || null)) {
         if (!reread) {
@@ -603,7 +630,7 @@ export async function startApplication(adapter, adapterContext, lifecycle) {
         if (!field) continue;
       }
       const now = reader.current(field);
-      if (now && now !== entry.value && !entry.options?.includes(now)) continue;
+      if (now && now !== entry.value) continue;
       if (entry.kind === "text" || entry.kind === "long" || entry.kind === "number") {
         // Two real changes, so the form hears it even when the input already
         // shows the value.
@@ -710,36 +737,100 @@ export async function startApplication(adapter, adapterContext, lifecycle) {
   }
 
   function show() {
-    const done = fill.fields.filter(isFilled);
-    const todo = fill.fields.filter((e) => !isFilled(e));
-    const sourceLabel = { profile: "Profile", bank: "Saved answer", draft: "Job draft", ai: "AI answer" };
-    const li = (e, extra = "", preview = false) => `<li><div class="field-copy"><span class="field-label">${esc(e.label || e.key)}</span>${preview ? `<span class="field-value">${esc(e.kind === "group" ? "Entries filled; review each on the form" : filled.get(e.key)?.value)}</span>` : ""}${e.ai_note ? `<span class="field-value">${esc(e.ai_note)}</span>` : ""}</div>${extra}</li>`;
     render(`
-      <div class="result-heading"><span class="eyebrow">This page</span><h4>${!fill.fields.length ? "No fields detected" : todo.length ? "A few things to review" : "Ready for your review"}</h4><p>${!fill.fields.length ? "Open the application form, then try again." : "Check your answers on the form before continuing."}</p></div>
-      <div class="metrics" aria-label="Autofill results"><div><strong>${done.length}</strong><span>Items filled</span></div><div><strong>${todo.length}</strong><span>Need attention</span></div></div>
-      <p class="board-note">${fill.job_id ? "Matched to a Job Tracker posting." : "No matching Job Tracker posting. Profile and saved answers are available; job drafts are not."}</p>
       ${fill.ai_error ? `<p class="notice warn" role="alert">Could not prepare AI answers: ${esc(fill.ai_error)}.</p>` : ""}
       ${fill.stopped ? `<p class="notice warn" role="alert">${esc(fill.stopped)}</p>` : ""}
-      <button id="jt-again" class="primary">Fill again <span aria-hidden="true">↻</span></button>
-      ${todo.length ? `<section class="field-section"><h5>Needs your attention <span class="count">${todo.length}</span></h5><ul>${todo.map((e) => li(e, e.kind === "file" ? '<span class="tag">Attach file</span>' : e.never_ai || !askable(e) ? '<span class="tag">Fill on form</span>' : `<button id="jt-ai-${esc(e.key)}" data-ai="${esc(e.key)}" aria-label="Prepare an AI answer for ${esc(e.label || e.key)}">Draft answer</button>`)).join("")}</ul></section>` : ""}
-      ${done.length ? `<details class="field-section"><summary>Filled items <span class="count">${done.length}</span></summary><ul>${done.map((e) => li(e, `<span class="tag success">${esc(sourceLabel[e.rung] || "Filled")}</span>`, true)).join("")}</ul></details>` : ""}
-      <details class="help"><summary>What gets remembered?</summary><p>After you submit, choices and short answers you keep can be reused for the same question. Free-text answers stay specific to the application.</p></details>
+      <div id="jt-answer-review"></div>
+      <button id="jt-again">Fill remaining blanks</button>
+      <details class="help"><summary>What gets remembered?</summary><p>Drafts and suggestions are saved with this application. After submission, choices and short answers can be reused for the same question. The final submission record keeps the values actually on the form.</p></details>
     `);
     on("click", "jt-again", run);
-    onAi = (key) => execute(async () => {
-      surface.mark(`jt-ai-${key}`, { disabled: true, text: "asking…" });
-      const entry = entryByKey(key);
-      if (!allowed("ai_suggestions")) {
-        entry.ai_note = "AI suggestions are switched off right now";
-        show();
+    drawReview();
+    if (!reviewState) loadReview();
+  }
+
+  async function loadReview() {
+    const fillId = fill?.fill_id;
+    if (!fillId) return;
+    reviewState = { id: fillId, state: "loading", fields: [] };
+    drawReview();
+    const result = await api(`user/apply/fills/${fillId}`, "GET");
+    if (fill?.fill_id !== fillId) return;
+    reviewState = result.ok ? { ...result.json, state: "ready" } : { id: fillId, state: "error", fields: [] };
+    if (!result.ok) reviewMessage = "Could not load saved answers. Check your connection and sign-in, then retry. Your form has not changed.";
+    drawReview();
+  }
+
+  function drawReview() {
+    if (!fill || !panelUp) return;
+    const names = { profile: "Profile", bank: "Saved answer", draft: "Job draft", ai: "Generated", manual: "Your edit" };
+    surface.review({
+      fillId: fill.fill_id, state: reviewState?.state || "loading", message: reviewMessage,
+      busy: operation.busy || !!reviewState?.submitted_at,
+      fields: fill.fields.map(entry => {
+        const saved = reviewState?.fields.find(f => f.key === entry.key) || entry;
+        const field = fieldByKey(entry.key);
+        const current = String((field && reader.current(field)) || "");
+        return { key: entry.key, label: entry.label || entry.key, kind: entry.kind, current,
+          value: saved.review_value ?? current ?? entry.value ?? "", feedback: saved.feedback || "",
+          source: touched.has(entry.key) || filled.get(entry.key)?.kept ? "Kept on form" : names[entry.rung] || "Filled",
+          editable: !field?._person && ["text", "long", "number", "select", "yesno", "multiselect"].includes(entry.kind),
+          canGenerate: allowed("ai_suggestions") && !saved.never_ai && !field?._person && (entry.kind === "long" || askable(entry)), history: saved.answer_history || [] };
+      }),
+    });
+  }
+
+  async function reviewAction({ action, key, value, feedback }) {
+    if (action === "reload") return loadReview();
+    if (!fill || reviewState?.state !== "ready" || operation.busy) return;
+    const entry = entryByKey(key);
+    const field = fieldByKey(key);
+    if (!entry || !field) return;
+    if (action === "locate") {
+      const node = field._el || field._ctl || field._box || boxOf(field);
+      node?.scrollIntoView?.({ block: "center", behavior: "smooth" });
+      if (node) {
+        prefs.collapsed = true;
+        surface.appearance({ theme: prefs.theme, collapsed: true });
+        surface.mark("jt-min", { text: "+", label: "Expand panel", expanded: false });
+      }
+      return;
+    }
+    if (field._person || !["text", "long", "number", "select", "yesno", "multiselect"].includes(entry.kind)) return;
+    const before = reader.current(field);
+    const originalFill = fill.fill_id;
+    return execute(async () => {
+      const saved = reviewState.fields.find(f => f.key === key);
+      if (!saved) throw new Error("The field is no longer part of this application.");
+      const answer = action === "refill" ? (saved.review_value ?? saved.value ?? "") : String(value ?? "");
+      const response = await taskApi(`user/apply/fills/${originalFill}/answer`, "PUT", {
+        key, revision: saved.answer_revision || 0, value: answer, feedback: String(feedback ?? ""),
+      });
+      if (!response.ok) {
+        reviewMessage = response.status === 409 ? "This answer changed elsewhere. Reload saved answers before trying again." : "Could not save your draft. The form has not changed.";
+        drawReview();
         return;
       }
-      await askModel([entry]);
-      if (!isFilled(entry) && !fill.ai_error) {
-        const f = filled.get(entry.key);
-        entry.ai_note = f && f.value ? "the form did not take the answer" : "the model had no answer";
-      }
-      show();
+      reviewState = { ...response.json, state: "ready" };
+      if (action === "generate") {
+        if (!allowed("ai_suggestions") || saved.never_ai || !(entry.kind === "long" || askable(entry))) return;
+        const generated = await taskApi("user/apply/suggest", "POST", {
+          fill_id: originalFill, job_id: fill.job_id, review_only: true,
+          revision: reviewState.fields.find(f => f.key === key).answer_revision,
+          fields: [{ key, label: entry.label || key, kind: entry.kind, options: entry.options || [] }],
+        });
+        reviewMessage = generated.ok ? (generated.json.answers?.[key] ? "New draft ready. Review it, then choose Apply this answer." : "No draft was generated for this field. Your existing answer is unchanged.") : "Could not generate a new draft. Your saved suggestions and form answer are unchanged.";
+        await loadReview();
+      } else if (action === "apply" || action === "refill") {
+        if (fill.fill_id !== originalFill || reader.current(field) !== before) {
+          reviewMessage = "The form changed while saving. Your newer answer was kept. Review and apply again if needed.";
+        } else {
+          const ok = await put(entry, answer, null, true);
+          if (ok) touched.add(key);
+          reviewMessage = ok ? "Answer applied. Check the employer's form before submitting." : "The form did not accept this answer. Choose its value directly on the page.";
+        }
+      } else reviewMessage = "Draft and suggestions saved. The form was not changed.";
+      drawReview();
     });
   }
 
@@ -784,6 +875,7 @@ export async function startApplication(adapter, adapterContext, lifecycle) {
         };
       }),
       resolved: fill,
+      answer_review: reviewState,
       filled: Object.fromEntries(filled),
       error: lastError,
       html: clean((root || document.body).outerHTML, 400000),
