@@ -25,11 +25,16 @@ test("pause holds the form, resume continues, and stop prevents later writes", a
 });
 
 test("stop releases a pending resolve and retry starts a fresh operation", async ({ page }) => {
-  await page.goto(`${preview}&state=loading`);
+  await page.goto(`${preview}&state=retry`);
   await page.locator("#jt-autofill").click();
+  await expect(page.locator("body")).toHaveAttribute("data-resolve-requests", "1");
   await page.getByRole("button", { name: "Stop autofill", exact: true }).click();
   await expect(page.locator("#jt-autofill")).toBeVisible();
   await expect(page.locator("#name")).toHaveValue("");
+  await page.locator("#jt-autofill").click();
+  await expect(page.locator("body")).toHaveAttribute("data-resolve-requests", "2");
+  await expect(page.locator("#name")).toHaveValue("Alex Morgan");
+  await expect(page.locator("#jt-again")).toBeVisible();
 });
 
 for (const theme of ["light", "dark"]) test(`${theme} panel fits a 390px viewport`, async ({ page }) => {
