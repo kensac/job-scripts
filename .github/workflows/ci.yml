@@ -221,6 +221,7 @@ jobs:
           name: job-tracker-apply
           path: extension/.output/*.zip
           if-no-files-found: error
+          include-hidden-files: true
 
   tests:
     needs: gate
