@@ -21,7 +21,7 @@ test('opening a panel report does not look like a new application page', () => {
 
 // panel.js is the panel's DOM, and it runs in whichever frame shows the
 // panel, which is not always the frame that reads the form.
-const panelSource = fs.readFileSync(path.join(__dirname, '../../extension/ui/panel.js'), 'utf8').replace('export function', 'function');
+const panelSource = fs.readFileSync(path.join(__dirname, '../../extension/ui/panel.js'), 'utf8').replace(/^import .*;\n/m, '').replace('export function', 'function');
 
 function fakeDom() {
   const listeners = {};

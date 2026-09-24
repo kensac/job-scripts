@@ -12,12 +12,30 @@ submit button; the extension never does.
 2. In this directory, run `npm ci` and `npm run build` with Node 24.
    At `chrome://extensions`, turn on Developer mode, Load unpacked, and pick
    `extension/.output/chrome-mv3`. Load the built directory, not the source.
+   When moving from the old source-folder install, disable that entry before
+   loading the new directory. Later updates use the same built directory:
+   rebuild, click Reload on its Chrome entry, then reload open application pages.
 3. Fill in your profile on the site (Applications page): the facts every
    form asks, plus your experience and education, and choose a default
    resume. A resume must be uploaded as a PDF for the extension to attach
    it; a pasted one has no file.
 
 ## Use it
+
+The answer-review panel lets you search the form, show only unanswered fields,
+find a control on the page, or edit and refill one answer. Save draft & suggestions
+keeps your feedback with that application. Generate new draft uses that feedback
+and your configured model, but leaves the employer's form unchanged until you
+choose Apply this answer. Copy and answer history are available in each editor.
+Files, dates, manual-only controls and repeated sections stay on the form.
+
+Autofill keeps existing answers. Typing or changing a control during an active
+fill stops automation; Fill remaining blanks will not overwrite that edit.
+Explicitly applying or refilling one field is the way to replace its value.
+Theme changes, minimising and search keep an unsaved editor open in memory.
+Reload saved answers discards unsaved editor changes and reads the server copy.
+Saved drafts and feedback survive page reloads when the URL and field identities
+match an open fill. Submitted fills remain immutable.
 
 Pause holds the operation at its next adapter checkpoint, including inside
 dropdown waits. Resume continues that operation. Stop cancels further writes;

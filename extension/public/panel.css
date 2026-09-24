@@ -131,13 +131,14 @@
   top: 16px;
   right: 16px;
   z-index: 2147483647;
-  width: min(360px, calc(100vw - 32px));
+  width: min(400px, calc(100vw - 32px));
   max-height: calc(100dvh - 32px);
   overflow: auto;
   background: var(--x-card);
   color: var(--x-ink);
   border: 1px solid var(--x-smoke);
-  border-radius: 8px;
+  border-radius: 14px;
+  box-shadow: 0 12px 44px #0002;
   font: 400 14px/1.5 "Inter Tight", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-variant-numeric: tabular-nums;
   text-align: left;
@@ -268,3 +269,24 @@
 #jt-apply details[open] > summary::before {
   content: "\2013";
 }
+
+#jt-apply .review-heading, #jt-apply .answer-heading { display: flex; align-items: baseline; gap: 8px; justify-content: space-between; }
+#jt-apply .review-heading h4 { font-size: 20px; font-weight: 550; }
+#jt-apply .review-tools { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; margin: 16px 0 8px; }
+#jt-apply .answer-review :is(input, textarea, select) { width: 100%; padding: 9px 10px; border: 1px solid var(--x-smoke); border-radius: 7px; color: var(--x-ink); background: var(--x-card); font: inherit; font-size: 12px; }
+#jt-apply .answer-review textarea { display: block; min-height: 76px; resize: vertical; margin: 6px 0 10px; }
+#jt-apply .answer-card { padding: 14px; margin-top: 12px; border: 1px solid var(--x-hair); border-radius: 10px; background: var(--x-wash); }
+#jt-apply .answer-card h5 { font-weight: 550; overflow-wrap: anywhere; }
+#jt-apply .answer-card .tag { white-space: normal; text-align: right; }
+#jt-apply .current-answer { margin-top: 10px; white-space: pre-wrap; max-height: 120px; overflow: auto; overflow-wrap: anywhere; }
+#jt-apply .current-answer > span { display: block; font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--x-ash); }
+#jt-apply .answer-actions { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+#jt-apply .answer-actions button { min-height: 36px; }
+#jt-apply .answer-editor { border-top: 1px solid var(--x-hair); padding-top: 10px; }
+#jt-apply .answer-editor label { display: block; margin-top: 12px; font-size: 12px; }
+#jt-apply .answer-history { margin-top: 12px; }
+#jt-apply .answer-history > div { padding: 10px 0; border-top: 1px solid var(--x-hair); white-space: pre-wrap; overflow-wrap: anywhere; }
+#jt-apply .review-empty { padding: 24px 0; }
+#jt-apply #jt-operation:not(:empty) { padding: 0 16px; border-bottom: 1px solid var(--x-hair); }
+#jt-apply :is(input, textarea, select):focus-visible { outline: 2px solid var(--x-accent); outline-offset: 2px; }
+@media (max-width: 360px) { #jt-apply .review-tools { grid-template-columns: 1fr; } }

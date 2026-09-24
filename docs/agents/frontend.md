@@ -159,6 +159,22 @@ success.
 
 ## Application answer updates
 
+The extension's per-field review uses `GET /user/apply/fills/{id}` and
+`PUT /user/apply/fills/{id}/answer`. The latter requires the field's
+`answer_revision`, saves `review_value` and feedback, and appends history without
+claiming that anything was written to the employer's form. A stale revision or
+submitted fill returns 409. The submission receipt still records actual final
+values and alone updates the board. These are private, owner-scoped records;
+the extension's existing report capture includes review state for issue triage.
+
+An explicit refinement sends one field, `review_only=true` and its saved revision
+to `/user/apply/suggest`. It returns a draft for review, not permission to overwrite
+a form. Generation reservations and completion checks live in
+`api/apply/fill_answers.py`; model calls run outside transactions, and consumed
+usage remains recorded when a newer edit or submission supersedes the answer.
+Resolve can opt into `resume_open` to recover an owned, unsubmitted fill with the
+same URL, posting and matching field identities. New pages must still be read.
+
 A manual draft request reserves the selected answer generations when queued;
 it supersedes older automatic work. Edits, clears and refinements invalidate
 older results. A refinement that loses this race returns `409 ANSWER_CHANGED`:
