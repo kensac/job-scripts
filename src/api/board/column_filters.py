@@ -95,6 +95,8 @@ def compile_filters(raw: str | None) -> tuple[list[ColumnFilter], list[str], dic
                 raise ValueError(f"A value is required for {rule.field}")
             name = f"column_filter_{index}"
             value: object = rule.value
+            if rule.operator in ("not_equals", "not_contains"):
+                clauses.append(f"AND NULLIF(btrim({expression}), '') IS NOT NULL")
             if kind == "date":
                 value = datetime.date.fromisoformat(rule.value)
             elif kind == "number":

@@ -71,3 +71,61 @@ def test_column_filters_apply_before_pagination_and_totals(client, user_headers,
     assert response.json()["total"] == 2
     assert len(response.json()["rows"]) == 1
     assert response.json()["rows"][0]["company"] == "Acme"
+
+
+@pytest.mark.parametrize(
+    ("operator", "value", "expected"),
+    [
+        ("contains", "100%_", ["100%_ Inc"]),
+        ("not_contains", "Acme", ["100%_ Inc", "100XX Inc"]),
+        ("not_equals", "Acme", ["100%_ Inc", "100XX Inc"]),
+        ("is_empty", None, ["", "   "]),
+    ],
+)
+def test_text_filters_keep_literal_wildcards_and_explicit_empty_semantics(
+    client, user_headers, f, operator, value, expected
+):
+    uid = db.query_one("SELECT id FROM users WHERE sub='test-user'")["id"]
+    for company in ["100%_ Inc", "100XX Inc", "Acme", "", "   "]:
+        jid = f.make_job(company=company)
+        db.execute(
+            "INSERT INTO user_jobs (user_id,job_id,status) VALUES (%s,%s,'saved')", (uid, jid)
+        )
+    response = client.get(
+        "/v1/user/jobs",
+        headers=user_headers,
+        params={
+            "column_filters": json.dumps(
+                [{"field": "company", "operator": operator, "value": value}]
+            )
+        },
+    )
+    assert response.status_code == 200
+    actual = [row["company"] for row in response.json()["rows"]]
+    assert len(actual) == len(expected)
+    assert set(actual) == set(expected)
+
+
+def test_private_column_predicates_cannot_read_another_users_notes(client, user_headers, f):
+    uid = db.query_one("SELECT id FROM users WHERE sub='test-user'")["id"]
+    other = db.query_one(
+        "INSERT INTO users (sub,email) VALUES ('other-filter-user','other@example.test') RETURNING id"
+    )["id"]
+    jid = f.make_job(company="Acme")
+    db.execute(
+        "INSERT INTO user_jobs (user_id,job_id,status,notes) VALUES (%s,%s,'saved','mine'), (%s,%s,'saved','private')",
+        (uid, jid, other, jid),
+    )
+    for value, count in [("private", 0), ("mine", 1)]:
+        response = client.get(
+            "/v1/user/jobs",
+            headers=user_headers,
+            params={
+                "column_filters": json.dumps(
+                    [{"field": "notes", "operator": "contains", "value": value}]
+                ),
+                "with_total": "true",
+            },
+        )
+        assert response.status_code == 200
+        assert response.json()["total"] == count
