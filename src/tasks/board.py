@@ -122,6 +122,43 @@ def decided_urls(urls: list[str], prompt_hash: str, model: str) -> set:
     return {r["url"] for r in rows}
 
 
+def submission_exclusions(
+    task_id: int, user_id: int, urls: list[str], prompt_hash: str, model: str
+) -> set[str]:
+    """Recheck decisions and deterministic chunk ownership in one database snapshot.
+
+    Planning can precede submission by hours. Checking decisions and owners in
+    separate statements also races a collector committing its verdict and then
+    completing its task. The older chunk owns overlapping work, regardless of
+    which worker reaches submission first. No lock spans provider network I/O.
+    """
+    if not urls:
+        return set()
+    rows = db.query(
+        """
+        WITH owners AS MATERIALIZED (
+            SELECT t.payload FROM tasks t
+            WHERE t.id < %(tid)s
+              AND t.kind IN ('run_filter_chunk', 'run_filter_batch_chunk')
+              AND (t.payload->>'user_id')::bigint = %(uid)s
+              AND t.payload->'filter'->>'prompt_hash' = %(hash)s
+              AND (t.status IN ('pending', 'running', 'waiting', 'awaiting_batch')
+                   OR jsonb_array_length(COALESCE(t.payload->'batch_ids', '[]'::jsonb)) > 0)
+        )
+        SELECT DISTINCT url FROM ai_queries
+        WHERE url = ANY(%(urls)s) AND check_type = 'custom'
+          AND prompt_hash = %(hash)s AND model = %(model)s
+          AND status IN ('passed', 'rejected')
+        UNION
+        SELECT j->>'url' AS url FROM owners,
+            jsonb_array_elements(owners.payload->'jobs') AS j
+        WHERE j->>'url' = ANY(%(urls)s)
+        """,
+        {"tid": task_id, "uid": user_id, "urls": urls, "hash": prompt_hash, "model": model},
+    )
+    return {row["url"] for row in rows}
+
+
 def in_flight_urls(user_id: int) -> set:
     """URLs a live filter chunk of an earlier run still holds for this user.
 
