@@ -50246,6 +50246,11 @@
               }
             ],
             "title": "Fill Id"
+          },
+          "resume_open": {
+            "type": "boolean",
+            "title": "Resume Open",
+            "default": false
           }
         },
         "type": "object",
@@ -53963,6 +53968,18 @@
             "type": "boolean",
             "title": "Review Only",
             "default": false
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision"
           }
         },
         "type": "object",

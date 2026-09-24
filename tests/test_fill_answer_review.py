@@ -65,3 +65,72 @@ def test_newer_edit_and_submission_fence_late_results(client, user_headers):
     )
     row = db.query_one("SELECT fields FROM application_fills WHERE id = %s", (fill_id,))
     assert row["fields"][0]["review_value"] == "Keep this"
+
+
+def test_resume_open_keeps_saved_feedback_but_not_a_submitted_fill(client, user_headers):
+    fill_id = _fill(client, user_headers)
+    client.put(
+        f"/v1/user/apply/fills/{fill_id}/answer",
+        headers=user_headers,
+        json={"key": "why", "revision": 0, "value": "Saved draft", "feedback": "Be specific"},
+    )
+    body = {
+        "url": "https://example.test/apply",
+        "resume_open": True,
+        "fields": [{"key": "why", "label": "Why this role?", "kind": "long"}],
+    }
+    assert (
+        client.post("/v1/user/apply/resolve", headers=user_headers, json=body).json()["fill_id"]
+        == fill_id
+    )
+    state = client.get(f"/v1/user/apply/fills/{fill_id}", headers=user_headers).json()
+    assert state["fields"][0]["feedback"] == "Be specific"
+    client.post(
+        f"/v1/user/apply/fills/{fill_id}/submitted", headers=user_headers, json={"fields": []}
+    )
+    assert (
+        client.post("/v1/user/apply/resolve", headers=user_headers, json=body).json()["fill_id"]
+        != fill_id
+    )
+
+
+def test_refinement_uses_saved_feedback_and_bills_a_superseded_result(
+    client, user_headers, monkeypatch
+):
+    from api import ai
+    from api.apply import fill_answers
+
+    fill_id = _fill(client, user_headers)
+    user_id = _uid(user_headers)
+    fill_answers.edit(user_id, fill_id, "why", 0, "Draft", "Use the backend project")
+    calls = []
+
+    async def parse(cfg, rules, text, schema):
+        calls.append(text)
+        fill_answers.edit(user_id, fill_id, "why", 1, "Newer manual edit", "Keep this")
+        return schema(answers=[{"key": "why", "answer": "Late answer"}]), {
+            "prompt_tokens": 1,
+            "completion_tokens": 1,
+            "total_tokens": 2,
+        }
+
+    monkeypatch.setattr(ai, "parse", parse)
+    monkeypatch.setattr(
+        "api.budget.resolve_ai_config",
+        lambda uid, ent: type("Cfg", (), {"model": "m", "key_source": "owner"})(),
+    )
+    body = {
+        "fill_id": fill_id,
+        "review_only": True,
+        "revision": 1,
+        "fields": [{"key": "why", "label": "Why this role?", "kind": "long"}],
+    }
+    result = client.post("/v1/user/apply/suggest", headers=user_headers, json=body)
+    assert result.status_code == 409, result.text
+    assert len(calls) == 1 and "Use the backend project" in calls[0]
+    assert fill_answers.read(user_id, fill_id)["fields"][0]["review_value"] == "Newer manual edit"
+    assert (
+        db.query_one("SELECT count(*) AS n FROM api_usage WHERE user_id = %s", (user_id,))["n"] == 1
+    )
+    assert client.post("/v1/user/apply/suggest", headers=user_headers, json=body).status_code == 409
+    assert len(calls) == 1

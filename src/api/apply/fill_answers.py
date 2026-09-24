@@ -57,7 +57,14 @@ def edit(user_id: int, fill_id: int, key: str, revision: int, value: str, feedba
         return field
 
 
-def reserve(user_id: int, fill_id: int, keys: list[str], job_id: int | None) -> tuple[str, dict]:
+def reserve(
+    user_id: int,
+    fill_id: int,
+    keys: list[str],
+    job_id: int | None,
+    *,
+    expected_revision: int | None = None,
+) -> tuple[str, dict]:
     with db.transaction():
         row = read(user_id, fill_id, lock=True)
         _open(row)
@@ -66,6 +73,10 @@ def reserve(user_id: int, fill_id: int, keys: list[str], job_id: int | None) -> 
         by_key = {f["key"]: f for f in row["fields"]}
         if len(set(keys)) != len(keys) or any(k not in by_key for k in keys):
             raise refuse(422, "INVALID_FIELDS", "Fields must be unique and belong to this fill.")
+        if expected_revision is not None and any(
+            by_key[k].get("answer_revision", 0) != expected_revision for k in keys
+        ):
+            raise refuse(409, "ANSWER_CHANGED", "A newer edit superseded this request.")
         token = uuid4().hex
         for key in keys:
             by_key[key]["answer_generation"] = token

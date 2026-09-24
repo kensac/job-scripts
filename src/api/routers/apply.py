@@ -396,6 +396,7 @@ class ResolveBody(BaseModel):
     # filled (the EEO race question appears once Hispanic/Latino is
     # answered), and they belong on the same ledger row.
     fill_id: int | None = None
+    resume_open: bool = False
 
 
 def _seen(event: str, user: AuthedUser, **props: Any) -> None:
@@ -432,6 +433,18 @@ def resolve_form(body: ResolveBody, user: AuthedUser = Depends(require_user)) ->
             if body.fill_id is not None
             else None
         )
+        if open_fill is None and body.fill_id is None and body.resume_open and fields:
+            open_fill = db.query_one(
+                "SELECT id, fields FROM application_fills WHERE user_id = %s AND url = %s "
+                "AND job_id IS NOT DISTINCT FROM %s AND submitted_at IS NULL "
+                "AND fields @> %s::jsonb ORDER BY id DESC LIMIT 1 FOR UPDATE",
+                (
+                    user.id,
+                    body.url,
+                    job_id,
+                    db.jsonb([{"key": f.key, "label": f.label, "kind": f.kind} for f in fields]),
+                ),
+            )
         if open_fill:
             have = {f["key"] for f in open_fill["fields"]}
             merged = [*open_fill["fields"], *[f.model_dump() for f in fields if f.key not in have]]
@@ -575,6 +588,7 @@ class SuggestBody(BaseModel):
     # The fill this belongs to; the model's answers go on its ledger row.
     fill_id: int | None = None
     review_only: bool = False
+    revision: int | None = Field(default=None, ge=0)
 
 
 class SuggestedAnswer(BaseModel):
@@ -623,11 +637,19 @@ async def suggest(body: SuggestBody, user: AuthedUser = Depends(require_user)) -
     goes into the bank on submit."""
     token = None
     saved = {}
-    if body.review_only and body.fill_id is None:
-        raise refuse(422, "FILL_REQUIRED", "Answer review requires an application fill.")
+    if body.review_only and (
+        body.fill_id is None or body.revision is None or len(body.fields) != 1
+    ):
+        raise refuse(
+            422, "FILL_REQUIRED", "Answer review requires one field, its revision and its fill."
+        )
     if body.fill_id is not None:
         token, saved = fill_answers.reserve(
-            user.id, body.fill_id, [f.key for f in body.fields], body.job_id
+            user.id,
+            body.fill_id,
+            [f.key for f in body.fields],
+            body.job_id,
+            expected_revision=body.revision if body.review_only else None,
         )
     skipped = never_filled(body.fields)
     fields = [f for f in body.fields if f.key not in skipped]
