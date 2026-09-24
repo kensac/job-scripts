@@ -197,13 +197,15 @@ class TestNoSilentSubstitution:
         ):
             assert len(shape.candidates) == 1, shape.candidates
 
-    def test_the_wired_models_are_the_ones_that_were_hardcoded(self):
-        """Byte-identical selection to before the router existed."""
+    def test_wired_extraction_defaults_use_the_requested_model(self):
         from core import shapes
         from tasks import comp, verify
 
-        assert resolve(comp.COMP_TASK).model == "gpt-5-nano"
-        assert resolve(verify.VERIFY_TASK).model == "gpt-5-nano"
+        for shape in (comp.COMP_TASK, verify.VERIFY_TASK, shapes.LOCATIONS_TASK):
+            choice = resolve(shape)
+            assert choice.model == "gpt-6-luna"
+            assert choice.params["reasoning_effort"] == "low"
+            assert shape.batched is True
         assert resolve(shapes.BACKFILL_TASK).model == shapes.BACKFILL_MODEL
         assert resolve(shapes.ONGOING_TASK).model == shapes.ONGOING_MODEL
 
