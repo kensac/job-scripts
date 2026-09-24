@@ -26,7 +26,9 @@ def test_board_echoes_supported_typed_filters(client, user_headers, rule):
         params={"column_filters": json.dumps(rules), "with_total": "true"},
     )
     assert response.status_code == 200
-    assert response.json()["column_filters"] == rules
+    assert response.json()["column_filters"] == [
+        dict(rule, value=rule.get("value")) for rule in rules
+    ]
     assert any(field["key"] == rule["field"] for field in response.json()["filter_fields"])
 
 

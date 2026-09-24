@@ -3,12 +3,13 @@ from __future__ import annotations
 import datetime
 from typing import Literal
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
 from api import db, sorting
 from api import params as params_
 from api.auth import AuthedUser, require_user
+from api.board import column_filters as column_filters_
 from api.board import visibility
 from api.reports import ReportKind, report_kinds
 from core.comp import CompBasis, CompPeriod
@@ -256,6 +257,8 @@ class Board(BaseModel):
     rows: list[BoardRow]
     # Only the filters that narrowed anything, echoed back.
     filters: dict[str, list[str]]
+    column_filters: list[column_filters_.ColumnFilter]
+    filter_fields: list[column_filters_.FilterField]
     next_cursor: int | None
     has_more: bool
     offset: int
@@ -337,6 +340,7 @@ def list_jobs(
     include_hidden: bool = False,
     with_total: bool = False,
     with_facets: bool = False,
+    column_filters: str | None = Query(default=None, max_length=12000),
     user: AuthedUser = Depends(require_user),
 ) -> Board:
     limit = max(1, min(limit, 1000))
@@ -348,6 +352,9 @@ def list_jobs(
     )
     extra = []
     params: dict = {"uid": user.id, "limit": limit + 1, "offset": offset}
+    column_rules, column_clauses, column_params = column_filters_.compile_filters(column_filters)
+    extra.extend(column_clauses)
+    params.update(column_params)
     if not include_hidden:
         extra.append("AND COALESCE(uj.hidden, FALSE) = FALSE")
     if search:
@@ -423,6 +430,8 @@ def list_jobs(
     return Board(
         rows=rows,
         filters=params_.applied(status=wanted, source=wanted_sources, ats=wanted_ats),
+        column_filters=column_rules,
+        filter_fields=column_filters_.fields(),
         next_cursor=rows[-1].job_id if cursor is not None and has_more and rows else None,
         has_more=has_more,
         offset=offset,
