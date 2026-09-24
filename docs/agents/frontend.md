@@ -58,6 +58,22 @@ sideways.
 
 ## Talking to the API
 
+The personal board's `GET /user/jobs` accepts `column_filters`, a JSON array of
+at most 32 AND conditions. Render available fields and operators from its
+`filter_fields` response, not a separate client whitelist. These predicates
+refine the authorized board before paging, totals and facets. Never filter
+only the loaded rows. Invalid conditions return 422, not an unfiltered board.
+Persist the JSON expression intact in saved views, including commas inside
+values. If an older API omits capabilities while conditions are requested,
+show an error instead of silently dropping them.
+
+Date conditions use UTC calendar dates for posting and ingestion timestamps.
+Numeric pay comparisons require explicit currency and period equality
+conditions and perform no conversion. Empty text includes whitespace-only
+values; negative text conditions do not include empty values. Private fields
+such as notes are scoped to the current user's joined row. The field mapping
+and parameterized compiler live in `api/board/column_filters.py`.
+
 **The client, its types, and any test fixture can each drift from the server
 independently.** Verify shapes against the server source, not against your
 expectation or your own fixture.

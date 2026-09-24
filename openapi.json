@@ -2427,6 +2427,23 @@
             }
           },
           {
+            "name": "column_filters",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 12000
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Column Filters"
+            }
+          },
+          {
             "name": "x-service-token",
             "in": "header",
             "required": false,
@@ -33366,6 +33383,20 @@
             "type": "object",
             "title": "Filters"
           },
+          "column_filters": {
+            "items": {
+              "$ref": "#/components/schemas/ColumnFilter"
+            },
+            "type": "array",
+            "title": "Column Filters"
+          },
+          "filter_fields": {
+            "items": {
+              "$ref": "#/components/schemas/FilterField"
+            },
+            "type": "array",
+            "title": "Filter Fields"
+          },
           "next_cursor": {
             "anyOf": [
               {
@@ -33437,6 +33468,8 @@
         "required": [
           "rows",
           "filters",
+          "column_filters",
+          "filter_fields",
           "next_cursor",
           "has_more",
           "offset",
@@ -35581,6 +35614,37 @@
         },
         "type": "object",
         "title": "ClosePostingBody"
+      },
+      "ColumnFilter": {
+        "properties": {
+          "field": {
+            "type": "string",
+            "title": "Field"
+          },
+          "operator": {
+            "type": "string",
+            "title": "Operator"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 1000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "field",
+          "operator"
+        ],
+        "title": "ColumnFilter"
       },
       "Company": {
         "properties": {
@@ -38156,6 +38220,43 @@
           "prompt"
         ],
         "title": "FilterCreate"
+      },
+      "FilterField": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "text",
+              "date",
+              "number",
+              "boolean"
+            ],
+            "title": "Kind"
+          },
+          "operators": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Operators"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "label",
+          "kind",
+          "operators"
+        ],
+        "title": "FilterField"
       },
       "FilterList": {
         "properties": {
