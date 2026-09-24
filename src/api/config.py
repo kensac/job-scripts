@@ -447,9 +447,10 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
         default="",
         value_type=str,
         help="The rules the model drafts application answers under, before the person's own "
-        "writing style. Empty means the built-in text in tasks.application; a change "
+        "writing style. Empty means the built-in text in api.apply.drafting; a change "
         "here takes effect on the next draft, with no roll. Read by application_draft, "
-        "application_sweep and the refine endpoint.",
+        "application_sweep and the refine endpoint. Shared evidence and company-motivation "
+        "guidance always applies after these rules and the writing style.",
     ),
     "application_suggest_instructions": ConfigKey(
         section="Applications",
@@ -458,7 +459,8 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
         value_type=str,
         help="The rules the model fills the rest of an application form under (the fields the "
         "profile and drafts did not). Empty means the built-in text in api.routers.apply. "
-        "Read by POST /user/apply/suggest.",
+        "Read by POST /user/apply/suggest. The person's writing style and shared evidence "
+        "and company-motivation guidance are appended to these rules.",
     ),
     # The model never fills these on a form; the person does. One label a
     # line or comma-separated, whole words in the field's label or key.
