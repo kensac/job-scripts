@@ -11,7 +11,7 @@ def test_shared_motivation_guidance_survives_saved_resume_only_instructions():
     assert "Motivation questions" in rules
     assert "company-specific reason" in rules
     assert "Short and conversational." in rules
-    assert "never invent" in rules
+    assert "never invent" in rules.lower()
 
 
 def test_extension_suggestions_receive_posting_and_personal_style(
