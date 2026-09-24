@@ -85,13 +85,17 @@ WHERE (
 
 FAST = f"""
 SELECT {{columns}}
-FROM jobs j
+FROM (
+    SELECT job_id FROM board_visible WHERE user_id = %(uid)s
+    UNION
+    SELECT id FROM jobs WHERE uploaded_by = %(uid)s
+    UNION
+    SELECT uj.job_id FROM user_jobs uj
+    WHERE uj.user_id = %(uid)s AND {_ACTED_ON}
+) visible_ids
+JOIN jobs j ON j.id = visible_ids.job_id
 LEFT JOIN user_jobs uj ON uj.job_id = j.id AND uj.user_id = %(uid)s
-WHERE (
-    j.uploaded_by = %(uid)s
-    OR (uj.user_id IS NOT NULL AND {_ACTED_ON})
-    OR EXISTS (SELECT 1 FROM board_visible bv WHERE bv.user_id = %(uid)s AND bv.job_id = j.id)
-)
+WHERE TRUE
 {{extra}}
 """
 

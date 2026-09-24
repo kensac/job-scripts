@@ -40,6 +40,14 @@ is visible without waiting.
 **Never write a fresh "can this user see this" predicate, and never evaluate
 FULL on a request.**
 
+`FAST` enumerates the three authorized ID sets first: computed membership,
+uploads, and acted-on rows. `UNION` deduplicates overlaps before joining jobs
+and the current user's private state. Keep this set-first shape: an OR over
+the whole catalog makes a small board scan unrelated postings. The regression
+in `tests/test_board_read_plan.py` checks examined catalog rows rather than
+elapsed time. Predicates, totals, facets and per-object checks still consume
+the same `FAST` template.
+
 ## A board row is a grant only when the person acted on it
 
 The worker materialises an empty row for every posting that passes a person's
