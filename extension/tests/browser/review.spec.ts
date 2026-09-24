@@ -80,6 +80,16 @@ test("typing during an active fill stops automation and preserves the edit", asy
   await expect(page.locator("#email")).toHaveValue("my-edit@example.com");
 });
 
+test("a scripted checkbox change does not masquerade as a manual edit", async ({ page }) => {
+  await page.goto(preview + "&slow=1");
+  await page.evaluate(() => { const box = document.createElement("input"); box.type = "checkbox"; box.id = "scripted-check"; document.querySelector("main")!.append(box); });
+  await page.locator("#jt-autofill").click();
+  await expect(page.locator("#name")).toHaveValue("Alex Morgan");
+  await page.evaluate(() => (document.querySelector("#scripted-check") as HTMLInputElement).click());
+  await expect(page.locator("#email")).toHaveValue("alex@example.com");
+  await expect(page.locator("#jt-again")).toBeVisible();
+});
+
 for (const theme of ["light", "dark"]) test(`${theme} review preserves unsaved text across theme and minimise`, async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await ready(page, `&theme=${theme}`);
