@@ -140,6 +140,13 @@ succeeds, whatever fixed it.
 claim must not exclude the task itself when it resumes. A guard that hides a
 task's own work from it will make the task discard results it already paid for.
 
+Personal batch chunks recheck decisions after content preparation, before new
+submission. One database snapshot reads exact prompt/model verdicts and older
+same-user, same-prompt chunk owners. The lowest task id owns overlapping URLs,
+including while pending; a failed owner with pending paid batch ids still holds
+them for collection. Failed unpaid work can be retried. Paid resumes bypass
+this check. Exclusions are logged as counts, not claimed dollar savings.
+
 **Collection must be reachable when there is nothing new to submit.** An early
 return on an empty selection, placed before collection, strands completed work.
 

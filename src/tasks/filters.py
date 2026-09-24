@@ -16,6 +16,7 @@ from tasks.board import (
     decided_urls,
     in_flight_urls,
     materialize_passing,
+    submission_exclusions,
 )
 from tasks.filter_execution import (
     ExecutionHooks,
@@ -218,6 +219,22 @@ async def handle_run_filter_batch_chunk(task_id: int, payload: dict[str, Any]) -
         parent_id,
         resumed_batch=existing,
     )
+    if not existing:
+        assert cfg is not None
+        excluded = submission_exclusions(
+            task_id, user_id, [job["url"] for job in jobs], flt["prompt_hash"], cfg.model
+        )
+        jobs = [job for job in jobs if job["url"] not in excluded]
+        if excluded:
+            logger.info(
+                "Filter task %s excluded %s decided or owned postings before submission",
+                task_id,
+                len(excluded),
+            )
+        if not jobs:
+            hooks.progress(0, 0, "no new reviews: already decided or owned by an earlier chunk")
+            hooks.complete()
+            return
     await execute_batch(
         task_id,
         cfg,
