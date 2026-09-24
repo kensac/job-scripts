@@ -1,0 +1,270 @@
+/* The panel, in a shadow root.
+ *
+ * :host is the div in the page; everything below it is behind a shadow
+ * boundary, so no page selector can match a panel element. That is most of
+ * the isolation, but NOT all of it: a shadow boundary blocks matching, it does
+ * not block INHERITANCE. line-height, font, color, letter-spacing,
+ * text-transform, white-space and visibility all inherit through it from the
+ * host element, so a page that sets line-height on body still reaches in - the
+ * exact Workday bug (2026-09-08) that the two resets below were written for.
+ *
+ * `all: initial` on the host stops inheritance at the boundary. It needs the
+ * !important, and this is the part that is easy to get wrong: for the HOST
+ * element, a normal declaration in the outer page beats a normal declaration in
+ * :host. Workday's `div { white-space: nowrap }` matches #jt-apply-host from
+ * outside and wins, so a plain `all: initial` measured as white-space nowrap
+ * and line-height 9.6px on the host and inherited straight through - the same
+ * bug, with a shadow root in front of it. The order reverses for important
+ * declarations, which is why this one holds.
+ *
+ * Between the boundary and this line, nothing on any of the 53 sites this
+ * loads on can reach the panel, and the resets stop being a list that grows by
+ * one every time someone reports a new site.
+ *
+ * The panel re-declares its own font and colour immediately below, because
+ * `all: initial` has just taken the browser defaults away too.
+ */
+.operation-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-block: 12px; }
+.operation-controls span { flex: 1 1 120px; }
+
+:host {
+  all: initial !important;
+
+  /* The host is a manual popover, so it lives in the top layer (content.js
+   * says why). `all: initial` has just thrown the browser's popover styles
+   * away with everything else, and those are the ones that would stretch the
+   * host over the whole viewport and swallow every click meant for the page.
+   * What the host needs instead is to be a box of no size that the panel can
+   * position against, so #jt-apply below keeps its own fixed 360px box and
+   * the rest of the viewport stays the page's.
+   *
+   * display: block matters when showPopover is missing or throws: the
+   * browser's `[popover]:not(:popover-open) { display: none }` would
+   * otherwise hide the panel outright rather than fall back to the
+   * behaviour it had before the top layer. */
+  display: block !important;
+  position: fixed !important;
+  inset: 0 auto auto 0 !important;
+  width: 0 !important;
+  height: 0 !important;
+  margin: 0 !important;
+  border: 0 !important;
+  padding: 0 !important;
+  background: none !important;
+  overflow: visible !important;
+}
+
+#jt-apply {
+  /* Light. Values are --x-* from admin.css, not approximations of them. */
+  --x-card: #ffffff;
+  --x-hair: #e7e5e2;
+  --x-wash: #f7f6f4;
+  --x-ink: #1f1e1c;
+  --x-slate: #5d5b58;
+  --x-ash: #6a6865;
+  --x-smoke: #d6d4d1;
+  --x-accent: #533afd;
+  --x-on-accent: #ffffff;
+  --x-good: #1e7a52;
+  --x-danger: #b42318;
+  --x-line-mix: 25%;
+  --x-wash-mix: 5%;
+
+  --x-danger-line: color-mix(in oklab, var(--x-danger) var(--x-line-mix), transparent);
+  --x-danger-wash: color-mix(in oklab, var(--x-danger) var(--x-wash-mix), transparent);
+  --x-accent-line: color-mix(in oklab, var(--x-accent) var(--x-line-mix), transparent);
+  --x-accent-wash: color-mix(in oklab, var(--x-accent) var(--x-wash-mix), transparent);
+
+  /* NOT admin.css's --x-accent-hover. That token lightens the indigo, which is
+     the wrong direction for a filled button carrying --x-on-accent: white on
+     #7389ff measures 3.11:1, under the AA bar DESIGN.md sets. Pulling the
+     accent toward --x-ink instead darkens it in light and lightens it in dark,
+     because ink flips with the theme - 7.02:1 and 7.37:1. Tokens only, no new
+     hex. The same failure exists in the app (kit.tsx:574); see the PR. */
+  --jt-accent-hover: color-mix(in oklab, var(--x-accent) 88%, var(--x-ink));
+
+}
+@media (prefers-color-scheme: dark) {
+  #jt-apply:not([data-jt-theme="light"]) {
+    --x-card: #201e1a;
+    --x-hair: #34312b;
+    --x-wash: #282520;
+    --x-ink: #ebe7e0;
+    --x-slate: #b6afa4;
+    --x-ash: #968f84;
+    --x-smoke: #55504a;
+    --x-accent: #9c8cff;
+    --x-on-accent: #171512;
+    --x-good: #3fbf7d;
+    --x-danger: #f08075;
+    /* A 5% wash reads on bone and is invisible on a dark ground, so the mix
+       strengths are tokens too. */
+    --x-line-mix: 45%;
+    --x-wash-mix: 15%;
+
+    color-scheme: dark;
+  }
+}
+
+#jt-apply[data-jt-theme="dark"] {
+    --x-card: #201e1a;
+    --x-hair: #34312b;
+    --x-wash: #282520;
+    --x-ink: #ebe7e0;
+    --x-slate: #b6afa4;
+    --x-ash: #968f84;
+    --x-smoke: #55504a;
+    --x-accent: #9c8cff;
+    --x-on-accent: #171512;
+    --x-good: #3fbf7d;
+    --x-danger: #f08075;
+    /* A 5% wash reads on bone and is invisible on a dark ground, so the mix
+       strengths are tokens too. */
+    --x-line-mix: 45%;
+    --x-wash-mix: 15%;
+
+    color-scheme: dark;
+}
+
+#jt-apply {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 2147483647;
+  width: min(360px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  overflow: auto;
+  background: var(--x-card);
+  color: var(--x-ink);
+  border: 1px solid var(--x-smoke);
+  border-radius: 8px;
+  font: 400 14px/1.5 "Inter Tight", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-variant-numeric: tabular-nums;
+  text-align: left;
+  color-scheme: light;
+  scrollbar-color: var(--x-smoke) transparent;
+  isolation: isolate;
+}
+/* box-sizing and min-width are the panel's own layout, not a defence: a flex
+   child that will not shrink below its content is what min-width: 0 fixes, and
+   the page was never involved. The rest of what stood here - letter-spacing,
+   text-transform, text-align, box-shadow, float, font-family - defended
+   against page rules that can no longer match. */
+#jt-apply *, #jt-apply *::before, #jt-apply *::after {
+  box-sizing: border-box;
+  min-width: 0;
+}
+#jt-apply { box-sizing: border-box; }
+#jt-apply h3, #jt-apply h4, #jt-apply h5, #jt-apply p, #jt-apply ul { margin: 0; padding: 0; }
+#jt-apply h3 { font-size: 15px; font-weight: 400; line-height: 1.3; color: var(--x-ink); }
+#jt-apply h4 { font-size: 22px; font-weight: 400; line-height: 1.25; letter-spacing: -0.02em; color: var(--x-ink); margin: 4px 0 8px; }
+#jt-apply h5 { font-size: 13px; font-weight: 400; color: var(--x-ink); }
+#jt-apply p { font-size: 12px; color: var(--x-slate); line-height: 1.6; }
+#jt-apply .muted { color: var(--x-ash); font-size: 12px; }
+#jt-apply .eyebrow { display: block; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--x-ash); }
+#jt-apply .head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px; position: sticky; top: 0; background: var(--x-card); z-index: 1; border-bottom: 1px solid var(--x-hair); }
+#jt-apply .brand, #jt-apply .head-actions { display: flex; align-items: center; gap: 8px; }
+#jt-apply .brand-mark { display: grid; place-items: center; width: 32px; height: 32px; border: 1px solid var(--x-smoke); border-radius: 6px; background: var(--x-wash); font-size: 24px; }
+#jt-apply .brand .eyebrow { margin-top: 4px; }
+#jt-apply .application-context { padding: 16px; background: var(--x-wash); border-bottom: 1px solid var(--x-hair); overflow-wrap: anywhere; }
+#jt-apply .application-title { font-size: 14px; margin: 4px 0; line-height: 1.4; }
+#jt-apply .workspace { padding: 20px 16px 16px; overflow-wrap: anywhere; }
+#jt-apply button { appearance: none; display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 32px; margin: 0; padding: 4px 12px; border: 1px solid var(--x-smoke); border-radius: 4px; background: var(--x-card); color: var(--x-ink); font: inherit; font-size: 12px; cursor: pointer; text-align: center; }
+#jt-apply button:hover { background: var(--x-wash); }
+#jt-apply button:disabled { opacity: 0.6; cursor: wait; }
+#jt-apply button.primary { display: flex; justify-content: space-between; width: 100%; min-height: 44px; margin-top: 16px; padding: 8px 12px; background: var(--x-accent); border-color: var(--x-accent); color: var(--x-on-accent); font-size: 14px; }
+#jt-apply button.primary:hover { background: var(--jt-accent-hover); border-color: var(--jt-accent-hover); }
+#jt-apply .workspace > button:not(.primary) { width: 100%; margin-top: 16px; }
+#jt-apply #jt-theme, #jt-apply #jt-min { width: 32px; padding: 0; border-color: transparent; background: transparent; font-size: 18px; color: var(--x-slate); }
+#jt-apply #jt-theme:hover, #jt-apply #jt-min:hover { background: var(--x-wash); }
+#jt-apply.collapsed { width: 248px; }
+#jt-apply.collapsed .head { border: 0; padding: 12px; }
+#jt-apply.collapsed .body { display: none; }
+#jt-apply .metrics { display: grid; grid-template-columns: 1fr 1fr; margin-top: 16px; background: var(--x-wash); border: 1px solid var(--x-hair); border-radius: 6px; }
+#jt-apply .metrics > div { padding: 12px; }
+#jt-apply .metrics > div + div { border-left: 1px solid var(--x-hair); }
+#jt-apply .metrics strong { display: block; font-size: 28px; line-height: 1.2; font-weight: 400; color: var(--x-ink); }
+#jt-apply .metrics span { display: block; margin-top: 4px; font-size: 11px; color: var(--x-slate); }
+#jt-apply .board-note { margin-top: 12px; font-size: 11px; }
+#jt-apply .field-section { margin-top: 20px; border-top: 1px solid var(--x-hair); padding-top: 12px; }
+#jt-apply .count { display: inline-block; margin-left: 4px; padding: 0 6px; background: var(--x-wash); border: 1px solid var(--x-hair); border-radius: 4px; font-size: 11px; color: var(--x-slate); }
+#jt-apply ul { list-style: none; margin-top: 8px; }
+#jt-apply li { display: flex; align-items: flex-start; gap: 8px; padding: 12px 0; border-bottom: 1px solid var(--x-hair); font-size: 12px; }
+#jt-apply li:last-child { border-bottom: 0; padding-bottom: 0; }
+#jt-apply .field-copy { flex: 1; }
+#jt-apply .field-label { display: block; color: var(--x-ink); }
+#jt-apply .field-value { display: block; margin-top: 4px; color: var(--x-slate); font-size: 11px; max-height: 6em; overflow: auto; }
+#jt-apply .tag { flex: none; max-width: 100px; border: 1px solid var(--x-hair); border-radius: 4px; padding: 2px 6px; font-size: 10px; color: var(--x-slate); }
+#jt-apply .tag.success { color: var(--x-good); border-color: color-mix(in oklab, var(--x-good) var(--x-line-mix), transparent); background: color-mix(in oklab, var(--x-good) var(--x-wash-mix), transparent); }
+#jt-apply li button { flex: none; max-width: 104px; padding: 4px 8px; color: var(--x-accent); border-color: var(--x-accent-line); background: var(--x-accent-wash); font-size: 11px; }
+#jt-apply summary { cursor: pointer; color: var(--x-slate); font-size: 12px; list-style-position: inside; }
+#jt-apply summary:hover { color: var(--x-ink); }
+#jt-apply .field-section > summary { color: var(--x-ink); font-size: 13px; }
+#jt-apply .help { margin-top: 16px; }
+#jt-apply details > p { margin-top: 8px; }
+#jt-apply .settings { padding: 16px; border-top: 1px solid var(--x-hair); }
+#jt-apply .switch { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 16px 0 0; cursor: pointer; }
+#jt-apply .setting-title { display: block; font-size: 12px; color: var(--x-ink); }
+#jt-apply .setting-description { display: block; font-size: 11px; color: var(--x-slate); margin-top: 4px; }
+#jt-apply input[role="switch"] { appearance: none; flex: none; position: relative; width: 32px; height: 20px; margin: 0; padding: 0; border: 1px solid var(--x-smoke); border-radius: 12px; background: var(--x-wash); cursor: pointer; }
+#jt-apply input[role="switch"]::after { content: ""; display: block; position: absolute; left: 3px; top: 3px; width: 12px; height: 12px; border-radius: 50%; background: var(--x-slate); }
+#jt-apply input[role="switch"]:checked { background: var(--x-accent); border-color: var(--x-accent); }
+#jt-apply input[role="switch"]:checked::after { left: 15px; background: var(--x-on-accent); }
+#jt-apply .panel-footer { padding: 12px 16px; border-top: 1px solid var(--x-hair); display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+#jt-apply #jt-report:has(textarea) { flex-basis: 100%; }
+#jt-apply #jt-report-btn { border: 0; padding: 0; min-height: 24px; color: var(--x-slate); font-size: 11px; background: transparent; }
+#jt-apply #jt-report textarea { display: block; width: 100%; margin: 8px 0; padding: 8px; border: 1px solid var(--x-smoke); border-radius: 4px; background: var(--x-card); color: var(--x-ink); font: inherit; font-size: 12px; resize: vertical; }
+#jt-apply .warn { color: var(--x-danger); }
+#jt-apply .notice { margin-top: 12px; padding: 12px; border: 1px solid var(--x-danger-line); border-radius: 4px; background: var(--x-danger-wash); }
+#jt-apply a { color: var(--x-accent); text-decoration: underline; text-underline-offset: 2px; }
+#jt-apply :is(button, input, textarea, summary, a):focus-visible { outline: 2px solid var(--x-accent); outline-offset: 2px; }
+#jt-apply .working { display: flex; gap: 12px; padding: 12px 0; }
+#jt-apply .working h4 { font-size: 18px; margin: 0 0 8px; }
+#jt-apply .spinner { flex: none; width: 20px; height: 20px; border: 2px solid var(--x-hair); border-top-color: var(--x-accent); border-radius: 50%; }
+@media (prefers-reduced-motion: no-preference) {
+  #jt-apply .spinner { animation: jt-spin 1s linear infinite; }
+  #jt-apply button { transition: background-color 120ms ease, border-color 120ms ease; }
+}
+@keyframes jt-spin { to { transform: rotate(360deg); } }
+#jt-apply[data-jt-theme="dark"] { color-scheme: dark; }
+@media (prefers-color-scheme: dark) { #jt-apply:not([data-jt-theme="light"]) { color-scheme: dark; } }
+@media (max-width: 480px) {
+  #jt-apply { top: 8px; right: 8px; width: calc(100vw - 16px); max-height: calc(100dvh - 16px); }
+  #jt-apply.collapsed { width: 248px; }
+}
+
+/* The panel's own typographic baseline. It reads as a reset and is not one any
+   more: nothing outside can set these. It stays because the panel wants a
+   consistent line-height on every element it renders, and because `all:
+   initial` on the host means there is nothing to inherit from. */
+#jt-apply * {
+  line-height: 1.5;
+}
+#jt-apply .tag,
+#jt-apply .count {
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+/* Disclosure marks: the same plus and minus as the minimise button, not
+   the browser's triangle. */
+#jt-apply summary {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+#jt-apply summary::-webkit-details-marker {
+  display: none;
+}
+#jt-apply summary::before {
+  content: "+";
+  display: inline-block;
+  width: 14px;
+  text-align: center;
+  color: var(--x-ash);
+  font-size: 13px;
+}
+#jt-apply details[open] > summary::before {
+  content: "\2013";
+}

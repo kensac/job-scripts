@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const manifest = JSON.parse(
-  fs.readFileSync(path.join(__dirname, '../../extension/manifest.json'), 'utf8'),
+  fs.readFileSync(path.join(__dirname, '../../extension/.output/chrome-mv3/manifest.json'), 'utf8'),
 );
 
 const parts = (pattern) => {

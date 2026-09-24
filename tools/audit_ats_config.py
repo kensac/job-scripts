@@ -8,7 +8,7 @@ fill methods the engine has no branch for, the action, variant and
 question-reader keys the engine ignores, the top-level behaviour keys it
 ignores, and whether the ATS loads at all (a url glob a content script can
 match). The lists of what the engine implements live here and must move
-with extension/engine.js; the audit is only as honest as they are. Run it
+with extension/adapters/recipe.js; the audit is only as honest as they are. Run it
 after any change to the table, the converter or the engine, and before
 calling an ATS covered.
 """
@@ -25,7 +25,7 @@ from convert_ats_config import FACTS, SKIP_METHODS, STEPS, glob_to_match
 
 HAND = {"AshbyHQ", "Greenhouse", "Lever"}
 
-# What extension/engine.js implements.
+# What extension/adapters/recipe.js implements.
 ENGINE_METHODS = {
     "default",
     "defaultWithoutBlur",

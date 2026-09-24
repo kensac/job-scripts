@@ -9,14 +9,20 @@ submit button; the extension never does.
 1. Sign in at https://www.kanishksachdev.com/job-tracker in the Chrome
    profile you apply from. The extension uses that session; it cannot sign
    in for you, and when the session has expired the panel says so.
-2. `chrome://extensions`, turn on Developer mode, Load unpacked, pick this
-   directory.
+2. In this directory, run `npm ci` and `npm run build` with Node 24.
+   At `chrome://extensions`, turn on Developer mode, Load unpacked, and pick
+   `extension/.output/chrome-mv3`. Load the built directory, not the source.
 3. Fill in your profile on the site (Applications page): the facts every
    form asks, plus your experience and education, and choose a default
    resume. A resume must be uploaded as a PDF for the extension to attach
    it; a pasted one has no file.
 
 ## Use it
+
+Pause holds the operation at its next adapter checkpoint, including inside
+dropdown waits. Resume continues that operation. Stop cancels further writes;
+it does not undo answers already filled or cancel billing for a request already
+sent. Only one operation can own the form at a time. Navigating away stops it.
 
 Open a posting's application page on a supported ATS; the panel in the
 corner appears when the form does, with or without a reload, and can be
@@ -73,7 +79,7 @@ and navigation never arrive through the switches; a new form operation is a
 release.
 
 The one exception, chosen for developer-mode and self-hosted installs, is the
-table a config-driven reader runs from (the `ats/` files). Before each
+table a config-driven reader runs from (the `adapters/recipes/` files). Before each
 Autofill the extension also asks the public recipe route for this adapter's
 published table; if one comes back and decodes to the digest the server
 named, that table is pinned for the fill, otherwise the bundled table is
@@ -117,10 +123,10 @@ iframe pins to that FRAME's viewport, so a panel mounted beside the form
 rides the page down and out of sight. The top layer does not help, being
 per-document.
 
-So the two split by frame. `content.js` stays with the form, because the flow
+So the two split by frame. `runtime/application.js` stays with the form, because the flow
 cannot leave the form's document: the reader hands back DOM nodes, `capture()`
 walks the markup around each field, and the fill types into the controls.
-`panel.js` shows the panel, in the top frame when the form is embedded, and
+`ui/panel.js` shows the panel, in the top frame when the form is embedded, and
 the background worker relays each operation there and each event back, since
 two content scripts in one tab cannot speak to each other. Everything the
 frames send is one way: the flow paints by id and every event carries the
@@ -139,21 +145,25 @@ script matches: Chrome refuses to load the extension otherwise, with
 
 ## Local panel preview
 
-Run `python -m http.server 8768` at the repository root, then open
+Run `npm run preview:build` in `extension`, then run
+`python -m http.server 8768` at the repository root and open
 `http://localhost:8768/tests/extension/panel-preview.html?reset=1`.
 The fixture uses fictional values and replaces every extension API call.
 `state=error`, `state=empty`, and `state=loading` exercise resolve states,
 and `policy=off` the paused panel a failed configuration read leaves.
 Submitting the demo navigates to a confirmation page with a failed save;
 remove `fail=1` from that URL to exercise recovery. No real application is
-submitted. Run `node --test tests/extension/*.test.cjs` for regressions.
+submitted. Run `npm run typecheck`, `npm run build`, and `npm test` in
+`extension` for regressions. CI produces an installable zip as its extension
+artifact. An unpacked extension needs reloading after rebuilding; a backend
+deployment does not update it.
 
 ## Supported
 
 - Ashby (`jobs.ashbyhq.com/<org>/<id>/application`): text, email, phone,
   url, number, textarea, file, yes/no buttons, choice questions (radio
-  groups and searchable dropdowns), the location search box. Date pickers
-  and Ashby's education history widget are left to you.
+  groups and searchable dropdowns), the location search box, and the
+  education history widget. Review repeated sections on the form.
 - Greenhouse (`job-boards.greenhouse.io`, `boards.greenhouse.io`, the
   `.eu` hosts, and the form an employer embeds on its own careers site,
   which is the same page in an iframe): the fields come from Greenhouse's
@@ -167,12 +177,8 @@ Forms embedded on an employer's own careers page in an iframe work
 too (Greenhouse's embed is one); a form rendered inline by an ATS's
 script, with no iframe, does not, because the extension only runs on the
 ATS hosts it names.
-Readers are single-page: a paginated form with a proxy submit button
-(Workday, Taleo, iCIMS and the rest of that tier) is out of scope until
-readers gain a step model.
-
-Every other ATS under `ats/` (49 of them, Workday, SmartRecruiters, iCIMS,
-Jobvite, Workable, Rippling and the rest) is filled by `engine.js` from
+Every other ATS under `adapters/recipes/` (Workday, SmartRecruiters, iCIMS,
+Jobvite, Workable, Rippling and the rest) is filled by `adapters/recipe.js` from
 that data: fields that know their fact, custom questions found by
 selector, and forms that span pages, advanced page by page up to the one
 that submits. Education and experience sections are filled from the rows on your
@@ -181,8 +187,17 @@ your consent.
 Workday and the other enterprise systems need you signed in first; the
 panel appears once the form does.
 
-One reader per ATS lives under `readers/`. A reader exposes `ready`,
+Each adapter is an imported factory under `adapters/`. A reader exposes `ready`,
 `read` (fields with key, label, kind, required, options), `fill`,
 `current`, `submitButton` and `submitted` (the ATS's own confirmation
-screen, which is what marks the posting submitted); `content.js` does
-everything else.
+screen, which is what marks the posting submitted). The public contract is
+`adapters/types.ts`. Profile data and operation control are passed into the
+factory, never installed on `window`. Shared native-value writes live in
+`adapters/dom.ts`; widget-specific selectors stay with their adapter.
+
+`scripts/entrypoints.mjs` derives one WXT content entry from each recipe and
+the handwritten host registry. The build includes only that host's table in
+its content bundle. The generated entries, manifest and output are not source
+files and are not edited or committed. `tools/convert_ats_config.py` produces
+the recipe JSON; `tools/publish_recipes.py` reads the same files. There is no
+second global-script adapter runtime or manually maintained manifest.

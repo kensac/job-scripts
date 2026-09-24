@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const source = fs.readFileSync(path.join(__dirname, '../../extension/background.js'), 'utf8');
+const source = fs.readFileSync(path.join(__dirname, '../../extension/background/index.js'), 'utf8');
 // The routing only, without the worker's fetch paths and importScripts.
 const routing = source.slice(source.indexOf('const ownerKey ='), source.indexOf('chrome.runtime.onMessage.addListener'));
 

@@ -179,7 +179,6 @@ jobs:
         run: |
           export TEST_REVISION=$(git rev-parse HEAD)
           export APP_ENCRYPTION_KEY=$(python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
-          node --test tests/extension/*.test.cjs
           python -m pytest -p tests.ci_suite --collect-only -q tests --test-report=manifest.json
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
@@ -194,6 +193,34 @@ jobs:
             echo "::error::ORM models drifted from migrations - generate a real migration"; cat "$f"; exit 1
           fi
 
+
+  extension:
+    needs: gate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ needs.gate.outputs.revision }}
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: extension/package-lock.json
+      - run: npm ci
+        working-directory: extension
+      - run: npm run typecheck
+        working-directory: extension
+      - run: npm run zip
+        working-directory: extension
+      - run: npm test
+        working-directory: extension
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: job-tracker-apply
+          path: extension/.output/*.zip
+          if-no-files-found: error
 
   tests:
     needs: gate

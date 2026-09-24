@@ -17,8 +17,11 @@ check:          ## everything CI gates on: lint, format, types, compile, tests
 	pyright
 	PYTHONPATH=src lint-imports
 	python -m compileall -q src
-	@if git grep -InF -e "—" -e "\\u2014" -- . ':!Makefile' ':!extension/ats/*' ; then echo "em dash found: write a comma, a colon, or a new sentence"; exit 1; fi
-	node --test tests/extension/*.test.cjs
+	@if git grep -InF -e "—" -e "\\u2014" -- . ':!Makefile' ':!extension/adapters/recipes/*' ; then echo "em dash found: write a comma, a colon, or a new sentence"; exit 1; fi
+	npm --prefix extension ci
+	npm --prefix extension run typecheck
+	npm --prefix extension run build
+	npm --prefix extension test
 	pytest -q tests
 
 lint:           ## report lint findings (add ARGS=--fix to apply)
@@ -34,7 +37,8 @@ coverage:       ## measure test coverage (never gated, see docs/agents)
 	PYTHONPATH=src pytest -q tests --cov=src --cov-report=term-missing:skip-covered
 
 test:           ## run the test suite
-	node --test tests/extension/*.test.cjs
+	npm --prefix extension run build
+	npm --prefix extension test
 	pytest -q tests
 
 test-par:       ## run the python suite across cores (one database per worker)

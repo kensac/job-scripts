@@ -11,11 +11,13 @@ test('Greenhouse confirmation can replace a hidden form without removing it', ()
     window: {},
     document: { querySelector: () => form, body: { innerText: 'Thank you for applying to Example Company.' } },
   };
-  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../../extension/readers/greenhouse.js'), 'utf8'), context);
-  assert.equal(context.window.__jtReader.submitted(), true);
+  const source = fs.readFileSync(path.join(__dirname, '../../extension/adapters/greenhouse.js'), 'utf8')
+    .replace(/^import .*;\n/gm, '').replace('export function', 'function');
+  const reader = vm.runInNewContext(source + '; createAdapter({})', context);
+  assert.equal(reader.submitted(), true);
   visible = true;
-  assert.equal(context.window.__jtReader.submitted(), false);
+  assert.equal(reader.submitted(), false);
   visible = false;
   context.document.body.innerText = 'Please correct the errors below.';
-  assert.equal(context.window.__jtReader.submitted(), false);
+  assert.equal(reader.submitted(), false);
 });

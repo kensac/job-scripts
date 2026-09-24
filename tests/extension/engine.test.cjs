@@ -3,10 +3,13 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
-const source = fs.readFileSync(process.env.ENGINE_SOURCE || path.join(__dirname, '../../extension/engine.js'), 'utf8');
+const source = fs.readFileSync(path.join(__dirname, '../../extension/adapters/recipe.js'), 'utf8')
+  .replace(/^import .*;\n/gm, '').replace('export function', 'function');
 function engine(overrides = {}) {
   const context = {
-    window: { __jtATS: [{ name: 'Test', matches: ['https://example.com/*'] }] },
+    window: {},
+    isStopped: error => error.name === 'AbortError',
+    operation: { checkpoint: async () => {}, sleep: async () => {} },
     location: { href: 'https://example.com/apply' },
     Event,
     KeyboardEvent: class KeyboardEvent extends Event {
@@ -14,7 +17,8 @@ function engine(overrides = {}) {
     },
     ...overrides,
   };
-  vm.runInNewContext(source.replace(/\}\)\(\);\s*$/, 'window.test = {runActions, fillGroup}; })();'), context);
+  const instrumented = source.replace('  return {\n    host: cfg.name', '  window.test = {runActions, fillGroup};\n  return {\n    host: cfg.name');
+  vm.runInNewContext(instrumented + '; createRecipeAdapter([{ name: "Test", matches: ["https://example.com/*"] }], { operation, profile: {} });', context);
   return context;
 }
 test('recipe Enter retains keyboard identity and legacy codes', async () => {

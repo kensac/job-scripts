@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const source = fs.readFileSync(path.join(__dirname, '../../extension/content.js'), 'utf8');
+const source = fs.readFileSync(path.join(__dirname, '../../extension/runtime/application.js'), 'utf8');
 
 test('opening a panel report does not look like a new application page', () => {
   const declaration = source.slice(source.indexOf('  const pageSignature ='), source.indexOf('  let pageSig ='));
@@ -21,7 +21,7 @@ test('opening a panel report does not look like a new application page', () => {
 
 // panel.js is the panel's DOM, and it runs in whichever frame shows the
 // panel, which is not always the frame that reads the form.
-const panelSource = fs.readFileSync(path.join(__dirname, '../../extension/panel.js'), 'utf8');
+const panelSource = fs.readFileSync(path.join(__dirname, '../../extension/ui/panel.js'), 'utf8').replace('export function', 'function');
 
 function fakeDom() {
   const listeners = {};
@@ -66,8 +66,8 @@ function fakeDom() {
 function panelUnderTest() {
   const dom = fakeDom();
   const events = [];
-  vm.runInNewContext(panelSource, dom.context);
-  const panel = dom.context.window.__jtPanel.create((event) => events.push(event));
+  const surface = vm.runInNewContext(panelSource + '; panelSurface()', dom.context);
+  const panel = surface.create((event) => events.push(event));
   return { dom, events, panel };
 }
 
@@ -86,7 +86,7 @@ test('the panel goes in the top layer and leaves the rest of the page clickable'
 
   // The browser's popover styles stretch the host over the whole viewport,
   // which would swallow every click meant for the page underneath.
-  const css = fs.readFileSync(path.join(__dirname, '../../extension/panel.css'), 'utf8');
+  const css = fs.readFileSync(path.join(__dirname, '../../extension/public/panel.css'), 'utf8');
   const rule = css.slice(css.indexOf(':host {'), css.indexOf('#jt-apply {'));
   for (const declaration of ['width: 0 !important', 'height: 0 !important', 'display: block !important']) {
     assert.ok(rule.includes(declaration), `:host must keep "${declaration}"`);
