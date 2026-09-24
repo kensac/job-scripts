@@ -34,7 +34,7 @@ export async function startApplication(adapter, adapterContext, lifecycle) {
   const reader = adapter || { ready: () => false, submitButton: () => null, submitted: () => false };
   // Stamped into every report, so a report from a build the person has not
   // reloaded yet is told apart from a bug (reports 9 to 11, 2026-09-08).
-  const BUILD = "0.3.1 field commit";
+  const BUILD = "0.3.2 non-destructive fill";
 
   // A message to the extension's background worker. After the extension is
   // reloaded, a page that was already open keeps the old script, whose
@@ -545,10 +545,9 @@ export async function startApplication(adapter, adapterContext, lifecycle) {
       const got = await operation.wait(pdf(`user/resumes/${fill.resume.id}/pdf`));
       if (got.ok) file = new File([new Uint8Array(got.bytes)], got.name, { type: "application/pdf" });
     }
-    // Files first, then let the page settle before anything else: Ashby
-    // parses an attached resume and rewrites its form a second or two
-    // later, and a value set in that window is dropped from the form's
-    // state while the widget still shows it (the Clera report, 2026-09-07).
+    // Upload before filling text and reread controls after DOM activity.
+    // Never clear populated fields to force a save: an async form may save
+    // the blank and skip restoring a value it still considers persisted.
     let attached = false;
     for (const entry of fill.fields) {
       if (entry.rung === "resume") attached = (await put(entry, null, file)) || attached;
@@ -610,50 +609,9 @@ export async function startApplication(adapter, adapterContext, lifecycle) {
         return runPage();
       }
     }
-    // Ashby parses an attached resume on its server and, when the answer
-    // comes back seconds later, resets the form's own record of its fields
-    // while the inputs keep showing what was typed (Clera, 2026-09-07: the
-    // email on screen, "Missing entry for required field: Email" on
-    // submit). The page gives no signal when that lands, so every filled
-    // field is written again, as a real change, a few times after the
-    // attach. A field the person has edited by hand is left alone.
-    if (attached) {
-      for (const wait of [2500, 3000, 4000]) {
-        await sleep(wait);
-        await resync();
-      }
-    }
   }
 
-  async function resync() {
-    if (!fill) return;
-    let reread = false;
-    for (const entry of fill.fields) {
-      if (entry.value == null || entry.rung === "resume" || !isFilled(entry) || touched.has(entry.key) || filled.get(entry.key)?.kept) continue;
-      let field = fieldByKey(entry.key);
-      if (!field || !document.contains(boxOf(field) || field._ctl || null)) {
-        if (!reread) {
-          await readFields();
-          reread = true;
-        }
-        field = fieldByKey(entry.key);
-        if (!field) continue;
-      }
-      const now = reader.current(field);
-      if (now && now !== entry.value) continue;
-      if (entry.kind === "text" || entry.kind === "long" || entry.kind === "number") {
-        // Two real changes, so the form hears it even when the input already
-        // shows the value.
-        await reader.fill(field, "", null);
-        await reader.fill(field, entry.value, null);
-      } else if (!now) {
-        await reader.fill(field, entry.value, null);
-      }
-    }
-  }
-
-  // The page as a string of its input values and element count; stable for
-  // 1.5 seconds means whatever the attach set off has finished.
+  // DOM quiet is only a rendering heuristic, not a server-save receipt.
   const fingerprint = () =>
     [...document.querySelectorAll("input, textarea, select, button[aria-pressed]")]
       .map((e) => (e.value || "") + (e.getAttribute("aria-pressed") || ""))
