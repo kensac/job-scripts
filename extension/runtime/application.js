@@ -184,6 +184,7 @@ export async function startApplication(adapter, adapterContext, lifecycle) {
   let reviewState = null;
   let reviewMessage = "";
   const touched = new Set();
+  let humanGesture = false;
   let lastError = null;
   // The server's switches, pinned per fill (docs/agents/frontend.md, #494):
   // refreshed before each Autofill, held for that fill, nothing without it.
@@ -232,6 +233,7 @@ export async function startApplication(adapter, adapterContext, lifecycle) {
 
   async function execute(task) {
     if (operation.busy) return;
+    humanGesture = false;
     operation.start();
     try {
       await task();
@@ -277,6 +279,8 @@ export async function startApplication(adapter, adapterContext, lifecycle) {
   };
   const protectManualEdit = (event) => {
     if (!event.isTrusted || !(event.target instanceof HTMLElement) || event.target.id === "jt-apply-host") return;
+    if (event.type === "beforeinput") humanGesture = true;
+    if (!humanGesture) return;
     for (const field of fields) {
       const nodes = [field._el, field._ctl, field._box, ...(field._inputs || [])].filter(node => node instanceof Element);
       if (nodes.some(node => node === event.target || node.contains(event.target))) touched.add(field.key);
@@ -284,7 +288,13 @@ export async function startApplication(adapter, adapterContext, lifecycle) {
     if (operation.active) operation.stop();
     drawReview();
   };
-  for (const type of ["input", "change"]) lifecycle.addEventListener(document, type, protectManualEdit, true);
+  // HTMLElement.click() produces trusted checkbox input/change events in
+  // Chromium. Only a preceding human gesture or trusted beforeinput proves
+  // an edit came from the person rather than the adapter's click.
+  for (const type of ["pointerdown", "keydown"]) lifecycle.addEventListener(document, type, event => {
+    if (event.isTrusted && event.target instanceof HTMLElement && event.target.id !== "jt-apply-host" && event.target.closest("input, textarea, select, label, button, [role]")) humanGesture = true;
+  }, true);
+  for (const type of ["beforeinput", "input", "change"]) lifecycle.addEventListener(document, type, protectManualEdit, true);
 
   // The panel appears when a form is on the page and goes when it is not,
   // so the posting page shows nothing and the form page shows the button
