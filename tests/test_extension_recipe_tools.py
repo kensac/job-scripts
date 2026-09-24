@@ -1,7 +1,8 @@
 """The publisher and packaged extension consume the same recipe format."""
 
-from api.apply import recipes
 from tools.publish_recipes import ATS, tables
+
+from api.apply import recipes
 
 
 def test_every_bundled_adapter_is_publishable_without_javascript_wrappers():
