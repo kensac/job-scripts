@@ -35,8 +35,8 @@ _OPERATORS = {
 _FIELDS: dict[str, tuple[str, FilterKind, str]] = {
     "company": ("Company", "text", "j.company"),
     "title": ("Role", "text", "j.title"),
-    "locations": ("Location text", "text", "j.locations"),
-    "terms": ("Employment terms", "text", "j.terms"),
+    "locations": ("Location text", "text", "array_to_string(j.locations, ', ')"),
+    "terms": ("Employment terms", "text", "array_to_string(j.terms, ', ')"),
     "source": ("Source", "text", "j.source"),
     "url": ("Posting URL", "text", "j.url"),
     "notes": ("Notes", "text", "uj.notes"),
