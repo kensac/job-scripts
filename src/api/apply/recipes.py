@@ -55,7 +55,7 @@ def canonical(body: dict[str, Any]) -> bytes:
 
 def validate(adapter: str, body: Any) -> bytes:
     """The shape the engine requires of a table, and nothing about what the
-    table says: the format is the engine's, defined in extension/engine.js.
+    table says: the format is defined in extension/adapters/recipe.js.
     Returns the canonical bytes; raises ValueError with the reason."""
     if not isinstance(body, dict):
         raise ValueError("a recipe is an object")

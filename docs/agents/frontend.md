@@ -98,7 +98,7 @@ base64-encoded canonical table with its sha256 as `revision` and `digest`, or
 404 `NO_RECIPE` when only the bundled table exists. The extension pins a
 revision per fill, keeps an unexpired copy through an outage, and runs from
 the bundled table when nothing is published. Publish with
-`tools/publish_recipes.py` (every `extension/ats/*.js`, or one adapter) or
+`tools/publish_recipes.py` (every `extension/adapters/recipes/*.json`, or one adapter) or
 `PUT /v1/admin/extension/recipes/{adapter}`; `POST .../rollback` re-enables the
 publish before; `GET /v1/admin/extension/recipes` is the history. The encoding
 keeps selector tables out of casual view and out of a public diff and stops

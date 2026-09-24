@@ -10,7 +10,7 @@ const nodeCrypto = require('node:crypto');
 // The worker's globals the decoder needs: base64, streams, digest.
 const context = { URL, atob, Blob, Response, DecompressionStream, TextDecoder, crypto: globalThis.crypto };
 const { PolicyStore: Store, RecipeStore } = vm.runInNewContext(
-  fs.readFileSync(path.join(__dirname, '../../extension/policy.js'), 'utf8') + '; ({ PolicyStore, RecipeStore })',
+  fs.readFileSync(path.join(__dirname, '../../extension/background/policy.js'), 'utf8').replace(/^export /gm, '') + '; ({ PolicyStore, RecipeStore })',
   context,
 );
 const BASE = 'https://www.kanishksachdev.com/api/extension/config';

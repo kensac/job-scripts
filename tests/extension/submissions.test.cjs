@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
-const Store = vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../../extension/submissions.js'), 'utf8') + '; SubmissionStore', { URL });
+const Store = vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../../extension/background/submissions.js'), 'utf8').replace(/^export /gm, '') + '; SubmissionStore', { URL });
 const sender = { tab: { id: 5 }, frameId: 0, url: 'https://job-boards.greenhouse.io/example/jobs/123' };
 function storage() {
   const data = {};

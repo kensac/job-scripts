@@ -19,7 +19,10 @@ ROOT = Path(__file__).resolve().parent.parent
 # test: the extension's manifest, the type checker's config, the committed
 # API schema, Renovate's config. Add to this list when adding such a file.
 MUST_BE_TRACKED = (
-    "extension/manifest.json",
+    "extension/wxt.config.ts",
+    "extension/package.json",
+    "extension/package-lock.json",
+    "extension/adapters/hosts.json",
     "pyrightconfig.json",
     "openapi.json",
     "renovate.json",

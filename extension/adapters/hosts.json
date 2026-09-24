@@ -1,0 +1,15 @@
+{
+  "ashby": [
+    "https://jobs.ashbyhq.com/*"
+  ],
+  "greenhouse": [
+    "https://job-boards.greenhouse.io/*",
+    "https://boards.greenhouse.io/*",
+    "https://job-boards.eu.greenhouse.io/*",
+    "https://boards.eu.greenhouse.io/*"
+  ],
+  "lever": [
+    "https://jobs.lever.co/*",
+    "https://jobs.eu.lever.co/*"
+  ]
+}

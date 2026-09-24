@@ -57,3 +57,6 @@ config/
 data/
 backups/
 .env.*
+extension/node_modules/
+extension/.wxt/
+extension/.output/
