@@ -11,3 +11,9 @@ await build({
   format: "esm",
   outfile: new URL("../.output/preview.js", import.meta.url).pathname,
 });
+await build({
+  entryPoints: [new URL("../tests/browser/field-fixture.tsx", import.meta.url).pathname],
+  bundle: true,
+  format: "esm",
+  outfile: new URL("../.output/field-fixture.js", import.meta.url).pathname,
+});

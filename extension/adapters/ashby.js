@@ -1,4 +1,4 @@
-import { setNative } from "./dom";
+import { commitControl, setNative } from "./dom";
 // Ashby's hosted application form (jobs.ashbyhq.com/<org>/<id>/application).
 //
 // Three shapes of field, measured on live forms 2026-09-07. A wrapper
@@ -327,8 +327,7 @@ export function createAdapter(context) {
     if (isAuto(ctl)) return pickFromList(ctl, value);
     ctl.focus();
     setNative(ctl, value);
-    // No blur: on a form with eager validation it raises the error state
-    // on a field the person has not reached.
+    await commitControl(ctl, context.operation);
     return true;
   }
 
