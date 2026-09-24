@@ -45,33 +45,28 @@ REVERIFY_PER_CYCLE = int(os.environ.get("JOBTRACKER_REVERIFY_PER_CYCLE", "0"))
 EXTRACT_COMP_PER_CYCLE = int(os.environ.get("JOBTRACKER_EXTRACT_COMP_PER_CYCLE", "1100"))
 
 
-# What this work needs, rather than which model happens to serve it. One
-# candidate, so the resolved model is gpt-5-nano exactly as before - what
-# changes is that the capability, the key and the price are now checked
-# instead of assumed. Comp extraction is the shape nano handles well: a
-# stated number copied off the page, not a judgment about silence.
 COMP_TASK = TaskShape(
     purpose="comp",
     label="Compensation extraction",
     per_cycle=EXTRACT_COMP_PER_CYCLE,
     notes=(
-        "Copying a stated number off the page, which is the shape gpt-5-nano "
-        "handles well - it is not asked to judge silence, only to read a figure "
-        "that is either printed or absent."
+        "Copies stated compensation from the posting and leaves absent figures unknown. "
+        "The model upgrade preserves low reasoning, the output cap and batching. "
+        "Previously extracted results are retained; comparative quality is unmeasured."
     ),
     structured=StructuredOutput.JSON_SCHEMA,
     batched=True,
     max_output_tokens=1500,
     est_prompt_tokens=6500,
     effort="low",
-    candidates=("gpt-5-nano",),
+    candidates=("gpt-6-luna",),
 )
 
 
 # --- requirements extraction ---
 
-# gpt-5-nano is the fleet default and is the wrong model here, so this pass
-# names its own. Audited over 60 real postings against whether the page even
+# The former fleet default was unsuitable here. Audited over 60 real postings
+# against whether the page even
 # mentions the fact: nano at "low" effort invented a clearance level for 12 of
 # 55 postings that never mention clearance, and lost 5 of 60 responses to the
 # output cap; nano at "minimal" filled 0 and "none" wherever the honest answer
@@ -220,7 +215,7 @@ LOCATIONS_TASK = TaskShape(
     per_cycle=CLASSIFY_LOCATIONS_PER_CYCLE,
     notes=(
         "Naming the country, state and city a short string refers to is a "
-        "lookup, not a judgment about silence: the shape gpt-5-nano handles. "
+        "lookup, not a judgment about silence. "
         "A string that names no single place is left empty, which excludes "
         "nothing, so the cost of a wrong answer is one visible posting."
     ),
@@ -231,35 +226,27 @@ LOCATIONS_TASK = TaskShape(
     max_output_tokens=2048,
     est_prompt_tokens=260,
     effort_preference=("minimal", "low"),
-    candidates=("gpt-5-nano",),
+    candidates=("gpt-6-luna",),
 )
 
 
 # --- closed and clearance verification ---
 
-# One candidate, so this resolves to gpt-5-nano exactly as it did when the name
-# was written inline - the change is that a missing key or a model that cannot
-# enforce a schema fails at resolution, with a reason, instead of at the
-# provider after a wave has been built.
-#
-# Deliberately NOT widened to a second model. tasks/filters.py scopes its
-# cached-verdict check by model, so a sweep that answered on a different model
-# than last cycle would see no cached verdicts and re-run everything at full
-# price. See core/routing.py.
 VERIFY_TASK = TaskShape(
     purpose="verify",
     label="Closed and clearance verification",
     notes=(
         "A yes/no read of whether a posting is still open and whether it "
-        "demands a clearance. Cheap and high volume - every active job, every "
-        "cycle - so the fleet default is the right place to start."
+        "demands a clearance. The model upgrade preserves low reasoning, batching "
+        "and the existing eligibility and re-verification schedule. Existing paid "
+        "batches keep their original model provenance."
     ),
     structured=StructuredOutput.JSON_SCHEMA,
     batched=True,
     max_output_tokens=VERIFICATION_REQUEST.max_output_tokens,
     est_prompt_tokens=5500,
     effort="low",
-    candidates=("gpt-5-nano",),
+    candidates=("gpt-6-luna",),
 )
 
 

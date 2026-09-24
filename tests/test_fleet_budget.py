@@ -29,13 +29,13 @@ def _spend(usd: str, *, fleet: bool = True, user_id=None):
 
 class TestAcknowledgementAtTheDecision:
     def test_a_large_increase_is_refused_until_acknowledged(self, client, admin_headers):
-        """comp on gpt-5.6-sol is 60x nano for the same work, hourly."""
+        """A much more expensive model still requires explicit acknowledgement."""
         r = _put(client, admin_headers, "comp", model="gpt-5.6-sol")
         assert r.status_code == 400
         detail = r.json()["detail"]
         assert detail["code"] == "COST_ACKNOWLEDGEMENT_REQUIRED"
         assert float(detail["multiple"]) > 10
-        assert detail["current_model"] == "gpt-5-nano"
+        assert detail["current_model"] == "gpt-6-luna"
 
     def test_the_refusal_says_what_the_numbers_are(self, client, admin_headers):
         """So the person is told before committing rather than discovering it
