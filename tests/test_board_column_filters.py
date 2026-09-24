@@ -5,6 +5,32 @@ import pytest
 from api import db
 
 
+@pytest.mark.parametrize("field,value", [("locations", "Toronto"), ("terms", "internship")])
+def test_array_backed_posting_fields_support_text_and_empty_filters(
+    client, user_headers, f, field, value
+):
+    uid = db.query_one("SELECT id FROM users WHERE sub='test-user'")["id"]
+    matching = f.make_job()
+    empty = f.make_job()
+    db.execute(f"UPDATE jobs SET {field}=%s WHERE id=%s", ([value], matching))
+    for jid in [matching, empty]:
+        db.execute(
+            "INSERT INTO user_jobs(user_id,job_id,status) VALUES (%s,%s,'saved')", (uid, jid)
+        )
+    for rule, expected in [
+        ({"field": field, "operator": "contains", "value": value}, matching),
+        ({"field": field, "operator": "is_empty"}, empty),
+    ]:
+        response = client.get(
+            "/v1/user/jobs",
+            headers=user_headers,
+            params={"column_filters": json.dumps([rule]), "with_total": "true"},
+        )
+        assert response.status_code == 200
+        assert response.json()["total"] == 1
+        assert [row["job_id"] for row in response.json()["rows"]] == [expected]
+
+
 @pytest.mark.parametrize(
     "rule",
     [
