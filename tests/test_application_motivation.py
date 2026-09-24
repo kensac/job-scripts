@@ -1,6 +1,5 @@
 from api import db
 from api.apply import drafting
-from api.routers import apply
 
 
 def test_shared_motivation_guidance_survives_saved_resume_only_instructions():
