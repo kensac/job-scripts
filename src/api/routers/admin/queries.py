@@ -436,6 +436,39 @@ class CheckedPostings(BaseModel):
     sortable: list[str]
 
 
+_POSTING_TOTALS = """
+    MAX(company) AS company,
+    MAX(job_title) AS job_title,
+    MAX(config_name) AS config_name,
+    COUNT(*) AS checks,
+    SUM(CASE WHEN status='passed' THEN 1 ELSE 0 END) AS passed,
+    SUM(CASE WHEN status='rejected' THEN 1 ELSE 0 END) AS rejected,
+    SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) AS failed,
+    COALESCE(SUM(total_tokens), 0) AS total_tokens,
+    MAX(created_at) AS last_seen
+"""
+
+
+_RECENT_POSTINGS = f"""
+    WITH selected AS MATERIALIZED (
+        SELECT q.url, q.created_at
+        FROM ai_queries q
+        WHERE q.url IS NOT NULL AND q.id = (
+            SELECT n.id FROM ai_queries n WHERE n.url = q.url
+            ORDER BY n.created_at DESC, n.id DESC LIMIT 1
+        )
+        ORDER BY q.created_at DESC, q.url
+        LIMIT %(limit)s OFFSET %(offset)s
+    )
+    SELECT selected.url, totals.*
+    FROM selected
+    CROSS JOIN LATERAL (
+        SELECT {_POSTING_TOTALS} FROM ai_queries WHERE url = selected.url
+    ) totals
+    ORDER BY selected.created_at DESC, selected.url
+"""
+
+
 @router.get("/jobs")
 def list_jobs(
     q: str | None = None,
@@ -475,28 +508,31 @@ def list_jobs(
             "AND SUM(CASE WHEN status='passed' THEN 1 ELSE 0 END) > 0"
         )
     base = f"""
-        SELECT url,
-            MAX(company) AS company,
-            MAX(job_title) AS job_title,
-            MAX(config_name) AS config_name,
-            COUNT(*) AS checks,
-            SUM(CASE WHEN status='passed' THEN 1 ELSE 0 END) AS passed,
-            SUM(CASE WHEN status='rejected' THEN 1 ELSE 0 END) AS rejected,
-            SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) AS failed,
-            COALESCE(SUM(total_tokens), 0) AS total_tokens,
-            MAX(created_at) AS last_seen
+        SELECT url, {_POSTING_TOTALS}
         FROM ai_queries
         WHERE url IN (SELECT url FROM ai_queries WHERE {" AND ".join(sub)})
         GROUP BY url
         {having}
     """
-    total_row = db.query_one(f"SELECT COUNT(*) AS c FROM ({base}) sub", params)
     sorts = sorting.parse(sort, dir, _JOBS_SORTABLE, "last_seen")
-    rows = db.query(
-        f"{base} ORDER BY {sorting.clause(sorts, _JOBS_SORTABLE)}, url "
-        "LIMIT %(limit)s OFFSET %(offset)s",
-        {**params, "limit": paging.size, "offset": paging.offset},
-    )
+    page_params = {**params, "limit": paging.size, "offset": paging.offset}
+    if len(sub) == 1 and not having and sorts == [{"key": "last_seen", "dir": "desc"}]:
+        # Walk the time index to find the page, then read history only for
+        # those URLs. created_at is NOT NULL, so DESC has the same ordering
+        # as DESC NULLS LAST and can use the existing index backwards.
+        # The id tiebreaker selects one row when a URL has equal timestamps;
+        # every check still contributes to that URL's reported totals.
+        total_row = db.query_one(
+            "SELECT COUNT(DISTINCT url) AS c FROM ai_queries WHERE url IS NOT NULL"
+        )
+        rows = db.query(_RECENT_POSTINGS, page_params)
+    else:
+        total_row = db.query_one(f"SELECT COUNT(*) AS c FROM ({base}) sub", params)
+        rows = db.query(
+            f"{base} ORDER BY {sorting.clause(sorts, _JOBS_SORTABLE)}, url "
+            "LIMIT %(limit)s OFFSET %(offset)s",
+            page_params,
+        )
     total = total_row["c"] if total_row else 0
     return CheckedPostings(
         rows=[
