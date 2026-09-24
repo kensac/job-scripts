@@ -32,9 +32,9 @@ def test_recent_postings_page_does_not_aggregate_unselected_history(monkeypatch)
     ]
     assert len(reads) == 1
     sql, params = reads[0]
-    plan = db.query_one(
-        "EXPLAIN (ANALYZE, TIMING OFF, FORMAT JSON) " + sql, params
-    )["QUERY PLAN"][0]["Plan"]
+    plan = db.query_one("EXPLAIN (ANALYZE, TIMING OFF, FORMAT JSON) " + sql, params)["QUERY PLAN"][
+        0
+    ]["Plan"]
     examined = sum(
         (node["Actual Rows"] + node.get("Rows Removed by Filter", 0)) * node["Actual Loops"]
         for node in _nodes(plan)
@@ -61,9 +61,17 @@ def test_recent_postings_keep_all_checks_ties_orphans_and_page_boundaries(client
     assert body["total"] == 3
     assert body["has_more"] is True
     assert body["rows"][0] | {"last_seen": None} == {
-        "url": "https://x.test/a", "company": "Zeta", "job_title": None,
-        "config_name": "recent", "checks": 2, "passed": 1, "rejected": 1,
-        "failed": 0, "total_tokens": 30, "last_seen": None, "verdict": "rejected",
+        "url": "https://x.test/a",
+        "company": "Zeta",
+        "job_title": None,
+        "config_name": "recent",
+        "checks": 2,
+        "passed": 1,
+        "rejected": 1,
+        "failed": 0,
+        "total_tokens": 30,
+        "last_seen": None,
+        "verdict": "rejected",
     }
     second = client.get(
         "/v1/admin/jobs", params={"page_size": 1, "page": 2}, headers=admin_headers
