@@ -31,6 +31,7 @@ from api.board.person_state import write_board_row as _write_board_row
 from api.models import Ok
 from api.problem import AI_REFUSALS, SIZE_REFUSALS, refuse
 from core.fetching.forms import posting_urls
+from core.store import get_content
 
 router = APIRouter()
 
@@ -661,13 +662,16 @@ async def suggest(body: SuggestBody, user: AuthedUser = Depends(require_user)) -
     resume = drafts.resume_text(user.id, profile.default_resume_id) or ""
     cfg = ai_access.require_config(user)
     job = (
-        db.query_one("SELECT company, title FROM jobs WHERE id = %s", (body.job_id,))
+        db.query_one("SELECT company, title, url FROM jobs WHERE id = %s", (body.job_id,))
         if body.job_id
         else None
     )
     parts = []
     if job:
         parts.append(f"Job: {job['title']} at {job['company']}")
+        if any(f.kind in {"text", "long"} and not f.options for f in fields):
+            posting = get_content(job["url"]) or ""
+            parts.append(f"Posting:\n{posting[:6000] or '(no posting text captured)'}")
     parts.append("Fields:\n" + json.dumps([f.model_dump() for f in fields], indent=1))
     if body.review_only:
         parts.append(
@@ -689,6 +693,7 @@ async def suggest(body: SuggestBody, user: AuthedUser = Depends(require_user)) -
     if resume:
         parts.append("Resume:\n" + resume)
     rules = (db.get_config("application_suggest_instructions") or "").strip() or DEFAULT_SUGGEST
+    rules = drafts.with_answer_guidance(rules, drafts.writing_style(user.id))
     with budget.record_parse_failures(user.id, cfg.key_source, drafts.PURPOSE, cfg.model):
         parsed, usage = await ai.parse(cfg, rules, "\n\n".join(parts), Suggestions)
     budget.record_tokens(
