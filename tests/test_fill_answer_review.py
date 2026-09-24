@@ -50,7 +50,7 @@ def test_newer_edit_and_submission_fence_late_results(client, user_headers):
     from api.apply import fill_answers
 
     fill_id = _fill(client, user_headers)
-    user_id = _uid()
+    user_id = _uid(user_headers)
     token, _ = fill_answers.reserve(user_id, fill_id, ["why"], None)
     fill_answers.edit(user_id, fill_id, "why", 0, "Keep this", "Shorter")
     assert not fill_answers.complete(

@@ -23,6 +23,7 @@ from api import (
 )
 from api.ai import access as ai_access
 from api.apply import drafting as drafts
+from api.apply import fill_answers
 from api.apply import policy as extension_policy
 from api.apply import recipes as extension_recipes
 from api.auth import AuthedUser, require_user
@@ -421,38 +422,36 @@ def resolve_form(body: ResolveBody, user: AuthedUser = Depends(require_user)) ->
     job = db.query_one("SELECT id FROM jobs WHERE url = ANY(%s) LIMIT 1", (posting_urls(body.url),))
     job_id = job["id"] if job else None
     fields = apply.resolve(user.id, job_id, body.fields)
-    open_fill = (
-        db.query_one(
-            "SELECT id, fields FROM application_fills WHERE id = %s AND user_id = %s "
-            "AND submitted_at IS NULL",
-            (body.fill_id, user.id),
+    with db.transaction():
+        open_fill = (
+            db.query_one(
+                "SELECT id, fields FROM application_fills WHERE id = %s AND user_id = %s "
+                "AND submitted_at IS NULL AND url = %s FOR UPDATE",
+                (body.fill_id, user.id, body.url),
+            )
+            if body.fill_id is not None
+            else None
         )
-        if body.fill_id is not None
-        else None
-    )
-    if open_fill:
-        have = {f["key"] for f in open_fill["fields"]}
-        merged = [
-            *open_fill["fields"],
-            *[f.model_dump() for f in fields if f.key not in have],
-        ]
-        db.execute(
-            "UPDATE application_fills SET fields = %s WHERE id = %s",
-            (db.jsonb(merged), open_fill["id"]),
-        )
-        fill = open_fill
-    else:
-        fill = db.query_one(
-            "INSERT INTO application_fills (user_id, job_id, url, host, fields) "
-            "VALUES (%s, %s, %s, %s, %s) RETURNING id",
-            (
-                user.id,
-                job_id,
-                body.url,
-                urlsplit(body.url).netloc,
-                db.jsonb([f.model_dump() for f in fields]),
-            ),
-        )
+        if open_fill:
+            have = {f["key"] for f in open_fill["fields"]}
+            merged = [*open_fill["fields"], *[f.model_dump() for f in fields if f.key not in have]]
+            db.execute(
+                "UPDATE application_fills SET fields = %s WHERE id = %s",
+                (db.jsonb(merged), open_fill["id"]),
+            )
+            fill = open_fill
+        else:
+            fill = db.query_one(
+                "INSERT INTO application_fills (user_id, job_id, url, host, fields) "
+                "VALUES (%s, %s, %s, %s, %s) RETURNING id",
+                (
+                    user.id,
+                    job_id,
+                    body.url,
+                    urlsplit(body.url).netloc,
+                    db.jsonb([f.model_dump() for f in fields]),
+                ),
+            )
     assert fill
     profile = apply.load_profile(user.id)
     resume = (
@@ -575,6 +574,7 @@ class SuggestBody(BaseModel):
     job_id: int | None = None
     # The fill this belongs to; the model's answers go on its ledger row.
     fill_id: int | None = None
+    review_only: bool = False
 
 
 class SuggestedAnswer(BaseModel):
@@ -621,10 +621,18 @@ async def suggest(body: SuggestBody, user: AuthedUser = Depends(require_user)) -
     own model settings. The extension fills the answers; the person still
     sees them in the form before submitting, and an answer left in place
     goes into the bank on submit."""
+    token = None
+    saved = {}
+    if body.review_only and body.fill_id is None:
+        raise refuse(422, "FILL_REQUIRED", "Answer review requires an application fill.")
+    if body.fill_id is not None:
+        token, saved = fill_answers.reserve(
+            user.id, body.fill_id, [f.key for f in body.fields], body.job_id
+        )
     skipped = never_filled(body.fields)
     fields = [f for f in body.fields if f.key not in skipped]
     if not fields:
-        _note_on_fill(user.id, body.fill_id, {}, {}, skipped)
+        _finish_suggestions(user.id, body, token, {}, {}, skipped)
         _seen("apply_ai_suggested", user, asked=0, answered=0, skipped=len(skipped), model=None)
         return Suggested(answers={}, skipped=skipped, model=None)
     profile = apply.load_profile(user.id)
@@ -639,6 +647,20 @@ async def suggest(body: SuggestBody, user: AuthedUser = Depends(require_user)) -
     if job:
         parts.append(f"Job: {job['title']} at {job['company']}")
     parts.append("Fields:\n" + json.dumps([f.model_dump() for f in fields], indent=1))
+    if body.review_only:
+        parts.append(
+            "Revise the requested answers using the person's saved feedback. "
+            "Keep claims grounded in their profile and resume.\n"
+            + json.dumps(
+                {
+                    key: {
+                        "previous_answer": f.get("review_value", f.get("value")),
+                        "feedback": f.get("feedback", ""),
+                    }
+                    for key, f in saved.items()
+                }
+            )
+        )
     if profile.notes:
         parts.append("The person's standing answers, in their own words:\n" + profile.notes)
     parts.append("Profile:\n" + profile.model_dump_json(exclude={"default_resume_id", "notes"}))
@@ -669,7 +691,7 @@ async def suggest(body: SuggestBody, user: AuthedUser = Depends(require_user)) -
             text = apply.pick_option(text, field.options) or ""
         if text:
             answers[a.key] = text
-    _note_on_fill(user.id, body.fill_id, answers, raw, skipped)
+    _finish_suggestions(user.id, body, token, answers, raw, skipped)
     _seen(
         "apply_ai_suggested",
         user,
@@ -681,36 +703,50 @@ async def suggest(body: SuggestBody, user: AuthedUser = Depends(require_user)) -
     return Suggested(answers=answers, skipped=skipped, model=cfg.model)
 
 
-def _note_on_fill(
-    user_id: int, fill_id: int | None, answers: dict, raw: dict, skipped: list[str]
+def _finish_suggestions(
+    user_id: int, body: SuggestBody, token: str | None, answers: dict, raw: dict, skipped: list[str]
 ) -> None:
-    """The model's answers on the fill's ledger row as they return, so a
-    fill nobody submitted still says what the model said: the text as
-    written (ai_answer), the value it became (rung "ai") when an option
-    recognisably held it, and the fields kept from it."""
-    if fill_id is None:
+    if body.fill_id is None or token is None:
         return
-    fill = db.query_one(
-        "SELECT fields FROM application_fills WHERE id = %s AND user_id = %s",
-        (fill_id, user_id),
-    )
-    if not fill:
-        return
-    fields = []
-    for read in fill["fields"]:
-        entry = dict(read)
-        key = entry.get("key")
-        if key in raw:
-            entry["ai_answer"] = raw[key]
-        if key in answers:
-            entry["rung"] = "ai"
-            entry["value"] = answers[key]
-        if key in skipped:
-            entry["never_ai"] = True
-        fields.append(entry)
-    db.execute(
-        "UPDATE application_fills SET fields = %s WHERE id = %s", (db.jsonb(fields), fill_id)
-    )
+    if not fill_answers.complete(
+        user_id,
+        body.fill_id,
+        token,
+        [f.key for f in body.fields],
+        answers,
+        raw,
+        skipped,
+        review_only=body.review_only,
+    ):
+        raise refuse(409, "ANSWER_CHANGED", "A newer edit or submission superseded this answer.")
+
+
+class FillAnswerEdit(BaseModel):
+    key: str = Field(min_length=1, max_length=300)
+    revision: int = Field(ge=0)
+    value: str = Field(max_length=20000)
+    feedback: str = Field(default="", max_length=4000)
+
+
+class FillAnswerState(BaseModel):
+    id: int
+    job_id: int | None
+    submitted_at: datetime.datetime | None
+    fields: list[dict[str, Any]]
+
+
+@router.get("/user/apply/fills/{fill_id}")
+def get_fill_answers(fill_id: int, user: AuthedUser = Depends(require_user)) -> FillAnswerState:
+    return FillAnswerState(**fill_answers.read(user.id, fill_id))
+
+
+@router.put("/user/apply/fills/{fill_id}/answer")
+def edit_fill_answer(
+    fill_id: int, body: FillAnswerEdit, user: AuthedUser = Depends(require_user)
+) -> FillAnswerState:
+    fill_answers.edit(user.id, fill_id, body.key, body.revision, body.value, body.feedback)
+    _seen("apply_answer_edited", user, has_feedback=bool(body.feedback))
+    return FillAnswerState(**fill_answers.read(user.id, fill_id))
 
 
 class PageReport(BaseModel):
