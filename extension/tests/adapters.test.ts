@@ -7,6 +7,7 @@ import { createAdapter as ashby } from "../adapters/ashby.js";
 import { createAdapter as greenhouse } from "../adapters/greenhouse.js";
 import { createRecipeAdapter } from "../adapters/recipe.js";
 import { releaseAutomationFocus } from "../runtime/focus";
+import { commitControl } from "../adapters/dom";
 import type { Adapter, AdapterContext } from "../adapters/types";
 
 function dom(markup: string, url = "https://jobs.lever.co/example/apply") {
@@ -72,5 +73,35 @@ test("automation releases its control focus and leaves the page scrollable", asy
   const input = document.querySelector<HTMLInputElement>("input")!;
   await releaseAutomationFocus(document, async () => { input.focus(); });
   assert.notEqual(document.activeElement, input);
+  await window.happyDOM.close();
+});
+
+test("stop cancels a pending field commit without emitting more form events", async () => {
+  const { window, operation } = dom('<input id="name">');
+  const input = document.querySelector<HTMLInputElement>("input")!;
+  input.focus();
+  let blurred = 0;
+  input.addEventListener("blur", () => blurred++);
+  operation.start();
+  const committing = commitControl(input, operation);
+  operation.stop();
+  await assert.rejects(committing, { name: "AbortError" });
+  assert.equal(blurred, 0);
+  operation.finish();
+  await window.happyDOM.close();
+});
+
+for (const focused of [false, true]) test(`field commit emits one blur and focusout pair (focused: ${focused})`, async () => {
+  const { window, operation } = dom('<input id="name">');
+  const input = document.querySelector<HTMLInputElement>("input")!;
+  if (focused) input.focus();
+  const seen: string[] = [];
+  input.addEventListener("blur", () => seen.push("blur"));
+  document.addEventListener("focusout", () => seen.push("focusout"));
+  operation.start();
+  await commitControl(input, operation);
+  assert.deepEqual(seen, ["blur", "focusout"]);
+  assert.notEqual(document.activeElement, input);
+  operation.finish();
   await window.happyDOM.close();
 });

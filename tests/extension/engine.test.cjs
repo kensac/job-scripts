@@ -9,6 +9,7 @@ function engine(overrides = {}) {
   const context = {
     window: {},
     isStopped: error => error.name === 'AbortError',
+    commitControl: async el => { el.dispatchEvent(new Event('blur')); el.dispatchEvent(new Event('focusout', {bubbles:true})); },
     operation: { checkpoint: async () => {}, sleep: async () => {} },
     location: { href: 'https://example.com/apply' },
     Event,

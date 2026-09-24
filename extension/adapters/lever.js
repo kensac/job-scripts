@@ -1,4 +1,4 @@
-import { setNative } from "./dom";
+import { commitControl, setNative } from "./dom";
 // Lever's hosted application form (jobs.lever.co/<company>/<id>/apply).
 // Plain HTML, measured 2026-09-07: one .application-question per field
 // with a .application-label; text and email inputs by name (name, email,
@@ -258,6 +258,7 @@ export function createAdapter(context) {
     const text = first.name === "eeo[disabilitySignatureDate]" ? mmddyyyy(value) : value;
     first.focus();
     setNative(first, text);
+    await commitControl(first, context.operation);
     return true;
   }
 

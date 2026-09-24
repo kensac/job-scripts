@@ -1,4 +1,4 @@
-import { setNative } from "./dom";
+import { commitControl, setNative } from "./dom";
 // Greenhouse's hosted application form (job-boards.greenhouse.io,
 // boards.greenhouse.io, job-boards.eu.greenhouse.io), including the form
 // an employer embeds on its own careers site, which is the same page in
@@ -359,6 +359,7 @@ export function createAdapter(context) {
     }
     ctl.focus();
     setNative(ctl, value);
+    await commitControl(ctl, context.operation);
     return true;
   }
 
