@@ -11,6 +11,9 @@ def test_the_ladder_rungs():
     assert apply.normalize("Phone Number *") == "phone number"
     assert apply.rule_for("Legal Name") == "full_name"
     assert apply.rule_for("First name") == "first_name"
+    for label in ("Preferred First & Last Name", "First and last name", "First name / Last name"):
+        assert apply.rule_for(label) == "full_name"
+    assert apply.rule_for("Preferred Last Name") == "last_name"
     assert apply.rule_for("Preferred Name (if applicable)") == "preferred_name"
     assert apply.rule_for(
         "Are you authorized to work in the country where the job is located?"

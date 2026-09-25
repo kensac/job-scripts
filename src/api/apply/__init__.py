@@ -156,6 +156,7 @@ def normalize(label: str) -> str:
 # profile fact. Specific phrasings sit above the general ones they contain
 # ("first name" above "name"; "preferred name" above both).
 _RULES: tuple[tuple[str, str], ...] = (
+    (r"\bfirst(?: name)? (?:and )?last names?\b", "full_name"),
     (r"\bpreferred (first )?name\b", "preferred_name"),
     (r"\bpronouns?\b", "pronouns"),
     (r"\b(first|given) name\b", "first_name"),
