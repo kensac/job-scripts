@@ -38,7 +38,7 @@ test("Ashby's canonical name field identifies the full-name fact despite its lab
   const { window, context } = dom('<div class="ashby-application-form-field-entry"><label for="_systemfield_name">Preferred First &amp; Last Name</label><input id="_systemfield_name"></div>', "https://jobs.ashbyhq.com/example/application");
   const fields = await ashby(context).read();
   assert.equal(fields.length, 1);
-  assert.equal(fields[0].fact, "full_name");
+  assert.equal(fields[0]!.fact, "full_name");
   await window.happyDOM.close();
 });
 
