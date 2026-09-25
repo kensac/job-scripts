@@ -52,6 +52,28 @@ class AtsResult:
 UNSUPPORTED = AtsResult(Status.UNSUPPORTED)
 
 
+def source_posting_url(url: str, listings_url: str | None) -> str:
+    """An embedded posting's catalog source supplies its board identity.
+
+    A hostname guess cannot prove a closure: a wrong board and a removed
+    posting both return 404. Only use the configured Greenhouse API source.
+    Keep the original URL as the storage key and browser fallback.
+    """
+    posting = urlparse(url)
+    job_id = (parse_qs(posting.query).get("gh_jid") or [None])[0]
+    listing = urlparse(listings_url or "")
+    board = re.fullmatch(r"/v1/boards/([A-Za-z0-9_-]+)/jobs/?", listing.path)
+    if (
+        job_id
+        and job_id.isascii()
+        and job_id.isdecimal()
+        and listing.hostname == "boards-api.greenhouse.io"
+        and board
+    ):
+        return f"https://boards.greenhouse.io/{board.group(1)}/jobs/{job_id}"
+    return url
+
+
 def clean_html(raw: str) -> str:
     text = BeautifulSoup(html.unescape(raw or ""), "html.parser").get_text("\n")
     return ftfy.fix_text(re.sub(r"\n{3,}", "\n\n", text)).strip()
@@ -287,6 +309,11 @@ class SmartRecruiters(AtsResolver):
             return early
         assert resp is not None
         data = resp.json()
+        # A removed public ad can retain its complete description at HTTP 200.
+        # Missing fields are not closure evidence, and truthy strings are not
+        # booleans. INTERNAL means unavailable to this public-board audience.
+        if data.get("active") is False or data.get("visibility") == "INTERNAL":
+            return AtsResult(Status.GONE, source=self.name)
         loc = data.get("location") or {}
         sections = (data.get("jobAd") or {}).get("sections") or {}
         body = [clean_html((sections.get(k) or {}).get("text", "")) for k in self._SECTIONS]
