@@ -130,6 +130,7 @@ export function createAdapter(context) {
       else if (isAuto(ctl) && box.tagName === "FIELDSET") options = await listOptions(ctl);
       out.push({
         key: keyOf(box, ctl, text),
+        fact: ctl?.id === "_systemfield_name" ? "full_name" : null,
         label: text,
         kind,
         required: !!(ctl && (ctl.required || ctl.getAttribute("aria-required") === "true")),

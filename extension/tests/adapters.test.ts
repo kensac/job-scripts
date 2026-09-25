@@ -34,6 +34,14 @@ test("Lever reads and writes the same named facts without a window profile", asy
   await window.happyDOM.close();
 });
 
+test("Ashby's canonical name field identifies the full-name fact despite its label", async () => {
+  const { window, context } = dom('<div class="ashby-application-form-field-entry"><label for="_systemfield_name">Preferred First &amp; Last Name</label><input id="_systemfield_name"></div>', "https://jobs.ashbyhq.com/example/application");
+  const fields = await ashby(context).read();
+  assert.equal(fields.length, 1);
+  assert.equal(fields[0].fact, "full_name");
+  await window.happyDOM.close();
+});
+
 for (const [name, create, markup, url] of [
   ["Lever", lever, '<form id="application-form"><div class="application-question"><label class="application-label">Name</label><input name="name"></div></form>', "https://jobs.lever.co/example/apply"],
   ["Ashby", ashby, '<div class="ashby-application-form-field-entry"><label for="name">Name</label><input id="name"></div>', "https://jobs.ashbyhq.com/example/application"],
