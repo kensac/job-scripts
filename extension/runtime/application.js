@@ -34,7 +34,7 @@ export async function startApplication(adapter, adapterContext, lifecycle) {
   const reader = adapter || { ready: () => false, submitButton: () => null, submitted: () => false };
   // Stamped into every report, so a report from a build the person has not
   // reloaded yet is told apart from a bug (reports 9 to 11, 2026-09-08).
-  const BUILD = "0.3.3 field-save confirmation";
+  const BUILD = "0.3.4 remaining-field checklist";
 
   // A message to the extension's background worker. After the extension is
   // reloaded, a page that was already open keeps the old script, whose
@@ -745,7 +745,10 @@ export async function startApplication(adapter, adapterContext, lifecycle) {
         const saved = reviewState?.fields.find(f => f.key === entry.key) || entry;
         const field = fieldByKey(entry.key);
         const current = String((field && reader.current(field)) || "");
+        const node = field && (field._el || field._ctl || field._box || boxOf(field));
         return { key: entry.key, label: entry.label || entry.key, kind: entry.kind, current,
+          required: field?.required === true, present: !!node?.isConnected,
+          saveUnconfirmed: !!filled.get(entry.key)?.error,
           value: saved.review_value ?? current ?? entry.value ?? "", feedback: saved.feedback || "",
           source: filled.get(entry.key)?.error ? "Save unconfirmed" : touched.has(entry.key) || filled.get(entry.key)?.kept ? "Kept on form" : names[entry.rung] || "Filled",
           editable: !field?._person && ["text", "long", "number", "select", "yesno", "multiselect"].includes(entry.kind),
@@ -756,20 +759,24 @@ export async function startApplication(adapter, adapterContext, lifecycle) {
 
   async function reviewAction({ action, key, value, feedback }) {
     if (action === "reload") return loadReview();
-    if (!fill || reviewState?.state !== "ready" || operation.busy) return;
+    if (!fill || operation.busy) return;
     const entry = entryByKey(key);
     const field = fieldByKey(key);
     if (!entry || !field) return;
     if (action === "locate") {
       const node = field._el || field._ctl || field._box || boxOf(field);
-      node?.scrollIntoView?.({ block: "center", behavior: "smooth" });
       if (node) {
         prefs.collapsed = true;
         surface.appearance({ theme: prefs.theme, collapsed: true });
         surface.mark("jt-min", { text: "+", label: "Expand panel", expanded: false });
+        node.scrollIntoView?.({ block: "center", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+        const selector = 'input:not([type="hidden"]):not([type="file"]):not(:disabled), textarea:not(:disabled), select:not(:disabled), button:not(:disabled), [contenteditable="true"]';
+        const target = node.matches(selector) ? node : [...node.querySelectorAll(selector)].find(el => el.getClientRects().length);
+        target?.focus({ preventScroll: true });
       }
       return;
     }
+    if (reviewState?.state !== "ready") return;
     if (field._person || !["text", "long", "number", "select", "yesno", "multiselect"].includes(entry.kind)) return;
     const before = reader.current(field);
     const originalFill = fill.fill_id;

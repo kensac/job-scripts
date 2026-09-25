@@ -65,6 +65,8 @@ export function createAdapter(context) {
     }));
   const clean = (s) => (s || "").replace(/\s+/g, " ").replace(/\s*\*$/, "").trim();
   const labelOf = (box) => clean(box.querySelector("label, legend")?.innerText);
+  const required = (box) => !!box.querySelector('[required], [aria-required="true"]') ||
+    [...(box.querySelector(".ashby-application-form-question-title")?.classList || [])].some(name => name.startsWith("_required_"));
   const results = () => [...document.querySelectorAll(`${RESULT}, ${PORTAL_RESULT}`)];
 
   // The dropdown's full list, read once at read time: open, collect, close.
@@ -112,7 +114,7 @@ export function createAdapter(context) {
           key: opts[0].input.name || "label:" + text,
           label: text,
           kind: multi ? "multiselect" : "select",
-          required: opts.some((o) => o.input.required),
+          required: required(box),
           options: opts.map((o) => o.text),
           _box: box,
           _group: true,
@@ -133,7 +135,7 @@ export function createAdapter(context) {
         fact: ctl?.id === "_systemfield_name" ? "full_name" : null,
         label: text,
         kind,
-        required: !!(ctl && (ctl.required || ctl.getAttribute("aria-required") === "true")),
+        required: required(box),
         options,
         _box: box,
         _buttons: !ctl && kind === "select",

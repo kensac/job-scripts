@@ -8,6 +8,27 @@ async function ready(page: import("@playwright/test").Page, extra = "") {
 }
 const card = (page: import("@playwright/test").Page, name: string) => page.locator(".answer-card").filter({ has: page.getByRole("heading", { name, exact: true }) });
 
+test("remaining fields link to controls and disappear as the person fills them", async ({ page }) => {
+  await ready(page);
+  const remaining = page.getByRole("region", { name: "Fields needing attention" });
+  await expect(remaining.getByRole("button")).toHaveCount(2);
+  await remaining.getByRole("button", { name: "Portfolio URL Unanswered", exact: true }).click();
+  await expect(page.locator("#portfolio")).toBeFocused();
+  await page.locator("#portfolio").fill("https://example.com/portfolio");
+  await page.getByRole("button", { name: "Expand panel", exact: true }).click();
+  await expect(remaining.getByRole("button")).toHaveCount(1);
+  await expect(remaining.getByRole("button", { name: "Resume / CV Unanswered", exact: true })).toBeVisible();
+});
+
+test("remaining fields stay navigable when saved-answer loading fails", async ({ page }) => {
+  await page.goto(preview + "&review-error=1");
+  await page.locator("#jt-autofill").click();
+  const remaining = page.getByRole("region", { name: "Fields needing attention" });
+  await remaining.getByRole("button", { name: "Portfolio URL Unanswered", exact: true }).click();
+  await expect(page.locator("#portfolio")).toBeFocused();
+  await expect(page.locator("#name")).toHaveValue("Alex Morgan");
+});
+
 test("edit one answer, persist suggestions, and leave other fields unchanged", async ({ page }) => {
   await ready(page);
   const name = card(page, "Full name");

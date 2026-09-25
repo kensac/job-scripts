@@ -42,6 +42,14 @@ test("Ashby's canonical name field identifies the full-name fact despite its lab
   await window.happyDOM.close();
 });
 
+test("Ashby required radio questions inherit the question label's required marker", async () => {
+  const { window, context } = dom('<fieldset class="ashby-application-form-field-entry"><label class="ashby-application-form-question-title _required_example_91">Work authorization</label><input type="radio" name="authorization" id="yes"><label for="yes">Yes</label><input type="radio" name="authorization" id="no"><label for="no">No</label></fieldset>', "https://jobs.ashbyhq.com/example/application");
+  const fields = await ashby(context).read();
+  assert.equal(fields.length, 1);
+  assert.equal(fields[0]!.required, true);
+  await window.happyDOM.close();
+});
+
 for (const [name, create, markup, url] of [
   ["Lever", lever, '<form id="application-form"><div class="application-question"><label class="application-label">Name</label><input name="name"></div></form>', "https://jobs.lever.co/example/apply"],
   ["Ashby", ashby, '<div class="ashby-application-form-field-entry"><label for="name">Name</label><input id="name"></div>', "https://jobs.ashbyhq.com/example/application"],
