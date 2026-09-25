@@ -12,6 +12,9 @@ export interface ReviewField {
   editable: boolean;
   canGenerate: boolean;
   history: { kind: string; at: string; value?: string; feedback?: string }[];
+  required?: boolean;
+  present?: boolean;
+  saveUnconfirmed?: boolean;
 }
 
 export interface ReviewModel {
@@ -31,7 +34,7 @@ function AnswerCard({ field, busy, emit }: { field: ReviewField; busy: boolean; 
   useEffect(() => { setValue(field.value); setFeedback(field.feedback); }, [field.value, field.feedback]);
   const action = (name: string) => emit({ type: "review", action: name, key: field.key, value, feedback });
   return <article className="answer-card">
-    <div className="answer-heading"><h5>{field.label}</h5><span className="tag">{field.current ? field.source : "Unanswered"}</span></div>
+    <div className="answer-heading"><h5>{field.label}</h5><span className="tag">{field.current.trim() ? field.source : "Unanswered"}</span></div>
     <p className="current-answer"><span>On the form</span>{field.current || "No answer yet"}</p>
     <div className="answer-actions"><button onClick={() => action("locate")}>Find on page</button></div>
     {field.editable ? <details className="answer-editor"><summary>Edit or improve answer</summary>
@@ -56,11 +59,26 @@ function AnswerCard({ field, busy, emit }: { field: ReviewField; busy: boolean; 
 function AnswerReview({ model, emit }: { model: ReviewModel; emit: (action: Action) => void }) {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("all");
-  const shown = model.fields.filter(field => (status !== "blank" || !field.current) &&
+  const remaining = model.fields.filter(field => field.present !== false && !field.current.trim());
+  const unconfirmed = model.fields.filter(field => field.present !== false && field.current.trim() && field.saveUnconfirmed);
+  const needsAttention = [...remaining, ...unconfirmed].sort((a, b) => Number(!!b.required) - Number(!!a.required));
+  const shown = model.fields.filter(field => (status !== "blank" || !field.current.trim()) &&
     `${field.label} ${field.current} ${field.source}`.toLowerCase().includes(query.toLowerCase()));
   return <section className="answer-review" aria-label="Application answers">
     <div className="review-heading"><h4>Review your answers</h4><span className="count">{model.fields.length}</span></div>
     <p>Keep control of every answer. Nothing here submits your application.</p>
+    <section className="remaining-fields" aria-label="Fields needing attention">
+      <div className="review-heading"><h4>Finish on the form</h4><span className="count">{needsAttention.length}</span></div>
+      {needsAttention.length ? <>
+        <p>{remaining.length} unanswered{unconfirmed.length ? ` · ${unconfirmed.length} saves unconfirmed` : ""}. Choose a field to go straight to it.</p>
+        <ul>{needsAttention.map(field => <li key={field.key}>
+          <button disabled={model.busy} onClick={() => emit({ type: "review", action: "locate", key: field.key })}>
+            <span>{field.label}</span><small>{field.saveUnconfirmed && field.current.trim() ? "Save unconfirmed" : field.required ? "Required" : "Unanswered"}</small>
+          </button>
+        </li>)}</ul>
+      </> : <p>No unanswered fields detected on this page. Review the form before submitting.</p>}
+      <p className="muted">After confirmed submission, short answers and choices you changed can be reused for the same question. Long answers and files stay with this application.</p>
+    </section>
     {model.state === "ready" && <button disabled={model.busy} onClick={() => emit({ type: "review", action: "reload" })}>Reload saved answers</button>}
     {model.message && <p className="notice" role={model.state === "error" ? "alert" : "status"}>{model.message}</p>}
     {model.state === "loading" ? <p role="status">Loading saved drafts and suggestions…</p> : model.state === "error" ?

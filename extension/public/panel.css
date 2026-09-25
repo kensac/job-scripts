@@ -275,6 +275,12 @@
 #jt-apply .review-tools { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; margin: 16px 0 8px; }
 #jt-apply .answer-review :is(input, textarea, select) { width: 100%; padding: 9px 10px; border: 1px solid var(--x-smoke); border-radius: 7px; color: var(--x-ink); background: var(--x-card); font: inherit; font-size: 12px; }
 #jt-apply .answer-review textarea { display: block; min-height: 76px; resize: vertical; margin: 6px 0 10px; }
+#jt-apply .remaining-fields { margin: 16px 0; padding: 12px; border: 1px solid var(--x-accent-line); border-radius: 7px; background: var(--x-accent-wash); }
+#jt-apply .remaining-fields ul { display: grid; gap: 6px; padding: 0; list-style: none; }
+#jt-apply .remaining-fields li { display: block; padding: 0; border: 0; }
+#jt-apply .remaining-fields li button { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; width: 100%; max-width: none; padding: 9px; text-align: left; }
+#jt-apply .remaining-fields button span { min-width: 0; overflow-wrap: anywhere; }
+#jt-apply .remaining-fields button small { flex-shrink: 0; font-size: 10px; }
 #jt-apply .answer-card { padding: 14px; margin-top: 12px; border: 1px solid var(--x-hair); border-radius: 10px; background: var(--x-wash); }
 #jt-apply .answer-card h5 { font-weight: 550; overflow-wrap: anywhere; }
 #jt-apply .answer-card .tag { white-space: normal; text-align: right; }
