@@ -7,6 +7,7 @@ const SAVE_DEADLINE_MS = 30_000;
 export async function confirmAshbySave(path: string, operation: Operation, write: () => Promise<boolean>): Promise<boolean> {
   let ready = false;
   let requestId: number | undefined;
+  let state = "no save request observed";
   let finish: (ok: boolean) => void = () => {};
   const receipt = new Promise<boolean>(resolve => { finish = resolve; });
   const listener = (event: Event) => {
@@ -14,8 +15,13 @@ export async function confirmAshbySave(path: string, operation: Operation, write
       const data = JSON.parse((event as CustomEvent).detail);
       if (data.phase === "ready") ready = true;
       if (data.path !== path) return;
-      if (data.phase === "started") requestId = data.id;
-      else if (requestId !== undefined && data.id === requestId) finish(data.phase === "accepted");
+      if (data.phase === "started") {
+        requestId = data.id;
+        state = "save response timed out";
+      } else if (requestId !== undefined && data.id === requestId) {
+        state = data.phase === "accepted" ? "accepted" : "save request failed";
+        finish(data.phase === "accepted");
+      }
     } catch { /* Page messages are untrusted and carry no extension authority. */ }
   };
   document.addEventListener(SAVE_EVENT, listener);
@@ -26,7 +32,7 @@ export async function confirmAshbySave(path: string, operation: Operation, write
     timer = setTimeout(() => finish(false), SAVE_DEADLINE_MS);
     if (!await write()) return false;
     const accepted = await operation.wait(receipt);
-    if (!accepted) throw new Error("The application site did not confirm this field was saved. Review it before submitting.");
+    if (!accepted) throw new Error(`The application site did not confirm this field was saved (${state}). Review it before submitting.`);
     return true;
   } finally {
     clearTimeout(timer);
