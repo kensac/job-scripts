@@ -34,7 +34,7 @@ export async function startApplication(adapter, adapterContext, lifecycle) {
   const reader = adapter || { ready: () => false, submitButton: () => null, submitted: () => false };
   // Stamped into every report, so a report from a build the person has not
   // reloaded yet is told apart from a bug (reports 9 to 11, 2026-09-08).
-  const BUILD = "0.3.2 non-destructive fill";
+  const BUILD = "0.3.3 field-save confirmation";
 
   // A message to the extension's background worker. After the extension is
   // reloaded, a page that was already open keeps the old script, whose
@@ -455,20 +455,24 @@ export async function startApplication(adapter, adapterContext, lifecycle) {
     const field = fieldByKey(entry.key);
     if (!field) return false;
     const current = reader.current(field);
+    const previous = filled.get(entry.key);
+    if (!explicit && previous?.error && current === previous.value) return false;
     if (!explicit && (touched.has(entry.key) || filled.get(entry.key)?.kept || (current && current !== filled.get(entry.key)?.value))) {
       filled.set(entry.key, { ok: !!current, value: current, kept: true });
       return false;
     }
     let ok = false;
+    let error = null;
     try {
       ok = await reader.fill(field, value, file);
     } catch (e) {
       if (isStopped(e)) throw e;
       lastError = String(e);
+      error = String(e.message || e);
       traces.set(entry.key, [...(field._trace || []), `threw: ${String(e)}`]);
     }
     if (field._trace && field._trace.length) traces.set(entry.key, field._trace);
-    filled.set(entry.key, { ok, value: file ? file.name : value });
+    filled.set(entry.key, { ok, value: file ? file.name : value, ...(error ? { error } : {}) });
     return ok;
   }
 
@@ -705,9 +709,11 @@ export async function startApplication(adapter, adapterContext, lifecycle) {
   }
 
   function show() {
+    const unconfirmed = fill.fields.filter(entry => filled.get(entry.key)?.error);
     render(`
       ${fill.ai_error ? `<p class="notice warn" role="alert">Could not prepare AI answers: ${esc(fill.ai_error)}.</p>` : ""}
       ${fill.stopped ? `<p class="notice warn" role="alert">${esc(fill.stopped)}</p>` : ""}
+      ${unconfirmed.length ? `<div class="notice warn" role="alert"><p>Some fields could not be confirmed. Review these before submitting:</p><ul>${unconfirmed.map(entry => `<li>${esc(entry.label || entry.key)}: ${esc(filled.get(entry.key).error)}</li>`).join("")}</ul></div>` : ""}
       <div id="jt-answer-review"></div>
       <button id="jt-again">Fill remaining blanks</button>
       <details class="help"><summary>What gets remembered?</summary><p>Drafts and suggestions are saved with this application. After submission, choices and short answers can be reused for the same question. The final submission record keeps the values actually on the form.</p></details>
@@ -741,7 +747,7 @@ export async function startApplication(adapter, adapterContext, lifecycle) {
         const current = String((field && reader.current(field)) || "");
         return { key: entry.key, label: entry.label || entry.key, kind: entry.kind, current,
           value: saved.review_value ?? current ?? entry.value ?? "", feedback: saved.feedback || "",
-          source: touched.has(entry.key) || filled.get(entry.key)?.kept ? "Kept on form" : names[entry.rung] || "Filled",
+          source: filled.get(entry.key)?.error ? "Save unconfirmed" : touched.has(entry.key) || filled.get(entry.key)?.kept ? "Kept on form" : names[entry.rung] || "Filled",
           editable: !field?._person && ["text", "long", "number", "select", "yesno", "multiselect"].includes(entry.kind),
           canGenerate: allowed("ai_suggestions") && !saved.never_ai && !field?._person && (entry.kind === "long" || askable(entry)), history: saved.answer_history || [] };
       }),

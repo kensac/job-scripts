@@ -6,6 +6,17 @@ const root = fileURLToPath(new URL("../", import.meta.url));
 const entries = path.join(root, "entrypoints");
 await mkdir(entries, { recursive: true });
 const expected = new Map();
+expected.set("ashby-save-observer.content.ts", `// Built by scripts/entrypoints.mjs.
+import { defineContentScript } from "wxt/utils/define-content-script";
+import { observeAshbySaves } from "../runtime/ashby-save-events";
+export default defineContentScript({
+  matches: ["https://jobs.ashbyhq.com/*"],
+  world: "MAIN",
+  allFrames: true,
+  runAt: "document_start",
+  main: observeAshbySaves,
+});
+`);
 const content = (name, matches, factory) => `// Built from the adapter registry by scripts/entrypoints.mjs.\nimport { defineContentScript } from "wxt/utils/define-content-script";\nimport { launch } from "../runtime/launch";\n${factory.imports}\nexport default defineContentScript({\n  matches: ${JSON.stringify(matches)},\n  allFrames: true,\n  runAt: "document_idle",\n  main(ctx) { return launch(ctx, ${factory.create}); },\n});\n`;
 const hosts = JSON.parse(await readFile(path.join(root, "adapters/hosts.json"), "utf8"));
 for (const [name, matches] of Object.entries(hosts)) {

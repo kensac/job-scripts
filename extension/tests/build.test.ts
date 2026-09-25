@@ -13,7 +13,12 @@ test("every adapter has one isolated build entry and no old runtime is packaged"
   const recipes = readdirSync(path.join(root, "adapters/recipes")).filter(file => file.endsWith(".json")).map(file => json(`adapters/recipes/${file}`));
   const expected = new Map<string, string[]>(Object.entries(hosts));
   for (const recipe of recipes) expected.set(recipe.name.toLowerCase(), recipe.matches);
-  assert.equal(manifest.content_scripts.length, expected.size);
+  assert.equal(manifest.content_scripts.length, expected.size + 1);
+  const observer = manifest.content_scripts.find((entry: {js: string[]}) => entry.js.includes("content-scripts/ashby-save-observer.js"));
+  assert.ok(observer);
+  assert.equal(observer.world, "MAIN");
+  assert.equal(observer.run_at, "document_start");
+  assert.deepEqual(observer.matches, ["https://jobs.ashbyhq.com/*"]);
   for (const [name, matches] of expected) {
     const entry = manifest.content_scripts.find((entry: {js: string[]}) => entry.js.includes(`content-scripts/${name}.js`));
     assert.ok(entry, name);

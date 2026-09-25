@@ -3,6 +3,22 @@ import { createRoot } from "react-dom/client";
 import { createAdapter } from "../../adapters/ashby";
 import { Operation } from "../../runtime/operation";
 import { startApplication } from "../../runtime/application.js";
+import { observeAshbySaves } from "../../runtime/ashby-save-events";
+
+const receipts = new URLSearchParams(location.search).has("receipts");
+if (receipts) {
+  window.fetch = async (_input, init) => {
+    const request = JSON.parse(String(init?.body));
+    document.body.dataset.pendingSaves = String(Number(document.body.dataset.pendingSaves || 0) + 1);
+    document.body.dataset.maxPendingSaves = String(Math.max(Number(document.body.dataset.maxPendingSaves || 0), Number(document.body.dataset.pendingSaves)));
+    await new Promise(resolve => setTimeout(resolve, 200));
+    document.body.dataset.pendingSaves = String(Number(document.body.dataset.pendingSaves) - 1);
+    return new URLSearchParams(location.search).has("refused")
+      ? Response.json({ errors: [{ message: "Fixture save refused" }] })
+      : Response.json({ data: { setFormValue: { id: "fixture", path: request.variables.path } } });
+  };
+  observeAshbySaves();
+}
 
 // Ashby's mMe/$j components compare local text with the last saved prop,
 // debounce changes, cancel that debounce on blur, and save asynchronously.
@@ -15,7 +31,11 @@ function Field({ id, label, type }: { id: string; label: string; type: string })
     if (value !== saved) {
       const pending = value;
       if (!pending) document.body.dataset.blankWrites = String(Number(document.body.dataset.blankWrites || 0) + 1);
-      window.setTimeout(() => setSaved(pending), 200);
+      if (receipts) {
+        void fetch("/api/non-user-graphql?op=ApiSetFormValue", {
+          method: "POST", body: JSON.stringify({ operationName: "ApiSetFormValue", variables: { path: id, value: pending } }),
+        }).then(response => response.json()).then(body => { if (body.data?.setFormValue) setSaved(pending); });
+      } else window.setTimeout(() => setSaved(pending), 200);
     }
   };
   const callback = useRef(save);
@@ -25,7 +45,7 @@ function Field({ id, label, type }: { id: string; label: string; type: string })
     timer.current = window.setTimeout(() => callback.current(), 500);
     return () => window.clearTimeout(timer.current);
   }, [value]);
-  return <div className="ashby-application-form-field-entry">
+  return <div className="ashby-application-form-field-entry" data-field-path={receipts ? id : undefined}>
     <label htmlFor={id}>{label}</label>
     <input id={id} type={type} required value={value} onChange={e => setValue(e.target.value)}
       onBlur={() => { window.clearTimeout(timer.current); save(); }} />
