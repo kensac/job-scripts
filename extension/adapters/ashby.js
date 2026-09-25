@@ -1,4 +1,5 @@
 import { commitControl, setNative } from "./dom";
+import { confirmAshbySave } from "./ashby-save";
 // Ashby's hosted application form (jobs.ashbyhq.com/<org>/<id>/application).
 //
 // Three shapes of field, measured on live forms 2026-09-07. A wrapper
@@ -129,6 +130,7 @@ export function createAdapter(context) {
       else if (isAuto(ctl) && box.tagName === "FIELDSET") options = await listOptions(ctl);
       out.push({
         key: keyOf(box, ctl, text),
+        fact: ctl?.id === "_systemfield_name" ? "full_name" : null,
         label: text,
         kind,
         required: !!(ctl && (ctl.required || ctl.getAttribute("aria-required") === "true")),
@@ -285,6 +287,17 @@ export function createAdapter(context) {
   }
 
   async function fill(field, value, file) {
+    const path = field._box.closest("[data-field-path]")?.getAttribute("data-field-path");
+    if (path && field.kind !== "file" && !field._edu) {
+      field._trace = ["Awaiting site save confirmation"];
+      const accepted = await confirmAshbySave(path, context.operation, () => fillControl(field, value, file));
+      field._trace = ["Site accepted field save"];
+      return accepted;
+    }
+    return fillControl(field, value, file);
+  }
+
+  async function fillControl(field, value, file) {
     await context.operation.checkpoint();
     const box = field._box;
     const want = String(value ?? "").trim().toLowerCase();

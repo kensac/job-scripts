@@ -3,6 +3,12 @@ import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 await build({
+  entryPoints: [new URL("../tests/browser/isolated-fill.ts", import.meta.url).pathname],
+  bundle: true,
+  format: "iife",
+  outfile: new URL("../.output/isolated-fill.js", import.meta.url).pathname,
+});
+await build({
   stdin: {
     contents: 'export { startApplication } from "./runtime/application.js"; export { Operation } from "./runtime/operation.ts"; export { SubmissionStore } from "./background/submissions.js";',
     resolveDir: root,
