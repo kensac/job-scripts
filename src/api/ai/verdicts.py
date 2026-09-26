@@ -261,7 +261,15 @@ async def refresh_content(
     from core.fetching import ats
     from core.store import add_ai_result
 
-    ats_res = await asyncio.to_thread(ats.resolve, url)
+    ats_url = url
+    if "gh_jid=" in url:
+        source = db.query_one(
+            "SELECT s.listings_url FROM jobs j JOIN sources s ON s.name = j.source "
+            "WHERE j.url = %s",
+            (url,),
+        )
+        ats_url = ats.source_posting_url(url, source["listings_url"] if source else None)
+    ats_res = await asyncio.to_thread(ats.resolve, ats_url)
     if ats_res.status is ats.Status.GONE:
         record_manual(
             url=url,

@@ -190,3 +190,17 @@ delivers nothing is visible as exactly that.
 The knobs above (`fetch_retry_after_hours`, `screened_retention_days`,
 `queue_stall_minutes`, `ingest_backlog_cycles`) are `app_config` rows, not
 constants; see [engineering-standards.md](engineering-standards.md).
+
+## Public availability from ATS detail endpoints
+
+A successful detail response can retain a closed posting's description.
+SmartRecruiters `active=false` or `visibility=INTERNAL` means unavailable to
+the public-board audience, even at HTTP 200. Missing flags are not evidence
+of closure. The resolver returns `GONE` before extracting retained text.
+
+Embedded Greenhouse URLs carry a job ID but may omit the board token.
+`refresh_content` resolves that token from the job's configured catalog source
+when it is a Greenhouse API listing URL. The original posting URL remains the
+verdict key and browser fallback. An explicit board's HTTP 404/410 is terminal;
+a hostname-derived guess returning 404 is inconclusive and must not close a
+posting. Never replace an authoritative response with a later guess.
