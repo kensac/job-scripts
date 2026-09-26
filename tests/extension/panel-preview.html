@@ -28,6 +28,7 @@ const request=async msg=>{
   return new URLSearchParams(location.search).has('track-error')?{ok:false,status:503}:{ok:true,json:{job_id:20,url:'https://jobs.example.com/20'}};
  }
  if(msg.path==='user/apply/fills/1'){
+  if(new URLSearchParams(location.search).has('review-delay'))await new Promise(resolve=>setTimeout(resolve,250));
   if(new URLSearchParams(location.search).has('review-error'))return {ok:false,status:503};
   return {ok:true,json:{id:1,job_id:20,submitted_at:null,fields:structuredClone(savedFields)}};
  }

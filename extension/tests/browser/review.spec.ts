@@ -51,6 +51,35 @@ test("generation previews a draft without changing the form", async ({ page }) =
   await expect(page.locator("#name")).toHaveValue("Alex Morgan");
 });
 
+test("generating a draft keeps the answer editor mounted and open", async ({ page }) => {
+  await ready(page, "&review-delay=1");
+  const answer = card(page, "Portfolio URL");
+  await answer.getByText("Edit or improve answer", { exact: true }).click();
+  const editor = answer.getByRole("textbox", { name: "Answer for Portfolio URL", exact: true });
+  const original = await editor.elementHandle();
+  const pageScroll = await page.evaluate(() => window.scrollY);
+  await answer.getByRole("button", { name: "Generate new draft", exact: true }).click();
+  await expect(editor).toHaveValue("A revised answer based on my backend project.");
+  expect(await original!.evaluate(node => node.isConnected)).toBe(true);
+  await expect(editor).toBeVisible();
+  await expect(answer.locator(".answer-editor")).toHaveAttribute("open", "");
+  expect(await page.evaluate(() => window.scrollY)).toBe(pageScroll);
+  expect(await page.locator("#jt-apply").evaluate(node => node.scrollTop)).toBeGreaterThan(0);
+});
+
+test("failed draft refresh preserves open editors and unsaved text", async ({ page }) => {
+  await ready(page);
+  const answer = card(page, "Portfolio URL");
+  await answer.getByText("Edit or improve answer", { exact: true }).click();
+  const editor = answer.getByRole("textbox", { name: "Answer for Portfolio URL", exact: true });
+  await editor.fill("My unfinished edit");
+  await page.evaluate(() => history.replaceState(null, "", location.href + "&review-error=1"));
+  await page.getByRole("button", { name: "Reload saved answers", exact: true }).click();
+  await expect(page.getByText(/Could not load saved answers/)).toBeVisible();
+  await expect(editor).toHaveValue("My unfinished edit");
+  await expect(answer.locator(".answer-editor")).toHaveAttribute("open", "");
+});
+
 test("existing manual answers survive autofill and a field can be refilled explicitly", async ({ page }) => {
   await page.goto(preview);
   await page.locator("#name").fill("My own answer");

@@ -1,7 +1,7 @@
 {
   "name": "job-tracker-apply",
   "private": true,
-  "version": "0.3.6",
+  "version": "0.3.7",
   "type": "module",
   "scripts": {
     "dev": "node scripts/entrypoints.mjs && wxt",
