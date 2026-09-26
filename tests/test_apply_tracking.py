@@ -54,3 +54,21 @@ def test_context_and_repeated_fill_preserve_existing_application(client, user_he
         (uid, job_id),
     )
     assert row == {"status": "Application Submitted", "date": "2026-09-01", "notes": "keep this"}
+
+
+def test_tracking_rejects_another_users_fill(client, user_headers, other_user_headers):
+    fill_id = open_fill(client, user_headers)
+    response = client.post(f"/v1/user/apply/fills/{fill_id}/track", headers=other_user_headers)
+    assert response.status_code == 404
+    assert db.query_one("SELECT count(*) AS n FROM jobs")["n"] == 0
+
+
+def test_tracking_and_context_do_not_grant_another_users_private_upload(client, user_headers, f):
+    other = f.make_user()
+    job_id = f.make_job(url=URL.split("/application")[0], uploaded_by=other)
+    fill_id = open_fill(client, user_headers)
+    response = client.post(f"/v1/user/apply/fills/{fill_id}/track", headers=user_headers)
+    assert response.status_code == 403
+    assert db.query_one("SELECT count(*) AS n FROM user_jobs WHERE job_id=%s", (job_id,))["n"] == 0
+    context = client.get("/v1/user/apply/context", headers=user_headers, params={"url": URL})
+    assert context.json()["job"] is None
