@@ -16,6 +16,20 @@ class Response:
         return self.body
 
 
+def test_explicit_greenhouse_closure_cannot_be_overwritten_by_hostname_guess(monkeypatch):
+    resolver = ats.Greenhouse()
+    asked = []
+
+    def get(url):
+        asked.append(url)
+        return Response({"status": 404, "error": "Job not found"}, 404)
+
+    monkeypatch.setattr(resolver, "get", get)
+    result = resolver.fetch("https://boards.greenhouse.io/nuro/jobs/8227399")
+    assert result.status is ats.Status.GONE
+    assert asked == ["https://boards-api.greenhouse.io/v1/boards/nuro/jobs/8227399?content=true"]
+
+
 @pytest.mark.parametrize("availability", [{"active": False}, {"visibility": "INTERNAL"}])
 def test_smartrecruiters_retained_description_is_not_public_availability(monkeypatch, availability):
     resolver = ats.SmartRecruiters()
