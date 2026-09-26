@@ -1,3 +1,5 @@
+import pytest
+
 from api import db
 from api.apply import drafting
 
@@ -113,3 +115,47 @@ def test_external_application_supplies_posting_without_creating_catalog_job(
     assert "Build tools for legal contract review." in captured[0]
     assert fetched == [url.split("/application")[0]]
     assert db.query_one("SELECT count(*) AS n FROM jobs")["n"] == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://jobs.ashbyhq.com.evil.test/org/00000000-0000-0000-0000-000000000000",
+        "http://127.0.0.1/private",
+        "https://jobs.ashbyhq.com/org%2f..%2fprivate/00000000-0000-0000-0000-000000000000",
+    ],
+)
+async def test_external_context_never_fetches_untrusted_targets(f, monkeypatch, url):
+    from api.apply.posting_context import external_posting
+    from core.fetching import ats
+
+    owner = f.make_user()
+    row = db.query_one(
+        "INSERT INTO application_fills (user_id, url, fields) VALUES (%s, %s, '[]') RETURNING id",
+        (owner, url),
+    )
+
+    def forbidden(url):
+        raise AssertionError("untrusted target reached the fetcher")
+
+    monkeypatch.setattr(ats, "resolve", forbidden)
+    assert await external_posting(owner, row["id"]) is None
+
+
+@pytest.mark.asyncio
+async def test_external_context_cannot_read_another_users_fill(f, monkeypatch):
+    from api.apply.posting_context import external_posting
+    from core.fetching import ats
+
+    owner, other = f.make_user(), f.make_user()
+    row = db.query_one(
+        "INSERT INTO application_fills (user_id, url, fields) VALUES (%s, %s, '[]') RETURNING id",
+        (owner, "https://jobs.ashbyhq.com/ivo-inc/b31e7195-37dd-4631-8648-422cecbb3f83"),
+    )
+
+    def forbidden(url):
+        raise AssertionError("another user's fill reached the fetcher")
+
+    monkeypatch.setattr(ats, "resolve", forbidden)
+    assert await external_posting(other, row["id"]) is None
