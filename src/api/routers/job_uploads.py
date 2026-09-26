@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
-from api import db, task_admission
+from api import job_imports
 from api.auth import AuthedUser, require_user
 from api.models import UploadRequest
 from core.fetching.urls import normalize_url
@@ -50,25 +50,7 @@ def upload_links(body: UploadRequest, user: AuthedUser = Depends(require_user)) 
             rejected.append(RejectedUpload(url=raw, error=error))
             continue
         url = normalize_url(raw)
-        row = db.query_one(
-            """
-            INSERT INTO jobs (url, raw_url, source, uploaded_by, extraction_status)
-            VALUES (%s, %s, 'upload', %s, 'pending')
-            ON CONFLICT (url) DO UPDATE SET
-                extraction_status = CASE WHEN jobs.extraction_status = 'failed'
-                                         THEN 'pending' ELSE jobs.extraction_status END
-            RETURNING id, extraction_status
-            """,
-            (url, raw, user.id),
-        )
-        assert row is not None
-        db.execute(
-            "INSERT INTO user_jobs (user_id, job_id, person_touched_at) VALUES (%s, %s, now()) "
-            "ON CONFLICT (user_id, job_id) DO UPDATE SET "
-            "person_touched_at = now(), updated_at = now()",
-            (user.id, row["id"]),
-        )
-        if row["extraction_status"] == "pending":
-            task_admission.enqueue("extract_upload", {"job_id": row["id"]}, {"user_id": user.id})
-        accepted.append(AcceptedUpload(job_id=row["id"], url=url))
+        saved = job_imports.save_posting(user.id, url, raw)
+        job_imports.publish_saved(user.id, saved)
+        accepted.append(AcceptedUpload(job_id=saved["job_id"], url=url))
     return Uploaded(accepted=accepted, rejected=rejected)

@@ -34,7 +34,7 @@ export async function startApplication(adapter, adapterContext, lifecycle) {
   const reader = adapter || { ready: () => false, submitButton: () => null, submitted: () => false };
   // Stamped into every report, so a report from a build the person has not
   // reloaded yet is told apart from a bug (reports 9 to 11, 2026-09-08).
-  const BUILD = "0.3.5 external application context";
+  const BUILD = "0.3.6 track filled applications";
 
   // A message to the extension's background worker. After the extension is
   // reloaded, a page that was already open keeps the old script, whose
@@ -211,6 +211,7 @@ export async function startApplication(adapter, adapterContext, lifecycle) {
       </div>
       <div class="body">
         <div class="application-context"><span class="eyebrow">Current application</span><div class="application-title">${esc(matchedTitle() || submission?.title || document.title || "Application form")}</div><span class="muted">${esc(location.hostname)}${context ? (context.job ? " · on your board" : " · not on your board") : ""}</span></div>
+        ${previousApplicationNotice()}
         <div id="jt-operation" role="status">${operationControls()}</div>
         <div class="workspace">${html}</div>
         <details class="settings"><summary>Autofill preferences</summary>
@@ -376,6 +377,12 @@ export async function startApplication(adapter, adapterContext, lifecycle) {
   let context = null;
   let contextState = "idle";
   let contextGeneration = 0;
+  function previousApplicationNotice() {
+    const job = context?.job;
+    if (!job || !(job.status || job.date_applied || job.submitted_at)) return "";
+    const date = job.date_applied || job.submitted_at?.slice(0, 10);
+    return `<div class="notice warn" role="status" aria-label="Existing application"><strong>${job.submitted_at ? "You already submitted this application." : "Existing application record"}</strong><p>${esc(job.status || "Submission recorded")}${date ? ` · ${esc(date)}` : ""}</p><p>Filling again will keep your existing status and application date.</p></div>`;
+  }
   async function loadContext() {
     if (contextState !== "idle") return;
     contextState = "loading";
@@ -577,6 +584,7 @@ export async function startApplication(adapter, adapterContext, lifecycle) {
     }
     if (allowed("ai_suggestions")) await askModel(fill.fields.filter((e) => !isFilled(e) && askable(e)));
     await verify();
+    if (fill.fields.some(isFilled)) await trackFilledJob();
     show();
     await autoReport(`filled page ${step + 1}`);
     // A form that spans pages: when this page has a Continue and no Submit,
@@ -708,9 +716,24 @@ export async function startApplication(adapter, adapterContext, lifecycle) {
     }
   }
 
+  async function trackFilledJob() {
+    const current = fill;
+    const result = await api(`user/apply/fills/${current.fill_id}/track`, "POST", {});
+    if (fill !== current) return;
+    if (result.ok) {
+      fill.job_id = result.json.job_id;
+      fill.board_saved = true;
+      fill.board_error = false;
+      contextState = "idle";
+      await loadContext();
+    } else fill.board_error = true;
+  }
+
   function show() {
     const unconfirmed = fill.fields.filter(entry => filled.get(entry.key)?.error);
     render(`
+      ${fill.board_saved ? `<p class="muted">Saved to your board. Existing status and application date preserved.</p>` : ""}
+      ${fill.board_error ? `<p class="notice warn" role="alert">Your form was filled, but saving this job to your board failed.</p><button id="jt-track-retry">Retry saving to board</button>` : ""}
       ${fill.ai_error ? `<p class="notice warn" role="alert">Could not prepare AI answers: ${esc(fill.ai_error)}.</p>` : ""}
       ${fill.stopped ? `<p class="notice warn" role="alert">${esc(fill.stopped)}</p>` : ""}
       ${unconfirmed.length ? `<div class="notice warn" role="alert"><p>Some fields could not be confirmed. Review these before submitting:</p><ul>${unconfirmed.map(entry => `<li>${esc(entry.label || entry.key)}: ${esc(filled.get(entry.key).error)}</li>`).join("")}</ul></div>` : ""}
@@ -719,6 +742,7 @@ export async function startApplication(adapter, adapterContext, lifecycle) {
       <details class="help"><summary>What gets remembered?</summary><p>Drafts and suggestions are saved with this application. After submission, choices and short answers can be reused for the same question. The final submission record keeps the values actually on the form.</p></details>
     `);
     on("click", "jt-again", run);
+    on("click", "jt-track-retry", async () => { await trackFilledJob(); show(); });
     drawReview();
     if (!reviewState) loadReview();
   }
