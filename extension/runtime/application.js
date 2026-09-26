@@ -34,7 +34,7 @@ export async function startApplication(adapter, adapterContext, lifecycle) {
   const reader = adapter || { ready: () => false, submitButton: () => null, submitted: () => false };
   // Stamped into every report, so a report from a build the person has not
   // reloaded yet is told apart from a bug (reports 9 to 11, 2026-09-08).
-  const BUILD = "0.3.6 track filled applications";
+  const BUILD = "0.3.7 preserve draft editor position";
 
   // A message to the extension's background worker. After the extension is
   // reloaded, a page that was already open keeps the old script, whose
@@ -750,11 +750,15 @@ export async function startApplication(adapter, adapterContext, lifecycle) {
   async function loadReview() {
     const fillId = fill?.fill_id;
     if (!fillId) return;
-    reviewState = { id: fillId, state: "loading", fields: [] };
+    const refreshing = reviewState?.id === fillId && reviewState.state === "ready";
+    // Refresh existing cards in place. Removing them collapses the scroll
+    // container and discards open editors and unsaved edits in other fields.
+    if (!refreshing) reviewState = { id: fillId, state: "loading", fields: [] };
     drawReview();
     const result = await api(`user/apply/fills/${fillId}`, "GET");
     if (fill?.fill_id !== fillId) return;
-    reviewState = result.ok ? { ...result.json, state: "ready" } : { id: fillId, state: "error", fields: [] };
+    if (result.ok) reviewState = { ...result.json, state: "ready" };
+    else if (!refreshing) reviewState = { id: fillId, state: "error", fields: [] };
     if (!result.ok) reviewMessage = "Could not load saved answers. Check your connection and sign-in, then retry. Your form has not changed.";
     drawReview();
   }
