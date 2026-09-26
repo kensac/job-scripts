@@ -222,6 +222,10 @@ class Greenhouse(AtsResolver):
             )
             early = self.from_response(resp)
             if early is not None:
+                if cand == board:
+                    # An explicit board identity owns the answer. Trying a
+                    # hostname guess afterwards discarded authoritative 404s.
+                    return early
                 # A 404 only proves the posting is gone when the board token
                 # came explicitly from a greenhouse.io URL. For host-derived
                 # guesses (embedded boards on custom domains) a 404 usually

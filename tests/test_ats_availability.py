@@ -28,6 +28,10 @@ def test_explicit_greenhouse_closure_cannot_be_overwritten_by_hostname_guess(mon
     result = resolver.fetch("https://boards.greenhouse.io/nuro/jobs/8227399")
     assert result.status is ats.Status.GONE
     assert asked == ["https://boards-api.greenhouse.io/v1/boards/nuro/jobs/8227399?content=true"]
+    # Without an authoritative board, the same 404 remains inconclusive.
+    assert (
+        resolver.fetch("https://unknown.example/careers?gh_jid=8227399").status is ats.Status.ERROR
+    )
 
 
 @pytest.mark.parametrize("availability", [{"active": False}, {"visibility": "INTERNAL"}])
@@ -48,6 +52,13 @@ def test_smartrecruiters_retained_description_is_not_public_availability(monkeyp
         resolver.fetch("https://jobs.smartrecruiters.com/LinkedIn3/744000151447279").status
         is ats.Status.GONE
     )
+    for availability in ({}, {"active": True, "visibility": "PUBLIC"}):
+        monkeypatch.setattr(
+            resolver,
+            "get",
+            lambda url, value=availability: Response({"name": "Software Engineer", **value}),
+        )
+        assert resolver.fetch("https://jobs.smartrecruiters.com/LinkedIn3/744000151447279").ok
 
 
 @pytest.mark.asyncio
