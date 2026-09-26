@@ -64,3 +64,52 @@ def test_missing_company_evidence_is_explicit():
     rules = drafting.instructions(None)
     assert "Do not invent company details" in rules
     assert "empty string" in rules
+
+
+def test_external_application_supplies_posting_without_creating_catalog_job(
+    client, user_headers, monkeypatch
+):
+    from api import ai
+    from core.fetching import ats
+
+    url = "https://jobs.ashbyhq.com/ivo-inc/b31e7195-37dd-4631-8648-422cecbb3f83/application?utm_source=Otta"
+    fields = [{"key": "why", "label": "Why Ivo?", "kind": "long", "options": []}]
+    fill = client.post(
+        "/v1/user/apply/resolve",
+        headers=user_headers,
+        json={"url": url, "host": "ashby", "fields": fields},
+    )
+    assert fill.status_code == 200, fill.text
+    assert fill.json()["job_id"] is None
+    captured = []
+    fetched = []
+
+    def resolve(target):
+        fetched.append(target)
+        return ats.AtsResult(
+            ats.Status.OK,
+            "Software Engineer at Ivo. Build tools for legal contract review.",
+            "ashby",
+        )
+
+    async def parse(cfg, rules, text, schema):
+        captured.append(text)
+        return schema(
+            answers=[{"key": "why", "answer": "I want to build useful tools for legal teams."}]
+        ), {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}
+
+    monkeypatch.setattr(ats, "resolve", resolve)
+    monkeypatch.setattr(ai, "parse", parse)
+    monkeypatch.setattr(
+        "api.budget.resolve_ai_config",
+        lambda uid, ent: type("Cfg", (), {"model": "m", "key_source": "owner"})(),
+    )
+    response = client.post(
+        "/v1/user/apply/suggest",
+        headers=user_headers,
+        json={"fill_id": fill.json()["fill_id"], "fields": fields},
+    )
+    assert response.status_code == 200, response.text
+    assert "Build tools for legal contract review." in captured[0]
+    assert fetched == [url.split("/application")[0]]
+    assert db.query_one("SELECT count(*) AS n FROM jobs")["n"] == 0
