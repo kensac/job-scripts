@@ -159,6 +159,16 @@ success.
 
 ## Application answer updates
 
+Extension suggestions can belong to an application fill without a catalog job.
+When posting text is missing, the suggestion service uses the owning user's
+stored fill URL to read supported hosted Ashby, Greenhouse or Lever posting
+APIs. It does not create a catalog or board row. Arbitrary application URLs
+are not scraped, and unavailable context remains explicit in the request.
+Saved answer revisions and usage accounting are the same as for catalog jobs.
+
+Jumping from the unanswered-field checklist focuses the form control without
+collapsing the extension. Panel minimization is an explicit user action.
+
 The extension's per-field review uses `GET /user/apply/fills/{id}` and
 `PUT /user/apply/fills/{id}/answer`. The latter requires the field's
 `answer_revision`, saves `review_value` and feedback, and appends history without

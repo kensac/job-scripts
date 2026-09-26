@@ -34,7 +34,7 @@ export async function startApplication(adapter, adapterContext, lifecycle) {
   const reader = adapter || { ready: () => false, submitButton: () => null, submitted: () => false };
   // Stamped into every report, so a report from a build the person has not
   // reloaded yet is told apart from a bug (reports 9 to 11, 2026-09-08).
-  const BUILD = "0.3.4 remaining-field checklist";
+  const BUILD = "0.3.5 external application context";
 
   // A message to the extension's background worker. After the extension is
   // reloaded, a page that was already open keeps the old script, whose
@@ -766,9 +766,6 @@ export async function startApplication(adapter, adapterContext, lifecycle) {
     if (action === "locate") {
       const node = field._el || field._ctl || field._box || boxOf(field);
       if (node) {
-        prefs.collapsed = true;
-        surface.appearance({ theme: prefs.theme, collapsed: true });
-        surface.mark("jt-min", { text: "+", label: "Expand panel", expanded: false });
         node.scrollIntoView?.({ block: "center", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
         const selector = 'input:not([type="hidden"]):not([type="file"]):not(:disabled), textarea:not(:disabled), select:not(:disabled), button:not(:disabled), [contenteditable="true"]';
         const target = node.matches(selector) ? node : [...node.querySelectorAll(selector)].find(el => el.getClientRects().length);
