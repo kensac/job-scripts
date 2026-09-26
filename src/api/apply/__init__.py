@@ -114,6 +114,11 @@ class Profile(BaseModel):
         return " | ".join(p for p in (full, self.city, self.state) if p)
 
 
+# Choices belong to the source form, not a fixed-size vocabulary. Keep the
+# complete list in both request paths so a valid answer cannot be cut off.
+ApplicationOptions = list[str]
+
+
 class Field_(BaseModel):
     """One field as the extension read it. kind is the widget: text, long,
     select, yesno, file, number, date. options are the select's choices
@@ -124,7 +129,7 @@ class Field_(BaseModel):
     label: str = Field(default="", max_length=4000)
     kind: str = Field(default="text", max_length=20)
     required: bool = False
-    options: list[str] = Field(default_factory=list, max_length=200)
+    options: ApplicationOptions = Field(default_factory=list)
     # A config-driven reader knows which fact a selector fills (first_name,
     # needs_sponsorship, resume); when it says so, the label is not read.
     fact: str | None = Field(default=None, max_length=40)

@@ -38481,7 +38481,6 @@
               "type": "string"
             },
             "type": "array",
-            "maxItems": 200,
             "title": "Options"
           },
           "fact": {
@@ -51043,7 +51042,6 @@
               "type": "string"
             },
             "type": "array",
-            "maxItems": 200,
             "title": "Options"
           },
           "fact": {
@@ -54187,7 +54185,6 @@
               "type": "string"
             },
             "type": "array",
-            "maxItems": 200,
             "title": "Options"
           },
           "hint": {
