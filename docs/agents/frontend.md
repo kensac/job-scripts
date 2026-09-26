@@ -169,6 +169,20 @@ Saved answer revisions and usage accounting are the same as for catalog jobs.
 Jumping from the unanswered-field checklist focuses the form control without
 collapsing the extension. Panel minimization is an explicit user action.
 
+After a fill with populated fields, the extension calls the owning fill's
+`track` endpoint. It adds the canonical posting through the shared import
+service, links the fill, and records personal tracking intent atomically.
+Tracking never assigns application status or date and preserves existing
+notes and hidden state. Submission remains a separate confirmation.
+Failures leave the form intact and offer a board-save retry. New postings
+use the existing extraction task; retries share that task.
+
+Apply context includes the current user's saved status, application date and
+latest confirmed fill submission for a matched job. The extension displays
+them before autofill, without presenting an arbitrary saved status as proof
+of submission. Another user's private posting or application state is not
+part of this context.
+
 The extension's per-field review uses `GET /user/apply/fills/{id}` and
 `PUT /user/apply/fills/{id}/answer`. The latter requires the field's
 `answer_revision`, saves `review_value` and feedback, and appends history without

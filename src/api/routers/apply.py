@@ -39,6 +39,49 @@ SUBMITTED_STATUS = "Application Submitted"
 _BANK_COLS = "id, label, kind, value, times_used, last_used_at, updated_at"
 
 
+class TrackedFill(BaseModel):
+    job_id: int
+    url: str
+
+
+@router.post("/user/apply/fills/{fill_id}/track")
+def track_fill(fill_id: int, user: AuthedUser = Depends(require_user)) -> TrackedFill:
+    from api import job_imports, ssrf
+    from core.fetching import ats
+    from core.fetching.urls import normalize_url
+
+    fill = db.query_one(
+        "SELECT url FROM application_fills WHERE id = %s AND user_id = %s",
+        (fill_id, user.id),
+    )
+    if not fill:
+        raise refuse(404, "NOT_FOUND", "unknown fill")
+    url = ats.canonicalize(fill["url"]) or normalize_url(fill["url"])
+    error = ssrf.validate_public_url(url)
+    if error:
+        raise refuse(422, "INVALID_URL", error)
+    with db.transaction():
+        locked = db.query_one(
+            "SELECT job_id, submitted_at FROM application_fills "
+            "WHERE id = %s AND user_id = %s FOR UPDATE",
+            (fill_id, user.id),
+        )
+        if not locked:
+            raise refuse(404, "NOT_FOUND", "unknown fill")
+        if locked["submitted_at"] is not None:
+            raise refuse(409, "FILL_SUBMITTED", "This application was already submitted.")
+        if locked["job_id"] is not None:
+            existing = db.query_one("SELECT url FROM jobs WHERE id = %s", (locked["job_id"],))
+            if existing:
+                url = existing["url"]
+        saved = job_imports.save_posting(user.id, url, fill["url"])
+        db.execute(
+            "UPDATE application_fills SET job_id = %s WHERE id = %s", (saved["job_id"], fill_id)
+        )
+    job_imports.publish_saved(user.id, saved)
+    return TrackedFill(job_id=saved["job_id"], url=saved["url"])
+
+
 class RememberedAnswer(BaseModel):
     """One answer the bank kept from a submitted form."""
 
@@ -124,6 +167,9 @@ class MatchedPosting(BaseModel):
     id: int
     company: str | None
     title: str | None
+    status: str | None = None
+    date_applied: datetime.date | None = None
+    submitted_at: datetime.datetime | None = None
 
 
 class ContextDraft(BaseModel):
@@ -314,8 +360,12 @@ def apply_context(
     """
     job = db.query_one_as(
         MatchedPosting,
-        "SELECT id, company, title FROM jobs WHERE url = ANY(%s) LIMIT 1",
-        (posting_urls(url),),
+        "SELECT j.id, j.company, j.title, uj.status, uj.date_applied, "
+        "(SELECT MAX(f.submitted_at) FROM application_fills f "
+        " WHERE f.user_id = %s AND f.job_id = j.id) AS submitted_at "
+        "FROM jobs j LEFT JOIN user_jobs uj ON uj.job_id = j.id AND uj.user_id = %s "
+        "WHERE j.url = ANY(%s) AND (j.uploaded_by IS NULL OR j.uploaded_by = %s) LIMIT 1",
+        (user.id, user.id, posting_urls(url), user.id),
     )
     # Only the facts that are set. A blank fact fills nothing, so listing it
     # would be a row that says the profile has something it does not.

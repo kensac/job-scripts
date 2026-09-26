@@ -22,6 +22,19 @@ USER_JOB_SPLIT_CHECKPOINT = "user_job_split_v1"
 USER_JOB_SPLIT_DEDUPE_PREFIX = "user-job-split:v1"
 
 
+def track_board_row(user_id: int, job_id: int) -> dict:
+    """Record tracking intent without changing application status or dates."""
+    return (
+        db.query_one(
+            "INSERT INTO user_jobs (user_id, job_id, person_touched_at) VALUES (%s, %s, now()) "
+            "ON CONFLICT (user_id, job_id) DO UPDATE SET person_touched_at = now(), updated_at = now() "
+            "RETURNING status, date_applied, hidden",
+            (user_id, job_id),
+        )
+        or {}
+    )
+
+
 def touchable_job_ids(user_id: int, job_ids: list[int]) -> set[int]:
     """The ids this user may write a board row for.
 
