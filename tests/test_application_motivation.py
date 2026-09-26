@@ -132,7 +132,7 @@ async def test_external_context_never_fetches_untrusted_targets(f, monkeypatch, 
 
     owner = f.make_user()
     row = db.query_one(
-        "INSERT INTO application_fills (user_id, url, fields) VALUES (%s, %s, '[]') RETURNING id",
+        "INSERT INTO application_fills (user_id, url, host, fields) VALUES (%s, %s, 'ashby', '[]') RETURNING id",
         (owner, url),
     )
 
@@ -150,7 +150,7 @@ async def test_external_context_cannot_read_another_users_fill(f, monkeypatch):
 
     owner, other = f.make_user(), f.make_user()
     row = db.query_one(
-        "INSERT INTO application_fills (user_id, url, fields) VALUES (%s, %s, '[]') RETURNING id",
+        "INSERT INTO application_fills (user_id, url, host, fields) VALUES (%s, %s, 'ashby', '[]') RETURNING id",
         (owner, "https://jobs.ashbyhq.com/ivo-inc/b31e7195-37dd-4631-8648-422cecbb3f83"),
     )
 
