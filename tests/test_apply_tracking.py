@@ -1,6 +1,5 @@
 from api import db
 
-
 URL = "https://jobs.ashbyhq.com/ivo-inc/b31e7195-37dd-4631-8648-422cecbb3f83/application?utm_source=Otta"
 
 
