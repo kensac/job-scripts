@@ -628,7 +628,7 @@ class SuggestField(BaseModel):
     key: str = Field(min_length=1, max_length=300)
     label: str = Field(min_length=1, max_length=4000)
     kind: str = Field(default="text", max_length=20)
-    options: list[str] = Field(default_factory=list, max_length=200)
+    options: apply.ApplicationOptions = Field(default_factory=list)
     # The profile's answer when the options did not recognisably hold it.
     hint: str | None = Field(default=None, max_length=200)
 
