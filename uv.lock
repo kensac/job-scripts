@@ -973,7 +973,7 @@ requires-dist = [
     { name = "opentelemetry-sdk", specifier = "==1.44.0" },
     { name = "outcome", specifier = "==1.3.0.post0" },
     { name = "pgvector", specifier = "==0.5.0" },
-    { name = "posthog", specifier = "==7.59.1" },
+    { name = "posthog", specifier = "==7.59.2" },
     { name = "prometheus-client", specifier = "==0.26.0" },
     { name = "psycopg", extras = ["binary"], specifier = "==3.3.6" },
     { name = "psycopg-pool", specifier = "==3.3.3" },
@@ -1407,7 +1407,7 @@ wheels = [
 
 [[package]]
 name = "posthog"
-version = "7.59.1"
+version = "7.59.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "backoff" },
@@ -1415,9 +1415,9 @@ dependencies = [
     { name = "requests" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/21/30/dd5c3c4a6bc1ac9b94b552a90f1c5c2fe13f4fdfd7c5b9671b572a63fc9d/posthog-7.59.1.tar.gz", hash = "sha256:ddc57b0acb3fb2731df19bdd3c8ee577b9c8611737b50c8d2867d3f520aeecc8", size = 685406, upload-time = "2026-09-23T13:35:51.83Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c5/6f/2b5375de0bea206d25fd4d4093b7d6a799f7c7342ce18a03c687de55842e/posthog-7.59.2.tar.gz", hash = "sha256:4f04e147fc321da6ad5638c46c74570cd90d21e99c1f0fc701533eea16b664f2", size = 687215, upload-time = "2026-09-23T15:17:47.664Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/19/e4/67095e227994a76670b7d82289d37544b83528059c15ea2f860f2598dc7d/posthog-7.59.1-py3-none-any.whl", hash = "sha256:e12c0f0b25325e585d991c386eefaf69d8fc922725f88dcbc2c2f03f12af382f", size = 801402, upload-time = "2026-09-23T13:35:50.035Z" },
+    { url = "https://files.pythonhosted.org/packages/ba/f5/0da22cc876b3fd8cb1775171438e1037f9806fb3e6fe71c5c7211d838eab/posthog-7.59.2-py3-none-any.whl", hash = "sha256:b4ca3c43661306465d60e7731216f2b24b1b5c05c9908c91fb2e823da0172b2e", size = 803735, upload-time = "2026-09-23T15:17:45.697Z" },
 ]
 
 [[package]]
