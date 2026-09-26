@@ -1,3 +1,5 @@
+import pytest
+
 from api import db
 from api.apply import drafting
 
@@ -64,3 +66,96 @@ def test_missing_company_evidence_is_explicit():
     rules = drafting.instructions(None)
     assert "Do not invent company details" in rules
     assert "empty string" in rules
+
+
+def test_external_application_supplies_posting_without_creating_catalog_job(
+    client, user_headers, monkeypatch
+):
+    from api import ai
+    from core.fetching import ats
+
+    url = "https://jobs.ashbyhq.com/ivo-inc/b31e7195-37dd-4631-8648-422cecbb3f83/application?utm_source=Otta"
+    fields = [{"key": "why", "label": "Why Ivo?", "kind": "long", "options": []}]
+    fill = client.post(
+        "/v1/user/apply/resolve",
+        headers=user_headers,
+        json={"url": url, "host": "ashby", "fields": fields},
+    )
+    assert fill.status_code == 200, fill.text
+    assert fill.json()["job_id"] is None
+    captured = []
+    fetched = []
+
+    def resolve(target):
+        fetched.append(target)
+        return ats.AtsResult(
+            ats.Status.OK,
+            "Software Engineer at Ivo. Build tools for legal contract review.",
+            "ashby",
+        )
+
+    async def parse(cfg, rules, text, schema):
+        captured.append(text)
+        return schema(
+            answers=[{"key": "why", "answer": "I want to build useful tools for legal teams."}]
+        ), {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}
+
+    monkeypatch.setattr(ats, "resolve", resolve)
+    monkeypatch.setattr(ai, "parse", parse)
+    monkeypatch.setattr(
+        "api.budget.resolve_ai_config",
+        lambda uid, ent: type("Cfg", (), {"model": "m", "key_source": "owner"})(),
+    )
+    response = client.post(
+        "/v1/user/apply/suggest",
+        headers=user_headers,
+        json={"fill_id": fill.json()["fill_id"], "fields": fields},
+    )
+    assert response.status_code == 200, response.text
+    assert "Build tools for legal contract review." in captured[0]
+    assert fetched == [url.split("/application")[0]]
+    assert db.query_one("SELECT count(*) AS n FROM jobs")["n"] == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://jobs.ashbyhq.com.evil.test/org/00000000-0000-0000-0000-000000000000",
+        "http://127.0.0.1/private",
+        "https://jobs.ashbyhq.com/org%2f..%2fprivate/00000000-0000-0000-0000-000000000000",
+    ],
+)
+async def test_external_context_never_fetches_untrusted_targets(f, monkeypatch, url):
+    from api.apply.posting_context import external_posting
+    from core.fetching import ats
+
+    owner = f.make_user()
+    row = db.query_one(
+        "INSERT INTO application_fills (user_id, url, host, fields) VALUES (%s, %s, 'ashby', '[]') RETURNING id",
+        (owner, url),
+    )
+
+    def forbidden(url):
+        raise AssertionError("untrusted target reached the fetcher")
+
+    monkeypatch.setattr(ats, "resolve", forbidden)
+    assert await external_posting(owner, row["id"]) is None
+
+
+@pytest.mark.asyncio
+async def test_external_context_cannot_read_another_users_fill(f, monkeypatch):
+    from api.apply.posting_context import external_posting
+    from core.fetching import ats
+
+    owner, other = f.make_user(), f.make_user()
+    row = db.query_one(
+        "INSERT INTO application_fills (user_id, url, host, fields) VALUES (%s, %s, 'ashby', '[]') RETURNING id",
+        (owner, "https://jobs.ashbyhq.com/ivo-inc/b31e7195-37dd-4631-8648-422cecbb3f83"),
+    )
+
+    def forbidden(url):
+        raise AssertionError("another user's fill reached the fetcher")
+
+    monkeypatch.setattr(ats, "resolve", forbidden)
+    assert await external_posting(other, row["id"]) is None

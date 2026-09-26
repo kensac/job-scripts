@@ -23,7 +23,7 @@ from api import (
 )
 from api.ai import access as ai_access
 from api.apply import drafting as drafts
-from api.apply import fill_answers
+from api.apply import fill_answers, posting_context
 from api.apply import policy as extension_policy
 from api.apply import recipes as extension_recipes
 from api.auth import AuthedUser, require_user
@@ -669,9 +669,11 @@ async def suggest(body: SuggestBody, user: AuthedUser = Depends(require_user)) -
     parts = []
     if job:
         parts.append(f"Job: {job['title']} at {job['company']}")
-        if any(f.kind in {"text", "long"} and not f.options for f in fields):
-            posting = get_content(job["url"]) or ""
-            parts.append(f"Posting:\n{posting[:6000] or '(no posting text captured)'}")
+    if any(f.kind in {"text", "long"} and not f.options for f in fields):
+        posting = get_content(job["url"]) if job else None
+        if not posting and body.fill_id is not None:
+            posting = await posting_context.external_posting(user.id, body.fill_id)
+        parts.append(f"Posting:\n{(posting or '')[:6000] or '(no posting text captured)'}")
     parts.append("Fields:\n" + json.dumps([f.model_dump() for f in fields], indent=1))
     if body.review_only:
         parts.append(

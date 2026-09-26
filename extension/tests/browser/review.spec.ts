@@ -15,7 +15,7 @@ test("remaining fields link to controls and disappear as the person fills them",
   await remaining.getByRole("button", { name: "Portfolio URL Unanswered", exact: true }).click();
   await expect(page.locator("#portfolio")).toBeFocused();
   await page.locator("#portfolio").fill("https://example.com/portfolio");
-  await page.getByRole("button", { name: "Expand panel", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Minimise panel", exact: true })).toBeVisible();
   await expect(remaining.getByRole("button")).toHaveCount(1);
   await expect(remaining.getByRole("button", { name: "Resume / CV Unanswered", exact: true })).toBeVisible();
 });
