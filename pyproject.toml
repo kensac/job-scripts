@@ -57,7 +57,7 @@ dependencies = [
     "sniffio==1.3.1",
     "sortedcontainers==2.4.0",
     "soupsieve==2.10",
-    "SQLAlchemy==2.0.54",
+    "SQLAlchemy==2.1.0",
     "trio-websocket==0.12.2",
     "trio==0.34.0",
     "typing-inspection==0.4.4",
@@ -76,7 +76,7 @@ dev = [
     "pytest==9.1.1",
     "pytest-asyncio==1.4.0",
     "pytest-xdist==3.8.0",
-    "ruff==0.16.8",
+    "ruff==0.16.9",
     "pyright==1.1.414",
 ]
 
