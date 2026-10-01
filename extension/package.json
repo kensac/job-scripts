@@ -17,7 +17,7 @@
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "@playwright/test": "1.63.0",
-    "@types/chrome": "0.3.1",
+    "@types/chrome": "0.3.2",
     "@types/node": "24.19.0",
     "esbuild": "0.28.2",
     "happy-dom": "20.14.5",
