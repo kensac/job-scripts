@@ -40,6 +40,21 @@ is visible without waiting.
 **Never write a fresh "can this user see this" predicate, and never evaluate
 FULL on a request.**
 
+**A recompute writes only the rows that changed.** `visibility.store` deletes
+the members that left, inserts the ones that joined and leaves the rest alone,
+in one transaction under the person's advisory lock (7001, user_id). Replacing
+the whole set rewrote 1.28M rows and 3.97 GB of WAL in 36 hours on 2026-10-03
+for boards that had barely moved; an unchanged board now costs one row.
+
+So a `board_visible` row's `computed_at` is when that posting joined the board,
+not when the board was computed. The recompute's own time is
+`board_visible_recomputes`, one row per person. Read it through
+`visibility.computed_at` or `visibility.COMPUTED_AT`, never `MAX(computed_at)`
+over the rows: the reader takes the later of the two, which is what a writer
+that replaces every row would have reported, and is still correct while such a
+writer runs beside this one. A person with no rows reads as never computed.
+`tests/test_board_visible_diff.py` pins all of it, including that writer.
+
 `FAST` enumerates the three authorized ID sets first: computed membership,
 uploads, and acted-on rows. `UNION` deduplicates overlaps before joining jobs
 and the current user's private state. Keep this set-first shape: an OR over

@@ -24,6 +24,8 @@ from __future__ import annotations
 import datetime
 import logging
 
+from psycopg import Connection
+
 from api import db
 from api.board import criteria
 from api.board import eligibility as board_eligibility
@@ -125,29 +127,66 @@ def member_ids(user_id: int) -> list[int]:
     return [r["id"] for r in rows]
 
 
+# Readers take the later of the recompute record and the rows. A worker on the
+# writer before the diff (DELETE and INSERT every row with now()) never writes
+# the record, so during a rollout its rows carry the newer time; the diff
+# writer keeps every row at or before its record. Either way the reader gets
+# the last recompute's now(), which is what MAX over rows that a full rewrite
+# stamped used to give.
+COMPUTED_AT = "GREATEST(bv.computed_at, bvr.computed_at)"
+RECOMPUTES_JOIN = "LEFT JOIN board_visible_recomputes bvr ON bvr.user_id = bv.user_id"
+
+
 def recompute(user_id: int) -> int:
-    """Replace the person's membership with the full predicate's answer, in
-    one transaction, so a read never sees the board half-built."""
+    """Bring the person's membership to the full predicate's answer."""
     ids = member_ids(user_id)
     with db.pool.connection() as conn:
-        # One recompute per person at a time. Two ran together on 2026-09-05
-        # (the three-minute cycle beside a preference-driven refresh) and the
-        # second died on a duplicate key between the other's DELETE and INSERT.
-        # The lock is transaction-scoped, so the later one waits and then
-        # recomputes on top of the earlier result rather than under it.
-        conn.execute("SELECT pg_advisory_xact_lock(%s, %s)", (7001, user_id))
-        conn.execute("DELETE FROM board_visible WHERE user_id = %s", (user_id,))
-        conn.execute(
-            "INSERT INTO board_visible (user_id, job_id, computed_at) "
-            "SELECT %s, unnest(%s::bigint[]), now()",
-            (user_id, ids),
-        )
+        store(conn, user_id, ids)
     return len(ids)
 
 
+def store(conn: Connection, user_id: int, ids: list[int]) -> None:
+    """Write `ids` as the person's membership in conn's transaction, touching
+    only the rows that changed, so a read never sees the board half-built and
+    an unchanged board costs one row of WAL instead of all of them."""
+    # One recompute per person at a time. Two ran together on 2026-09-05
+    # (the three-minute cycle beside a preference-driven refresh) and the
+    # second died on a duplicate key between the other's DELETE and INSERT.
+    # The lock is transaction-scoped, so the later one waits and then
+    # recomputes on top of the earlier result rather than under it. The writer
+    # before the diff takes the same lock, so the two never interleave.
+    conn.execute("SELECT pg_advisory_xact_lock(%s, %s)", (7001, user_id))
+    conn.execute(
+        "DELETE FROM board_visible WHERE user_id = %s "
+        "AND job_id NOT IN (SELECT unnest(%s::bigint[]))",
+        (user_id, ids),
+    )
+    conn.execute(
+        "INSERT INTO board_visible (user_id, job_id, computed_at) "
+        "SELECT %s, unnest(%s::bigint[]), now() ON CONFLICT DO NOTHING",
+        (user_id, ids),
+    )
+    # A recompute whose transaction began before another's can write after it,
+    # leaving rows newer than this now(). The writer this replaced overwrote
+    # them, so computed_at reported this now(); clamp them so it still does.
+    # Steady state matches nothing.
+    conn.execute(
+        "UPDATE board_visible SET computed_at = now() WHERE user_id = %s AND computed_at > now()",
+        (user_id,),
+    )
+    conn.execute(
+        "INSERT INTO board_visible_recomputes (user_id, computed_at) VALUES (%s, now()) "
+        "ON CONFLICT (user_id) DO UPDATE SET computed_at = EXCLUDED.computed_at",
+        (user_id,),
+    )
+
+
 def computed_at(user_id: int) -> datetime.datetime | None:
+    """When the person's board was last recomputed; None while it is empty."""
     row = db.query_one(
-        "SELECT MAX(computed_at) AS at FROM board_visible WHERE user_id = %s", (user_id,)
+        f"SELECT MAX({COMPUTED_AT}) AS at FROM board_visible bv {RECOMPUTES_JOIN} "
+        "WHERE bv.user_id = %s",
+        (user_id,),
     )
     return row["at"] if row else None
 

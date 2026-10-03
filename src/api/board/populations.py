@@ -6,6 +6,7 @@ import datetime
 from dataclasses import dataclass
 
 from api import db
+from api.board import visibility
 from api.board.person_state import UNTOUCHED
 
 
@@ -50,8 +51,9 @@ def read(*, user_ids: list[int], sources: list[str]) -> list[PopulationRow]:
             WHERE true {user_scope.replace("pairs.", "ws.")} {source_scope}
             UNION ALL
             SELECT bv.user_id, bv.job_id, j.source,
-                   false, false, false, true, false, false, bv.computed_at
+                   false, false, false, true, false, false, {visibility.COMPUTED_AT}
             FROM board_visible bv JOIN jobs j ON j.id = bv.job_id
+            {visibility.RECOMPUTES_JOIN}
             WHERE true {user_scope.replace("pairs.", "bv.")} {source_scope}
         ), pairs AS MATERIALIZED (
             SELECT user_id, job_id, source,
