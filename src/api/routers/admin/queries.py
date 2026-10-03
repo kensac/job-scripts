@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from api import db, pagination, scoping, sorting
 from api import params as params_
 from api.auth import AuthedUser
+from api.review_decision_storage import URL_MATCH
 from api.review_gate_reads import ReviewDecisions, read_decisions
 from api.routers.admin.shared import require_admin
 from core import query_instructions, reason_taxonomy
@@ -614,7 +615,7 @@ def job_timeline(url: str, user: AuthedUser = Depends(require_admin)) -> Posting
             (url,),
         ),
         decisions=read_decisions(
-            "d.url=%(url)s",
+            URL_MATCH,
             {"url": url},
             pagination.Page.from_params(1, 25, maximum=100),
             {"url": [url]},

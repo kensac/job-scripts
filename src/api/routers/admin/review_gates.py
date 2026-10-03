@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 from api import db, pagination, params
 from api.auth import AuthedUser
+from api.review_decision_storage import DECISIONS, URL_MATCH
 from api.review_gate_reads import ReviewDecisions, read_decisions
 from api.routers.admin.shared import require_admin
 
@@ -35,7 +36,7 @@ def selection(
         "action": action,
     }.items():
         if value is not None:
-            clauses.append(f"d.{key}=%({key})s")
+            clauses.append(URL_MATCH if key == "url" else f"d.{key}=%({key})s")
             values[key] = value
             filters[key] = [value]
     users = [int(value) for value in params.csv(user) if value.isdigit()]
@@ -181,12 +182,12 @@ def _report(
         prompt_hash=prompt_hash, user=user, managed_board_id=managed_board_id, filter_id=filter_id
     )
     first = db.query_one(
-        f"SELECT min(d.created_at) AS first FROM review_gate_decisions d WHERE {where}", values
+        f"SELECT min(d.created_at) AS first FROM {DECISIONS} WHERE {where}", values
     )
     cohort = (
         "SELECT d.id,d.url,d.stage,d.mode,d.action,d.prompt_hash,"
         "d.evidence->>'planned_model' planned_model,d.evidence->>'transport' transport "
-        f"FROM review_gate_decisions d WHERE {where} "
+        f"FROM {DECISIONS} WHERE {where} "
         "AND d.created_at >= %(start)s AND d.created_at < %(end)s"
     )
     bounded = {**values, "start": start, "end": end}

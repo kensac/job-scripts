@@ -87,7 +87,9 @@ def test_report_1000_decision_workload(client, admin_headers, monkeypatch, reque
     plans = []
     for sql, params in captured:
         if "WITH cohort AS MATERIALIZED" in sql:
-            projection = sql.split("FROM review_gate_decisions", 1)[0]
+            from api.review_decision_storage import DECISIONS
+
+            projection = sql.split(DECISIONS, 1)[0]
             assert "d.*" not in projection
             assert "d.policy" not in projection
             assert "d.evidence," not in projection

@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, Query
 from api import pagination
 from api.auth import AuthedUser, require_user
 from api.board.access import require_visible_job
+from api.review_decision_storage import URL_MATCH
 from api.review_gate_reads import ReviewDecisions, read_decisions
 
 router = APIRouter()
@@ -17,7 +18,7 @@ def own_review_decisions(
 ) -> ReviewDecisions:
     job = require_visible_job(user, job_id, "j.id,j.url")
     return read_decisions(
-        "d.url=%(url)s AND d.user_id=%(uid)s AND d.managed_board_id IS NULL",
+        f"{URL_MATCH} AND d.user_id=%(uid)s AND d.managed_board_id IS NULL",
         {"url": job["url"], "uid": user.id},
         pagination.Page.from_params(page, page_size, maximum=100),
         {},

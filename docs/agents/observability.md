@@ -697,62 +697,95 @@ archival does not alter those vectors or board membership. Report verified
 logical bytes separately from table size and filesystem space: removal alone
 does not return filesystem space, and no table rewrite is part of this command.
 
-## Shared review policy snapshots
+## Shared review decision bodies and policies
 
-New review decisions retain their exact policy in `review_gate_policies` and
-store only its reference. The interning service uses PostgreSQL's JSONB
-serialization and checks exact text equality after digest conflicts. Never
-reconstruct historical policy from current configuration or a filter hash.
-Readers accept legacy inline-only, dual-written and reference-only rows, but fail
-explicitly on missing references or disagreement between retained copies.
-Snapshots have no cascade from task, posting or filter retention.
+A review decision is a per-task row plus content that is stored once.
+`review_gate_policies` holds each exact policy, `review_gate_decision_bodies`
+each distinct decision (prompt hash, stage, mode, action, reason, profile id,
+title, content hash, policy id, evidence) and `review_gate_urls` each URL. The
+per-task row keeps task, job, user, filter, board, revision and creation time.
+On 2026-10-02 production wrote 570,747 decisions holding 38,017 distinct
+bodies, because every task re-admits the same postings under the same prompt
+and policy. Interning uses PostgreSQL's JSONB serialization for digests and
+checks exact equality of every column after a digest conflict. Never
+reconstruct a historical policy or body from current configuration or a
+filter hash. None of the three tables cascades from task, posting or filter
+retention.
+
+**Every reader selects from `review_decision_storage.DECISIONS`**, which
+presents inline, copied and reference-only rows with the columns the inline
+table had. A reader written against `review_gate_decisions` directly reads
+NULL for every reference-only row. Filter a URL with `URL_MATCH`, never through
+the resolved `url`: its two arms use `idx_review_gate_decisions_url_created`
+and `idx_review_gate_decisions_url_id`, and the resolved expression uses
+neither. Readers that return whole decisions fail explicitly when a copied
+row's inline columns disagree with its references.
+
+`(task_id, url_id)` is unique, and a URL has one id, so it is unique exactly
+when `(task_id, url)` is. While both shapes exist each index covers only its
+own shape; admission's task lock and its read of both shapes keep one task
+from holding a URL twice, and `copy` fails a chunk with a unique violation if
+one ever did. `ck_review_gate_decisions_shape` keeps every row complete in at
+least one shape.
 
 **Roll the compatible readers across every API and worker before deploying a
-reference-only writer or clearing any inline policy.** The nullable policy
-migration is a coordinated non-additive release. An operator's flag records the
-fleet confirmation; it does not discover deployed versions or establish that the
-rollout happened.
+reference-only writer or clearing any inline column.** Relaxing the inline
+NOT NULLs is a coordinated non-additive release. An operator's flag records
+the fleet confirmation; it does not discover deployed versions or establish
+that the rollout happened.
 
-`python -m api.migrate_review_policies MODE --through ID --after ID --limit N`
+`python -m api.migrate_review_decisions MODE --through ID --after ID --limit N`
 operates on at most N decisions in one transaction. Choose the fixed upper ID
 with `SELECT id FROM review_gate_decisions ORDER BY id DESC LIMIT 1`; start after
 zero and resume from the committed `after` in each result. A failed chunk rolls
 back and returns the unchanged cursor for retry. Each invocation requires an
 explicit limit and upper bound and applies five-second statement and two-second
-lock timeouts. The upper ID bounds the population, not an assertion that concurrent
-older transactions have committed: repeat a pass from zero after the fleet
-transition to catch late legacy inserts.
+lock timeouts. The upper ID bounds the population, not an assertion that
+concurrent older transactions have committed.
 
-- `copy` adds missing references without removing inline policies. PostgreSQL
-  JSONB text retains historical numeric precision through the copy.
-- `verify` is read-only and checks effective policy even after inline removal.
-  It counts unreferenced decisions separately and exits unsuccessfully if any
-  remain in the chunk. Missing, mismatched or invalid-digest snapshots fail the
-  chunk. Verify from zero across the fixed upper ID; a final empty chunk does
-  not certify earlier chunks.
+- `copy` gives every unreferenced decision its URL, body and policy references
+  in one UPDATE of the row, interning an inline-only policy in the same pass,
+  and keeps every inline value. JSONB text keeps historical numeric precision.
+- `verify` is read-only. It counts unreferenced decisions separately and exits
+  unsuccessfully if any remain in the chunk. A body or policy whose digest does
+  not match its content, or a retained inline value that differs from its
+  reference, fails the chunk. Verify from zero across the fixed upper ID; a
+  final empty chunk does not certify earlier chunks.
 - `compact --backup-complete --compatible-readers` requires both explicit
-  confirmations, a reference for every selected decision, exact equality of
-  every retained inline copy and a valid snapshot digest. It clears only the
-  inline column. Decision and snapshot locks keep verification and mutation
-  atomic. Already compacted rows verify and replay without another write.
-- `restore` writes missing inline policies directly from verified snapshots,
-  preserving exact JSONB values and every reference. Legacy inline-only rows
-  remain unchanged. Replaying a restored chunk performs no additional write.
+  confirmations and a verified reference for every selected decision. It clears
+  every inline copy, including `policy` and `policy_id`. Row locks and shared
+  locks on the referenced URLs, bodies and policies keep verification and
+  mutation atomic. Already compacted rows verify and replay without a write.
+- `restore` writes every inline column back from the verified references,
+  keeping the references. A row that held its policy only by reference also
+  receives the exact snapshot inline, so any older reader has what it needs.
+  Rows without references remain unchanged.
 
-Run and verify reference backfill before compaction, then verify the same
-population afterwards. `inline_remaining` counts inline policies after the
-operation. `inline_policy_bytes_removed` sums PostgreSQL column sizes cleared
-by that invocation; it is neither filesystem space returned nor a table-size
-reduction. Updates can produce temporary bloat and WAL. No rewrite, deletion,
-object cleanup or vacuum is part of the operator.
+Run order:
 
-Rolling back to the compatible-reader release can retain the nullable schema
-and referenced data. Before restoring the old NOT NULL constraint or older
-readers, stop reference-only writers, restore every missing inline policy,
-verify all references and zero missing inline policies, and only then change
-the schema or readers. Repeating a bounded restore pass also catches late
-transactions. Keep snapshots and decision identities throughout; do not alter
-paid outcomes or reprice usage.
+1. Deploy the compatible-reader release to every API and worker.
+2. `copy` from zero to a fixed upper ID, then `verify` the same range.
+3. Deploy the reference-only writer everywhere. From then on no legacy row
+   is written; repeat `copy` and `verify` from zero with a new upper ID to
+   catch rows the old writer committed late.
+4. Confirm the independent backup. `compact` a bounded canary, `verify` it,
+   then compact the rest.
+5. `verify` from zero across the whole range.
+
+`inline_remaining` counts rows still holding an inline copy after the
+operation. `inline_bytes_removed` sums the PostgreSQL column sizes that
+invocation cleared; it is neither filesystem space returned nor a table-size
+reduction. Each copy and each compaction writes a new version of every row and
+of every index entry, so expect temporary bloat and WAL; the freed space is
+reused by new rows after vacuum, and the table shrinks only with a rewrite,
+which is not part of the operator.
+
+Rolling back to the compatible-reader release can keep the nullable schema and
+referenced data. Before restoring the old NOT NULL constraints or older
+readers, stop reference-only writers, `restore` every row, verify zero
+unreferenced rows and the inline values, and only then change the schema or
+readers. Keep bodies, snapshots and decision identities throughout; do not
+alter paid outcomes or reprice usage.
 
 ## Request snapshot storage and recovery
 
