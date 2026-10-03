@@ -64,7 +64,7 @@ class ReviewGateDecision(Base):
     title: Mapped[str] = mapped_column(Text)
     content_hash: Mapped[str | None] = mapped_column(Text)
     policy_id: Mapped[int | None] = mapped_column(BigInteger)
-    policy: Mapped[dict] = mapped_column(JSONB)
+    policy: Mapped[dict | None] = mapped_column(JSONB)
     evidence: Mapped[dict] = mapped_column(JSONB)
     created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
 

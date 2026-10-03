@@ -16,8 +16,9 @@ def test_admission_interns_policy_without_changing_snapshot(f):
     snapshot = db.query_one(
         "SELECT policy FROM review_gate_policies WHERE id=%s", (row["policy_id"],)
     )
-    assert snapshot == {"policy": row["policy"]}
-    assert review_gate_records.existing(task)[row["url"]]["policy"] == row["policy"]
+    assert snapshot is not None
+    assert row["policy"] is None
+    assert review_gate_records.existing(task)[row["url"]]["policy"] == snapshot["policy"]
 
 
 def test_separate_runs_share_exact_policy_snapshot(f):
@@ -32,18 +33,18 @@ def test_policy_change_gets_a_new_snapshot_and_partial_retry_keeps_old_policy(f)
     from api import review_policy_storage
 
     task, job, first = admission(f)
-    old = first["policy"]
+    old = review_gate_records.existing(task)[job["url"]]["policy"]
     changed = {**old, "lookup_timeout_ms": old["lookup_timeout_ms"] + 1}
     db.execute(
         "UPDATE app_config SET value=%s WHERE key='filter_review_gate'", (db.jsonb(changed),)
     )
     added = {**job, "url": job["url"] + "/next"}
     review_gate.partition(task, "policy-test", [job, added], {})
-    _, _, new = admission(f)
+    new_task, _, new = admission(f)
     historical = review_gate_records.existing(task)
     assert historical[added["url"]]["policy"] == old
     assert new["policy_id"] != first["policy_id"]
-    assert new["policy"] == changed
+    assert review_gate_records.existing(new_task)[new["url"]]["policy"] == changed
     assert review_policy_storage.intern(db.jsonb(old)) == first["policy_id"]
 
 
@@ -117,24 +118,34 @@ def test_copy_is_exact_bounded_restartable_and_preserves_outcomes(f):
     text_before = db.query_one(
         "SELECT policy::text AS policy FROM review_gate_decisions WHERE id=%s", (first["id"],)
     )
-    result = review_policy_storage.migrate_chunk(after=0, through=second["id"], limit=1, copy=True)
+    result = review_policy_storage.migrate_chunk(
+        after=0, through=second["id"], limit=1, mode="copy"
+    )
     assert result == {
         "scanned": 1,
         "copied": 1,
         "verified": 1,
         "unreferenced": 0,
+        "compacted": 0,
+        "restored": 0,
+        "inline_remaining": 1,
+        "inline_policy_bytes_removed": 0,
         "after": first["id"],
         "through": second["id"],
     }
-    replay = review_policy_storage.migrate_chunk(after=0, through=second["id"], limit=1, copy=True)
+    replay = review_policy_storage.migrate_chunk(
+        after=0, through=second["id"], limit=1, mode="copy"
+    )
     assert replay["copied"] == 0 and replay["verified"] == 1
     remaining = review_policy_storage.migrate_chunk(
-        after=first["id"], through=second["id"], limit=1, copy=False
+        after=first["id"], through=second["id"], limit=1, mode="verify"
     )
     assert remaining["unreferenced"] == 1 and remaining["verified"] == 0
-    review_policy_storage.migrate_chunk(after=first["id"], through=second["id"], limit=1, copy=True)
+    review_policy_storage.migrate_chunk(
+        after=first["id"], through=second["id"], limit=1, mode="copy"
+    )
     verified = review_policy_storage.migrate_chunk(
-        after=0, through=second["id"], limit=2, copy=False
+        after=0, through=second["id"], limit=2, mode="verify"
     )
     assert verified["verified"] == 2 and verified["unreferenced"] == 0
     assert (
@@ -158,7 +169,11 @@ def test_bad_reference_aborts_copy_chunk_without_advancing_or_partial_writes(f):
 
     _, _, first = admission(f)
     _, _, second = admission(f)
-    db.execute("UPDATE review_gate_decisions SET policy_id=NULL WHERE id=%s", (first["id"],))
+    db.execute(
+        "UPDATE review_gate_decisions d SET policy=p.policy,policy_id=NULL "
+        "FROM review_gate_policies p WHERE d.id=%s AND p.id=d.policy_id",
+        (first["id"],),
+    )
     db.execute(
         "UPDATE review_gate_decisions SET policy='{\"changed\":true}' WHERE id=%s", (second["id"],)
     )
@@ -166,7 +181,7 @@ def test_bad_reference_aborts_copy_chunk_without_advancing_or_partial_writes(f):
     with pytest.raises(
         review_policy_storage.PolicySnapshotUnavailable, match="verification failed"
     ):
-        review_policy_storage.migrate_chunk(after=0, through=second["id"], limit=2, copy=True)
+        review_policy_storage.migrate_chunk(after=0, through=second["id"], limit=2, mode="copy")
     assert db.query("SELECT * FROM review_gate_decisions ORDER BY id") == before
 
 
@@ -176,6 +191,11 @@ def test_missing_reference_fails_even_when_inline_policy_exists(f):
     from api import review_policy_storage
 
     task, _, row = admission(f)
+    db.execute(
+        "UPDATE review_gate_decisions d SET policy=p.policy "
+        "FROM review_gate_policies p WHERE d.id=%s AND p.id=d.policy_id",
+        (row["id"],),
+    )
     with db.transaction():
         db.execute("SET LOCAL session_replication_role=replica")
         db.execute(
@@ -189,28 +209,21 @@ def test_missing_reference_fails_even_when_inline_policy_exists(f):
 def test_reference_only_and_legacy_rows_preserve_admin_and_personal_shapes(
     f, client, admin_headers
 ):
-    import pytest
-
     from api import pagination, review_gate_reads
-
-    class Rollback(Exception):
-        pass
 
     task, _, row = admission(f)
     baseline = client.get("/v1/admin/review-gates/decisions", headers=admin_headers).json()
-    with pytest.raises(Rollback), db.transaction():
-        # Exercise the next fleet phase's shape without retaining a schema change.
-        db.execute("ALTER TABLE review_gate_decisions ALTER COLUMN policy DROP NOT NULL")
-        db.execute("UPDATE review_gate_decisions SET policy=NULL WHERE id=%s", (row["id"],))
-        assert review_gate_records.existing(task)[row["url"]]["policy"] == row["policy"]
-        actual = review_gate_reads._read_decisions(
-            "TRUE", {}, pagination.Page.from_params(1, 25, maximum=100), {}, personal=False
-        )
-        assert actual.model_dump(mode="json") == baseline
-        personal = review_gate_reads._read_decisions(
-            "TRUE", {}, pagination.Page.from_params(1, 25, maximum=100), {}, personal=True
-        )
-        assert personal.rows[0].policy == {} and personal.rows[0].evidence == {}
-        raise Rollback
+    assert row["policy"] is None
+    assert review_gate_records.existing(task)[row["url"]]["policy"] == baseline["rows"][0]["policy"]
+    personal = review_gate_reads.read_decisions(
+        "TRUE", {}, pagination.Page.from_params(1, 25, maximum=100), {}, personal=True
+    )
+    assert personal.rows[0].policy == {} and personal.rows[0].evidence == {}
+    db.execute(
+        "UPDATE review_gate_decisions d SET policy=p.policy "
+        "FROM review_gate_policies p WHERE d.id=%s AND p.id=d.policy_id",
+        (row["id"],),
+    )
+    assert client.get("/v1/admin/review-gates/decisions", headers=admin_headers).json() == baseline
     db.execute("UPDATE review_gate_decisions SET policy_id=NULL WHERE id=%s", (row["id"],))
     assert client.get("/v1/admin/review-gates/decisions", headers=admin_headers).json() == baseline
