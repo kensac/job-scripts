@@ -12,6 +12,7 @@ from core.payload_objects import PayloadRef, PayloadStore, PayloadUnavailable
 from core.pool import in_transaction
 
 Mode = Literal["copy", "compact", "restore", "verify"]
+STOP_OUTCOMES = frozenset(("unavailable", "changed", "ineligible"))
 _ELIGIBLE = (
     "t.status='done' AND t.kind<>'classify_job_profiles' "
     "AND NOT EXISTS(SELECT 1 FROM batch_result_receipts r "
@@ -105,7 +106,7 @@ def _prepare(source: dict[str, Any], store: PayloadStore, mode: Mode) -> tuple[s
 def migrate_many(
     sources: list[dict[str, Any]], store: PayloadStore, *, mode: Mode, workers: int = 1
 ) -> list[str]:
-    """Commit an ordered prefix, stopping before the first unavailable object.
+    """Commit an ordered prefix, stopping before any unavailable or changed source.
 
     A later upload can finish before an earlier failure is known. Those objects
     remain unreferenced and safe to reuse when the failed cursor is retried.
@@ -130,7 +131,8 @@ def migrate_many(
 
     with ThreadPoolExecutor(max_workers=workers) as executor:
         prepared = list(executor.map(prepare, sources))
-    stop = next((i for i, item in enumerate(prepared) if item[0] == "unavailable"), len(prepared))
+    stop = next((i for i, item in enumerate(prepared) if item[0] in STOP_OUTCOMES), len(prepared))
+    failure = prepared[stop][0] if stop < len(prepared) else None
     prefix = sources[:stop]
     outcomes = [item[0] for item in prepared[:stop]]
     if prefix:
@@ -141,13 +143,13 @@ def migrate_many(
             updates = []
             for index, source in enumerate(prefix):
                 if (source["task_id"], source["custom_id"]) not in current:
-                    outcomes[index] = "changed"
-                    continue
-                outcome, snapshot, reference = prepared[index]
-                if (
-                    mode != "verify"
-                    and outcome not in ("changed", "ineligible")
-                    and (snapshot, reference) != (source["snapshot"], source["snapshot_ref"])
+                    outcomes = outcomes[:index]
+                    failure = "changed"
+                    break
+                _, snapshot, reference = prepared[index]
+                if mode != "verify" and (snapshot, reference) != (
+                    source["snapshot"],
+                    source["snapshot_ref"],
                 ):
                     updates.append(
                         {
@@ -171,7 +173,7 @@ def migrate_many(
                 )
                 if changed != len(updates):
                     raise RuntimeError("Snapshot sources changed while locked")
-    return outcomes + (["unavailable"] if stop < len(sources) else [])
+    return outcomes + ([failure] if failure is not None else [])
 
 
 def migrate(source: dict[str, Any], store: PayloadStore, *, mode: Mode) -> str:

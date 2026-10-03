@@ -38,7 +38,7 @@ def main() -> int:
         "-c application_name=snapshot_payload_migration"
         + (" -c default_transaction_read_only=on" if args.mode == "verify" else "")
     )
-    from api.ai.snapshot_payloads import Mode, candidates, migrate_many
+    from api.ai.snapshot_payloads import STOP_OUTCOMES, Mode, candidates, migrate_many
     from core.payload_objects import PayloadStore, encode_payload
     from core.pool import pool
 
@@ -46,6 +46,7 @@ def main() -> int:
     after = (int(args.after[0]), args.after[1]) if args.after else None
     counts: Counter[str] = Counter()
     logical_bytes = 0
+    stopped = None
     try:
         store = PayloadStore.from_env()
         remaining = args.limit
@@ -56,7 +57,8 @@ def main() -> int:
             outcomes = migrate_many(rows, store, mode=mode, workers=args.workers)
             for source, outcome in zip(rows, outcomes, strict=False):
                 counts[outcome] += 1
-                if outcome == "unavailable":
+                if outcome in STOP_OUTCOMES:
+                    stopped = outcome
                     break
                 if outcome == "copied":
                     logical_bytes += len(encode_payload(source["snapshot"]))
@@ -77,7 +79,7 @@ def main() -> int:
                 ),
                 flush=True,
             )
-            if counts["unavailable"]:
+            if stopped is not None:
                 break
     finally:
         pool.close()
@@ -91,7 +93,7 @@ def main() -> int:
             }
         )
     )
-    return 1 if counts["unavailable"] else 0
+    return 1 if stopped is not None else 0
 
 
 if __name__ == "__main__":

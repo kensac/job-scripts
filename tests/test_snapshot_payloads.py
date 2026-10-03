@@ -381,3 +381,14 @@ def test_cli_changed_source_keeps_cursor_before_gap_and_returns_failure(
     assert report["counts"] == {"copied": 1, "changed": 1}
     assert row(tasks[0])["snapshot_ref"] is not None
     assert row(tasks[2])["snapshot_ref"] is None
+
+
+def test_ineligible_legacy_snapshot_stops_before_later_rows(f, objects):
+    first, _ = request(f)
+    second, _ = request(f)
+    db.execute("UPDATE batch_requests SET snapshot=NULL WHERE task_id=%s", (first,))
+    sources = [row(first), row(second)]
+    assert snapshot_payloads.migrate_many(sources, objects, mode="copy", workers=2) == [
+        "ineligible"
+    ]
+    assert row(second)["snapshot_ref"] is None

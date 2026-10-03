@@ -694,13 +694,13 @@ with `python -m api.ai.migrate_snapshot_payloads MODE --limit COUNT`. Modes are
 in pages selected by `--chunk-size` (default 100). `--workers` controls concurrent
 verified object operations (default 1). Object I/O finishes before a short
 transaction locks tasks and requests in key order and performs one conditional
-set-based update. Each committed chunk prints its cursor. If an object fails,
+set-based update. Each committed chunk prints its cursor. If an object fails or a source changes or becomes ineligible,
 only the preceding ordered prefix commits; later successful uploads remain
 unreferenced until retry. Compaction requires `--backup-complete`, confirmation that
 the independent database copy has finished. Start with copy and verification,
 then a bounded compaction canary. Keep the emitted counters and cursor. An
-unavailable object stops before advancing past its row; restore the object or
-configuration and retry that cursor. Database errors fail the invocation; rerun
+unavailable, changed or ineligible outcome exits unsuccessfully before advancing
+past its row; investigate or restore the source/object and retry that cursor. Database errors fail the invocation; rerun
 from the last saved cursor, since completed operations are idempotent.
 
 Eligibility is completed non-profile tasks with no unconsumed receipts. The
