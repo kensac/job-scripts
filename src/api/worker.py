@@ -21,6 +21,7 @@ import psycopg
 
 from api import db, events, hosts, job_profile_derivation, managed_board_runs, metrics, telemetry
 from api.queue import INGEST_INTERVAL_MINUTES, enqueue
+from core.payload_objects import PayloadUnavailable
 from tasks import HANDLERS
 from tasks.runtime import (
     CHUNK_KINDS,
@@ -29,6 +30,7 @@ from tasks.runtime import (
     AwaitingBatch,
     Deferred,
     TaskClaim,
+    fail_unavailable_payload,
     finish,
     maybe_finalize_parent,
     reconcile_chunks,
@@ -626,6 +628,11 @@ async def run_once() -> bool:
         )
         metrics.TASKS_PROCESSED.labels(task["kind"], "deferred").inc()
         logger.info(f"Task {task['id']} {d}")
+    except PayloadUnavailable as exc:
+        fail_unavailable_payload(task["id"], str(exc))
+        metrics.TASKS_PROCESSED.labels(task["kind"], "failed").inc()
+        logger.exception("Task %s requires payload restoration before retry", task["id"])
+        telemetry.capture_exception(exc, properties={**_task_props(task, exc), **span_ids})
     except Exception as exc:
         if _is_transient(exc) and task["attempts"] < MAX_ATTEMPTS:
             # Host ran out of memory/threads, not a broken task: put it back so

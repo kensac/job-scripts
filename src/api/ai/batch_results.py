@@ -6,12 +6,13 @@ from contextlib import contextmanager
 from typing import Any
 
 from api import db
+from api.ai import request_snapshots
 from core.batch import BatchResult, BatchSpec
 from core.payload_objects import PayloadRef, PayloadStore
 
 
 def snapshot_specs(task_id: int, specs: list[BatchSpec]) -> list[BatchSpec]:
-    frozen = []
+    rows = []
     with db.transaction():
         for spec in specs:
             snapshot = dataclasses.asdict(spec)
@@ -22,12 +23,18 @@ def snapshot_specs(task_id: int, specs: list[BatchSpec]) -> list[BatchSpec]:
             row = db.query_one(
                 "INSERT INTO batch_requests (task_id, custom_id, snapshot) VALUES (%s,%s,%s) "
                 "ON CONFLICT (task_id,custom_id) DO UPDATE SET snapshot=batch_requests.snapshot "
-                "RETURNING snapshot",
+                "RETURNING custom_id,snapshot,snapshot_ref",
                 (task_id, spec.custom_id, db.jsonb(snapshot)),
             )
-            if not row or row["snapshot"] is None:
-                raise RuntimeError("cannot resubmit a legacy request without its original snapshot")
-            frozen.append(BatchSpec(**row["snapshot"]))
+            if row is None:
+                raise RuntimeError("request snapshot was not recorded")
+            rows.append(row)
+    frozen = []
+    for row in rows:
+        spec = request_snapshots.resolve(row)
+        if spec is None:
+            raise RuntimeError("cannot resubmit a legacy request without its original snapshot")
+        frozen.append(spec)
     return frozen
 
 
@@ -87,11 +94,11 @@ def unconsumed(task_id: int) -> list[BatchResult]:
             custom_id=row["custom_id"],
             batch_id=row["provider_batch_id"],
             model=row["model"],
-            request=BatchSpec(**row["snapshot"]) if row["snapshot"] is not None else None,
+            request=request_snapshots.resolve(row),
             **response_payload(row["response"]),
         )
         for row in db.query(
-            "SELECT r.*, q.snapshot FROM batch_result_receipts r LEFT JOIN batch_requests q "
+            "SELECT r.*, q.snapshot,q.snapshot_ref FROM batch_result_receipts r LEFT JOIN batch_requests q "
             "ON q.task_id=r.task_id AND q.custom_id=r.custom_id "
             "WHERE r.task_id=%s AND r.consumed_at IS NULL ORDER BY r.provider_batch_id,r.custom_id",
             (task_id,),
