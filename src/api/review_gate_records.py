@@ -27,10 +27,10 @@ def decision(row: dict[str, Any]) -> dict[str, Any]:
 
 def existing(task_id: int) -> dict[str, dict[str, Any]]:
     return {
-        row["url"]: review_decision_storage.resolve(row)
+        row["url"]: row
         for row in db.query(
             "SELECT d.id,d.url,d.prompt_hash,d.title,d.content_hash,d.evidence,d.stage,d.action,"
-            f"d.reason,d.profile_id,{review_decision_storage.RESOLVED_COLUMNS} "
+            "d.reason,d.profile_id,p.policy "
             f"FROM {review_decision_storage.RESOLVED_FROM} WHERE d.task_id=%s",
             (task_id,),
         )

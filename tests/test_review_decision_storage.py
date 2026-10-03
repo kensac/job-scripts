@@ -1,8 +1,9 @@
-"""Every reader returns the same decision whichever shape stores it.
+"""Every reader returns the same decision whatever the inline columns hold.
 
-Reference-only rows are built here with raw SQL rather than by the migration
-under test, so a reader and the backfill cannot agree with each other by
-sharing a mistake.
+Readers resolve only url_id and body_id. The copied shape (inline values kept
+beside the references, as the #751 writer and the copy operator left them) is
+built here with raw SQL, so a reader and the operator cannot agree with each
+other by sharing a mistake.
 """
 
 import pytest
@@ -25,35 +26,21 @@ INLINE = (
 )
 
 
-def reference_only(ids=None):
-    """Move the selected rows to the body-and-url shape, clearing inline copies."""
-    scope = {"ids": ids, "all": ids is None}
-    selected = "(%(all)s OR d.id=ANY(%(ids)s::bigint[]))"
+def copied(ids=None):
+    """Write every inline column back from the references, keeping the references."""
     db.execute(
-        "INSERT INTO review_gate_urls(url) SELECT DISTINCT d.url FROM review_gate_decisions d "
-        f"WHERE d.url IS NOT NULL AND {selected} ON CONFLICT(url) DO NOTHING",
-        scope,
-    )
-    db.execute(
-        "INSERT INTO review_gate_decision_bodies(digest,prompt_hash,stage,mode,action,reason,"
-        "profile_id,title,content_hash,policy_id,evidence) "
-        "SELECT sha256(convert_to('fixture-'||d.id,'UTF8')),prompt_hash,stage,mode,action,reason,"
-        "profile_id,title,content_hash,policy_id,evidence FROM review_gate_decisions d "
-        f"WHERE d.body_id IS NULL AND {selected}",
-        scope,
-    )
-    db.execute(
-        "UPDATE review_gate_decisions d SET url_id=u.id,body_id=b.id,"
-        + ",".join(f"{column}=NULL" for column in INLINE)
-        + ",policy=NULL,policy_id=NULL FROM review_gate_urls u,review_gate_decision_bodies b "
-        "WHERE u.url=d.url AND b.digest=sha256(convert_to('fixture-'||d.id,'UTF8')) "
-        f"AND {selected}",
-        scope,
+        "UPDATE review_gate_decisions d SET url=u.url,"
+        + ",".join(f"{column}=b.{column}" for column in INLINE if column != "url")
+        + ",policy_id=b.policy_id,policy=p.policy "
+        "FROM review_gate_urls u,review_gate_decision_bodies b,review_gate_policies p "
+        "WHERE u.id=d.url_id AND b.id=d.body_id AND p.id=b.policy_id "
+        "AND (%(all)s OR d.id=ANY(%(ids)s::bigint[]))",
+        {"ids": ids, "all": ids is None},
     )
 
 
 def inline(ids=None):
-    """Rewrite admitted rows into the legacy all-inline shape production holds."""
+    """Rewrite admitted rows into the legacy all-inline shape, without references."""
     db.execute(
         "UPDATE review_gate_decisions d SET url=u.url,"
         + ",".join(f"{column}=b.{column}" for column in INLINE if column != "url")
@@ -79,13 +66,16 @@ def admitted(f):
         review_gate.partition(
             task, "test-hash", jobs, contents, model="test-model", transport="batch"
         )
-    inline()
     db.execute(
-        "UPDATE review_gate_decisions SET evidence=evidence||"
+        "UPDATE review_gate_decision_bodies b SET evidence=b.evidence||"
         '\'{"routing":{"outcome":"reject","would_review":false}}\'::jsonb '
-        "WHERE url='https://example.test/eng'"
+        "FROM review_gate_decisions d JOIN review_gate_urls u ON u.id=d.url_id "
+        "WHERE b.id=d.body_id AND u.url='https://example.test/eng'"
     )
-    decisions = db.query("SELECT id,stage FROM review_gate_decisions ORDER BY id")
+    decisions = db.query(
+        "SELECT d.id,b.stage FROM review_gate_decisions d "
+        "JOIN review_gate_decision_bodies b ON b.id=d.body_id ORDER BY d.id"
+    )
     for n, row in enumerate(decisions):
         outcome(row["id"], 100 + n, 0.25, rejected=row["stage"] == "title")
     return user, (first, second), jobs, contents
@@ -129,62 +119,59 @@ def owned_job(user_headers):
     return me, _insert_job("manual", "https://example.test/eng", uploaded_by=me)
 
 
-def test_reference_only_rows_read_exactly_like_inline_rows(
-    f, client, admin_headers, user_headers, owned_job
-):
+def baseline(f, client, admin_headers, user_headers, owned_job):
+    """Every read surface over reference-only rows, the shape production holds."""
     me, job_id = owned_job
     _, tasks, jobs, contents = admitted(f)
     db.execute("UPDATE review_gate_decisions SET user_id=%s", (me,))
     before = observed(client, admin_headers, user_headers, tasks, jobs, contents, job_id)
     assert before["all"]["total"] == 4
+    assert {row["title"] for row in before["all"]["rows"]} == {
+        "Registered Nurse",
+        "Software Engineer",
+    }
     assert before["url"]["total"] == 2
     assert before["stage"]["total"] == 2
+    assert before["timeline"]["decisions"]["total"] == 2
     assert before["personal"]["total"] == 2
+    assert before["existing"]["https://example.test/nurse"]["policy"]["title_mode"] == "enforce"
     assert before["exclusions"] == {"https://example.test/nurse"}
     assert before["comparisons"]["routing"] and before["comparisons"]["review_gate"]
-    reference_only()
-    assert (
-        db.query_one(
-            "SELECT count(*) n FROM review_gate_decisions WHERE url IS NOT NULL OR stage IS NOT NULL "
-            "OR evidence IS NOT NULL OR policy IS NOT NULL OR policy_id IS NOT NULL"
-        )["n"]
-        == 0
+    return tasks, jobs, contents, job_id, before
+
+
+def test_copied_rows_read_exactly_like_reference_only_rows(
+    f, client, admin_headers, user_headers, owned_job
+):
+    tasks, jobs, contents, job_id, before = baseline(
+        f, client, admin_headers, user_headers, owned_job
     )
-    assert observed(client, admin_headers, user_headers, tasks, jobs, contents, job_id) == before
-
-
-def test_one_task_may_mix_shapes_mid_migration(f, client, admin_headers, user_headers, owned_job):
-    me, job_id = owned_job
-    _, tasks, jobs, contents = admitted(f)
-    db.execute("UPDATE review_gate_decisions SET user_id=%s", (me,))
-    before = observed(client, admin_headers, user_headers, tasks, jobs, contents, job_id)
     first = db.query_one("SELECT min(id) AS id FROM review_gate_decisions")["id"]
-    reference_only([first])
+    copied([first])
+    assert observed(client, admin_headers, user_headers, tasks, jobs, contents, job_id) == before
+    copied()
+    assert db.query_one("SELECT count(*) n FROM review_gate_decisions WHERE url IS NULL")["n"] == 0
     assert observed(client, admin_headers, user_headers, tasks, jobs, contents, job_id) == before
 
 
-def test_copied_rows_that_disagree_with_their_body_fail_explicitly(f, client, admin_headers):
-    _, tasks, _, _ = admitted(f)
-    row = db.query_one("SELECT * FROM review_gate_decisions WHERE task_id=%s LIMIT 1", (tasks[0],))
-    db.execute("INSERT INTO review_gate_urls(url) VALUES(%s) ON CONFLICT DO NOTHING", (row["url"],))
-    body = db.query_one(
-        "INSERT INTO review_gate_decision_bodies(digest,prompt_hash,stage,mode,action,reason,"
-        "profile_id,title,content_hash,policy_id,evidence) "
-        "SELECT 'x'::bytea,prompt_hash,stage,mode,action,reason,profile_id,'Different title',"
-        "content_hash,policy_id,evidence FROM review_gate_decisions WHERE id=%s RETURNING id",
-        (row["id"],),
+def test_no_reader_looks_at_the_inline_columns(f, client, admin_headers, user_headers, owned_job):
+    tasks, jobs, contents, job_id, before = baseline(
+        f, client, admin_headers, user_headers, owned_job
     )
+    copied()
+    # Every inline value now disagrees with its reference.
     db.execute(
-        "UPDATE review_gate_decisions SET body_id=%s,"
-        "url_id=(SELECT id FROM review_gate_urls WHERE url=%s) WHERE id=%s",
-        (body["id"], row["url"], row["id"]),
+        "UPDATE review_gate_decisions SET url='https://example.test/inline/'||id,title='Inline',"
+        "prompt_hash='inline',stage='inline',mode='inline',action='skip',reason='inline',"
+        "profile_id=-1,content_hash='inline',evidence='{}',policy='{\"inline\":true}'"
     )
-    from api.review_policy_storage import PolicySnapshotUnavailable
-
-    with pytest.raises(PolicySnapshotUnavailable, match="disagree"):
-        review_gate_records.existing(tasks[0])
-    with pytest.raises(PolicySnapshotUnavailable, match="disagree"):
-        client.get("/v1/admin/review-gates/decisions", headers=admin_headers)
+    assert observed(client, admin_headers, user_headers, tasks, jobs, contents, job_id) == before
+    # A URL only an inline column holds matches nothing.
+    inline_url = db.query_one("SELECT url FROM review_gate_decisions LIMIT 1")["url"]
+    response = client.get(
+        "/v1/admin/review-gates/decisions", params={"url": inline_url}, headers=admin_headers
+    )
+    assert response.json()["total"] == 0
 
 
 def test_a_row_must_keep_one_complete_shape(f):
@@ -192,14 +179,13 @@ def test_a_row_must_keep_one_complete_shape(f):
     from psycopg.errors import CheckViolation
 
     with pytest.raises(CheckViolation):
-        db.execute("UPDATE review_gate_decisions SET stage=NULL WHERE task_id=%s", (tasks[0],))
+        db.execute("UPDATE review_gate_decisions SET body_id=NULL WHERE task_id=%s", (tasks[0],))
     with pytest.raises(CheckViolation):
-        db.execute("UPDATE review_gate_decisions SET url=NULL WHERE task_id=%s", (tasks[0],))
+        db.execute("UPDATE review_gate_decisions SET url_id=NULL WHERE task_id=%s", (tasks[0],))
 
 
 def test_task_url_uniqueness_holds_for_reference_only_rows(f):
     _, tasks, _, _ = admitted(f)
-    reference_only()
     from psycopg.errors import UniqueViolation
 
     with pytest.raises(UniqueViolation):

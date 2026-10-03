@@ -748,14 +748,14 @@ rows holding `url_id` and `body_id` with `ON CONFLICT (task_id, url_id)`.
 Never write the inline columns again: a second copy is the 1,242 B a row this
 replaced, and the backfill would have to move it later.
 
-**Every reader selects from `review_decision_storage.DECISIONS`**, which
-presents inline, copied and reference-only rows with the columns the inline
-table had. A reader written against `review_gate_decisions` directly reads
-NULL for every reference-only row. Filter a URL with `URL_MATCH`, never through
-the resolved `url`: its two arms use `idx_review_gate_decisions_url_created`
-and `idx_review_gate_decisions_url_id`, and the resolved expression uses
-neither. Readers that return whole decisions fail explicitly when a copied
-row's inline columns disagree with its references.
+**Every reader selects from `review_decision_storage.DECISIONS`**, which joins
+a row's `url_id` and `body_id` and presents the columns the inline table had;
+`RESOLVED_FROM` adds the body's policy snapshot. No reader looks at an inline
+column. On 2026-10-03 every production row held both references and no inline
+value, so a row without references is not read at all. A reader written
+against `review_gate_decisions` directly reads NULL for every row. Filter a URL
+with `URL_MATCH`, which compares `url_id` and uses
+`idx_review_gate_decisions_url_id`; the resolved `url` has no index.
 
 `(task_id, url_id)` is unique, and a URL has one id, so it is unique exactly
 when `(task_id, url)` is. While both shapes exist each index covers only its

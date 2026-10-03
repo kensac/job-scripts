@@ -118,12 +118,12 @@ class ReviewGateDecision(Base):
         ),
         UniqueConstraint("task_id", "url", name="uq_review_gate_decisions_task_url"),
         Index("uq_review_gate_decisions_task_url_id", "task_id", "url_id", unique=True),
-        # The same job drawer read for reference-only rows (URL_MATCH).
+        # The job drawer read and every URL filter (URL_MATCH).
         Index("idx_review_gate_decisions_url_id", "url_id"),
         CheckConstraint("action IN ('skip','review')", name="ck_review_gate_decisions_action"),
-        # Zero scans in production as of 2026-10-03, kept anyway: a person's
-        # job drawer reads decisions by url, and without this the plan walks
-        # the whole (task_id, url) unique index. Measured in 7c0b33a7fd95.
+        # No reader filters on the inline url since every reader resolves
+        # url_id; this and uq_review_gate_decisions_task_url go with the
+        # inline columns in the contract migration.
         Index("idx_review_gate_decisions_url_created", "url", "created_at"),
         Index("idx_review_gate_decisions_created", "created_at"),
     )
@@ -132,7 +132,7 @@ class ReviewGateDecision(Base):
     id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
     task_id: Mapped[int] = mapped_column(BigInteger)
     # Inline columns are the legacy shape; url_id and body_id replace them.
-    # Readers resolve both through review_decision_storage.DECISIONS.
+    # Readers resolve only the references (review_decision_storage.DECISIONS).
     url: Mapped[str | None] = mapped_column(Text)
     url_id: Mapped[int | None] = mapped_column(BigInteger)
     body_id: Mapped[int | None] = mapped_column(BigInteger)

@@ -16,20 +16,28 @@ def decision(
     model="m",
     age=0,
 ):
+    from api import review_decision_storage, review_policy_storage
+
+    body = {
+        "key": 0,
+        "prompt_hash": prompt,
+        "stage": stage,
+        "mode": mode,
+        "action": action,
+        "title": "Engineer",
+        "policy_id": review_policy_storage.intern("{}"),
+        "evidence": {"planned_model": model, "transport": "batch"},
+    }
+    body_id = review_decision_storage.intern_bodies(
+        "SELECT * FROM jsonb_to_recordset(%(bodies)s::jsonb) AS s(key int,prompt_hash text,"
+        "stage text,mode text,action text,reason text,profile_id bigint,title text,"
+        "content_hash text,policy_id bigint,evidence jsonb)",
+        {"bodies": db.jsonb([body])},
+    )[0]
     return db.query_one(
-        "INSERT INTO review_gate_decisions(task_id,url,user_id,prompt_hash,stage,mode,action,title,policy,evidence,created_at) "
-        "VALUES(%s,%s,%s,%s,%s,%s,%s,'Engineer','{}',%s,now()-(%s * interval '1 day')) RETURNING id",
-        (
-            task,
-            url,
-            user,
-            prompt,
-            stage,
-            mode,
-            action,
-            db.jsonb({"planned_model": model, "transport": "batch"}),
-            age,
-        ),
+        "INSERT INTO review_gate_decisions(task_id,url_id,body_id,user_id,created_at) "
+        "VALUES(%s,%s,%s,%s,now()-(%s * interval '1 day')) RETURNING id",
+        (task, review_decision_storage.intern_urls([url])[url], body_id, user, age),
     )["id"]
 
 

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from psycopg.types.json import Jsonb
 
 from api import db
@@ -36,23 +34,3 @@ def intern(policy: Jsonb | str) -> int:
                 "Review policy digest does not identify its exact snapshot"
             )
         return row["id"]
-
-
-def resolve(row: dict[str, Any]) -> dict[str, Any]:
-    resolved = dict(row)
-    inline = resolved.pop("inline_policy")
-    policy_id = resolved.pop("policy_id")
-    snapshot_id = resolved.pop("snapshot_id")
-    snapshot = resolved.pop("snapshot_policy")
-    matches = resolved.pop("policy_matches")
-    if policy_id is not None:
-        if snapshot_id is None or snapshot is None:
-            raise PolicySnapshotUnavailable("Referenced review policy snapshot is unavailable")
-        if inline is not None and not matches:
-            raise PolicySnapshotUnavailable("Inline and referenced review policies disagree")
-        resolved["policy"] = snapshot
-    elif inline is not None:
-        resolved["policy"] = inline
-    else:
-        raise PolicySnapshotUnavailable("Review decision has no policy snapshot")
-    return resolved
