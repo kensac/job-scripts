@@ -1,39 +1,63 @@
-name: Test performance
-
+name: Instruction storage benchmark
 on:
   workflow_dispatch:
-
 permissions:
   contents: read
-
 jobs:
-  benchmark:
+  measure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        lane: [serial, profile, shard-0, shard-1, shard-2, shard-3, shard-4, shard-5, corpus]
+        variant: [baseline, candidate]
         repetition: [1, 2]
-        exclude:
-          - lane: profile
-            repetition: 2
-    uses: ./.github/workflows/test-run.yml
-    with:
-      lane: ${{ matrix.lane }}
-      repetition: ${{ matrix.repetition }}
-      shards: 6
-      revision: ${{ github.event.pull_request.head.sha || github.sha }}
-
-  compare:
-    if: always()
-    needs: benchmark
-    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/jobtracker_ci
+      TEST_DATABASE_URL: postgresql://ci:ci@localhost:5432/jobtracker_ci
+      JOBTRACKER_SERVICE_TOKEN: ci
+      PYTHONPATH: src
+      INSTRUCTION_BENCHMARK_ROLE: ${{ matrix.variant }}
+      INSTRUCTION_BENCHMARK_REPETITION: ${{ matrix.repetition }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Start disposable Postgres
+        run: |
+          nohup docker run --rm -d --name pg -p 5432:5432 \
+            -e POSTGRES_USER=ci -e POSTGRES_PASSWORD=ci -e POSTGRES_DB=jobtracker_ci \
+            pgvector/pgvector:pg18-trixie@sha256:78bf48b801e792f99e3ac62b5036fd3876e9be48afda16c1e331af1c75ceb2ff >/dev/null 2>&1 &
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+          ref: ${{ github.sha }}
+          path: harness
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          pattern: timings-*
-          path: measurements
-      - name: Verify coverage and compare timings
-        run: python tools/test_performance.py measurements --repetitions=2 --shards=6 | tee "$GITHUB_STEP_SUMMARY"
+          ref: ${{ matrix.variant == 'baseline' && 'f38d7cea271a807bf52c2b021a500f9594abf445' || github.sha }}
+          path: subject
+      - name: Install identical harness in each revision
+        run: cp harness/tests/test_instruction_hot_path_benchmark.py subject/tests/test_instruction_hot_path_benchmark.py
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7
+        with:
+          enable-cache: true
+      - run: uv sync --frozen
+        working-directory: subject
+      - name: Wait for Postgres
+        run: |
+          for _ in $(seq 1 90); do
+            if docker exec pg pg_isready -h 127.0.0.1 -U ci >/dev/null 2>&1; then exit 0; fi
+            sleep 1
+          done
+          docker logs pg 2>&1 | tail -50 || true
+          exit 1
+      - name: Measure bounded workloads
+        working-directory: subject
+        run: |
+          mkdir -p results
+          export TEST_REVISION=$(git rev-parse HEAD)
+          uv run python -m pytest -q tests/test_instruction_hot_path_benchmark.py --junitxml=results/junit.xml
+      - name: Upload measurements
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: instruction-${{ matrix.variant }}-${{ matrix.repetition }}
+          path: subject/results/
+          if-no-files-found: error

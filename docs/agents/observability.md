@@ -744,7 +744,9 @@ text; a separate `verify` pass reports unreferenced values. Only after an
 independent backup and fleet-wide compatible readers, `compact` with
 `--backup-complete --readers-compatible` removes verified inline duplicates.
 `restore` fills inline values again and keeps references. Each bounded chunk is
-atomic, locks rows in ID order for writes, and leaves the cursor before failed
-work. Keep dictionary rows permanently while referenced. Before reverting to
+atomic, locks result rows and referenced dictionary content in ID order for
+writes, and leaves the cursor before failed work. The service also enforces the
+backup and compatible-reader confirmations, so direct calls cannot bypass the
+CLI checks. Keep dictionary rows permanently while referenced. Before reverting to
 old readers, restore and verify inline text. Logical bytes removed do not prove
 that PostgreSQL relation files or filesystem use decreased.
