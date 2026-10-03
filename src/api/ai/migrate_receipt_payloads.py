@@ -17,11 +17,26 @@ def main() -> int:
     parser.add_argument(
         "--backup-complete", action="store_true", help="confirm independent DB copy finished"
     )
+    parser.add_argument("--verify-group-size", type=int)
+    parser.add_argument("--verify-workers", type=int)
+    parser.add_argument(
+        "--verify-byte-budget",
+        type=int,
+        help="maximum combined serialized receipt and declared object bytes per group",
+    )
     args = parser.parse_args()
     if args.limit <= 0:
         parser.error("--limit must be positive")
     if args.mode == "compact" and not args.backup_complete:
         parser.error("compaction requires confirmation with --backup-complete")
+    grouped = (args.verify_group_size, args.verify_workers, args.verify_byte_budget)
+    if any(value is not None for value in grouped):
+        if args.mode != "verify" or any(value is None or value <= 0 for value in grouped):
+            parser.error(
+                "grouped verification requires verify mode and all three positive verification bounds"
+            )
+        if args.verify_workers > args.verify_group_size:
+            parser.error("verification workers cannot exceed group size")
     # Set connection defaults BEFORE importing the pool; no bulk read or
     # stalled client may keep a production transaction open indefinitely.
     os.environ["PGOPTIONS"] = (
@@ -38,28 +53,50 @@ def main() -> int:
     after = tuple(args.after) if args.after else None
     counts: Counter[str] = Counter()
     logical_bytes = 0
+    stop_reason = None
     try:
         store = PayloadStore.from_env()
-        for _ in range(args.limit):
-            # One payload at a time bounds memory independently of the count.
-            rows = candidates(after=after, limit=1, mode=mode)
-            if not rows:
-                break
-            source = rows[0]
-            try:
-                outcome = migrate(source, store, mode=mode)
-            except PayloadUnavailable:
-                counts["unavailable"] += 1
-                # Stop at the failed row. Resuming from the returned cursor
-                # retries it rather than silently skipping missing history.
-                break
-            counts[outcome] += 1
-            response = source["response"]
-            if outcome == "copied":
-                logical_bytes += len(encode_payload(response["embedding_vectors"]))
-            elif "embedding_vectors_ref" in response and outcome != "changed":
-                logical_bytes += response["embedding_vectors_ref"]["size"]
-            after = (source["provider_batch_id"], source["custom_id"])
+        if args.verify_group_size is not None:
+            from api.ai.receipt_verification import verify
+
+            result = verify(
+                store,
+                after=after,
+                limit=args.limit,
+                group_size=args.verify_group_size,
+                workers=args.verify_workers,
+                byte_budget=args.verify_byte_budget,
+            )
+            counts, logical_bytes, after = (
+                result.counts,
+                result.logical_bytes_verified,
+                result.after,
+            )
+            stop_reason = result.stop_reason
+        else:
+            for _ in range(args.limit):
+                # One payload at a time bounds memory independently of the count.
+                rows = candidates(after=after, limit=1, mode=mode)
+                if not rows:
+                    break
+                source = rows[0]
+                try:
+                    outcome = migrate(source, store, mode=mode)
+                except PayloadUnavailable:
+                    counts["unavailable"] += 1
+                    # Stop at the failed row. Resuming from the returned cursor
+                    # retries it rather than silently skipping missing history.
+                    break
+                counts[outcome] += 1
+                if outcome in ("changed", "ineligible"):
+                    stop_reason = outcome
+                    break
+                response = source["response"]
+                if outcome == "copied":
+                    logical_bytes += len(encode_payload(response["embedding_vectors"]))
+                elif "embedding_vectors_ref" in response and outcome != "changed":
+                    logical_bytes += response["embedding_vectors_ref"]["size"]
+                after = (source["provider_batch_id"], source["custom_id"])
     finally:
         pool.close()
     print(
@@ -69,10 +106,11 @@ def main() -> int:
                 "counts": dict(counts),
                 "logical_bytes_verified": logical_bytes,
                 "after": after,
+                **({"stop_reason": stop_reason} if stop_reason else {}),
             }
         )
     )
-    return 1 if counts["unavailable"] else 0
+    return 1 if counts["unavailable"] or stop_reason else 0
 
 
 if __name__ == "__main__":
