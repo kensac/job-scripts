@@ -155,8 +155,9 @@ def test_partition_500_decisions_uses_bulk_admission(monkeypatch, request, no_pa
     assert bulk_rows == [500]
     # The disabled policy has bounded reads plus one bulk write, not
     # one database helper call per posting. Network round trips differ from
-    # helper calls, so this deliberately reports only the latter.
-    assert calls == {"query": 4, "query_one": 2, "executemany": 1, "execute": 1}
+    # helper calls, so this deliberately reports only the latter. Policy
+    # interning adds one conflict-safe insert and one exact-snapshot read.
+    assert calls == {"query": 4, "query_one": 3, "executemany": 1, "execute": 2}
     calls.clear()
     started = time.perf_counter()
     replay = review_gate.partition(

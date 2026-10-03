@@ -204,11 +204,11 @@ def test_reference_only_and_legacy_rows_preserve_admin_and_personal_shapes(
         db.execute("UPDATE review_gate_decisions SET policy=NULL WHERE id=%s", (row["id"],))
         assert review_gate_records.existing(task)[row["url"]]["policy"] == row["policy"]
         actual = review_gate_reads._read_decisions(
-            "TRUE", {}, pagination.Page.from_params(1, 25), {}, personal=False
+            "TRUE", {}, pagination.Page.from_params(1, 25, maximum=100), {}, personal=False
         )
         assert actual.model_dump(mode="json") == baseline
         personal = review_gate_reads._read_decisions(
-            "TRUE", {}, pagination.Page.from_params(1, 25), {}, personal=True
+            "TRUE", {}, pagination.Page.from_params(1, 25, maximum=100), {}, personal=True
         )
         assert personal.rows[0].policy == {} and personal.rows[0].evidence == {}
         raise Rollback
