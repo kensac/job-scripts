@@ -45,9 +45,9 @@ def hydrate(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if ids:
         with connection() as conn:
             values = {
-                row["id"]: row["instructions"]
+                row["id"]: row
                 for row in conn.execute(
-                    "SELECT id,instructions FROM ai_instruction_texts WHERE id=ANY(%s)",
+                    "SELECT id,instructions,sha256 FROM ai_instruction_texts WHERE id=ANY(%s)",
                     (list(ids),),
                 ).fetchall()
             }
@@ -56,5 +56,11 @@ def hydrate(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if row.get("instructions") is None and reference is not None:
             if reference not in values:
                 raise InstructionUnavailable("Referenced instructions are unavailable")
-            row["instructions"] = values[reference]
+            stored = values[reference]
+            if (
+                hashlib.sha256(stored["instructions"].encode("utf-8")).hexdigest()
+                != stored["sha256"]
+            ):
+                raise InstructionUnavailable("Referenced instruction integrity check failed")
+            row["instructions"] = stored["instructions"]
     return result

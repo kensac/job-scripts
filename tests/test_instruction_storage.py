@@ -147,3 +147,24 @@ def test_compaction_requires_explicit_gates(monkeypatch):
     with pytest.raises(SystemExit) as error:
         main()
     assert error.value.code == 2
+
+
+def test_dictionary_corruption_is_explicit():
+    import pytest
+
+    from core.query_instructions import InstructionUnavailable
+
+    query_id = store.add_ai_result(
+        "https://example.test/corrupt",
+        "passed",
+        check_type="custom",
+        prompt_hash="key",
+        instructions="original",
+    )
+    db.execute("UPDATE ai_queries SET instructions=NULL WHERE id=%s", (query_id,))
+    db.execute(
+        "UPDATE ai_instruction_texts SET instructions='corrupted' WHERE id=(SELECT instructions_id FROM ai_queries WHERE id=%s)",
+        (query_id,),
+    )
+    with pytest.raises(InstructionUnavailable):
+        store.get_custom_result("https://example.test/corrupt", "key")
