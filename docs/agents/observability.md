@@ -691,7 +691,12 @@ After deploying compatible readers to the whole fleet, run bounded operations
 with `python -m api.ai.migrate_snapshot_payloads MODE --limit COUNT`. Modes are
 `copy`, `verify`, `compact`, and `restore`; resume with the reported
 `--after TASK_ID CUSTOM_ID`. Each invocation processes at most COUNT snapshots,
-one object at a time. Compaction requires `--backup-complete`, confirmation that
+in pages selected by `--chunk-size` (default 100). `--workers` controls concurrent
+verified object operations (default 1). Object I/O finishes before a short
+transaction locks tasks and requests in key order and performs one conditional
+set-based update. Each committed chunk prints its cursor. If an object fails,
+only the preceding ordered prefix commits; later successful uploads remain
+unreferenced until retry. Compaction requires `--backup-complete`, confirmation that
 the independent database copy has finished. Start with copy and verification,
 then a bounded compaction canary. Keep the emitted counters and cursor. An
 unavailable object stops before advancing past its row; restore the object or

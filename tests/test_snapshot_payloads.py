@@ -204,8 +204,11 @@ def test_profile_historical_proof_hydrates_outside_transaction(f, objects):
 
 
 def test_cli_requires_backup_and_stops_before_unavailable_cursor(f, objects, monkeypatch, capsys):
+    from types import SimpleNamespace
+
     from api.ai import migrate_snapshot_payloads
 
+    monkeypatch.setattr(migrate_snapshot_payloads, "os", SimpleNamespace(environ={}))
     monkeypatch.setattr("sys.argv", ["migration", "compact", "--limit", "1"])
     with pytest.raises(SystemExit) as exit_code:
         migrate_snapshot_payloads.main()
@@ -219,6 +222,105 @@ def test_cli_requires_backup_and_stops_before_unavailable_cursor(f, objects, mon
     assert migrate_snapshot_payloads.main() == 1
     import json
 
-    report = json.loads(capsys.readouterr().out)
+    report = json.loads(capsys.readouterr().out.splitlines()[-1])
     assert report["after"] is None
     assert report["counts"] == {"unavailable": 1}
+
+
+def test_bulk_failure_commits_only_prefix_and_retry_closes_gap(f, objects):
+    tasks = [request(f)[0] for _ in range(4)]
+    rows = [row(tid) for tid in tasks]
+    original = objects.put_verified
+    failed = tasks[1]
+
+    def put(value):
+        if value["context"]["generation"] == failed:
+            raise PayloadUnavailable("missing")
+        return original(value)
+
+    for tid in tasks:
+        db.execute(
+            "UPDATE batch_requests SET snapshot=jsonb_set(snapshot,'{context,generation}',%s) WHERE task_id=%s",
+            (db.jsonb(tid), tid),
+        )
+    rows = [row(tid) for tid in tasks]
+    objects.put_verified = put
+    assert snapshot_payloads.migrate_many(rows, objects, mode="copy", workers=3) == [
+        "copied",
+        "unavailable",
+    ]
+    assert row(tasks[0])["snapshot_ref"] is not None
+    assert all(row(tid)["snapshot_ref"] is None for tid in tasks[1:])
+    objects.put_verified = original
+    assert (
+        snapshot_payloads.migrate_many(rows[1:], objects, mode="copy", workers=3) == ["copied"] * 3
+    )
+
+
+@pytest.mark.parametrize("size", [100, 1000])
+def test_bulk_workload_statement_count_and_concurrency(f, monkeypatch, capsys, size):
+    import json
+    import threading
+    import time
+
+    from core.pool import in_transaction
+
+    task_id = f.make_task("verify_new", {}, status="done")
+    specs = [BatchSpec(str(index), "rules", "page " + str(index)) for index in range(size)]
+    batch_results.snapshot_specs(task_id, specs)
+
+    class MeasuredClient(ObjectClient):
+        def __init__(self):
+            super().__init__()
+            self.lock = threading.Lock()
+            self.active = 0
+            self.peak = 0
+
+        def get_object(self, **kwargs):
+            assert not in_transaction()
+            with self.lock:
+                self.active += 1
+                self.peak = max(self.peak, self.active)
+            try:
+                # Simulated I/O releases the interpreter to exercise the pool;
+                # elapsed time is reported, never used as a performance gate.
+                time.sleep(0.001)
+                return super().get_object(**kwargs)
+            finally:
+                with self.lock:
+                    self.active -= 1
+
+    store = PayloadStore(MeasuredClient(), "test-payloads")
+    calls = []
+    for name in ("query", "execute", "execute_count"):
+        original = getattr(db, name)
+
+        def counted(*args, _original=original, **kwargs):
+            calls.append(args[0])
+            return _original(*args, **kwargs)
+
+        monkeypatch.setattr(db, name, counted)
+    started = time.monotonic()
+    after = None
+    for _ in range(size // 100):
+        sources = snapshot_payloads.candidates(after=after, limit=100, mode="copy")
+        assert (
+            snapshot_payloads.migrate_many(sources, store, mode="copy", workers=4)
+            == ["copied"] * 100
+        )
+        after = (sources[-1]["task_id"], sources[-1]["custom_id"])
+    assert len(calls) == 10 * (size // 100)
+    assert 1 < store.client.peak <= 4
+    with capsys.disabled():
+        print(
+            json.dumps(
+                {
+                    "snapshot_workload": size,
+                    "chunk_size": 100,
+                    "workers": 4,
+                    "db_helper_statements_excluding_transaction_control": len(calls),
+                    "observed_object_concurrency": store.client.peak,
+                    "elapsed_seconds": time.monotonic() - started,
+                }
+            )
+        )

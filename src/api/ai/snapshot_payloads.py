@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
 from typing import Any, Literal
 
@@ -36,36 +37,51 @@ def candidates(*, after: tuple[int, str] | None, limit: int, mode: Mode) -> list
     )
 
 
-def _current(source: dict[str, Any], *, lock: bool = False) -> bool:
-    task = db.query_one(
-        "SELECT kind,status FROM tasks WHERE id=%s" + (" FOR UPDATE" if lock else ""),
-        (source["task_id"],),
-    )
-    if not task or task["status"] != "done" or task["kind"] == "classify_job_profiles":
-        return False
-    row = db.query_one(
-        "SELECT * FROM batch_requests WHERE task_id=%s AND custom_id=%s"
-        + (" FOR UPDATE" if lock else ""),
-        (source["task_id"], source["custom_id"]),
-    )
-    return row == source and not db.query_one(
-        "SELECT 1 FROM batch_result_receipts WHERE task_id=%s AND consumed_at IS NULL LIMIT 1",
-        (source["task_id"],),
-    )
+def _current_sources(sources: list[dict[str, Any]], *, lock: bool = False) -> set[tuple[int, str]]:
+    ids = sorted({source["task_id"] for source in sources})
+    tasks = {
+        task["id"]: task
+        for task in db.query(
+            "SELECT id,kind,status FROM tasks WHERE id=ANY(%s) ORDER BY id"
+            + (" FOR UPDATE" if lock else ""),
+            (ids,),
+        )
+    }
+    keys = [{"task_id": source["task_id"], "custom_id": source["custom_id"]} for source in sources]
+    rows = {
+        (row["task_id"], row["custom_id"]): row
+        for row in db.query(
+            "SELECT b.* FROM batch_requests b JOIN jsonb_to_recordset(%s) "
+            "AS k(task_id bigint,custom_id text) USING(task_id,custom_id) "
+            "ORDER BY b.task_id,b.custom_id" + (" FOR UPDATE OF b" if lock else ""),
+            (db.jsonb(keys),),
+        )
+    }
+    pending = {
+        row["task_id"]
+        for row in db.query(
+            "SELECT DISTINCT task_id FROM batch_result_receipts "
+            "WHERE task_id=ANY(%s) AND consumed_at IS NULL",
+            (ids,),
+        )
+    }
+    return {
+        (source["task_id"], source["custom_id"])
+        for source in sources
+        if source["task_id"] in tasks
+        and tasks[source["task_id"]]["status"] == "done"
+        and tasks[source["task_id"]]["kind"] != "classify_job_profiles"
+        and source["task_id"] not in pending
+        and rows.get((source["task_id"], source["custom_id"])) == source
+    }
 
 
-def migrate(source: dict[str, Any], store: PayloadStore, *, mode: Mode) -> str:
-    if in_transaction():
-        raise RuntimeError("Snapshot migration cannot run inside a database transaction")
-    if mode not in ("copy", "compact", "restore", "verify"):
-        raise ValueError("unsupported migration mode")
-    if not _current(source):
-        return "changed"
+def _prepare(source: dict[str, Any], store: PayloadStore, mode: Mode) -> tuple[str, Any, Any]:
     inline, reference = source["snapshot"], source["snapshot_ref"]
     updated, updated_ref = inline, reference
     if mode == "copy" and reference is None:
         if inline is None:
-            return "ineligible"
+            return "ineligible", inline, reference
         request_snapshots.resolve(source, store)
         updated_ref = asdict(store.put_verified(inline))
         outcome = "copied"
@@ -83,27 +99,83 @@ def migrate(source: dict[str, Any], store: PayloadStore, *, mode: Mode) -> str:
         elif mode == "restore":
             updated, updated_ref = restored, None
             outcome = "restored"
-    if mode == "verify":
-        return "verified" if _current(source) else "changed"
-    with db.transaction():
-        db.execute("SET LOCAL lock_timeout='2s'")
-        db.execute("SET LOCAL statement_timeout='5s'")
-        if not _current(source, lock=True):
-            return "changed"
-        if (updated, updated_ref) != (inline, reference):
-            changed = db.execute_count(
-                "UPDATE batch_requests SET snapshot=%s,snapshot_ref=%s "
-                "WHERE task_id=%s AND custom_id=%s "
-                "AND snapshot IS NOT DISTINCT FROM %s AND snapshot_ref IS NOT DISTINCT FROM %s",
-                (
-                    db.jsonb(updated) if updated is not None else None,
-                    db.jsonb(updated_ref) if updated_ref is not None else None,
-                    source["task_id"],
-                    source["custom_id"],
-                    db.jsonb(inline) if inline is not None else None,
-                    db.jsonb(reference) if reference is not None else None,
-                ),
-            )
-            if changed != 1:
-                return "changed"
+    return outcome, updated, updated_ref
+
+
+def migrate_many(
+    sources: list[dict[str, Any]], store: PayloadStore, *, mode: Mode, workers: int = 1
+) -> list[str]:
+    """Commit an ordered prefix, stopping before the first unavailable object.
+
+    A later upload can finish before an earlier failure is known. Those objects
+    remain unreferenced and safe to reuse when the failed cursor is retried.
+    """
+    if in_transaction():
+        raise RuntimeError("Snapshot migration cannot run inside a database transaction")
+    if mode not in ("copy", "compact", "restore", "verify"):
+        raise ValueError("unsupported migration mode")
+    if workers <= 0:
+        raise ValueError("workers must be positive")
+    if not sources:
+        return []
+    current = _current_sources(sources)
+
+    def prepare(source: dict[str, Any]) -> tuple[str, Any, Any]:
+        if (source["task_id"], source["custom_id"]) not in current:
+            return "changed", None, None
+        try:
+            return _prepare(source, store, mode)
+        except PayloadUnavailable:
+            return "unavailable", None, None
+
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        prepared = list(executor.map(prepare, sources))
+    stop = next((i for i, item in enumerate(prepared) if item[0] == "unavailable"), len(prepared))
+    prefix = sources[:stop]
+    outcomes = [item[0] for item in prepared[:stop]]
+    if prefix:
+        with db.transaction():
+            db.execute("SET LOCAL lock_timeout='2s'")
+            db.execute("SET LOCAL statement_timeout='5s'")
+            current = _current_sources(prefix, lock=mode != "verify")
+            updates = []
+            for index, source in enumerate(prefix):
+                if (source["task_id"], source["custom_id"]) not in current:
+                    outcomes[index] = "changed"
+                    continue
+                outcome, snapshot, reference = prepared[index]
+                if (
+                    mode != "verify"
+                    and outcome not in ("changed", "ineligible")
+                    and (snapshot, reference) != (source["snapshot"], source["snapshot_ref"])
+                ):
+                    updates.append(
+                        {
+                            "task_id": source["task_id"],
+                            "custom_id": source["custom_id"],
+                            "snapshot": snapshot,
+                            "snapshot_ref": reference,
+                            "original": source["snapshot"],
+                            "original_ref": source["snapshot_ref"],
+                        }
+                    )
+            if updates:
+                changed = db.execute_count(
+                    "UPDATE batch_requests b SET snapshot=u.snapshot,snapshot_ref=u.snapshot_ref "
+                    "FROM jsonb_to_recordset(%s) AS u(task_id bigint,custom_id text,"
+                    "snapshot jsonb,snapshot_ref jsonb,original jsonb,original_ref jsonb) "
+                    "WHERE b.task_id=u.task_id AND b.custom_id=u.custom_id "
+                    "AND b.snapshot IS NOT DISTINCT FROM u.original "
+                    "AND b.snapshot_ref IS NOT DISTINCT FROM u.original_ref",
+                    (db.jsonb(updates),),
+                )
+                if changed != len(updates):
+                    raise RuntimeError("Snapshot sources changed while locked")
+    return outcomes + (["unavailable"] if stop < len(sources) else [])
+
+
+def migrate(source: dict[str, Any], store: PayloadStore, *, mode: Mode) -> str:
+    outcome = migrate_many([source], store, mode=mode)[0]
+    if outcome == "unavailable":
+        raise PayloadUnavailable("Snapshot object is unavailable or invalid")
     return outcome
