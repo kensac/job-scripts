@@ -3,9 +3,11 @@ from __future__ import annotations
 import dataclasses
 from collections.abc import Iterator
 from contextlib import contextmanager
+from typing import Any
 
 from api import db
 from core.batch import BatchResult, BatchSpec
+from core.payload_objects import PayloadRef, PayloadStore
 
 
 def snapshot_specs(task_id: int, specs: list[BatchSpec]) -> list[BatchSpec]:
@@ -66,6 +68,19 @@ def checkpoint(task_id: int, results: list[BatchResult], unfinished: list[str]) 
         )
 
 
+def response_payload(response: dict[str, Any], store: PayloadStore | None = None) -> dict[str, Any]:
+    payload = dict(response)
+    external = "embedding_vectors_ref" in payload
+    reference = payload.pop("embedding_vectors_ref", None)
+    if external and payload.get("embedding_vectors") is None:
+        # An unavailable required input raises before consumption or accounting.
+        # Consumed receipts are never hydrated by the replay path.
+        payload["embedding_vectors"] = (store or PayloadStore.from_env()).get(
+            PayloadRef.parse(reference)
+        )
+    return payload
+
+
 def unconsumed(task_id: int) -> list[BatchResult]:
     return [
         BatchResult(
@@ -73,7 +88,7 @@ def unconsumed(task_id: int) -> list[BatchResult]:
             batch_id=row["provider_batch_id"],
             model=row["model"],
             request=BatchSpec(**row["snapshot"]) if row["snapshot"] is not None else None,
-            **row["response"],
+            **response_payload(row["response"]),
         )
         for row in db.query(
             "SELECT r.*, q.snapshot FROM batch_result_receipts r LEFT JOIN batch_requests q "
