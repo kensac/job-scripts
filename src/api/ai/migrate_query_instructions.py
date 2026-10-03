@@ -9,12 +9,24 @@ import os
 from typing import Any
 
 
-def migrate_chunk(*, mode: str, after: int, through: int, limit: int) -> dict[str, Any]:
+def migrate_chunk(
+    *,
+    mode: str,
+    after: int,
+    through: int,
+    limit: int,
+    backup_complete: bool = False,
+    readers_compatible: bool = False,
+) -> dict[str, Any]:
     from core.pool import connection, in_transaction
     from core.query_instructions import InstructionUnavailable, intern
 
     if mode not in ("copy", "verify", "compact", "restore"):
         raise ValueError("Invalid instruction migration mode")
+    if mode == "compact" and not (backup_complete and readers_compatible):
+        raise InstructionUnavailable(
+            "Compaction requires backup and compatible-reader confirmations"
+        )
     if after < 0 or through < after or limit <= 0:
         raise ValueError("Require 0 <= after <= through and positive limit")
     if in_transaction():
@@ -31,6 +43,29 @@ def migrate_chunk(*, mode: str, after: int, through: int, limit: int) -> dict[st
             + (" FOR UPDATE OF q" if mode != "verify" else ""),
             (after, through, limit),
         ).fetchall()
+        if mode != "verify":
+            # A foreign key protects identity, not text. Hold content stable from
+            # exact verification through inline removal or restoration.
+            reference_ids = sorted(
+                {r["instructions_id"] for r in rows if r["instructions_id"] is not None}
+            )
+            locked = (
+                {
+                    row["id"]: row
+                    for row in conn.execute(
+                        "SELECT id,instructions,sha256 FROM ai_instruction_texts "
+                        "WHERE id=ANY(%s) ORDER BY id FOR SHARE",
+                        (reference_ids,),
+                    ).fetchall()
+                }
+                if reference_ids
+                else {}
+            )
+            for row in rows:
+                if row["instructions_id"] is not None:
+                    shared = locked.get(row["instructions_id"])
+                    row["shared"] = shared["instructions"] if shared else None
+                    row["sha256"] = shared["sha256"] if shared else None
         counts = {
             "scanned": len(rows),
             "copied": 0,
@@ -122,7 +157,12 @@ def main() -> int:
     try:
         try:
             result = migrate_chunk(
-                mode=args.mode, after=args.after, through=args.through, limit=args.limit
+                mode=args.mode,
+                after=args.after,
+                through=args.through,
+                limit=args.limit,
+                backup_complete=args.backup_complete,
+                readers_compatible=args.readers_compatible,
             )
         except (Error, InstructionUnavailable):
             print(json.dumps({"error": "instruction_migration_failed", "after": args.after}))

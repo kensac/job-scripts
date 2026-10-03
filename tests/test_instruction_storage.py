@@ -63,7 +63,17 @@ def test_copy_compact_restore_preserves_metadata_cache_and_admin_response(client
     assert copied["copied"] == 1
     assert migrate_chunk(mode="copy", after=0, through=query_id, limit=1)["copied"] == 0
     assert migrate_chunk(mode="verify", after=0, through=query_id, limit=1)["verified"] == 1
-    assert migrate_chunk(mode="compact", after=0, through=query_id, limit=1)["compacted"] == 1
+    assert (
+        migrate_chunk(
+            mode="compact",
+            after=0,
+            through=query_id,
+            limit=1,
+            backup_complete=True,
+            readers_compatible=True,
+        )["compacted"]
+        == 1
+    )
     compacted = db.query_one("SELECT * FROM ai_queries WHERE id=%s", (query_id,))
     assert compacted["instructions"] is None
     assert {k: v for k, v in compacted.items() if k not in ("instructions", "instructions_id")} == {
@@ -217,4 +227,11 @@ def test_compaction_holds_dictionary_content_lock_through_validation(monkeypatch
         return original_hash(value)
 
     monkeypatch.setattr(migration.hashlib, "sha256", inspect_lock)
-    migration.migrate_chunk(mode="compact", after=0, through=query_id, limit=1)
+    migration.migrate_chunk(
+        mode="compact",
+        after=0,
+        through=query_id,
+        limit=1,
+        backup_complete=True,
+        readers_compatible=True,
+    )
