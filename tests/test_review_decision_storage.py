@@ -1,54 +1,10 @@
-"""Every reader returns the same decision whatever the inline columns hold.
-
-Readers resolve only url_id and body_id. The copied shape (inline values kept
-beside the references, as the #751 writer and the copy operator left them) is
-built here with raw SQL, so a reader and the operator cannot agree with each
-other by sharing a mistake.
-"""
+"""Every read surface resolves a decision through its URL and body references."""
 
 import pytest
 
 from api import db, review_gate, review_gate_reads, review_gate_records
 from tests.test_review_gate import configure
 from tests.test_review_gate_reads import outcome
-
-INLINE = (
-    "url",
-    "prompt_hash",
-    "stage",
-    "mode",
-    "action",
-    "reason",
-    "profile_id",
-    "title",
-    "content_hash",
-    "evidence",
-)
-
-
-def copied(ids=None):
-    """Write every inline column back from the references, keeping the references."""
-    db.execute(
-        "UPDATE review_gate_decisions d SET url=u.url,"
-        + ",".join(f"{column}=b.{column}" for column in INLINE if column != "url")
-        + ",policy_id=b.policy_id,policy=p.policy "
-        "FROM review_gate_urls u,review_gate_decision_bodies b,review_gate_policies p "
-        "WHERE u.id=d.url_id AND b.id=d.body_id AND p.id=b.policy_id "
-        "AND (%(all)s OR d.id=ANY(%(ids)s::bigint[]))",
-        {"ids": ids, "all": ids is None},
-    )
-
-
-def inline(ids=None):
-    """Rewrite admitted rows into the legacy all-inline shape, without references."""
-    db.execute(
-        "UPDATE review_gate_decisions d SET url=u.url,"
-        + ",".join(f"{column}=b.{column}" for column in INLINE if column != "url")
-        + ",policy_id=b.policy_id,url_id=NULL,body_id=NULL "
-        "FROM review_gate_urls u,review_gate_decision_bodies b "
-        "WHERE u.id=d.url_id AND b.id=d.body_id AND (%(all)s OR d.id=ANY(%(ids)s::bigint[]))",
-        {"ids": ids, "all": ids is None},
-    )
 
 
 def admitted(f):
@@ -140,48 +96,31 @@ def baseline(f, client, admin_headers, user_headers, owned_job):
     return tasks, jobs, contents, job_id, before
 
 
-def test_copied_rows_read_exactly_like_reference_only_rows(
+def test_every_read_surface_resolves_the_references(
     f, client, admin_headers, user_headers, owned_job
 ):
     tasks, jobs, contents, job_id, before = baseline(
         f, client, admin_headers, user_headers, owned_job
     )
-    first = db.query_one("SELECT min(id) AS id FROM review_gate_decisions")["id"]
-    copied([first])
-    assert observed(client, admin_headers, user_headers, tasks, jobs, contents, job_id) == before
-    copied()
-    assert db.query_one("SELECT count(*) n FROM review_gate_decisions WHERE url IS NULL")["n"] == 0
-    assert observed(client, admin_headers, user_headers, tasks, jobs, contents, job_id) == before
-
-
-def test_no_reader_looks_at_the_inline_columns(f, client, admin_headers, user_headers, owned_job):
-    tasks, jobs, contents, job_id, before = baseline(
-        f, client, admin_headers, user_headers, owned_job
-    )
-    copied()
-    # Every inline value now disagrees with its reference.
-    db.execute(
-        "UPDATE review_gate_decisions SET url='https://example.test/inline/'||id,title='Inline',"
-        "prompt_hash='inline',stage='inline',mode='inline',action='skip',reason='inline',"
-        "profile_id=-1,content_hash='inline',evidence='{}',policy='{\"inline\":true}'"
-    )
-    assert observed(client, admin_headers, user_headers, tasks, jobs, contents, job_id) == before
-    # A URL only an inline column holds matches nothing.
-    inline_url = db.query_one("SELECT url FROM review_gate_decisions LIMIT 1")["url"]
+    # A URL no decision references matches nothing.
     response = client.get(
-        "/v1/admin/review-gates/decisions", params={"url": inline_url}, headers=admin_headers
+        "/v1/admin/review-gates/decisions",
+        params={"url": "https://example.test/unrecorded"},
+        headers=admin_headers,
     )
     assert response.json()["total"] == 0
+    assert observed(client, admin_headers, user_headers, tasks, jobs, contents, job_id) == before
 
 
-def test_a_row_must_keep_one_complete_shape(f):
+def test_a_row_cannot_lose_a_reference(f):
     _, tasks, _, _ = admitted(f)
-    from psycopg.errors import CheckViolation
+    from psycopg.errors import NotNullViolation
 
-    with pytest.raises(CheckViolation):
-        db.execute("UPDATE review_gate_decisions SET body_id=NULL WHERE task_id=%s", (tasks[0],))
-    with pytest.raises(CheckViolation):
-        db.execute("UPDATE review_gate_decisions SET url_id=NULL WHERE task_id=%s", (tasks[0],))
+    for column in ("url_id", "body_id"):
+        with pytest.raises(NotNullViolation):
+            db.execute(
+                f"UPDATE review_gate_decisions SET {column}=NULL WHERE task_id=%s", (tasks[0],)
+            )
 
 
 def test_task_url_uniqueness_holds_for_reference_only_rows(f):

@@ -102,19 +102,17 @@ def test_admission_failure_rolls_back_policy_and_decisions(f, monkeypatch):
     assert db.query_one("SELECT count(*) n FROM review_gate_policies")["n"] == 0
 
 
-def test_inline_policy_never_replaces_the_snapshot(f, client, admin_headers):
+def test_admin_and_personal_reads_take_the_policy_from_the_snapshot(f, client, admin_headers):
     from api import pagination, review_gate_reads
 
     task, _, row = admission(f)
     baseline = client.get("/v1/admin/review-gates/decisions", headers=admin_headers).json()
-    assert review_gate_records.existing(task)[row["url"]]["policy"] == baseline["rows"][0]["policy"]
+    snapshot = db.query_one(
+        "SELECT policy FROM review_gate_policies WHERE id=%s", (row["policy_id"],)
+    )["policy"]
+    assert baseline["rows"][0]["policy"] == snapshot
+    assert review_gate_records.existing(task)[row["url"]]["policy"] == snapshot
     personal = review_gate_reads.read_decisions(
         "TRUE", {}, pagination.Page.from_params(1, 25, maximum=100), {}, personal=True
     )
     assert personal.rows[0].policy == {} and personal.rows[0].evidence == {}
-    db.execute(
-        "UPDATE review_gate_decisions SET policy='{\"inline\":true}',policy_id=%s WHERE id=%s",
-        (row["policy_id"], row["id"]),
-    )
-    assert client.get("/v1/admin/review-gates/decisions", headers=admin_headers).json() == baseline
-    assert review_gate_records.existing(task)[row["url"]]["policy"] == baseline["rows"][0]["policy"]
