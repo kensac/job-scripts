@@ -4,7 +4,7 @@ import datetime
 import logging
 import random
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, LiteralString
 
 from psycopg import errors
 from psycopg.types.json import Jsonb
@@ -169,6 +169,83 @@ def _upsert_batch(batch: list[tuple], retries: int = 3) -> None:
             time.sleep(delay)
 
 
+# Whether the value an incoming row {e} carries for a field equals what the
+# stored row {l} holds, in either shape (core.listing_payloads). A digest is
+# trusted only where it is written with its reference, so an inline value is
+# compared as itself: no writer of an inline value keeps a digest beside it.
+_KEPT: dict[str, LiteralString] = {
+    "description": (
+        "({e}.description_sha256 = {l}.description_sha256"
+        # Empty: the listing did not carry the text, and keeps the stored one.
+        " OR ({e}.description_sha256 IS NULL AND {e}.description = '')"
+        " OR ({e}.description_sha256 IS NULL AND {l}.description_sha256 IS NULL"
+        " AND {e}.description = {l}.description))"
+    ),
+    "raw": (
+        "({e}.raw_sha256 = {l}.raw_sha256"
+        " OR ({e}.raw_sha256 IS NULL AND {l}.raw_sha256 IS NULL AND {e}.raw = {l}.raw))"
+    ),
+}
+
+
+def _kept(field: str, incoming: LiteralString, stored: LiteralString) -> LiteralString:
+    return _KEPT[field].format(e=incoming, l=stored)
+
+
+def _set_payload(field: LiteralString) -> LiteralString:
+    """A field's four columns move together: all from the stored row when its
+    value is kept, so a TOASTed inline value keeps its own pointer, otherwise
+    all from the incoming row, so no reference outlives its value."""
+    kept = _kept(field, "EXCLUDED", "listings")
+    return ",\n".join(
+        f"{column} = CASE WHEN {kept} THEN listings.{column} ELSE EXCLUDED.{column} END"
+        for column in (field, f"{field}_sha256", f"{field}_object", f"{field}_object_size")
+    )
+
+
+# The NOT EXISTS is the update's own SET, evaluated against the row: what the
+# row would hold after it equals what it holds now. date_posted keeps the first
+# date seen, so a board that dates by age ("Posted 3 Days Ago", Workday and the
+# markdown lists), which yields a new timestamp on every pull, is not a change.
+_RECORD_LISTINGS: LiteralString = f"""
+    INSERT INTO listings
+        (url, source, company, title, locations, date_posted, pattern, kept,
+         description, description_sha256, description_object, description_object_size,
+         raw, raw_sha256, raw_object, raw_object_size)
+    SELECT v.url, v.source, v.company, v.title, v.locations, v.date_posted,
+           v.pattern, v.kept,
+           v.description, v.description_sha256, v.description_object, v.description_object_size,
+           v.raw, v.raw_sha256, v.raw_object, v.raw_object_size
+    FROM (VALUES (%s::text, %s::text, %s::text, %s::text, %s::text[],
+                  %s::timestamptz, %s::text, %s::boolean,
+                  %s::text, %s::bytea, %s::bytea, %s::integer,
+                  %s::jsonb, %s::bytea, %s::bytea, %s::integer,
+                  %s::integer))
+        AS v (url, source, company, title, locations, date_posted, pattern, kept,
+              description, description_sha256, description_object, description_object_size,
+              raw, raw_sha256, raw_object, raw_object_size, refresh_hours)
+    WHERE NOT EXISTS (
+        SELECT 1 FROM listings l
+        WHERE l.url = v.url
+          AND (l.source, l.company, l.title, l.locations, l.pattern, l.kept)
+              IS NOT DISTINCT FROM
+              (v.source, v.company, v.title, v.locations, v.pattern, v.kept)
+          AND (l.date_posted IS NOT NULL OR v.date_posted IS NULL)
+          AND {_kept("description", "v", "l")}
+          AND {_kept("raw", "v", "l")}
+          AND l.last_seen_at >= now() - make_interval(hours => v.refresh_hours)
+    )
+    ON CONFLICT (url) DO UPDATE SET
+        source = EXCLUDED.source, company = EXCLUDED.company,
+        title = EXCLUDED.title, locations = EXCLUDED.locations,
+        date_posted = COALESCE(listings.date_posted, EXCLUDED.date_posted),
+        pattern = EXCLUDED.pattern, kept = EXCLUDED.kept,
+        {_set_payload("description")},
+        {_set_payload("raw")},
+        last_seen_at = now()
+"""
+
+
 def record_listings(
     postings: list[JobPosting],
     source: str,
@@ -184,7 +261,9 @@ def record_listings(
     can read a field nobody mapped). `kept` names the URLs the stored title
     pattern matched, including while pattern enforcement is disabled and
     every posting enters the catalog. Read by the admin source screens
-    (pattern preview, screened postings), never by visibility or the checks.
+    (pattern preview, screened postings), never by visibility or the checks;
+    those read neither the text nor the raw record, and anything that does
+    reads them through core.listing_payloads.resolve.
 
     A row is rewritten only when what it would hold differs, or when its
     last_seen_at is older than refresh_hours. Rewriting every listed row on
@@ -214,7 +293,13 @@ def record_listings(
             pattern,
             p.url in kept,
             p.description or "",
+            None,
+            None,
+            None,
             Jsonb(p.raw or {}),
+            None,
+            None,
+            None,
             refresh_hours,
         )
         for p in postings
@@ -222,51 +307,11 @@ def record_listings(
     ]
     with pool.connection() as conn, conn.cursor() as cur:
         if rows:
-            # The NOT EXISTS is the update's own SET, evaluated against the
-            # row: what the row would hold after it equals what it holds now.
-            # date_posted keeps the first date seen, so a board that dates by
-            # age ("Posted 3 Days Ago", Workday and the markdown lists), which
-            # yields a new timestamp on every pull, is not a change. An empty
-            # description keeps the stored one. description and raw are set
-            # from the old row when equal, because Postgres reuses a TOASTed
-            # value only when handed the old row's own pointer; a value from
-            # EXCLUDED is a fresh copy, written out again chunk by chunk.
-            cur.executemany(
-                """
-                INSERT INTO listings
-                    (url, source, company, title, locations, date_posted, pattern,
-                     kept, description, raw)
-                SELECT v.url, v.source, v.company, v.title, v.locations, v.date_posted,
-                       v.pattern, v.kept, v.description, v.raw
-                FROM (VALUES (%s::text, %s::text, %s::text, %s::text, %s::text[],
-                              %s::timestamptz, %s::text, %s::boolean, %s::text, %s::jsonb,
-                              %s::integer))
-                    AS v (url, source, company, title, locations, date_posted, pattern,
-                          kept, description, raw, refresh_hours)
-                WHERE NOT EXISTS (
-                    SELECT 1 FROM listings l
-                    WHERE l.url = v.url
-                      AND (l.source, l.company, l.title, l.locations, l.pattern, l.kept)
-                          IS NOT DISTINCT FROM
-                          (v.source, v.company, v.title, v.locations, v.pattern, v.kept)
-                      AND (l.date_posted IS NOT NULL OR v.date_posted IS NULL)
-                      AND v.description IN ('', l.description)
-                      AND v.raw = l.raw
-                      AND l.last_seen_at >= now() - make_interval(hours => v.refresh_hours)
-                )
-                ON CONFLICT (url) DO UPDATE SET
-                    source = EXCLUDED.source, company = EXCLUDED.company,
-                    title = EXCLUDED.title, locations = EXCLUDED.locations,
-                    date_posted = COALESCE(listings.date_posted, EXCLUDED.date_posted),
-                    pattern = EXCLUDED.pattern, kept = EXCLUDED.kept,
-                    description = CASE WHEN EXCLUDED.description IN ('', listings.description)
-                                       THEN listings.description ELSE EXCLUDED.description END,
-                    raw = CASE WHEN EXCLUDED.raw = listings.raw
-                               THEN listings.raw ELSE EXCLUDED.raw END,
-                    last_seen_at = now()
-                """,
-                rows,
-            )
+            # description and raw are set from the old row when equal, because
+            # Postgres reuses a TOASTed value only when handed the old row's own
+            # pointer; a value from EXCLUDED is a fresh copy, written out again
+            # chunk by chunk.
+            cur.executemany(_RECORD_LISTINGS, rows)
         cur.execute(
             "DELETE FROM listings WHERE source = %s "
             "AND last_seen_at < now() - make_interval(days => %s, hours => %s)",

@@ -226,14 +226,43 @@ class PayloadStore:
 
     def get_bundle(self, ref: BundleMemberRef, cache: BundleCache | None = None) -> dict[str, Any]:
         ref = BundleMemberRef.parse(asdict(ref))
-        members = None if cache is None else cache.get((ref.key, ref.size))
+        return self._bundle(ref.bucket, ref.sha256, ref.size, cache)
+
+    def _bundle(
+        self, bucket: str, sha256: str, size: int, cache: BundleCache | None
+    ) -> dict[str, Any]:
+        key = f"payloads/v3/sha256/{sha256}.json"
+        members = None if cache is None else cache.get((key, size))
         if members is None:
-            members = self._read(ref.bucket, ref.key, ref.size, ref.sha256, gz=False)
+            members = self._read(bucket, key, size, sha256, gz=False)
             if not isinstance(members, dict):
                 raise PayloadUnavailable("Payload bundle is not an object")
             if cache is not None:
-                cache[ref.key, ref.size] = members
+                cache[key, size] = members
         return members
+
+    def get_digest_member(
+        self, bundle_sha256: str, bundle_size: int, member_sha256: str, cache: BundleCache
+    ) -> Any:
+        """A member of a bundle whose members are named by their own SHA-256.
+
+        The bundle stands for the bucket this store writes to: a row that holds
+        only the two digests and the size names no bucket of its own.
+        """
+        if (
+            _DIGEST.fullmatch(bundle_sha256) is None
+            or _DIGEST.fullmatch(member_sha256) is None
+            or type(bundle_size) is not int
+            or bundle_size < 0
+        ):
+            raise PayloadUnavailable("Invalid bundle member reference")
+        members = self._bundle(self.bucket, bundle_sha256, bundle_size, cache)
+        if member_sha256 not in members:
+            raise PayloadUnavailable("Payload bundle has no such member")
+        value = members[member_sha256]
+        if hashlib.sha256(encode_payload(value)).hexdigest() != member_sha256:
+            raise PayloadUnavailable("Payload bundle member integrity check failed")
+        return value
 
     def get_member(self, ref: BundleMemberRef, cache: BundleCache | None = None) -> Any:
         members = self.get_bundle(ref, cache)

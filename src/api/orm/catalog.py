@@ -14,6 +14,7 @@ from sqlalchemy import (
     Identity,
     Index,
     Integer,
+    LargeBinary,
     Numeric,
     Text,
     UniqueConstraint,
@@ -242,7 +243,23 @@ class Listing(Base):
     # (860 HOT of 1.17M updates a day, 2026-10-03). Every reader and the
     # retention delete filter by source; the delete re-reads that source's
     # rows, which its own upsert has just read. Fillfactor is in 507fe2f38949.
-    __table_args__ = (Index("idx_listings_by_source", "source"),)
+    __table_args__ = (
+        Index("idx_listings_by_source", "source"),
+        *(
+            # A field is held by reference exactly when all three of its
+            # reference columns are set: the value's own SHA-256 (the bundle
+            # member's name and the upsert's change check), the bundle's
+            # SHA-256 and the bundle's size. NOT VALID: every existing row is
+            # inline, and the check binds every row written from here on.
+            CheckConstraint(
+                f"({field}_sha256 IS NULL) = ({field}_object IS NULL) "
+                f"AND ({field}_object IS NULL) = ({field}_object_size IS NULL)",
+                name=f"ck_listings_{field}_reference",
+                postgresql_not_valid=True,
+            )
+            for field in ("description", "raw")
+        ),
+    )
 
     url: Mapped[str] = mapped_column(Text, primary_key=True)
     source: Mapped[str] = mapped_column(Text)
@@ -254,6 +271,14 @@ class Listing(Base):
     kept: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     description: Mapped[str] = mapped_column(Text, server_default=text("''"))
     raw: Mapped[dict] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
+    # A value held by reference lives in a verified bundle object
+    # (core.listing_payloads); the inline column then holds its default.
+    description_sha256: Mapped[bytes | None] = mapped_column(LargeBinary)
+    description_object: Mapped[bytes | None] = mapped_column(LargeBinary)
+    description_object_size: Mapped[int | None] = mapped_column(Integer)
+    raw_sha256: Mapped[bytes | None] = mapped_column(LargeBinary)
+    raw_object: Mapped[bytes | None] = mapped_column(LargeBinary)
+    raw_object_size: Mapped[int | None] = mapped_column(Integer)
     first_seen_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
     last_seen_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
 
