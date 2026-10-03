@@ -728,3 +728,23 @@ parents require separate investigation. Recovery and parent finalization lock
 the parent before the child state transition/count, preventing a stale count
 from terminalizing a parent after its child was recovered. Do not deploy this
 lifecycle change without coordinating with the fleet deployment owner.
+
+## Shared query instruction text
+
+`core.query_instructions` stores exact instruction strings separately from
+verdict `prompt_hash` and the prompt-reporting catalog. NULL and empty strings
+remain distinct. Compatibility writes retain inline instructions and attach a
+shared reference; cached page content and accounting columns are unchanged.
+Query detail and custom-result readers hydrate a missing inline value and fail
+explicitly if referenced content is missing or its digest is wrong.
+
+Use `python -m api.ai.migrate_query_instructions MODE --through ID --after ID
+--limit N` with a fixed maximum query ID and saved cursors. `copy` retains inline
+text; a separate `verify` pass reports unreferenced values. Only after an
+independent backup and fleet-wide compatible readers, `compact` with
+`--backup-complete --readers-compatible` removes verified inline duplicates.
+`restore` fills inline values again and keeps references. Each bounded chunk is
+atomic, locks rows in ID order for writes, and leaves the cursor before failed
+work. Keep dictionary rows permanently while referenced. Before reverting to
+old readers, restore and verify inline text. Logical bytes removed do not prove
+that PostgreSQL relation files or filesystem use decreased.
