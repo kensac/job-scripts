@@ -791,3 +791,20 @@ backup and compatible-reader confirmations, so direct calls cannot bypass the
 CLI checks. Keep dictionary rows permanently while referenced. Before reverting to
 old readers, restore and verify inline text. Logical bytes removed do not prove
 that PostgreSQL relation files or filesystem use decreased.
+
+Grouped receipt verification and compaction select a materialized page of cheap eligible
+receipt keys before accessing any response JSON. The metadata size query therefore
+detoasts at most that key page, including rows subsequently skipped for missing
+references (or missing inline vectors in compact mode). `--scan-limit` bounds metadata
+keys inspected per invocation, including repeated probes after byte-budget splits;
+its default is `--limit` times the group size. This is independent of the successful
+receipt limit and the serialized-byte reservation.
+
+Grouped JSON summaries include `scanned`, `skipped`, `verified_after`, and `exhausted`.
+`after` is the safe restart cursor through successful receipts and explicitly skipped
+keys; `verified_after` is the last receipt verified or compacted in that invocation.
+An all-skipped page is not end of input. Runners must continue from `after` until
+`exhausted` is true, never infer completion from successful count below `--limit`.
+Exhaustion is reported only after a fully processed short or empty key page, with no
+blocked candidate. A scan or successful-count bound can finish with `exhausted=false`;
+a bad reference or oversized candidate stops before that key and reports a failure.

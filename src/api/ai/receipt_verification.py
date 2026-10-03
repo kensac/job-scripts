@@ -39,36 +39,49 @@ def verify(
     group_size: int,
     workers: int,
     byte_budget: int,
+    scan_limit: int | None = None,
 ) -> ReceiptProgress:
     if in_transaction():
         raise RuntimeError("Payload verification cannot run inside a database transaction")
     if min(limit, group_size, workers, byte_budget) <= 0 or workers > group_size:
         raise ValueError("Positive limits and workers no greater than group size are required")
+    scan_remaining = limit * group_size if scan_limit is None else scan_limit
+    if scan_remaining <= 0:
+        raise ValueError("Scan limit must be positive")
     result = ReceiptProgress(after)
     with ThreadPoolExecutor(max_workers=workers) as executor:
         remaining = limit
-        while remaining:
-            sources, blocked = read_group(
-                after=result.after, limit=min(remaining, group_size), byte_budget=byte_budget
+        while remaining and scan_remaining:
+            page = read_group(
+                after=result.after,
+                limit=min(remaining, group_size, scan_remaining),
+                byte_budget=byte_budget,
             )
-            if sources:
-                # Only this byte-bounded group is submitted. Futures retain
-                # scalar outcomes, never decoded vectors or source documents.
-                outcomes = list(executor.map(lambda source: verify_object(source, store), sources))
-                current = _current(sources)
-                for source, (object_outcome, size) in zip(sources, outcomes, strict=True):
-                    outcome = object_outcome if current.get(source.cursor, False) else "changed"
-                    result.counts[outcome] += 1
-                    if outcome != "verified":
-                        result.stop_reason = outcome
-                        return result
-                    result.logical_bytes_verified += size
-                    result.after = source.cursor
-                    remaining -= 1
-            if blocked is not None:
+            result.scanned += page.scanned
+            scan_remaining -= page.scanned
+            sources = page.sources
+            outcomes = list(executor.map(lambda source: verify_object(source, store), sources))
+            current = _current(sources) if sources else {}
+            prepared = dict(zip((source.cursor for source in sources), outcomes, strict=True))
+            for cursor in page.cursors:
+                if cursor not in prepared:
+                    result.counts["skipped"] += 1
+                    result.after = cursor
+                    continue
+                object_outcome, size = prepared[cursor]
+                outcome = object_outcome if current.get(cursor, False) else "changed"
+                result.counts[outcome] += 1
+                if outcome != "verified":
+                    result.stop_reason = outcome
+                    return result
+                result.logical_bytes_verified += size
+                result.after = result.verified_after = cursor
+                remaining -= 1
+            if page.blocked is not None:
                 result.counts["unavailable"] += 1
-                result.stop_reason = blocked
+                result.stop_reason = page.blocked
                 break
-            if not sources:
+            if page.exhausted:
+                result.exhausted = True
                 break
     return result

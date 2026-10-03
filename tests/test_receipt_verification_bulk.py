@@ -84,6 +84,8 @@ def test_grouped_verification_bounds_database_queries(f, monkeypatch, capsys):
     assert result["counts"] == {"verified": 3}
     assert result["after"] == [rows[-1]["provider_batch_id"], rows[-1]["custom_id"]]
     assert len(calls) == 3
+    assert result["scanned"] == 3 and result["skipped"] == 0
+    assert result["verified_after"] == result["after"] and not result["exhausted"]
 
 
 def bounds(rows):
@@ -375,6 +377,7 @@ def test_grouped_scan_budget_pages_past_missing_references(f, operation):
     )
     assert first.counts == {"skipped": 3}
     assert first.scanned == 3 and first.verified_after is None
+    assert not first.exhausted
     assert first.after == (rows[2]["provider_batch_id"], rows[2]["custom_id"])
     second = run(
         store,
@@ -422,3 +425,57 @@ def test_skipped_keys_never_advance_past_bad_reference(f, operation):
     assert result.counts == {"skipped": 1, "unavailable": 1}
     assert result.after == (rows[0]["provider_batch_id"], rows[0]["custom_id"])
     assert result.verified_after is None and result.stop_reason == "invalid_reference_size"
+
+
+@pytest.mark.parametrize("operation", ["verify", "compact"])
+def test_empty_key_page_is_explicit_exhaustion(f, operation):
+    from api.ai.receipt_compaction import compact
+    from api.ai.receipt_verification import verify
+
+    store, rows = prepare(f, 2)
+    for item in rows:
+        db.execute(
+            "UPDATE batch_result_receipts SET response=response-'embedding_vectors_ref' WHERE task_id=%s",
+            (item["task_id"],),
+        )
+    run = verify if operation == "verify" else compact
+    result = run(
+        store,
+        after=None,
+        limit=3,
+        group_size=3,
+        workers=1,
+        byte_budget=100000,
+        scan_limit=3,
+        **({} if operation == "verify" else {"backup_complete": True}),
+    )
+    assert result.exhausted and result.counts == {"skipped": 2}
+    assert result.after == (rows[-1]["provider_batch_id"], rows[-1]["custom_id"])
+    assert result.verified_after is None
+
+
+def test_metadata_plan_limits_cheap_keys_before_any_response_projection(f, monkeypatch):
+    from api.ai.receipt_payload_groups import read_group
+
+    prepare(f, 4)
+    original = db.query
+    captured = []
+
+    def observed(sql, params=None):
+        captured.append((sql, params))
+        return original(sql, params)
+
+    monkeypatch.setattr(db, "query", observed)
+    page = read_group(after=None, limit=2, byte_budget=100000)
+    assert page.scanned == 2 and len(page.sources) == 2 and not page.exhausted
+    sql, params = captured[0]
+    plan = original("EXPLAIN (FORMAT JSON, VERBOSE) " + sql, params)[0]["QUERY PLAN"][0]["Plan"]
+
+    def nodes(node):
+        yield node
+        for child in node.get("Plans", []):
+            yield from nodes(child)
+
+    keys = [node for node in nodes(plan) if node.get("Subplan Name") == "CTE keys"]
+    assert len(keys) == 1 and keys[0]["Node Type"] == "Limit"
+    assert all("response" not in str(node.get("Output", [])) for node in nodes(keys[0]))

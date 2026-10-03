@@ -78,6 +78,7 @@ def compact(
     workers: int,
     byte_budget: int,
     backup_complete: bool = False,
+    scan_limit: int | None = None,
 ) -> ReceiptProgress:
     if not backup_complete:
         raise ValueError("Compaction requires a completed independent database backup")
@@ -85,14 +86,17 @@ def compact(
         raise RuntimeError("Payload compaction cannot run inside a database transaction")
     if min(limit, group_size, workers, byte_budget) <= 0 or workers > group_size:
         raise ValueError("Positive limits and workers no greater than group size are required")
+    scan_remaining = limit * group_size if scan_limit is None else scan_limit
+    if scan_remaining <= 0:
+        raise ValueError("Scan limit must be positive")
     result = ReceiptProgress(after)
     with ThreadPoolExecutor(max_workers=workers) as executor:
         remaining = limit
-        while remaining:
+        while remaining and scan_remaining:
             try:
-                sources, blocked = read_group(
+                page = read_group(
                     after=result.after,
-                    limit=min(remaining, group_size),
+                    limit=min(remaining, group_size, scan_remaining),
                     byte_budget=byte_budget,
                     inline_only=True,
                 )
@@ -100,6 +104,13 @@ def compact(
                 result.counts["unavailable"] += 1
                 result.stop_reason = "database_error"
                 return result
+            result.scanned += page.scanned
+            scan_remaining -= page.scanned
+            sources = page.sources
+            committed = 0
+            changed = False
+            prepared = []
+            stop = 0
             if sources:
                 prepared = list(executor.map(lambda source: verify_object(source, store), sources))
                 stop = next(
@@ -116,22 +127,30 @@ def compact(
                     result.counts["unavailable"] += 1
                     result.stop_reason = "database_error"
                     return result
-                for source, (_, size) in zip(
-                    sources[:committed], prepared[:committed], strict=True
-                ):
+            committed_sizes = {
+                source.cursor: outcome[1]
+                for source, outcome in zip(sources[:committed], prepared[:committed], strict=True)
+            }
+            candidate_keys = {source.cursor for source in sources}
+            for cursor in page.cursors:
+                if cursor in committed_sizes:
                     result.counts["compacted"] += 1
-                    result.logical_bytes_verified += size
-                    result.after = source.cursor
+                    result.logical_bytes_verified += committed_sizes[cursor]
+                    result.after = result.verified_after = cursor
                     remaining -= 1
-                if changed or stop < len(sources):
+                elif cursor not in candidate_keys:
+                    result.counts["skipped"] += 1
+                    result.after = cursor
+                else:
                     outcome = "changed" if changed else prepared[stop][0]
                     result.counts[outcome] += 1
                     result.stop_reason = outcome
                     return result
-            if blocked is not None:
+            if page.blocked is not None:
                 result.counts["unavailable"] += 1
-                result.stop_reason = blocked
+                result.stop_reason = page.blocked
                 return result
-            if not sources:
+            if page.exhausted:
+                result.exhausted = True
                 break
     return result

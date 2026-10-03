@@ -31,6 +31,11 @@ def main() -> int:
         type=int,
         help="maximum combined serialized receipt and declared object bytes per group",
     )
+    parser.add_argument(
+        "--scan-limit",
+        type=int,
+        help="maximum metadata keys inspected in grouped mode; defaults to limit times group size",
+    )
     args = parser.parse_args()
     if args.limit <= 0:
         parser.error("--limit must be positive")
@@ -52,6 +57,10 @@ def main() -> int:
             )
         if args.compact_workers > args.compact_group_size:
             parser.error("compaction workers cannot exceed group size")
+    if args.scan_limit is not None and (
+        args.scan_limit <= 0 or (args.verify_group_size is None and args.compact_group_size is None)
+    ):
+        parser.error("--scan-limit requires a positive bound and grouped mode")
     # Set connection defaults BEFORE importing the pool; no bulk read or
     # stalled client may keep a production transaction open indefinitely.
     os.environ["PGOPTIONS"] = (
@@ -69,6 +78,7 @@ def main() -> int:
     counts: Counter[str] = Counter()
     logical_bytes = 0
     stop_reason = None
+    scan_progress = {}
     try:
         store = PayloadStore.from_env()
         if args.compact_group_size is not None:
@@ -81,6 +91,7 @@ def main() -> int:
                 group_size=args.compact_group_size,
                 workers=args.compact_workers,
                 byte_budget=args.compact_byte_budget,
+                scan_limit=args.scan_limit,
                 backup_complete=args.backup_complete,
             )
             counts, logical_bytes, after = (
@@ -89,6 +100,12 @@ def main() -> int:
                 result.after,
             )
             stop_reason = result.stop_reason
+            scan_progress = {
+                "scanned": result.scanned,
+                "skipped": result.counts["skipped"],
+                "verified_after": result.verified_after,
+                "exhausted": result.exhausted,
+            }
         elif args.verify_group_size is not None:
             from api.ai.receipt_verification import verify
 
@@ -99,6 +116,7 @@ def main() -> int:
                 group_size=args.verify_group_size,
                 workers=args.verify_workers,
                 byte_budget=args.verify_byte_budget,
+                scan_limit=args.scan_limit,
             )
             counts, logical_bytes, after = (
                 result.counts,
@@ -106,6 +124,12 @@ def main() -> int:
                 result.after,
             )
             stop_reason = result.stop_reason
+            scan_progress = {
+                "scanned": result.scanned,
+                "skipped": result.counts["skipped"],
+                "verified_after": result.verified_after,
+                "exhausted": result.exhausted,
+            }
         else:
             for _ in range(args.limit):
                 # One payload at a time bounds memory independently of the count.
@@ -139,6 +163,7 @@ def main() -> int:
                 "counts": dict(counts),
                 "logical_bytes_verified": logical_bytes,
                 "after": after,
+                **scan_progress,
                 **({"stop_reason": stop_reason} if stop_reason else {}),
             }
         )

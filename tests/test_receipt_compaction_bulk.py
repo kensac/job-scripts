@@ -104,7 +104,8 @@ def test_compaction_preserves_native_json_and_task_accounting_and_replays_safely
         == expected
     )
     assert db.query("SELECT * FROM tasks ORDER BY id") == tasks_before
-    assert compact(store).counts == {}
+    replay = compact(store)
+    assert replay.counts == {"skipped": 4} and replay.exhausted
     assert all("embedding_vectors_ref" in row(item["task_id"])["response"] for item in rows)
 
 
