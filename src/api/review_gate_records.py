@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 from typing import Any
 
-from api import db, review_policy_storage
+from api import db, review_decision_storage, review_policy_storage
 from core.filters import build_custom_input
 from core.job_profile import CLASSIFIER_VERSION, JOB_PROFILE_INSTRUCTIONS, JOB_PROFILE_MODEL
 
@@ -27,11 +27,11 @@ def decision(row: dict[str, Any]) -> dict[str, Any]:
 
 def existing(task_id: int) -> dict[str, dict[str, Any]]:
     return {
-        row["url"]: review_policy_storage.resolve(row)
+        row["url"]: review_decision_storage.resolve(row)
         for row in db.query(
             "SELECT d.id,d.url,d.prompt_hash,d.title,d.content_hash,d.evidence,d.stage,d.action,"
-            f"d.reason,d.profile_id,{review_policy_storage.POLICY_COLUMNS} "
-            f"FROM review_gate_decisions d {review_policy_storage.POLICY_JOIN} WHERE d.task_id=%s",
+            f"d.reason,d.profile_id,{review_decision_storage.RESOLVED_COLUMNS} "
+            f"FROM {review_decision_storage.RESOLVED_FROM} WHERE d.task_id=%s",
             (task_id,),
         )
     }
@@ -185,7 +185,9 @@ def record_outcome(decision_id: int | None, query_id: int | None) -> None:
 
 def exclusions(task_id: int, prompt_hash: str) -> set[str] | None:
     rows = db.query(
-        "SELECT url,prompt_hash,action FROM review_gate_decisions WHERE task_id=%s", (task_id,)
+        f"SELECT d.url,d.prompt_hash,d.action FROM {review_decision_storage.DECISIONS} "
+        "WHERE d.task_id=%s",
+        (task_id,),
     )
     if not rows:
         return None

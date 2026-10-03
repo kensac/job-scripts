@@ -1,4 +1,4 @@
-"""Bounded, verified policy normalization and exact inline restoration."""
+"""Bounded, verified review decision normalization and exact inline restoration."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ def main() -> int:
     parser.add_argument(
         "--compatible-readers",
         action="store_true",
-        help="confirm every API and worker reads shared policy snapshots",
+        help="confirm every API and worker reads referenced decision bodies",
     )
     args = parser.parse_args()
     if args.after < 0 or args.through < args.after or args.limit <= 0:
@@ -30,12 +30,13 @@ def main() -> int:
     os.environ["PGOPTIONS"] = (
         "-c statement_timeout=5000 -c lock_timeout=2000 "
         "-c idle_in_transaction_session_timeout=5000 "
-        "-c application_name=review_policy_migration"
+        "-c application_name=review_decision_migration"
         + (" -c default_transaction_read_only=on" if args.mode == "verify" else "")
     )
     from psycopg import Error
 
-    from api.review_policy_storage import Mode, PolicySnapshotUnavailable, migrate_chunk
+    from api.review_decision_storage import Mode, migrate_chunk
+    from api.review_policy_storage import PolicySnapshotUnavailable
     from core.pool import pool
 
     try:

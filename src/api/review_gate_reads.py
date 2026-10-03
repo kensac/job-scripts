@@ -6,7 +6,7 @@ import datetime
 
 from pydantic import BaseModel, JsonValue
 
-from api import db, pagination, review_policy_storage
+from api import db, pagination, review_decision_storage
 
 
 class ReviewOutcome(BaseModel):
@@ -56,7 +56,7 @@ class ReviewDecisions(BaseModel):
 DECISION_COLUMNS = (
     "d.id,d.task_id,d.url,d.job_id,d.user_id,d.filter_id,d.managed_board_id,d.revision,"
     "d.prompt_hash,d.stage,d.mode,d.action,d.reason,d.profile_id,d.title,d.content_hash,"
-    f"{review_policy_storage.POLICY_COLUMNS},d.evidence,d.created_at"
+    f"{review_decision_storage.RESOLVED_COLUMNS},d.evidence,d.created_at"
 )
 
 
@@ -82,15 +82,14 @@ def _read_decisions(
     personal: bool,
 ) -> ReviewDecisions:
     count = db.query_one(
-        f"SELECT count(*) AS n FROM review_gate_decisions d WHERE {where}", parameters
+        f"SELECT count(*) AS n FROM {review_decision_storage.DECISIONS} WHERE {where}", parameters
     )
     raw_rows = db.query(
-        f"SELECT {DECISION_COLUMNS} FROM review_gate_decisions d "
-        f"{review_policy_storage.POLICY_JOIN} WHERE {where} "
+        f"SELECT {DECISION_COLUMNS} FROM {review_decision_storage.RESOLVED_FROM} WHERE {where} "
         "ORDER BY d.id DESC LIMIT %(limit)s OFFSET %(offset)s",
         {**parameters, "limit": page.size, "offset": page.offset},
     )
-    rows = [ReviewDecision.model_validate(review_policy_storage.resolve(row)) for row in raw_rows]
+    rows = [ReviewDecision.model_validate(review_decision_storage.resolve(row)) for row in raw_rows]
     if rows:
         outcomes = db.query(
             "SELECT decision_id,query_id,batch_id,model,rejected,outcome,recorded_cost_usd,created_at "
@@ -137,16 +136,16 @@ def comparisons(task_id: int) -> dict[str, dict[str, int]]:
     across 259 batches for counters nothing read.
     """
     rows = db.query(
-        "SELECT 'routing' AS kind, CASE WHEN o.rejected IS NULL THEN 'unresolved_reference' "
+        f"SELECT 'routing' AS kind, CASE WHEN o.rejected IS NULL THEN 'unresolved_reference' "
         "WHEN d.evidence->'routing'->>'outcome'='abstain' THEN 'abstained' "
         "WHEN (d.evidence->'routing'->>'outcome'='reject')=o.rejected THEN 'agreed' "
         "WHEN d.evidence->'routing'->>'outcome'='reject' THEN 'false_reject' "
         "ELSE 'false_accept' END AS key, count(*) AS n "
-        "FROM review_gate_decisions d JOIN review_gate_outcomes o ON o.decision_id=d.id "
+        f"FROM {review_decision_storage.DECISIONS} JOIN review_gate_outcomes o ON o.decision_id=d.id "
         "WHERE d.task_id=%(task)s AND jsonb_typeof(d.evidence->'routing')='object' GROUP BY 2 "
         "UNION ALL SELECT 'review_gate', CASE WHEN o.rejected IS NULL THEN 'unresolved' "
         "WHEN o.rejected THEN 'agreed_reject' ELSE 'false_reject' END, count(*) "
-        "FROM review_gate_decisions d JOIN review_gate_outcomes o ON o.decision_id=d.id "
+        f"FROM {review_decision_storage.DECISIONS} JOIN review_gate_outcomes o ON o.decision_id=d.id "
         "WHERE d.task_id=%(task)s AND d.stage<>'detailed' GROUP BY 2",
         {"task": task_id},
     )
