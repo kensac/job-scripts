@@ -1,4 +1,4 @@
-"""Bounded storage operations for completed non-profile request evidence."""
+"""Bounded storage operations for request evidence of every task."""
 
 from __future__ import annotations
 
@@ -29,16 +29,20 @@ from core.pool import in_transaction
 
 Mode = Literal["bundle", "copy", "compact", "restore", "verify"]
 STOP_OUTCOMES = frozenset(("unavailable", "changed", "ineligible"))
-# A page's locked transaction waits on task and request rows. Any other holder
+# A page's locked transaction waits on request rows. Any other holder
 # is itself bounded: the migration's own pages by the 5 s statement_timeout set
 # below. Retrying after 2 s and then 4 s, each attempt also waiting its 2 s
 # lock_timeout, spans 12 s: longer than two such holders back to back.
 LOCK_RETRY_DELAYS = (2.0, 4.0)
 LOCK_ERRORS = (errors.LockNotAvailable, errors.QueryCanceled)
-_ELIGIBLE = (
-    "t.status='done' AND t.kind<>'classify_job_profiles' "
-    "AND NOT EXISTS(SELECT 1 FROM batch_result_receipts r "
-    "WHERE r.task_id=t.id AND r.consumed_at IS NULL)"
+# Every row of every task, whatever its kind, status or unconsumed receipts.
+# A request is immutable once written: snapshot_specs never replaces an
+# existing row, consumption locks only receipts, and every reader resolves an
+# inline value and its verified reference to the same request, so a reader on
+# either side of a swap sees one request. observability.md has the analysis.
+BUNDLE_PREDICATE = (
+    "(b.snapshot IS NOT NULL OR b.snapshot_ref IS NOT NULL) "
+    "AND b.snapshot_ref->>'version' IS DISTINCT FROM '3'"
 )
 
 
@@ -46,40 +50,29 @@ def candidates(*, after: tuple[int, str] | None, limit: int, mode: Mode) -> list
     if limit <= 0:
         raise ValueError("limit must be positive")
     predicate = {
-        "bundle": "b.snapshot IS NOT NULL AND b.snapshot_ref IS NULL",
+        "bundle": BUNDLE_PREDICATE,
         "copy": "b.snapshot IS NOT NULL",
         "compact": "b.snapshot IS NOT NULL AND b.snapshot_ref IS NOT NULL",
         "restore": "b.snapshot_ref IS NOT NULL",
         "verify": "b.snapshot_ref IS NOT NULL",
     }[mode]
-    where = (
-        f"{_ELIGIBLE} AND {predicate} AND (%s::bigint IS NULL OR (b.task_id,b.custom_id)>(%s,%s))"
-    )
+    where = f"{predicate} AND (%s::bigint IS NULL OR (b.task_id,b.custom_id)>(%s,%s))"
     cursor = (after[0] if after else None, *(after or (None, None)))
     if mode == "bundle":
         # A page never spans tasks, so every bundle holds one task's rows.
         where += (
-            " AND b.task_id=(SELECT b.task_id FROM batch_requests b JOIN tasks t "
-            f"ON t.id=b.task_id WHERE {where} ORDER BY b.task_id,b.custom_id LIMIT 1)"
+            " AND b.task_id=(SELECT b.task_id FROM batch_requests b "
+            f"WHERE {where} ORDER BY b.task_id,b.custom_id LIMIT 1)"
         )
         cursor = cursor * 2
     return db.query(
-        f"SELECT b.* FROM batch_requests b JOIN tasks t ON t.id=b.task_id WHERE {where} "
-        "ORDER BY b.task_id,b.custom_id LIMIT %s",
+        f"SELECT b.* FROM batch_requests b WHERE {where} ORDER BY b.task_id,b.custom_id LIMIT %s",
         (*cursor, limit),
     )
 
 
 def _current_sources(sources: list[dict[str, Any]], *, lock: bool = False) -> set[tuple[int, str]]:
-    ids = sorted({source["task_id"] for source in sources})
-    tasks = {
-        task["id"]: task
-        for task in db.query(
-            "SELECT id,kind,status FROM tasks WHERE id=ANY(%s) ORDER BY id"
-            + (" FOR UPDATE" if lock else ""),
-            (ids,),
-        )
-    }
+    """The sources whose rows are still exactly as read, locked when asked."""
     keys = [{"task_id": source["task_id"], "custom_id": source["custom_id"]} for source in sources]
     rows = {
         (row["task_id"], row["custom_id"]): row
@@ -90,22 +83,10 @@ def _current_sources(sources: list[dict[str, Any]], *, lock: bool = False) -> se
             (db.jsonb(keys),),
         )
     }
-    pending = {
-        row["task_id"]
-        for row in db.query(
-            "SELECT DISTINCT task_id FROM batch_result_receipts "
-            "WHERE task_id=ANY(%s) AND consumed_at IS NULL",
-            (ids,),
-        )
-    }
     return {
         (source["task_id"], source["custom_id"])
         for source in sources
-        if source["task_id"] in tasks
-        and tasks[source["task_id"]]["status"] == "done"
-        and tasks[source["task_id"]]["kind"] != "classify_job_profiles"
-        and source["task_id"] not in pending
-        and rows.get((source["task_id"], source["custom_id"])) == source
+        if rows.get((source["task_id"], source["custom_id"])) == source
     }
 
 
@@ -255,14 +236,18 @@ def migrate_many(
 def bundle_many(
     sources: list[dict[str, Any]], store: PayloadStore, *, workers: int = 1
 ) -> list[str]:
-    """Store one task's inline-only snapshots as bundle members, keeping inline.
+    """Make each of one task's rows a bundle member, keeping any inline value.
 
-    Bundles upload outside any transaction. A short locked transaction then
-    attaches a member reference to each row still unchanged and eligible; a
-    row that changed is skipped ("changed") and stays inline-only. An invalid
-    snapshot or failed bundle stops there: outcomes end with "unavailable" at
-    its first row and only rows before it can be attached. A bundle whose rows
-    were skipped stays partly unreferenced; it is content-addressed.
+    A row is inline-only or holds a per-row (version 1 or 2) reference. Its
+    member is the inline value when there is one, which is what readers
+    resolve, and otherwise its verified object. Bundles upload outside any
+    transaction. A short locked transaction then swaps in a member reference
+    for each row still exactly as read; a row that changed is skipped
+    ("changed") and keeps what it had. The superseded per-row object is left
+    in place. An invalid snapshot, unreadable object or failed bundle stops
+    there: outcomes end with "unavailable" at its first row and only rows
+    before it can be attached. A bundle whose rows were skipped stays partly
+    unreferenced; it is content-addressed.
     """
     if in_transaction():
         raise RuntimeError("Snapshot migration cannot run inside a database transaction")
@@ -274,39 +259,46 @@ def bundle_many(
         raise ValueError("A bundle holds one task's snapshots")
     current = _current_sources(sources)
     skipped: dict[str, str] = {}
-    valid: list[dict[str, Any]] = []
+    members: dict[str, Any] = {}
     for source in sources:
+        reference = source["snapshot_ref"]
         if (
             (source["task_id"], source["custom_id"]) not in current
-            or source["snapshot"] is None
-            or source["snapshot_ref"] is not None
+            or (source["snapshot"] is None and reference is None)
+            or (isinstance(reference, dict) and reference.get("version") == 3)
         ):
             skipped[source["custom_id"]] = "changed"
             continue
         try:
-            request_snapshots.resolve(source, store)
+            value = source["snapshot"]
+            if value is None:
+                value = request_snapshots.load(source, store)
+            request_snapshots.resolve({**source, "snapshot": value}, store)
         except PayloadUnavailable:
             skipped[source["custom_id"]] = "unavailable"
             break
-        valid.append(source)
+        members[source["custom_id"]] = value
 
-    def upload(group: list[dict[str, Any]]) -> dict[str, BundleMemberRef] | None:
+    def upload(group: dict[str, Any]) -> dict[str, BundleMemberRef] | None:
         try:
-            return store.put_bundle({source["custom_id"]: source["snapshot"] for source in group})
+            return store.put_bundle(group)
         except PayloadUnavailable:
             return None
 
     # A bundle's member count is bounded by the page size the operator passes.
-    groups = bundle_groups(valid, lambda source: len(encode_payload(source["snapshot"])))
+    groups = [
+        dict(group)
+        for group in bundle_groups(members.items(), lambda item: len(encode_payload(item[1])))
+    ]
     with ThreadPoolExecutor(max_workers=workers) as executor:
         uploaded = list(executor.map(upload, groups))
     refs: dict[str, BundleMemberRef] = {}
     for group, group_refs in zip(groups, uploaded, strict=True):
         if group_refs is None:
-            skipped[group[0]["custom_id"]] = "unavailable"
+            skipped[next(iter(group))] = "unavailable"
             break
         refs.update(group_refs)
-    ready = [source for source in valid if source["custom_id"] in refs]
+    ready = [source for source in sources if source["custom_id"] in refs]
 
     def attach() -> set[str]:
         locked = _current_sources(ready, lock=True)
@@ -316,6 +308,7 @@ def bundle_many(
                 "custom_id": source["custom_id"],
                 "snapshot_ref": asdict(refs[source["custom_id"]]),
                 "original": source["snapshot"],
+                "original_ref": source["snapshot_ref"],
             }
             for source in ready
             if (source["task_id"], source["custom_id"]) in locked
@@ -324,9 +317,10 @@ def bundle_many(
             changed = db.execute_count(
                 "UPDATE batch_requests b SET snapshot_ref=u.snapshot_ref "
                 "FROM jsonb_to_recordset(%s) AS u(task_id bigint,custom_id text,"
-                "snapshot_ref jsonb,original jsonb) "
+                "snapshot_ref jsonb,original jsonb,original_ref jsonb) "
                 "WHERE b.task_id=u.task_id AND b.custom_id=u.custom_id "
-                "AND b.snapshot=u.original AND b.snapshot_ref IS NULL",
+                "AND b.snapshot IS NOT DISTINCT FROM u.original "
+                "AND b.snapshot_ref IS NOT DISTINCT FROM u.original_ref",
                 (db.jsonb(updates),),
             )
             if changed != len(updates):

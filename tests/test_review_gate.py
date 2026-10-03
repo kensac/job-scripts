@@ -1,6 +1,10 @@
+import time
+from dataclasses import asdict
+
 import pytest
 
 from api import ai, db, review_gate, review_gate_reads
+from api.ai import request_snapshots
 from core.batch import structured_response_spec
 from core.job_profile import (
     CLASSIFIER_VERSION,
@@ -8,6 +12,7 @@ from core.job_profile import (
     JOB_PROFILE_MODEL,
     build_job_profile_input,
 )
+from core.payload_objects import PayloadStore, PayloadUnavailable
 from core.review_gate import ReviewGatePolicy, profile_rejection, title_rejection
 from tasks import filter_execution, job_profiles
 from tasks.runtime import consume_result
@@ -129,14 +134,114 @@ def test_profile_reuse_requires_proven_title_content_response_and_model(f):
     db.execute(
         "UPDATE batch_result_receipts SET model=%s WHERE task_id=%s", (JOB_PROFILE_MODEL, task)
     )
+    for version in ("inline", 2, 3):
+        store_request(task, {"input": "different original input"}, version=version)
+        assert not review_gate.proven_profiles([job], content, 1000)
+
+
+def store_request(task, edit=None, *, version):
+    """Store the task's one profile request again, edited, inline or by reference."""
+    store = PayloadStore.from_env()
+    row = db.query_one("SELECT * FROM batch_requests WHERE task_id=%s", (task,))
+    snapshot = row["snapshot"] or request_snapshots.load(row, store)
+    snapshot = {**snapshot, **(edit or {})}
+    if version == "inline":
+        values = (snapshot, None)
+    elif version == 2:
+        values = (None, asdict(store.put_verified(snapshot)))
+    else:
+        values = (None, asdict(store.put_bundle({row["custom_id"]: snapshot})[row["custom_id"]]))
     db.execute(
-        "UPDATE batch_requests SET snapshot=snapshot || %s WHERE task_id=%s",
-        (
-            db.jsonb({"input": "different original input"}),
-            task,
-        ),
+        "UPDATE batch_requests SET snapshot=%s,snapshot_ref=%s WHERE task_id=%s",
+        (*map(db.jsonb, values), task),
+    )
+
+
+class Gets:
+    """Count and optionally delay object reads, the way a slow store would."""
+
+    def __init__(self, monkeypatch, delay=0.0):
+        self.keys = []
+        client = PayloadStore.from_env().client
+        original = client.get_object
+
+        def get_object(**kwargs):
+            self.keys.append(kwargs["Key"])
+            time.sleep(delay)
+            return original(**kwargs)
+
+        monkeypatch.setattr(client, "get_object", get_object)
+
+
+def test_profile_proof_from_an_unedited_reference_reads_no_object(f, monkeypatch):
+    """The reference holds the request's digest; an unedited request is proven
+    by recomputing it, so admission does no object I/O on its hot path."""
+    job, task = proven_job(f)
+    content = {job["url"]: "exact posting content"}
+    for version in (2, 3):
+        store_request(task, version=version)
+        gets = Gets(monkeypatch)
+        assert job["url"] in review_gate.proven_profiles([job], content, 1000)
+        assert gets.keys == []
+        assert not review_gate.proven_profiles([{**job, "title": "Changed title"}], content, 1000)
+    other = profile(primary_role_family="sales", role_tracks=["other"]).model_dump_json()
+    db.execute(
+        "UPDATE batch_result_receipts SET response=jsonb_set(response,'{text}',to_jsonb(%s::text)) "
+        "WHERE task_id=%s",
+        (other, task),
     )
     assert not review_gate.proven_profiles([job], content, 1000)
+
+
+@pytest.mark.parametrize("version", [2, 3])
+def test_profile_proof_reads_a_reference_whose_digest_differs(f, monkeypatch, version):
+    """A request with fields the proof does not compare cannot be recomputed;
+    its object is read, outside any transaction, and the same checks decide."""
+    from core.pool import in_transaction
+
+    job, task = proven_job(f)
+    content = {job["url"]: "exact posting content"}
+    row = db.query_one("SELECT * FROM batch_requests WHERE task_id=%s", (task,))
+    snapshot = row["snapshot"] or request_snapshots.load(row, PayloadStore.from_env())
+    store_request(task, {"context": {**snapshot["context"], "extra": 1}}, version=version)
+    gets = Gets(monkeypatch)
+    client = PayloadStore.from_env().client
+    counted = client.get_object
+
+    def outside(**kwargs):
+        assert not in_transaction()
+        return counted(**kwargs)
+
+    monkeypatch.setattr(client, "get_object", outside)
+    assert job["url"] in review_gate.proven_profiles([job], content, 1000)
+    assert len(gets.keys) == 1
+    assert not review_gate.proven_profiles([job], {job["url"]: "changed content"}, 1000)
+    client.objects.clear()
+    with pytest.raises(PayloadUnavailable):
+        review_gate.proven_profiles([job], content, 1000)
+
+
+def test_profile_lookup_past_its_budget_retains_detailed_review(f, monkeypatch):
+    job, task = proven_job(f)
+    content = {job["url"]: "exact posting content"}
+    row = db.query_one("SELECT * FROM batch_requests WHERE task_id=%s", (task,))
+    snapshot = row["snapshot"] or request_snapshots.load(row, PayloadStore.from_env())
+    store_request(task, {"context": {**snapshot["context"], "extra": 1}}, version=3)
+    configure(title="off", shared="enforce")
+    policy = db.get_config("filter_review_gate")
+    db.execute(
+        "UPDATE app_config SET value=%s WHERE key='filter_review_gate'",
+        (db.jsonb({**policy, "lookup_timeout_ms": 100}),),
+    )
+    Gets(monkeypatch, delay=1.0)
+    started = time.monotonic()
+    kept, decisions = review_gate.partition(
+        f.make_task("run_filter_batch_chunk"), "test-hash", [job], content
+    )
+    assert time.monotonic() - started < 0.5
+    assert kept == [job]
+    assert decisions[job["url"]]["stage"] == "detailed"
+    assert decisions[job["url"]]["profile_id"] is None
 
 
 def test_independent_controls_revision_scope_rollback_and_no_fake_verdict(f):

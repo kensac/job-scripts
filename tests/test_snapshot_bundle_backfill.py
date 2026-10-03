@@ -11,7 +11,7 @@ from api.ai import batch_results, request_snapshots, snapshot_payloads
 from api.ai import migrate_snapshot_payloads as cli
 from core import payload_objects
 from core.batch import BatchResult
-from core.payload_objects import PayloadStore
+from core.payload_objects import PayloadRef, PayloadStore
 from tests.test_snapshot_bundles import CountingClient, rows, task
 
 
@@ -88,19 +88,47 @@ def test_bundle_skips_rows_changed_between_upload_and_lock(f, objects):
     assert after[0]["snapshot_ref"]["member"] == "r0"
 
 
-@pytest.mark.parametrize("change", ["reactivate", "new_receipt"])
-def test_bundle_skips_a_task_that_lost_eligibility_after_upload(f, objects, change):
-    task_id, _ = task(f, 2)
+def resolved(task_id):
+    return [request_snapshots.resolve(source) for source in rows(task_id)]
 
-    def mutate():
-        if change == "reactivate":
-            db.execute("UPDATE tasks SET status='pending' WHERE id=%s", (task_id,))
-        else:
-            batch_results.checkpoint(task_id, [BatchResult("r0", batch_id="paid")], [])
 
-    objects.client.after_put = mutate
-    assert snapshot_payloads.bundle_many(rows(task_id), objects) == ["changed"] * 2
-    assert all(source["snapshot_ref"] is None for source in rows(task_id))
+@pytest.mark.parametrize("mode", ["bundle", "compact"])
+def test_consumption_running_beside_the_migration_reads_the_same_requests(
+    f, objects, monkeypatch, capsys, mode
+):
+    """A live task's request is immutable: whichever side of the swap a reader
+    lands on, inline or reference, it resolves to the same request, and the
+    migration takes no lock that consumption takes."""
+    task_id, specs = task(f, 3, status="awaiting_batch")
+    batch_results.checkpoint(
+        task_id, [BatchResult(s.custom_id, text="{}", batch_id="paid") for s in specs], []
+    )
+    if mode == "compact":
+        assert run(monkeypatch, capsys, "bundle", "--limit", "10")[0] == 0
+    seen = []
+
+    def consume():
+        results = batch_results.unconsumed(task_id)
+        seen.append([result.request for result in results])
+        if results:
+            with batch_results.consume_result(task_id, results[0]) as receipt:
+                receipt.outcome = "written"
+        batch_results.checkpoint(task_id, [BatchResult("r9", text="{}", batch_id="late")], [])
+
+    if mode == "bundle":
+        objects.client.after_put = consume
+    else:
+        real = snapshot_payloads._locked
+        monkeypatch.setattr(snapshot_payloads, "_locked", lambda work: (consume(), real(work))[1])
+    args = ("--backup-complete",) if mode == "compact" else ()
+    code, report = run(monkeypatch, capsys, mode, "--limit", "10", *args)
+    assert code == 0
+    assert report["counts"] == {"bundled" if mode == "bundle" else "compacted": 3}
+    assert seen[0] == specs
+    # The late receipt names no request ("late" sorts before "paid").
+    assert [result.request for result in batch_results.unconsumed(task_id)] == [None, *specs[1:]]
+    assert resolved(task_id) == specs
+    assert all(source["snapshot_ref"]["version"] == 3 for source in rows(task_id))
 
 
 def test_failed_upload_writes_no_reference(f, objects):
@@ -111,21 +139,109 @@ def test_failed_upload_writes_no_reference(f, objects):
     assert rows(task_id) == original
 
 
-def test_bundle_leaves_v2_and_profile_and_active_rows_alone(f, objects, monkeypatch, capsys):
-    task_id, _ = task(f, 3)
-    v2 = objects.put_verified(rows(task_id)[1]["snapshot"])
+def every_population(f, objects):
+    """One task of each shape production holds, with distinct content."""
+    tasks = {
+        "done": task(f, 3)[0],
+        "failed": task(f, 1, status="failed")[0],
+        "cancelled": task(f, 1, status="cancelled")[0],
+        "running": task(f, 1, status="running")[0],
+        "profile": task(f, 1)[0],
+        "unconsumed": task(f, 1)[0],
+    }
+    db.execute("UPDATE tasks SET kind='classify_job_profiles' WHERE id=%s", (tasks["profile"],))
+    batch_results.checkpoint(tasks["unconsumed"], [BatchResult("r0", batch_id="paid")], [])
     db.execute(
-        "UPDATE batch_requests SET snapshot_ref=%s WHERE task_id=%s AND custom_id='r1'",
-        (db.jsonb(asdict(v2)), task_id),
+        "UPDATE batch_requests SET snapshot=jsonb_set(snapshot,'{context,task}',to_jsonb(task_id))"
     )
-    active, _ = task(f, 1, status="running")
-    profile, _ = task(f, 1)
-    db.execute("UPDATE tasks SET kind='classify_job_profiles' WHERE id=%s", (profile,))
-    untouched = rows(task_id)[1], rows(active), rows(profile)
-    code, report = run(monkeypatch, capsys, "bundle", "--limit", "10")
-    assert code == 0 and report["counts"] == {"bundled": 2}
-    assert (rows(task_id)[1], rows(active), rows(profile)) == untouched
-    assert [s["snapshot_ref"]["version"] for s in rows(task_id)] == [3, 2, 3]
+    done = rows(tasks["done"])
+    # A per-row version 2 reference beside its inline value, and one compacted.
+    for source, keep_inline in ((done[1], True), (done[2], False)):
+        ref = objects.put_verified(source["snapshot"])
+        db.execute(
+            "UPDATE batch_requests SET snapshot_ref=%s"
+            + ("" if keep_inline else ",snapshot=NULL")
+            + " WHERE task_id=%s AND custom_id=%s",
+            (db.jsonb(asdict(ref)), source["task_id"], source["custom_id"]),
+        )
+    return tasks
+
+
+def test_bundle_takes_every_row_and_repoints_per_row_references(f, objects, monkeypatch, capsys):
+    tasks = every_population(f, objects)
+    original = {name: rows(task_id) for name, task_id in tasks.items()}
+    specs = {name: resolved(task_id) for name, task_id in tasks.items()}
+    v2_objects = {key for _, key in objects.client.objects if key.startswith("payloads/v2/")}
+    code, report = run(monkeypatch, capsys, "bundle", "--limit", "20")
+    assert code == 0 and report["counts"] == {"bundled": 8}
+    after = {name: rows(task_id) for name, task_id in tasks.items()}
+    assert all(s["snapshot_ref"]["version"] == 3 for group in after.values() for s in group)
+    # Bundling never changes the inline value a reader already prefers.
+    assert {n: [s["snapshot"] for s in g] for n, g in after.items()} == {
+        n: [s["snapshot"] for s in g] for n, g in original.items()
+    }
+    assert {name: resolved(task_id) for name, task_id in tasks.items()} == specs
+    assert {
+        name: [request_snapshots.resolve({**s, "snapshot": None}) for s in group]
+        for name, group in after.items()
+    } == specs
+    # The superseded per-row objects stay where they were.
+    assert v2_objects <= {key for _, key in objects.client.objects}
+    # A rerun finds nothing left to bundle.
+    assert run(monkeypatch, capsys, "bundle", "--limit", "20")[1]["counts"] == {}
+
+    code, report = run(monkeypatch, capsys, "compact", "--limit", "20", "--backup-complete")
+    assert code == 0 and report["counts"] == {"compacted": 7}
+    inline, not_member = db.query_one(
+        "SELECT count(*) FILTER (WHERE snapshot IS NOT NULL) AS a, "
+        "count(*) FILTER (WHERE snapshot_ref->>'version' IS DISTINCT FROM '3') AS b "
+        "FROM batch_requests"
+    ).values()
+    assert (inline, not_member) == (0, 0)
+    assert {name: resolved(task_id) for name, task_id in tasks.items()} == specs
+
+    code, report = run(monkeypatch, capsys, "restore", "--limit", "20")
+    assert code == 0 and report["counts"] == {"restored": 8}
+    restored = {name: rows(task_id) for name, task_id in tasks.items()}
+    assert {n: [s["snapshot"] for s in g] for n, g in restored.items()} == {
+        n: [s["snapshot"] or objects.get(PayloadRef.parse(s["snapshot_ref"])) for s in g]
+        for n, g in original.items()
+    }
+    assert all(s["snapshot_ref"] is None for g in restored.values() for s in g)
+
+
+def test_repointing_a_reference_that_changed_after_upload_is_skipped(f, objects):
+    task_id, _ = task(f, 2)
+    first = rows(task_id)[0]
+    ref = objects.put_verified(first["snapshot"])
+    db.execute(
+        "UPDATE batch_requests SET snapshot=NULL,snapshot_ref=%s WHERE task_id=%s "
+        "AND custom_id='r0'",
+        (db.jsonb(asdict(ref)), task_id),
+    )
+    sources = rows(task_id)
+    other = objects.put_verified({**first["snapshot"], "input": "elsewhere"})
+    objects.client.after_put = lambda: db.execute(
+        "UPDATE batch_requests SET snapshot_ref=%s WHERE task_id=%s AND custom_id='r0'",
+        (db.jsonb(asdict(other)), task_id),
+    )
+    assert snapshot_payloads.bundle_many(sources, objects) == ["changed", "bundled"]
+    assert rows(task_id)[0]["snapshot_ref"] == asdict(other)
+
+
+def test_an_unreadable_per_row_reference_stops_the_page(f, objects):
+    task_id, _ = task(f, 2)
+    first = rows(task_id)[0]
+    ref = objects.put_verified(first["snapshot"])
+    db.execute(
+        "UPDATE batch_requests SET snapshot=NULL,snapshot_ref=%s WHERE task_id=%s "
+        "AND custom_id='r0'",
+        (db.jsonb(asdict(ref)), task_id),
+    )
+    before = rows(task_id)
+    objects.client.objects.clear()
+    assert snapshot_payloads.bundle_many(before, objects) == ["unavailable"]
+    assert rows(task_id) == before
 
 
 def test_bundle_then_verify_compact_restore_round_trip(f, objects, monkeypatch, capsys):
@@ -255,9 +371,10 @@ def test_failed_middle_page_keeps_cursor_before_it_and_rerun_closes_the_gap(
 
 
 @pytest.mark.parametrize("mode", ["bundle", "verify"])
-def test_pages_of_one_task_never_run_concurrently(f, objects, monkeypatch, capsys, mode):
+def test_pages_of_one_task_run_side_by_side(f, objects, monkeypatch, capsys, mode):
     """Production 2026-10-03: pages of one task locked its tasks row together
-    and queued past the 2 s lock_timeout, aborting the whole invocation."""
+    and queued past the 2 s lock_timeout, aborting the whole invocation. Pages
+    now lock only their own request rows, so they overlap without waiting."""
     import threading
     import time
 
@@ -295,9 +412,7 @@ def test_pages_of_one_task_never_run_concurrently(f, objects, monkeypatch, capsy
     assert code == 0
     assert report["counts"] == {"bundled" if mode == "bundle" else "verified": 11}
     assert report["after"] == [small[-1], "r1"]
-    assert peak_task == 1
-    # Different tasks still overlap: the rule serialises a task, not the run.
-    assert peak > 1
+    assert peak_task > 1
     assert all(s["snapshot_ref"]["version"] == 3 for t in [big, *small] for s in rows(t))
 
 

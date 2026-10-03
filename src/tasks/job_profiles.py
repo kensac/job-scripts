@@ -8,14 +8,12 @@ from typing import Any
 
 from api import db, job_profile_derivation
 from api.ai import batch_results
-from core.batch import structured_response_spec
 from core.job_profile import (
     CLASSIFIER_VERSION,
     JOB_PROFILE_INPUT_CHARS,
-    JOB_PROFILE_INSTRUCTIONS,
     JOB_PROFILE_MODEL,
     JobProfileAnswer,
-    build_job_profile_input,
+    job_profile_spec,
 )
 from core.shapes import JOB_PROFILE_TASK
 from tasks import rescrape
@@ -64,17 +62,12 @@ async def handle_classify_job_profiles(task_id: int, payload: dict[str, Any]) ->
         return
     rows = [] if resumed else job_profile_derivation.candidates(JOB_PROFILE_TASK.per_cycle)
     specs = [
-        structured_response_spec(
-            str(row["content_row_id"]),
-            JOB_PROFILE_INSTRUCTIONS,
-            build_job_profile_input(row["title"], row["input_content"]),
-            JobProfileAnswer,
-            context={
-                "url": row["url"],
-                "content_row_id": row["content_row_id"],
-                "content_hash": _content_hash(row["input_content"]),
-                "classifier_version": CLASSIFIER_VERSION,
-            },
+        job_profile_spec(
+            row["url"],
+            row["content_row_id"],
+            row["title"],
+            row["input_content"],
+            _content_hash(row["input_content"]),
         )
         for row in rows
     ]

@@ -18,7 +18,6 @@ from botocore.config import Config
 # concurrency by it: a thread beyond the pool waits for a connection, and the
 # pool discards the extra connection it opens.
 MAX_CONNECTIONS = 10
-
 # A bundle is read whole to resolve one member, so it stays the size of the
 # largest objects this store already serves: managed-board candidate lists of
 # 7.9 to 8.6 MB per run (observability.md).
@@ -146,7 +145,11 @@ class PayloadStore:
         self.bucket = bucket
 
     @classmethod
-    def from_env(cls, max_connections: int = MAX_CONNECTIONS) -> PayloadStore:
+    def from_env(
+        cls, max_connections: int = MAX_CONNECTIONS, timeout: float | None = None
+    ) -> PayloadStore:
+        """`timeout` bounds each connect and socket read and disables retries,
+        for a caller with a time budget of its own to keep."""
         # Explicit credentials prevent an accidental fallback to another
         # account through the SDK credential discovery chain.
         prefix = "JOBTRACKER_S3_"
@@ -163,9 +166,12 @@ class PayloadStore:
                 config=Config(
                     s3={"addressing_style": "path"},
                     max_pool_connections=max_connections,
-                    connect_timeout=5,
-                    read_timeout=30,
-                    retries={"mode": "standard", "total_max_attempts": 3},
+                    connect_timeout=5 if timeout is None else timeout,
+                    read_timeout=30 if timeout is None else timeout,
+                    retries={
+                        "mode": "standard",
+                        "total_max_attempts": 3 if timeout is None else 1,
+                    },
                 ),
             )
             return cls(client, os.environ[prefix + "BUCKET"])

@@ -7,7 +7,7 @@ import json
 import os
 import sys
 from collections import Counter, deque
-from concurrent.futures import Future, ThreadPoolExecutor, wait
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import asdict
 from typing import cast
 
@@ -112,17 +112,11 @@ def main() -> int:
         # cap the workers below what was asked for.
         store = PayloadStore.from_env(max_connections=max(MAX_CONNECTIONS, args.workers))
 
-        def run(rows: list[dict], before: list[Future[list[str]]]) -> list[str]:
-            # Pages of one task lock the same tasks row, so a page runs only
-            # after every earlier in-flight page sharing a task with it. On
-            # 2026-10-03 single tasks held up to 37,329 rows (~38 bundle pages),
-            # and concurrent pages of one task queued past the 2 s lock_timeout.
-            # This cannot deadlock: at most `workers` pages are outstanding on
-            # `workers` threads, so every page waited on is already running.
-            # ponytail: a task with more pages than workers fills the window
-            # and runs serially; per-task read cursors would keep other tasks
-            # moving beside it.
-            wait(before)
+        def run(rows: list[dict]) -> list[str]:
+            # Pages are disjoint ranges of request rows and lock only those,
+            # so pages of one task run side by side. They once also locked
+            # the task's row, and on 2026-10-03 concurrent pages of a 37,329
+            # row task queued on it past the 2 s lock_timeout.
             if mode == "bundle":
                 return bundle_many(rows, store)
             return migrate_many(rows, store, mode=mode)
@@ -131,7 +125,6 @@ def main() -> int:
         read_after = after
         exhausted = False
         in_flight: deque[tuple[list[dict], Future[list[str]]]] = deque()
-        last_page: dict[int, Future[list[str]]] = {}
         with ThreadPoolExecutor(max_workers=args.workers) as executor:
             while True:
                 while (
@@ -145,11 +138,7 @@ def main() -> int:
                         break
                     unread -= len(rows)
                     read_after = (rows[-1]["task_id"], rows[-1]["custom_id"])
-                    task_ids = {row["task_id"] for row in rows}
-                    before = [last_page[t] for t in task_ids if t in last_page]
-                    future = executor.submit(run, rows, before)
-                    last_page.update(dict.fromkeys(task_ids, future))
-                    in_flight.append((rows, future))
+                    in_flight.append((rows, executor.submit(run, rows)))
                 if not in_flight:
                     break
                 # Pages are reported in cursor order. A page that commits while
@@ -157,9 +146,6 @@ def main() -> int:
                 # before the failure: it never passes an uncommitted row, and a
                 # rerun from it finds the committed rows idempotently.
                 rows, page = in_flight.popleft()
-                for task_id in {row["task_id"] for row in rows}:
-                    if last_page.get(task_id) is page:
-                        del last_page[task_id]
                 try:
                     outcomes = page.result()
                 except LOCK_ERRORS as exc:
@@ -184,7 +170,7 @@ def main() -> int:
                     if outcome in stops:
                         stopped = stopped or outcome
                         break
-                    if outcome in ("copied", "bundled"):
+                    if outcome in ("copied", "bundled") and source["snapshot"] is not None:
                         logical_bytes += len(encode_payload(source["snapshot"]))
                     elif source.get("snapshot_ref") is not None and outcome != "changed":
                         logical_bytes += request_snapshots.digest_and_size(source["snapshot_ref"])[

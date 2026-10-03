@@ -47,23 +47,12 @@ def test_manifest_exact_subset_round_trip_and_backup_gate(f, objects):
     assert row(tasks[0])["snapshot"] is not None
 
 
-@pytest.mark.parametrize(
-    "failure", ["missing", "active", "profile", "unconsumed", "changed", "concurrent"]
-)
+@pytest.mark.parametrize("failure", ["missing", "changed", "concurrent"])
 def test_manifest_failure_stops_before_gap(f, objects, failure):
     tasks = [request(f)[0] for _ in range(3)]
     manifest = [entry(tid) for tid in tasks]
     if failure == "missing":
         db.execute("DELETE FROM batch_requests WHERE task_id=%s", (tasks[1],))
-    elif failure == "active":
-        db.execute("UPDATE tasks SET status='pending' WHERE id=%s", (tasks[1],))
-    elif failure == "profile":
-        db.execute("UPDATE tasks SET kind='classify_job_profiles' WHERE id=%s", (tasks[1],))
-    elif failure == "unconsumed":
-        from api.ai import batch_results
-        from core.batch import BatchResult
-
-        batch_results.checkpoint(tasks[1], [BatchResult("request", batch_id="paid")], [])
     elif failure == "changed":
         db.execute(
             "UPDATE batch_requests SET snapshot=snapshot || %s WHERE task_id=%s",
@@ -71,7 +60,8 @@ def test_manifest_failure_stops_before_gap(f, objects, failure):
         )
     else:
         objects.client.after_put = lambda: db.execute(
-            "UPDATE tasks SET status='pending' WHERE id=%s", (tasks[1],)
+            "UPDATE batch_requests SET snapshot=snapshot || %s WHERE task_id=%s",
+            (db.jsonb({"input": "changed"}), tasks[1]),
         )
     result = snapshots.migrate_manifest(manifest, objects, mode="copy", limit=3)
     assert not result.exhausted and result.completed == 1

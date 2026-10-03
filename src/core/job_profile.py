@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import dataclasses
+import functools
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
+
+from core.batch import BatchSpec, structured_response_spec
 
 CLASSIFIER_VERSION = "job-profile-v1"
 JOB_PROFILE_MODEL = "gpt-6-luna"
@@ -98,3 +102,29 @@ Do not extract location, compensation, posting age, or company name."""
 
 def build_job_profile_input(title: str, content: str) -> str:
     return f"Title: {title}\n\nPosting:\n{content[:JOB_PROFILE_INPUT_CHARS]}"
+
+
+def job_profile_spec(
+    url: str, content_row_id: int, title: str, content: str, content_hash: str
+) -> BatchSpec:
+    """The one request a profile is classified from. Review gate admission
+    rebuilds it to prove a stored request by digest, so both build it here."""
+    return dataclasses.replace(
+        _job_profile_template(),
+        custom_id=str(content_row_id),
+        input=build_job_profile_input(title, content),
+        context={
+            "url": url,
+            "content_row_id": content_row_id,
+            "content_hash": content_hash,
+            "classifier_version": CLASSIFIER_VERSION,
+        },
+    )
+
+
+@functools.cache
+def _job_profile_template() -> BatchSpec:
+    # Generating the schema was 65% of an admission proving 1,000 candidates
+    # (0.84 of 1.29 s, measured 2026-10-03); it depends only on the model.
+    # Every spec shares this schema dict, which nothing mutates.
+    return structured_response_spec("", JOB_PROFILE_INSTRUCTIONS, "", JobProfileAnswer)
