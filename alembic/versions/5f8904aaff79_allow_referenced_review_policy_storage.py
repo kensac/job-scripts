@@ -1,7 +1,7 @@
 """allow referenced review policy storage
 
 Revision ID: 5f8904aaff79
-Revises: d2c923541eaa
+Revises: fc5431a0bb93
 Create Date: 2026-10-03 03:45:04.547373
 
 """
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 revision: str = '5f8904aaff79'
-down_revision: Union[str, None] = 'd2c923541eaa'
+down_revision: Union[str, None] = 'fc5431a0bb93'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
