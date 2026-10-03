@@ -198,17 +198,12 @@ async def test_paused_collection_still_saves_paid_receipts_once(f, monkeypatch):
     _job_id, url = f.make_ready_job(source=source)
     row = job_profiles.job_profile_derivation.candidates(1)[0]
     task_id = f.make_task("classify_job_profiles", {}, status="running")
-    spec = job_profiles.structured_response_spec(
-        str(row["content_row_id"]),
-        job_profiles.JOB_PROFILE_INSTRUCTIONS,
-        job_profiles.build_job_profile_input(row["title"], row["input_content"]),
-        JobProfileAnswer,
-        context={
-            "url": url,
-            "content_row_id": row["content_row_id"],
-            "content_hash": job_profiles._content_hash(row["input_content"]),
-            "classifier_version": CLASSIFIER_VERSION,
-        },
+    spec = job_profiles.job_profile_spec(
+        url,
+        row["content_row_id"],
+        row["title"],
+        row["input_content"],
+        job_profiles._content_hash(row["input_content"]),
     )
     make_batch_result(task_id, spec, text=_answer(), model=JOB_PROFILE_MODEL)
     _collection_enabled(False)

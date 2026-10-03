@@ -608,6 +608,41 @@ Missing provenance or bounded lookup failure retains detailed review. Reuse
 creates no additional classification calls; the existing profile derivation is
 still responsible for producing shared profiles.
 
+**A profile request held by reference is proven by its digest, not read.**
+`review_gate.proven_profiles` rebuilds the request the proof wants with
+`job_profile_spec`, the recipe the profile handler submits, and compares
+`batch_results.snapshot_sha256` of it with the digest the reference records. Equal
+digests mean the stored request is that request byte for byte, so every field
+comparison holds and only the response is checked. A request that differs
+anywhere, even in a field the proof does not compare, is read from storage and
+compared as before. Reads happen outside any transaction, one per object
+concurrently, each with its own `BundleCache`. The policy's
+`lookup_timeout_ms` (`filter_review_gate` in `app_config`) bounds the whole
+lookup, the database query and the object reads together; the object client's
+connect and read timeouts are set to what remains, with no retries. Past the
+budget, or on an unreadable object, the lookup raises and admission retains
+detailed review, the same fallback as any other lookup failure.
+
+Measured 2026-10-03 on a local test database, with the in-memory test store
+(so object reads cost CPU, not network): profile requests of 8,000 characters,
+500 per profile task, every candidate proven, median of five calls.
+
+| candidates | inline, before | by reference, digest | every reference read |
+|---|---|---|---|
+| 100 | 26 ms | 19 ms | 29 ms |
+| 1,000 | 259 ms | 177 ms | 265 ms |
+| 5,000 | 1,270 ms | 892 ms | 1,398 ms |
+
+The digest path is faster than the inline path it replaced. An inline request
+is fetched from TOAST and parsed into a spec, and the same new code reading
+inline rows took 28, 250 and 1,368 ms. Before the change, 65
+percent of a 1,000-candidate admission was regenerating the profile JSON
+schema per candidate. `job_profile_spec` now builds it once. The read column
+excludes network time. Each object Garage serves adds a GET of up to a
+whole bundle, so that path is what `lookup_timeout_ms` exists to bound. At
+5,000 candidates even the inline path took longer than the 1,000 ms default.
+That was true before this change too.
+
 Task payload `review_gate` records the policy, candidate, proven-profile,
 proposed-exclusion and remainder counts, written once at admission. **The
 skipped URLs live only in `review_gate_decisions`**, and
@@ -778,30 +813,36 @@ read is a required-input failure, never a legacy unknown request. Hydration and
 object verification must occur outside database transactions, including outer
 transactions inherited through the shared connection context.
 
+**Every request has one stored shape: a member of a version 3 bundle, held by
+reference, with nothing inline.** There is no exception by kind, task status or
+receipt state. Two shapes for one population means every reader, test and
+audit must handle both, and the second shape becomes the place where the next
+rule quietly does not apply. A hot path that needs care gets a solution, such
+as the digest proof the review gate uses (above). It never gets an exempt
+population. Readers still accept inline values and version 1 and 2 references,
+so a rollback past this release can read what it wrote.
+
 **A new request is written to object storage before its row exists, and the row
-holds only the reference.** `batch_results.snapshot_specs` uploads every request
-the task has no row for with `PayloadStore.put_verified`, outside any
-transaction and concurrently up to the client's connection pool
-(`payload_objects.MAX_CONNECTIONS`), then inserts `snapshot=NULL` with
-`snapshot_ref`. Never write a new request inline: a second copy written for the
+holds only the reference.** `batch_results.snapshot_specs` puts every request
+the task has no row for into bundles (`PayloadStore.put_bundle`, split at
+`payload_objects.BUNDLE_MAX_BYTES` by `bundle_groups`). The bundles upload
+outside any transaction, concurrently up to the client's connection pool
+(`payload_objects.MAX_CONNECTIONS`), and each one is read back member by member
+before anything is written. Then each request is inserted with `snapshot=NULL`
+and its member reference. One call's requests are one task's, so a bundle never
+mixes tasks. Never write a new request inline: a second copy written for the
 backfill to move later costs the bytes twice and leaves dead TOAST behind.
+Never write a new per-row (version 2) reference either: that is the second
+shape the backfill below exists to remove.
 An existing row, inline or referenced, always wins the conflict and is what gets
 frozen and resubmitted; a request that already has a row is not uploaded again.
 A row this call just wrote is frozen from the value its upload read back, with
-no further read. Storage that is unconfigured or failing raises
+no further read. Freezing rows that already existed reads each of their bundles
+once. Storage that is unconfigured or failing raises
 `PayloadUnavailable` before any row is written or anything is submitted, so the
 task takes the payload recovery path below with nothing paid. An object whose
 insert lost the conflict, or whose batch failed on a later upload, stays
 unreferenced; it is content-addressed, so a retry reuses it.
-
-**`classify_job_profiles` requests are the one exception, kept inline in both
-directions:** the write path stores them inline and the backfill's eligibility
-excludes them. Review gate admission (`review_gate.proven_profiles`) reads them
-on its hot path, where a referenced request costs one S3 GET per candidate that
-`lookup_timeout_ms` does not bound, and their volume is negligible: 0 rows and
-0 bytes of the week's `batch_requests` (measured 2026-10-03, against
-run_managed_board_batch 343 MB, run_filter_batch_chunk 175 MB and verify_new
-140 MB). Re-measure before moving them.
 
 After deploying compatible readers to the whole fleet, run bounded operations
 with `python -m api.ai.migrate_snapshot_payloads MODE --limit COUNT`. Modes are
@@ -812,26 +853,27 @@ pages in flight (default 1); each page does its object I/O serially and commits
 on its own, and the object client's connection pool is sized to match. Object
 storage is bound by per-request latency, not bandwidth: on 2026-10-03 one PUT
 took about 0.67 s, 16 concurrent PUTs reached about 11/s and 64 about 16/s.
-Object I/O finishes before a short transaction locks tasks and requests in key
-order and performs one conditional set-based update. Pages are reported in
+Object I/O finishes before a short transaction locks the page's request rows
+in key order and performs one conditional set-based update. Pages are reported in
 cursor order, one line per page with its cursor. If an object fails or a source
-changes or becomes ineligible, only the preceding ordered prefix of that page
+changes, only the preceding ordered prefix of that page
 commits and the cursor stops before it. Pages already in flight past it still
 commit and are counted, but the cursor never passes an uncommitted row; a rerun
-from it finds them already done. **Two pages sharing a task never run at
-once:** each page locks its tasks rows, and on 2026-10-03 single tasks held up
-to 37,329 rows, about 38 bundle pages, whose concurrent pages queued on one
-row past the 2 s `lock_timeout` and aborted the run. A page waits for every
-earlier in-flight page that shares a task with it; other tasks run beside it.
-A task with more pages than `--workers` therefore runs its pages one at a
-time. A lock or statement timeout in a page's locked transaction is retried
+from it finds them already done. **A page locks only its own request rows,
+never the task's row.** Pages are disjoint key ranges, so pages of one task
+run side by side. When pages also locked the task row, on 2026-10-03 single
+tasks held up to 37,329 rows, about 38 bundle pages. Concurrent pages of one
+task queued on that one row past the 2 s `lock_timeout` and aborted the run.
+Not locking the task also keeps the migration out of the way of a live
+worker's own task updates. A lock or statement timeout in a page's locked transaction is retried
 twice (`LOCK_RETRY_DELAYS`); if it persists, that page commits nothing, the
 run prints `{"error": "lock_timeout", "at": [TASK_ID, CUSTOM_ID]}`, counts
 `lock_timeout`, stops the cursor before the page and exits nonzero, like any
 other failure. Later successful uploads remain unreferenced
 until retry. Compaction requires `--backup-complete`, confirmation that
-the independent database copy has finished. Start with copy and verification,
-then a bounded compaction canary. Keep the emitted counters and cursor. An
+the independent database copy has finished. `copy` writes the superseded per-row
+version 2 shape and is not part of the cutover; `bundle` below is. If anything
+runs `copy`, a later `bundle` re-points what it wrote. Keep the emitted counters and cursor. An
 unavailable, changed or ineligible outcome exits unsuccessfully before advancing
 past its row; investigate or restore the source/object and retry that cursor. Other database errors fail the invocation; rerun
 from the last saved cursor, since completed operations are idempotent.
@@ -882,7 +924,9 @@ Every reader of `snapshot_ref` goes through `request_snapshots.resolve` or
 `payload_recovery.retry`, and `snapshot_payloads.migrate_many`, which reads
 every bundle a chunk references before verifying, compacting or restoring its
 members. The cache lives for one call and is never filled inside a transaction.
-Rows with a version 2 reference are never rewritten as members.
+`review_gate.proven_profiles` reads only requests it cannot prove by digest,
+one cache per object it reads, inside its lookup budget (see the review gate
+section).
 
 **Rollout order for bundles.** Deploy the readers to every API and worker
 before any member reference is written; the bundle backfill is a separate,
@@ -890,34 +934,71 @@ later release. Rolling back past the readers requires restoring every
 member-referenced row first (`restore` writes the inline value back and clears
 the reference).
 
-`migrate_snapshot_payloads bundle --limit COUNT` is the historical backfill.
-It takes the same eligible rows as `copy` that hold no reference yet, one task
-per page of at most `--chunk-size` rows (default 1,000 in this mode), and
-uploads each page as one bundle, split further only past `BUNDLE_MAX_BYTES`.
-Then one short locked transaction rechecks eligibility and each row's exact
-inline value and attaches the member reference, keeping inline. Rows with a
-version 2 reference are not candidates. A row that changed after its upload is
+`migrate_snapshot_payloads bundle --limit COUNT` is the backfill to the one
+shape. It takes every row that is not yet a member: inline-only rows, and rows
+holding a per-row (version 1 or 2) reference, with or without their inline
+value. Each page is one task's rows, at most `--chunk-size` of them (default
+1,000 in this mode). It is uploaded as one bundle, split further only past
+`BUNDLE_MAX_BYTES`. A row's member is its inline value when it has one, since
+that is what readers resolve. Otherwise it is the row's verified object,
+read and validated first. Then one short locked transaction rechecks each row's
+exact inline value and reference and swaps in the member reference, keeping
+any inline value for `compact`. The superseded per-row object is left in place,
+never deleted. A row that changed after its upload is
 skipped and counted `changed`: the run continues, exits nonzero, and the row
-stays inline-only for a later run. An upload or invalid snapshot is
-`unavailable` and stops before its row, like `copy`. `--manifest-stdin` does
+keeps what it had for a later run. An upload, an unreadable per-row object or
+an invalid snapshot is `unavailable` and stops before its row, like `copy`.
+A row with neither an inline value nor a reference is a legacy unknown request
+with nothing to store, and is not a candidate. `--manifest-stdin` does
 not take `bundle`; manifests verify, compact and restore member rows with the
 member's digest. `compact`, `verify` and `restore` handle member rows as they
 handle version 2, reading each bundle once per chunk, so a compaction chunk the
 size of a bundle page GETs about one bundle.
 
-1. Deploy the bundle readers to every API and worker.
+1. Deploy this release to every API and worker, so nothing writes a new
+   inline or version 2 request.
 2. `bundle --workers W` from the start; `verify` the same range. A nonzero exit with only
    `changed` counts means rerun `bundle` from the start.
 3. Confirm the independent backup, compact a bounded canary, `verify` it, then
    compact the rest with `--chunk-size 1000 --workers W`. Overlapping pages,
    not a larger chunk, is what reaches Garage's concurrency; 16 to 64 pages
    in flight hold that many pages of rows in memory.
+4. Count the end state. Both numbers must be 0:
+   `SELECT count(*) FILTER (WHERE snapshot IS NOT NULL),
+   count(*) FILTER (WHERE snapshot_ref->>'version' IS DISTINCT FROM '3'
+   AND snapshot_ref IS NOT NULL) FROM batch_requests`. Rows with neither are
+   legacy unknown requests; count them separately, since nothing can move them.
 
-Eligibility is completed non-profile tasks (the exception above) with no unconsumed receipts. The
-migration locks the task and request and rechecks eligibility and exact source
-values after verified object I/O. It retains task/request identities and all
+**Every row is a candidate, whatever its task's kind or status and whether it
+has unconsumed receipts.** The migration changes what a row stores, never what
+it resolves to. These paths run concurrently with it:
+
+- **Readers.** `request_snapshots.resolve` prefers the inline value and
+  otherwise reads the verified object. Every step leaves a row resolving to the
+  same request. `bundle` adds a reference beside an existing inline value, or
+  swaps one verified reference for another. `compact` clears an inline value
+  only after its object has been read back equal to it. A reader sees one
+  committed version of the row, either side of the swap, and gets the same
+  spec. `unconsumed()` reads with one query and resolves outside any
+  transaction, as it already does for every request written since #740.
+- **Consumption** (`consume_result`) locks only `batch_result_receipts` rows.
+  The migration locks only `batch_requests` rows, so they never wait on each
+  other.
+- **`snapshot_specs`** never replaces an existing row (`DO UPDATE SET
+  snapshot=batch_requests.snapshot` keeps both columns). The conflict locks the
+  row, so it serializes with the migration's `FOR UPDATE`, and the migration's
+  update is conditioned on the row being exactly as read. Whatever it returns
+  is frozen by the same reader.
+- **`payload_recovery.retry`** compares every request row before and after its
+  locked transaction. A swap in between makes it report `conflict` with no
+  mutation; rerunning it then succeeds.
+
+Converting a running task's inline rows means that task now needs object
+storage to read them, as every task created since #740 already does. An outage
+fails it into the payload recovery path below, with nothing lost. It retains
+task/request identities and all
 receipt outcomes/accounting. No age cutoff or object expiry is implied.
-`restore` requires the verified object and reverses eligible inline removal.
+`restore` requires the verified object and reverses inline removal.
 Logical bytes moved are not a measurement of filesystem space reclaimed.
 
 A worker encountering `PayloadUnavailable` leaves a failed task with a

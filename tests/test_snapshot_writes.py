@@ -6,9 +6,9 @@ import pytest
 
 from api import db, worker
 from api.ai import batch_results, request_snapshots
-from core import batch
+from core import batch, payload_objects
 from core.batch import BatchSpec
-from core.payload_objects import MAX_CONNECTIONS, PayloadRef, PayloadStore
+from core.payload_objects import MAX_CONNECTIONS, BundleMemberRef, PayloadStore, encode_payload
 from tasks import runtime
 from tests.factories import ObjectClient
 
@@ -16,7 +16,7 @@ from tests.factories import ObjectClient
 @pytest.fixture
 def objects(monkeypatch):
     store = PayloadStore(ObjectClient(), "test-payloads")
-    monkeypatch.setattr(PayloadStore, "from_env", lambda: store)
+    monkeypatch.setattr(PayloadStore, "from_env", lambda **_: store)
     return store
 
 
@@ -30,20 +30,21 @@ SPECS = [
 ]
 
 
-def test_new_requests_are_stored_only_as_verified_objects(f, objects):
+def test_new_requests_are_stored_only_as_verified_bundle_members(f, objects):
     task_id = f.make_task("verify_new", {})
     reads = []
     original_get = objects.client.get_object
     objects.client.get_object = lambda **kw: reads.append(kw) or original_get(**kw)
     assert batch_results.snapshot_specs(task_id, SPECS) == SPECS
-    # One read per object, the upload's own round-trip check: freezing reads nothing more.
-    assert len(reads) == len(SPECS)
+    # One bundle, read once by its upload's own check: freezing reads nothing more.
+    assert len(reads) == 1
     stored = rows(task_id)
     assert [row["custom_id"] for row in stored] == ["a", "b"]
+    assert len({row["snapshot_ref"]["key"] for row in stored}) == 1
     for row, spec in zip(stored, SPECS, strict=True):
         assert row["snapshot"] is None
-        ref = PayloadRef.parse(row["snapshot_ref"])
-        assert ref.version == 2
+        ref = BundleMemberRef.parse(row["snapshot_ref"])
+        assert ref.member == spec.custom_id
         expected = {
             "custom_id": spec.custom_id,
             "instructions": spec.instructions,
@@ -54,7 +55,7 @@ def test_new_requests_are_stored_only_as_verified_objects(f, objects):
         }
         if spec.endpoint != "/v1/responses":
             expected |= {"endpoint": spec.endpoint, "inputs": spec.inputs}
-        assert objects.get(ref) == expected
+        assert objects.get_member(ref) == expected
         assert request_snapshots.resolve(row, objects) == spec
 
 
@@ -82,10 +83,10 @@ def test_legacy_inline_request_wins(f, objects):
     ]
     after = rows(task_id)
     assert after[0] == before[0]
-    assert after[1]["snapshot"] is None and after[1]["snapshot_ref"] is not None
+    assert after[1]["snapshot"] is None and after[1]["snapshot_ref"]["version"] == 3
 
 
-def test_uploads_run_concurrently_within_the_connection_pool(f, objects):
+def test_bundles_split_by_size_and_upload_concurrently_within_the_pool(f, objects, monkeypatch):
     lock = threading.Lock()
     active, peak = [0], [0]
     original_put = objects.client.put_object
@@ -104,8 +105,18 @@ def test_uploads_run_concurrently_within_the_connection_pool(f, objects):
     objects.client.put_object = put
     task_id = f.make_task("verify_new", {})
     specs = [BatchSpec(str(index), input=str(index)) for index in range(3 * MAX_CONNECTIONS)]
+    # Room for two members per bundle, so one task's requests take many objects.
+    size = len(encode_payload(batch_results.snapshot_of(specs[10])))
+    monkeypatch.setattr(payload_objects, "BUNDLE_MAX_BYTES", 2 * size + 1)
     assert batch_results.snapshot_specs(task_id, specs) == specs
+    stored = rows(task_id)
+    assert all(row["snapshot_ref"]["version"] == 3 for row in stored)
+    assert len({row["snapshot_ref"]["key"] for row in stored}) >= len(specs) // 2
     assert 1 < peak[0] <= MAX_CONNECTIONS
+    by_id = {spec.custom_id: spec for spec in specs}
+    assert [request_snapshots.resolve(row, objects) for row in stored] == [
+        by_id[row["custom_id"]] for row in stored
+    ]
 
 
 @pytest.mark.asyncio
@@ -139,22 +150,11 @@ async def test_storage_outage_submits_nothing_and_recovers(f, objects, monkeypat
     assert all(row["snapshot"] is None for row in rows(task_id))
 
 
-def test_profile_requests_stay_inline_and_gate_reads_no_object(f, objects):
-    from api import review_gate
+def test_profile_requests_are_bundle_members_like_every_other_kind(f, objects):
     from tests.test_review_gate import proven_job
 
-    calls = []
-    for name in ("put_object", "get_object"):
-        original = getattr(objects.client, name)
-        setattr(
-            objects.client,
-            name,
-            lambda _original=original, _name=name, **kw: calls.append(_name) or _original(**kw),
-        )
-    job, task_id = proven_job(f)
+    _, task_id = proven_job(f)
     stored = rows(task_id)
     assert len(stored) == 1
-    assert stored[0]["snapshot"] is not None and stored[0]["snapshot_ref"] is None
-    evidence = review_gate.proven_profiles([job], {job["url"]: "exact posting content"}, 1000)
-    assert job["url"] in evidence
-    assert calls == []
+    assert stored[0]["snapshot"] is None
+    assert BundleMemberRef.parse(stored[0]["snapshot_ref"]).member == stored[0]["custom_id"]

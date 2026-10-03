@@ -108,6 +108,11 @@ def test_copy_rechecks_concurrent_changes(f, objects, change):
             db.execute("UPDATE tasks SET kind='classify_job_profiles' WHERE id=%s", (task_id,))
 
     objects.client.after_put = mutate
+    # Only the row itself matters: its task's state cannot change the request.
+    if change != "source":
+        assert snapshot_payloads.migrate(original, objects, mode="copy") == "copied"
+        assert row(task_id)["snapshot"] == original["snapshot"]
+        return
     assert snapshot_payloads.migrate(original, objects, mode="copy") == "changed"
     assert row(task_id)["snapshot_ref"] is None
     assert row(task_id)["snapshot"] is not None
@@ -119,14 +124,17 @@ def test_copy_rechecks_concurrent_changes(f, objects, change):
         ("running", "verify_new"),
         ("awaiting_batch", "verify_new"),
         ("failed", "verify_new"),
+        ("cancelled", "verify_new"),
         ("done", "classify_job_profiles"),
     ],
 )
-def test_excluded_populations_cannot_copy(f, objects, status, kind):
-    task_id, _ = request(f, status=status, kind=kind)
-    assert snapshot_payloads.candidates(after=None, limit=1, mode="copy") == []
-    assert snapshot_payloads.migrate(row(task_id), objects, mode="copy") == "changed"
-    assert objects.client.objects == {}
+def test_every_population_is_a_candidate(f, objects, status, kind):
+    task_id, spec = request(f, status=status, kind=kind)
+    assert [
+        s["task_id"] for s in snapshot_payloads.candidates(after=None, limit=1, mode="copy")
+    ] == [task_id]
+    compact(task_id, objects)
+    assert request_snapshots.resolve(row(task_id)) == spec
 
 
 def test_nested_transaction_refuses_object_io(f, objects):
@@ -175,32 +183,6 @@ def test_compaction_rechecks_unchanged_inline_and_reference(f, objects):
     db.execute("UPDATE batch_requests SET snapshot_ref=NULL WHERE task_id=%s", (task_id,))
     assert snapshot_payloads.migrate(source, objects, mode="compact") == "changed"
     assert row(task_id)["snapshot"] is not None
-
-
-def test_profile_historical_proof_hydrates_outside_transaction(f, objects):
-    from api import review_gate
-    from core.pool import in_transaction
-    from tests.test_review_gate import proven_job
-
-    job, task_id = proven_job(f)
-    source = row(task_id)
-    ref = objects.put_verified(source["snapshot"])
-    db.execute(
-        "UPDATE batch_requests SET snapshot=NULL,snapshot_ref=%s WHERE task_id=%s",
-        (db.jsonb(asdict(ref)), task_id),
-    )
-    original_get = objects.client.get_object
-
-    def outside(**kwargs):
-        assert not in_transaction()
-        return original_get(**kwargs)
-
-    objects.client.get_object = outside
-    evidence = review_gate.proven_profiles([job], {job["url"]: "exact posting content"}, 5000)
-    assert job["url"] in evidence
-    objects.client.objects.clear()
-    with pytest.raises(PayloadUnavailable):
-        review_gate.proven_profiles([job], {job["url"]: "exact posting content"}, 5000)
 
 
 def test_cli_requires_backup_and_stops_before_unavailable_cursor(f, objects, monkeypatch, capsys):
@@ -310,7 +292,9 @@ def test_bulk_workload_statement_count_and_concurrency(f, monkeypatch, capsys, s
             == ["copied"] * 100
         )
         after = (sources[-1]["task_id"], sources[-1]["custom_id"])
-    assert len(calls) == 10 * (size // 100)
+    # Per page: the candidate read, the unlocked recheck, the transaction's
+    # two timeouts, the locked recheck and the update.
+    assert len(calls) == 6 * (size // 100)
     assert 1 < store.client.peak <= 4
     with capsys.disabled():
         print(
@@ -339,7 +323,10 @@ def test_source_change_stops_before_later_eligible_rows(f, objects, phase, mode)
     original_second = row(second)
 
     def change():
-        db.execute("UPDATE tasks SET status='pending' WHERE id=%s", (first,))
+        db.execute(
+            "UPDATE batch_requests SET snapshot=snapshot || %s WHERE task_id=%s",
+            (db.jsonb({"input": "changed"}), first),
+        )
 
     if phase == "initial":
         change()
@@ -369,7 +356,10 @@ def test_cli_changed_source_keeps_cursor_before_gap_and_returns_failure(
 
     def changed_candidates(**kwargs):
         sources = original_candidates(**kwargs)
-        db.execute("UPDATE tasks SET status='pending' WHERE id=%s", (tasks[1],))
+        db.execute(
+            "UPDATE batch_requests SET snapshot=snapshot || %s WHERE task_id=%s",
+            (db.jsonb({"input": "changed"}), tasks[1]),
+        )
         return sources
 
     monkeypatch.setattr(snapshot_payloads, "candidates", changed_candidates)

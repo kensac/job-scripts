@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import json
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
@@ -15,27 +16,41 @@ from core.payload_objects import (
     BundleCache,
     PayloadRef,
     PayloadStore,
+    bundle_groups,
     encode_payload,
 )
 from core.pool import in_transaction
 
 
-def _snapshot(spec: BatchSpec) -> Any:
+def _encoded(spec: BatchSpec) -> bytes:
     snapshot = dataclasses.asdict(spec)
     if spec.endpoint == "/v1/responses":
         snapshot.pop("endpoint")
     if spec.inputs is None:
         snapshot.pop("inputs")
+    return encode_payload(snapshot)
+
+
+def snapshot_of(spec: BatchSpec) -> Any:
     # The stored form is JSON, so freeze and verify the value JSON gives back.
-    return json.loads(encode_payload(snapshot))
+    return json.loads(_encoded(spec))
+
+
+def snapshot_sha256(spec: BatchSpec) -> str:
+    """The digest a reference records for this spec's stored form.
+
+    encode_payload is canonical, so encoding the value JSON gives back yields
+    these same bytes.
+    """
+    return hashlib.sha256(_encoded(spec)).hexdigest()
 
 
 def snapshot_specs(task_id: int, specs: list[BatchSpec]) -> list[BatchSpec]:
     """Freeze requests before paid submission; an existing request always wins.
 
-    New snapshots are verified objects before their reference row exists, so a
-    storage failure raises PayloadUnavailable before anything is submitted.
-    Profile requests stay inline; observability.md gives the reason.
+    New snapshots are members of verified bundles before their reference rows
+    exist, so a storage failure raises PayloadUnavailable before anything is
+    submitted. Every kind is stored the same way; observability.md says why.
     """
     if in_transaction():
         raise RuntimeError("Request snapshots cannot be uploaded inside a database transaction")
@@ -46,30 +61,19 @@ def snapshot_specs(task_id: int, specs: list[BatchSpec]) -> list[BatchSpec]:
     fresh: dict[str, Any] = {}
     for spec in specs:
         if spec.custom_id not in existing:
-            fresh.setdefault(spec.custom_id, _snapshot(spec))
-    task = db.query_one("SELECT kind FROM tasks WHERE id=%s", (task_id,))
-    inline = task is not None and task["kind"] == "classify_job_profiles"
+            fresh.setdefault(spec.custom_id, snapshot_of(spec))
     refs: dict[str, dict[str, Any]] = {}
-    if fresh and not inline:
+    if fresh:
         store = PayloadStore.from_env()
         with ThreadPoolExecutor(max_workers=MAX_CONNECTIONS) as executor:
-            uploaded = executor.map(store.put_verified, fresh.values())
-            refs = {
-                custom_id: dataclasses.asdict(ref)
-                for custom_id, ref in zip(fresh, uploaded, strict=True)
-            }
+            groups = bundle_groups(fresh.items(), lambda item: len(encode_payload(item[1])))
+            for uploaded in executor.map(store.put_bundle, map(dict, groups)):
+                refs.update({name: dataclasses.asdict(ref) for name, ref in uploaded.items()})
     rows = []
     with db.transaction():
         for spec in specs:
             ref = refs.get(spec.custom_id)
-            if inline and spec.custom_id in fresh:
-                row = db.query_one(
-                    "INSERT INTO batch_requests (task_id, custom_id, snapshot) VALUES (%s,%s,%s) "
-                    "ON CONFLICT (task_id,custom_id) DO UPDATE SET snapshot=batch_requests.snapshot "
-                    "RETURNING custom_id,snapshot,snapshot_ref",
-                    (task_id, spec.custom_id, db.jsonb(fresh[spec.custom_id])),
-                )
-            elif ref is None:
+            if ref is None:
                 row = db.query_one(
                     "SELECT custom_id,snapshot,snapshot_ref FROM batch_requests "
                     "WHERE task_id=%s AND custom_id=%s",

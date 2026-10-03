@@ -4,19 +4,29 @@ from __future__ import annotations
 
 import dataclasses
 import logging
+import time
 from collections import Counter
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor, wait
 from typing import Any
 
 from api import db, review_gate_records
-from api.ai import request_snapshots
+from api.ai import batch_results, request_snapshots
 from core.job_profile import (
     CLASSIFIER_VERSION,
     JOB_PROFILE_INSTRUCTIONS,
     JOB_PROFILE_MODEL,
     JobProfileAnswer,
     build_job_profile_input,
+    job_profile_spec,
 )
+from core.payload_objects import (
+    MAX_CONNECTIONS,
+    BundleCache,
+    PayloadStore,
+    parse_ref,
+)
+from core.pool import in_transaction
 from core.review_gate import ReviewGatePolicy, profile_rejection, title_rejection
 from core.store import get_contents
 
@@ -34,8 +44,11 @@ def load_policy() -> ReviewGatePolicy:
 def proven_profiles(
     jobs: list[dict[str, Any]], contents: dict[str, str], timeout_ms: int
 ) -> dict[str, tuple[int, JobProfileAnswer]]:
+    """`timeout_ms` bounds the whole lookup, database and object reads together;
+    past it this raises, and admission retains detailed review."""
     if not contents:
         return {}
+    deadline = time.monotonic() + timeout_ms / 1000
     titles = {job["url"]: job.get("title") or "" for job in jobs}
     # Legacy profile rows lack a title snapshot. A retained, consumed request
     # must prove both the original input and the response used for reuse.
@@ -68,31 +81,103 @@ def proven_profiles(
     by_id: dict[str, list[dict[str, Any]]] = {}
     for receipt in receipts:
         by_id.setdefault(receipt["custom_id"], []).append(receipt)
+
+    def answered(receipt: dict[str, Any], answer: JobProfileAnswer) -> bool:
+        return bool(
+            receipt["answer"] and JobProfileAnswer.model_validate_json(receipt["answer"]) == answer
+        )
+
+    def proves(row: dict[str, Any], receipt: dict[str, Any], answer: JobProfileAnswer) -> bool:
+        url = row["url"]
+        spec = request_snapshots.resolve(receipt)
+        if spec is None:
+            return False
+        snapshot = dataclasses.asdict(spec)
+        context = snapshot.get("context") or {}
+        return (
+            snapshot.get("instructions") == JOB_PROFILE_INSTRUCTIONS
+            and snapshot.get("input") == build_job_profile_input(titles[url], contents[url])
+            and context.get("url") == url
+            and context.get("content_row_id") == row["content_row_id"]
+            and context.get("classifier_version") == CLASSIFIER_VERSION
+            and context.get("content_hash") == row["content_hash"]
+            and answered(receipt, answer)
+        )
+
     result = {}
+    unread: list[tuple[dict[str, Any], JobProfileAnswer, list[dict[str, Any]]]] = []
     for row in rows:
         url = row["url"]
         if url not in titles or not titles[url].strip():
             continue
         answer = JobProfileAnswer.model_validate(row)
+        # A reference records the digest of the request it stands for. The
+        # request this proof wants is rebuilt from the same recipe, so an
+        # equal digest means the stored request is it byte for byte: every
+        # comparison in proves() holds by construction and nothing is read.
+        # A request that differs anywhere, including in fields the proof does
+        # not compare, is read and compared as before.
+        digest = batch_results.snapshot_sha256(
+            job_profile_spec(
+                url, row["content_row_id"], titles[url], contents[url], row["content_hash"]
+            )
+        )
+        later = []
         for receipt in by_id.get(str(row["content_row_id"]), []):
-            spec = request_snapshots.resolve(receipt)
-            if spec is None:
+            if receipt["snapshot"] is None and receipt["snapshot_ref"] is not None:
+                if request_snapshots.digest_and_size(receipt["snapshot_ref"])[0] != digest:
+                    later.append(receipt)
+                    continue
+                if answered(receipt, answer):
+                    result[url] = (row["id"], answer)
+                    break
                 continue
-            snapshot = dataclasses.asdict(spec)
-            context = snapshot.get("context") or {}
-            if (
-                snapshot.get("instructions") == JOB_PROFILE_INSTRUCTIONS
-                and snapshot.get("input") == build_job_profile_input(titles[url], contents[url])
-                and context.get("url") == url
-                and context.get("content_row_id") == row["content_row_id"]
-                and context.get("classifier_version") == CLASSIFIER_VERSION
-                and context.get("content_hash") == row["content_hash"]
-                and receipt["answer"]
-                and JobProfileAnswer.model_validate_json(receipt["answer"]) == answer
-            ):
+            if proves(row, receipt, answer):
                 result[url] = (row["id"], answer)
                 break
+        else:
+            if later:
+                unread.append((row, answer, later))
+    if unread:
+        _hydrate([receipt for _, _, later in unread for receipt in later], deadline)
+        for row, answer, later in unread:
+            if any(proves(row, receipt, answer) for receipt in later):
+                result[row["url"]] = (row["id"], answer)
     return result
+
+
+def _hydrate(receipts: list[dict[str, Any]], deadline: float) -> None:
+    """Read each receipt's referenced request into it, or raise by the deadline.
+
+    One reader per object, concurrently, each with its own BundleCache. The
+    client's own timeouts are the remaining budget, so a read abandoned at
+    the deadline ends by itself within that budget again.
+    """
+    if in_transaction():
+        raise RuntimeError("Request hydration cannot run inside a database transaction")
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError("Review gate profile lookup exceeded its budget")
+    store = PayloadStore.from_env(timeout=remaining)
+    objects: dict[str, list[dict[str, Any]]] = {}
+    for receipt in receipts:
+        objects.setdefault(parse_ref(receipt["snapshot_ref"]).key, []).append(receipt)
+
+    def read(group: list[dict[str, Any]]) -> list[Any]:
+        cache: BundleCache = {}
+        return [request_snapshots.load(receipt, store, cache) for receipt in group]
+
+    executor = ThreadPoolExecutor(max_workers=MAX_CONNECTIONS)
+    try:
+        futures = {executor.submit(read, group): group for group in objects.values()}
+        done, pending = wait(futures, timeout=max(0.0, deadline - time.monotonic()))
+        if pending:
+            raise TimeoutError("Review gate profile lookup exceeded its budget")
+        for future in done:
+            for receipt, snapshot in zip(futures[future], future.result(), strict=True):
+                receipt["snapshot"] = snapshot
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
 
 
 def partition(
