@@ -904,6 +904,27 @@ later release. Rolling back past the readers requires restoring every
 member-referenced row first (`restore` writes the inline value back and clears
 the reference).
 
+`migrate_snapshot_payloads bundle --limit COUNT` is the historical backfill.
+It takes the same eligible rows as `copy` that hold no reference yet, one task
+per page of at most `--chunk-size` rows (default 1,000 in this mode), and
+uploads each page as one bundle, split further only past `BUNDLE_MAX_BYTES`.
+Then one short locked transaction rechecks eligibility and each row's exact
+inline value and attaches the member reference, keeping inline. Rows with a
+version 2 reference are not candidates. A row that changed after its upload is
+skipped and counted `changed`: the run continues, exits nonzero, and the row
+stays inline-only for a later run. An upload or invalid snapshot is
+`unavailable` and stops before its row, like `copy`. `--manifest-stdin` does
+not take `bundle`; manifests verify, compact and restore member rows with the
+member's digest. `compact`, `verify` and `restore` handle member rows as they
+handle version 2, reading each bundle once per chunk, so a compaction chunk the
+size of a bundle page GETs about one bundle.
+
+1. Deploy the bundle readers to every API and worker.
+2. `bundle` from the start; `verify` the same range. A nonzero exit with only
+   `changed` counts means rerun `bundle` from the start.
+3. Confirm the independent backup, compact a bounded canary, `verify` it, then
+   compact the rest with `--chunk-size 1000`.
+
 Eligibility is completed non-profile tasks (the exception above) with no unconsumed receipts. The
 migration locks the task and request and rechecks eligibility and exact source
 values after verified object I/O. It retains task/request identities and all

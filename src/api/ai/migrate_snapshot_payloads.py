@@ -13,12 +13,15 @@ from typing import cast
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mode", choices=("copy", "compact", "restore", "verify"))
+    parser.add_argument("mode", choices=("bundle", "copy", "compact", "restore", "verify"))
     parser.add_argument(
         "--limit", type=int, required=True, help="maximum snapshots this invocation"
     )
     parser.add_argument(
-        "--chunk-size", type=int, default=100, help="maximum snapshots held and committed together"
+        "--chunk-size",
+        type=int,
+        help="maximum snapshots held and committed together (default 100; "
+        "bundle: 1000, the most members one bundle holds)",
     )
     parser.add_argument(
         "--workers", type=int, default=1, help="concurrent verified object operations"
@@ -33,6 +36,14 @@ def main() -> int:
         "--backup-complete", action="store_true", help="confirm independent DB copy finished"
     )
     args = parser.parse_args()
+    if args.chunk_size is None:
+        # The bundle count cannot fall below one per task (3,523 tasks held
+        # the 1,081,787 rows left on 2026-10-03), so 1,000 members leaves at
+        # most 1,082 bundles to save by going larger, while a page's memory
+        # and its locked update grow with it.
+        args.chunk_size = 1000 if args.mode == "bundle" else 100
+    if args.manifest_stdin and args.mode == "bundle":
+        parser.error("bundle reads its population from the database scan")
     if args.manifest_stdin and args.after:
         parser.error("Manifest batches cannot use a database scan cursor")
     if min(args.limit, args.chunk_size, args.workers) <= 0:
@@ -48,7 +59,13 @@ def main() -> int:
         + (" -c default_transaction_read_only=on" if args.mode == "verify" else "")
     )
     from api.ai import request_snapshots
-    from api.ai.snapshot_payloads import STOP_OUTCOMES, Mode, candidates, migrate_many
+    from api.ai.snapshot_payloads import (
+        STOP_OUTCOMES,
+        Mode,
+        bundle_many,
+        candidates,
+        migrate_many,
+    )
     from core.payload_objects import PayloadStore, encode_payload
     from core.pool import pool
 
@@ -80,6 +97,9 @@ def main() -> int:
     counts: Counter[str] = Counter()
     logical_bytes = 0
     stopped = None
+    # A bundled task's changed row is skipped, not a stop: its bundle is
+    # already uploaded and the rest of the page is attached.
+    stops = {"unavailable"} if mode == "bundle" else STOP_OUTCOMES
     try:
         store = PayloadStore.from_env()
         remaining = args.limit
@@ -87,13 +107,17 @@ def main() -> int:
             rows = candidates(after=after, limit=min(remaining, args.chunk_size), mode=mode)
             if not rows:
                 break
-            outcomes = migrate_many(rows, store, mode=mode, workers=args.workers)
+            outcomes = (
+                bundle_many(rows, store, workers=args.workers)
+                if mode == "bundle"
+                else migrate_many(rows, store, mode=mode, workers=args.workers)
+            )
             for source, outcome in zip(rows, outcomes, strict=False):
                 counts[outcome] += 1
-                if outcome in STOP_OUTCOMES:
+                if outcome in stops:
                     stopped = outcome
                     break
-                if outcome == "copied":
+                if outcome in ("copied", "bundled"):
                     logical_bytes += len(encode_payload(source["snapshot"]))
                 elif source.get("snapshot_ref") is not None and outcome != "changed":
                     logical_bytes += request_snapshots.digest_and_size(source["snapshot_ref"])[1]
@@ -126,7 +150,7 @@ def main() -> int:
             }
         )
     )
-    return 1 if stopped is not None else 0
+    return 1 if stopped is not None or counts["changed"] else 0
 
 
 if __name__ == "__main__":
