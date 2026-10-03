@@ -6,7 +6,8 @@ import argparse
 import json
 import os
 import sys
-from collections import Counter
+from collections import Counter, deque
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import asdict
 from typing import cast
 
@@ -24,7 +25,10 @@ def main() -> int:
         "bundle: 1000, the most members one bundle holds)",
     )
     parser.add_argument(
-        "--workers", type=int, default=1, help="concurrent verified object operations"
+        "--workers",
+        type=int,
+        default=1,
+        help="scan: pages in flight, each committing on its own; manifest: concurrent rows",
     )
     parser.add_argument(
         "--manifest-stdin",
@@ -66,7 +70,7 @@ def main() -> int:
         candidates,
         migrate_many,
     )
-    from core.payload_objects import PayloadStore, encode_payload
+    from core.payload_objects import MAX_CONNECTIONS, PayloadStore, encode_payload
     from core.pool import pool
 
     if args.manifest_stdin:
@@ -101,43 +105,68 @@ def main() -> int:
     # already uploaded and the rest of the page is attached.
     stops = {"unavailable"} if mode == "bundle" else STOP_OUTCOMES
     try:
-        store = PayloadStore.from_env()
-        remaining = args.limit
-        while remaining:
-            rows = candidates(after=after, limit=min(remaining, args.chunk_size), mode=mode)
-            if not rows:
-                break
-            outcomes = (
-                bundle_many(rows, store, workers=args.workers)
-                if mode == "bundle"
-                else migrate_many(rows, store, mode=mode, workers=args.workers)
-            )
-            for source, outcome in zip(rows, outcomes, strict=False):
-                counts[outcome] += 1
-                if outcome in stops:
-                    stopped = outcome
+        # Object storage is bound by per-request latency, not bandwidth, so
+        # throughput comes from pages in flight: each page does its object I/O
+        # serially and commits on its own, and the connection pool must not
+        # cap the workers below what was asked for.
+        store = PayloadStore.from_env(max_connections=max(MAX_CONNECTIONS, args.workers))
+
+        def run(rows: list[dict]) -> list[str]:
+            if mode == "bundle":
+                return bundle_many(rows, store)
+            return migrate_many(rows, store, mode=mode)
+
+        unread = args.limit
+        read_after = after
+        exhausted = False
+        in_flight: deque[tuple[list[dict], Future[list[str]]]] = deque()
+        with ThreadPoolExecutor(max_workers=args.workers) as executor:
+            while True:
+                while (
+                    not exhausted and stopped is None and unread and len(in_flight) < args.workers
+                ):
+                    rows = candidates(
+                        after=read_after, limit=min(unread, args.chunk_size), mode=mode
+                    )
+                    if not rows:
+                        exhausted = True
+                        break
+                    unread -= len(rows)
+                    read_after = (rows[-1]["task_id"], rows[-1]["custom_id"])
+                    in_flight.append((rows, executor.submit(run, rows)))
+                if not in_flight:
                     break
-                if outcome in ("copied", "bundled"):
-                    logical_bytes += len(encode_payload(source["snapshot"]))
-                elif source.get("snapshot_ref") is not None and outcome != "changed":
-                    logical_bytes += request_snapshots.digest_and_size(source["snapshot_ref"])[1]
-                after = (source["task_id"], source["custom_id"])
-                remaining -= 1
-            # Emit every committed chunk so an interrupted long invocation has
-            # a durable cursor in its captured output, never beyond a failure.
-            print(
-                json.dumps(
-                    {
-                        "mode": mode,
-                        "counts": dict(counts),
-                        "logical_bytes_verified": logical_bytes,
-                        "after": after,
-                    }
-                ),
-                flush=True,
-            )
-            if stopped is not None:
-                break
+                # Pages are reported in cursor order. A page that commits while
+                # an earlier one has failed is counted, but the cursor stays
+                # before the failure: it never passes an uncommitted row, and a
+                # rerun from it finds the committed rows idempotently.
+                rows, page = in_flight.popleft()
+                for source, outcome in zip(rows, page.result(), strict=False):
+                    counts[outcome] += 1
+                    if outcome in stops:
+                        stopped = stopped or outcome
+                        break
+                    if outcome in ("copied", "bundled"):
+                        logical_bytes += len(encode_payload(source["snapshot"]))
+                    elif source.get("snapshot_ref") is not None and outcome != "changed":
+                        logical_bytes += request_snapshots.digest_and_size(source["snapshot_ref"])[
+                            1
+                        ]
+                    if stopped is None:
+                        after = (source["task_id"], source["custom_id"])
+                # Emit every committed page so an interrupted long invocation
+                # has a durable cursor in its captured output.
+                print(
+                    json.dumps(
+                        {
+                            "mode": mode,
+                            "counts": dict(counts),
+                            "logical_bytes_verified": logical_bytes,
+                            "after": after,
+                        }
+                    ),
+                    flush=True,
+                )
     finally:
         pool.close()
     print(

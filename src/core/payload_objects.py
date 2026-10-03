@@ -125,7 +125,7 @@ class PayloadStore:
         self.bucket = bucket
 
     @classmethod
-    def from_env(cls) -> PayloadStore:
+    def from_env(cls, max_connections: int = MAX_CONNECTIONS) -> PayloadStore:
         # Explicit credentials prevent an accidental fallback to another
         # account through the SDK credential discovery chain.
         prefix = "JOBTRACKER_S3_"
@@ -141,7 +141,7 @@ class PayloadStore:
                 aws_secret_access_key=os.environ[prefix + "SECRET_ACCESS_KEY"],
                 config=Config(
                     s3={"addressing_style": "path"},
-                    max_pool_connections=MAX_CONNECTIONS,
+                    max_pool_connections=max_connections,
                     connect_timeout=5,
                     read_timeout=30,
                     retries={"mode": "standard", "total_max_attempts": 3},

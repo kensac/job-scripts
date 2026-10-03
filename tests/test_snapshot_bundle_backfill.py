@@ -17,7 +17,7 @@ from tests.test_snapshot_bundles import CountingClient, rows, task
 @pytest.fixture
 def objects(monkeypatch):
     store = PayloadStore(CountingClient(), "test-payloads")
-    monkeypatch.setattr(PayloadStore, "from_env", lambda: store)
+    monkeypatch.setattr(PayloadStore, "from_env", lambda **_: store)
     return store
 
 
@@ -169,3 +169,85 @@ def test_cli_stops_before_an_unavailable_page(f, objects, monkeypatch, capsys):
     assert code == 1
     assert report["after"] is None and report["counts"] == {"unavailable": 1}
     assert rows(first)[0]["snapshot_ref"] is None
+
+
+def distinct_tasks(f, count):
+    tasks = [task(f, 2)[0] for _ in range(count)]
+    # Distinct content, or the tasks' bundles are one content-addressed object.
+    db.execute(
+        "UPDATE batch_requests SET snapshot=jsonb_set(snapshot,'{context,task}',to_jsonb(task_id))"
+    )
+    return tasks
+
+
+def test_concurrent_pages_each_commit_and_report_in_cursor_order(f, objects, monkeypatch, capsys):
+    import threading
+    import time
+
+    tasks = distinct_tasks(f, 6)
+    lock = threading.Lock()
+    active = peak = 0
+    original_put = objects.client.put_object
+
+    def slow_put(**kwargs):
+        nonlocal active, peak
+        with lock:
+            active += 1
+            peak = max(peak, active)
+        try:
+            # Simulated latency releases the interpreter so pages overlap.
+            time.sleep(0.02)
+            return original_put(**kwargs)
+        finally:
+            with lock:
+                active -= 1
+
+    objects.client.put_object = slow_put
+    monkeypatch.setattr(cli, "os", SimpleNamespace(environ={}))
+    monkeypatch.setattr("core.pool.pool.close", lambda: None)
+    monkeypatch.setattr("sys.argv", ["migration", "bundle", "--limit", "20", "--workers", "4"])
+    assert cli.main() == 0
+    lines = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    # One progress line per committed page, in cursor order, then the summary.
+    assert [line["after"] for line in lines] == [[t, "r1"] for t in tasks] + [[tasks[-1], "r1"]]
+    assert lines[-1]["counts"] == {"bundled": 12}
+    assert 1 < peak <= 4
+    assert all(s["snapshot_ref"]["version"] == 3 for t in tasks for s in rows(t))
+
+
+def test_failed_middle_page_keeps_cursor_before_it_and_rerun_closes_the_gap(
+    f, objects, monkeypatch, capsys
+):
+    tasks = distinct_tasks(f, 5)
+    failing = tasks[2]
+    original_put = objects.client.put_object
+
+    def put(**kwargs):
+        if f'"task":{failing}}}'.encode() in kwargs["Body"]:
+            raise OSError("upload failed")
+        return original_put(**kwargs)
+
+    objects.client.put_object = put
+    code, report = run(monkeypatch, capsys, "bundle", "--limit", "20", "--workers", "4")
+    assert code == 1
+    assert report["after"] == [tasks[1], "r1"]
+    assert report["counts"]["unavailable"] == 1
+    assert all(s["snapshot_ref"] is None for s in rows(failing))
+    # Pages already in flight past the failure commit on their own; the cursor
+    # does not pass the failure, and a rerun from it finds them idempotently.
+    assert all(s["snapshot_ref"] is not None for t in tasks[3:] for s in rows(t))
+    objects.client.put_object = original_put
+    code, report = run(
+        monkeypatch,
+        capsys,
+        "bundle",
+        "--limit",
+        "20",
+        "--workers",
+        "4",
+        "--after",
+        str(tasks[1]),
+        "r1",
+    )
+    assert code == 0 and report["counts"] == {"bundled": 2}
+    assert all(s["snapshot_ref"]["version"] == 3 for t in tasks for s in rows(t))

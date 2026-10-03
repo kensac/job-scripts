@@ -838,12 +838,19 @@ After deploying compatible readers to the whole fleet, run bounded operations
 with `python -m api.ai.migrate_snapshot_payloads MODE --limit COUNT`. Modes are
 `copy`, `verify`, `compact`, and `restore`; resume with the reported
 `--after TASK_ID CUSTOM_ID`. Each invocation processes at most COUNT snapshots,
-in pages selected by `--chunk-size` (default 100). `--workers` controls concurrent
-verified object operations (default 1). Object I/O finishes before a short
-transaction locks tasks and requests in key order and performs one conditional
-set-based update. Each committed chunk prints its cursor. If an object fails or a source changes or becomes ineligible,
-only the preceding ordered prefix commits; later successful uploads remain
-unreferenced until retry. Compaction requires `--backup-complete`, confirmation that
+in pages selected by `--chunk-size` (default 100). `--workers` is the number of
+pages in flight (default 1); each page does its object I/O serially and commits
+on its own, and the object client's connection pool is sized to match. Object
+storage is bound by per-request latency, not bandwidth: on 2026-10-03 one PUT
+took about 0.67 s, 16 concurrent PUTs reached about 11/s and 64 about 16/s.
+Object I/O finishes before a short transaction locks tasks and requests in key
+order and performs one conditional set-based update. Pages are reported in
+cursor order, one line per page with its cursor. If an object fails or a source
+changes or becomes ineligible, only the preceding ordered prefix of that page
+commits and the cursor stops before it. Pages already in flight past it still
+commit and are counted, but the cursor never passes an uncommitted row; a rerun
+from it finds them already done. Later successful uploads remain unreferenced
+until retry. Compaction requires `--backup-complete`, confirmation that
 the independent database copy has finished. Start with copy and verification,
 then a bounded compaction canary. Keep the emitted counters and cursor. An
 unavailable, changed or ineligible outcome exits unsuccessfully before advancing
@@ -920,10 +927,12 @@ handle version 2, reading each bundle once per chunk, so a compaction chunk the
 size of a bundle page GETs about one bundle.
 
 1. Deploy the bundle readers to every API and worker.
-2. `bundle` from the start; `verify` the same range. A nonzero exit with only
+2. `bundle --workers W` from the start; `verify` the same range. A nonzero exit with only
    `changed` counts means rerun `bundle` from the start.
 3. Confirm the independent backup, compact a bounded canary, `verify` it, then
-   compact the rest with `--chunk-size 1000`.
+   compact the rest with `--chunk-size 1000 --workers W`. Overlapping pages,
+   not a larger chunk, is what reaches Garage's concurrency; 16 to 64 pages
+   in flight hold that many pages of rows in memory.
 
 Eligibility is completed non-profile tasks (the exception above) with no unconsumed receipts. The
 migration locks the task and request and rechecks eligibility and exact source
