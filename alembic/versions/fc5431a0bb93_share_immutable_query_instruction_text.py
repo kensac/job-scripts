@@ -1,7 +1,7 @@
 """share immutable query instruction text
 
 Revision ID: fc5431a0bb93
-Revises: 01a2e66a5929
+Revises: 343357c00e0e
 Create Date: 2026-10-03 03:33:41.245589
 
 """
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 
 revision: str = 'fc5431a0bb93'
-down_revision: Union[str, None] = '01a2e66a5929'
+down_revision: Union[str, None] = '343357c00e0e'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
