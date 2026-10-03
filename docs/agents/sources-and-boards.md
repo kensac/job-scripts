@@ -79,6 +79,8 @@ that way, and a change to the upsert must keep all four:
 - Set `description` and `raw` from the old row when they are equal. Postgres
   reuses a TOASTed value only when it is handed the old row's own pointer. A
   value from `EXCLUDED` is a fresh copy and is written out again in full.
+  A field's reference columns (below) move with it: all four from the old
+  row or all four from the new one, so no reference outlives its value.
 - No index on a column a refresh moves. `last_seen_at` was in the source
   index, and no update could be heap-only (860 of 1.17M a day). The index is
   on `source` alone, with fillfactor 80 so a page has room for the new
@@ -101,6 +103,33 @@ instead of fetching the page.
 Scraping is the action that gets the fleet blocked, so a backtest or a
 backfill reads this table rather than asking a board twice. Nothing downstream
 reads it.
+
+## A listing's text and raw record can be held by reference
+
+`description` and `raw` were 1.3 GB of TOAST on about 650k rows (about 595 MB
+and 630 MB compressed, from a 5% sample, 2026-10-03), and the only thing that
+read them was the upsert's own change check. Each field can instead be a
+member of a verified bundle object: `<field>_sha256` is the SHA-256 of
+`encode_payload(value)` and names the member, `<field>_object` is the bundle's
+SHA-256 (the key is `payloads/v3/sha256/<hex>.json` in the configured bucket)
+and `<field>_object_size` its length. The three are set together or not at all
+(`ck_listings_<field>_reference`). A referenced field's inline column holds its
+default, `''` or `'{}'`, which is not the value. An empty description is never
+referenced: `''` with no reference is "the board never carried the text".
+
+**Every reader of `description` or `raw` selects `listing_payloads.COLUMNS`
+and goes through `listing_payloads.resolve`.** Selecting the inline columns
+alone reads `''` and `'{}'` for every referenced row. A reference that cannot
+be read, or reads a value whose digest differs, raises `PayloadUnavailable`;
+it is never a listing without text. On 2026-10-03 nothing outside the upsert
+read either column: pattern preview and the screened list select title, url,
+company and dates only.
+
+**The change check trusts a digest only beside its reference.** A stored
+referenced value equals an incoming one when the digests match; an inline
+value is compared as itself. A writer that stores a value inline writes no
+digest, so no older writer can leave a digest that disagrees with the value
+beside it.
 
 ## A pull rewrites a catalog row only when the row would change
 
