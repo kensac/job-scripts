@@ -1,0 +1,39 @@
+name: Generate instruction migration
+on:
+  pull_request:
+    paths:
+      - src/api/orm/ai.py
+      - .github/workflows/generate-instruction-migration.yml
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: pgvector/pgvector:pg18-trixie
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: jobtracker_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PYTHONPATH: src
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7
+      - run: uv sync --frozen
+      - name: Generate schema from models against disposable database
+        run: uv run make migration TESTPG_URL=postgresql://ci:ci@127.0.0.1:5432/jobtracker_ci m="share immutable query instruction text"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: instruction-migration
+          path: alembic/versions/*share_immutable_query_instruction_text.py

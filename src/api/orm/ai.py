@@ -98,6 +98,14 @@ class AiQuery(Base):
     company: Mapped[str | None] = mapped_column(Text)
     job_title: Mapped[str | None] = mapped_column(Text)
     instructions: Mapped[str | None] = mapped_column(Text)
+    instructions_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey(
+            "ai_instruction_texts.id",
+            name="fk_ai_queries_instructions_id",
+            postgresql_not_valid=True,
+        ),
+    )
     input_content: Mapped[str | None] = mapped_column(Text)
     parsed_json: Mapped[str | None] = mapped_column(Text)
     prompt_tokens: Mapped[int | None] = mapped_column(BigInteger)
@@ -111,6 +119,14 @@ class AiQuery(Base):
     worker: Mapped[str | None] = mapped_column(Text)
     batch_id: Mapped[str | None] = mapped_column(Text)
     cost_usd: Mapped[float | None] = mapped_column(Numeric(12, 6))
+
+
+class AiInstructionText(Base):
+    __tablename__ = "ai_instruction_texts"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    sha256: Mapped[str] = mapped_column(Text, unique=True)
+    instructions: Mapped[str] = mapped_column(Text)
 
 
 class AiPrompt(Base):
