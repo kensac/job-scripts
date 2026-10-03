@@ -85,10 +85,7 @@ def test_copy_compact_restore_preserves_metadata_cache_and_admin_response(client
     assert {k: v for k, v in compacted.items() if k not in ("instructions", "instructions_id")} == {
         k: v for k, v in original.items() if k not in ("instructions", "instructions_id")
     }
-    assert (
-        store.get_custom_result("https://example.test/history", "filter-key")["instructions"]
-        == original["instructions"]
-    )
+    assert store.has_custom_result("https://example.test/history", "filter-key") is True
     assert store.get_content("https://example.test/history") is None
     assert client.get(f"/v1/admin/queries/{query_id}", headers=admin_headers).json() == before
     responses = client.get(
@@ -185,7 +182,7 @@ def test_dictionary_corruption_is_explicit():
         (query_id,),
     )
     with pytest.raises(InstructionUnavailable):
-        store.get_custom_result("https://example.test/corrupt", "key")
+        store.has_custom_result("https://example.test/corrupt", "key")
 
 
 def test_service_compaction_requires_backup_and_reader_confirmations():
@@ -245,3 +242,49 @@ def test_compaction_holds_dictionary_content_lock_through_validation(monkeypatch
         backup_complete=True,
         readers_compatible=True,
     )
+
+
+def test_the_verdict_cache_check_answers_from_the_row_without_reading_page_text(monkeypatch):
+    """The filter sweeps ask this once per candidate, 1.32M times in 36 hours
+    (pg_stat_statements, 2026-10-03), and only ever test the answer. Reading
+    the whole row detoasted the cached page text on every one of them."""
+    import psycopg
+
+    long_text = "Posting text.\n" * 400
+    store.add_ai_result(
+        "https://example.test/cached",
+        "passed",
+        check_type="custom",
+        prompt_hash="key",
+        model="gpt-5-nano",
+        instructions="Exact instructions.",
+        input_content=long_text,
+    )
+    store.add_ai_result(
+        "https://example.test/undecided",
+        "failed",
+        check_type="custom",
+        prompt_hash="key",
+        input_content=long_text,
+    )
+    statements = []
+    execute = psycopg.Cursor.execute
+
+    def recording(cursor, query, *args, **kwargs):
+        statements.append(str(query))
+        return execute(cursor, query, *args, **kwargs)
+
+    monkeypatch.setattr(psycopg.Cursor, "execute", recording)
+
+    answers = [
+        store.has_custom_result("https://example.test/cached", "key"),
+        store.has_custom_result("https://example.test/cached", "key", model="gpt-5-nano"),
+        store.has_custom_result("https://example.test/cached", "key", model="gpt-5-mini"),
+        store.has_custom_result("https://example.test/cached", "other"),
+        store.has_custom_result("https://example.test/undecided", "key"),
+    ]
+
+    assert answers == [True, True, False, False, False]
+    reads = [s for s in statements if "ai_queries" in s]
+    assert reads
+    assert not [s for s in reads if "*" in s or "input_content" in s]

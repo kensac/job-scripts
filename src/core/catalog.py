@@ -102,10 +102,40 @@ def _upsert_batch(batch: list[tuple], retries: int = 3) -> None:
                     if proposed
                     else []
                 )
+                # A row is written only when the update would change it.
+                # Rewriting every listed row was 1.33M updates in 36 hours on
+                # a 605k-row catalog, 5.7 GB of WAL, while the feeds put back
+                # 5,336 postings (pg_stat_statements and job_listing_events,
+                # 2026-10-03). The NOT EXISTS is the SET below evaluated
+                # against the stored row, so it must change whenever the SET
+                # does. It filters in the SELECT rather than in a WHERE on DO
+                # UPDATE because DO UPDATE locks, and logs, the conflicting
+                # row even when its WHERE refuses the update.
                 cur.executemany(
                     """
                 INSERT INTO jobs (url, raw_url, company, title, locations, terms, source, active, date_posted)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                SELECT v.url, v.raw_url, v.company, v.title, v.locations, v.terms, v.source,
+                       v.active, v.date_posted
+                FROM (VALUES (%s::text, %s::text, %s::text, %s::text, %s::text[], %s::text[],
+                              %s::text, %s::boolean, %s::timestamptz))
+                    AS v (url, raw_url, company, title, locations, terms, source, active,
+                          date_posted)
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM jobs j
+                    WHERE j.url = v.url
+                      AND (CASE WHEN j.source = 'upload' OR j.company = ''
+                                THEN v.company ELSE j.company END,
+                           CASE WHEN j.source = 'upload' OR j.title = ''
+                                THEN v.title ELSE j.title END,
+                           v.locations, v.terms, v.active,
+                           COALESCE(j.date_posted, v.date_posted),
+                           CASE WHEN j.source = 'upload' THEN v.source ELSE j.source END,
+                           CASE WHEN j.source = 'upload'
+                                THEN 'done' ELSE j.extraction_status END)
+                          IS NOT DISTINCT FROM
+                          (j.company, j.title, j.locations, j.terms, j.active,
+                           j.date_posted, j.source, j.extraction_status)
+                )
                 ON CONFLICT (url) DO UPDATE SET
                     company = CASE WHEN jobs.source = 'upload' OR jobs.company = ''
                                    THEN EXCLUDED.company ELSE jobs.company END,

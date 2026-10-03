@@ -30,7 +30,7 @@ WHAT A MODEL SWITCH ACTUALLY COSTS, since the obvious guess is wrong. It does
 NOT fork the verdict log: model appears in no resolution key - jobs.py resolves
 DISTINCT ON (url, check_type) and custom on (url, prompt_hash) - so the newest
 row wins whatever produced it, and the board stays correct. The damage is a
-bill. core/store.py's get_custom_result takes an optional `model` and
+bill. core/store.py's has_custom_result takes an optional `model` and
 tasks/filters.py passes cfg.model to it as its skip-check, so the moment a
 check is answered by a different model than last cycle, every verdict already
 decided becomes invisible to that check and the sweep re-runs its whole
@@ -112,7 +112,7 @@ class ModelChangeEffect(StrEnum):
     MIXES = "mixes"
     # The sweep's skip-check is scoped by model, so the next cycle sees no
     # completed work and re-pays for all of it. tasks/filters.py is the case:
-    # get_custom_result(url, prompt_hash, model=cfg.model).
+    # has_custom_result(url, prompt_hash, model=cfg.model).
     RERUNS = "reruns"
 
 
