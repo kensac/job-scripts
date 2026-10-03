@@ -14,7 +14,7 @@ from api import params as params_
 from api.auth import AuthedUser
 from api.review_gate_reads import ReviewDecisions, read_decisions
 from api.routers.admin.shared import require_admin
-from core import reason_taxonomy
+from core import query_instructions, reason_taxonomy
 
 router = APIRouter()
 
@@ -360,12 +360,12 @@ class QueryRecord(BaseModel):
 
 @router.get("/queries/{query_id}")
 def get_query(query_id: int, user: AuthedUser = Depends(require_admin)) -> QueryRecord:
-    row = db.query_one_as(
-        QueryRecord, f"SELECT {_ROW_COLS} FROM ai_queries WHERE id = %s", (query_id,)
+    row = db.query_one(
+        f"SELECT {_ROW_COLS}, instructions_id FROM ai_queries WHERE id = %s", (query_id,)
     )
     if not row:
         raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown query"})
-    return row
+    return QueryRecord.model_validate(query_instructions.hydrate([row])[0])
 
 
 class DeleteQueries(BaseModel):
@@ -567,11 +567,15 @@ class QueryResponses(BaseModel):
 @router.get("/jobs/responses")
 def job_responses(url: str, user: AuthedUser = Depends(require_admin)) -> QueryResponses:
     return QueryResponses(
-        rows=db.query_as(
-            QueryRecord,
-            f"SELECT {_ROW_COLS} FROM ai_queries WHERE url = %s ORDER BY id ASC",
-            (url,),
-        )
+        rows=[
+            QueryRecord.model_validate(row)
+            for row in query_instructions.hydrate(
+                db.query(
+                    f"SELECT {_ROW_COLS}, instructions_id FROM ai_queries WHERE url = %s ORDER BY id ASC",
+                    (url,),
+                )
+            )
+        ]
     )
 
 

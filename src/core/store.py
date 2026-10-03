@@ -7,7 +7,7 @@ from typing import Any, LiteralString, cast
 
 import dotenv
 
-from core import pricing
+from core import pricing, query_instructions
 from core.pool import connection
 
 logger = logging.getLogger(__name__)
@@ -39,6 +39,7 @@ _INSERT_COLUMNS = [
     "company",
     "job_title",
     "instructions",
+    "instructions_id",
     "input_content",
     "parsed_json",
     "prompt_tokens",
@@ -139,6 +140,9 @@ def add_ai_result(
     columns = ", ".join(_INSERT_COLUMNS)
     placeholders = ", ".join(f"%({c})s" for c in _INSERT_COLUMNS)
     with connection() as conn:
+        row["instructions_id"] = (
+            query_instructions.intern(conn, instructions) if instructions is not None else None
+        )
         inserted = conn.execute(
             _as_query(f"INSERT INTO ai_queries ({columns}) VALUES ({placeholders}) RETURNING id"),
             row,
@@ -164,7 +168,7 @@ def get_custom_result(
             "ORDER BY id DESC LIMIT 1",
             params,
         ).fetchone()
-    return dict(row) if row else None
+    return query_instructions.hydrate([dict(row)])[0] if row else None
 
 
 # A page shorter than this is a login wall, an error stub or a cookie banner,
