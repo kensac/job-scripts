@@ -251,3 +251,113 @@ def test_failed_middle_page_keeps_cursor_before_it_and_rerun_closes_the_gap(
     )
     assert code == 0 and report["counts"] == {"bundled": 2}
     assert all(s["snapshot_ref"]["version"] == 3 for t in tasks for s in rows(t))
+
+
+@pytest.mark.parametrize("mode", ["bundle", "verify"])
+def test_pages_of_one_task_never_run_concurrently(f, objects, monkeypatch, capsys, mode):
+    """Production 2026-10-03: pages of one task locked its tasks row together
+    and queued past the 2 s lock_timeout, aborting the whole invocation."""
+    import threading
+    import time
+
+    # Five rows in pages of two: in verify mode the third page spans two tasks.
+    big, _ = task(f, 5)
+    small = distinct_tasks(f, 3)
+    if mode == "verify":
+        assert run(monkeypatch, capsys, "bundle", "--limit", "20")[0] == 0
+    name = "bundle_many" if mode == "bundle" else "migrate_many"
+    real = getattr(snapshot_payloads, name)
+    lock = threading.Lock()
+    active: dict[int, int] = {}
+    peak_task = peak = 0
+
+    def instrumented(sources, *args, **kwargs):
+        nonlocal peak_task, peak
+        ids = {source["task_id"] for source in sources}
+        with lock:
+            for task_id in ids:
+                active[task_id] = active.get(task_id, 0) + 1
+                peak_task = max(peak_task, active[task_id])
+            peak = max(peak, sum(1 for count in active.values() if count))
+        try:
+            time.sleep(0.05)
+            return real(sources, *args, **kwargs)
+        finally:
+            with lock:
+                for task_id in ids:
+                    active[task_id] -= 1
+
+    monkeypatch.setattr(snapshot_payloads, name, instrumented)
+    code, report = run(
+        monkeypatch, capsys, mode, "--limit", "20", "--chunk-size", "2", "--workers", "4"
+    )
+    assert code == 0
+    assert report["counts"] == {"bundled" if mode == "bundle" else "verified": 11}
+    assert report["after"] == [small[-1], "r1"]
+    assert peak_task == 1
+    # Different tasks still overlap: the rule serialises a task, not the run.
+    assert peak > 1
+    assert all(s["snapshot_ref"]["version"] == 3 for t in [big, *small] for s in rows(t))
+
+
+def lock_failures(monkeypatch, failing, times):
+    """Fail task `failing`'s locked recheck the way Postgres does past lock_timeout."""
+    import psycopg
+
+    real = snapshot_payloads._current_sources
+    calls = {"locked": 0}
+
+    def current(sources, *, lock=False):
+        if lock and sources[0]["task_id"] == failing:
+            calls["locked"] += 1
+            if calls["locked"] <= times:
+                raise psycopg.errors.LockNotAvailable("canceling statement due to lock timeout")
+        return real(sources, lock=lock)
+
+    monkeypatch.setattr(snapshot_payloads, "_current_sources", current)
+    monkeypatch.setattr(snapshot_payloads, "LOCK_RETRY_DELAYS", (0.0, 0.0))
+    return calls
+
+
+@pytest.mark.parametrize("mode", ["bundle", "copy"])
+def test_a_lock_timeout_on_a_page_is_retried(f, objects, monkeypatch, capsys, mode):
+    tasks = distinct_tasks(f, 3)
+    calls = lock_failures(monkeypatch, tasks[1], times=1)
+    code, report = run(
+        monkeypatch, capsys, mode, "--limit", "20", "--chunk-size", "2", "--workers", "2"
+    )
+    assert code == 0
+    assert report["counts"] == {"bundled" if mode == "bundle" else "copied": 6}
+    assert calls["locked"] == 2
+    assert all(s["snapshot_ref"] is not None for t in tasks for s in rows(t))
+
+
+@pytest.mark.parametrize("mode", ["bundle", "copy"])
+def test_a_persistent_lock_timeout_stops_the_cursor_before_its_page(
+    f, objects, monkeypatch, capsys, mode
+):
+    tasks = distinct_tasks(f, 3)
+    calls = lock_failures(monkeypatch, tasks[1], times=99)
+    monkeypatch.setattr(cli, "os", SimpleNamespace(environ={}))
+    monkeypatch.setattr("core.pool.pool.close", lambda: None)
+    monkeypatch.setattr(
+        "sys.argv",
+        ["migration", mode, "--limit", "20", "--chunk-size", "2", "--workers", "2"],
+    )
+    assert cli.main() == 1
+    lines = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert calls["locked"] == 3
+    assert [line for line in lines if "error" in line] == [
+        {
+            "mode": mode,
+            "error": "lock_timeout",
+            "at": [tasks[1], "r0"],
+            "detail": "canceling statement due to lock timeout",
+        }
+    ]
+    report = lines[-1]
+    assert report["after"] == [tasks[0], "r1"]
+    assert report["counts"]["lock_timeout"] == 1
+    assert all(s["snapshot_ref"] is None for s in rows(tasks[1]))
+    # The page after it was in flight and commits; a rerun finds it done.
+    assert all(s["snapshot_ref"] is not None for t in (tasks[0], tasks[2]) for s in rows(t))
