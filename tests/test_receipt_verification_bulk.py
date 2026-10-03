@@ -348,3 +348,77 @@ def test_compacted_references_verify_without_inline_arrays(f):
     result = grouped(store)
     assert result.counts == {"verified": 4}
     assert [row(item["task_id"]) for item in rows] == before
+
+
+@pytest.mark.parametrize("operation", ["verify", "compact"])
+def test_grouped_scan_budget_pages_past_missing_references(f, operation):
+    from api.ai.receipt_compaction import compact
+    from api.ai.receipt_verification import verify
+
+    store, rows = prepare(f, 5)
+    for item in rows[:3]:
+        db.execute(
+            "UPDATE batch_result_receipts SET response=response-'embedding_vectors_ref' WHERE task_id=%s",
+            (item["task_id"],),
+        )
+    run = verify if operation == "verify" else compact
+    options = {} if operation == "verify" else {"backup_complete": True}
+    first = run(
+        store,
+        after=None,
+        limit=2,
+        group_size=2,
+        workers=1,
+        byte_budget=100000,
+        scan_limit=3,
+        **options,
+    )
+    assert first.counts == {"skipped": 3}
+    assert first.scanned == 3 and first.verified_after is None
+    assert first.after == (rows[2]["provider_batch_id"], rows[2]["custom_id"])
+    second = run(
+        store,
+        after=first.after,
+        limit=2,
+        group_size=2,
+        workers=1,
+        byte_budget=100000,
+        scan_limit=3,
+        **options,
+    )
+    assert second.counts == {"verified" if operation == "verify" else "compacted": 2}
+    assert (
+        second.after
+        == second.verified_after
+        == (rows[4]["provider_batch_id"], rows[4]["custom_id"])
+    )
+
+
+@pytest.mark.parametrize("operation", ["verify", "compact"])
+def test_skipped_keys_never_advance_past_bad_reference(f, operation):
+    from api.ai.receipt_compaction import compact
+    from api.ai.receipt_verification import verify
+
+    store, rows = prepare(f, 3)
+    db.execute(
+        "UPDATE batch_result_receipts SET response=response-'embedding_vectors_ref' WHERE task_id=%s",
+        (rows[0]["task_id"],),
+    )
+    db.execute(
+        "UPDATE batch_result_receipts SET response=jsonb_set(response,'{embedding_vectors_ref,size}','null') WHERE task_id=%s",
+        (rows[1]["task_id"],),
+    )
+    run = verify if operation == "verify" else compact
+    result = run(
+        store,
+        after=None,
+        limit=3,
+        group_size=3,
+        workers=1,
+        byte_budget=100000,
+        scan_limit=3,
+        **({} if operation == "verify" else {"backup_complete": True}),
+    )
+    assert result.counts == {"skipped": 1, "unavailable": 1}
+    assert result.after == (rows[0]["provider_batch_id"], rows[0]["custom_id"])
+    assert result.verified_after is None and result.stop_reason == "invalid_reference_size"
