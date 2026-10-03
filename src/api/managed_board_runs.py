@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import datetime
+from collections import Counter
 from collections.abc import Mapping
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from decimal import Decimal
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel
 
@@ -19,7 +21,7 @@ from core.batch import BATCH_CHARS_PER_TOKEN
 from core.filters import build_custom_decision_instructions, build_custom_input
 from core.managed_board_title_gate import TitleGateConfig
 from core.managed_board_title_gate import evaluate as evaluate_title_gate
-from core.payload_objects import PayloadRef, PayloadStore, PayloadUnavailable
+from core.payload_objects import PayloadRef, PayloadStore, PayloadUnavailable, encode_payload
 from core.pool import in_transaction
 from core.providers import StructuredOutput
 from core.routing import NoEligibleModel, TaskShape, resolve
@@ -469,10 +471,10 @@ def admit(board_id: int, *, dedupe_key: str | None = None) -> ManagedBoardRunQue
 def run_jobs(payload: Mapping[str, Any], store: PayloadStore | None = None) -> list[dict[str, Any]]:
     """The run's frozen candidates, the one reader of both payload shapes.
 
-    Runs admitted before the reference existed carry them inline. A run with
-    neither had them removed by retention, which only selects runs nothing
-    reads again, so reaching one is a required-input failure, never an empty
-    run that would project an empty board.
+    Runs admitted before the reference existed carry them inline until
+    `migrate_run_jobs` externalizes them. No writer produces a run with
+    neither, so reaching one is a required-input failure, never an empty run
+    that would project an empty board.
     """
     if "jobs" in payload:
         return payload["jobs"]
@@ -685,73 +687,131 @@ def replace_projection(
     return result.n if result else 0
 
 
-# A finished run whose candidates nothing will read again. A failed run
-# carrying the recovery marker, provider batches still to collect, or a
-# receipt not yet consumed can run again, and its handler reads them.
-# Split in two because the payload tests decompress the whole legacy payload
-# (8 to 9 MB each): the cheap columns choose at most `limit` runs in id order
-# first, so an invocation decompresses no more than that.
-_FINISHED = f"""
-  {_KINDS_SQL} AND id > %(after)s AND id <= %(through)s
-  AND finished_at < now() - make_interval(days => %(days)s)
-  AND status IN ('done', 'cancelled', 'failed')
-"""
-_STRIPPABLE = """
-  id = ANY(%(ids)s) AND payload ? 'jobs'
-  AND (status <> 'failed' OR NOT payload ? 'payload_recovery')
-  AND COALESCE(payload->'batch_ids', '[]'::jsonb) = '[]'::jsonb
-  AND NOT EXISTS (SELECT 1 FROM batch_result_receipts r
-                  WHERE r.task_id = tasks.id AND r.consumed_at IS NULL)
-"""
+type RunJobsMode = Literal["count", "externalize", "verify", "restore"]
+# A run left unconverted for a reason a retry can clear. A writing invocation
+# stops its cursor before the first one, so resuming from `after` retries it.
+_RETRY = frozenset({"changed", "unavailable"})
+# Reported by id. `conflict` (inline with a reference or count beside it, or a
+# list run_jobs would refuse) and `missing` (neither shape) are not what any
+# admission wrote and need a person, so they do not hold the cursor.
+_FAILED = _RETRY | {"conflict", "missing"}
 
 
-def strip_finished_jobs(*, after: int, through: int, limit: int, dry_run: bool) -> dict[str, Any]:
-    """Remove inline candidates from the eligible runs among the next `limit`
-    finished runs, in one transaction, keeping their count; `dry_run` selects
-    and writes nothing.
+def _run_shape(task_id: int, *, jobs: bool, lock: bool = False) -> dict[str, Any] | None:
+    return db.query_one(
+        "SELECT payload ? 'jobs' AS inline, payload->'jobs_ref' AS ref, "
+        "payload->'candidate_count' AS count"
+        + (", payload->'jobs' AS jobs" if jobs else "")
+        + " FROM tasks WHERE id = %s"
+        + (" FOR UPDATE" if lock else ""),
+        (task_id,),
+    )
 
-    Referenced objects are never touched. Resume from the returned `after`;
-    a stripped run is never selected again.
-    """
-    params: dict[str, Any] = {
-        "after": after,
-        "through": through,
-        "limit": limit,
-        "days": int(db.get_config("managed_board_run_jobs_retention_days")),
-    }
-    lock = "" if dry_run else " FOR UPDATE"
+
+def _lock_run(task_id: int, *, jobs: bool) -> dict[str, Any] | None:
+    db.execute("SET LOCAL lock_timeout = '2s'")
+    db.execute("SET LOCAL statement_timeout = '5s'")
+    return _run_shape(task_id, jobs=jobs, lock=True)
+
+
+def _migrate_run(task_id: int, mode: RunJobsMode, store: PayloadStore | None) -> str:
+    row = _run_shape(task_id, jobs=mode == "externalize")
+    if row is None:
+        return "changed"
+    if row["inline"]:
+        if row["ref"] is not None or row["count"] is not None:
+            return "conflict"
+        if mode != "externalize":
+            return "inline"
+        jobs = row["jobs"]
+        if not isinstance(jobs, list) or not all(isinstance(job, dict) for job in jobs):
+            return "conflict"
+        assert store is not None
+        try:
+            ref = store.put_verified(jobs)
+        except PayloadUnavailable:
+            return "unavailable"
+        with db.transaction():
+            current = _lock_run(task_id, jobs=True)
+            # put_verified read the object back equal to `jobs`, and its bytes
+            # are encode_payload(jobs); equal canonical bytes here prove the
+            # object holds exactly what the locked row holds.
+            if (
+                current is None
+                or not current["inline"]
+                or current["ref"] is not None
+                or current["count"] is not None
+                or encode_payload(current["jobs"]) != encode_payload(jobs)
+            ):
+                return "changed"
+            db.execute(
+                "UPDATE tasks SET payload = (payload - 'jobs') || %s WHERE id = %s",
+                (db.jsonb({"jobs_ref": asdict(ref), "candidate_count": len(jobs)}), task_id),
+            )
+        return "externalized"
+    if row["ref"] is None:
+        return "missing"
+    if mode in ("count", "externalize"):
+        return "referenced"
+    try:
+        jobs = run_jobs({"jobs_ref": row["ref"], "candidate_count": row["count"]}, store)
+    except PayloadUnavailable:
+        return "unavailable"
+    if mode == "verify":
+        return "verified"
     with db.transaction():
-        db.execute("SET LOCAL lock_timeout = '2s'")
-        db.execute("SET LOCAL statement_timeout = '5s'")
-        scanned = [
-            row["id"]
-            for row in db.query(
-                f"SELECT id FROM tasks WHERE {_FINISHED} ORDER BY id LIMIT %(limit)s", params
-            )
-        ]
-        params["ids"] = scanned
-        selected = db.query(
-            f"SELECT id, pg_column_size(payload) AS size FROM tasks WHERE {_STRIPPABLE} "
-            f"ORDER BY id{lock}",
-            params,
+        current = _lock_run(task_id, jobs=False)
+        if current != row:
+            return "changed"
+        db.execute(
+            "UPDATE tasks SET payload = (payload - 'jobs_ref' - 'candidate_count') || "
+            "jsonb_build_object('jobs', %s::jsonb) WHERE id = %s",
+            (db.jsonb(jobs), task_id),
         )
-        stripped = (
-            []
-            if dry_run or not selected
-            else db.query(
-                "UPDATE tasks SET payload = (payload - 'jobs') || "
-                "jsonb_build_object('candidate_count', jsonb_array_length(payload->'jobs')) "
-                "WHERE id = ANY(%s) RETURNING pg_column_size(payload) AS size",
-                ([row["id"] for row in selected],),
-            )
+    return "restored"
+
+
+def migrate_run_jobs(
+    mode: RunJobsMode,
+    *,
+    after: int,
+    through: int,
+    limit: int,
+    store: PayloadStore | None = None,
+    workers: int = 1,
+) -> dict[str, Any]:
+    """Move the next `limit` managed runs after `after` between the inline
+    candidate shape and the reference admission writes, one run per short
+    transaction.
+
+    `externalize` uploads a run's exact inline list with put_verified outside
+    any transaction, then locks the row, requires the identical list still
+    there, and swaps it for `jobs_ref` and `candidate_count` in one UPDATE.
+    `restore` is its inverse, `verify` reads every reference through run_jobs,
+    and `count` classifies without reading objects. Nothing else in a payload
+    is touched, and a converted run is skipped when selected again.
+    """
+    if in_transaction():
+        raise RuntimeError("Run candidate migration cannot run inside a database transaction")
+    if mode != "count" and store is None:
+        store = PayloadStore.from_env()
+    ids = [
+        row["id"]
+        for row in db.query(
+            f"SELECT id FROM tasks WHERE {_KINDS_SQL} AND id > %s AND id <= %s "
+            "ORDER BY id LIMIT %s",
+            (after, through, limit),
         )
-    exhausted = len(scanned) < limit
+    ]
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        outcomes = list(executor.map(lambda task_id: _migrate_run(task_id, mode, store), ids))
+    stop = len(ids)
+    if mode in ("externalize", "restore"):
+        stop = next((i for i, outcome in enumerate(outcomes) if outcome in _RETRY), stop)
+    exhausted = stop == len(ids) < limit
     return {
-        "scanned": len(scanned),
-        "eligible": len(selected),
-        "stripped": len(stripped),
-        "bytes_before": sum(row["size"] for row in selected),
-        "bytes_after": sum(row["size"] for row in stripped),
-        "after": through if exhausted else scanned[-1],
+        "counts": dict(Counter(outcomes)),
+        "failed": [i for i, outcome in zip(ids, outcomes, strict=True) if outcome in _FAILED],
+        "after": through if exhausted else ids[stop - 1] if stop else after,
         "exhausted": exhausted,
     }
