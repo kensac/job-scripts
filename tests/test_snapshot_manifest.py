@@ -16,7 +16,7 @@ from tests.test_snapshot_payloads import request, row
 @pytest.fixture
 def objects(monkeypatch):
     store = PayloadStore(ObjectClient(), "test-payloads")
-    monkeypatch.setattr(PayloadStore, "from_env", lambda: store)
+    monkeypatch.setattr(PayloadStore, "from_env", lambda **_: store)
     return store
 
 

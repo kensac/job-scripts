@@ -22,8 +22,13 @@ from core.payload_objects import (
 )
 from core.pool import in_transaction
 
-Mode = Literal["copy", "compact", "restore", "verify"]
+Mode = Literal["bundle", "copy", "compact", "restore", "verify"]
 STOP_OUTCOMES = frozenset(("unavailable", "changed", "ineligible"))
+# A bundle is read whole to resolve one member, so it stays the size of the
+# largest objects this store already serves: managed-board candidate lists of
+# 7.9 to 8.6 MB per run (observability.md). The member count is bounded
+# separately by the page size the operator passes.
+BUNDLE_MAX_BYTES = 8 * 1024 * 1024
 _ELIGIBLE = (
     "t.status='done' AND t.kind<>'classify_job_profiles' "
     "AND NOT EXISTS(SELECT 1 FROM batch_result_receipts r "
@@ -35,17 +40,27 @@ def candidates(*, after: tuple[int, str] | None, limit: int, mode: Mode) -> list
     if limit <= 0:
         raise ValueError("limit must be positive")
     predicate = {
+        "bundle": "b.snapshot IS NOT NULL AND b.snapshot_ref IS NULL",
         "copy": "b.snapshot IS NOT NULL",
         "compact": "b.snapshot IS NOT NULL AND b.snapshot_ref IS NOT NULL",
         "restore": "b.snapshot_ref IS NOT NULL",
         "verify": "b.snapshot_ref IS NOT NULL",
     }[mode]
+    where = (
+        f"{_ELIGIBLE} AND {predicate} AND (%s::bigint IS NULL OR (b.task_id,b.custom_id)>(%s,%s))"
+    )
+    cursor = (after[0] if after else None, *(after or (None, None)))
+    if mode == "bundle":
+        # A page never spans tasks, so every bundle holds one task's rows.
+        where += (
+            " AND b.task_id=(SELECT b.task_id FROM batch_requests b JOIN tasks t "
+            f"ON t.id=b.task_id WHERE {where} ORDER BY b.task_id,b.custom_id LIMIT 1)"
+        )
+        cursor = cursor * 2
     return db.query(
-        "SELECT b.* FROM batch_requests b JOIN tasks t ON t.id=b.task_id "
-        f"WHERE {_ELIGIBLE} AND {predicate} "
-        "AND (%s::bigint IS NULL OR (b.task_id,b.custom_id)>(%s,%s)) "
+        f"SELECT b.* FROM batch_requests b JOIN tasks t ON t.id=b.task_id WHERE {where} "
         "ORDER BY b.task_id,b.custom_id LIMIT %s",
-        (after[0] if after else None, *(after or (None, None)), limit),
+        (*cursor, limit),
     )
 
 
@@ -207,6 +222,117 @@ def migrate_many(
                 if changed != len(updates):
                     raise RuntimeError("Snapshot sources changed while locked")
     return outcomes + ([failure] if failure is not None else [])
+
+
+def _bundle_groups(sources: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
+    groups: list[list[dict[str, Any]]] = []
+    size = 0
+    for source in sources:
+        member = len(encode_payload(source["snapshot"]))
+        if not groups or size + member > BUNDLE_MAX_BYTES:
+            groups.append([])
+            size = 0
+        groups[-1].append(source)
+        size += member
+    return groups
+
+
+def bundle_many(
+    sources: list[dict[str, Any]], store: PayloadStore, *, workers: int = 1
+) -> list[str]:
+    """Store one task's inline-only snapshots as bundle members, keeping inline.
+
+    Bundles upload outside any transaction. A short locked transaction then
+    attaches a member reference to each row still unchanged and eligible; a
+    row that changed is skipped ("changed") and stays inline-only. An invalid
+    snapshot or failed bundle stops there: outcomes end with "unavailable" at
+    its first row and only rows before it can be attached. A bundle whose rows
+    were skipped stays partly unreferenced; it is content-addressed.
+    """
+    if in_transaction():
+        raise RuntimeError("Snapshot migration cannot run inside a database transaction")
+    if workers <= 0:
+        raise ValueError("workers must be positive")
+    if not sources:
+        return []
+    if len({source["task_id"] for source in sources}) != 1:
+        raise ValueError("A bundle holds one task's snapshots")
+    current = _current_sources(sources)
+    skipped: dict[str, str] = {}
+    valid: list[dict[str, Any]] = []
+    for source in sources:
+        if (
+            (source["task_id"], source["custom_id"]) not in current
+            or source["snapshot"] is None
+            or source["snapshot_ref"] is not None
+        ):
+            skipped[source["custom_id"]] = "changed"
+            continue
+        try:
+            request_snapshots.resolve(source, store)
+        except PayloadUnavailable:
+            skipped[source["custom_id"]] = "unavailable"
+            break
+        valid.append(source)
+
+    def upload(group: list[dict[str, Any]]) -> dict[str, BundleMemberRef] | None:
+        try:
+            return store.put_bundle({source["custom_id"]: source["snapshot"] for source in group})
+        except PayloadUnavailable:
+            return None
+
+    groups = _bundle_groups(valid)
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        uploaded = list(executor.map(upload, groups))
+    refs: dict[str, BundleMemberRef] = {}
+    for group, group_refs in zip(groups, uploaded, strict=True):
+        if group_refs is None:
+            skipped[group[0]["custom_id"]] = "unavailable"
+            break
+        refs.update(group_refs)
+    attached: set[str] = set()
+    ready = [source for source in valid if source["custom_id"] in refs]
+    if ready:
+        with db.transaction():
+            db.execute("SET LOCAL lock_timeout='2s'")
+            db.execute("SET LOCAL statement_timeout='5s'")
+            locked = _current_sources(ready, lock=True)
+            updates = [
+                {
+                    "task_id": source["task_id"],
+                    "custom_id": source["custom_id"],
+                    "snapshot_ref": asdict(refs[source["custom_id"]]),
+                    "original": source["snapshot"],
+                }
+                for source in ready
+                if (source["task_id"], source["custom_id"]) in locked
+            ]
+            if updates:
+                changed = db.execute_count(
+                    "UPDATE batch_requests b SET snapshot_ref=u.snapshot_ref "
+                    "FROM jsonb_to_recordset(%s) AS u(task_id bigint,custom_id text,"
+                    "snapshot_ref jsonb,original jsonb) "
+                    "WHERE b.task_id=u.task_id AND b.custom_id=u.custom_id "
+                    "AND b.snapshot=u.original AND b.snapshot_ref IS NULL",
+                    (db.jsonb(updates),),
+                )
+                if changed != len(updates):
+                    raise RuntimeError("Snapshot sources changed while locked")
+            attached = {update["custom_id"] for update in updates}
+    outcomes = []
+    for source in sources:
+        custom_id = source["custom_id"]
+        if custom_id in attached:
+            outcomes.append("bundled")
+        elif custom_id in refs:
+            outcomes.append("changed")
+        elif custom_id in skipped:
+            outcomes.append(skipped[custom_id])
+            if skipped[custom_id] == "unavailable":
+                break
+        else:
+            break
+    return outcomes
 
 
 def migrate(source: dict[str, Any], store: PayloadStore, *, mode: Mode) -> str:

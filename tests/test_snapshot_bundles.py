@@ -25,7 +25,7 @@ class CountingClient(ObjectClient):
 @pytest.fixture
 def objects(monkeypatch):
     store = PayloadStore(CountingClient(), "test-payloads")
-    monkeypatch.setattr(PayloadStore, "from_env", lambda: store)
+    monkeypatch.setattr(PayloadStore, "from_env", lambda **_: store)
     return store
 
 
