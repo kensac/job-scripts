@@ -31,7 +31,7 @@ def main() -> int:
         + (" -c default_transaction_read_only=on" if args.mode == "verify" else "")
     )
     from api.ai.receipt_payloads import Mode, candidates, migrate
-    from core.payload_objects import PayloadStore, PayloadUnavailable
+    from core.payload_objects import PayloadStore, PayloadUnavailable, encode_payload
     from core.pool import pool
 
     mode = cast(Mode, args.mode)
@@ -55,7 +55,9 @@ def main() -> int:
                 break
             counts[outcome] += 1
             response = source["response"]
-            if "embedding_vectors_ref" in response and outcome != "changed":
+            if outcome == "copied":
+                logical_bytes += len(encode_payload(response["embedding_vectors"]))
+            elif "embedding_vectors_ref" in response and outcome != "changed":
                 logical_bytes += response["embedding_vectors_ref"]["size"]
             after = (source["provider_batch_id"], source["custom_id"])
     finally:

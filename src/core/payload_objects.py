@@ -7,7 +7,7 @@ import hashlib
 import json
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Any
 
 import boto3
@@ -16,6 +16,13 @@ from botocore.config import Config
 
 class PayloadUnavailable(RuntimeError):
     pass
+
+
+def encode_payload(value: Any) -> bytes:
+    try:
+        return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+    except (TypeError, ValueError) as exc:
+        raise PayloadUnavailable("Payload is not finite JSON") from exc
 
 
 @dataclass(frozen=True)
@@ -58,6 +65,9 @@ class PayloadStore:
         # account through the SDK credential discovery chain.
         prefix = "JOBTRACKER_S3_"
         try:
+            required = ("ENDPOINT", "REGION", "BUCKET", "ACCESS_KEY_ID", "SECRET_ACCESS_KEY")
+            if any(not os.environ[prefix + name].strip() for name in required):
+                raise ValueError("empty storage configuration")
             client = boto3.client(
                 "s3",
                 endpoint_url=os.environ[prefix + "ENDPOINT"],
@@ -76,7 +86,7 @@ class PayloadStore:
             raise PayloadUnavailable("Object storage configuration unavailable") from exc
 
     def put_verified(self, value: Any) -> PayloadRef:
-        raw = json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+        raw = encode_payload(value)
         digest = hashlib.sha256(raw).hexdigest()
         ref = PayloadRef(self.bucket, f"payloads/v1/sha256/{digest}.json.gz", digest, len(raw))
         try:
@@ -94,13 +104,9 @@ class PayloadStore:
         return ref
 
     def get(self, ref: PayloadRef) -> Any:
-        if (
-            ref.version != 1
-            or ref.bucket != self.bucket
-            or ref.key != f"payloads/v1/sha256/{ref.sha256}.json.gz"
-            or ref.size < 0
-        ):
-            raise PayloadUnavailable("Invalid payload reference")
+        ref = PayloadRef.parse(asdict(ref))
+        if ref.bucket != self.bucket:
+            raise PayloadUnavailable("Payload reference belongs to a different bucket")
         try:
             response = self.client.get_object(Bucket=ref.bucket, Key=ref.key)
             body = response["Body"]

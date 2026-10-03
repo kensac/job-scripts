@@ -212,3 +212,81 @@ def test_keyset_iteration_and_restore_selection(f, objects):
 def test_reference_parse_rejects_wrong_types():
     with pytest.raises(PayloadUnavailable):
         PayloadRef.parse({"bucket": "b", "key": "k", "sha256": "x", "size": True, "version": 1})
+
+
+def test_migration_rejects_outer_transaction(f, objects):
+    task_id, _ = receipt(f)
+    with db.transaction(), pytest.raises(RuntimeError, match="inside a database transaction"):
+        receipt_payloads.migrate(row(task_id), objects, mode="copy")
+    assert objects.client.objects == {}
+
+
+def test_compaction_cli_requires_backup_confirmation(monkeypatch):
+    from api.ai.migrate_receipt_payloads import main
+
+    monkeypatch.setattr("sys.argv", ["migration", "compact", "--limit", "1"])
+    with pytest.raises(SystemExit) as error:
+        main()
+    assert error.value.code == 2
+
+
+def test_store_rejects_empty_credentials_before_sdk_discovery(monkeypatch):
+    for name in ("ENDPOINT", "REGION", "BUCKET", "ACCESS_KEY_ID", "SECRET_ACCESS_KEY"):
+        monkeypatch.setenv("JOBTRACKER_S3_" + name, "")
+    with pytest.raises(PayloadUnavailable, match="configuration"):
+        PayloadStore.from_env()
+
+
+def test_compaction_rechecks_task_after_object_download(f, objects, monkeypatch):
+    task_id, _ = receipt(f)
+    receipt_payloads.migrate(row(task_id), objects, mode="copy")
+    copied = row(task_id)
+    original_get = objects.get
+
+    def reactivate(ref):
+        vectors = original_get(ref)
+        db.execute("UPDATE tasks SET status='running' WHERE id=%s", (task_id,))
+        return vectors
+
+    monkeypatch.setattr(objects, "get", reactivate)
+    assert receipt_payloads.migrate(copied, objects, mode="compact") == "changed"
+    assert row(task_id) == copied
+
+
+def test_required_receipt_loading_raises_without_acknowledging(f, objects, monkeypatch):
+    task_id, result = receipt(f, consumed=False)
+    original = row(task_id)["response"]
+    ref = objects.put_verified(original.pop("embedding_vectors"))
+    original["embedding_vectors_ref"] = asdict(ref)
+    db.execute(
+        "UPDATE batch_result_receipts SET response=%s WHERE task_id=%s",
+        (db.jsonb(original), task_id),
+    )
+    monkeypatch.setattr(PayloadStore, "from_env", lambda: objects)
+    assert batch_results.unconsumed(task_id)[0].embedding_vectors == result.embedding_vectors
+    objects.client.fail_get = True
+    with pytest.raises(PayloadUnavailable):
+        batch_results.unconsumed(task_id)
+    assert row(task_id)["outcome"] is None
+    assert row(task_id)["consumed_at"] is None
+
+
+def test_verification_works_in_read_only_session(f, objects):
+    task_id, _ = receipt(f)
+    receipt_payloads.migrate(row(task_id), objects, mode="copy")
+    original = row(task_id)
+    # The command uses a read-only connection, and must not acquire row locks.
+    from core.pool import pool
+
+    old = pool.kwargs.get("options")
+    pool.kwargs["options"] = "-c default_transaction_read_only=on"
+    pool.drain()
+    try:
+        assert receipt_payloads.migrate(original, objects, mode="verify") == "verified"
+    finally:
+        if old is None:
+            pool.kwargs.pop("options", None)
+        else:
+            pool.kwargs["options"] = old
+        pool.drain()
+    assert row(task_id) == original

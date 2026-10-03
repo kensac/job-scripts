@@ -7,6 +7,7 @@ from typing import Any, Literal
 
 from api import db
 from core.payload_objects import PayloadRef, PayloadStore, PayloadUnavailable
+from core.pool import in_transaction
 
 Mode = Literal["copy", "compact", "restore", "verify"]
 REFERENCE = "embedding_vectors_ref"
@@ -58,6 +59,8 @@ def _current(source: dict[str, Any], *, lock: bool = False) -> bool:
 
 
 def migrate(source: dict[str, Any], store: PayloadStore, *, mode: Mode) -> str:
+    if in_transaction():
+        raise RuntimeError("Payload migration cannot run inside a database transaction")
     if mode not in ("copy", "compact", "restore", "verify"):
         raise ValueError("unsupported migration mode")
     if not _current(source):
