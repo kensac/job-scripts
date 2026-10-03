@@ -143,6 +143,7 @@ def add_ai_result(
         row["instructions_id"] = (
             query_instructions.intern(conn, instructions) if instructions is not None else None
         )
+        row["instructions"] = None
         inserted = conn.execute(
             _as_query(f"INSERT INTO ai_queries ({columns}) VALUES ({placeholders}) RETURNING id"),
             row,

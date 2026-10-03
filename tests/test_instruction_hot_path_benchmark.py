@@ -122,7 +122,7 @@ def test_instruction_hot_path_workload(size, client, admin_headers, monkeypatch,
     for index in range(len(instructions)):
         write(f"https://example.test/benchmark/warm/{index}", index)
     meter = Measurements(monkeypatch)
-    with meter.phase("write_inline", size):
+    with meter.phase("write", size):
         ids = [write(url, index) for index, url in enumerate(urls)]
     history_ids = [write(shared_url, index) for index in range(size)]
     tracked_ids = ids + history_ids
@@ -195,7 +195,7 @@ def test_instruction_hot_path_workload(size, client, admin_headers, monkeypatch,
             )
         return cached, details, history_responses[-1].json()
 
-    inline_results = read_workload("inline")
+    initial_results = read_workload("initial")
     if role == "candidate":
         from api.ai.migrate_query_instructions import migrate_chunk
 
@@ -221,7 +221,7 @@ def test_instruction_hot_path_workload(size, client, admin_headers, monkeypatch,
         assert all(
             row["instructions"] is None and row["instructions_id"] is not None for row in compacted
         )
-        assert read_workload("compacted") == inline_results
+        assert read_workload("compacted") == initial_results
         assert (
             db.query(
                 "SELECT id,status,prompt_hash,input_content,prompt_tokens,completion_tokens,"
