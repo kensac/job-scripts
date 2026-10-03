@@ -41,9 +41,11 @@ class ReviewGateDecision(Base):
         ),
         UniqueConstraint("task_id", "url", name="uq_review_gate_decisions_task_url"),
         CheckConstraint("action IN ('skip','review')", name="ck_review_gate_decisions_action"),
+        # Zero scans in production as of 2026-10-03, kept anyway: a person's
+        # job drawer reads decisions by url, and without this the plan walks
+        # the whole (task_id, url) unique index. Measured in 7c0b33a7fd95.
         Index("idx_review_gate_decisions_url_created", "url", "created_at"),
         Index("idx_review_gate_decisions_created", "created_at"),
-        Index("idx_review_gate_decisions_user_created", "user_id", "created_at"),
     )
 
     # Identity references intentionally outlive task, catalog and filter retention.

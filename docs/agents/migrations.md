@@ -61,6 +61,30 @@ waits for every transaction older than itself, and a timeout turns a wait that
 will not end into a failed start that retries. `bd1e66f153c3` is the worked
 example.
 
+**An index with zero scans over the life of the statistics is dropped, after
+checking every query.** Read `idx_scan` from `pg_stat_user_indexes` and
+`stats_reset` from `pg_stat_database`; a zero means something only if the
+counters cover the time the code that could use the index has been live.
+Then find every query that could use it and EXPLAIN each on realistic volume
+without the index (drop it inside a transaction and roll back). Zero can mean
+"no plan can use it" (a partial predicate nothing implies) or "the planner
+would use it but the query never ran"; in the second case keep it if the plan
+without it is a scan of a large table on a path a non-administrator reaches.
+An OR is index-backed only when every arm is, so one arm's unused index can
+be what keeps the others usable. Drop with `DROP INDEX CONCURRENTLY IF
+EXISTS` inside `autocommit_block()` under a `lock_timeout`, and have the
+downgrade rebuild it concurrently. `7c0b33a7fd95` is the worked example,
+including an index with zero scans it kept.
+
+**A table that is about to take a bulk update gets per-table autovacuum
+settings first.** Stock `autovacuum_vacuum_scale_factor` is 0.2: a table
+updated row by row accumulates a fifth of itself in dead versions before
+vacuum frees any space, and on full pages every new version extends the file
+instead of reusing that space. Set the scale factors before the backfill
+starts; `ALTER TABLE ... SET` takes SHARE UPDATE EXCLUSIVE and rewrites
+nothing, so it is safe on the live table, and unlike fillfactor it applies at
+autovacuum's next check.
+
 **No session that takes the schema lock may hold a snapshot while a
 migration runs.** `db.init_schema` polls `pg_try_advisory_lock` and commits
 after every attempt; the session-level lock outlives the commit. A concurrent

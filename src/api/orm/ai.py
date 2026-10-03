@@ -50,11 +50,6 @@ class AiQuery(Base):
         Index("idx_ai_queries_created_at", "created_at"),
         Index("idx_ai_queries_prompt_hash", "check_type", "prompt_hash"),
         Index(
-            "idx_ai_queries_cost_created",
-            "created_at",
-            postgresql_where=text("cost_usd IS NOT NULL"),
-        ),
-        Index(
             "idx_ai_queries_latest_verdict",
             "url",
             "check_type",
@@ -72,7 +67,9 @@ class AiQuery(Base):
             postgresql_include=["status"],
             postgresql_where=text("check_type = 'custom' AND status IN ('passed', 'rejected')"),
         ),
-        # Admin search is ILIKE %q%; trigram indexes make it index-backed.
+        # url serves the per-host fetch pacing LIKE, reason the reason-group
+        # regex. company and job_title had one each for the admin search;
+        # production never scanned either, so that search is a seq scan.
         *(
             Index(
                 f"idx_ai_queries_{col}_trgm",
@@ -80,7 +77,7 @@ class AiQuery(Base):
                 postgresql_using="gin",
                 postgresql_ops={col: "gin_trgm_ops"},
             )
-            for col in ("url", "company", "job_title", "reason")
+            for col in ("url", "reason")
         ),
     )
 
