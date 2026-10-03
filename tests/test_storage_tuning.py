@@ -21,7 +21,7 @@ def test_review_gate_decisions_vacuums_before_a_backfill_extends_the_file():
     }
 
 
-def test_unscanned_indexes_are_gone_and_the_url_read_keeps_its_index():
+def test_dropped_indexes_are_gone_and_the_url_read_keeps_its_index():
     present = {
         row["indexname"]
         for row in db.query(
@@ -34,9 +34,12 @@ def test_unscanned_indexes_are_gone_and_the_url_read_keeps_its_index():
         "idx_ai_queries_company_trgm",
         "idx_ai_queries_cost_created",
         "idx_review_gate_decisions_user_created",
+        "idx_review_gate_decisions_url_created",
+        "uq_review_gate_decisions_task_url",
     }
     assert {
-        "idx_review_gate_decisions_url_created",
+        "idx_review_gate_decisions_url_id",
+        "uq_review_gate_decisions_task_url_id",
         "idx_ai_queries_url_trgm",
         "idx_ai_queries_reason_trgm",
     } <= present

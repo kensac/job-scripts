@@ -101,6 +101,21 @@ on a live table leaves every existing page as packed as it was. Say so in the
 migration, and do not rewrite the table to apply it: a rewrite locks it.
 `507fe2f38949` is the example.
 
+**A column is dropped only by a migration that proves it empty.** Add a
+`CHECK (col IS NULL ...)` constraint `NOT VALID`, then `VALIDATE` it: the scan
+runs under SHARE UPDATE EXCLUSIVE, so reads and writes continue. If any row
+holds a value, the migration raises before anything is dropped, and until the
+drop commits the constraint refuses new values. Every image that names the
+column must be gone from the fleet first, because a dropped column fails every
+statement that names it: readers stop naming it one release, the drop ships
+the next. `7ca95d34ef5f` is the worked example.
+
+**SET NOT NULL on a large table goes through a validated CHECK.** Plain
+`SET NOT NULL` scans the table under ACCESS EXCLUSIVE. With a validated
+`CHECK (col IS NOT NULL)` in place, PostgreSQL proves the column non-null from
+the constraint and skips the scan. Validate in an `autocommit_block()`, then
+set NOT NULL and drop the CHECK in a short transaction.
+
 ## Long-running work
 
 Do not put a large data operation inside a migration. Migrations run at every

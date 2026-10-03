@@ -4,7 +4,6 @@ import pytest
 
 from api import db, review_decision_storage, review_gate, review_gate_records
 from api.review_policy_storage import PolicySnapshotUnavailable
-from tests.test_review_decision_storage import INLINE
 from tests.test_review_gate import configure
 
 JOBS = [
@@ -26,7 +25,18 @@ def test_admission_writes_only_references_and_shares_one_body(f):
     for row in stored:
         assert row["url_id"] is not None and row["body_id"] is not None
         assert row["filter_id"] == 5
-        assert all(row[column] is None for column in (*INLINE, "policy", "policy_id"))
+        assert set(row) == {
+            "id",
+            "task_id",
+            "url_id",
+            "body_id",
+            "job_id",
+            "user_id",
+            "filter_id",
+            "managed_board_id",
+            "revision",
+            "created_at",
+        }
     # Three tasks, two postings: two bodies and two URLs, not six of each.
     assert db.query_one("SELECT count(*) n FROM review_gate_decision_bodies")["n"] == 2
     assert db.query_one("SELECT count(*) n FROM review_gate_urls")["n"] == 2
