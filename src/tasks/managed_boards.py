@@ -8,7 +8,7 @@ from typing import Any
 from api import ai, db
 from api import managed_board_runs as runs
 from core.filters import compute_filter_hash
-from core.store import get_custom_result
+from core.store import has_custom_result
 from tasks.filter_execution import ExecutionHooks, FilterSnapshot, execute_batch, execute_live
 from tasks.runtime import cancelled, has_batch_work, pending_batch_ids, set_progress
 
@@ -145,7 +145,7 @@ async def _handle_managed_filter(
         else [
             job
             for job in jobs
-            if not get_custom_result(
+            if not has_custom_result(
                 job["url"], snapshot.prompt_hash, model=payload["requested_model"]
             )
         ]

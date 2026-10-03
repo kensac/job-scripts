@@ -102,6 +102,29 @@ Scraping is the action that gets the fleet blocked, so a backtest or a
 backfill reads this table rather than asking a board twice. Nothing downstream
 reads it.
 
+## A pull rewrites a catalog row only when the row would change
+
+`catalog.upsert_postings` follows the first two listings rules above for
+`jobs`. Rewriting every admitted row on every pull was 1.33M updates in 36
+hours on a 605k-row catalog and 5.7 GB of WAL, while the feeds put back 5,336
+postings in the same window (pg_stat_statements and `job_listing_events`,
+2026-10-03).
+
+- The filter is the update's `SET` evaluated against the stored row, column
+  for column. A feed row keeps the company and title it was first stored with
+  unless they are empty, `date_posted` keeps the first date seen, `raw_url` is
+  written on insert only, and an `upload` row is taken over by the first feed
+  that lists it. None of those is a change unless the `SET` would apply it. A
+  change to the `SET` changes the filter in the same edit.
+- It filters in the `SELECT` feeding the insert, never in a `WHERE` on
+  `DO UPDATE`, for the reason the listings rule gives.
+
+`jobs` has no seen-at or updated-at column for an unchanged pull to refresh,
+and its columns stay inline (the largest `locations` was 1,680 bytes), so
+neither the refresh interval nor the TOAST rule has anything to apply to. The
+return events are read from the old row before the upsert, and a return
+changes `active`, so every return is still both written and recorded.
+
 ## A company board's pull is the closure signal for its rows
 
 After a pull from a board that lists every open posting
