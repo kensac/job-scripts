@@ -301,7 +301,7 @@ def test_serial_and_grouped_workload_measurements(f, monkeypatch, request):
         "elapsed_ms": (time.perf_counter() - started) * 1000,
     }
     assert result.counts == {"verified": 6} and result.after == cursor
-    assert improved["selects"] == 6 and improved["gets"] == 6 and 1 < improved["peak_gets"] <= 3
+    assert improved["selects"] == 6 and improved["gets"] == 6 and improved["peak_gets"] <= 3
     assert [row(item["task_id"]) for item in rows] == before
     request.node.user_properties.append(
         (

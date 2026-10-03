@@ -9,8 +9,8 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 
 from api import db
-from api.ai.receipt_payloads import _ELIGIBLE, REFERENCE
-from core.payload_objects import PayloadRef, PayloadStore, PayloadUnavailable
+from api.ai.receipt_payloads import _ELIGIBLE
+from core.payload_objects import PayloadStore, PayloadUnavailable
 from core.pool import in_transaction
 
 Cursor = tuple[str, str]
@@ -84,13 +84,7 @@ def _group(
 def _object(source: Source, store: PayloadStore) -> tuple[str, int]:
     try:
         response = json.loads(source.snapshot)["response"]
-        ref = PayloadRef.parse(response[REFERENCE])
-        vectors = store.get(ref)
-        if not isinstance(vectors, list):
-            raise PayloadUnavailable("Receipt vector object is not an array")
-        inline = response.get("embedding_vectors")
-        if inline is not None and vectors != inline:
-            raise PayloadUnavailable("Receipt vectors differ from the object")
+        ref, _ = verified_vectors(response, store)
         return "verified", ref.size
     except PayloadUnavailable:
         return "unavailable", 0

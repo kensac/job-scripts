@@ -58,6 +58,19 @@ def _current(source: dict[str, Any], *, lock: bool = False) -> bool:
     )
 
 
+def verified_vectors(response: dict[str, Any], store: PayloadStore) -> tuple[PayloadRef, list[Any]]:
+    if REFERENCE not in response:
+        raise PayloadUnavailable("Receipt has no verified vector reference; copy first")
+    ref = PayloadRef.parse(response[REFERENCE])
+    vectors = store.get(ref)
+    if not isinstance(vectors, list):
+        raise PayloadUnavailable("Receipt vector object is not an array")
+    inline = response.get("embedding_vectors")
+    if inline is not None and vectors != inline:
+        raise PayloadUnavailable("Receipt vectors differ from the object")
+    return ref, vectors
+
+
 def migrate(source: dict[str, Any], store: PayloadStore, *, mode: Mode) -> str:
     if in_transaction():
         raise RuntimeError("Payload migration cannot run inside a database transaction")
@@ -76,13 +89,7 @@ def migrate(source: dict[str, Any], store: PayloadStore, *, mode: Mode) -> str:
         updated[REFERENCE] = asdict(ref)
         outcome = "copied"
     else:
-        if ref is None:
-            raise PayloadUnavailable("Receipt has no verified vector reference; copy first")
-        vectors = store.get(ref)
-        if not isinstance(vectors, list):
-            raise PayloadUnavailable("Receipt vector object is not an array")
-        if inline is not None and vectors != inline:
-            raise PayloadUnavailable("Receipt vectors differ from the object")
+        ref, vectors = verified_vectors(response, store)
         outcome = "verified"
         if mode == "compact":
             updated.pop("embedding_vectors", None)
