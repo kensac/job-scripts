@@ -444,6 +444,25 @@ def _no_network_static_fetch(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _in_memory_object_storage(monkeypatch):
+    """Every paid request is frozen in object storage before submission, so any
+    test that submits needs a bucket. Each test gets an empty in-memory one
+    behind the real configuration path, and never a configured real bucket.
+    A test of storage itself passes its own store or replaces this one."""
+    import types
+
+    import core.payload_objects
+    from tests.factories import ObjectClient
+
+    client = ObjectClient()
+    for name in ("ENDPOINT", "REGION", "BUCKET", "ACCESS_KEY_ID", "SECRET_ACCESS_KEY"):
+        monkeypatch.setenv("JOBTRACKER_S3_" + name, "test-payloads")
+    monkeypatch.setattr(
+        core.payload_objects, "boto3", types.SimpleNamespace(client=lambda *a, **kw: client)
+    )
+
+
+@pytest.fixture(autouse=True)
 def _no_browser(monkeypatch):
     """The browser tier must never actually launch in a test.
 

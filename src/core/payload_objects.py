@@ -13,6 +13,11 @@ from typing import Any
 import boto3
 from botocore.config import Config
 
+# botocore's default connection pool size, named so callers can bound their
+# concurrency by it: a thread beyond the pool waits for a connection, and the
+# pool discards the extra connection it opens.
+MAX_CONNECTIONS = 10
+
 
 class PayloadUnavailable(RuntimeError):
     pass
@@ -78,6 +83,7 @@ class PayloadStore:
                 aws_secret_access_key=os.environ[prefix + "SECRET_ACCESS_KEY"],
                 config=Config(
                     s3={"addressing_style": "path"},
+                    max_pool_connections=MAX_CONNECTIONS,
                     connect_timeout=5,
                     read_timeout=30,
                     retries={"mode": "standard", "total_max_attempts": 3},

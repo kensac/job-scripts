@@ -11,6 +11,8 @@ against, because the behaviour under test is mostly SQL.
 
 from __future__ import annotations
 
+import dataclasses
+import io
 import itertools
 from typing import Any
 
@@ -306,3 +308,35 @@ def make_batch_result(
         for result in batch_results.unconsumed(task_id)
         if result.batch_id == batch_id and result.custom_id == spec.custom_id
     )
+
+
+def make_inline_request(task_id: int, spec) -> None:
+    """A request snapshot as written before snapshots went to object storage."""
+    snapshot = dataclasses.asdict(spec)
+    if spec.endpoint == "/v1/responses":
+        snapshot.pop("endpoint")
+    if spec.inputs is None:
+        snapshot.pop("inputs")
+    db.execute(
+        "INSERT INTO batch_requests (task_id, custom_id, snapshot) VALUES (%s,%s,%s)",
+        (task_id, spec.custom_id, db.jsonb(snapshot)),
+    )
+
+
+class ObjectClient:
+    def __init__(self):
+        self.objects = {}
+        self.fail_put = False
+        self.fail_get = False
+        self.after_put = lambda: None
+
+    def put_object(self, *, Bucket, Key, Body, **kwargs):
+        if self.fail_put:
+            raise OSError("upload failed")
+        self.objects[Bucket, Key] = Body
+        self.after_put()
+
+    def get_object(self, *, Bucket, Key):
+        if self.fail_get:
+            raise OSError("read failed")
+        return {"Body": io.BytesIO(self.objects[Bucket, Key])}
