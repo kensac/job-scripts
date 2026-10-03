@@ -111,3 +111,45 @@ def test_manifest_cli_single_delta_and_explicit_completion(f, objects, monkeypat
     assert reports[0]["exhausted"] is True
     assert reports[0]["completed"] == 2
     assert reports[0]["scope"] == "manifest"
+
+
+@pytest.mark.parametrize("field", ["metadata_md5", "reference"])
+def test_manifest_rejects_frozen_evidence_drift(f, objects, field):
+    task_id, _ = request(f)
+    manifest = [entry(task_id)]
+    snapshots.migrate(row(task_id), objects, mode="copy")
+    if field == "metadata_md5":
+        manifest[0][field] = "0" * 32
+    else:
+        from dataclasses import asdict
+
+        manifest[0][field] = asdict(objects.put_verified({"different": "payload"}))
+    original = row(task_id)
+    result = snapshots.migrate_manifest(
+        manifest, objects, mode="compact", limit=1, backup_complete=True
+    )
+    assert result.counts == {"changed": 1}
+    assert result.completed == 0 and not result.exhausted
+    assert row(task_id) == original
+
+
+def test_manifest_missing_object_and_resume_preserve_exact_prefix(f, objects):
+    tasks = [request(f)[0] for _ in range(2)]
+    # Distinct requests give independent object failure domains.
+    db.execute(
+        "UPDATE batch_requests SET snapshot=snapshot || %s WHERE task_id=%s",
+        (db.jsonb({"input": "second"}), tasks[1]),
+    )
+    manifest = [entry(tid) for tid in tasks]
+    snapshots.migrate_manifest(manifest, objects, mode="copy", limit=2)
+    second = row(tasks[1])
+    stored = objects.client.objects.pop(
+        (second["snapshot_ref"]["bucket"], second["snapshot_ref"]["key"])
+    )
+    result = snapshots.migrate_manifest(manifest, objects, mode="verify", limit=2)
+    assert result.completed == 1 and result.failed == (tasks[1], "request")
+    objects.client.objects[(second["snapshot_ref"]["bucket"], second["snapshot_ref"]["key"])] = (
+        stored
+    )
+    resumed = snapshots.migrate_manifest(manifest[1:], objects, mode="verify", limit=1)
+    assert resumed.completed == 1 and resumed.exhausted
