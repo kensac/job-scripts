@@ -24,6 +24,13 @@ def main() -> int:
         type=int,
         help="maximum combined serialized receipt and declared object bytes per group",
     )
+    parser.add_argument("--compact-group-size", type=int)
+    parser.add_argument("--compact-workers", type=int)
+    parser.add_argument(
+        "--compact-byte-budget",
+        type=int,
+        help="maximum combined serialized receipt and declared object bytes per group",
+    )
     args = parser.parse_args()
     if args.limit <= 0:
         parser.error("--limit must be positive")
@@ -37,6 +44,14 @@ def main() -> int:
             )
         if args.verify_workers > args.verify_group_size:
             parser.error("verification workers cannot exceed group size")
+    compact_grouped = (args.compact_group_size, args.compact_workers, args.compact_byte_budget)
+    if any(value is not None for value in compact_grouped):
+        if args.mode != "compact" or any(value is None or value <= 0 for value in compact_grouped):
+            parser.error(
+                "grouped compaction requires compact mode and all three positive compaction bounds"
+            )
+        if args.compact_workers > args.compact_group_size:
+            parser.error("compaction workers cannot exceed group size")
     # Set connection defaults BEFORE importing the pool; no bulk read or
     # stalled client may keep a production transaction open indefinitely.
     os.environ["PGOPTIONS"] = (
@@ -56,7 +71,25 @@ def main() -> int:
     stop_reason = None
     try:
         store = PayloadStore.from_env()
-        if args.verify_group_size is not None:
+        if args.compact_group_size is not None:
+            from api.ai.receipt_compaction import compact
+
+            result = compact(
+                store,
+                after=after,
+                limit=args.limit,
+                group_size=args.compact_group_size,
+                workers=args.compact_workers,
+                byte_budget=args.compact_byte_budget,
+                backup_complete=args.backup_complete,
+            )
+            counts, logical_bytes, after = (
+                result.counts,
+                result.logical_bytes_verified,
+                result.after,
+            )
+            stop_reason = result.stop_reason
+        elif args.verify_group_size is not None:
             from api.ai.receipt_verification import verify
 
             result = verify(

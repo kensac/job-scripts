@@ -646,7 +646,27 @@ outcomes, not vector arrays. GETs later in the current group may finish before
 an earlier failure is observed, but their outcomes never advance the cursor or
 verified-byte total past the first failing row. Changing concurrency does not
 weaken reference parsing, SHA-256, byte size, array-shape or inline-equality
-checks. No copy or compaction throughput change is implied by these options.
+checks. These verification options do not change copy or compaction throughput.
+
+For grouped compaction, explicitly supply `--compact-group-size N
+--compact-workers W --compact-byte-budget B` with `--backup-complete`. The same
+serialized-byte reservation and GET bounds apply. Each object is downloaded and
+verified again even after a previous verification pass. No database lock or
+transaction spans object IO. Afterwards, the operator locks parent tasks in
+ascending ID order and receipts in cursor order, rechecks exact canonical rows
+and eligibility, and removes only `embedding_vectors` with a native JSONB update
+for the successful ordered prefix. Other response fields retain their exact
+PostgreSQL values, without a Python JSON round trip.
+
+Each grouped conditional update must affect the entire verified prefix; a count
+mismatch or transaction failure rolls back that group. The returned cursor and
+byte count retain only earlier committed groups. A later object failure or
+eligibility change permits only its earlier unchanged prefix to commit. Retry
+from the returned cursor; already compacted receipts are not selected again.
+A `database_error` stop reason requires resolving the database problem before
+retrying. Grouped controls are opt-in; serial compaction remains available.
+Neither path deletes references or objects, reprices usage, or touches live
+embedding vectors.
 
 Deploy the compatible receipt reader before any compaction. After an independent
 database copy finishes, `compact --limit N --backup-complete` verifies the object
