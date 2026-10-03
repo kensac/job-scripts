@@ -293,6 +293,20 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
         help="Days a finished managed-board run keeps its inline candidate list before the "
         "retention operation may remove it. Runs awaiting recovery or collection keep theirs.",
     ),
+    # How stale a listing's last_seen_at may get before a pull that still
+    # lists it rewrites the row only to move it. Retention is the one thing
+    # the timestamp decides, and it is counted in whole days, so a day is the
+    # finest distinction it can draw. Refreshed every pull instead, the
+    # timestamp alone rewrote 1.17M rows a day, 99.2% of them otherwise
+    # unchanged (pg_stat_statements, 2026-10-03).
+    "listings_seen_refresh_hours": ConfigKey(
+        section="Catalog",
+        default=24,
+        value_type=PositiveInt,
+        help="Hours a listed posting's last-seen time may lag before a pull rewrites the row "
+        "just to update it. A posting is kept between screened_retention_days and that plus "
+        "this many hours after its board last listed it.",
+    ),
     "source_title_patterns_enabled": ConfigKey(
         section="Catalog",
         default=True,
