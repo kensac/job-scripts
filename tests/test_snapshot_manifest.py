@@ -37,7 +37,9 @@ def test_manifest_exact_subset_round_trip_and_backup_gate(f, objects):
     assert row(tasks[1])["snapshot_ref"] is None
     with pytest.raises(ValueError, match="backup"):
         snapshots.migrate_manifest(manifest, objects, mode="compact", limit=2)
-    for mode in ("verify", "compact", "verify", "restore"):
+    for item in manifest:
+        item["reference"] = row(item["task_id"])["snapshot_ref"]
+    for mode in ("verify", "compact", "verify", "restore", "restore"):
         result = snapshots.migrate_manifest(
             manifest, objects, mode=mode, limit=2, backup_complete=True
         )
