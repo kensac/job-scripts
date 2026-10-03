@@ -571,12 +571,23 @@ the supported profile version. Policies name the exact filter prompt hash; no
 policy is inferred from prose. Satisfying partial taxonomy rules cannot establish
 acceptance of the entire filter. Missing or unsupported evidence abstains.
 
-The request snapshot retains the route proposal, and collection compares it to
-the paid result in the receipt transaction. Task payload `routing_report` counts
-agreements, false rejects, false accepts, abstentions and unresolved reference
-results separately. These are agreement measurements against the existing filter,
-not ground-truth accuracy. Old paid requests without a proposal collect normally.
-Observations never enter the verdict cache, usage ledger or board projection.
+The route proposal is retained in the run's `review_gate_decisions.evidence`,
+and collection records the paid result in `review_gate_outcomes` inside the
+receipt transaction, so a replayed receipt adds nothing.
+`review_gate_reads.comparisons(task_id)` derives agreements, false rejects, false
+accepts, abstentions and unresolved reference results from those rows. These are
+agreement measurements against the existing filter, not ground-truth accuracy.
+Old paid requests without a proposal collect normally. Observations never enter
+the verdict cache, usage ledger or board projection.
+
+**Nothing increments a counter inside `tasks.payload` per collected result.** A
+managed batch payload carries its whole job list (up to 1.9 MB), so every
+`jsonb_set` rewrites the entire TOASTed value and locks the task row. Measured
+2026-10-03: 259 managed batches took 74,432 such increments, about 104 GB of
+rewritten payload, for counters with no reader. Per-result observations go in a
+row keyed by what they observe and are derived when read. The `routing_report`
+and `review_gate_comparison` keys in older payloads are historical, written by
+releases before this rule, and nothing reads or extends them.
 
 Live enforcement is intentionally not an accepted mode. It requires representative
 held-out validation and a versioned decision/projection invalidation contract so
@@ -598,8 +609,10 @@ creates no additional classification calls; the existing profile derivation is
 still responsible for producing shared profiles.
 
 Task payload `review_gate` records candidates, proposed exclusions, proven
-profiles, skipped URLs with stage/reason, and the remainder. Batch shadow
-comparisons use receipt transactions. Paid batches bypass replanning, including
+profiles, skipped URLs with stage/reason, and the remainder, written once at
+admission. Shadow comparisons against the paid result are derived from
+`review_gate_outcomes` by `review_gate_reads.comparisons`, never counted into the
+payload. Paid batches bypass replanning, including
 after a switch changes. Skips are not paid verdicts, do not enter the verdict
 cache, and create no usage. Managed projection explicitly excludes this run's
 skips even when fail-open is configured. Switching off restores eligibility on

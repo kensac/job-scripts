@@ -1,6 +1,6 @@
 import pytest
 
-from api import ai, db, review_gate
+from api import ai, db, review_gate, review_gate_reads
 from core.batch import structured_response_spec
 from core.job_profile import (
     CLASSIFIER_VERSION,
@@ -198,8 +198,10 @@ async def test_batch_gate_changes_requests_not_verdict_cache(f, mode, expected):
     )
     payload = db.query_one("SELECT payload FROM tasks WHERE id=%s", (task,))["payload"]
     assert payload["review_gate"]["detailed"] == expected
-    if mode == "shadow":
-        assert payload["review_gate_comparison"] == {"false_reject": 1}
+    assert "review_gate_comparison" not in payload
+    assert review_gate_reads.comparisons(task)["review_gate"] == (
+        {"false_reject": 1} if mode == "shadow" else {}
+    )
 
 
 @pytest.mark.asyncio
@@ -314,13 +316,3 @@ def test_managed_fail_open_projection_excludes_gate_rejects_and_rollback_restore
     task = f.make_task("run_managed_board_batch", payload)
     assert review_gate.partition(task, "test-hash", [job], {})[0] == [job]
     assert managed_board_runs.replace_projection(task, payload) == 1
-
-
-def test_optional_comparison_failure_does_not_abort_receipt_transaction(f):
-    task = f.make_task(
-        "run_filter_batch_chunk", {"review_gate_comparison": {"false_reject": "bad"}}
-    )
-    with db.transaction():
-        review_gate.record_comparison(task, {"stage": "title"}, False)
-        db.execute("UPDATE tasks SET error='still writable' WHERE id=%s", (task,))
-    assert db.query_one("SELECT error FROM tasks WHERE id=%s", (task,))["error"] == "still writable"

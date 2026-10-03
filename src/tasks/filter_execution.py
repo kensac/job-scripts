@@ -382,12 +382,6 @@ async def execute_batch(
             review_gate_records.record_outcome(
                 (context.get("review_gate") or {}).get("decision_id"), query_id
             )
-            filter_routing.record_comparison(
-                task_id, context.get("routing"), parsed.should_filter if parsed else None
-            )
-            review_gate.record_comparison(
-                task_id, context.get("review_gate"), parsed.should_filter if parsed else None
-            )
             receipt.outcome = "written" if parsed else "failed"
         if done % 50 == 0:
             done_count, total_count = progress_counts(task_id)

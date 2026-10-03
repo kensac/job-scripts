@@ -4,7 +4,7 @@ import logging
 from typing import Any
 
 from api import db
-from core.filter_policy import RouteProposal, RoutingPolicy, propose
+from core.filter_policy import RoutingPolicy, propose
 from core.job_profile import CLASSIFIER_VERSION, JOB_PROFILE_MODEL, JobProfileAnswer
 
 logger = logging.getLogger(__name__)
@@ -80,34 +80,3 @@ def observations(
     except Exception:
         logger.exception("Filter routing observation failed; retaining detailed review")
         return {}
-
-
-def record_comparison(
-    task_id: int,
-    proposal: dict[str, Any] | None,
-    rejected: bool | None,
-) -> None:
-    if not proposal:
-        return
-    try:
-        parsed = RouteProposal.model_validate(proposal)
-        if rejected is None:
-            key = "unresolved_reference"
-        elif parsed.outcome == "abstain":
-            key = "abstained"
-        elif (parsed.outcome == "reject") == rejected:
-            key = "agreed"
-        else:
-            key = "false_reject" if parsed.outcome == "reject" else "false_accept"
-        # This runs inside the receipt transaction. A collected receipt cannot
-        # count twice, and a rolled-back verdict cannot leave a comparison behind.
-        with db.transaction():
-            db.execute(
-                "UPDATE tasks SET payload = jsonb_set(payload, '{routing_report}', "
-                "COALESCE(payload->'routing_report', '{}'::jsonb) || "
-                "jsonb_build_object(%s::text, "
-                "COALESCE((payload->'routing_report'->>%s)::int, 0) + 1)) WHERE id = %s",
-                (key, key, task_id),
-            )
-    except Exception:
-        logger.exception("Filter routing comparison unavailable")
