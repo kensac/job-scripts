@@ -9,7 +9,8 @@ from typing import TYPE_CHECKING, LiteralString
 from psycopg import errors
 from psycopg.types.json import Jsonb
 
-from core.pool import pool
+from core import listing_payloads
+from core.pool import in_transaction, pool
 
 if TYPE_CHECKING:
     from core.fetching.posting import JobPosting
@@ -279,7 +280,18 @@ def record_listings(
     that last listed them, counted from last_seen_at plus refresh_hours
     because last_seen_at can lag that pull by up to refresh_hours. So a row
     is never deleted sooner than before and at most refresh_hours later. A
-    row still listed is never deleted: the pull refreshes it first."""
+    row still listed is never deleted: the pull refreshes it first.
+
+    The text and the raw record are written by reference to verified bundle
+    objects uploaded before the upsert (listing_payloads.reference_columns).
+    Returns how many values it had to write inline because object storage
+    was unavailable."""
+    listed = [p for p in postings if p.url]
+    if in_transaction():
+        raise RuntimeError("Listings upload their payloads and cannot record inside a transaction")
+    payloads, inline = listing_payloads.reference_columns(
+        [(p.url, p.description or "", p.raw or {}) for p in listed]
+    )
     rows = [
         (
             p.url,
@@ -292,18 +304,12 @@ def record_listings(
             else None,
             pattern,
             p.url in kept,
-            p.description or "",
-            None,
-            None,
-            None,
-            Jsonb(p.raw or {}),
-            None,
-            None,
-            None,
+            *payload[:4],
+            Jsonb(payload[4]),
+            *payload[5:],
             refresh_hours,
         )
-        for p in postings
-        if p.url
+        for p, payload in zip(listed, payloads, strict=True)
     ]
     with pool.connection() as conn, conn.cursor() as cur:
         if rows:
@@ -317,4 +323,4 @@ def record_listings(
             "AND last_seen_at < now() - make_interval(days => %s, hours => %s)",
             (source, retention_days, refresh_hours),
         )
-    return len(rows)
+    return inline

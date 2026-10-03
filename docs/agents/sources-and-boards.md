@@ -131,6 +131,63 @@ value is compared as itself. A writer that stores a value inline writes no
 digest, so no older writer can leave a digest that disagrees with the value
 beside it.
 
+**A pull writes references, uploaded before its upsert.**
+`listing_payloads.reference_columns` reads the reference columns of the rows
+the pull lists (never their text), reuses a stored reference wherever an
+incoming value's digest matches one, and uploads every other value with
+`PayloadStore.put_bundle`, outside any transaction: one bundle per pull, split
+at `BUNDLE_MAX_BYTES`, members named by their own digest. A re-pull of
+unchanged content uploads nothing and writes no row version, as before.
+Objects are content-addressed and never deleted; an upload whose rows lost a
+race stays unreferenced.
+
+**An outage writes inline, never fails the pull.** Unconfigured or failing
+storage puts the values that needed an upload inline with no digest, and the
+pull counts them as `listings_inline` on its task and in a
+`listings_stored_inline` event. Failing the pull instead would stop the
+catalog upsert and the page caching that ride on it, for an archive nothing
+downstream reads. Nothing stays half moved: an inline value never equals a
+referenced one in the change check, so the next pull that lists the row moves
+it, and the backfill reaches rows no pull lists again (switched-off sources,
+rows waiting out retention). An empty description cannot be compared, so a
+pull without text leaves a stored inline description to the backfill.
+
+**Rollout order.** Deploy the compatible reader (the release that added the
+columns) to every API and worker before the reference writer: an older
+writer compares `description IN ('', stored)` and would write new text
+inline beside a reference every reader still follows. Rolling back past the
+reference writer is safe to the compatible reader, which writes inline and
+clears the reference it replaces; rolling back past the compatible reader
+needs `restore` over the whole table first.
+
+`python -m api.migrate_listings MODE --limit N` is the backfill. Each
+invocation takes at most N rows after `--after URL` in url order, in pages of
+`--chunk-size` rows (default 1,000) with `--workers` pages in flight. Repeat
+from the printed `after` until `exhausted` is true.
+
+- `count` classifies rows `inline` or `referenced` without reading TOAST or
+  objects.
+- `externalize` reads a page's inline values, uploads them as bundles outside
+  any transaction, then in one short transaction locks the page with
+  `FOR UPDATE SKIP LOCKED`, requires each row unchanged, and replaces each
+  value with its reference and the column default. A row a pull holds or
+  rewrote in between is `changed`: left as it is, listed under `failed`
+  (exit 1), and reached by a rerun. An upload failure is `unavailable` and
+  stops the cursor before its page, with nothing written.
+- `verify` reads every reference through `resolve`, each bundle once per
+  page; a missing or altered object is `unavailable`.
+- `restore` is the rollback: it writes each referenced value back inline and
+  clears its reference, leaving the row exactly as an inline writer stored it.
+
+Done means `count` from the start reports no `inline` and `verify` no
+`failed`. One object per value would be about 825k PUTs (650k raw records
+and 175k texts, the 27% of descriptions that are not empty) at about 16 a
+second, over 14 hours before the read-back; a page of 1,000 rows is one
+bundle, about 650 PUTs and their read-backs for the table. Each externalized
+row is one new row version, so expect WAL about the size of the rows moved;
+the TOAST it frees is reused after vacuum, and the files shrink only with a
+rewrite, which is not part of this.
+
 ## A pull rewrites a catalog row only when the row would change
 
 `catalog.upsert_postings` follows the first two listings rules above for

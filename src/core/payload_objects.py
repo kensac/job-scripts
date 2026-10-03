@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import re
+from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -17,6 +18,11 @@ from botocore.config import Config
 # concurrency by it: a thread beyond the pool waits for a connection, and the
 # pool discards the extra connection it opens.
 MAX_CONNECTIONS = 10
+
+# A bundle is read whole to resolve one member, so it stays the size of the
+# largest objects this store already serves: managed-board candidate lists of
+# 7.9 to 8.6 MB per run (observability.md).
+BUNDLE_MAX_BYTES = 8 * 1024 * 1024
 
 
 class PayloadUnavailable(RuntimeError):
@@ -112,6 +118,21 @@ def parse_ref(value: Any) -> PayloadRef | BundleMemberRef:
     if isinstance(value, dict) and value.get("version") == 3:
         return BundleMemberRef.parse(value)
     return PayloadRef.parse(value)
+
+
+def bundle_groups[T](items: Iterable[T], size: Callable[[T], int]) -> list[list[T]]:
+    """Consecutive runs of items, each a bundle of at most BUNDLE_MAX_BYTES
+    unless one item alone is larger."""
+    groups: list[list[T]] = []
+    total = 0
+    for item in items:
+        member = size(item)
+        if not groups or total + member > BUNDLE_MAX_BYTES:
+            groups.append([])
+            total = 0
+        groups[-1].append(item)
+        total += member
+    return groups
 
 
 # Decoded bundles keyed by object key and size, owned by one call that

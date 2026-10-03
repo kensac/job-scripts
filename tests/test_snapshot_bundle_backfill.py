@@ -9,6 +9,7 @@ import pytest
 from api import db
 from api.ai import batch_results, request_snapshots, snapshot_payloads
 from api.ai import migrate_snapshot_payloads as cli
+from core import payload_objects
 from core.batch import BatchResult
 from core.payload_objects import PayloadStore
 from tests.test_snapshot_bundles import CountingClient, rows, task
@@ -56,7 +57,7 @@ def test_a_task_with_one_row_over_the_bundle_size_makes_two_bundles(
 def test_bundle_bytes_split_a_page(f, objects, monkeypatch):
     task_id, _ = task(f, 4)
     size = len(json.dumps(rows(task_id)[0]["snapshot"]))
-    monkeypatch.setattr(snapshot_payloads, "BUNDLE_MAX_BYTES", 2 * size + 50)
+    monkeypatch.setattr(payload_objects, "BUNDLE_MAX_BYTES", 2 * size + 50)
     assert snapshot_payloads.bundle_many(rows(task_id), objects) == ["bundled"] * 4
     assert len({source["snapshot_ref"]["key"] for source in rows(task_id)}) == 2
 
