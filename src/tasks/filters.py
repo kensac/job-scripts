@@ -8,6 +8,7 @@ from typing import Any
 from api import budget, db, events, metrics
 from api.ai import verdicts
 from api.budget import load_config
+from api.task_jobs import run_jobs
 from core.store import get_contents
 from tasks import batch_policy
 from tasks.board import (
@@ -175,7 +176,7 @@ async def handle_run_filter_chunk(task_id: int, payload: dict[str, Any]) -> None
         ent,
         cfg,
         payload["filter"],
-        payload["jobs"],
+        run_jobs(payload),
         parent_id=payload["parent_id"],
     )
 
@@ -186,7 +187,7 @@ async def handle_run_filter_batch_chunk(task_id: int, payload: dict[str, Any]) -
     waves) and records every verdict when results land."""
     user_id = payload["user_id"]
     flt = payload["filter"]
-    jobs = payload["jobs"]
+    jobs = run_jobs(payload)
     parent_id = payload["parent_id"]
     existing = has_batch_work(task_id)
     cfg = None

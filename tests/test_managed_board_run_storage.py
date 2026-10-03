@@ -8,7 +8,7 @@ from dataclasses import asdict
 
 import pytest
 
-from api import db
+from api import db, task_jobs
 from api import managed_board_runs as runs
 from core.payload_objects import PayloadRef, PayloadStore, PayloadUnavailable
 from tasks import managed_boards as managed_task
@@ -192,8 +192,14 @@ def _all(mode: str, objects, *, limit: int = 100, workers: int = 1) -> list[dict
     results, cursor = [], 0
     while not results or not results[-1]["exhausted"]:
         results.append(
-            runs.migrate_run_jobs(
-                mode, after=cursor, through=through, limit=limit, store=objects, workers=workers
+            task_jobs.migrate(
+                task_jobs.MANAGED_BOARD_RUNS,
+                mode,
+                after=cursor,
+                through=through,
+                limit=limit,
+                store=objects,
+                workers=workers,
             )
         )
         cursor = results[-1]["after"]
@@ -294,7 +300,14 @@ def test_a_concurrent_change_between_upload_and_lock_writes_nothing(f, objects):
         (db.jsonb(changed), task_id),
     )
 
-    result = runs.migrate_run_jobs("externalize", after=0, through=task_id, limit=10, store=objects)
+    result = task_jobs.migrate(
+        task_jobs.MANAGED_BOARD_RUNS,
+        "externalize",
+        after=0,
+        through=task_id,
+        limit=10,
+        store=objects,
+    )
 
     assert result["counts"] == {"changed": 1} and result["failed"] == [task_id]
     assert result["after"] == 0 and not result["exhausted"]
@@ -306,7 +319,14 @@ def test_an_upload_failure_stops_before_the_run_and_writes_nothing(f, objects):
     objects.client.fail_put = True
     before = _texts()
 
-    result = runs.migrate_run_jobs("externalize", after=0, through=task_id, limit=10, store=objects)
+    result = task_jobs.migrate(
+        task_jobs.MANAGED_BOARD_RUNS,
+        "externalize",
+        after=0,
+        through=task_id,
+        limit=10,
+        store=objects,
+    )
 
     assert result["counts"] == {"unavailable": 1} and result["after"] == 0
     assert _texts() == before

@@ -316,3 +316,57 @@ def test_managed_fail_open_projection_excludes_gate_rejects_and_rollback_restore
     task = f.make_task("run_managed_board_batch", payload)
     assert review_gate.partition(task, "test-hash", [job], {})[0] == [job]
     assert managed_board_runs.replace_projection(task, payload) == 1
+
+
+def _gate_board(f):
+    sponsor = f.make_user()
+    job_id = f.make_job(title="Registered Nurse")
+    job = db.query_one("SELECT id,url,title,company FROM jobs WHERE id=%s", (job_id,))
+    board = db.query_one(
+        "INSERT INTO managed_boards(slug,name,sponsor_user_id,prompt,prompt_hash,requested_model) "
+        "VALUES ('gate','Gate',%s,'prompt','test-hash',%s) RETURNING id",
+        (sponsor, JOB_PROFILE_MODEL),
+    )
+    payload = {
+        "managed_board_id": board["id"],
+        "revision": 1,
+        "prompt_hash": "test-hash",
+        "requested_model": JOB_PROFILE_MODEL,
+        "fail_closed": False,
+        "jobs": [{**job, "sort_at": "2026-09-01T00:00:00+00:00"}],
+    }
+    return job, payload
+
+
+def test_skipped_urls_are_read_from_decisions_not_copied_into_the_payload(f):
+    from api import managed_board_runs, review_gate_records
+
+    job, payload = _gate_board(f)
+    task = f.make_task("run_managed_board_batch", payload)
+    configure()
+
+    assert review_gate.partition(task, "test-hash", [job], {})[0] == []
+
+    plan = db.query_one("SELECT payload->'review_gate' plan FROM tasks WHERE id=%s", (task,))[
+        "plan"
+    ]
+    assert "skipped" not in plan
+    assert plan["candidates"] == 1 and plan["detailed"] == 0
+    assert review_gate_records.exclusions(task, "test-hash") == {job["url"]}
+    assert managed_board_runs.replace_projection(task, payload) == 0
+
+
+def test_a_run_planned_before_decisions_were_recorded_keeps_its_payload_skips(f):
+    """Runs gated between #632 and #638 hold their skips only in the payload."""
+    from api import managed_board_runs
+
+    job, payload = _gate_board(f)
+    plan = {
+        "version": "review-gate-v1",
+        "prompt_hash": "test-hash",
+        "skipped": {job["url"]: {"stage": "title", "skip": True}},
+    }
+    legacy = f.make_task("run_managed_board_batch", {**payload, "review_gate": plan})
+    assert managed_board_runs.replace_projection(legacy, payload) == 0
+    ungated = f.make_task("run_managed_board_batch", payload)
+    assert managed_board_runs.replace_projection(ungated, payload) == 1

@@ -41,6 +41,9 @@ def recoverable(f, *, parent=None, kind="verify_new"):
     payload = {"batch_ids": ["paid"], "payload_recovery": {"reason": "payload_unavailable"}}
     if parent is not None:
         payload["parent_id"] = parent
+    if kind == "run_filter_batch_chunk":
+        # Every chunk is enqueued with its job list, and recovery verifies it.
+        payload["jobs"] = [{"url": "https://posting"}]
     task_id = f.make_task(kind, payload, status="failed")
     if parent is not None:
         db.execute("UPDATE tasks SET parent_id=%s WHERE id=%s", (parent, task_id))

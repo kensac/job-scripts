@@ -122,6 +122,16 @@ def decided_urls(urls: list[str], prompt_hash: str, model: str) -> set:
     return {r["url"] for r in rows}
 
 
+# The URLs a filter chunk holds, in either payload shape (api.task_jobs): the
+# legacy inline `jobs` list, or `urls`, kept inline beside the referenced list
+# because these readers run in SQL and cannot follow a reference. A payload
+# holds one or the other, so this is exactly the URL sequence of its jobs.
+CHUNK_URLS = (
+    "CROSS JOIN LATERAL (SELECT j->>'url' AS url FROM jsonb_array_elements({t}.payload->'jobs') j "
+    "UNION ALL SELECT jsonb_array_elements_text({t}.payload->'urls')) AS chunk_url"
+)
+
+
 def submission_exclusions(
     task_id: int, user_id: int, urls: list[str], prompt_hash: str, model: str
 ) -> set[str]:
@@ -135,7 +145,7 @@ def submission_exclusions(
     if not urls:
         return set()
     rows = db.query(
-        """
+        f"""
         WITH owners AS MATERIALIZED (
             SELECT t.payload FROM tasks t
             WHERE t.id < %(tid)s
@@ -150,9 +160,8 @@ def submission_exclusions(
           AND prompt_hash = %(hash)s AND model = %(model)s
           AND status IN ('passed', 'rejected')
         UNION
-        SELECT j->>'url' AS url FROM owners,
-            jsonb_array_elements(owners.payload->'jobs') AS j
-        WHERE j->>'url' = ANY(%(urls)s)
+        SELECT chunk_url.url FROM owners {CHUNK_URLS.format(t="owners")}
+        WHERE chunk_url.url = ANY(%(urls)s)
         """,
         {"tid": task_id, "uid": user_id, "urls": urls, "hash": prompt_hash, "model": model},
     )
@@ -170,8 +179,7 @@ def in_flight_urls(user_id: int) -> set:
     one is still parked: it judges only what arrived since.
     """
     rows = db.query(
-        "SELECT DISTINCT j->>'url' AS url FROM tasks t, "
-        "jsonb_array_elements(t.payload->'jobs') AS j "
+        f"SELECT DISTINCT chunk_url.url FROM tasks t {CHUNK_URLS.format(t='t')} "
         "WHERE t.kind IN ('run_filter_chunk', 'run_filter_batch_chunk') "
         "AND t.status IN ('pending', 'running', 'awaiting_batch') "
         "AND (t.payload->>'user_id')::bigint = %s",

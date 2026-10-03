@@ -172,9 +172,14 @@ def partition(
         "would_reject": dict(
             Counter(d["stage"] for d in decisions.values() if d["stage"] != "detailed")
         ),
-        "skipped": skipped,
         "detailed": len(jobs) - len(skipped),
     }
+    # The skipped URLs are not copied here. persist records a decision row for
+    # every job in the same transaction, so review_gate_records.exclusions
+    # derives exactly this set; the copy was 53% of filter-chunk payload text
+    # over 7 days (2026-10-03) and rode along on every later payload rewrite.
+    # Payloads written before #638 recorded decisions keep theirs, and
+    # managed_board_runs.replace_projection still reads them when no rows exist.
     # Failure to persist provenance aborts before any requests are submitted.
     # Replace, never increment: retries cannot inflate the funnel.
     with db.transaction():
@@ -193,7 +198,6 @@ def partition(
         )
         decisions = {url: review_gate_records.decision(row) for url, row in persisted.items()}
         skipped = {url: value for url, value in decisions.items() if value["skip"]}
-        report["skipped"] = skipped
         report["policy"] = (
             next(iter(persisted.values()))["policy"] if persisted else report["policy"]
         )
