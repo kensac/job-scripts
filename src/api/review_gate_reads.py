@@ -56,7 +56,7 @@ class ReviewDecisions(BaseModel):
 DECISION_COLUMNS = (
     "d.id,d.task_id,d.url,d.job_id,d.user_id,d.filter_id,d.managed_board_id,d.revision,"
     "d.prompt_hash,d.stage,d.mode,d.action,d.reason,d.profile_id,d.title,d.content_hash,"
-    f"{review_decision_storage.RESOLVED_COLUMNS},d.evidence,d.created_at"
+    "p.policy,d.evidence,d.created_at"
 )
 
 
@@ -89,7 +89,7 @@ def _read_decisions(
         "ORDER BY d.id DESC LIMIT %(limit)s OFFSET %(offset)s",
         {**parameters, "limit": page.size, "offset": page.offset},
     )
-    rows = [ReviewDecision.model_validate(review_decision_storage.resolve(row)) for row in raw_rows]
+    rows = [ReviewDecision.model_validate(row) for row in raw_rows]
     if rows:
         outcomes = db.query(
             "SELECT decision_id,query_id,batch_id,model,rejected,outcome,recorded_cost_usd,created_at "

@@ -1,10 +1,8 @@
 """A decision's immutable content is stored once; its per-task row references it.
 
-Rows exist in three shapes: fully inline (every row written before the
-reference writer), copied (inline plus url_id and body_id), and
-reference-only. Readers select from DECISIONS, which presents every shape with
-the columns the inline table had, so a reader's result does not depend on
-which shape stores a row.
+Readers select from DECISIONS, which resolves a row's url_id and body_id into
+the columns the inline table had. The inline columns are read only by the
+migration operator below.
 """
 
 from __future__ import annotations
@@ -48,42 +46,29 @@ def body_digest(alias: str) -> str:
     )
 
 
-# A copied row's inline columns must equal what its references say. Readers
-# that return whole decisions refuse a row where they differ.
+# A copied row's inline columns must equal what its references say; the
+# migration operator refuses to clear or restore a row where they differ.
 STORED_MATCHES = (
     f"(d.body_id IS NULL OR d.stage IS NULL OR ({_content('d')}) IS NOT DISTINCT FROM "
     f"({_content('b')})) AND (d.url_id IS NULL OR d.url IS NULL OR d.url=u.url)"
 )
 
+# Every row in production holds url_id and body_id (2026-10-03), and the
+# writer stores nothing else, so readers never look at the inline columns.
 DECISIONS = (
     "(SELECT d.id,d.task_id,d.job_id,d.user_id,d.filter_id,d.managed_board_id,d.revision,"
-    "d.created_at,d.url AS inline_url,d.url_id,"
-    "CASE WHEN d.url_id IS NULL THEN d.url ELSE u.url END AS url,"
-    + ",".join(
-        f"CASE WHEN d.body_id IS NULL THEN d.{column} ELSE b.{column} END AS {column}"
-        for column in BODY
-    )
-    + f",d.policy AS inline_policy,{STORED_MATCHES} AS stored_matches "
-    "FROM review_gate_decisions d LEFT JOIN review_gate_urls u ON u.id=d.url_id "
-    "LEFT JOIN review_gate_decision_bodies b ON b.id=d.body_id) d"
+    "d.created_at,d.url_id,u.url,"
+    + ",".join(f"b.{column}" for column in BODY)
+    + " FROM review_gate_decisions d JOIN review_gate_urls u ON u.id=d.url_id "
+    "JOIN review_gate_decision_bodies b ON b.id=d.body_id) d"
 )
 
-# Both arms are indexed (url_created, url_id); a CASE over the two is not.
-URL_MATCH = "(d.inline_url=%(url)s OR d.url_id=(SELECT id FROM review_gate_urls WHERE url=%(url)s))"
+# idx_review_gate_decisions_url_id serves this; the resolved url has no index.
+URL_MATCH = "(d.url_id=(SELECT id FROM review_gate_urls WHERE url=%(url)s))"
 
-RESOLVED_COLUMNS = (
-    "d.inline_policy,d.policy_id,p.id AS snapshot_id,p.policy AS snapshot_policy,"
-    "(d.inline_policy::text IS NOT DISTINCT FROM p.policy::text) AS policy_matches,"
-    "d.stored_matches"
-)
-RESOLVED_FROM = f"{DECISIONS} LEFT JOIN review_gate_policies p ON p.id=d.policy_id"
-
-
-def resolve(row: dict[str, Any]) -> dict[str, Any]:
-    resolved = dict(row)
-    if not resolved.pop("stored_matches"):
-        raise PolicySnapshotUnavailable("Inline and referenced review decisions disagree")
-    return review_policy_storage.resolve(resolved)
+# A body's policy_id is NOT NULL under a validated foreign key, so the join
+# cannot drop a decision.
+RESOLVED_FROM = f"{DECISIONS} JOIN review_gate_policies p ON p.id=d.policy_id"
 
 
 def intern_urls(urls: list[str]) -> dict[str, int]:

@@ -41,13 +41,14 @@ def rows():
 def test_copy_references_policy_url_and_body_in_one_pass_without_changing_values(f):
     exact = '{"precision":0.123456789012345678901234567890,"unicode":"é","null":null,"list":[2,1]}'
     first_task, _, first = legacy(f, exact)
-    second_task, _, last = legacy(f, exact)
+    _, _, last = legacy(f, exact)
     outcome(first["id"], 77, None)
     before = db.query(
         f"SELECT to_jsonb(d){REFERENCES} AS row FROM review_gate_decisions d ORDER BY id"
     )
     outcomes = db.query("SELECT * FROM review_gate_outcomes ORDER BY id")
-    reads = {task: review_gate_records.existing(task) for task in (first_task, second_task)}
+    # Readers resolve references only, so an unreferenced row reads as absent.
+    assert review_gate_records.existing(first_task) == {}
     result = run("copy", last["id"])
     assert result["copied"] == 2 and result["verified"] == 2 and result["unreferenced"] == 0
     assert result["after"] == last["id"]
@@ -68,7 +69,7 @@ def test_copy_references_policy_url_and_body_in_one_pass_without_changing_values
         == before
     )
     assert db.query("SELECT * FROM review_gate_outcomes ORDER BY id") == outcomes
-    assert {task: review_gate_records.existing(task) for task in reads} == reads
+    assert review_gate_records.existing(first_task)[first["url"]]["title"] == first["title"]
     replay = run("copy", last["id"])
     assert replay["copied"] == 0 and replay["verified"] == 2
 
@@ -104,10 +105,10 @@ def test_compaction_and_restore_are_exact_and_restartable(f):
 
 def test_reference_only_policy_rows_get_their_exact_snapshot_back_inline(f):
     task, _, row = admission(f)
+    reads = review_gate_records.existing(task)
     inline([row["id"]])
     row = db.query_one("SELECT * FROM review_gate_decisions WHERE id=%s", (row["id"],))
     assert row["policy"] is None and row["policy_id"] is not None
-    reads = review_gate_records.existing(task)
     run("copy", row["id"])
     compact(row["id"])
     run("restore", row["id"])
@@ -181,10 +182,7 @@ def test_copy_refuses_a_policy_reference_that_disagrees_with_inline(f):
 def test_copy_detects_a_task_url_held_in_both_shapes(f):
     from psycopg.errors import UniqueViolation
 
-    from tests.test_review_decision_storage import reference_only
-
-    task, job, row = admission(f)
-    reference_only([row["id"]])
+    task, job, _ = admission(f)
     db.execute(
         "INSERT INTO review_gate_decisions(task_id,url,prompt_hash,stage,mode,action,title,"
         "policy,evidence) VALUES(%s,%s,'p','detailed','off','review','t','{}','{}')",

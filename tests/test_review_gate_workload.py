@@ -26,29 +26,46 @@ def test_report_1000_decision_workload(client, admin_headers, monkeypatch, reque
     # Half of the independent fixture belongs to another prompt. Of the
     # selected half, 250 reviews have 300 outcomes, including 50 retries.
     # Wide evidence ensures the report does not return posting bodies.
+    from api import review_policy_storage
+
+    policy = review_policy_storage.intern("{}")
     db.execute(
-        "INSERT INTO review_gate_decisions "
-        "(task_id,url,prompt_hash,stage,mode,action,title,policy,evidence) "
-        "SELECT 1,'https://workload.test/'||n,CASE WHEN n<500 THEN 'selected' ELSE 'other' END, "
+        "INSERT INTO review_gate_urls(url) "
+        "SELECT 'https://workload.test/'||n FROM generate_series(0,999) n"
+    )
+    db.execute(
+        "INSERT INTO review_gate_decision_bodies "
+        "(digest,prompt_hash,stage,mode,action,title,policy_id,evidence) "
+        "SELECT sha256(convert_to('workload-'||n,'UTF8')), "
+        "CASE WHEN n<500 THEN 'selected' ELSE 'other' END, "
         "CASE WHEN n%%2=0 THEN 'detailed' ELSE 'title' END, "
         "CASE WHEN n%%2=0 THEN 'off' ELSE 'enforce' END, "
-        "CASE WHEN n%%2=0 THEN 'review' ELSE 'skip' END,'Engineer','{}', "
+        "CASE WHEN n%%2=0 THEN 'review' ELSE 'skip' END,'Engineer',%s, "
         "jsonb_build_object('planned_model','fixture-model','transport','batch', "
         "'profile_input_content',repeat(md5(n::text),128)) "
         "FROM generate_series(0,999) n",
-        (),
+        (policy,),
     )
+    db.execute(
+        "INSERT INTO review_gate_decisions(task_id,url_id,body_id) "
+        "SELECT 1,u.id,b.id FROM generate_series(0,999) n "
+        "JOIN review_gate_urls u ON u.url='https://workload.test/'||n "
+        "JOIN review_gate_decision_bodies b ON b.digest=sha256(convert_to('workload-'||n,'UTF8')) "
+        "ORDER BY n"
+    )
+    from api.review_decision_storage import DECISIONS
+
     db.execute(
         "INSERT INTO review_gate_outcomes "
         "(decision_id,query_id,model,rejected,outcome,recorded_cost_usd,usage) "
         "SELECT id,id,'fixture-model',false,'written',0.001,'{}' "
-        "FROM review_gate_decisions WHERE prompt_hash='selected' AND action='review'"
+        f"FROM {DECISIONS} WHERE prompt_hash='selected' AND action='review'"
     )
     db.execute(
         "INSERT INTO review_gate_outcomes "
         "(decision_id,query_id,model,rejected,outcome,recorded_cost_usd,usage) "
         "SELECT id,id+1000,'fixture-model',NULL,'failed',0.002,'{}' "
-        "FROM review_gate_decisions WHERE prompt_hash='selected' "
+        f"FROM {DECISIONS} WHERE prompt_hash='selected' "
         "AND split_part(url,'/',4)::int%%10=0",
         (),
     )
@@ -87,8 +104,6 @@ def test_report_1000_decision_workload(client, admin_headers, monkeypatch, reque
     plans = []
     for sql, params in captured:
         if "WITH cohort AS MATERIALIZED" in sql:
-            from api.review_decision_storage import DECISIONS
-
             projection = sql.split(DECISIONS, 1)[0]
             assert "d.*" not in projection
             assert "d.policy" not in projection
