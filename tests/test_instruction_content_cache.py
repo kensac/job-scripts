@@ -45,7 +45,10 @@ def test_instruction_storage_preserves_positive_content_cache_and_source_identit
     ids = [preferred_id, newer_check_id, custom_id, fallback_id]
     # Exercise legacy backfill, rather than only compatibility writes that
     # already carry a dictionary reference.
-    db.execute("UPDATE ai_queries SET instructions_id=NULL WHERE id=ANY(%s)", (ids,))
+    db.execute(
+        "UPDATE ai_queries SET instructions=%s,instructions_id=NULL WHERE id=ANY(%s)",
+        (original_instructions, ids),
+    )
 
     def assert_cache_and_provenance():
         # These getters deliberately select the newest non-custom raw input.

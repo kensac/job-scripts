@@ -106,7 +106,9 @@ async def test_every_consumed_result_records_transport_and_cached_usage(
         assert verdict["cached_tokens"] == 400
         assert verdict["cost_usd"] == row["cost_usd"]
         assert verdict["filter_name"] == f"user{uid}:{flt['name']}"
-        assert verdict["instructions"]
+        from core.query_instructions import hydrate
+
+        assert hydrate([verdict])[0]["instructions"]
         assert verdict["input_content"] == (
             "Company: Acme\nJob Title: Engineer\n\nJob Content:\nBuild useful software."
         )

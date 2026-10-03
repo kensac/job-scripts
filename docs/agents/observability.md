@@ -787,8 +787,10 @@ lifecycle change without coordinating with the fleet deployment owner.
 
 `core.query_instructions` stores exact instruction strings separately from
 verdict `prompt_hash` and the prompt-reporting catalog. NULL and empty strings
-remain distinct. Compatibility writes retain inline instructions and attach a
-shared reference; cached page content and accounting columns are unchanged.
+remain distinct. New writes store only a shared reference; cached page content
+and accounting columns are unchanged. Deploy the compatible-reader release
+throughout the fleet before enabling these writes. Historical inline rows remain
+readable and require the separate bounded migration below.
 Query detail and custom-result readers hydrate a missing inline value and fail
 explicitly if referenced content is missing or its digest is wrong.
 

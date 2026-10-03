@@ -1,5 +1,6 @@
 from api import db
 from core import store
+from core.query_instructions import hydrate
 
 
 def test_identical_instructions_share_storage_without_changing_verdict_identity():
@@ -15,10 +16,11 @@ def test_identical_instructions_share_storage_without_changing_verdict_identity(
         for index in range(2)
     ]
     rows = db.query(
-        "SELECT id,instructions,input_content,prompt_hash,to_jsonb(q)->'instructions_id' AS reference "
+        "SELECT id,instructions,instructions_id,input_content,prompt_hash,to_jsonb(q)->'instructions_id' AS reference "
         "FROM ai_queries q WHERE id=ANY(%s) ORDER BY id",
         (ids,),
     )
+    rows = hydrate(rows)
     assert rows[0]["reference"] is not None
     assert rows[0]["reference"] == rows[1]["reference"]
     assert [r["prompt_hash"] for r in rows] == ["verdict-identity-0", "verdict-identity-1"]
@@ -32,10 +34,11 @@ def test_null_empty_and_whitespace_instruction_values_remain_distinct():
         store.add_ai_result("https://example.test/values", "passed", instructions=s) for s in values
     ]
     rows = db.query(
-        "SELECT instructions,to_jsonb(q)->'instructions_id' AS reference "
+        "SELECT instructions,instructions_id,to_jsonb(q)->'instructions_id' AS reference "
         "FROM ai_queries q WHERE id=ANY(%s) ORDER BY id",
         (ids,),
     )
+    rows = hydrate(rows)
     assert [r["instructions"] for r in rows] == values
     assert rows[0]["reference"] is None
     assert all(r["reference"] is not None for r in rows[1:])
@@ -56,7 +59,10 @@ def test_copy_compact_restore_preserves_metadata_cache_and_admin_response(client
         prompt_tokens=10,
         completion_tokens=2,
     )
-    db.execute("UPDATE ai_queries SET instructions_id=NULL WHERE id=%s", (query_id,))
+    db.execute(
+        "UPDATE ai_queries SET instructions=%s,instructions_id=NULL WHERE id=%s",
+        ("Exact historical instructions", query_id),
+    )
     original = db.query_one("SELECT * FROM ai_queries WHERE id=%s", (query_id,))
     before = client.get(f"/v1/admin/queries/{query_id}", headers=admin_headers).json()
     copied = migrate_chunk(mode="copy", after=0, through=query_id, limit=1)
@@ -106,7 +112,9 @@ def test_bad_reference_rolls_back_whole_chunk():
 
     first = store.add_ai_result("https://example.test/first", "passed", instructions="first")
     second = store.add_ai_result("https://example.test/second", "passed", instructions="second")
-    db.execute("UPDATE ai_queries SET instructions_id=NULL WHERE id=%s", (first,))
+    db.execute(
+        "UPDATE ai_queries SET instructions=%s,instructions_id=NULL WHERE id=%s", ("first", first)
+    )
     db.execute("UPDATE ai_queries SET instructions='changed inline' WHERE id=%s", (second,))
     with pytest.raises(InstructionUnavailable):
         migrate_chunk(mode="copy", after=0, through=second, limit=2)
@@ -187,6 +195,7 @@ def test_service_compaction_requires_backup_and_reader_confirmations():
     from core.query_instructions import InstructionUnavailable
 
     query_id = store.add_ai_result("https://example.test/gates", "passed", instructions="retain")
+    db.execute("UPDATE ai_queries SET instructions=%s WHERE id=%s", ("retain", query_id))
     with pytest.raises(InstructionUnavailable):
         migrate_chunk(mode="compact", after=0, through=query_id, limit=1)
     assert (
@@ -207,6 +216,7 @@ def test_compaction_holds_dictionary_content_lock_through_validation(monkeypatch
     reference = db.query_one("SELECT instructions_id FROM ai_queries WHERE id=%s", (query_id,))[
         "instructions_id"
     ]
+    db.execute("UPDATE ai_queries SET instructions=%s WHERE id=%s", ("original", query_id))
     original_hash = migration.hashlib.sha256
 
     def attempt_dictionary_change():
