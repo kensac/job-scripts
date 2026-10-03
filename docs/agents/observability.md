@@ -849,12 +849,22 @@ cursor order, one line per page with its cursor. If an object fails or a source
 changes or becomes ineligible, only the preceding ordered prefix of that page
 commits and the cursor stops before it. Pages already in flight past it still
 commit and are counted, but the cursor never passes an uncommitted row; a rerun
-from it finds them already done. Later successful uploads remain unreferenced
+from it finds them already done. **Two pages sharing a task never run at
+once:** each page locks its tasks rows, and on 2026-10-03 single tasks held up
+to 37,329 rows, about 38 bundle pages, whose concurrent pages queued on one
+row past the 2 s `lock_timeout` and aborted the run. A page waits for every
+earlier in-flight page that shares a task with it; other tasks run beside it.
+A task with more pages than `--workers` therefore runs its pages one at a
+time. A lock or statement timeout in a page's locked transaction is retried
+twice (`LOCK_RETRY_DELAYS`); if it persists, that page commits nothing, the
+run prints `{"error": "lock_timeout", "at": [TASK_ID, CUSTOM_ID]}`, counts
+`lock_timeout`, stops the cursor before the page and exits nonzero, like any
+other failure. Later successful uploads remain unreferenced
 until retry. Compaction requires `--backup-complete`, confirmation that
 the independent database copy has finished. Start with copy and verification,
 then a bounded compaction canary. Keep the emitted counters and cursor. An
 unavailable, changed or ineligible outcome exits unsuccessfully before advancing
-past its row; investigate or restore the source/object and retry that cursor. Database errors fail the invocation; rerun
+past its row; investigate or restore the source/object and retry that cursor. Other database errors fail the invocation; rerun
 from the last saved cursor, since completed operations are idempotent.
 
 For a fixed historical population, use `--manifest-stdin` instead of a database

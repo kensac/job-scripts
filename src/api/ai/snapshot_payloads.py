@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import hashlib
 import re
+import time
 from collections import Counter
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
 from dataclasses import asdict, dataclass
 from typing import Any, Literal
+
+from psycopg import errors
 
 from api import db
 from api.ai import request_snapshots
@@ -29,6 +33,12 @@ STOP_OUTCOMES = frozenset(("unavailable", "changed", "ineligible"))
 # 7.9 to 8.6 MB per run (observability.md). The member count is bounded
 # separately by the page size the operator passes.
 BUNDLE_MAX_BYTES = 8 * 1024 * 1024
+# A page's locked transaction waits on task and request rows. Any other holder
+# is itself bounded: the migration's own pages by the 5 s statement_timeout set
+# below. Retrying after 2 s and then 4 s, each attempt also waiting its 2 s
+# lock_timeout, spans 12 s: longer than two such holders back to back.
+LOCK_RETRY_DELAYS = (2.0, 4.0)
+LOCK_ERRORS = (errors.LockNotAvailable, errors.QueryCanceled)
 _ELIGIBLE = (
     "t.status='done' AND t.kind<>'classify_job_profiles' "
     "AND NOT EXISTS(SELECT 1 FROM batch_result_receipts r "
@@ -101,6 +111,26 @@ def _current_sources(sources: list[dict[str, Any]], *, lock: bool = False) -> se
         and source["task_id"] not in pending
         and rows.get((source["task_id"], source["custom_id"])) == source
     }
+
+
+def _locked[T](work: Callable[[], T]) -> T:
+    """Run a page's short locked transaction, retrying a lock or statement timeout.
+
+    The rollback discards everything the attempt read, so each retry rechecks
+    from scratch. The last timeout propagates for the caller to stop before
+    this page; nothing in it committed.
+    """
+    for delay in (*LOCK_RETRY_DELAYS, None):
+        try:
+            with db.transaction():
+                db.execute("SET LOCAL lock_timeout='2s'")
+                db.execute("SET LOCAL statement_timeout='5s'")
+                return work()
+        except LOCK_ERRORS:
+            if delay is None:
+                raise
+            time.sleep(delay)
+    raise AssertionError("unreachable")
 
 
 def _prepare(
@@ -183,44 +213,46 @@ def migrate_many(
     failure = prepared[stop][0] if stop < len(prepared) else None
     prefix = sources[:stop]
     outcomes = [item[0] for item in prepared[:stop]]
-    if prefix:
-        with db.transaction():
-            db.execute("SET LOCAL lock_timeout='2s'")
-            db.execute("SET LOCAL statement_timeout='5s'")
-            current = _current_sources(prefix, lock=mode != "verify")
-            updates = []
-            for index, source in enumerate(prefix):
-                if (source["task_id"], source["custom_id"]) not in current:
-                    outcomes = outcomes[:index]
-                    failure = "changed"
-                    break
-                _, snapshot, reference = prepared[index]
-                if mode != "verify" and (snapshot, reference) != (
-                    source["snapshot"],
-                    source["snapshot_ref"],
-                ):
-                    updates.append(
-                        {
-                            "task_id": source["task_id"],
-                            "custom_id": source["custom_id"],
-                            "snapshot": snapshot,
-                            "snapshot_ref": reference,
-                            "original": source["snapshot"],
-                            "original_ref": source["snapshot_ref"],
-                        }
-                    )
-            if updates:
-                changed = db.execute_count(
-                    "UPDATE batch_requests b SET snapshot=u.snapshot,snapshot_ref=u.snapshot_ref "
-                    "FROM jsonb_to_recordset(%s) AS u(task_id bigint,custom_id text,"
-                    "snapshot jsonb,snapshot_ref jsonb,original jsonb,original_ref jsonb) "
-                    "WHERE b.task_id=u.task_id AND b.custom_id=u.custom_id "
-                    "AND b.snapshot IS NOT DISTINCT FROM u.original "
-                    "AND b.snapshot_ref IS NOT DISTINCT FROM u.original_ref",
-                    (db.jsonb(updates),),
+
+    def commit() -> tuple[list[str], str | None]:
+        current = _current_sources(prefix, lock=mode != "verify")
+        updates = []
+        done, stopped = outcomes, failure
+        for index, source in enumerate(prefix):
+            if (source["task_id"], source["custom_id"]) not in current:
+                done, stopped = outcomes[:index], "changed"
+                break
+            _, snapshot, reference = prepared[index]
+            if mode != "verify" and (snapshot, reference) != (
+                source["snapshot"],
+                source["snapshot_ref"],
+            ):
+                updates.append(
+                    {
+                        "task_id": source["task_id"],
+                        "custom_id": source["custom_id"],
+                        "snapshot": snapshot,
+                        "snapshot_ref": reference,
+                        "original": source["snapshot"],
+                        "original_ref": source["snapshot_ref"],
+                    }
                 )
-                if changed != len(updates):
-                    raise RuntimeError("Snapshot sources changed while locked")
+        if updates:
+            changed = db.execute_count(
+                "UPDATE batch_requests b SET snapshot=u.snapshot,snapshot_ref=u.snapshot_ref "
+                "FROM jsonb_to_recordset(%s) AS u(task_id bigint,custom_id text,"
+                "snapshot jsonb,snapshot_ref jsonb,original jsonb,original_ref jsonb) "
+                "WHERE b.task_id=u.task_id AND b.custom_id=u.custom_id "
+                "AND b.snapshot IS NOT DISTINCT FROM u.original "
+                "AND b.snapshot_ref IS NOT DISTINCT FROM u.original_ref",
+                (db.jsonb(updates),),
+            )
+            if changed != len(updates):
+                raise RuntimeError("Snapshot sources changed while locked")
+        return done, stopped
+
+    if prefix:
+        outcomes, failure = _locked(commit)
     return outcomes + ([failure] if failure is not None else [])
 
 
@@ -290,35 +322,34 @@ def bundle_many(
             skipped[group[0]["custom_id"]] = "unavailable"
             break
         refs.update(group_refs)
-    attached: set[str] = set()
     ready = [source for source in valid if source["custom_id"] in refs]
-    if ready:
-        with db.transaction():
-            db.execute("SET LOCAL lock_timeout='2s'")
-            db.execute("SET LOCAL statement_timeout='5s'")
-            locked = _current_sources(ready, lock=True)
-            updates = [
-                {
-                    "task_id": source["task_id"],
-                    "custom_id": source["custom_id"],
-                    "snapshot_ref": asdict(refs[source["custom_id"]]),
-                    "original": source["snapshot"],
-                }
-                for source in ready
-                if (source["task_id"], source["custom_id"]) in locked
-            ]
-            if updates:
-                changed = db.execute_count(
-                    "UPDATE batch_requests b SET snapshot_ref=u.snapshot_ref "
-                    "FROM jsonb_to_recordset(%s) AS u(task_id bigint,custom_id text,"
-                    "snapshot_ref jsonb,original jsonb) "
-                    "WHERE b.task_id=u.task_id AND b.custom_id=u.custom_id "
-                    "AND b.snapshot=u.original AND b.snapshot_ref IS NULL",
-                    (db.jsonb(updates),),
-                )
-                if changed != len(updates):
-                    raise RuntimeError("Snapshot sources changed while locked")
-            attached = {update["custom_id"] for update in updates}
+
+    def attach() -> set[str]:
+        locked = _current_sources(ready, lock=True)
+        updates = [
+            {
+                "task_id": source["task_id"],
+                "custom_id": source["custom_id"],
+                "snapshot_ref": asdict(refs[source["custom_id"]]),
+                "original": source["snapshot"],
+            }
+            for source in ready
+            if (source["task_id"], source["custom_id"]) in locked
+        ]
+        if updates:
+            changed = db.execute_count(
+                "UPDATE batch_requests b SET snapshot_ref=u.snapshot_ref "
+                "FROM jsonb_to_recordset(%s) AS u(task_id bigint,custom_id text,"
+                "snapshot_ref jsonb,original jsonb) "
+                "WHERE b.task_id=u.task_id AND b.custom_id=u.custom_id "
+                "AND b.snapshot=u.original AND b.snapshot_ref IS NULL",
+                (db.jsonb(updates),),
+            )
+            if changed != len(updates):
+                raise RuntimeError("Snapshot sources changed while locked")
+        return {update["custom_id"] for update in updates}
+
+    attached = _locked(attach) if ready else set()
     outcomes = []
     for source in sources:
         custom_id = source["custom_id"]

@@ -7,7 +7,7 @@ import json
 import os
 import sys
 from collections import Counter, deque
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor, wait
 from dataclasses import asdict
 from typing import cast
 
@@ -64,6 +64,7 @@ def main() -> int:
     )
     from api.ai import request_snapshots
     from api.ai.snapshot_payloads import (
+        LOCK_ERRORS,
         STOP_OUTCOMES,
         Mode,
         bundle_many,
@@ -111,7 +112,17 @@ def main() -> int:
         # cap the workers below what was asked for.
         store = PayloadStore.from_env(max_connections=max(MAX_CONNECTIONS, args.workers))
 
-        def run(rows: list[dict]) -> list[str]:
+        def run(rows: list[dict], before: list[Future[list[str]]]) -> list[str]:
+            # Pages of one task lock the same tasks row, so a page runs only
+            # after every earlier in-flight page sharing a task with it. On
+            # 2026-10-03 single tasks held up to 37,329 rows (~38 bundle pages),
+            # and concurrent pages of one task queued past the 2 s lock_timeout.
+            # This cannot deadlock: at most `workers` pages are outstanding on
+            # `workers` threads, so every page waited on is already running.
+            # ponytail: a task with more pages than workers fills the window
+            # and runs serially; per-task read cursors would keep other tasks
+            # moving beside it.
+            wait(before)
             if mode == "bundle":
                 return bundle_many(rows, store)
             return migrate_many(rows, store, mode=mode)
@@ -120,6 +131,7 @@ def main() -> int:
         read_after = after
         exhausted = False
         in_flight: deque[tuple[list[dict], Future[list[str]]]] = deque()
+        last_page: dict[int, Future[list[str]]] = {}
         with ThreadPoolExecutor(max_workers=args.workers) as executor:
             while True:
                 while (
@@ -133,7 +145,11 @@ def main() -> int:
                         break
                     unread -= len(rows)
                     read_after = (rows[-1]["task_id"], rows[-1]["custom_id"])
-                    in_flight.append((rows, executor.submit(run, rows)))
+                    task_ids = {row["task_id"] for row in rows}
+                    before = [last_page[t] for t in task_ids if t in last_page]
+                    future = executor.submit(run, rows, before)
+                    last_page.update(dict.fromkeys(task_ids, future))
+                    in_flight.append((rows, future))
                 if not in_flight:
                     break
                 # Pages are reported in cursor order. A page that commits while
@@ -141,7 +157,29 @@ def main() -> int:
                 # before the failure: it never passes an uncommitted row, and a
                 # rerun from it finds the committed rows idempotently.
                 rows, page = in_flight.popleft()
-                for source, outcome in zip(rows, page.result(), strict=False):
+                for task_id in {row["task_id"] for row in rows}:
+                    if last_page.get(task_id) is page:
+                        del last_page[task_id]
+                try:
+                    outcomes = page.result()
+                except LOCK_ERRORS as exc:
+                    # Retried inside the page and still locked: nothing in it
+                    # committed, so stop before its first row like any failure.
+                    outcomes = []
+                    counts["lock_timeout"] += 1
+                    stopped = stopped or "lock_timeout"
+                    print(
+                        json.dumps(
+                            {
+                                "mode": mode,
+                                "error": "lock_timeout",
+                                "at": [rows[0]["task_id"], rows[0]["custom_id"]],
+                                "detail": str(exc).splitlines()[0],
+                            }
+                        ),
+                        flush=True,
+                    )
+                for source, outcome in zip(rows, outcomes, strict=False):
                     counts[outcome] += 1
                     if outcome in stops:
                         stopped = stopped or outcome
