@@ -28,9 +28,12 @@ is dropped, so the retention delete always has one. ALTER TABLE SET
 (fillfactor) takes SHARE UPDATE EXCLUSIVE, which blocks neither reads nor
 writes. A build that died midway leaves an INVALID index that IF NOT EXISTS
 would mistake for a finished one, so an invalid leftover is dropped first.
+A concurrent build waits for every transaction older than itself; the lock
+timeout turns a wait that will not end into a failed start that retries, as
+in bd1e66f153c3.
 
 Revision ID: 507fe2f38949
-Revises: 5f8904aaff79
+Revises: bd1e66f153c3
 Create Date: 2026-10-03 10:21:15.219333
 
 """
@@ -41,7 +44,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "507fe2f38949"
-down_revision: str | None = "5f8904aaff79"
+down_revision: str | None = "bd1e66f153c3"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -59,15 +62,21 @@ def _build(name: str, columns: str) -> None:
     op.execute(f"CREATE INDEX CONCURRENTLY IF NOT EXISTS {name} ON listings ({columns})")
 
 
-def upgrade() -> None:
+def _swap(build: str, columns: str, drop: str) -> None:
     with op.get_context().autocommit_block():
-        _build("idx_listings_by_source", "source")
-        op.execute("DROP INDEX CONCURRENTLY IF EXISTS idx_listings_source")
+        # bd1e66f153c3's judgment: a start can afford a minute for the
+        # transactions in flight, and past that the wait is not ending.
+        op.execute("SET lock_timeout = '60s'")
+        _build(build, columns)
+        op.execute(f"DROP INDEX CONCURRENTLY IF EXISTS {drop}")
+        op.execute("RESET lock_timeout")
+
+
+def upgrade() -> None:
+    _swap("idx_listings_by_source", "source", "idx_listings_source")
     op.execute("ALTER TABLE listings SET (fillfactor = 80)")
 
 
 def downgrade() -> None:
     op.execute("ALTER TABLE listings RESET (fillfactor)")
-    with op.get_context().autocommit_block():
-        _build("idx_listings_source", "source, last_seen_at")
-        op.execute("DROP INDEX CONCURRENTLY IF EXISTS idx_listings_by_source")
+    _swap("idx_listings_source", "source, last_seen_at", "idx_listings_by_source")
