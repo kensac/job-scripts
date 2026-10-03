@@ -757,10 +757,26 @@ paid outcomes or reprice usage.
 ## Request snapshot storage and recovery
 
 `api.ai.request_snapshots` is the shared reader for inline and external request
-snapshots. New requests remain inline. An external reference that cannot be
+snapshots. An external reference that cannot be
 read is a required-input failure, never a legacy unknown request. Hydration and
 object verification must occur outside database transactions, including outer
 transactions inherited through the shared connection context.
+
+**A new request is written to object storage before its row exists, and the row
+holds only the reference.** `batch_results.snapshot_specs` uploads every request
+the task has no row for with `PayloadStore.put_verified`, outside any
+transaction and concurrently up to the client's connection pool
+(`payload_objects.MAX_CONNECTIONS`), then inserts `snapshot=NULL` with
+`snapshot_ref`. Never write a new request inline: a second copy written for the
+backfill to move later costs the bytes twice and leaves dead TOAST behind.
+An existing row, inline or referenced, always wins the conflict and is what gets
+frozen and resubmitted; a request that already has a row is not uploaded again.
+A row this call just wrote is frozen from the value its upload read back, with
+no further read. Storage that is unconfigured or failing raises
+`PayloadUnavailable` before any row is written or anything is submitted, so the
+task takes the payload recovery path below with nothing paid. An object whose
+insert lost the conflict, or whose batch failed on a later upload, stays
+unreferenced; it is content-addressed, so a retry reuses it.
 
 After deploying compatible readers to the whole fleet, run bounded operations
 with `python -m api.ai.migrate_snapshot_payloads MODE --limit COUNT`. Modes are

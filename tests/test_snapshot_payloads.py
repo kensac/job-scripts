@@ -6,7 +6,7 @@ from api import db
 from api.ai import batch_results, request_snapshots, snapshot_payloads
 from core.batch import BatchResult, BatchSpec
 from core.payload_objects import PayloadStore, PayloadUnavailable
-from tests.test_receipt_payloads import ObjectClient
+from tests.factories import ObjectClient
 
 
 @pytest.fixture
@@ -19,7 +19,7 @@ def objects(monkeypatch):
 def request(f, *, status="done", kind="verify_new"):
     task_id = f.make_task(kind, {}, status=status)
     spec = BatchSpec("request", "original rules", "original page", context={"generation": 1})
-    batch_results.snapshot_specs(task_id, [spec])
+    f.make_inline_request(task_id, spec)
     return task_id, spec
 
 
@@ -183,12 +183,7 @@ def test_profile_historical_proof_hydrates_outside_transaction(f, objects):
     from tests.test_review_gate import proven_job
 
     job, task_id = proven_job(f)
-    source = row(task_id)
-    ref = objects.put_verified(source["snapshot"])
-    db.execute(
-        "UPDATE batch_requests SET snapshot=NULL,snapshot_ref=%s WHERE task_id=%s",
-        (db.jsonb(asdict(ref)), task_id),
-    )
+    assert row(task_id)["snapshot"] is None
     original_get = objects.client.get_object
 
     def outside(**kwargs):
@@ -267,7 +262,8 @@ def test_bulk_workload_statement_count_and_concurrency(f, monkeypatch, capsys, s
 
     task_id = f.make_task("verify_new", {}, status="done")
     specs = [BatchSpec(str(index), "rules", "page " + str(index)) for index in range(size)]
-    batch_results.snapshot_specs(task_id, specs)
+    for spec in specs:
+        f.make_inline_request(task_id, spec)
 
     class MeasuredClient(ObjectClient):
         def __init__(self):

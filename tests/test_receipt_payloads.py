@@ -1,6 +1,5 @@
 import gzip
 import hashlib
-import io
 from dataclasses import asdict, replace
 
 import pytest
@@ -9,25 +8,7 @@ from api import db
 from api.ai import batch_results, receipt_payloads
 from core.batch import BatchResult, BatchSpec
 from core.payload_objects import PayloadRef, PayloadStore, PayloadUnavailable
-
-
-class ObjectClient:
-    def __init__(self):
-        self.objects = {}
-        self.fail_put = False
-        self.fail_get = False
-        self.after_put = lambda: None
-
-    def put_object(self, *, Bucket, Key, Body, **kwargs):
-        if self.fail_put:
-            raise OSError("upload failed")
-        self.objects[Bucket, Key] = Body
-        self.after_put()
-
-    def get_object(self, *, Bucket, Key):
-        if self.fail_get:
-            raise OSError("read failed")
-        return {"Body": io.BytesIO(self.objects[Bucket, Key])}
+from tests.factories import ObjectClient
 
 
 @pytest.fixture
@@ -267,7 +248,8 @@ def test_compaction_rechecks_task_after_object_download(f, objects, monkeypatch)
     assert row(task_id) == copied
 
 
-def test_required_receipt_loading_raises_without_acknowledging(f, objects, monkeypatch):
+def test_required_receipt_loading_raises_without_acknowledging(f):
+    objects = PayloadStore.from_env()
     task_id, result = receipt(f, consumed=False)
     original = row(task_id)["response"]
     ref = objects.put_verified(original.pop("embedding_vectors"))
@@ -276,9 +258,8 @@ def test_required_receipt_loading_raises_without_acknowledging(f, objects, monke
         "UPDATE batch_result_receipts SET response=%s WHERE task_id=%s",
         (db.jsonb(original), task_id),
     )
-    monkeypatch.setattr(PayloadStore, "from_env", lambda: objects)
     assert batch_results.unconsumed(task_id)[0].embedding_vectors == result.embedding_vectors
-    objects.client.fail_get = True
+    del objects.client.objects[ref.bucket, ref.key]
     with pytest.raises(PayloadUnavailable):
         batch_results.unconsumed(task_id)
     assert row(task_id)["outcome"] is None

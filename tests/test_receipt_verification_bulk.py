@@ -5,7 +5,8 @@ import pytest
 from api import db
 from api.ai import migrate_receipt_payloads, receipt_payloads
 from core.payload_objects import PayloadStore
-from tests.test_receipt_payloads import ObjectClient, receipt, row
+from tests.factories import ObjectClient
+from tests.test_receipt_payloads import receipt, row
 
 
 def prepare(f, count):

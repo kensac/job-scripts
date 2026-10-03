@@ -1,37 +1,81 @@
 from __future__ import annotations
 
 import dataclasses
+import json
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from typing import Any
 
 from api import db
 from api.ai import request_snapshots
 from core.batch import BatchResult, BatchSpec
-from core.payload_objects import PayloadRef, PayloadStore
+from core.payload_objects import MAX_CONNECTIONS, PayloadRef, PayloadStore, encode_payload
+from core.pool import in_transaction
+
+
+def _snapshot(spec: BatchSpec) -> Any:
+    snapshot = dataclasses.asdict(spec)
+    if spec.endpoint == "/v1/responses":
+        snapshot.pop("endpoint")
+    if spec.inputs is None:
+        snapshot.pop("inputs")
+    # The stored form is JSON, so freeze and verify the value JSON gives back.
+    return json.loads(encode_payload(snapshot))
 
 
 def snapshot_specs(task_id: int, specs: list[BatchSpec]) -> list[BatchSpec]:
+    """Freeze requests before paid submission; an existing request always wins.
+
+    New snapshots are verified objects before their reference row exists, so a
+    storage failure raises PayloadUnavailable before anything is submitted.
+    """
+    if in_transaction():
+        raise RuntimeError("Request snapshots cannot be uploaded inside a database transaction")
+    existing = {
+        row["custom_id"]
+        for row in db.query("SELECT custom_id FROM batch_requests WHERE task_id=%s", (task_id,))
+    }
+    fresh: dict[str, Any] = {}
+    for spec in specs:
+        if spec.custom_id not in existing:
+            fresh.setdefault(spec.custom_id, _snapshot(spec))
+    refs: dict[str, dict[str, Any]] = {}
+    if fresh:
+        store = PayloadStore.from_env()
+        with ThreadPoolExecutor(max_workers=MAX_CONNECTIONS) as executor:
+            uploaded = executor.map(store.put_verified, fresh.values())
+            refs = {
+                custom_id: dataclasses.asdict(ref)
+                for custom_id, ref in zip(fresh, uploaded, strict=True)
+            }
     rows = []
     with db.transaction():
         for spec in specs:
-            snapshot = dataclasses.asdict(spec)
-            if spec.endpoint == "/v1/responses":
-                snapshot.pop("endpoint")
-            if spec.inputs is None:
-                snapshot.pop("inputs")
-            row = db.query_one(
-                "INSERT INTO batch_requests (task_id, custom_id, snapshot) VALUES (%s,%s,%s) "
-                "ON CONFLICT (task_id,custom_id) DO UPDATE SET snapshot=batch_requests.snapshot "
-                "RETURNING custom_id,snapshot,snapshot_ref",
-                (task_id, spec.custom_id, db.jsonb(snapshot)),
-            )
+            ref = refs.get(spec.custom_id)
+            if ref is None:
+                row = db.query_one(
+                    "SELECT custom_id,snapshot,snapshot_ref FROM batch_requests "
+                    "WHERE task_id=%s AND custom_id=%s",
+                    (task_id, spec.custom_id),
+                )
+            else:
+                row = db.query_one(
+                    "INSERT INTO batch_requests (task_id, custom_id, snapshot_ref) VALUES (%s,%s,%s) "
+                    "ON CONFLICT (task_id,custom_id) DO UPDATE SET snapshot=batch_requests.snapshot "
+                    "RETURNING custom_id,snapshot,snapshot_ref",
+                    (task_id, spec.custom_id, db.jsonb(ref)),
+                )
             if row is None:
                 raise RuntimeError("request snapshot was not recorded")
             rows.append(row)
     frozen = []
     for row in rows:
-        spec = request_snapshots.resolve(row)
+        source = row
+        if row["snapshot"] is None and row["snapshot_ref"] == refs.get(row["custom_id"]):
+            # This call wrote the row from a value already read back from storage.
+            source = {**row, "snapshot": fresh[row["custom_id"]]}
+        spec = request_snapshots.resolve(source)
         if spec is None:
             raise RuntimeError("cannot resubmit a legacy request without its original snapshot")
         frozen.append(spec)

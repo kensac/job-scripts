@@ -8,6 +8,7 @@ from api import db, worker
 from api.ai import batch_results
 from core import batch
 from core.embeddings import EMBEDDING_DIMENSIONS, EMBEDDING_MODEL
+from core.payload_objects import PayloadRef, PayloadStore
 from tasks import embeddings, runtime
 
 
@@ -191,7 +192,8 @@ def test_responses_snapshots_and_receipts_retain_legacy_shape(f):
     batch_results.checkpoint(
         task_id, [batch.BatchResult("url", text="answer", batch_id="responses")], []
     )
-    snapshot = db.query_one("SELECT snapshot FROM batch_requests")["snapshot"]
+    ref = db.query_one("SELECT snapshot_ref FROM batch_requests")["snapshot_ref"]
+    snapshot = PayloadStore.from_env().get(PayloadRef.parse(ref))
     assert "endpoint" not in snapshot and "inputs" not in snapshot
     assert (
         "embedding_vectors"

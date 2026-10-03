@@ -64,7 +64,7 @@ def test_recovery_preflights_receipt_vectors(f, monkeypatch):
     from core.batch import BatchResult
     from core.payload_objects import PayloadStore
     from tasks.runtime.payload_recovery import retry
-    from tests.test_receipt_payloads import ObjectClient
+    from tests.factories import ObjectClient
 
     objects = PayloadStore(ObjectClient(), "test-payloads")
     task_id = recoverable(f)
@@ -209,20 +209,16 @@ def test_recovery_refuses_accepted_work_without_replay_state(f):
 
 @pytest.mark.asyncio
 async def test_restored_task_consumes_original_receipt_without_new_submission(f, monkeypatch):
-    from api.ai import batch_results, snapshot_payloads
+    from api.ai import batch_results
     from core import batch
     from core.payload_objects import PayloadStore
     from tasks.runtime.payload_recovery import retry
-    from tests.test_receipt_payloads import ObjectClient
+    from tests.factories import ObjectClient
 
     objects = PayloadStore(ObjectClient(), "test-payloads")
     monkeypatch.setattr(PayloadStore, "from_env", lambda: objects)
     task_id = f.make_task("test_kind", {}, status="done")
     batch_results.snapshot_specs(task_id, [batch.BatchSpec("request", input="original")])
-    source = db.query_one("SELECT * FROM batch_requests WHERE task_id=%s", (task_id,))
-    snapshot_payloads.migrate(source, objects, mode="copy")
-    source = db.query_one("SELECT * FROM batch_requests WHERE task_id=%s", (task_id,))
-    snapshot_payloads.migrate(source, objects, mode="compact")
     result = batch.BatchResult("request", text="paid answer", batch_id="paid")
     batch_results.checkpoint(task_id, [result], [])
     db.execute("UPDATE tasks SET status='pending' WHERE id=%s", (task_id,))
@@ -259,11 +255,12 @@ def test_completed_collection_recovery_ignores_consumed_only_missing_snapshot(f,
     from core.batch import BatchResult, BatchSpec
     from core.payload_objects import PayloadStore
     from tasks.runtime.payload_recovery import retry
-    from tests.test_receipt_payloads import ObjectClient
+    from tests.factories import ObjectClient
 
     objects = PayloadStore(ObjectClient(), "test-payloads")
     task_id = f.make_task("verify_new", {}, status="done")
-    batch_results.snapshot_specs(task_id, [BatchSpec("consumed"), BatchSpec("required")])
+    f.make_inline_request(task_id, BatchSpec("consumed"))
+    f.make_inline_request(task_id, BatchSpec("required"))
     sources = db.query(
         "SELECT * FROM batch_requests WHERE task_id=%s ORDER BY custom_id", (task_id,)
     )
