@@ -208,21 +208,3 @@ def partition(
             (db.jsonb(report), task_id),
         )
     return [job for job in jobs if job["url"] not in skipped], decisions
-
-
-def record_comparison(task_id: int, decision: dict[str, Any] | None, rejected: bool | None) -> None:
-    if not decision or decision.get("stage") == "detailed":
-        return
-    key = "unresolved" if rejected is None else "agreed_reject" if rejected else "false_reject"
-    # Called in the paid receipt transaction, so replay counts once.
-    try:
-        with db.transaction():
-            db.execute(
-                "UPDATE tasks SET payload=jsonb_set(payload,'{review_gate_comparison}', "
-                "COALESCE(payload->'review_gate_comparison','{}'::jsonb) || "
-                "jsonb_build_object(%s::text,COALESCE((payload->'review_gate_comparison'->>%s)::int,0)+1)) "
-                "WHERE id=%s",
-                (key, key, task_id),
-            )
-    except Exception:
-        logger.exception("Review gate comparison unavailable")

@@ -125,3 +125,32 @@ def _read_decisions(
             "window_end",
         ],
     )
+
+
+def comparisons(task_id: int) -> dict[str, dict[str, int]]:
+    """Shadow proposals against the paid verdict, derived from durable rows.
+
+    Each paid batch result records its outcome against the decision that
+    carried the proposal, inside the receipt transaction, so replay counts
+    once. Counting into tasks.payload instead rewrote a managed batch's whole
+    TOASTed job list per receipt: measured 2026-10-03, about 104 GB rewritten
+    across 259 batches for counters nothing read.
+    """
+    rows = db.query(
+        "SELECT 'routing' AS kind, CASE WHEN o.rejected IS NULL THEN 'unresolved_reference' "
+        "WHEN d.evidence->'routing'->>'outcome'='abstain' THEN 'abstained' "
+        "WHEN (d.evidence->'routing'->>'outcome'='reject')=o.rejected THEN 'agreed' "
+        "WHEN d.evidence->'routing'->>'outcome'='reject' THEN 'false_reject' "
+        "ELSE 'false_accept' END AS key, count(*) AS n "
+        "FROM review_gate_decisions d JOIN review_gate_outcomes o ON o.decision_id=d.id "
+        "WHERE d.task_id=%(task)s AND jsonb_typeof(d.evidence->'routing')='object' GROUP BY 2 "
+        "UNION ALL SELECT 'review_gate', CASE WHEN o.rejected IS NULL THEN 'unresolved' "
+        "WHEN o.rejected THEN 'agreed_reject' ELSE 'false_reject' END, count(*) "
+        "FROM review_gate_decisions d JOIN review_gate_outcomes o ON o.decision_id=d.id "
+        "WHERE d.task_id=%(task)s AND d.stage<>'detailed' GROUP BY 2",
+        {"task": task_id},
+    )
+    result: dict[str, dict[str, int]] = {"routing": {}, "review_gate": {}}
+    for row in rows:
+        result[row["kind"]][row["key"]] = row["n"]
+    return result

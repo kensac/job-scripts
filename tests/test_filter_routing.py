@@ -2,9 +2,9 @@ from contextlib import nullcontext
 
 import pytest
 
-from api import ai, db, filter_routing
+from api import ai, db, filter_routing, review_gate_reads
 from api.config import CONFIG_KEYS
-from core.filter_policy import ProfilePolicy, RouteProposal, RoutingPolicy, propose
+from core.filter_policy import ProfilePolicy, RoutingPolicy, propose
 from core.job_profile import JOB_PROFILE_MODEL, JobProfileAnswer
 from core.profile_rules import ProfileRules
 from tasks import filter_execution, job_profiles
@@ -197,8 +197,11 @@ async def test_shadow_submits_every_job_and_compares_paid_results_once(f, monkey
     assert asked[0].context["routing"]["would_review"] is False
     verdict = db.query_one("SELECT status FROM ai_queries WHERE check_type = 'custom'")
     assert verdict["status"] == "passed"
+    # A per-receipt payload counter rewrote a managed batch's whole TOASTed job
+    # list on every collected result. The comparison is derived instead.
     payload = db.query_one("SELECT payload FROM tasks WHERE id = %s", (task_id,))["payload"]
-    assert payload["routing_report"] == {"false_reject": 1}
+    assert "routing_report" not in payload
+    assert review_gate_reads.comparisons(task_id)["routing"] == {"false_reject": 1}
 
     async def collect(*_args):
         return receipts
@@ -219,19 +222,8 @@ async def test_shadow_submits_every_job_and_compares_paid_results_once(f, monkey
         collect=collect,
     )
     payload = db.query_one("SELECT payload FROM tasks WHERE id = %s", (task_id,))["payload"]
-    assert payload["routing_report"] == {"false_reject": 1}
+    assert "routing_report" not in payload
+    assert review_gate_reads.comparisons(task_id)["routing"] == {"false_reject": 1}
     assert (
         db.query_one("SELECT count(*) AS n FROM ai_queries WHERE check_type = 'custom'")["n"] == 1
-    )
-
-
-def test_comparison_failure_cannot_abort_paid_result_transaction(f):
-    task_id = f.make_task("run_filter_batch_chunk", {"routing_report": {"agreed": "broken"}})
-    proposal = RouteProposal(outcome="reject", stage="title", reason="test", would_review=False)
-    with db.transaction():
-        filter_routing.record_comparison(task_id, proposal.model_dump(), True)
-        db.execute("UPDATE tasks SET error = 'still writable' WHERE id = %s", (task_id,))
-    assert (
-        db.query_one("SELECT error FROM tasks WHERE id = %s", (task_id,))["error"]
-        == "still writable"
     )
