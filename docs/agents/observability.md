@@ -618,6 +618,9 @@ remove referenced objects.
 Run `python -m api.ai.migrate_receipt_payloads copy --limit N` with the private
 `JOBTRACKER_S3_ENDPOINT`, `REGION`, `BUCKET`, `ACCESS_KEY_ID` and
 `SECRET_ACCESS_KEY` variables (each with the `JOBTRACKER_S3_` prefix).
+New objects use version 2 uncompressed JSON; the reader also accepts historical
+version 1 gzip objects. Deploy version 2 readers everywhere before writing new
+references. Both formats verify the canonical JSON byte size and SHA-256.
 Copy retains inline vectors and verifies a GET before attaching the reference.
 `verify` checks existing references without database writes. All modes process
 one payload at a time, have database timeouts, and return a cursor for `--after

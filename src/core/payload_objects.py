@@ -45,8 +45,10 @@ class PayloadRef:
                 or type(ref.size) is not int
                 or ref.size < 0
                 or type(ref.version) is not int
-                or ref.version != 1
-                or ref.key != f"payloads/v1/sha256/{ref.sha256}.json.gz"
+                or ref.version not in (1, 2)
+                or ref.key
+                != f"payloads/v{ref.version}/sha256/{ref.sha256}.json"
+                + (".gz" if ref.version == 1 else "")
             ):
                 raise ValueError("invalid reference")
             return ref
@@ -88,13 +90,15 @@ class PayloadStore:
     def put_verified(self, value: Any) -> PayloadRef:
         raw = encode_payload(value)
         digest = hashlib.sha256(raw).hexdigest()
-        ref = PayloadRef(self.bucket, f"payloads/v1/sha256/{digest}.json.gz", digest, len(raw))
+        ref = PayloadRef(
+            self.bucket, f"payloads/v2/sha256/{digest}.json", digest, len(raw), version=2
+        )
         try:
             self.client.put_object(
                 Bucket=ref.bucket,
                 Key=ref.key,
-                Body=gzip.compress(raw, mtime=0),
-                ContentType="application/gzip",
+                Body=raw,
+                ContentType="application/json",
             )
         except Exception as exc:
             raise PayloadUnavailable("Payload upload failed") from exc
@@ -111,8 +115,11 @@ class PayloadStore:
             response = self.client.get_object(Bucket=ref.bucket, Key=ref.key)
             body = response["Body"]
             try:
-                with gzip.GzipFile(fileobj=body) as stream:
-                    raw = stream.read(ref.size + 1)
+                if ref.version == 1:
+                    with gzip.GzipFile(fileobj=body) as stream:
+                        raw = stream.read(ref.size + 1)
+                else:
+                    raw = body.read(ref.size + 1)
             finally:
                 body.close()
             if len(raw) != ref.size or hashlib.sha256(raw).hexdigest() != ref.sha256:
