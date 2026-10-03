@@ -39,6 +39,19 @@ class BoardVisible(Base):
     computed_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
 
 
+class BoardVisibleRecompute(Base):
+    """When a person's board_visible was last recomputed. The recompute writes
+    only the rows that changed, so a row's computed_at is when it joined the
+    board; this is the recompute's own time. See visibility.computed_at."""
+
+    __tablename__ = "board_visible_recomputes"
+
+    user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    computed_at: Mapped[datetime.datetime]
+
+
 class UserJobWorkingSet(Base):
     """Automated discovery scope, rebuildable independently of person state."""
 
