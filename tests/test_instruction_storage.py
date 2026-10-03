@@ -179,7 +179,10 @@ def test_service_compaction_requires_backup_and_reader_confirmations():
     query_id = store.add_ai_result("https://example.test/gates", "passed", instructions="retain")
     with pytest.raises(InstructionUnavailable):
         migrate_chunk(mode="compact", after=0, through=query_id, limit=1)
-    assert db.query_one("SELECT instructions FROM ai_queries WHERE id=%s", (query_id,))["instructions"] == "retain"
+    assert (
+        db.query_one("SELECT instructions FROM ai_queries WHERE id=%s", (query_id,))["instructions"]
+        == "retain"
+    )
 
 
 def test_compaction_holds_dictionary_content_lock_through_validation(monkeypatch):
@@ -191,14 +194,19 @@ def test_compaction_holds_dictionary_content_lock_through_validation(monkeypatch
     from core.pool import connection
 
     query_id = store.add_ai_result("https://example.test/locked", "passed", instructions="original")
-    reference = db.query_one("SELECT instructions_id FROM ai_queries WHERE id=%s", (query_id,))["instructions_id"]
+    reference = db.query_one("SELECT instructions_id FROM ai_queries WHERE id=%s", (query_id,))[
+        "instructions_id"
+    ]
     original_hash = migration.hashlib.sha256
 
     def attempt_dictionary_change():
         try:
             with connection() as conn, conn.transaction():
                 conn.execute("SET LOCAL lock_timeout='100ms'")
-                conn.execute("UPDATE ai_instruction_texts SET instructions=instructions WHERE id=%s", (reference,))
+                conn.execute(
+                    "UPDATE ai_instruction_texts SET instructions=instructions WHERE id=%s",
+                    (reference,),
+                )
         except LockNotAvailable:
             return "blocked"
         return "unprotected"
