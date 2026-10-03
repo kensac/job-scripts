@@ -184,8 +184,8 @@ def test_recovery_refuses_concurrent_source_change(f, monkeypatch):
     snapshot_specs(task_id, [BatchSpec("request")])
     original = request_snapshots.resolve
 
-    def changed(row, store=None):
-        value = original(row, store)
+    def changed(row, store=None, cache=None):
+        value = original(row, store, cache)
         db.execute(
             "UPDATE tasks SET payload=payload || %s WHERE id=%s",
             (db.jsonb({"changed": True}), task_id),
@@ -305,8 +305,8 @@ def test_recovery_rechecks_collection_boundary_after_hydration(f, monkeypatch, c
     batch_results.checkpoint(task_id, [BatchResult("required", batch_id="paid")], [])
     original = request_snapshots.resolve
 
-    def changed(row, store=None):
-        spec = original(row, store)
+    def changed(row, store=None, cache=None):
+        spec = original(row, store, cache)
         db.execute(
             "UPDATE tasks SET payload=payload || %s WHERE id=%s", (db.jsonb(change), task_id)
         )

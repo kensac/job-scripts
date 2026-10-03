@@ -10,7 +10,13 @@ from typing import Any
 from api import db
 from api.ai import request_snapshots
 from core.batch import BatchResult, BatchSpec
-from core.payload_objects import MAX_CONNECTIONS, PayloadRef, PayloadStore, encode_payload
+from core.payload_objects import (
+    MAX_CONNECTIONS,
+    BundleCache,
+    PayloadRef,
+    PayloadStore,
+    encode_payload,
+)
 from core.pool import in_transaction
 
 
@@ -80,12 +86,13 @@ def snapshot_specs(task_id: int, specs: list[BatchSpec]) -> list[BatchSpec]:
                 raise RuntimeError("request snapshot was not recorded")
             rows.append(row)
     frozen = []
+    cache: BundleCache = {}
     for row in rows:
         source = row
         if row["snapshot"] is None and row["snapshot_ref"] == refs.get(row["custom_id"]):
             # This call wrote the row from a value already read back from storage.
             source = {**row, "snapshot": fresh[row["custom_id"]]}
-        spec = request_snapshots.resolve(source)
+        spec = request_snapshots.resolve(source, cache=cache)
         if spec is None:
             raise RuntimeError("cannot resubmit a legacy request without its original snapshot")
         frozen.append(spec)
@@ -143,12 +150,13 @@ def response_payload(response: dict[str, Any], store: PayloadStore | None = None
 
 
 def unconsumed(task_id: int) -> list[BatchResult]:
+    cache: BundleCache = {}
     return [
         BatchResult(
             custom_id=row["custom_id"],
             batch_id=row["provider_batch_id"],
             model=row["model"],
-            request=request_snapshots.resolve(row),
+            request=request_snapshots.resolve(row, cache=cache),
             **response_payload(row["response"]),
         )
         for row in db.query(

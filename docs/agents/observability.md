@@ -872,6 +872,38 @@ independent verification, a fresh preservation audit, and a separate final audit
 as phase gates. The legacy scan mode retains cumulative chunk counters and its
 repeated final summary; do not combine that accounting with manifest deltas.
 
+**A historical snapshot can be a member of a bundle: one object holding many
+snapshots of one task.** One object per row is bound by object storage write
+latency, not bytes: on 2026-10-03 Garage (data on CIFS with `data_fsync=true`)
+took about 0.67 s per PUT and reached about 16 PUTs/s at 64 in parallel, so
+1,081,787 remaining rows were about 20 hours of copying and 2 more of
+compaction GETs. Their reference is version 3:
+`{bucket, key, sha256, size, version: 3, member, member_sha256, member_size}`.
+`key`, `sha256` and `size` describe the bundle, which is `encode_payload` of a
+JSON object mapping each `custom_id` to its snapshot, stored at
+`payloads/v3/sha256/<sha256>.json`. `member` is the row's `custom_id`;
+`member_sha256` and `member_size` are of `encode_payload(snapshot)`, the same
+digest a manifest binds. A reader checks the bundle's size and digest, then the
+member's, and refuses a member named for another request.
+`payload_objects.parse_ref` reads every version; `PayloadRef.parse` still
+accepts only 1 and 2, so a reader that predates bundles fails closed with
+`PayloadUnavailable` instead of reading a bundle as a snapshot.
+
+Every reader of `snapshot_ref` goes through `request_snapshots.resolve` or
+`request_snapshots.load`. A caller resolving many rows passes one
+`BundleCache` for that call, so each bundle is read once:
+`batch_results.snapshot_specs`, `batch_results.unconsumed`,
+`payload_recovery.retry`, and `snapshot_payloads.migrate_many`, which reads
+every bundle a chunk references before verifying, compacting or restoring its
+members. The cache lives for one call and is never filled inside a transaction.
+Rows with a version 2 reference are never rewritten as members.
+
+**Rollout order for bundles.** Deploy the readers to every API and worker
+before any member reference is written; the bundle backfill is a separate,
+later release. Rolling back past the readers requires restoring every
+member-referenced row first (`restore` writes the inline value back and clears
+the reference).
+
 Eligibility is completed non-profile tasks (the exception above) with no unconsumed receipts. The
 migration locks the task and request and rechecks eligibility and exact source
 values after verified object I/O. It retains task/request identities and all

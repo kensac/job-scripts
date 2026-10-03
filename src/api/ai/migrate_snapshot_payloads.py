@@ -47,6 +47,7 @@ def main() -> int:
         "-c application_name=snapshot_payload_migration"
         + (" -c default_transaction_read_only=on" if args.mode == "verify" else "")
     )
+    from api.ai import request_snapshots
     from api.ai.snapshot_payloads import STOP_OUTCOMES, Mode, candidates, migrate_many
     from core.payload_objects import PayloadStore, encode_payload
     from core.pool import pool
@@ -95,7 +96,7 @@ def main() -> int:
                 if outcome == "copied":
                     logical_bytes += len(encode_payload(source["snapshot"]))
                 elif source.get("snapshot_ref") is not None and outcome != "changed":
-                    logical_bytes += source["snapshot_ref"]["size"]
+                    logical_bytes += request_snapshots.digest_and_size(source["snapshot_ref"])[1]
                 after = (source["task_id"], source["custom_id"])
                 remaining -= 1
             # Emit every committed chunk so an interrupted long invocation has

@@ -6,12 +6,20 @@ import hashlib
 import re
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import suppress
 from dataclasses import asdict, dataclass
 from typing import Any, Literal
 
 from api import db
 from api.ai import request_snapshots
-from core.payload_objects import PayloadRef, PayloadStore, PayloadUnavailable, encode_payload
+from core.payload_objects import (
+    BundleCache,
+    BundleMemberRef,
+    PayloadStore,
+    PayloadUnavailable,
+    encode_payload,
+    parse_ref,
+)
 from core.pool import in_transaction
 
 Mode = Literal["copy", "compact", "restore", "verify"]
@@ -80,7 +88,9 @@ def _current_sources(sources: list[dict[str, Any]], *, lock: bool = False) -> se
     }
 
 
-def _prepare(source: dict[str, Any], store: PayloadStore, mode: Mode) -> tuple[str, Any, Any]:
+def _prepare(
+    source: dict[str, Any], store: PayloadStore, mode: Mode, cache: BundleCache
+) -> tuple[str, Any, Any]:
     inline, reference = source["snapshot"], source["snapshot_ref"]
     updated, updated_ref = inline, reference
     if mode == "restore" and reference is None and inline is not None:
@@ -95,7 +105,7 @@ def _prepare(source: dict[str, Any], store: PayloadStore, mode: Mode) -> tuple[s
     else:
         if reference is None:
             raise PayloadUnavailable("Snapshot has no verified reference; copy first")
-        restored = store.get(PayloadRef.parse(reference))
+        restored = request_snapshots.load(source, store, cache)
         request_snapshots.resolve({**source, "snapshot": restored}, store)
         if inline is not None and inline != restored:
             raise PayloadUnavailable("Snapshot differs from its object")
@@ -126,16 +136,33 @@ def migrate_many(
     if not sources:
         return []
     current = _current_sources(sources)
+    cache: BundleCache = {}
+
+    def fetch(ref: BundleMemberRef) -> None:
+        # A failure is reported by the member's own read below, in cursor order.
+        with suppress(PayloadUnavailable):
+            store.get_bundle(ref, cache)
 
     def prepare(source: dict[str, Any]) -> tuple[str, Any, Any]:
         if (source["task_id"], source["custom_id"]) not in current:
             return "changed", None, None
         try:
-            return _prepare(source, store, mode)
+            return _prepare(source, store, mode, cache)
         except PayloadUnavailable:
             return "unavailable", None, None
 
+    bundles: dict[str, BundleMemberRef] = {}
+    for source in sources:
+        try:
+            ref = parse_ref(source["snapshot_ref"]) if source["snapshot_ref"] else None
+        except PayloadUnavailable:
+            continue
+        if isinstance(ref, BundleMemberRef):
+            bundles.setdefault(ref.key, ref)
     with ThreadPoolExecutor(max_workers=workers) as executor:
+        # Read each bundle once for the whole chunk before any member uses it,
+        # so concurrent members of one bundle never race to GET it twice.
+        list(executor.map(fetch, bundles.values()))
         prepared = list(executor.map(prepare, sources))
     stop = next((i for i, item in enumerate(prepared) if item[0] in STOP_OUTCOMES), len(prepared))
     failure = prepared[stop][0] if stop < len(prepared) else None
@@ -232,7 +259,7 @@ def validate_manifest(entries: Any, *, limit: int) -> list[dict[str, Any]]:
             raise ValueError("Invalid metadata digest")
         if "reference" in entry:
             try:
-                PayloadRef.parse(entry["reference"])
+                parse_ref(entry["reference"])
             except PayloadUnavailable as exc:
                 raise ValueError("Invalid expected reference") from exc
         key = (entry["task_id"], entry["custom_id"])
@@ -288,7 +315,7 @@ def migrate_manifest(
             actual = (
                 hashlib.sha256(encode_payload(source["snapshot"])).hexdigest()
                 if source["snapshot"] is not None
-                else PayloadRef.parse(source["snapshot_ref"]).sha256
+                else request_snapshots.digest_and_size(source["snapshot_ref"])[0]
             )
         except PayloadUnavailable:
             rejected, reason = key, "unavailable"
@@ -320,7 +347,7 @@ def migrate_manifest(
         logical_bytes += (
             len(encode_payload(source["snapshot"]))
             if outcome == "copied" or source["snapshot_ref"] is None
-            else source["snapshot_ref"]["size"]
+            else request_snapshots.digest_and_size(source["snapshot_ref"])[1]
         )
     if failed is None and rejected is not None:
         assert reason is not None

@@ -6,7 +6,7 @@ from typing import Any
 
 from api import db, events
 from api.ai import batch_results, request_snapshots
-from core.payload_objects import PayloadStore, PayloadUnavailable
+from core.payload_objects import BundleCache, PayloadStore, PayloadUnavailable
 from core.pool import in_transaction
 
 MARKER = "payload_recovery"
@@ -45,12 +45,13 @@ def retry(task_id: int, store: PayloadStore | None = None) -> str:
     collection_finished = payload.get("batch_collection_checkpointed") is True and not payload.get(
         "batch_ids"
     )
+    cache: BundleCache = {}
     try:
         if source["kind"] in (*task_jobs.MANAGED_BOARD_RUNS.kinds, *task_jobs.FILTER_CHUNKS.kinds):
             task_jobs.run_jobs(payload, store)
         for row in requests:
             if not collection_finished or row["custom_id"] in required_ids:
-                request_snapshots.resolve(row, store)
+                request_snapshots.resolve(row, store, cache)
         for row in unconsumed:
             batch_results.response_payload(row["response"], store)
     except PayloadUnavailable:
