@@ -324,3 +324,60 @@ def test_bulk_workload_statement_count_and_concurrency(f, monkeypatch, capsys, s
                 }
             )
         )
+
+
+@pytest.mark.parametrize("phase", ["initial", "locked"])
+@pytest.mark.parametrize("mode", ["copy", "compact"])
+def test_source_change_stops_before_later_eligible_rows(f, objects, phase, mode):
+    first, _ = request(f)
+    second, _ = request(f)
+    sources = [row(first), row(second)]
+    if mode == "compact":
+        snapshot_payloads.migrate_many(sources, objects, mode="copy")
+        sources = [row(first), row(second)]
+    original_second = row(second)
+
+    def change():
+        db.execute("UPDATE tasks SET status='pending' WHERE id=%s", (first,))
+
+    if phase == "initial":
+        change()
+    else:
+        original_get = objects.client.get_object
+
+        def changed_get(**kwargs):
+            result = original_get(**kwargs)
+            change()
+            return result
+
+        objects.client.get_object = changed_get
+    assert snapshot_payloads.migrate_many(sources, objects, mode=mode, workers=2) == ["changed"]
+    assert row(second) == original_second
+
+
+def test_cli_changed_source_keeps_cursor_before_gap_and_returns_failure(
+    f, objects, monkeypatch, capsys
+):
+    import json
+    from types import SimpleNamespace
+
+    from api.ai import migrate_snapshot_payloads
+
+    tasks = [request(f)[0] for _ in range(3)]
+    original_candidates = snapshot_payloads.candidates
+
+    def changed_candidates(**kwargs):
+        sources = original_candidates(**kwargs)
+        db.execute("UPDATE tasks SET status='pending' WHERE id=%s", (tasks[1],))
+        return sources
+
+    monkeypatch.setattr(snapshot_payloads, "candidates", changed_candidates)
+    monkeypatch.setattr(migrate_snapshot_payloads, "os", SimpleNamespace(environ={}))
+    monkeypatch.setattr("core.pool.pool.close", lambda: None)
+    monkeypatch.setattr("sys.argv", ["migration", "copy", "--limit", "3", "--workers", "2"])
+    assert migrate_snapshot_payloads.main() == 1
+    report = json.loads(capsys.readouterr().out.splitlines()[-1])
+    assert report["after"] == [tasks[0], "request"]
+    assert report["counts"] == {"copied": 1, "changed": 1}
+    assert row(tasks[0])["snapshot_ref"] is not None
+    assert row(tasks[2])["snapshot_ref"] is None
