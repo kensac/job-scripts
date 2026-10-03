@@ -6,7 +6,7 @@ import datetime
 
 from pydantic import BaseModel, JsonValue
 
-from api import db, pagination
+from api import db, pagination, review_policy_storage
 
 
 class ReviewOutcome(BaseModel):
@@ -56,7 +56,7 @@ class ReviewDecisions(BaseModel):
 DECISION_COLUMNS = (
     "d.id,d.task_id,d.url,d.job_id,d.user_id,d.filter_id,d.managed_board_id,d.revision,"
     "d.prompt_hash,d.stage,d.mode,d.action,d.reason,d.profile_id,d.title,d.content_hash,"
-    "d.policy,d.evidence,d.created_at"
+    f"{review_policy_storage.POLICY_COLUMNS},d.evidence,d.created_at"
 )
 
 
@@ -84,12 +84,13 @@ def _read_decisions(
     count = db.query_one(
         f"SELECT count(*) AS n FROM review_gate_decisions d WHERE {where}", parameters
     )
-    rows = db.query_as(
-        ReviewDecision,
-        f"SELECT {DECISION_COLUMNS} FROM review_gate_decisions d WHERE {where} "
+    raw_rows = db.query(
+        f"SELECT {DECISION_COLUMNS} FROM review_gate_decisions d "
+        f"{review_policy_storage.POLICY_JOIN} WHERE {where} "
         "ORDER BY d.id DESC LIMIT %(limit)s OFFSET %(offset)s",
         {**parameters, "limit": page.size, "offset": page.offset},
     )
+    rows = [ReviewDecision.model_validate(review_policy_storage.resolve(row)) for row in raw_rows]
     if rows:
         outcomes = db.query(
             "SELECT decision_id,query_id,batch_id,model,rejected,outcome,recorded_cost_usd,created_at "

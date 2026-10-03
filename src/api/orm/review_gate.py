@@ -7,8 +7,10 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     CheckConstraint,
+    ForeignKey,
     Identity,
     Index,
+    LargeBinary,
     Numeric,
     Text,
     UniqueConstraint,
@@ -17,6 +19,14 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from api.orm.base import Base, _now
+
+
+class ReviewGatePolicySnapshot(Base):
+    __tablename__ = "review_gate_policies"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
+    digest: Mapped[bytes] = mapped_column(LargeBinary, unique=True)
+    policy: Mapped[dict] = mapped_column(JSONB)
 
 
 class ReviewGateDecision(Base):
@@ -46,6 +56,9 @@ class ReviewGateDecision(Base):
     profile_id: Mapped[int | None] = mapped_column(BigInteger)
     title: Mapped[str] = mapped_column(Text)
     content_hash: Mapped[str | None] = mapped_column(Text)
+    policy_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("review_gate_policies.id", ondelete="RESTRICT")
+    )
     policy: Mapped[dict] = mapped_column(JSONB)
     evidence: Mapped[dict] = mapped_column(JSONB)
     created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)

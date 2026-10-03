@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 from typing import Any
 
-from api import db
+from api import db, review_policy_storage
 from core.filters import build_custom_input
 from core.job_profile import CLASSIFIER_VERSION, JOB_PROFILE_INSTRUCTIONS, JOB_PROFILE_MODEL
 
@@ -27,10 +27,11 @@ def decision(row: dict[str, Any]) -> dict[str, Any]:
 
 def existing(task_id: int) -> dict[str, dict[str, Any]]:
     return {
-        row["url"]: row
+        row["url"]: review_policy_storage.resolve(row)
         for row in db.query(
-            "SELECT id,url,prompt_hash,title,content_hash,policy,evidence,stage,action,reason,"
-            "profile_id FROM review_gate_decisions WHERE task_id=%s",
+            "SELECT d.id,d.url,d.prompt_hash,d.title,d.content_hash,d.evidence,d.stage,d.action,"
+            f"d.reason,d.profile_id,{review_policy_storage.POLICY_COLUMNS} "
+            f"FROM review_gate_decisions d {review_policy_storage.POLICY_JOIN} WHERE d.task_id=%s",
             (task_id,),
         )
     }
@@ -153,10 +154,14 @@ def persist(
                 ),
             )
         )
+    if not rows:
+        return previous
+    policy_id = review_policy_storage.intern(db.jsonb(policy))
+    rows = [(*row, policy_id) for row in rows]
     db.executemany(
         "INSERT INTO review_gate_decisions(task_id,url,job_id,user_id,filter_id,managed_board_id,"
-        "revision,prompt_hash,stage,mode,action,reason,profile_id,title,content_hash,policy,evidence) "
-        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) "
+        "revision,prompt_hash,stage,mode,action,reason,profile_id,title,content_hash,policy,evidence,policy_id) "
+        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) "
         "ON CONFLICT(task_id,url) DO NOTHING",
         rows,
     )
