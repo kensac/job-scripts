@@ -40,3 +40,110 @@ def test_null_empty_and_whitespace_instruction_values_remain_distinct():
     assert rows[0]["reference"] is None
     assert all(r["reference"] is not None for r in rows[1:])
     assert len({r["reference"] for r in rows[1:]}) == 3
+
+
+def test_copy_compact_restore_preserves_metadata_cache_and_admin_response(client, admin_headers):
+    from api.ai.migrate_query_instructions import migrate_chunk
+
+    query_id = store.add_ai_result(
+        "https://example.test/history",
+        "passed",
+        check_type="custom",
+        prompt_hash="filter-key",
+        instructions="Exact historical instructions",
+        input_content="Original cached content",
+        model="original-model",
+        prompt_tokens=10,
+        completion_tokens=2,
+    )
+    db.execute("UPDATE ai_queries SET instructions_id=NULL WHERE id=%s", (query_id,))
+    original = db.query_one("SELECT * FROM ai_queries WHERE id=%s", (query_id,))
+    before = client.get(f"/v1/admin/queries/{query_id}", headers=admin_headers).json()
+    copied = migrate_chunk(mode="copy", after=0, through=query_id, limit=1)
+    assert copied["copied"] == 1
+    assert migrate_chunk(mode="copy", after=0, through=query_id, limit=1)["copied"] == 0
+    assert migrate_chunk(mode="verify", after=0, through=query_id, limit=1)["verified"] == 1
+    assert migrate_chunk(mode="compact", after=0, through=query_id, limit=1)["compacted"] == 1
+    compacted = db.query_one("SELECT * FROM ai_queries WHERE id=%s", (query_id,))
+    assert compacted["instructions"] is None
+    assert {k: v for k, v in compacted.items() if k not in ("instructions", "instructions_id")} == {
+        k: v for k, v in original.items() if k not in ("instructions", "instructions_id")
+    }
+    assert (
+        store.get_custom_result("https://example.test/history", "filter-key")["instructions"]
+        == original["instructions"]
+    )
+    assert store.get_content("https://example.test/history") is None
+    assert client.get(f"/v1/admin/queries/{query_id}", headers=admin_headers).json() == before
+    responses = client.get(
+        "/v1/admin/jobs/responses",
+        params={"url": "https://example.test/history"},
+        headers=admin_headers,
+    )
+    assert responses.status_code == 200
+    assert responses.json()["rows"] == [before]
+    assert migrate_chunk(mode="restore", after=0, through=query_id, limit=1)["restored"] == 1
+    restored = db.query_one("SELECT * FROM ai_queries WHERE id=%s", (query_id,))
+    assert restored["instructions"] == original["instructions"]
+    assert restored["instructions_id"] == compacted["instructions_id"]
+
+
+def test_bad_reference_rolls_back_whole_chunk():
+    import pytest
+
+    from api.ai.migrate_query_instructions import migrate_chunk
+    from core.query_instructions import InstructionUnavailable
+
+    first = store.add_ai_result("https://example.test/first", "passed", instructions="first")
+    second = store.add_ai_result("https://example.test/second", "passed", instructions="second")
+    db.execute("UPDATE ai_queries SET instructions_id=NULL WHERE id=%s", (first,))
+    db.execute("UPDATE ai_queries SET instructions='changed inline' WHERE id=%s", (second,))
+    with pytest.raises(InstructionUnavailable):
+        migrate_chunk(mode="copy", after=0, through=second, limit=2)
+    assert (
+        db.query_one("SELECT instructions_id FROM ai_queries WHERE id=%s", (first,))[
+            "instructions_id"
+        ]
+        is None
+    )
+
+
+def test_concurrent_writers_share_exact_text():
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    barrier = Barrier(4)
+
+    def write(index):
+        barrier.wait(timeout=10)
+        return store.add_ai_result(
+            f"https://example.test/concurrent/{index}", "passed", instructions="Shared exact text"
+        )
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        ids = list(executor.map(write, range(4)))
+    rows = db.query("SELECT instructions_id FROM ai_queries WHERE id=ANY(%s)", (ids,))
+    assert len(rows) == 4
+    assert len({row["instructions_id"] for row in rows}) == 1
+    assert rows[0]["instructions_id"] is not None
+
+
+def test_missing_reference_never_becomes_legacy_null():
+    import pytest
+
+    from core.query_instructions import InstructionUnavailable, hydrate
+
+    with pytest.raises(InstructionUnavailable):
+        hydrate([{"instructions": None, "instructions_id": -1}])
+    assert hydrate([{"instructions": None, "instructions_id": None}]) == [{"instructions": None}]
+
+
+def test_compaction_requires_explicit_gates(monkeypatch):
+    import pytest
+
+    from api.ai.migrate_query_instructions import main
+
+    monkeypatch.setattr("sys.argv", ["migration", "compact", "--through", "1", "--limit", "1"])
+    with pytest.raises(SystemExit) as error:
+        main()
+    assert error.value.code == 2
