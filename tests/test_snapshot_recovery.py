@@ -169,3 +169,39 @@ def test_parent_finalization_serializes_with_recovery(f, monkeypatch):
     assert db.query_one("SELECT status FROM tasks WHERE id=%s", (child,))["status"] == "failed"
     assert retry(child) == "pending"
     assert db.query_one("SELECT status FROM tasks WHERE id=%s", (parent,))["status"] == "waiting"
+
+
+def test_recovery_refuses_concurrent_source_change(f, monkeypatch):
+    from api.ai import request_snapshots
+    from api.ai.batch_results import snapshot_specs
+    from core.batch import BatchSpec
+    from tasks.runtime.payload_recovery import retry
+
+    task_id = recoverable(f)
+    snapshot_specs(task_id, [BatchSpec("request")])
+    original = request_snapshots.resolve
+
+    def changed(row, store=None):
+        value = original(row, store)
+        db.execute(
+            "UPDATE tasks SET payload=payload || %s WHERE id=%s",
+            (db.jsonb({"changed": True}), task_id),
+        )
+        return value
+
+    monkeypatch.setattr(request_snapshots, "resolve", changed)
+    assert retry(task_id) == "conflict"
+    assert db.query_one("SELECT status FROM tasks WHERE id=%s", (task_id,))["status"] == "failed"
+
+
+def test_recovery_refuses_accepted_work_without_replay_state(f):
+    from tasks.runtime.payload_recovery import retry
+
+    task_id = recoverable(f)
+    db.execute("UPDATE tasks SET payload=payload-'batch_ids' WHERE id=%s", (task_id,))
+    db.execute(
+        "INSERT INTO ai_batches(provider_batch_id,task_id,purpose,model,status) "
+        "VALUES ('paid',%s,'verify','model','completed')",
+        (task_id,),
+    )
+    assert retry(task_id) == "conflict"

@@ -146,6 +146,7 @@ def update_parent_progress(parent_id: int) -> None:
 
 
 def maybe_finalize_parent(parent_id: int) -> None:
+    update_parent_progress(parent_id)
     # Serialize the live-child check with explicit payload recovery. Otherwise
     # a finalizer can count a failed child, then overwrite the parent's state
     # after recovery has already requeued that child.
@@ -155,7 +156,6 @@ def maybe_finalize_parent(parent_id: int) -> None:
         )
         if not parent or parent["status"] != "waiting":
             return
-        update_parent_progress(parent_id)
         live = db.query_one(
             "SELECT COUNT(*) AS c FROM tasks WHERE kind = ANY(%s) "
             "AND parent_id = %s AND status IN ('pending','running','awaiting_batch')",

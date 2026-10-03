@@ -175,3 +175,50 @@ def test_compaction_rechecks_unchanged_inline_and_reference(f, objects):
     db.execute("UPDATE batch_requests SET snapshot_ref=NULL WHERE task_id=%s", (task_id,))
     assert snapshot_payloads.migrate(source, objects, mode="compact") == "changed"
     assert row(task_id)["snapshot"] is not None
+
+
+def test_profile_historical_proof_hydrates_outside_transaction(f, objects):
+    from api import review_gate
+    from core.pool import in_transaction
+    from tests.test_review_gate import proven_job
+
+    job, task_id = proven_job(f)
+    source = row(task_id)
+    ref = objects.put_verified(source["snapshot"])
+    db.execute(
+        "UPDATE batch_requests SET snapshot=NULL,snapshot_ref=%s WHERE task_id=%s",
+        (db.jsonb(asdict(ref)), task_id),
+    )
+    original_get = objects.client.get_object
+
+    def outside(**kwargs):
+        assert not in_transaction()
+        return original_get(**kwargs)
+
+    objects.client.get_object = outside
+    evidence = review_gate.proven_profiles([job], {job["url"]: "exact posting content"}, 5000)
+    assert job["url"] in evidence
+    objects.client.objects.clear()
+    with pytest.raises(PayloadUnavailable):
+        review_gate.proven_profiles([job], {job["url"]: "exact posting content"}, 5000)
+
+
+def test_cli_requires_backup_and_stops_before_unavailable_cursor(f, objects, monkeypatch, capsys):
+    from api.ai import migrate_snapshot_payloads
+
+    monkeypatch.setattr("sys.argv", ["migration", "compact", "--limit", "1"])
+    with pytest.raises(SystemExit) as exit_code:
+        migrate_snapshot_payloads.main()
+    assert exit_code.value.code == 2
+    task_id, _ = request(f)
+    snapshot_payloads.migrate(row(task_id), objects, mode="copy")
+    objects.client.objects.clear()
+    monkeypatch.setattr("sys.argv", ["migration", "verify", "--limit", "1"])
+    # The test harness owns the shared pool; the deployed CLI owns its own.
+    monkeypatch.setattr("core.pool.pool.close", lambda: None)
+    assert migrate_snapshot_payloads.main() == 1
+    import json
+
+    report = json.loads(capsys.readouterr().out)
+    assert report["after"] is None
+    assert report["counts"] == {"unavailable": 1}
