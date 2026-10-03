@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 
 from api import db
-from api.ai.receipt_payloads import _ELIGIBLE
+from api.ai.receipt_payloads import _ELIGIBLE, verified_vectors
 from core.payload_objects import PayloadStore, PayloadUnavailable
 from core.pool import in_transaction
 
