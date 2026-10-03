@@ -27,6 +27,13 @@ def receipt(f, *, status="done", kind="embed_postings_batch", consumed=True):
         model="embedding-model",
     )
     batch_results.checkpoint(task_id, [result], [])
+    # The shape written before checkpoint stored vectors as an object: inline
+    # vectors and no reference. That is the population this tooling moves.
+    db.execute(
+        "UPDATE batch_result_receipts SET response=response-'embedding_vectors_ref' || %s "
+        "WHERE task_id=%s",
+        (db.jsonb({"embedding_vectors": result.embedding_vectors}), task_id),
+    )
     if consumed:
         with batch_results.consume_result(task_id, result) as acknowledgement:
             acknowledgement.outcome = "written"
@@ -291,3 +298,37 @@ def test_verification_works_in_read_only_session(f, objects, monkeypatch):
         }
         assert receipt_payloads.migrate(original, objects, mode="verify") == "verified"
     assert row(task_id) == original
+
+
+def test_named_receipts_are_the_only_ones_any_mode_touches(f, objects, monkeypatch, capsys):
+    import json
+
+    from api.ai.migrate_receipt_payloads import main
+    from core.pool import pool
+
+    tasks = [receipt(f)[0] for _ in range(3)]
+    by_key = {(row(task)["provider_batch_id"], row(task)["custom_id"]): task for task in tasks}
+    keys = sorted(by_key)
+    first, named, last = (by_key[key] for key in keys)
+    original = {task: row(task) for task in tasks}
+    monkeypatch.setattr(PayloadStore, "from_env", lambda: objects)
+    monkeypatch.setattr(pool, "close", lambda: None)
+    monkeypatch.setenv("PGOPTIONS", "")
+
+    def run(*argv):
+        monkeypatch.setattr("sys.argv", ["migration", *argv, "--receipt", *keys[1]])
+        code = main()
+        return code, json.loads(capsys.readouterr().out)["counts"]
+
+    assert run("copy", "--limit", "5") == (0, {"copied": 1})
+    assert run("compact", "--limit", "5", "--backup-complete") == (0, {"compacted": 1})
+    assert run("verify", "--limit", "5") == (0, {"verified": 1})
+    assert "embedding_vectors" not in row(named)["response"]
+    assert row(first) == original[first] and row(last) == original[last]
+    # Without the name, restore would start at the first referenced receipt.
+    for task in (first, last):
+        receipt_payloads.migrate(row(task), objects, mode="copy")
+    untouched = {task: row(task) for task in (first, last)}
+    assert run("restore", "--limit", "5") == (0, {"restored": 1})
+    assert row(named) == original[named]
+    assert row(first) == untouched[first] and row(last) == untouched[last]

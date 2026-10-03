@@ -293,3 +293,88 @@ async def test_malformed_provider_vectors_are_acknowledged_without_database_fail
         "missing_model": "unknown_model",
     }
     assert batch_results.outcome_counts(task_id) == {expected[malformed]: 1}
+
+
+def test_new_embedding_receipt_holds_only_a_verified_reference(f):
+    task_id = f.make_task("embed_postings_batch", {}, status="running")
+    batch_results.snapshot_specs(task_id, [_spec()])
+    vectors = [[0.1, -2.5e-07, 3], [0.30000000000000004, 0.0, -1]]
+    result = batch.BatchResult(
+        "packed",
+        embedding_vectors=vectors,
+        usage={"input_tokens": 7, "output_tokens": 0, "total_tokens": 7},
+        model=EMBEDDING_MODEL,
+        batch_id="packed",
+    )
+    batch_results.checkpoint(task_id, [result], [])
+    response = db.query_one("SELECT response FROM batch_result_receipts")["response"]
+    assert "embedding_vectors" not in response
+    ref = PayloadRef.parse(response["embedding_vectors_ref"])
+    assert PayloadStore.from_env().get(ref) == vectors
+    # Exactly what the inline writer stored, which every reader is still given.
+    assert batch_results.response_payload(response) == {
+        "text": None,
+        "usage": result.usage,
+        "error": None,
+        "finish_reason": None,
+        "embedding_vectors": vectors,
+    }
+    assert batch_results.unconsumed(task_id)[0].embedding_vectors == vectors
+
+
+@pytest.mark.asyncio
+async def test_storage_outage_writes_no_receipt_and_the_batch_is_collected_again(f, monkeypatch):
+    from tasks.runtime.payload_recovery import retry
+
+    task_id, originals = _receipt(f)
+    db.execute("DELETE FROM batch_result_receipts WHERE task_id=%s", (task_id,))
+    db.execute(
+        "UPDATE tasks SET status='pending',payload=%s WHERE id=%s",
+        (db.jsonb({"batch_ids": ["packed"]}), task_id),
+    )
+    db.execute(
+        "INSERT INTO ai_batches(provider_batch_id,task_id,purpose,model,status) "
+        "VALUES ('packed',%s,'embedding',%s,'completed')",
+        (task_id, EMBEDDING_MODEL),
+    )
+    vectors = [[0.1] * EMBEDDING_DIMENSIONS, [0.2] * EMBEDDING_DIMENSIONS]
+    collections = []
+
+    async def collect(batch_ids, hook=None):
+        # A finished provider batch keeps its output file, so each collection
+        # reads the same paid result again.
+        collections.append(list(batch_ids))
+        return [
+            batch.BatchResult(
+                "packed",
+                embedding_vectors=[list(v) for v in vectors],
+                usage={"input_tokens": 101, "output_tokens": 0, "total_tokens": 101},
+                batch_id="packed",
+            )
+        ], []
+
+    monkeypatch.setattr(batch, "collect_finished_batches", collect)
+    client = PayloadStore.from_env().client
+    client.fail_put = True
+    await worker.run_once()
+    task = db.query_one("SELECT status,payload FROM tasks WHERE id=%s", (task_id,))
+    assert task["status"] == "failed"
+    assert task["payload"]["payload_recovery"] == {"reason": "payload_unavailable"}
+    assert task["payload"]["batch_ids"] == ["packed"]
+    assert "batch_collection_checkpointed" not in task["payload"]
+    assert db.query("SELECT 1 FROM batch_result_receipts") == []
+    assert db.query("SELECT 1 FROM job_embeddings") == []
+
+    client.fail_put = False
+    assert retry(task_id) == "pending"
+    await worker.run_once()
+    assert collections == [["packed"], ["packed"]]
+    assert db.query_one("SELECT status FROM tasks WHERE id=%s", (task_id,))["status"] == "done"
+    response = db.query_one("SELECT response FROM batch_result_receipts")["response"]
+    assert "embedding_vectors" not in response
+    ref = PayloadRef.parse(response["embedding_vectors_ref"])
+    assert PayloadStore.from_env().get(ref) == vectors
+    assert sorted(row["url"] for row in db.query("SELECT url FROM job_embeddings")) == sorted(
+        original["url"] for original in originals
+    )
+    assert batch_results.outcome_counts(task_id) == {"written": 1}
