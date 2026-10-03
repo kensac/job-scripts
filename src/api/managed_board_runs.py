@@ -19,6 +19,8 @@ from core.batch import BATCH_CHARS_PER_TOKEN
 from core.filters import build_custom_decision_instructions, build_custom_input
 from core.managed_board_title_gate import TitleGateConfig
 from core.managed_board_title_gate import evaluate as evaluate_title_gate
+from core.payload_objects import PayloadRef, PayloadStore, PayloadUnavailable
+from core.pool import in_transaction
 from core.providers import StructuredOutput
 from core.routing import NoEligibleModel, TaskShape, resolve
 
@@ -41,6 +43,21 @@ BATCH_OUTPUT_TOKENS = 6000
 MANAGED_FILTER_EXECUTION_VERSION = 2
 MANAGED_FILTER_TRANSPORT = "batch"
 MANAGED_BOARD_RUN_KINDS = ("run_managed_board", "run_managed_board_batch")
+# Spelled as literals, not a bound array, so a prepared statement's generic
+# plan can still prove idx_tasks_managed_board's partial predicate.
+_KINDS_SQL = "kind IN ('run_managed_board', 'run_managed_board_batch')"
+_BOARD_SQL = "(payload->>'managed_board_id')::bigint"
+LATEST_SQL = (
+    "SELECT id, status, progress, error, (payload->>'revision')::bigint AS snapshot_revision, "
+    "payload->>'requested_model' AS requested_model, "
+    "(payload->>'reserved_tokens')::bigint AS reserved_tokens, "
+    "created_at, started_at, finished_at, payload->'title_gate_report' AS title_gate_report "
+    f"FROM tasks WHERE {_KINDS_SQL} AND {_BOARD_SQL} = %s ORDER BY id DESC LIMIT 1"
+)
+ACTIVE_SQL = (
+    f"SELECT id FROM tasks WHERE {_KINDS_SQL} AND {_BOARD_SQL} = %s "
+    "AND status = ANY(%s) ORDER BY id DESC LIMIT 1"
+)
 
 
 def _batch_shape(model: str, effort: str | None = None) -> TaskShape:
@@ -289,13 +306,7 @@ def admit(board_id: int, *, dedupe_key: str | None = None) -> ManagedBoardRunQue
         board = _board(board_id, lock=True)
         if board is None:
             raise RunRefusal("NOT_FOUND", "unknown managed board")
-        active = db.query_one_as(
-            _ActiveTask,
-            "SELECT id FROM tasks WHERE kind = ANY(%s) "
-            "AND (payload->>'managed_board_id')::bigint = %s AND status = ANY(%s) "
-            "ORDER BY id DESC LIMIT 1",
-            (list(MANAGED_BOARD_RUN_KINDS), board_id, list(ACTIVE_STATUSES)),
-        )
+        active = db.query_one_as(_ActiveTask, ACTIVE_SQL, (board_id, list(ACTIVE_STATUSES)))
         if active:
             raise RunRefusal(
                 "IN_PROGRESS", "this board already has an active run", task_id=active.id
@@ -421,17 +432,33 @@ def admit(board_id: int, *, dedupe_key: str | None = None) -> ManagedBoardRunQue
     )
 
 
+def run_jobs(payload: Mapping[str, Any], store: PayloadStore | None = None) -> list[dict[str, Any]]:
+    """The run's frozen candidates, the one reader of both payload shapes.
+
+    Runs admitted before the reference existed carry them inline. A run with
+    neither had them removed by retention, which only selects runs nothing
+    reads again, so reaching one is a required-input failure, never an empty
+    run that would project an empty board.
+    """
+    if "jobs" in payload:
+        return payload["jobs"]
+    reference = payload.get("jobs_ref")
+    if reference is None:
+        raise PayloadUnavailable("Managed board run candidates are no longer retained")
+    if in_transaction():
+        raise RuntimeError("Run candidates cannot be read inside a database transaction")
+    jobs = (store or PayloadStore.from_env()).get(PayloadRef.parse(reference))
+    if (
+        not isinstance(jobs, list)
+        or not all(isinstance(job, dict) for job in jobs)
+        or len(jobs) != payload.get("candidate_count")
+    ):
+        raise PayloadUnavailable("Managed board run candidates are invalid")
+    return jobs
+
+
 def latest(board_id: int) -> ManagedBoardRun | None:
-    return db.query_one_as(
-        ManagedBoardRun,
-        "SELECT id, status, progress, error, (payload->>'revision')::bigint AS snapshot_revision, "
-        "payload->>'requested_model' AS requested_model, "
-        "(payload->>'reserved_tokens')::bigint AS reserved_tokens, "
-        "created_at, started_at, finished_at, payload->'title_gate_report' AS title_gate_report "
-        "FROM tasks WHERE kind = ANY(%s) "
-        "AND (payload->>'managed_board_id')::bigint = %s ORDER BY id DESC LIMIT 1",
-        (list(MANAGED_BOARD_RUN_KINDS), board_id),
-    )
+    return db.query_one_as(ManagedBoardRun, LATEST_SQL, (board_id,))
 
 
 def cost(board_id: int) -> ManagedBoardCost:
@@ -476,10 +503,12 @@ def record_parse_failures(board_id: int, model: str | None):
         raise
 
 
-def replace_projection(task_id: int, payload: dict[str, Any]) -> int:
+def replace_projection(
+    task_id: int, payload: dict[str, Any], jobs: list[dict[str, Any]] | None = None
+) -> int:
     from api.review_gate_records import exclusions
 
-    all_jobs = payload["jobs"]
+    all_jobs = run_jobs(payload) if jobs is None else jobs
     # Exclusions belong to this immutable run, not the shared verdict cache.
     # Reading the persisted plan also covers resume after partial collection.
     gate = db.query_one("SELECT payload->'review_gate' AS plan FROM tasks WHERE id=%s", (task_id,))
@@ -620,3 +649,75 @@ def replace_projection(task_id: int, payload: dict[str, Any]) -> int:
                 (db.jsonb({"title_gate_report": report}), task_id),
             )
     return result.n if result else 0
+
+
+# A finished run whose candidates nothing will read again. A failed run
+# carrying the recovery marker, provider batches still to collect, or a
+# receipt not yet consumed can run again, and its handler reads them.
+# Split in two because the payload tests decompress the whole legacy payload
+# (8 to 9 MB each): the cheap columns choose at most `limit` runs in id order
+# first, so an invocation decompresses no more than that.
+_FINISHED = f"""
+  {_KINDS_SQL} AND id > %(after)s AND id <= %(through)s
+  AND finished_at < now() - make_interval(days => %(days)s)
+  AND status IN ('done', 'cancelled', 'failed')
+"""
+_STRIPPABLE = """
+  id = ANY(%(ids)s) AND payload ? 'jobs'
+  AND (status <> 'failed' OR NOT payload ? 'payload_recovery')
+  AND COALESCE(payload->'batch_ids', '[]'::jsonb) = '[]'::jsonb
+  AND NOT EXISTS (SELECT 1 FROM batch_result_receipts r
+                  WHERE r.task_id = tasks.id AND r.consumed_at IS NULL)
+"""
+
+
+def strip_finished_jobs(*, after: int, through: int, limit: int, dry_run: bool) -> dict[str, Any]:
+    """Remove inline candidates from the eligible runs among the next `limit`
+    finished runs, in one transaction, keeping their count; `dry_run` selects
+    and writes nothing.
+
+    Referenced objects are never touched. Resume from the returned `after`;
+    a stripped run is never selected again.
+    """
+    params: dict[str, Any] = {
+        "after": after,
+        "through": through,
+        "limit": limit,
+        "days": int(db.get_config("managed_board_run_jobs_retention_days")),
+    }
+    lock = "" if dry_run else " FOR UPDATE"
+    with db.transaction():
+        db.execute("SET LOCAL lock_timeout = '2s'")
+        db.execute("SET LOCAL statement_timeout = '5s'")
+        scanned = [
+            row["id"]
+            for row in db.query(
+                f"SELECT id FROM tasks WHERE {_FINISHED} ORDER BY id LIMIT %(limit)s", params
+            )
+        ]
+        params["ids"] = scanned
+        selected = db.query(
+            f"SELECT id, pg_column_size(payload) AS size FROM tasks WHERE {_STRIPPABLE} "
+            f"ORDER BY id{lock}",
+            params,
+        )
+        stripped = (
+            []
+            if dry_run or not selected
+            else db.query(
+                "UPDATE tasks SET payload = (payload - 'jobs') || "
+                "jsonb_build_object('candidate_count', jsonb_array_length(payload->'jobs')) "
+                "WHERE id = ANY(%s) RETURNING pg_column_size(payload) AS size",
+                ([row["id"] for row in selected],),
+            )
+        )
+    exhausted = len(scanned) < limit
+    return {
+        "scanned": len(scanned),
+        "eligible": len(selected),
+        "stripped": len(stripped),
+        "bytes_before": sum(row["size"] for row in selected),
+        "bytes_after": sum(row["size"] for row in stripped),
+        "after": through if exhausted else scanned[-1],
+        "exhausted": exhausted,
+    }

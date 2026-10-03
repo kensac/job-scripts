@@ -22,9 +22,10 @@ class _Content:
 async def handle_run_managed_board(task_id: int, payload: dict[str, Any]) -> None:
     """Receive only pre-cutover live work and projection-only reuse work."""
     if payload.get("execution_mode") == "sponsor_filter_reuse":
-        set_progress(task_id, 0, len(payload["jobs"]), "projecting stored filter outcomes")
-        runs.replace_projection(task_id, payload)
-        set_progress(task_id, len(payload["jobs"]), len(payload["jobs"]), "projected")
+        all_jobs = runs.run_jobs(payload)
+        set_progress(task_id, 0, len(all_jobs), "projecting stored filter outcomes")
+        runs.replace_projection(task_id, payload, all_jobs)
+        set_progress(task_id, len(all_jobs), len(all_jobs), "projected")
         return
     if (
         payload.get("execution_version") is not None
@@ -83,6 +84,8 @@ async def _handle_managed_filter(
         )
     )
     board_id = int(payload["managed_board_id"])
+    # Read once per run or resume: the reference costs one object GET.
+    all_jobs = runs.run_jobs(payload)
     snapshot = FilterSnapshot(
         name=f"managed-board:{board_id}",
         prompt=payload["prompt"],
@@ -91,7 +94,7 @@ async def _handle_managed_filter(
     )
     content_ids = [
         job["content_query_id"]
-        for job in payload["jobs"]
+        for job in all_jobs
         if job.get("content_query_id") is not None
         and (
             not payload.get("title_gate")
@@ -110,7 +113,7 @@ async def _handle_managed_filter(
     }
     jobs = [
         {**job, "content": frozen_contents.get(job.get("content_query_id"), "")}
-        for job in payload["jobs"]
+        for job in all_jobs
         if not payload.get("title_gate")
         or payload["title_gate"]["mode"] == "shadow"
         or job["title_gate_keep"]
@@ -118,7 +121,7 @@ async def _handle_managed_filter(
 
     def complete() -> None:
         if not pending_batch_ids(task_id):
-            runs.replace_projection(task_id, payload)
+            runs.replace_projection(task_id, payload, all_jobs)
 
     hooks = ExecutionHooks(
         verdict_label=f"managed-board:{board_id}",

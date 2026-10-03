@@ -851,6 +851,51 @@ the parent before the child state transition/count, preventing a stale count
 from terminalizing a parent after its child was recovered. Do not deploy this
 lifecycle change without coordinating with the fleet deployment owner.
 
+## Managed-board run candidates
+
+**Every reader of a managed-board run's candidate list goes through
+`managed_board_runs.run_jobs`, which reads both shapes:** inline `jobs`, and
+`jobs_ref` with `candidate_count`, a verified object. The list was 7.9 to
+8.6 MB of JSON per run and 94 percent of the payload (measured 2026-10-03),
+so every whole-payload write (batch id appends, the review gate plan, the
+title gate report, `finish`) rewrote it and every whole-payload read (the
+claim, progress events, the admin queue) carried it. Its readers are the
+handler, once per run or resume, which passes the list on to
+`replace_projection`, and `tasks.retry_payload_task`, which verifies the
+object before requeueing. Nothing reads a finished run's candidates. A
+missing or unreadable object raises `PayloadUnavailable`, so the run takes
+the payload recovery path above; a run with neither shape had its list removed
+by retention and is refused the same way, never run as an empty board.
+
+**Admission still writes the list inline, and must not write only the
+reference until this reader runs on every API and worker.** A worker without
+it fails a reference-only run on a missing key.
+
+A board's runs are found through `idx_tasks_managed_board`, partial on the two
+run kinds. Its readers spell the kinds as SQL literals, because a prepared
+statement's generic plan cannot prove a partial predicate from a bound array.
+
+**Retention removes inline lists from finished runs; it never touches objects
+or references.** `managed_board_run_jobs_retention_days` (app_config) sets the
+age. A run is eligible when it is done or cancelled, or failed without the
+`payload_recovery` marker, and has no pending batch ids and no unconsumed
+receipt. Its `jobs` is replaced by `candidate_count`. Nothing runs this
+automatically. Choose a fixed high-water id with
+`SELECT max(id) FROM tasks`, count first, then strip:
+
+```
+python -m api.migrate_managed_board_jobs count --through ID --after 0 --limit 20
+python -m api.migrate_managed_board_jobs strip --through ID --after 0 --limit 20
+```
+
+Each invocation examines at most `--limit` finished runs in id order, in one
+transaction with two-second lock and five-second statement timeouts; the
+limit bounds how many legacy payloads it decompresses. Repeat from the printed
+`after` until `exhausted` is true. A failed invocation commits nothing; retry
+it from the same cursor. Stripped runs are not selected again. Removed bytes
+are column sizes, not filesystem space: the table does not shrink without a
+rewrite, which is not part of this operation.
+
 ## Shared query instruction text
 
 `core.query_instructions` stores exact instruction strings separately from

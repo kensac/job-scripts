@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from api import db
+from api import db, managed_board_runs
 from core import pricing
 from core.filters import compute_filter_hash
 from core.store import add_ai_result
@@ -59,11 +59,12 @@ def test_run_admission_snapshots_board_candidates_and_refuses_overlap(
     assert payload["reasoning_effort"] == "low"
     assert payload["sources"] == ["managed-source"]
     assert payload["title_gate"] == {"recipe": "internship_v1", "mode": "shadow"}
-    assert [job["id"] for job in payload["jobs"]] == [job_id]
-    assert payload["jobs"][0]["source"] == "managed-source"
-    assert payload["jobs"][0]["title_gate_keep"] is False
-    assert payload["jobs"][0]["content_query_id"] is not None
-    assert "content" not in payload["jobs"][0]
+    jobs = managed_board_runs.run_jobs(payload)
+    assert [job["id"] for job in jobs] == [job_id]
+    assert jobs[0]["source"] == "managed-source"
+    assert jobs[0]["title_gate_keep"] is False
+    assert jobs[0]["content_query_id"] is not None
+    assert "content" not in jobs[0]
 
     conflict = client.post(f"/v1/admin/managed-boards/{board['id']}/run", headers=admin_headers)
     assert conflict.status_code == 409
@@ -379,10 +380,9 @@ async def test_sponsor_filter_reuse_projects_only_exact_machine_results_without_
         "payload"
     ]
     assert payload["execution_mode"] == "sponsor_filter_reuse"
-    assert [job["id"] for job in payload["jobs"]] == [included_id]
-    assert rejected_id not in [job["id"] for job in payload["jobs"]]
-    assert wrong_model_id not in [job["id"] for job in payload["jobs"]]
-    assert person_only_id not in [job["id"] for job in payload["jobs"]]
+    ids = [job["id"] for job in managed_board_runs.run_jobs(payload)]
+    assert ids == [included_id]
+    assert {rejected_id, wrong_model_id, person_only_id}.isdisjoint(ids)
 
     monkeypatch.setattr(
         managed_task,
@@ -400,8 +400,6 @@ async def test_sponsor_filter_reuse_projects_only_exact_machine_results_without_
 
 
 def test_projection_revision_cas_preserves_previous_projection(f):
-    from api import managed_board_runs
-
     sponsor = f.make_user()
     source = f.make_source()
     old_job = f.make_job(source=source)

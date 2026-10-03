@@ -126,6 +126,17 @@ class Task(Base):
             text("created_at DESC"),
             postgresql_where=text("kind = 'ingest_source'"),
         ),
+        # A board's latest run and its active-run check. Without this both
+        # walk tasks backwards decompressing every payload to read the board
+        # id: 150,847 rows and 7.5 s for board 4 on 2026-10-03 (EXPLAIN
+        # ANALYZE). The kinds stay literal in the readers so a generic plan
+        # can still prove this predicate.
+        Index(
+            "idx_tasks_managed_board",
+            text("((payload->>'managed_board_id')::bigint)"),
+            text("id DESC"),
+            postgresql_where=text("kind IN ('run_managed_board', 'run_managed_board_batch')"),
+        ),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)

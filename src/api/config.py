@@ -281,6 +281,18 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
         help="Days a posting a title pattern screened out stays on record after its "
         "board stops listing it.",
     ),
+    # How long a finished managed-board run keeps an inline candidate list
+    # before `python -m api.migrate_managed_board_jobs strip` may remove it.
+    # Nothing reads a finished run's candidates (observability.md lists the
+    # readers), so this is only how long a recent run stays inspectable from
+    # the admin queue: a judgment, and a week covers a weekend's runs.
+    "managed_board_run_jobs_retention_days": ConfigKey(
+        section="Boards",
+        default=7,
+        value_type=PositiveInt,
+        help="Days a finished managed-board run keeps its inline candidate list before the "
+        "retention operation may remove it. Runs awaiting recovery or collection keep theirs.",
+    ),
     "source_title_patterns_enabled": ConfigKey(
         section="Catalog",
         default=True,
