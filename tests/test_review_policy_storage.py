@@ -1,11 +1,17 @@
 from api import db, review_gate, review_gate_records
+from tests.test_review_decision_storage import inline
 
 
 def admission(f, *, title="Engineer"):
     task = f.make_task("run_filter_batch_chunk")
     job = {"url": f"https://example.test/{task}", "title": title, "company": "Example"}
     review_gate.partition(task, "policy-test", [job], {})
-    row = db.query_one("SELECT * FROM review_gate_decisions WHERE task_id=%s", (task,))
+    from api.review_decision_storage import DECISIONS
+
+    # The resolved row: effective references, and the inline policy column.
+    row = db.query_one(
+        f"SELECT d.*,d.inline_policy AS policy FROM {DECISIONS} WHERE d.task_id=%s", (task,)
+    )
     assert row is not None
     return task, job, row
 
@@ -107,6 +113,7 @@ def test_missing_reference_fails_even_when_inline_policy_exists(f):
     from api import review_policy_storage
 
     task, _, row = admission(f)
+    inline([row["id"]])
     db.execute(
         "UPDATE review_gate_decisions d SET policy=p.policy "
         "FROM review_gate_policies p WHERE d.id=%s AND p.id=d.policy_id",
@@ -135,6 +142,8 @@ def test_reference_only_and_legacy_rows_preserve_admin_and_personal_shapes(
         "TRUE", {}, pagination.Page.from_params(1, 25, maximum=100), {}, personal=True
     )
     assert personal.rows[0].policy == {} and personal.rows[0].evidence == {}
+    inline([row["id"]])
+    assert client.get("/v1/admin/review-gates/decisions", headers=admin_headers).json() == baseline
     db.execute(
         "UPDATE review_gate_decisions d SET policy=p.policy "
         "FROM review_gate_policies p WHERE d.id=%s AND p.id=d.policy_id",

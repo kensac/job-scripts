@@ -101,7 +101,8 @@ def persist(
             "SELECT id,url FROM jobs WHERE url=ANY(%s::text[])", ([job["url"] for job in jobs],)
         )
     }
-    rows = []
+    rows: list[tuple[Any, ...]] = []
+    bodies: list[dict[str, Any]] = []
     for job in jobs:
         url = job["url"]
         if url in previous:
@@ -122,47 +123,58 @@ def persist(
                 filter_id if filter_id is not None else payload.get("filter_id"),
                 payload.get("managed_board_id"),
                 payload.get("revision"),
-                prompt_hash,
-                selected["stage"],
-                policy.get(selected["stage"] + "_mode", "off"),
-                "skip" if selected["skip"] else "review",
-                selected["reason"],
-                selected["profile_id"],
-                job.get("title") or "",
-                content_hash((contents or {}).get(url)),
-                db.jsonb(
-                    {
-                        "version": "review-gate-v1",
-                        "company": job.get("company"),
-                        "planned_model": model,
-                        "transport": transport,
-                        "routing": observations.get(url),
-                        "input_hash": content_hash(
-                            build_custom_input(
-                                job.get("company") or "", job.get("title") or "", contents[url]
-                            )
-                        )
-                        if contents and url in contents
-                        else None,
-                        "profile": profile[1].model_dump(mode="json") if profile else None,
-                        "profile_classifier_version": CLASSIFIER_VERSION if profile else None,
-                        "profile_model": JOB_PROFILE_MODEL if profile else None,
-                        "profile_instructions": JOB_PROFILE_INSTRUCTIONS if profile else None,
-                        "profile_input_content": (contents or {}).get(url) if profile else None,
-                    }
-                ),
             )
+        )
+        bodies.append(
+            {
+                "key": len(bodies),
+                "prompt_hash": prompt_hash,
+                "stage": selected["stage"],
+                "mode": policy.get(selected["stage"] + "_mode", "off"),
+                "action": "skip" if selected["skip"] else "review",
+                "reason": selected["reason"],
+                "profile_id": selected["profile_id"],
+                "title": job.get("title") or "",
+                "content_hash": content_hash((contents or {}).get(url)),
+                "evidence": {
+                    "version": "review-gate-v1",
+                    "company": job.get("company"),
+                    "planned_model": model,
+                    "transport": transport,
+                    "routing": observations.get(url),
+                    "input_hash": content_hash(
+                        build_custom_input(
+                            job.get("company") or "", job.get("title") or "", contents[url]
+                        )
+                    )
+                    if contents and url in contents
+                    else None,
+                    "profile": profile[1].model_dump(mode="json") if profile else None,
+                    "profile_classifier_version": CLASSIFIER_VERSION if profile else None,
+                    "profile_model": JOB_PROFILE_MODEL if profile else None,
+                    "profile_instructions": JOB_PROFILE_INSTRUCTIONS if profile else None,
+                    "profile_input_content": (contents or {}).get(url) if profile else None,
+                },
+            }
         )
     if not rows:
         return previous
     policy_id = review_policy_storage.intern(db.jsonb(policy))
-    rows = [(*row, policy_id) for row in rows]
+    for body in bodies:
+        body["policy_id"] = policy_id
+    urls = review_decision_storage.intern_urls([row[1] for row in rows])
+    body_ids = review_decision_storage.intern_bodies(
+        "SELECT * FROM jsonb_to_recordset(%(bodies)s::jsonb) AS s(key int,prompt_hash text,"
+        "stage text,mode text,action text,reason text,profile_id bigint,title text,"
+        "content_hash text,policy_id bigint,evidence jsonb)",
+        {"bodies": db.jsonb(bodies)},
+    )
+    # Reference-only: the content lives once in the body and URL tables.
     db.executemany(
-        "INSERT INTO review_gate_decisions(task_id,url,job_id,user_id,filter_id,managed_board_id,"
-        "revision,prompt_hash,stage,mode,action,reason,profile_id,title,content_hash,evidence,policy_id) "
-        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) "
-        "ON CONFLICT(task_id,url) DO NOTHING",
-        rows,
+        "INSERT INTO review_gate_decisions(task_id,url_id,job_id,user_id,filter_id,"
+        "managed_board_id,revision,body_id) VALUES (%s,%s,%s,%s,%s,%s,%s,%s) "
+        "ON CONFLICT(task_id,url_id) DO NOTHING",
+        [(row[0], urls[row[1]], *row[2:], body_ids[n]) for n, row in enumerate(rows)],
     )
     return existing(task_id)
 

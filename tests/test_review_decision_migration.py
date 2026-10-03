@@ -4,7 +4,7 @@ import pytest
 
 from api import db, review_gate_records
 from api.review_policy_storage import PolicySnapshotUnavailable
-from tests.test_review_decision_storage import INLINE
+from tests.test_review_decision_storage import INLINE, inline
 from tests.test_review_gate_reads import outcome
 from tests.test_review_policy_storage import admission
 
@@ -14,11 +14,12 @@ REFERENCES = "-'url_id'-'body_id'-'policy_id'"
 def legacy(f, policy='{"legacy":true}'):
     """The shape 7.4M production rows hold: every column inline, no references."""
     task, job, row = admission(f)
+    inline([row["id"]])
     db.execute(
         "UPDATE review_gate_decisions SET policy=%s::jsonb,policy_id=NULL WHERE id=%s",
         (policy, row["id"]),
     )
-    return task, job, row
+    return task, job, db.query_one("SELECT * FROM review_gate_decisions WHERE id=%s", (row["id"],))
 
 
 def run(mode, through, **kwargs):
@@ -103,6 +104,8 @@ def test_compaction_and_restore_are_exact_and_restartable(f):
 
 def test_reference_only_policy_rows_get_their_exact_snapshot_back_inline(f):
     task, _, row = admission(f)
+    inline([row["id"]])
+    row = db.query_one("SELECT * FROM review_gate_decisions WHERE id=%s", (row["id"],))
     assert row["policy"] is None and row["policy_id"] is not None
     reads = review_gate_records.existing(task)
     run("copy", row["id"])
@@ -143,9 +146,11 @@ def test_unreferenced_rows_are_counted_never_compacted_or_given_provenance(f):
     [
         "UPDATE review_gate_decisions SET title='Changed'",
         "UPDATE review_gate_decisions SET policy='{\"changed\":true}'",
-        "UPDATE review_gate_decision_bodies SET digest='invalid'::bytea",
+        "UPDATE review_gate_decision_bodies SET digest='invalid'::bytea "
+        "WHERE id=(SELECT body_id FROM review_gate_decisions)",
         "UPDATE review_gate_policies SET digest='invalid'::bytea "
-        "WHERE id=(SELECT policy_id FROM review_gate_decision_bodies)",
+        "WHERE id=(SELECT b.policy_id FROM review_gate_decision_bodies b "
+        "JOIN review_gate_decisions d ON d.body_id=b.id)",
     ],
 )
 def test_disagreeing_or_corrupt_references_never_clear_or_restore(f, tamper):
@@ -161,6 +166,8 @@ def test_disagreeing_or_corrupt_references_never_clear_or_restore(f, tamper):
 
 def test_copy_refuses_a_policy_reference_that_disagrees_with_inline(f):
     _, _, row = admission(f)
+    inline([row["id"]])
+    db.execute("DELETE FROM review_gate_decision_bodies")
     db.execute(
         "UPDATE review_gate_decisions SET policy='{\"changed\":true}' WHERE id=%s", (row["id"],)
     )

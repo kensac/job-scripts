@@ -719,6 +719,13 @@ reconstruct a historical policy or body from current configuration or a
 filter hash. None of the three tables cascades from task, posting or filter
 retention.
 
+**Admission writes only references.** `review_gate_records.persist` interns
+the policy, the URLs and the bodies inside the admission transaction, each as
+one set-based conflict-safe insert followed by a read, and inserts per-task
+rows holding `url_id` and `body_id` with `ON CONFLICT (task_id, url_id)`.
+Never write the inline columns again: a second copy is the 1,242 B a row this
+replaced, and the backfill would have to move it later.
+
 **Every reader selects from `review_decision_storage.DECISIONS`**, which
 presents inline, copied and reference-only rows with the columns the inline
 table had. A reader written against `review_gate_decisions` directly reads

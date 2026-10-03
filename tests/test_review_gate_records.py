@@ -2,6 +2,7 @@ import pytest
 
 from api import db, review_gate, review_gate_records
 from api.ai import verdicts
+from api.review_decision_storage import DECISIONS
 from tests.test_review_gate import configure, proven_job
 
 
@@ -14,7 +15,7 @@ def test_admissions_survive_retention_and_retries_do_not_rewrite_facts(f):
         task, "test-hash", [job], {}, model="test-model", transport="batch"
     )
     row = db.query_one(
-        "SELECT * FROM review_gate_decisions WHERE id=%s", (decisions[job["url"]]["decision_id"],)
+        f"SELECT * FROM {DECISIONS} WHERE d.id=%s", (decisions[job["url"]]["decision_id"],)
     )
     assert row["action"] == "skip"
     assert row["job_id"] == job_id
@@ -25,7 +26,7 @@ def test_admissions_survive_retention_and_retries_do_not_rewrite_facts(f):
     assert db.query_one("SELECT count(*) n FROM review_gate_decisions")["n"] == 1
     db.execute("DELETE FROM tasks WHERE id=%s", (task,))
     db.execute("DELETE FROM jobs WHERE id=%s", (job_id,))
-    assert db.query_one("SELECT * FROM review_gate_decisions WHERE id=%s", (row["id"],)) == row
+    assert db.query_one(f"SELECT * FROM {DECISIONS} WHERE d.id=%s", (row["id"],)) == row
 
 
 def test_profile_snapshot_keeps_evidence_after_source_task_retention(f):
@@ -33,7 +34,7 @@ def test_profile_snapshot_keeps_evidence_after_source_task_retention(f):
     job, profile_task = proven_job(f)
     task = f.make_task("run_filter_batch_chunk")
     review_gate.partition(task, "test-hash", [job], {job["url"]: "exact posting content"})
-    row = db.query_one("SELECT * FROM review_gate_decisions WHERE task_id=%s", (task,))
+    row = db.query_one(f"SELECT * FROM {DECISIONS} WHERE d.task_id=%s", (task,))
     assert row["stage"] == "profile"
     assert row["evidence"]["profile"]["primary_role_family"] == "legal"
     assert row["evidence"]["profile_input_content"] == "exact posting content"

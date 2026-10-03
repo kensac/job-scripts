@@ -52,6 +52,18 @@ def reference_only(ids=None):
     )
 
 
+def inline(ids=None):
+    """Rewrite admitted rows into the legacy all-inline shape production holds."""
+    db.execute(
+        "UPDATE review_gate_decisions d SET url=u.url,"
+        + ",".join(f"{column}=b.{column}" for column in INLINE if column != "url")
+        + ",policy_id=b.policy_id,url_id=NULL,body_id=NULL "
+        "FROM review_gate_urls u,review_gate_decision_bodies b "
+        "WHERE u.id=d.url_id AND b.id=d.body_id AND (%(all)s OR d.id=ANY(%(ids)s::bigint[]))",
+        {"ids": ids, "all": ids is None},
+    )
+
+
 def admitted(f):
     """Real admissions: a skip, a review with routing evidence, two tasks, outcomes."""
     configure()
@@ -67,6 +79,7 @@ def admitted(f):
         review_gate.partition(
             task, "test-hash", jobs, contents, model="test-model", transport="batch"
         )
+    inline()
     db.execute(
         "UPDATE review_gate_decisions SET evidence=evidence||"
         '\'{"routing":{"outcome":"reject","would_review":false}}\'::jsonb '
