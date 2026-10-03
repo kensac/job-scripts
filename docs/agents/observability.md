@@ -864,8 +864,10 @@ handler, once per run or resume, which passes the list on to
 `replace_projection`, and `tasks.retry_payload_task`, which verifies the
 object before requeueing. Nothing reads a finished run's candidates. A
 missing or unreadable object raises `PayloadUnavailable`, so the run takes
-the payload recovery path above; a run with neither shape had its list removed
-by retention and is refused the same way, never run as an empty board.
+the payload recovery path above; a run with neither shape is refused the same
+way, never run as an empty board. Every payload writer merges its own keys
+(`||`, `jsonb_set`) and none writes `jobs`, which is what lets a run change
+shape underneath its handler.
 
 **Admission writes the list as a verified object before the task row exists,
 and the payload holds only the reference.** Never write it inline again.
@@ -882,26 +884,43 @@ A board's runs are found through `idx_tasks_managed_board`, partial on the two
 run kinds. Its readers spell the kinds as SQL literals, because a prepared
 statement's generic plan cannot prove a partial predicate from a bound array.
 
-**Retention removes inline lists from finished runs; it never touches objects
-or references.** `managed_board_run_jobs_retention_days` (app_config) sets the
-age. A run is eligible when it is done or cancelled, or failed without the
-`payload_recovery` marker, and has no pending batch ids and no unconsumed
-receipt. Its `jobs` is replaced by `candidate_count`. Nothing runs this
-automatically. Choose a fixed high-water id with
-`SELECT max(id) FROM tasks`, count first, then strip:
+**Legacy inline runs move to exactly the shape admission writes; a run's
+candidates are never deleted.** The end state is zero managed runs with
+inline `jobs`. `externalize` converts every inline run whatever its status,
+in-flight ones included: the handler holds the list it already read, and a
+resume or recovery reads the row again through `run_jobs`. Per run it uploads
+the exact inline list with `put_verified` outside any transaction, then in one
+short transaction locks the row, requires the identical list (same canonical
+bytes) and no reference or count beside it, and replaces `jobs` with
+`jobs_ref` and `candidate_count` in one UPDATE. Every other payload key is
+left as it was. A list that changed in between writes nothing and reports
+`changed`. Nothing runs this automatically. Choose a fixed high-water id with
+`SELECT max(id) FROM tasks`, then:
 
 ```
 python -m api.migrate_managed_board_jobs count --through ID --after 0 --limit 20
-python -m api.migrate_managed_board_jobs strip --through ID --after 0 --limit 20
+python -m api.migrate_managed_board_jobs externalize --through ID --after 0 --limit 20 --workers 4
+python -m api.migrate_managed_board_jobs verify --through ID --after 0 --limit 20
 ```
 
-Each invocation examines at most `--limit` finished runs in id order, in one
-transaction with two-second lock and five-second statement timeouts; the
-limit bounds how many legacy payloads it decompresses. Repeat from the printed
-`after` until `exhausted` is true. A failed invocation commits nothing; retry
-it from the same cursor. Stripped runs are not selected again. Removed bytes
-are column sizes, not filesystem space: the table does not shrink without a
-rewrite, which is not part of this operation.
+Each invocation examines at most `--limit` managed runs in id order, so it
+decompresses at most that many legacy payloads. Repeat from the printed
+`after` until `exhausted` is true. `count` and `verify` run read-only: `count`
+classifies runs as `inline`, `referenced`, `missing` or `conflict` without
+reading objects, and `verify` reads every reference through `run_jobs`, so a
+missing object or a length that disagrees with `candidate_count` is
+`unavailable`. A writing invocation stops its cursor before the first
+`changed` or `unavailable` run; resume from the same `after`, and runs already
+converted report `referenced`. `missing` and `conflict` are not shapes any
+admission wrote; they are listed by id under `failed` (exit status 1) for a
+person to look at, and the cursor moves past them. Done means `count` over
+the whole range reports no `inline` and `verify` no `failed`.
+
+`restore` is the rollback: it reads each reference through `run_jobs`, then
+under the row lock puts the exact list back as `jobs` and removes `jobs_ref`
+and `candidate_count`, returning a legacy payload to exactly what it was.
+Readers older than `run_jobs` need it on every run, including those admitted
+with a reference. Objects are never deleted, so a restore is always possible.
 
 ## Shared query instruction text
 

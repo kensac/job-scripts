@@ -1,8 +1,9 @@
 """Where a managed-board run keeps its candidate snapshot, how the board's
-runs are found, and how finished runs give their inline snapshots back."""
+runs are found, and how legacy inline snapshots move to objects and back."""
 
 from __future__ import annotations
 
+import json
 from dataclasses import asdict
 
 import pytest
@@ -166,84 +167,185 @@ def test_latest_and_active_check_answer_from_the_board_index(f):
             assert "idx_tasks_managed_board" in plan, plan
 
 
-def _finished(f, *, status="done", days=30, **payload):
-    task_id = f.make_task(
-        payload.pop("kind", "run_managed_board_batch"),
-        {"managed_board_id": 1, **payload},
-        status=status,
-    )
+def _run(f, *, status="done", kind="run_managed_board_batch", **payload):
+    return f.make_task(kind, {"managed_board_id": 1, "prompt": "p", **payload}, status=status)
+
+
+def _texts() -> dict[int, str]:
+    return {row["id"]: row["t"] for row in db.query("SELECT id, payload::text AS t FROM tasks")}
+
+
+def _legacy(task_id: int) -> list:
+    """Rewrite an admitted run into the inline shape admission wrote before
+    the reference existed, and return its candidates."""
+    jobs = runs.run_jobs(_payload(task_id))
     db.execute(
-        "UPDATE tasks SET finished_at = now() - make_interval(days => %s) WHERE id = %s",
-        (days, task_id),
+        "UPDATE tasks SET payload = (payload - 'jobs_ref' - 'candidate_count') || "
+        "jsonb_build_object('jobs', %s::jsonb) WHERE id = %s",
+        (db.jsonb(jobs), task_id),
     )
-    return task_id
+    return jobs
+
+
+def _all(mode: str, objects, *, limit: int = 100, workers: int = 1) -> list[dict]:
+    through = db.query_one("SELECT max(id) AS n FROM tasks")["n"]
+    results, cursor = [], 0
+    while not results or not results[-1]["exhausted"]:
+        results.append(
+            runs.migrate_run_jobs(
+                mode, after=cursor, through=through, limit=limit, store=objects, workers=workers
+            )
+        )
+        cursor = results[-1]["after"]
+    return results
+
+
+def _count(results: list[dict], outcome: str) -> int:
+    return sum(result["counts"].get(outcome, 0) for result in results)
 
 
 JOBS = [{"id": 1, "url": "u1"}, {"id": 2, "url": "u2"}]
 
 
-def test_retention_strips_only_finished_unreferenced_inline_candidates(f):
-    db.execute(
-        "UPDATE app_config SET value = '7' WHERE key = 'managed_board_run_jobs_retention_days'"
-    )
-    eligible = [
-        _finished(f, jobs=JOBS),
-        _finished(f, status="cancelled", jobs=JOBS),
-        _finished(f, status="failed", jobs=JOBS, batch_ids=[]),
-        _finished(f, kind="run_managed_board", jobs=JOBS),
-    ]
-    kept = [
-        _finished(f, jobs=JOBS, days=1),
-        _finished(f, status="failed", jobs=JOBS, payload_recovery={"reason": "x"}),
-        _finished(f, status="waiting", jobs=JOBS),
-        _finished(f, jobs=JOBS, batch_ids=["b"]),
-        _finished(f, kind="run_filter_chunk", jobs=JOBS),
-        _finished(f, jobs_ref={"key": "k"}, candidate_count=2),
-    ]
-    receipt_owner = _finished(f, jobs=JOBS)
-    kept.append(receipt_owner)
-    db.execute(
-        "INSERT INTO batch_result_receipts (provider_batch_id, custom_id, task_id, response) "
-        "VALUES ('b', 'c', %s, '{}')",
-        (receipt_owner,),
-    )
-    before = {row["id"]: row["payload"] for row in db.query("SELECT id, payload FROM tasks")}
-    through = max(before)
+@pytest.mark.asyncio
+async def test_externalize_moves_a_legacy_run_to_the_admission_shape_and_it_resumes(
+    client, admin_headers, f, monkeypatch, objects
+):
+    _admissible(monkeypatch)
+    board, job_id, _url = _board_and_job(client, admin_headers, f)
+    task_id = client.post(
+        f"/v1/admin/managed-boards/{board['id']}/run", headers=admin_headers
+    ).json()["task_id"]
+    jobs = _legacy(task_id)
+    db.execute("UPDATE tasks SET status = 'running' WHERE id = %s", (task_id,))
+    rest = db.query_one("SELECT (payload - 'jobs')::text AS t FROM tasks WHERE id = %s", (task_id,))
 
-    counted = runs.strip_finished_jobs(after=0, through=through, limit=100, dry_run=True)
-    assert counted["eligible"] == len(eligible) and counted["stripped"] == 0
-    assert {
-        row["id"]: row["payload"] for row in db.query("SELECT id, payload FROM tasks")
-    } == before
+    [result] = _all("externalize", objects)
 
-    # Three finished runs an invocation, resumed from each cursor.
-    results, cursor = [], 0
-    while not results or not results[-1]["exhausted"]:
-        results.append(
-            runs.strip_finished_jobs(after=cursor, through=through, limit=3, dry_run=False)
+    assert result["counts"] == {"externalized": 1}
+    payload = _payload(task_id)
+    assert "jobs" not in payload and payload["candidate_count"] == len(jobs)
+    assert runs.run_jobs(payload, objects) == jobs
+    # Everything else in the payload is the same jsonb, byte for byte.
+    assert (
+        db.query_one(
+            "SELECT (payload - 'jobs_ref' - 'candidate_count')::text AS t FROM tasks WHERE id = %s",
+            (task_id,),
         )
-        cursor = results[-1]["after"]
-    assert all(result["scanned"] <= 3 for result in results) and len(results) > 1
-    assert sum(result["stripped"] for result in results) == len(eligible)
-    assert sum(result["bytes_before"] for result in results) > sum(
-        result["bytes_after"] for result in results
+        == rest
     )
 
-    after = {row["id"]: row["payload"] for row in db.query("SELECT id, payload FROM tasks")}
-    for task_id in eligible:
-        assert after[task_id] == {
-            **{k: v for k, v in before[task_id].items() if k != "jobs"},
-            "candidate_count": 2,
+    seen = []
+
+    async def fake_batch(tid, cfg, snapshot, batch_jobs, hooks, **kwargs):
+        seen.append([job["id"] for job in batch_jobs])
+        hooks.complete()
+
+    monkeypatch.setattr(managed_task, "execute_batch", fake_batch)
+    await managed_task.handle_run_managed_board_batch(task_id, _payload(task_id))
+    await managed_task.handle_run_managed_board_batch(task_id, _payload(task_id))
+    assert seen == [[job_id], [job_id]]
+
+
+def test_externalize_converts_every_inline_run_in_bounded_resumable_steps(f, objects):
+    # Every status: an in-flight run reads its candidates only through
+    # run_jobs, so converting it under the handler is safe.
+    inline = [
+        _run(f, status=status, jobs=[{"id": n, "url": f"u{n}"}])
+        for n, status in enumerate(
+            ("done", "cancelled", "failed", "pending", "running", "waiting", "awaiting_batch")
+        )
+    ]
+    inline.append(_run(f, kind="run_managed_board", jobs=JOBS))
+    referenced = _run(f, jobs_ref=asdict(objects.put_verified(JOBS)), candidate_count=2)
+    other = _run(f, kind="run_filter_chunk", jobs=JOBS)
+    before = _texts()
+
+    counted = _all("count", objects)
+    assert _count(counted, "inline") == len(inline) and _count(counted, "referenced") == 1
+    assert _texts() == before
+
+    results = _all("externalize", objects, limit=3, workers=2)
+    assert len(results) > 1 and all(sum(r["counts"].values()) <= 3 for r in results)
+    assert _count(results, "externalized") == len(inline)
+    assert _count(results, "referenced") == 1
+    after = _texts()
+    assert after[referenced] == before[referenced] and after[other] == before[other]
+    for task_id in inline:
+        payload = _payload(task_id)
+        original = json.loads(before[task_id])
+        assert runs.run_jobs(payload, objects) == original["jobs"]
+        assert {k: v for k, v in payload.items() if k not in ("jobs_ref", "candidate_count")} == {
+            k: v for k, v in original.items() if k != "jobs"
         }
-    for task_id in kept:
-        assert after[task_id] == before[task_id]
 
-    again = runs.strip_finished_jobs(after=0, through=through, limit=100, dry_run=False)
-    assert again["stripped"] == 0 and again["exhausted"]
-    assert {row["id"]: row["payload"] for row in db.query("SELECT id, payload FROM tasks")} == after
+    again = _all("externalize", objects)
+    assert _count(again, "externalized") == 0 and _texts() == after
+    verified = _all("verify", objects)
+    assert _count(verified, "verified") == len(inline) + 1
+    assert all(not r["failed"] for r in verified)
 
 
-def test_stripped_run_is_reported_unavailable_not_empty():
+def test_a_concurrent_change_between_upload_and_lock_writes_nothing(f, objects):
+    task_id = _run(f, jobs=JOBS)
+    changed = [{"id": 3, "url": "u3"}]
+    objects.client.after_put = lambda: db.execute(
+        "UPDATE tasks SET payload = jsonb_set(payload, '{jobs}', %s) WHERE id = %s",
+        (db.jsonb(changed), task_id),
+    )
+
+    result = runs.migrate_run_jobs("externalize", after=0, through=task_id, limit=10, store=objects)
+
+    assert result["counts"] == {"changed": 1} and result["failed"] == [task_id]
+    assert result["after"] == 0 and not result["exhausted"]
+    assert _payload(task_id) == {"managed_board_id": 1, "prompt": "p", "jobs": changed}
+
+
+def test_an_upload_failure_stops_before_the_run_and_writes_nothing(f, objects):
+    task_id = _run(f, jobs=JOBS)
+    objects.client.fail_put = True
+    before = _texts()
+
+    result = runs.migrate_run_jobs("externalize", after=0, through=task_id, limit=10, store=objects)
+
+    assert result["counts"] == {"unavailable": 1} and result["after"] == 0
+    assert _texts() == before
+
+
+def test_verify_reports_a_wrong_count_and_a_missing_object(f, objects):
+    good = _run(f, jobs=JOBS)
+    miscounted = _run(f, jobs=[{"id": 3, "url": "u3"}])
+    lost = _run(f, jobs=[{"id": 4, "url": "u4"}])
+    _all("externalize", objects)
+    db.execute(
+        "UPDATE tasks SET payload = payload || '{\"candidate_count\": 5}' WHERE id = %s",
+        (miscounted,),
+    )
+    objects.client.objects.pop((objects.bucket, _payload(lost)["jobs_ref"]["key"]))
+    before = _texts()
+
+    [result] = _all("verify", objects)
+
+    assert result["counts"] == {"verified": 1, "unavailable": 2}
+    assert result["failed"] == [miscounted, lost] and good not in result["failed"]
+    assert _texts() == before
+
+
+def test_restore_puts_back_exactly_the_original_inline_payload(f, objects):
+    tasks = [_run(f, jobs=JOBS), _run(f, status="running", jobs=[{"id": 3, "url": "u3"}])]
+    original = _texts()
+
+    _all("externalize", objects)
+    assert all("jobs" not in _payload(task_id) for task_id in tasks)
+    restored = _all("restore", objects)
+
+    assert _count(restored, "restored") == len(tasks)
+    assert _texts() == original
+    again = _all("restore", objects)
+    assert _count(again, "restored") == 0 and _count(again, "inline") == len(tasks)
+
+
+def test_a_run_with_neither_shape_is_reported_unavailable_not_empty():
     with pytest.raises(PayloadUnavailable):
         runs.run_jobs({"candidate_count": 2})
 
