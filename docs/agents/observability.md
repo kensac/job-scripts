@@ -715,8 +715,10 @@ A worker encountering `PayloadUnavailable` leaves a failed task with a
 IDs and checkpoint state. The claim's attempt is returned, so repeated storage
 outages do not exhaust execution attempts. After restoring object access, use
 `python -m tasks.retry_payload_task TASK_ID` on the deployed worker environment.
-It verifies external request snapshots and unconsumed receipt payloads before
-requeueing that exact task. Missing evidence reports `unavailable`; concurrent
+It verifies required external request snapshots and unconsumed receipt payloads
+before requeueing that exact task. Only when collection is explicitly
+checkpointed and no provider batches remain does it skip consumed-only snapshot
+hydration. It still rechecks all snapshot, receipt and task rows under locks. Missing evidence reports `unavailable`; concurrent
 changes, ambiguous accepted provider work, and unsupported parent states report
 `conflict`, without mutation. Neither result authorizes a fresh task submission.
 
