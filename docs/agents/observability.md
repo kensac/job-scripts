@@ -608,9 +608,16 @@ Missing provenance or bounded lookup failure retains detailed review. Reuse
 creates no additional classification calls; the existing profile derivation is
 still responsible for producing shared profiles.
 
-Task payload `review_gate` records candidates, proposed exclusions, proven
-profiles, skipped URLs with stage/reason, and the remainder, written once at
-admission. Shadow comparisons against the paid result are derived from
+Task payload `review_gate` records the policy, candidate, proven-profile,
+proposed-exclusion and remainder counts, written once at admission. **The
+skipped URLs live only in `review_gate_decisions`**, and
+`review_gate_records.exclusions` derives them: `persist` writes a row for every
+job in the transaction that writes the plan, so the derived set is exactly
+what the payload used to copy. That copy was 53 percent of filter-chunk
+payload text over 7 days (measured 2026-10-03) and was rewritten with every
+later payload write. Plans written before #638 (2026-09-16) recorded decisions
+carry `skipped` and no rows; `replace_projection` reads it only then. Never
+write it again. Shadow comparisons against the paid result are derived from
 `review_gate_outcomes` by `review_gate_reads.comparisons`, never counted into the
 payload. Paid batches bypass replanning, including
 after a switch changes. Skips are not paid verdicts, do not enter the verdict
@@ -884,27 +891,42 @@ the parent before the child state transition/count, preventing a stale count
 from terminalizing a parent after its child was recovered. Do not deploy this
 lifecycle change without coordinating with the fleet deployment owner.
 
-## Managed-board run candidates
+## Task job lists: managed-board runs and filter chunks
 
-**Every reader of a managed-board run's candidate list goes through
-`managed_board_runs.run_jobs`, which reads both shapes:** inline `jobs`, and
-`jobs_ref` with `candidate_count`, a verified object. The list was 7.9 to
-8.6 MB of JSON per run and 94 percent of the payload (measured 2026-10-03),
-so every whole-payload write (batch id appends, the review gate plan, the
-title gate report, `finish`) rewrote it and every whole-payload read (the
-claim, progress events, the admin queue) carried it. Its readers are the
-handler, once per run or resume, which passes the list on to
-`replace_projection`, and `tasks.retry_payload_task`, which verifies the
-object before requeueing. Nothing reads a finished run's candidates. A
-missing or unreadable object raises `PayloadUnavailable`, so the run takes
-the payload recovery path above; a run with neither shape is refused the same
-way, never run as an empty board. Every payload writer merges its own keys
-(`||`, `jsonb_set`) and none writes `jobs`, which is what lets a run change
-shape underneath its handler.
+**Every reader of a task's job list goes through `task_jobs.run_jobs`, which
+reads both shapes:** inline `jobs`, and `jobs_ref` with `candidate_count`, a
+verified object. Two populations carry one (`task_jobs.POPULATIONS`):
 
-**Admission writes the list as a verified object before the task row exists,
-and the payload holds only the reference.** Never write it inline again.
-`managed_board_runs.admit` plans without holding a lock, uploads with
+- **Managed-board runs.** The candidate list was 7.9 to 8.6 MB of JSON per run
+  and 94 percent of the payload (measured 2026-10-03). Its readers are the
+  handler, once per run or resume, which passes the list on to
+  `replace_projection`, and `tasks.retry_payload_task`.
+- **Filter chunks** (`run_filter_chunk`, `run_filter_batch_chunk`). The list
+  was 571 MB of the 1,301 MB of payload text written by 7,376 batch chunks in
+  7 days (162 MB stored after compression; measured 2026-10-03). Its readers
+  are the two chunk handlers, `tasks.retry_payload_task`, and two SQL readers,
+  `tasks.board.in_flight_urls` and `submission_exclusions`, which run for
+  every active chunk of a user on every split and every submission.
+
+Either way the list rode along on every whole-payload write (batch id
+appends, the review gate plan, `finish`) and every whole-payload read (the
+claim, progress events, the admin queue). A missing or unreadable object
+raises `PayloadUnavailable`, so the task takes the payload recovery path
+above; a payload with neither shape is refused the same way, never run as an
+empty list. Every payload writer merges its own keys (`||`, `jsonb_set`) and
+none writes `jobs`, which is what lets a task change shape underneath its
+handler.
+
+**A SQL reader cannot follow a reference, so a filter chunk keeps its URLs
+inline as `urls` beside it.** That is the URL of every job in list order,
+272 MB of the 571 MB (same measurement); company and title go to the object.
+`run_jobs` refuses an object whose URLs differ from `urls`. Both SQL readers
+read a chunk's URLs through `tasks.board.CHUNK_URLS`, which yields the same
+rows from either shape. Do not add a SQL reader of `payload->'jobs'`.
+
+**Managed admission writes the list as a verified object before the task row
+exists, and the payload holds only the reference.** Never write it inline
+again. `managed_board_runs.admit` plans without holding a lock, uploads with
 `PayloadStore.put_verified` outside any transaction, then locks the board and
 checks again what a concurrent writer can change (the board row, an active
 run, the sponsor's reservations) before inserting. Storage that is
@@ -914,46 +936,54 @@ again next cycle. Objects are content-addressed and never deleted; candidate
 lists rarely repeat across runs, so each run adds its list to the bucket.
 
 A board's runs are found through `idx_tasks_managed_board`, partial on the two
-run kinds. Its readers spell the kinds as SQL literals, because a prepared
-statement's generic plan cannot prove a partial predicate from a bound array.
+run kinds. Its readers spell the kinds as SQL literals
+(`Population.kinds_sql`), because a prepared statement's generic plan cannot
+prove a partial predicate from a bound array.
 
-**Legacy inline runs move to exactly the shape admission writes; a run's
-candidates are never deleted.** The end state is zero managed runs with
-inline `jobs`. `externalize` converts every inline run whatever its status,
-in-flight ones included: the handler holds the list it already read, and a
-resume or recovery reads the row again through `run_jobs`. Per run it uploads
-the exact inline list with `put_verified` outside any transaction, then in one
-short transaction locks the row, requires the identical list (same canonical
-bytes) and no reference or count beside it, and replaces `jobs` with
-`jobs_ref` and `candidate_count` in one UPDATE. Every other payload key is
-left as it was. A list that changed in between writes nothing and reports
-`changed`. Nothing runs this automatically. Choose a fixed high-water id with
-`SELECT max(id) FROM tasks`, then:
+**Legacy inline lists move to exactly the shape the writer produces; a list
+is never deleted.** The end state is zero tasks of either population with
+inline `jobs`. **Roll the `run_jobs` and `CHUNK_URLS` readers across every API
+and worker before converting a filter chunk**: an older worker reads
+`payload["jobs"]` and fails the chunk. `externalize` converts every inline
+task whatever its status, in-flight ones included: the handler holds the list
+it already read, and a resume or recovery reads the row again through
+`run_jobs`. Per task it uploads the exact inline list with `put_verified`
+outside any transaction, then in one short transaction locks the row,
+requires the identical list (same canonical bytes) and no reference keys
+beside it, and replaces `jobs` with `jobs_ref`, `candidate_count` and, for
+filter chunks, `urls`, in one UPDATE. Every other payload key is left as it
+was. A list that changed in between writes nothing and reports `changed`.
+Nothing runs this automatically. Choose a fixed high-water id with
+`SELECT max(id) FROM tasks`, then, with `POPULATION` one of `managed_board`
+or `filter_chunk`:
 
 ```
-python -m api.migrate_managed_board_jobs count --through ID --after 0 --limit 20
-python -m api.migrate_managed_board_jobs externalize --through ID --after 0 --limit 20 --workers 4
-python -m api.migrate_managed_board_jobs verify --through ID --after 0 --limit 20
+python -m api.migrate_task_jobs POPULATION count --through ID --after 0 --limit 20
+python -m api.migrate_task_jobs POPULATION externalize --through ID --after 0 --limit 20 --workers 4
+python -m api.migrate_task_jobs POPULATION verify --through ID --after 0 --limit 20
 ```
 
-Each invocation examines at most `--limit` managed runs in id order, so it
+Each invocation examines at most `--limit` tasks in id order, so it
 decompresses at most that many legacy payloads. Repeat from the printed
 `after` until `exhausted` is true. `count` and `verify` run read-only: `count`
-classifies runs as `inline`, `referenced`, `missing` or `conflict` without
+classifies tasks as `inline`, `referenced`, `missing` or `conflict` without
 reading objects, and `verify` reads every reference through `run_jobs`, so a
-missing object or a length that disagrees with `candidate_count` is
-`unavailable`. A writing invocation stops its cursor before the first
-`changed` or `unavailable` run; resume from the same `after`, and runs already
-converted report `referenced`. `missing` and `conflict` are not shapes any
-admission wrote; they are listed by id under `failed` (exit status 1) for a
-person to look at, and the cursor moves past them. Done means `count` over
-the whole range reports no `inline` and `verify` no `failed`.
+missing object, a length that disagrees with `candidate_count` or URLs that
+disagree with `urls` is `unavailable`. A writing invocation stops its cursor
+before the first `changed` or `unavailable` task; resume from the same
+`after`, and tasks already converted report `referenced`. `missing` and
+`conflict` (a filter chunk reference without `urls`, a managed one with them,
+an inline list beside reference keys) are not shapes any writer produced;
+they are listed by id under `failed` (exit status 1) for a person to look at,
+and the cursor moves past them. Done means `count` over the whole range
+reports no `inline` and `verify` no `failed`.
 
 `restore` is the rollback: it reads each reference through `run_jobs`, then
-under the row lock puts the exact list back as `jobs` and removes `jobs_ref`
-and `candidate_count`, returning a legacy payload to exactly what it was.
-Readers older than `run_jobs` need it on every run, including those admitted
-with a reference. Objects are never deleted, so a restore is always possible.
+under the row lock puts the exact list back as `jobs` and removes `jobs_ref`,
+`candidate_count` and `urls`, returning a legacy payload to exactly what it
+was. Readers older than `run_jobs` need it on every task, including those
+written with a reference. Objects are never deleted, so a restore is always
+possible.
 
 ## Shared query instruction text
 
