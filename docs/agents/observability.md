@@ -642,3 +642,39 @@ The personal and administrative board reads continue using `job_embeddings`;
 archival does not alter those vectors or board membership. Report verified
 logical bytes separately from table size and filesystem space: removal alone
 does not return filesystem space, and no table rewrite is part of this command.
+
+## Shared review policy snapshots
+
+Review decisions retain their inline policy during the compatibility rollout
+and also reference `review_gate_policies`. The interning service uses PostgreSQL's
+JSONB serialization and checks exact text equality after digest conflicts. Never
+reconstruct historical policy from current configuration or a filter hash.
+Readers accept legacy inline-only rows and reference-only rows, but fail explicitly
+on missing references or disagreement between retained copies. Snapshots have no
+cascade from task, posting or filter retention.
+
+`python -m api.migrate_review_policies copy --through ID --after ID --limit N`
+copies at most N decisions in one transaction. Choose the fixed upper ID with
+`SELECT id FROM review_gate_decisions ORDER BY id DESC LIMIT 1`; start after zero
+and resume from the committed `after` in each result. A failed chunk rolls back
+and must be retried with the same cursor. Each invocation requires an explicit
+limit and upper bound and applies five-second statement and two-second lock
+timeouts. The upper ID bounds the population, not an assertion that concurrent
+older transactions have committed: repeat a pass from zero after the fleet
+transition to catch late legacy inserts.
+
+The same command with `verify` is read-only, returns counts of referenced and
+unreferenced decisions, and exits unsuccessfully if the chunk contains
+unreferenced decisions. Missing, mismatched or invalid-digest snapshots fail the
+chunk. Verify from zero across the same fixed upper ID; a final empty chunk does
+not certify earlier chunks. JSONB values travel through the copy as PostgreSQL
+text so historical numeric precision is retained.
+
+This compatibility phase does not remove inline policies or reclaim storage.
+Before clearing them, confirm all API and worker readers support references,
+finish and verify reference backfill, and coordinate the non-additive nullable
+inline-column transition with the deployment owner. A later clearing operator
+must verify exact equality in the same transaction as each clear. After any
+inline clearing, rollback to older readers requires restoring every inline
+policy from its snapshot and verifying completeness first. Keep snapshots and
+decision identities throughout; do not alter paid outcomes or reprice usage.

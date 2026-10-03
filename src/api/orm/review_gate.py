@@ -35,6 +35,7 @@ class ReviewGateDecision(Base):
         ForeignKeyConstraint(
             ["policy_id"],
             ["review_gate_policies.id"],
+            name="fk_review_gate_decisions_policy",
             ondelete="RESTRICT",
             postgresql_not_valid=True,
         ),

@@ -24,6 +24,8 @@ def main() -> int:
         "-c application_name=review_policy_migration"
         + (" -c default_transaction_read_only=on" if args.mode == "verify" else "")
     )
+    from psycopg import Error
+
     from api.review_policy_storage import PolicySnapshotUnavailable, migrate_chunk
     from core.pool import pool
 
@@ -35,7 +37,7 @@ def main() -> int:
                 limit=args.limit,
                 copy=args.mode == "copy",
             )
-        except PolicySnapshotUnavailable:
+        except (PolicySnapshotUnavailable, Error):
             print(json.dumps({"error": "policy_verification_failed", "after": args.after}))
             return 1
         print(json.dumps({"mode": args.mode, **result}))
