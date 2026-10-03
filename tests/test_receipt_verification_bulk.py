@@ -478,4 +478,10 @@ def test_metadata_plan_limits_cheap_keys_before_any_response_projection(f, monke
 
     keys = [node for node in nodes(plan) if node.get("Subplan Name") == "CTE keys"]
     assert len(keys) == 1 and keys[0]["Node Type"] == "Limit"
-    assert all("response" not in str(node.get("Output", [])) for node in nodes(keys[0]))
+    assert "response" not in str(keys[0].get("Output", []))
+    # A heap scan may expose its full tuple descriptor without detoasting it.
+    # No response expression or filter may execute below the materialized limit.
+    for node in nodes(keys[0]):
+        assert "to_jsonb" not in str(node.get("Output", []))
+        assert "response" not in str(node.get("Filter", ""))
+        assert "response" not in str(node.get("Join Filter", ""))
