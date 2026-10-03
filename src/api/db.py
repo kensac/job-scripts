@@ -47,15 +47,20 @@ _SCHEMA_LOCK_POLL_SECONDS = 1.0
 def init_schema() -> None:
     # Wait, never skip: a worker waiting a few seconds for a peer's
     # migration is correct; skipping it and then running against a
-    # half-converted schema is not. The wait polls a try-lock rather than
-    # blocking in pg_advisory_lock, because a backend blocked inside a
-    # statement holds a snapshot, and CREATE INDEX CONCURRENTLY in the
-    # peer's migration waits for every older snapshot: the two would wait on
-    # each other forever, invisibly to the deadlock detector (reproduced
-    # against the test database on 2026-10-03).
+    # half-converted schema is not. CREATE INDEX CONCURRENTLY in a migration
+    # waits for every transaction holding an older snapshot, so no session
+    # here may keep one: not a waiter blocked inside pg_advisory_lock, and not
+    # the holder idling in the transaction its lock statement opened. Each
+    # did, and each hung the build invisibly to the deadlock detector
+    # (reproduced on 2026-10-03). So the wait polls a try-lock and every
+    # attempt commits; the session lock outlives the commit.
     with pool.connection() as conn:
         try_lock = "SELECT pg_try_advisory_lock(%s) AS held"
-        while conn.execute(try_lock, (_SCHEMA_LOCK_KEY,)).fetchone() != {"held": True}:
+        while True:
+            held = conn.execute(try_lock, (_SCHEMA_LOCK_KEY,)).fetchone() == {"held": True}
+            conn.commit()
+            if held:
+                break
             time.sleep(_SCHEMA_LOCK_POLL_SECONDS)
         try:
             _migrate()

@@ -61,11 +61,14 @@ waits for every transaction older than itself, and a timeout turns a wait that
 will not end into a failed start that retries. `bd1e66f153c3` is the worked
 example.
 
-**Startup waits for the schema lock by polling, and must keep doing so.**
-`db.init_schema` retries `pg_try_advisory_lock` rather than blocking in
-`pg_advisory_lock`. A backend blocked inside a statement holds a snapshot, a
-concurrent build in the peer's migration waits for it, and it waits for the
-peer: a hang the deadlock detector cannot see, reproduced on 2026-10-03.
+**No session that takes the schema lock may hold a snapshot while a
+migration runs.** `db.init_schema` polls `pg_try_advisory_lock` and commits
+after every attempt; the session-level lock outlives the commit. A concurrent
+build waits for every older snapshot. A waiter blocked inside
+`pg_advisory_lock` holds one, and so does the lock holder idling in the
+transaction its lock statement opened. Both hung the build without the
+deadlock detector seeing it, reproduced on 2026-10-03: the holder only on a
+database migrated from scratch, which is what CI provisions.
 
 ## Long-running work
 
