@@ -935,6 +935,16 @@ run route): no task is queued and nothing is paid, and the scheduler tries
 again next cycle. Objects are content-addressed and never deleted; candidate
 lists rarely repeat across runs, so each run adds its list to the bucket.
 
+**A filter run writes each batch chunk's list the same way.** `_run_filters`
+uploads every batch unit's list with `put_verified` outside any transaction,
+concurrently up to `payload_objects.MAX_CONNECTIONS`, before it enqueues the
+first chunk; each chunk payload holds `jobs_ref`, `candidate_count` and
+`urls`. Storage that is unconfigured or failing raises `PayloadUnavailable`
+from the parent with no chunk enqueued and nothing paid, so the parent takes
+the payload recovery path and the next scheduled cycle plans again. Live
+chunks keep their list inline: they are interactive, run in minutes, and
+must not depend on object storage (0 were written in the 7 days measured).
+
 A board's runs are found through `idx_tasks_managed_board`, partial on the two
 run kinds. Its readers spell the kinds as SQL literals
 (`Population.kinds_sql`), because a prepared statement's generic plan cannot

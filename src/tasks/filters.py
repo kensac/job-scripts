@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
-from api import budget, db, events, metrics
+from api import budget, db, events, metrics, task_jobs
 from api.ai import verdicts
 from api.budget import load_config
 from api.task_jobs import run_jobs
+from core.payload_objects import MAX_CONNECTIONS, PayloadStore
 from core.store import get_contents
 from tasks import batch_policy
 from tasks.board import (
@@ -142,6 +144,18 @@ async def _run_filters(
         materialize_passing(user_id)
         return
     total = sum(len(jobs) for _, _, jobs in units)
+    # A batch chunk's list is a verified object and its payload holds only the
+    # reference and URLs (api.task_jobs): the chunk waits hours at the provider
+    # while its payload is rewritten. Every upload finishes before the first
+    # chunk exists, so a storage failure raises PayloadUnavailable with nothing
+    # split or paid. A live chunk is interactive and keeps its short list inline.
+    batch_lists = [jobs for mode, _, jobs in units if mode == "batch"]
+    refs = []
+    if batch_lists:
+        store = PayloadStore.from_env()
+        with ThreadPoolExecutor(max_workers=MAX_CONNECTIONS) as executor:
+            refs = list(executor.map(store.put_verified, batch_lists))
+    batch_refs = iter(refs)
     for mode, flt, jobs in units:
         enqueue(
             "run_filter_batch_chunk" if mode == "batch" else "run_filter_chunk",
@@ -150,7 +164,11 @@ async def _run_filters(
                 "user_id": user_id,
                 "filter_id": flt["id"],
                 "filter": {k: flt[k] for k in ("name", "prompt", "on_ambiguous", "prompt_hash")},
-                "jobs": jobs,
+                **(
+                    task_jobs.reference(task_jobs.FILTER_CHUNKS, jobs, next(batch_refs))
+                    if mode == "batch"
+                    else {"jobs": jobs}
+                ),
                 "ignore_budget": ignore_budget,
                 "scheduled": batched,
             },

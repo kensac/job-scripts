@@ -214,3 +214,53 @@ def test_an_unreadable_chunk_list_is_held_for_payload_recovery(objects):
     assert payload_recovery.retry(task, objects) == "unavailable"
     objects.client.fail_get = False
     assert payload_recovery.retry(task, objects) == "pending"
+
+
+def _split(f, monkeypatch, n_jobs: int):
+    uid = f.make_user()
+    cfg = ai.AIConfig("openai", "test-key", "owner", "gpt-5-nano")
+    monkeypatch.setattr(
+        filters, "load_config", lambda *args: (SimpleNamespace(weekly_token_budget=None), cfg)
+    )
+    flt = f.make_filter(uid)
+    jobs = [
+        db.query_one("SELECT url, company, title FROM jobs WHERE id = %s", (f.make_job(),))
+        for _ in range(n_jobs)
+    ]
+    monkeypatch.setattr(filters, "candidates_for", lambda _uid: jobs)
+    parent = make_task("run_all_filters", {"user_id": uid, "batched": True}, status="running")
+    return uid, flt, jobs, parent
+
+
+@pytest.mark.asyncio
+async def test_a_split_writes_each_batch_chunk_list_as_a_verified_object(f, monkeypatch, objects):
+    monkeypatch.setattr(filters, "BATCH_CHUNK_SIZE", 2)
+    uid, flt, jobs, parent = _split(f, monkeypatch, 3)
+
+    await filters._run_filters(parent, uid, [flt], batched=True)
+
+    children = db.query(
+        "SELECT kind, payload FROM tasks WHERE parent_id = %s ORDER BY id", (parent,)
+    )
+    assert [child["kind"] for child in children] == ["run_filter_batch_chunk"] * 2
+    read = []
+    for child in children:
+        payload = child["payload"]
+        assert "jobs" not in payload
+        assert payload["urls"] == [job["url"] for job in task_jobs.run_jobs(payload, objects)]
+        read.extend(task_jobs.run_jobs(payload, objects))
+    assert read == jobs
+    assert in_flight_urls(uid) == {job["url"] for job in jobs}
+
+
+@pytest.mark.asyncio
+async def test_a_storage_outage_at_split_enqueues_no_chunk(f, monkeypatch, objects):
+    monkeypatch.setattr(filters, "BATCH_CHUNK_SIZE", 2)
+    uid, flt, _jobs, parent = _split(f, monkeypatch, 3)
+    objects.client.fail_put = True
+
+    with pytest.raises(PayloadUnavailable):
+        await filters._run_filters(parent, uid, [flt], batched=True)
+
+    assert db.query("SELECT id FROM tasks WHERE parent_id = %s", (parent,)) == []
+    assert db.query_one("SELECT status FROM tasks WHERE id = %s", (parent,))["status"] == "running"
