@@ -16,6 +16,8 @@ def retry(task_id: int, store: PayloadStore | None = None) -> str:
     if in_transaction():
         raise RuntimeError("Payload recovery cannot run inside a database transaction")
     # Import lazily: runtime lifecycle itself records this marker on failure.
+    from api import managed_board_runs
+    from api.managed_board_runs import MANAGED_BOARD_RUN_KINDS
     from tasks.runtime.lifecycle import CHUNK_KINDS
 
     source = db.query_one("SELECT * FROM tasks WHERE id=%s", (task_id,))
@@ -45,6 +47,8 @@ def retry(task_id: int, store: PayloadStore | None = None) -> str:
         "batch_ids"
     )
     try:
+        if source["kind"] in MANAGED_BOARD_RUN_KINDS:
+            managed_board_runs.run_jobs(payload, store)
         for row in requests:
             if not collection_finished or row["custom_id"] in required_ids:
                 request_snapshots.resolve(row, store)

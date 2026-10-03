@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime
 import decimal
 import json
+import time
 from typing import Any, LiteralString, cast
 
 import dotenv
@@ -38,14 +39,29 @@ _APP_CONFIG_DEFAULTS = dict(_APP_CONFIG_SEED)
 # different hosts. It has held only because every migration so far was additive
 # and the losers of the race landed on idempotent guards.
 _SCHEMA_LOCK_KEY = 8_274_113_907_441_002
+# A waiter re-asks once a second: startup already waits seconds for a peer's
+# migration, so a second of slack is invisible beside it.
+_SCHEMA_LOCK_POLL_SECONDS = 1.0
 
 
 def init_schema() -> None:
-    # Blocking, not try-lock: a worker waiting a few seconds for a peer's
+    # Wait, never skip: a worker waiting a few seconds for a peer's
     # migration is correct; skipping it and then running against a
-    # half-converted schema is not.
+    # half-converted schema is not. CREATE INDEX CONCURRENTLY in a migration
+    # waits for every transaction holding an older snapshot, so no session
+    # here may keep one: not a waiter blocked inside pg_advisory_lock, and not
+    # the holder idling in the transaction its lock statement opened. Each
+    # did, and each hung the build invisibly to the deadlock detector
+    # (reproduced on 2026-10-03). So the wait polls a try-lock and every
+    # attempt commits; the session lock outlives the commit.
     with pool.connection() as conn:
-        conn.execute("SELECT pg_advisory_lock(%s)", (_SCHEMA_LOCK_KEY,))
+        try_lock = "SELECT pg_try_advisory_lock(%s) AS held"
+        while True:
+            held = conn.execute(try_lock, (_SCHEMA_LOCK_KEY,)).fetchone() == {"held": True}
+            conn.commit()
+            if held:
+                break
+            time.sleep(_SCHEMA_LOCK_POLL_SECONDS)
         try:
             _migrate()
         finally:

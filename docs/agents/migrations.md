@@ -51,6 +51,25 @@ hides a real conflict.
 **Re-parenting is safe only when nothing has applied the migration yet.** Once
 a host has recorded a revision, its parent cannot change.
 
+**An index on a large live table is built `CONCURRENTLY`.** A plain build
+holds SHARE on the table for the whole build, and on `tasks` every heartbeat
+and claim waits behind it. Build inside `op.get_context().autocommit_block()`,
+with `postgresql_concurrently=True` and `if_not_exists=True`, after dropping
+an INVALID index of the same name that an interrupted build left behind
+(`IF NOT EXISTS` would accept it). Set a `lock_timeout`: a concurrent build
+waits for every transaction older than itself, and a timeout turns a wait that
+will not end into a failed start that retries. `bd1e66f153c3` is the worked
+example.
+
+**No session that takes the schema lock may hold a snapshot while a
+migration runs.** `db.init_schema` polls `pg_try_advisory_lock` and commits
+after every attempt; the session-level lock outlives the commit. A concurrent
+build waits for every older snapshot. A waiter blocked inside
+`pg_advisory_lock` holds one, and so does the lock holder idling in the
+transaction its lock statement opened. Both hung the build without the
+deadlock detector seeing it, reproduced on 2026-10-03: the holder only on a
+database migrated from scratch, which is what CI provisions.
+
 ## Long-running work
 
 Do not put a large data operation inside a migration. Migrations run at every
