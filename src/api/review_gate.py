@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 from collections import Counter
 from collections.abc import Callable
 from typing import Any
 
 from api import db, review_gate_records
+from api.ai import request_snapshots
 from core.job_profile import (
     CLASSIFIER_VERSION,
     JOB_PROFILE_INSTRUCTIONS,
@@ -54,7 +56,7 @@ def proven_profiles(
                 "WITH requests AS MATERIALIZED (SELECT b.* FROM tasks t "
                 "JOIN batch_requests b ON b.task_id=t.id WHERE t.kind='classify_job_profiles' "
                 "AND b.custom_id=ANY(%s::text[])) "
-                "SELECT r.custom_id, r.response->>'text' AS answer, b.snapshot "
+                "SELECT r.custom_id, r.response->>'text' AS answer, b.snapshot,b.snapshot_ref "
                 "FROM requests b JOIN batch_result_receipts r USING(task_id,custom_id) "
                 "WHERE r.model=%s AND r.outcome='written'",
                 ([str(row["content_row_id"]) for row in rows], JOB_PROFILE_MODEL),
@@ -73,7 +75,10 @@ def proven_profiles(
             continue
         answer = JobProfileAnswer.model_validate(row)
         for receipt in by_id.get(str(row["content_row_id"]), []):
-            snapshot = receipt["snapshot"] or {}
+            spec = request_snapshots.resolve(receipt)
+            if spec is None:
+                continue
+            snapshot = dataclasses.asdict(spec)
             context = snapshot.get("context") or {}
             if (
                 snapshot.get("instructions") == JOB_PROFILE_INSTRUCTIONS

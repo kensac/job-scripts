@@ -107,6 +107,19 @@ def finish(task_id: int, status: str, error: str | None = None) -> None:
     events.publish_task(task_id)
 
 
+def fail_unavailable_payload(task_id: int, error: str) -> None:
+    owned, owned_params = claim_guard(task_id)
+    db.execute(
+        "UPDATE tasks SET status='failed',error=%(error)s,finished_at=now(),"
+        "attempts=GREATEST(attempts-1,0),"
+        "payload=COALESCE(payload,'{}'::jsonb) || "
+        '\'{"payload_recovery":{"reason":"payload_unavailable"}}\'::jsonb '
+        f"WHERE id=%(tid)s AND status='running'{owned}",
+        {"tid": task_id, "error": error[:500], **owned_params},
+    )
+    events.publish_task(task_id)
+
+
 def cancelled(task_id: int) -> bool:
     row = db.query_one("SELECT status FROM tasks WHERE id = %s", (task_id,))
     return not row or row["status"] != "running"
@@ -134,45 +147,46 @@ def update_parent_progress(parent_id: int) -> None:
 
 def maybe_finalize_parent(parent_id: int) -> None:
     update_parent_progress(parent_id)
-    live = db.query_one(
-        # awaiting_batch counts as live: a parked chunk has work in flight
-        # at the provider, and finalizing the parent without it would publish
-        # partial results as if they were complete.
-        "SELECT COUNT(*) AS c FROM tasks WHERE kind = ANY(%s) "
-        "AND parent_id = %s AND status IN ('pending', 'running', 'awaiting_batch')",
-        (CHUNK_KINDS, parent_id),
-    )
-    if live and live["c"]:
-        return
-    failed = db.query_one(
-        "SELECT COUNT(*) AS c FROM tasks WHERE kind = ANY(%s) "
-        "AND parent_id = %s AND status = 'failed'",
-        (CHUNK_KINDS, parent_id),
-    )
-    parent = db.query_one("SELECT kind, payload FROM tasks WHERE id = %s", (parent_id,))
-    if parent and parent["kind"] == "reverify_open":
+    # Serialize the live-child check with explicit payload recovery. Otherwise
+    # a finalizer can count a failed child, then overwrite the parent's state
+    # after recovery has already requeued that child.
+    with db.transaction():
+        parent = db.query_one(
+            "SELECT kind,payload,status FROM tasks WHERE id=%s FOR UPDATE", (parent_id,)
+        )
+        if not parent or parent["status"] != "waiting":
+            return
+        live = db.query_one(
+            "SELECT COUNT(*) AS c FROM tasks WHERE kind = ANY(%s) "
+            "AND parent_id = %s AND status IN ('pending','running','awaiting_batch')",
+            (CHUNK_KINDS, parent_id),
+        )
+        if live and live["c"]:
+            return
+        failed = db.query_one(
+            "SELECT COUNT(*) AS c FROM tasks WHERE kind = ANY(%s) "
+            "AND parent_id = %s AND status='failed'",
+            (CHUNK_KINDS, parent_id),
+        )
+        n_failed = failed["c"] if failed else 0
+        db.execute(
+            "UPDATE tasks SET status=%s,error=%s,finished_at=now() WHERE id=%s AND status='waiting'",
+            (
+                "failed" if n_failed else "done",
+                f"{n_failed} chunk(s) failed" if n_failed else None,
+                parent_id,
+            ),
+        )
+    if parent["kind"] == "reverify_open":
         try:
             demote_closed()
         except Exception:
             logger.exception("demotion failed")
-    elif parent and (parent["payload"] or {}).get("user_id"):
+    elif (parent["payload"] or {}).get("user_id"):
         try:
             materialize_passing(parent["payload"]["user_id"])
         except Exception:
             logger.exception("materialize failed")
-    n_failed = failed["c"] if failed else 0
-    if n_failed:
-        db.execute(
-            "UPDATE tasks SET status = 'failed', error = %s, finished_at = now() "
-            "WHERE id = %s AND status = 'waiting'",
-            (f"{n_failed} chunk(s) failed", parent_id),
-        )
-    else:
-        db.execute(
-            "UPDATE tasks SET status = 'done', finished_at = now() "
-            "WHERE id = %s AND status = 'waiting'",
-            (parent_id,),
-        )
     events.publish_task(parent_id)
 
 
