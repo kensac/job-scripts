@@ -58,8 +58,40 @@ it is what a per-posting fetch would have returned. Workday, SmartRecruiters,
 Oracle Recruiting and Workable list without the text, so their postings get it
 from the matching resolver, one call each, when a check needs it.
 
-Rows are refreshed per pull and aged out by `screened_retention_days` after
-the board stops listing it.
+Rows are aged out by `screened_retention_days` after the board stops listing
+them.
+
+**A pull rewrites a listings row only when the row would change.** Equal
+content is filtered out before the insert, so an unchanged row gets no new
+version, no lock and no WAL. Before this, every pull rewrote every row it
+listed: 1.18M upserts a day, 99.2% of them unchanged, 9.17 GB of WAL a day and
+19% of the cluster's (pg_stat_statements, 2026-10-03). Four rules keep it
+that way, and a change to the upsert must keep all four:
+
+- Compare what the row would hold after the update, not what the board sent.
+  `date_posted` keeps the first date seen, so a board that dates by age
+  ("Posted 3 Days Ago" on Workday, "5d" on the markdown lists) sends a new
+  timestamp every pull and that is not a change. An empty description means
+  the listing did not carry the text, and keeps the stored one.
+- Filter in the `SELECT` feeding the insert, never in a `WHERE` on
+  `DO UPDATE`. `DO UPDATE` locks the conflicting row even when its `WHERE`
+  refuses the update, and the lock is a logged page write.
+- Set `description` and `raw` from the old row when they are equal. Postgres
+  reuses a TOASTed value only when it is handed the old row's own pointer. A
+  value from `EXCLUDED` is a fresh copy and is written out again in full.
+- No index on a column a refresh moves. `last_seen_at` was in the source
+  index, and no update could be heap-only (860 of 1.17M a day). The index is
+  on `source` alone, with fillfactor 80 so a page has room for the new
+  version.
+
+`last_seen_at` is refreshed only once it is older than
+`listings_seen_refresh_hours` (24 by default; retention counts whole days, so
+a day is the finest distinction it can draw). It can therefore lag the last
+pull that listed the row by up to that interval. The admin screened list
+returns it with that lag. Retention counts from `last_seen_at` plus the
+interval, so a row is never deleted sooner than `screened_retention_days`
+after its last listing, and at most the interval later. A listed row is never
+deleted, because its pull refreshes it before the delete runs.
 
 A candidate pattern is judged against this table (`pattern-preview`) before it
 replaces the live one. A posting a wider pattern admits arrives in `jobs` on
@@ -188,7 +220,7 @@ the only record of what one pull saw, and they are what the board detectors in
 delivers nothing is visible as exactly that.
 
 The knobs above (`fetch_retry_after_hours`, `screened_retention_days`,
-`queue_stall_minutes`, `ingest_backlog_cycles`) are `app_config` rows, not
+`listings_seen_refresh_hours`, `queue_stall_minutes`, `ingest_backlog_cycles`) are `app_config` rows, not
 constants; see [engineering-standards.md](engineering-standards.md).
 
 ## Public availability from ATS detail endpoints

@@ -140,17 +140,37 @@ def _upsert_batch(batch: list[tuple], retries: int = 3) -> None:
 
 
 def record_listings(
-    postings: list[JobPosting], source: str, pattern: str, kept: set[str], retention_days: int
+    postings: list[JobPosting],
+    source: str,
+    pattern: str,
+    kept: set[str],
+    retention_days: int,
+    refresh_hours: int,
 ) -> int:
-    """Keeps everything a board listed, refreshed on every pull: the title
-    (so a candidate pattern is judged against a month of real titles), the
-    posting text when the listing call carried it (so a backfill never
-    scrapes a page the board already handed over), and the raw record minus
-    that text (so a backtest can read a field nobody mapped). `kept` names
-    the URLs the stored title pattern matched, including while pattern
-    enforcement is disabled and every posting enters the catalog. Rows the
-    board has stopped listing age out after retention_days. Nothing downstream
-    reads this table."""
+    """Keeps everything a board listed: the title (so a candidate pattern is
+    judged against a month of real titles), the posting text when the
+    listing call carried it (so a backfill never scrapes a page the board
+    already handed over), and the raw record minus that text (so a backtest
+    can read a field nobody mapped). `kept` names the URLs the stored title
+    pattern matched, including while pattern enforcement is disabled and
+    every posting enters the catalog. Read by the admin source screens
+    (pattern preview, screened postings), never by visibility or the checks.
+
+    A row is rewritten only when what it would hold differs, or when its
+    last_seen_at is older than refresh_hours. Rewriting every listed row on
+    every pull was 9.17 GB of WAL a day, 19% of the cluster's, for rows
+    99.2% unchanged (pg_stat_statements over 24.6 hours, 2026-10-03). The
+    unchanged rows are filtered out before the insert rather than by a
+    WHERE on DO UPDATE, because DO UPDATE locks the conflicting row even
+    when its WHERE refuses the update, and the lock is itself a logged page
+    write: 1,174 bytes of WAL a row against 0 for the filter, measured on
+    3,000 rows after a checkpoint.
+
+    Rows the board stopped listing age out retention_days after the pull
+    that last listed them, counted from last_seen_at plus refresh_hours
+    because last_seen_at can lag that pull by up to refresh_hours. So a row
+    is never deleted sooner than before and at most refresh_hours later. A
+    row still listed is never deleted: the pull refreshes it first."""
     rows = [
         (
             p.url,
@@ -165,32 +185,61 @@ def record_listings(
             p.url in kept,
             p.description or "",
             Jsonb(p.raw or {}),
+            refresh_hours,
         )
         for p in postings
         if p.url
     ]
     with pool.connection() as conn, conn.cursor() as cur:
         if rows:
+            # The NOT EXISTS is the update's own SET, evaluated against the
+            # row: what the row would hold after it equals what it holds now.
+            # date_posted keeps the first date seen, so a board that dates by
+            # age ("Posted 3 Days Ago", Workday and the markdown lists), which
+            # yields a new timestamp on every pull, is not a change. An empty
+            # description keeps the stored one. description and raw are set
+            # from the old row when equal, because Postgres reuses a TOASTed
+            # value only when handed the old row's own pointer; a value from
+            # EXCLUDED is a fresh copy, written out again chunk by chunk.
             cur.executemany(
                 """
                 INSERT INTO listings
                     (url, source, company, title, locations, date_posted, pattern,
                      kept, description, raw)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                SELECT v.url, v.source, v.company, v.title, v.locations, v.date_posted,
+                       v.pattern, v.kept, v.description, v.raw
+                FROM (VALUES (%s::text, %s::text, %s::text, %s::text, %s::text[],
+                              %s::timestamptz, %s::text, %s::boolean, %s::text, %s::jsonb,
+                              %s::integer))
+                    AS v (url, source, company, title, locations, date_posted, pattern,
+                          kept, description, raw, refresh_hours)
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM listings l
+                    WHERE l.url = v.url
+                      AND (l.source, l.company, l.title, l.locations, l.pattern, l.kept)
+                          IS NOT DISTINCT FROM
+                          (v.source, v.company, v.title, v.locations, v.pattern, v.kept)
+                      AND (l.date_posted IS NOT NULL OR v.date_posted IS NULL)
+                      AND v.description IN ('', l.description)
+                      AND v.raw = l.raw
+                      AND l.last_seen_at >= now() - make_interval(hours => v.refresh_hours)
+                )
                 ON CONFLICT (url) DO UPDATE SET
                     source = EXCLUDED.source, company = EXCLUDED.company,
                     title = EXCLUDED.title, locations = EXCLUDED.locations,
                     date_posted = COALESCE(listings.date_posted, EXCLUDED.date_posted),
                     pattern = EXCLUDED.pattern, kept = EXCLUDED.kept,
-                    description = CASE WHEN EXCLUDED.description = ''
+                    description = CASE WHEN EXCLUDED.description IN ('', listings.description)
                                        THEN listings.description ELSE EXCLUDED.description END,
-                    raw = EXCLUDED.raw, last_seen_at = now()
+                    raw = CASE WHEN EXCLUDED.raw = listings.raw
+                               THEN listings.raw ELSE EXCLUDED.raw END,
+                    last_seen_at = now()
                 """,
                 rows,
             )
         cur.execute(
             "DELETE FROM listings WHERE source = %s "
-            "AND last_seen_at < now() - make_interval(days => %s)",
-            (source, retention_days),
+            "AND last_seen_at < now() - make_interval(days => %s, hours => %s)",
+            (source, retention_days, refresh_hours),
         )
     return len(rows)

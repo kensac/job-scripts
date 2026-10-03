@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import datetime
+import hashlib
 
 from api import db
 from api.ai import verdicts
@@ -187,5 +189,160 @@ def test_retention_is_admin_config(client, admin_headers):
     assert cfg["screened_retention_days"] == 30
     r = client.put(
         "/v1/admin/config/screened_retention_days", json={"value": 0}, headers=admin_headers
+    )
+    assert r.status_code == 400
+
+
+# Digests do not compress, so these are stored out of line in TOAST: the case
+# where rewriting an unchanged value costs the most.
+LONG_TEXT = "".join(hashlib.sha256(b"text%d" % i).hexdigest() for i in range(150))
+LONG_RAW = {"id": 7, "metadata": [hashlib.sha256(b"raw%d" % i).hexdigest() for i in range(150)]}
+
+
+def _versions() -> dict[str, tuple[str, str]]:
+    """Each row's physical version. A new xmin means the row was rewritten,
+    whatever the values in it say."""
+    return {
+        r["url"]: (r["xmin"], r["ctid"])
+        for r in db.query("SELECT url, xmin::text AS xmin, ctid::text AS ctid FROM listings")
+    }
+
+
+def _toast_ids(url: str) -> tuple[int | None, int | None]:
+    row = db.query_one(
+        "SELECT pg_column_toast_chunk_id(description) AS d, pg_column_toast_chunk_id(raw) AS r "
+        "FROM listings WHERE url = %s",
+        (url,),
+    )
+    assert row is not None
+    return row["d"], row["r"]
+
+
+def _long(posting: JobPosting) -> JobPosting:
+    return dataclasses.replace(posting, description=LONG_TEXT, raw=LONG_RAW)
+
+
+def test_a_repull_of_identical_content_writes_no_new_row_version(monkeypatch, f):
+    """At 1.18M upserts a day, 99.2% of which found the row already there,
+    rewriting every unchanged row was 9 GB of WAL a day. A re-pull that
+    carries what the row already holds must leave it physically untouched.
+    The second pull dates the postings differently, as Workday's "Posted 3
+    Days Ago" does a few hours later: the stored date is the first one seen,
+    so a moving date is not a change to the row."""
+    f.make_source("acme")
+    listed = [_long(LISTED[0]), *LISTED[1:]]
+    _ingest(monkeypatch, f, listed)
+    before = _versions()
+    assert len(before) == 4
+
+    redated = [dataclasses.replace(p, date_posted=TODAY + 3 * 3600) for p in listed]
+    _ingest(monkeypatch, f, redated)
+    # An empty description is "the listing did not carry it" and keeps the text.
+    _ingest(monkeypatch, f, [dataclasses.replace(listed[0], description=""), *listed[1:]])
+
+    assert _versions() == before
+
+
+def test_a_changed_field_rewrites_its_row_and_only_its_row(monkeypatch, f):
+    f.make_source("acme")
+    _ingest(monkeypatch, f, LISTED)
+    before = _versions()
+
+    moved = dataclasses.replace(LISTED[1], locations=["Remote"])
+    retitled = dataclasses.replace(LISTED[2], title="Staff Software Engineer")
+    _ingest(monkeypatch, f, [LISTED[0], moved, retitled, LISTED[3]])
+
+    after = _versions()
+    assert {url for url in before if after[url] != before[url]} == {moved.url, retitled.url}
+    rows = {r["url"]: r for r in db.query("SELECT url, title, locations FROM listings")}
+    assert rows[moved.url]["locations"] == ["Remote"]
+    assert rows[retitled.url]["title"] == "Staff Software Engineer"
+
+
+def test_an_update_keeps_long_text_it_did_not_change_where_it_already_is(monkeypatch, f):
+    """Postgres reuses a TOASTed value only when the new row carries the old
+    row's own pointer. A value arriving through EXCLUDED is a fresh copy and
+    is written out again in full, chunk by chunk, even when identical."""
+    f.make_source("acme")
+    posting = _long(LISTED[0])
+    _ingest(monkeypatch, f, [posting])
+    description_chunk, raw_chunk = _toast_ids(posting.url)
+    assert description_chunk is not None and raw_chunk is not None
+
+    _ingest(monkeypatch, f, [dataclasses.replace(posting, title="Software Engineer I")])
+
+    row = db.query_one(
+        "SELECT title, description, raw FROM listings WHERE url = %s", (posting.url,)
+    )
+    assert row is not None and row["title"] == "Software Engineer I"
+    assert (row["description"], row["raw"]) == (LONG_TEXT, LONG_RAW)
+    assert _toast_ids(posting.url) == (description_chunk, raw_chunk)
+
+    # A changed text is written; the unchanged raw beside it still is not.
+    _ingest(monkeypatch, f, [dataclasses.replace(posting, description=LONG_TEXT + " Apply now.")])
+    new_description_chunk, new_raw_chunk = _toast_ids(posting.url)
+    assert new_description_chunk != description_chunk
+    assert new_raw_chunk == raw_chunk
+
+
+def test_last_seen_refreshes_once_the_refresh_interval_has_passed(monkeypatch, f):
+    f.make_source("acme")
+    db.execute("UPDATE app_config SET value = '24' WHERE key = 'listings_seen_refresh_hours'")
+    _ingest(monkeypatch, f, LISTED[:2])
+    stale, fresh = LISTED[0].url, LISTED[1].url
+    db.execute(
+        "UPDATE listings SET last_seen_at = now() - interval '25 hours' WHERE url = %s", (stale,)
+    )
+    db.execute(
+        "UPDATE listings SET last_seen_at = now() - interval '23 hours' WHERE url = %s", (fresh,)
+    )
+    before = _versions()
+
+    _ingest(monkeypatch, f, LISTED[:2])
+
+    age = {
+        r["url"]: r["age"]
+        for r in db.query("SELECT url, now() - last_seen_at AS age FROM listings")
+    }
+    assert age[stale] < datetime.timedelta(minutes=1)
+    assert age[fresh] > datetime.timedelta(hours=22)
+    assert _versions()[fresh] == before[fresh]
+
+
+def test_retention_deletes_what_the_board_stopped_listing_and_never_earlier(monkeypatch, f):
+    """A row's last_seen_at may lag the last pull that listed it by up to the
+    refresh interval, so the age-out counts from that lag's far end: a row is
+    held at least screened_retention_days after the board last listed it, as
+    before, and at most the refresh interval longer. A row still listed is
+    never deleted, however old its last_seen_at, because the pull refreshes
+    it before the delete runs."""
+    f.make_source("acme")
+    db.execute("UPDATE app_config SET value = '30' WHERE key = 'screened_retention_days'")
+    db.execute("UPDATE app_config SET value = '24' WHERE key = 'listings_seen_refresh_hours'")
+    _ingest(monkeypatch, f, LISTED)
+    still_listed, gone, lagging = LISTED[0].url, LISTED[1].url, LISTED[2].url
+    for url, age in (
+        (still_listed, "40 days"),
+        (gone, "31 days 1 hour"),
+        (lagging, "30 days 1 hour"),
+    ):
+        db.execute(
+            "UPDATE listings SET last_seen_at = now() - %s::interval WHERE url = %s", (age, url)
+        )
+
+    _ingest(monkeypatch, f, [LISTED[0], LISTED[3]])
+
+    assert {r["url"] for r in db.query("SELECT url FROM listings")} == {
+        still_listed,
+        lagging,
+        LISTED[3].url,
+    }
+
+
+def test_the_refresh_interval_is_admin_config(client, admin_headers):
+    cfg = client.get("/v1/admin/config", headers=admin_headers).json()["config"]
+    assert cfg["listings_seen_refresh_hours"] == 24
+    r = client.put(
+        "/v1/admin/config/listings_seen_refresh_hours", json={"value": 0}, headers=admin_headers
     )
     assert r.status_code == 400

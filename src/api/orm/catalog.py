@@ -230,13 +230,19 @@ class JobListingEvent(Base):
 class Listing(Base):
     """Every posting a board returned on its last pull, kept by the title
     pattern or not, with the text the listing call carried and the raw record
-    minus that text. Refreshed per pull and aged out by
+    minus that text. Rewritten by a pull only when it changed or its
+    last_seen_at is older than listings_seen_refresh_hours, and aged out by
     screened_retention_days after the board stops listing it. Never read by
     visibility or the checks: a backtest or a backfill reads it so that no
     board is re-fetched and no page re-scraped for data already in hand."""
 
     __tablename__ = "listings"
-    __table_args__ = (Index("idx_listings_source", "source", "last_seen_at"),)
+    # source alone, not (source, last_seen_at): an index on a column every
+    # refresh moves makes every update a new index entry in every index
+    # (860 HOT of 1.17M updates a day, 2026-10-03). Every reader and the
+    # retention delete filter by source; the delete re-reads that source's
+    # rows, which its own upsert has just read. Fillfactor is in 507fe2f38949.
+    __table_args__ = (Index("idx_listings_by_source", "source"),)
 
     url: Mapped[str] = mapped_column(Text, primary_key=True)
     source: Mapped[str] = mapped_column(Text)

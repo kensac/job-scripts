@@ -86,6 +86,7 @@ async def handle_ingest_source(task_id: int, payload: dict[str, Any]) -> None:
         source["title_pattern"] or "",
         {p.url for p in pattern_matched},
         int(db.get_config("screened_retention_days")),
+        int(db.get_config("listings_seen_refresh_hours")),
     )
     upserted = catalog.upsert_postings(postings, source["name"])
     # A company board lists every open posting, so a catalog row this pull

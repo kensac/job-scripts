@@ -69,6 +69,13 @@ build waits for every older snapshot. A waiter blocked inside
 transaction its lock statement opened. Both hung the build without the
 deadlock detector seeing it, reproduced on 2026-10-03: the holder only on a
 database migrated from scratch, which is what CI provisions.
+`tests/test_schema_lock.py` builds an index concurrently while a peer waits
+in `init_schema`, and fails if the waiter holds a snapshot.
+
+**A storage parameter applies to pages written afterwards.** Fillfactor set
+on a live table leaves every existing page as packed as it was. Say so in the
+migration, and do not rewrite the table to apply it: a rewrite locks it.
+`507fe2f38949` is the example.
 
 ## Long-running work
 
