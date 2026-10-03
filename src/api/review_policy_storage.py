@@ -69,7 +69,7 @@ def migrate_chunk(*, after: int, through: int, limit: int, copy: bool) -> dict[s
         raise ValueError("Require 0 <= after <= through and a positive limit")
     with db.transaction():
         if not copy:
-            db.execute("SET TRANSACTION READ ONLY")
+            db.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
         rows = db.query(
             "SELECT d.id,d.policy::text AS policy_text,d.policy_id "
             "FROM review_gate_decisions d WHERE d.id>%s AND d.id<=%s "

@@ -7,7 +7,7 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     CheckConstraint,
-    ForeignKey,
+    ForeignKeyConstraint,
     Identity,
     Index,
     LargeBinary,
@@ -32,6 +32,12 @@ class ReviewGatePolicySnapshot(Base):
 class ReviewGateDecision(Base):
     __tablename__ = "review_gate_decisions"
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["policy_id"],
+            ["review_gate_policies.id"],
+            ondelete="RESTRICT",
+            postgresql_not_valid=True,
+        ),
         UniqueConstraint("task_id", "url", name="uq_review_gate_decisions_task_url"),
         CheckConstraint("action IN ('skip','review')", name="ck_review_gate_decisions_action"),
         Index("idx_review_gate_decisions_url_created", "url", "created_at"),
@@ -56,9 +62,7 @@ class ReviewGateDecision(Base):
     profile_id: Mapped[int | None] = mapped_column(BigInteger)
     title: Mapped[str] = mapped_column(Text)
     content_hash: Mapped[str | None] = mapped_column(Text)
-    policy_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("review_gate_policies.id", ondelete="RESTRICT")
-    )
+    policy_id: Mapped[int | None] = mapped_column(BigInteger)
     policy: Mapped[dict] = mapped_column(JSONB)
     evidence: Mapped[dict] = mapped_column(JSONB)
     created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
