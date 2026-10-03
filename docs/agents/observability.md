@@ -867,9 +867,16 @@ missing or unreadable object raises `PayloadUnavailable`, so the run takes
 the payload recovery path above; a run with neither shape had its list removed
 by retention and is refused the same way, never run as an empty board.
 
-**Admission still writes the list inline, and must not write only the
-reference until this reader runs on every API and worker.** A worker without
-it fails a reference-only run on a missing key.
+**Admission writes the list as a verified object before the task row exists,
+and the payload holds only the reference.** Never write it inline again.
+`managed_board_runs.admit` plans without holding a lock, uploads with
+`PayloadStore.put_verified` outside any transaction, then locks the board and
+checks again what a concurrent writer can change (the board row, an active
+run, the sponsor's reservations) before inserting. Storage that is
+unconfigured or failing is the refusal `STORAGE_UNAVAILABLE` (503 from the
+run route): no task is queued and nothing is paid, and the scheduler tries
+again next cycle. Objects are content-addressed and never deleted; candidate
+lists rarely repeat across runs, so each run adds its list to the bucket.
 
 A board's runs are found through `idx_tasks_managed_board`, partial on the two
 run kinds. Its readers spell the kinds as SQL literals, because a prepared

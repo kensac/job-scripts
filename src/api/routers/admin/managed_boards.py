@@ -323,7 +323,7 @@ def run_managed_board(
     try:
         return managed_board_runs.admit(board_id)
     except managed_board_runs.RunRefusal as exc:
-        status = 404 if exc.code == "NOT_FOUND" else 409
+        status = {"NOT_FOUND": 404, "STORAGE_UNAVAILABLE": 503}.get(exc.code, 409)
         raise HTTPException(
             status,
             detail={"code": exc.code, "message": exc.message, "task_id": exc.task_id},

@@ -9,7 +9,7 @@ import pytest
 
 from api import db
 from api import managed_board_runs as runs
-from core.payload_objects import PayloadStore, PayloadUnavailable
+from core.payload_objects import PayloadRef, PayloadStore, PayloadUnavailable
 from tasks import managed_boards as managed_task
 from tasks.runtime import payload_recovery
 from tests.factories import ObjectClient
@@ -27,25 +27,46 @@ def _payload(task_id: int) -> dict:
     return db.query_one("SELECT payload FROM tasks WHERE id = %s", (task_id,))["payload"]
 
 
-def _referenced_run(client, admin_headers, f, monkeypatch, objects) -> tuple[int, int]:
-    """A queued run whose candidates live only in object storage."""
+def test_admission_stores_candidates_as_a_verified_object_and_nothing_inline(
+    client, admin_headers, f, monkeypatch, objects
+):
     _admissible(monkeypatch)
-    board, job_id, _url = _board_and_job(client, admin_headers, f)
-    task_id = client.post(
-        f"/v1/admin/managed-boards/{board['id']}/run", headers=admin_headers
-    ).json()["task_id"]
-    payload = _payload(task_id)
-    jobs = payload.pop("jobs")
-    payload |= {"jobs_ref": asdict(objects.put_verified(jobs)), "candidate_count": len(jobs)}
-    db.execute("UPDATE tasks SET payload = %s WHERE id = %s", (db.jsonb(payload), task_id))
-    return task_id, job_id
+    board, job_id, url = _board_and_job(client, admin_headers, f)
+
+    response = client.post(f"/v1/admin/managed-boards/{board['id']}/run", headers=admin_headers)
+
+    assert response.status_code == 200, response.text
+    payload = _payload(response.json()["task_id"])
+    assert "jobs" not in payload
+    assert payload["candidate_count"] == 1
+    stored = objects.get(PayloadRef.parse(payload["jobs_ref"]))
+    assert [job["id"] for job in stored] == [job_id]
+    assert stored[0]["url"] == url and "content" not in stored[0]
+    assert runs.run_jobs(payload, objects) == stored
+
+
+def test_storage_outage_at_admission_queues_nothing(client, admin_headers, f, monkeypatch, objects):
+    _admissible(monkeypatch)
+    board, _job_id, _url = _board_and_job(client, admin_headers, f)
+    objects.client.fail_put = True
+
+    response = client.post(f"/v1/admin/managed-boards/{board['id']}/run", headers=admin_headers)
+
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "STORAGE_UNAVAILABLE"
+    assert db.query_one("SELECT count(*) AS n FROM tasks")["n"] == 0
+    assert objects.client.objects == {}
 
 
 @pytest.mark.asyncio
 async def test_handler_runs_and_resumes_from_the_stored_candidates(
     client, admin_headers, f, monkeypatch, objects
 ):
-    task_id, job_id = _referenced_run(client, admin_headers, f, monkeypatch, objects)
+    _admissible(monkeypatch)
+    board, job_id, _url = _board_and_job(client, admin_headers, f)
+    task_id = client.post(
+        f"/v1/admin/managed-boards/{board['id']}/run", headers=admin_headers
+    ).json()["task_id"]
     db.execute("UPDATE tasks SET status = 'running' WHERE id = %s", (task_id,))
     assert "jobs" not in _payload(task_id)
     seen = []
@@ -70,7 +91,11 @@ async def test_handler_runs_and_resumes_from_the_stored_candidates(
 async def test_unreadable_candidates_take_the_payload_recovery_path(
     client, admin_headers, f, monkeypatch, objects
 ):
-    task_id, _job_id = _referenced_run(client, admin_headers, f, monkeypatch, objects)
+    _admissible(monkeypatch)
+    board, _job_id, _url = _board_and_job(client, admin_headers, f)
+    task_id = client.post(
+        f"/v1/admin/managed-boards/{board['id']}/run", headers=admin_headers
+    ).json()["task_id"]
     objects.client.fail_get = True
     monkeypatch.setattr(
         managed_task,
