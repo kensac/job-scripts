@@ -8,8 +8,16 @@ import pytest
 from api import db
 from api.ai import migrate_snapshot_payloads as cli
 from api.ai import snapshot_payloads as snapshots
-from core.payload_objects import encode_payload
-from tests.test_snapshot_payloads import objects, request, row  # noqa: F401
+from core.payload_objects import PayloadStore, encode_payload
+from tests.factories import ObjectClient
+from tests.test_snapshot_payloads import request, row
+
+
+@pytest.fixture
+def objects(monkeypatch):
+    store = PayloadStore(ObjectClient(), "test-payloads")
+    monkeypatch.setattr(PayloadStore, "from_env", lambda: store)
+    return store
 
 
 def entry(task_id):
