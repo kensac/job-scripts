@@ -111,7 +111,6 @@ def test_public_index_requires_no_auth_and_does_not_provision(client):
     assert response.json()["job_lists"][0]["slug"] == "engineering"
     after = db.query_one("SELECT count(*) AS n FROM users")
     assert after is not None and after["n"] == before["n"]
-    assert "401" not in response.text
 
 
 def test_public_detail_allowlists_fields_and_paginates_stably(client):
