@@ -61,6 +61,64 @@ class PayloadRef:
             raise PayloadUnavailable("Invalid payload reference") from exc
 
 
+_DIGEST = re.compile(r"[0-9a-f]{64}")
+
+
+@dataclass(frozen=True)
+class BundleMemberRef:
+    """One value inside a version 3 bundle: a JSON object of named members.
+
+    A distinct type so PayloadRef.parse keeps rejecting it: a reader that
+    predates bundles fails closed instead of returning the whole bundle.
+    """
+
+    bucket: str
+    key: str
+    sha256: str
+    size: int
+    member: str
+    member_sha256: str
+    member_size: int
+    version: int = 3
+
+    @classmethod
+    def parse(cls, value: Any) -> BundleMemberRef:
+        try:
+            ref = cls(**value)
+            if (
+                not isinstance(ref.bucket, str)
+                or not ref.bucket
+                or not isinstance(ref.sha256, str)
+                or _DIGEST.fullmatch(ref.sha256) is None
+                or type(ref.size) is not int
+                or ref.size < 0
+                or type(ref.version) is not int
+                or ref.version != 3
+                or ref.key != f"payloads/v3/sha256/{ref.sha256}.json"
+                or not isinstance(ref.member, str)
+                or not ref.member
+                or not isinstance(ref.member_sha256, str)
+                or _DIGEST.fullmatch(ref.member_sha256) is None
+                or type(ref.member_size) is not int
+                or ref.member_size < 0
+            ):
+                raise ValueError("invalid reference")
+            return ref
+        except (TypeError, ValueError) as exc:
+            raise PayloadUnavailable("Invalid bundle member reference") from exc
+
+
+def parse_ref(value: Any) -> PayloadRef | BundleMemberRef:
+    if isinstance(value, dict) and value.get("version") == 3:
+        return BundleMemberRef.parse(value)
+    return PayloadRef.parse(value)
+
+
+# Decoded bundles keyed by object key and size, owned by one call that
+# resolves many members; never shared across calls or held between them.
+BundleCache = dict[tuple[str, int], dict[str, Any]]
+
+
 class PayloadStore:
     def __init__(self, client: Any, bucket: str):
         self.client = client
@@ -93,42 +151,67 @@ class PayloadStore:
         except Exception as exc:
             raise PayloadUnavailable("Object storage configuration unavailable") from exc
 
+    def _put(self, raw: bytes, key: str) -> None:
+        try:
+            self.client.put_object(
+                Bucket=self.bucket, Key=key, Body=raw, ContentType="application/json"
+            )
+        except Exception as exc:
+            raise PayloadUnavailable("Payload upload failed") from exc
+
     def put_verified(self, value: Any) -> PayloadRef:
         raw = encode_payload(value)
         digest = hashlib.sha256(raw).hexdigest()
         ref = PayloadRef(
             self.bucket, f"payloads/v2/sha256/{digest}.json", digest, len(raw), version=2
         )
-        try:
-            self.client.put_object(
-                Bucket=ref.bucket,
-                Key=ref.key,
-                Body=raw,
-                ContentType="application/json",
-            )
-        except Exception as exc:
-            raise PayloadUnavailable("Payload upload failed") from exc
+        self._put(raw, ref.key)
         # A successful PUT or ETag alone does not prove the bytes can be read.
         if self.get(ref) != value:
             raise PayloadUnavailable("Payload round-trip mismatch")
         return ref
 
-    def get(self, ref: PayloadRef) -> Any:
-        ref = PayloadRef.parse(asdict(ref))
-        if ref.bucket != self.bucket:
+    def put_bundle(self, members: dict[str, Any]) -> dict[str, BundleMemberRef]:
+        """Upload many values as one verified object, returning a reference per member."""
+        if not members or not all(isinstance(name, str) and name for name in members):
+            raise PayloadUnavailable("A bundle needs named members")
+        raw = encode_payload(members)
+        digest = hashlib.sha256(raw).hexdigest()
+        key = f"payloads/v3/sha256/{digest}.json"
+        refs = {}
+        for name, value in members.items():
+            encoded = encode_payload(value)
+            refs[name] = BundleMemberRef(
+                self.bucket,
+                key,
+                digest,
+                len(raw),
+                name,
+                hashlib.sha256(encoded).hexdigest(),
+                len(encoded),
+            )
+        self._put(raw, key)
+        # Read every member back through the reader, not only the bundle digest.
+        cache: BundleCache = {}
+        if any(self.get_member(ref, cache) != members[name] for name, ref in refs.items()):
+            raise PayloadUnavailable("Payload round-trip mismatch")
+        return refs
+
+    def _read(self, bucket: str, key: str, size: int, sha256: str, *, gz: bool) -> Any:
+        if bucket != self.bucket:
             raise PayloadUnavailable("Payload reference belongs to a different bucket")
         try:
-            response = self.client.get_object(Bucket=ref.bucket, Key=ref.key)
+            response = self.client.get_object(Bucket=bucket, Key=key)
             body = response["Body"]
             try:
-                if ref.version == 1:
+                if gz:
                     with gzip.GzipFile(fileobj=body) as stream:
-                        raw = stream.read(ref.size + 1)
+                        raw = stream.read(size + 1)
                 else:
-                    raw = body.read(ref.size + 1)
+                    raw = body.read(size + 1)
             finally:
                 body.close()
-            if len(raw) != ref.size or hashlib.sha256(raw).hexdigest() != ref.sha256:
+            if len(raw) != size or hashlib.sha256(raw).hexdigest() != sha256:
                 raise PayloadUnavailable("Payload integrity check failed")
             return json.loads(raw)
         except PayloadUnavailable:
@@ -136,3 +219,33 @@ class PayloadStore:
         except Exception as exc:
             # Do not expose endpoint responses, signed URLs or credentials.
             raise PayloadUnavailable("Payload unavailable from object storage") from exc
+
+    def get(self, ref: PayloadRef) -> Any:
+        ref = PayloadRef.parse(asdict(ref))
+        return self._read(ref.bucket, ref.key, ref.size, ref.sha256, gz=ref.version == 1)
+
+    def get_bundle(self, ref: BundleMemberRef, cache: BundleCache | None = None) -> dict[str, Any]:
+        ref = BundleMemberRef.parse(asdict(ref))
+        members = None if cache is None else cache.get((ref.key, ref.size))
+        if members is None:
+            members = self._read(ref.bucket, ref.key, ref.size, ref.sha256, gz=False)
+            if not isinstance(members, dict):
+                raise PayloadUnavailable("Payload bundle is not an object")
+            if cache is not None:
+                cache[ref.key, ref.size] = members
+        return members
+
+    def get_member(self, ref: BundleMemberRef, cache: BundleCache | None = None) -> Any:
+        members = self.get_bundle(ref, cache)
+        if ref.member not in members:
+            raise PayloadUnavailable("Payload bundle has no such member")
+        value = members[ref.member]
+        raw = encode_payload(value)
+        if len(raw) != ref.member_size or hashlib.sha256(raw).hexdigest() != ref.member_sha256:
+            raise PayloadUnavailable("Payload bundle member integrity check failed")
+        return value
+
+    def get_ref(self, ref: PayloadRef | BundleMemberRef, cache: BundleCache | None = None) -> Any:
+        if isinstance(ref, BundleMemberRef):
+            return self.get_member(ref, cache)
+        return self.get(ref)
