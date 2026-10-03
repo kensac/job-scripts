@@ -604,3 +604,38 @@ after a switch changes. Skips are not paid verdicts, do not enter the verdict
 cache, and create no usage. Managed projection explicitly excludes this run's
 skips even when fail-open is configured. Switching off restores eligibility on
 the next new run without deleting historical decisions or person-owned state.
+
+## Historical embedding receipt payloads
+
+`api.ai.receipt_payloads` copies only vector arrays from consumed receipts of
+`done` embedding tasks. The response retains text, usage, errors and an
+`embedding_vectors_ref` containing bucket, content-addressed key, SHA-256,
+uncompressed byte size and format version. Receipt identity, outcome and
+acknowledgement timestamps remain in Postgres. Profile receipts and active
+work are excluded. No object lifecycle expiration or garbage collection may
+remove referenced objects.
+
+Run `python -m api.ai.migrate_receipt_payloads copy --limit N` with the private
+`JOBTRACKER_S3_ENDPOINT`, `REGION`, `BUCKET`, `ACCESS_KEY_ID` and
+`SECRET_ACCESS_KEY` variables (each with the `JOBTRACKER_S3_` prefix).
+Copy retains inline vectors and verifies a GET before attaching the reference.
+`verify` checks existing references without database writes. All modes process
+one payload at a time, have database timeouts, and return a cursor for `--after
+BATCH_ID CUSTOM_ID`. An unavailable object stops the run with a nonzero exit;
+the cursor remains before that row so a retry cannot silently skip it.
+
+Deploy the compatible receipt reader before any compaction. After an independent
+database copy finishes, `compact --limit N --backup-complete` verifies the object
+again and removes only inline vectors. `restore --limit N` restores the exact
+vector array and removes the reference. Both recheck eligibility and the entire
+source receipt under task and receipt locks after object IO. Never wrap these
+operations in an outer database transaction. A failed upload or changed receipt
+leaves inline data intact; an interrupted copy may leave an unreferenced object.
+
+Replay reads only unconsumed receipts, so missing historical vectors cannot
+reopen acknowledged work. A required external input raises `PayloadUnavailable`
+before acknowledgement, never an empty substitute or a new paid submission.
+The personal and administrative board reads continue using `job_embeddings`;
+archival does not alter those vectors or board membership. Report verified
+logical bytes separately from table size and filesystem space: removal alone
+does not return filesystem space, and no table rewrite is part of this command.

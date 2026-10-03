@@ -80,3 +80,7 @@ def transaction() -> Iterator[None]:
             yield
         finally:
             _transaction_connection.reset(token)
+
+
+def in_transaction() -> bool:
+    return _transaction_connection.get() is not None
