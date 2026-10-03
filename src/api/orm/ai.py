@@ -200,6 +200,7 @@ class BatchRequest(Base):
     )
     custom_id: Mapped[str] = mapped_column(Text, primary_key=True)
     snapshot: Mapped[dict | None] = mapped_column(JSONB)
+    snapshot_ref: Mapped[dict | None] = mapped_column(JSONB)
 
 
 class BatchResultReceipt(Base):
