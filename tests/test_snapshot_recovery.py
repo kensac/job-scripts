@@ -205,3 +205,50 @@ def test_recovery_refuses_accepted_work_without_replay_state(f):
         (task_id,),
     )
     assert retry(task_id) == "conflict"
+
+
+@pytest.mark.asyncio
+async def test_restored_task_consumes_original_receipt_without_new_submission(f, monkeypatch):
+    from api.ai import batch_results, snapshot_payloads
+    from core import batch
+    from core.payload_objects import PayloadStore
+    from tasks.runtime.payload_recovery import retry
+    from tests.test_receipt_payloads import ObjectClient
+
+    objects = PayloadStore(ObjectClient(), "test-payloads")
+    monkeypatch.setattr(PayloadStore, "from_env", lambda: objects)
+    task_id = f.make_task("test_kind", {}, status="done")
+    batch_results.snapshot_specs(task_id, [batch.BatchSpec("request", input="original")])
+    source = db.query_one("SELECT * FROM batch_requests WHERE task_id=%s", (task_id,))
+    snapshot_payloads.migrate(source, objects, mode="copy")
+    source = db.query_one("SELECT * FROM batch_requests WHERE task_id=%s", (task_id,))
+    snapshot_payloads.migrate(source, objects, mode="compact")
+    result = batch.BatchResult("request", text="paid answer", batch_id="paid")
+    batch_results.checkpoint(task_id, [result], [])
+    db.execute("UPDATE tasks SET status='pending' WHERE id=%s", (task_id,))
+    saved = dict(objects.client.objects)
+    objects.client.objects.clear()
+    consumed = []
+
+    async def forbidden(*args, **kwargs):
+        raise AssertionError("paid work must never be resubmitted")
+
+    async def handler(tid, payload):
+        results = await runtime.submit_or_collect(tid, [], "model", "", 100, None)
+        for restored in results:
+            with batch_results.consume_result(tid, restored) as receipt:
+                if receipt.pending:
+                    consumed.append((restored.text, restored.request.input))
+                    receipt.outcome = "written"
+
+    monkeypatch.setattr(batch, "submit_responses_batches", forbidden)
+    monkeypatch.setitem(worker.HANDLERS, "test_kind", handler)
+    await worker.run_once()
+    assert consumed == []
+    assert retry(task_id, objects) == "unavailable"
+    objects.client.objects.update(saved)
+    assert retry(task_id, objects) == "pending"
+    await worker.run_once()
+    assert consumed == [("paid answer", "original")]
+    assert batch_results.progress_counts(task_id) == (1, 1)
+    assert db.query_one("SELECT status FROM tasks WHERE id=%s", (task_id,))["status"] == "done"
