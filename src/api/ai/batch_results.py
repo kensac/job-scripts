@@ -29,6 +29,7 @@ def snapshot_specs(task_id: int, specs: list[BatchSpec]) -> list[BatchSpec]:
 
     New snapshots are verified objects before their reference row exists, so a
     storage failure raises PayloadUnavailable before anything is submitted.
+    Profile requests stay inline; observability.md gives the reason.
     """
     if in_transaction():
         raise RuntimeError("Request snapshots cannot be uploaded inside a database transaction")
@@ -40,8 +41,10 @@ def snapshot_specs(task_id: int, specs: list[BatchSpec]) -> list[BatchSpec]:
     for spec in specs:
         if spec.custom_id not in existing:
             fresh.setdefault(spec.custom_id, _snapshot(spec))
+    task = db.query_one("SELECT kind FROM tasks WHERE id=%s", (task_id,))
+    inline = task is not None and task["kind"] == "classify_job_profiles"
     refs: dict[str, dict[str, Any]] = {}
-    if fresh:
+    if fresh and not inline:
         store = PayloadStore.from_env()
         with ThreadPoolExecutor(max_workers=MAX_CONNECTIONS) as executor:
             uploaded = executor.map(store.put_verified, fresh.values())
@@ -53,7 +56,14 @@ def snapshot_specs(task_id: int, specs: list[BatchSpec]) -> list[BatchSpec]:
     with db.transaction():
         for spec in specs:
             ref = refs.get(spec.custom_id)
-            if ref is None:
+            if inline and spec.custom_id in fresh:
+                row = db.query_one(
+                    "INSERT INTO batch_requests (task_id, custom_id, snapshot) VALUES (%s,%s,%s) "
+                    "ON CONFLICT (task_id,custom_id) DO UPDATE SET snapshot=batch_requests.snapshot "
+                    "RETURNING custom_id,snapshot,snapshot_ref",
+                    (task_id, spec.custom_id, db.jsonb(fresh[spec.custom_id])),
+                )
+            elif ref is None:
                 row = db.query_one(
                     "SELECT custom_id,snapshot,snapshot_ref FROM batch_requests "
                     "WHERE task_id=%s AND custom_id=%s",

@@ -1,5 +1,3 @@
-from dataclasses import asdict
-
 import pytest
 
 from api import ai, db, review_gate, review_gate_reads
@@ -10,7 +8,6 @@ from core.job_profile import (
     JOB_PROFILE_MODEL,
     build_job_profile_input,
 )
-from core.payload_objects import PayloadRef, PayloadStore
 from core.review_gate import ReviewGatePolicy, profile_rejection, title_rejection
 from tasks import filter_execution, job_profiles
 from tasks.runtime import consume_result
@@ -132,13 +129,12 @@ def test_profile_reuse_requires_proven_title_content_response_and_model(f):
     db.execute(
         "UPDATE batch_result_receipts SET model=%s WHERE task_id=%s", (JOB_PROFILE_MODEL, task)
     )
-    store = PayloadStore.from_env()
-    ref = db.query_one("SELECT snapshot_ref FROM batch_requests WHERE task_id=%s", (task,))
-    original = store.get(PayloadRef.parse(ref["snapshot_ref"]))
-    changed = store.put_verified({**original, "input": "different original input"})
     db.execute(
-        "UPDATE batch_requests SET snapshot_ref=%s WHERE task_id=%s",
-        (db.jsonb(asdict(changed)), task),
+        "UPDATE batch_requests SET snapshot=snapshot || %s WHERE task_id=%s",
+        (
+            db.jsonb({"input": "different original input"}),
+            task,
+        ),
     )
     assert not review_gate.proven_profiles([job], content, 1000)
 

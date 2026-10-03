@@ -137,3 +137,24 @@ async def test_storage_outage_submits_nothing_and_recovers(f, objects, monkeypat
     await worker.run_once()
     assert submitted == [SPECS]
     assert all(row["snapshot"] is None for row in rows(task_id))
+
+
+def test_profile_requests_stay_inline_and_gate_reads_no_object(f, objects):
+    from api import review_gate
+    from tests.test_review_gate import proven_job
+
+    calls = []
+    for name in ("put_object", "get_object"):
+        original = getattr(objects.client, name)
+        setattr(
+            objects.client,
+            name,
+            lambda _original=original, _name=name, **kw: calls.append(_name) or _original(**kw),
+        )
+    job, task_id = proven_job(f)
+    stored = rows(task_id)
+    assert len(stored) == 1
+    assert stored[0]["snapshot"] is not None and stored[0]["snapshot_ref"] is None
+    evidence = review_gate.proven_profiles([job], {job["url"]: "exact posting content"}, 1000)
+    assert job["url"] in evidence
+    assert calls == []

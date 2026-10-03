@@ -183,7 +183,12 @@ def test_profile_historical_proof_hydrates_outside_transaction(f, objects):
     from tests.test_review_gate import proven_job
 
     job, task_id = proven_job(f)
-    assert row(task_id)["snapshot"] is None
+    source = row(task_id)
+    ref = objects.put_verified(source["snapshot"])
+    db.execute(
+        "UPDATE batch_requests SET snapshot=NULL,snapshot_ref=%s WHERE task_id=%s",
+        (db.jsonb(asdict(ref)), task_id),
+    )
     original_get = objects.client.get_object
 
     def outside(**kwargs):

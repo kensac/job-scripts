@@ -778,6 +778,15 @@ task takes the payload recovery path below with nothing paid. An object whose
 insert lost the conflict, or whose batch failed on a later upload, stays
 unreferenced; it is content-addressed, so a retry reuses it.
 
+**`classify_job_profiles` requests are the one exception, kept inline in both
+directions:** the write path stores them inline and the backfill's eligibility
+excludes them. Review gate admission (`review_gate.proven_profiles`) reads them
+on its hot path, where a referenced request costs one S3 GET per candidate that
+`lookup_timeout_ms` does not bound, and their volume is negligible: 0 rows and
+0 bytes of the week's `batch_requests` (measured 2026-10-03, against
+run_managed_board_batch 343 MB, run_filter_batch_chunk 175 MB and verify_new
+140 MB). Re-measure before moving them.
+
 After deploying compatible readers to the whole fleet, run bounded operations
 with `python -m api.ai.migrate_snapshot_payloads MODE --limit COUNT`. Modes are
 `copy`, `verify`, `compact`, and `restore`; resume with the reported
@@ -794,7 +803,7 @@ unavailable, changed or ineligible outcome exits unsuccessfully before advancing
 past its row; investigate or restore the source/object and retry that cursor. Database errors fail the invocation; rerun
 from the last saved cursor, since completed operations are idempotent.
 
-Eligibility is completed non-profile tasks with no unconsumed receipts. The
+Eligibility is completed non-profile tasks (the exception above) with no unconsumed receipts. The
 migration locks the task and request and rechecks eligibility and exact source
 values after verified object I/O. It retains task/request identities and all
 receipt outcomes/accounting. No age cutoff or object expiry is implied.
