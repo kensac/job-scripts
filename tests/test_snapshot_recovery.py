@@ -252,3 +252,66 @@ async def test_restored_task_consumes_original_receipt_without_new_submission(f,
     assert consumed == [("paid answer", "original")]
     assert batch_results.progress_counts(task_id) == (1, 1)
     assert db.query_one("SELECT status FROM tasks WHERE id=%s", (task_id,))["status"] == "done"
+
+
+def test_completed_collection_recovery_ignores_consumed_only_missing_snapshot(f, monkeypatch):
+    from api.ai import batch_results, snapshot_payloads
+    from core.batch import BatchResult, BatchSpec
+    from core.payload_objects import PayloadStore
+    from tasks.runtime.payload_recovery import retry
+    from tests.test_receipt_payloads import ObjectClient
+
+    objects = PayloadStore(ObjectClient(), "test-payloads")
+    task_id = f.make_task("verify_new", {}, status="done")
+    batch_results.snapshot_specs(task_id, [BatchSpec("consumed"), BatchSpec("required")])
+    sources = db.query(
+        "SELECT * FROM batch_requests WHERE task_id=%s ORDER BY custom_id", (task_id,)
+    )
+    snapshot_payloads.migrate_many(sources, objects, mode="copy")
+    sources = db.query(
+        "SELECT * FROM batch_requests WHERE task_id=%s ORDER BY custom_id", (task_id,)
+    )
+    snapshot_payloads.migrate_many(sources, objects, mode="compact")
+    results = [
+        BatchResult(custom_id, text="answer", batch_id="paid")
+        for custom_id in ("consumed", "required")
+    ]
+    batch_results.checkpoint(task_id, results, [])
+    with batch_results.consume_result(task_id, results[0]) as receipt:
+        receipt.outcome = "written"
+    db.execute(
+        "UPDATE tasks SET status='failed',payload=payload || %s WHERE id=%s",
+        (db.jsonb({"payload_recovery": {"reason": "payload_unavailable"}}), task_id),
+    )
+    consumed_ref = sources[0]["snapshot_ref"]
+    del objects.client.objects[consumed_ref["bucket"], consumed_ref["key"]]
+    saved = dict(objects.client.objects)
+    objects.client.objects.clear()
+    assert retry(task_id, objects) == "unavailable"
+    objects.client.objects.update(saved)
+    assert retry(task_id, objects) == "pending"
+
+
+@pytest.mark.parametrize(
+    "change", [{"batch_collection_checkpointed": False}, {"batch_ids": ["later-batch"]}]
+)
+def test_recovery_rechecks_collection_boundary_after_hydration(f, monkeypatch, change):
+    from api.ai import batch_results, request_snapshots
+    from core.batch import BatchResult, BatchSpec
+    from tasks.runtime.payload_recovery import retry
+
+    task_id = recoverable(f)
+    batch_results.snapshot_specs(task_id, [BatchSpec("required")])
+    batch_results.checkpoint(task_id, [BatchResult("required", batch_id="paid")], [])
+    original = request_snapshots.resolve
+
+    def changed(row, store=None):
+        spec = original(row, store)
+        db.execute(
+            "UPDATE tasks SET payload=payload || %s WHERE id=%s", (db.jsonb(change), task_id)
+        )
+        return spec
+
+    monkeypatch.setattr(request_snapshots, "resolve", changed)
+    assert retry(task_id) == "conflict"
+    assert db.query_one("SELECT status FROM tasks WHERE id=%s", (task_id,))["status"] == "failed"

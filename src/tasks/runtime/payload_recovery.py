@@ -36,14 +36,19 @@ def retry(task_id: int, store: PayloadStore | None = None) -> str:
         "SELECT * FROM batch_requests WHERE task_id=%s ORDER BY custom_id", (task_id,)
     )
     receipts = db.query(
-        "SELECT * FROM batch_result_receipts WHERE task_id=%s AND consumed_at IS NULL "
-        "ORDER BY provider_batch_id,custom_id",
+        "SELECT * FROM batch_result_receipts WHERE task_id=%s ORDER BY provider_batch_id,custom_id",
         (task_id,),
+    )
+    unconsumed = [row for row in receipts if row["consumed_at"] is None]
+    required_ids = {row["custom_id"] for row in unconsumed}
+    collection_finished = payload.get("batch_collection_checkpointed") is True and not payload.get(
+        "batch_ids"
     )
     try:
         for row in requests:
-            request_snapshots.resolve(row, store)
-        for row in receipts:
+            if not collection_finished or row["custom_id"] in required_ids:
+                request_snapshots.resolve(row, store)
+        for row in unconsumed:
             batch_results.response_payload(row["response"], store)
     except PayloadUnavailable:
         return "unavailable"
@@ -63,7 +68,7 @@ def retry(task_id: int, store: PayloadStore | None = None) -> str:
             (task_id,),
         )
         current_receipts = db.query(
-            "SELECT * FROM batch_result_receipts WHERE task_id=%s AND consumed_at IS NULL "
+            "SELECT * FROM batch_result_receipts WHERE task_id=%s "
             "ORDER BY provider_batch_id,custom_id FOR UPDATE",
             (task_id,),
         )
