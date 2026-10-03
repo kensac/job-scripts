@@ -86,14 +86,17 @@ def migrate_chunk(*, after: int, through: int, limit: int, copy: bool) -> dict[s
                     if row["policy_id"] is None and row["policy_text"] is not None
                 }
                 references = {policy: intern(policy) for policy in sorted(snapshots)}
-                for row in rows:
-                    if row["policy_id"] is None and row["policy_text"] is not None:
-                        db.execute(
-                            "UPDATE review_gate_decisions SET policy_id=%s "
-                            "WHERE id=%s AND policy_id IS NULL",
-                            (references[row["policy_text"]], row["id"]),
-                        )
-                        counts["copied"] += 1
+                updates = [
+                    (references[row["policy_text"]], row["id"])
+                    for row in rows
+                    if row["policy_id"] is None and row["policy_text"] is not None
+                ]
+                db.executemany(
+                    "UPDATE review_gate_decisions SET policy_id=%s "
+                    "WHERE id=%s AND policy_id IS NULL",
+                    updates,
+                )
+                counts["copied"] = len(updates)
             checked = db.query(
                 "SELECT d.id,d.policy_id,p.id AS snapshot_id,"
                 "d.policy IS NOT NULL AS has_inline,"
