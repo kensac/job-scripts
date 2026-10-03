@@ -635,6 +635,23 @@ acknowledgement timestamps remain in Postgres. Profile receipts and active
 work are excluded. No object lifecycle expiration or garbage collection may
 remove referenced objects.
 
+**A new receipt's vectors are written to object storage before the receipt
+exists, and the receipt holds only `embedding_vectors_ref`.** Never write
+them inline again: on 2026-10-03, four receipts written after the backfill
+still carried inline vectors for the tooling below to move.
+`batch_results.checkpoint` uploads every result's vectors with
+`PayloadStore.put_verified` outside any transaction, concurrently up to
+`payload_objects.MAX_CONNECTIONS`, then writes the receipts and clears the
+collected batch IDs in one transaction. Storage that is unconfigured or
+failing raises `PayloadUnavailable` before any receipt is written, with the
+provider batch IDs still pending, so the task takes the payload recovery path
+below and its next run collects the same finished provider batch again;
+nothing is resubmitted or paid twice. An upload whose receipt was never
+written stays unreferenced and is reused by the retry, since objects are
+content-addressed. Every reader of receipt vectors goes through
+`batch_results.response_payload` (`unconsumed`, `payload_recovery.retry`);
+the tooling below verifies references directly against their inline values.
+
 Run `python -m api.ai.migrate_receipt_payloads copy --limit N` with the private
 `JOBTRACKER_S3_ENDPOINT`, `REGION`, `BUCKET`, `ACCESS_KEY_ID` and
 `SECRET_ACCESS_KEY` variables (each with the `JOBTRACKER_S3_` prefix).
@@ -647,6 +664,11 @@ database timeouts and return a cursor for `--after BATCH_ID CUSTOM_ID`. An
 unavailable object, changed receipt or lost eligibility stops the run with a
 nonzero exit; the cursor remains before that row so a retry cannot silently
 skip it. Only the contiguous successful prefix contributes verified byte counts.
+
+To move or roll back a known set of receipts rather than scan from a cursor,
+name each with `--receipt BATCH_ID CUSTOM_ID` (repeatable, serial modes only).
+Every mode then selects only those keys, so `verify` and `restore`, whose
+predicates match every referenced receipt, cannot reach any other row.
 
 Verification defaults to the original serial path. To group reads and overlap
 object GETs, supply all three explicit positive bounds:

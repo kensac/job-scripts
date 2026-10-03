@@ -100,18 +100,37 @@ def snapshot_specs(task_id: int, specs: list[BatchSpec]) -> list[BatchSpec]:
 
 
 def checkpoint(task_id: int, results: list[BatchResult], unfinished: list[str]) -> None:
+    """Record collected results before their provider batches stop being pending.
+
+    Embedding vectors are verified objects before their receipt exists, and the
+    receipt holds only the reference. A storage failure raises PayloadUnavailable
+    before any receipt is written or any batch ID is removed, so the batch is
+    collected again from the provider once storage is back.
+    """
+    if in_transaction():
+        raise RuntimeError("Receipt vectors cannot be uploaded inside a database transaction")
+    for result in results:
+        if not result.batch_id:
+            raise ValueError("a collected result must identify its provider batch")
+    embedded = [result for result in results if result.embedding_vectors is not None]
+    refs: dict[int, PayloadRef] = {}
+    if embedded:
+        store = PayloadStore.from_env()
+        with ThreadPoolExecutor(max_workers=MAX_CONNECTIONS) as executor:
+            uploaded = executor.map(
+                store.put_verified, [result.embedding_vectors for result in embedded]
+            )
+            refs = {id(result): ref for result, ref in zip(embedded, uploaded, strict=True)}
     with db.transaction():
         for result in results:
-            if not result.batch_id:
-                raise ValueError("a collected result must identify its provider batch")
-            response = {
+            response: dict[str, Any] = {
                 "text": result.text,
                 "usage": result.usage,
                 "error": result.error,
                 "finish_reason": result.finish_reason,
             }
-            if result.embedding_vectors is not None:
-                response["embedding_vectors"] = result.embedding_vectors
+            if id(result) in refs:
+                response["embedding_vectors_ref"] = dataclasses.asdict(refs[id(result)])
             db.execute(
                 "INSERT INTO batch_result_receipts (provider_batch_id, custom_id, task_id, response, model) "
                 "VALUES (%s,%s,%s,%s,%s) ON CONFLICT (provider_batch_id, custom_id) DO NOTHING",

@@ -17,7 +17,14 @@ _ELIGIBLE = (
 )
 
 
-def candidates(*, after: tuple[str, str] | None, limit: int, mode: Mode) -> list[dict[str, Any]]:
+def candidates(
+    *,
+    after: tuple[str, str] | None,
+    limit: int,
+    mode: Mode,
+    receipts: list[tuple[str, str]] | None = None,
+) -> list[dict[str, Any]]:
+    """Eligible receipts in cursor order; `receipts` confines every mode to those keys."""
     if limit <= 0:
         raise ValueError("limit must be positive")
     predicate = {
@@ -26,12 +33,22 @@ def candidates(*, after: tuple[str, str] | None, limit: int, mode: Mode) -> list
         "restore": "r.response ? 'embedding_vectors_ref'",
         "verify": "r.response ? 'embedding_vectors_ref'",
     }[mode]
+    named = receipts is not None
     return db.query(
         "SELECT r.* FROM batch_result_receipts r JOIN tasks t ON t.id=r.task_id "
         f"WHERE {_ELIGIBLE} AND {predicate} "
         "AND (%s::text IS NULL OR (r.provider_batch_id,r.custom_id)>(%s,%s)) "
+        "AND (NOT %s OR (r.provider_batch_id,r.custom_id) IN "
+        "(SELECT * FROM unnest(%s::text[],%s::text[]))) "
         "ORDER BY r.provider_batch_id,r.custom_id LIMIT %s",
-        (after[0] if after else None, *(after or (None, None)), limit),
+        (
+            after[0] if after else None,
+            *(after or (None, None)),
+            named,
+            [key[0] for key in receipts or []],
+            [key[1] for key in receipts or []],
+            limit,
+        ),
     )
 
 

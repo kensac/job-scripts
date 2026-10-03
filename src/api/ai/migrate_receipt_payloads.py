@@ -15,6 +15,13 @@ def main() -> int:
     parser.add_argument("--limit", type=int, required=True, help="maximum receipts this invocation")
     parser.add_argument("--after", nargs=2, metavar=("BATCH_ID", "CUSTOM_ID"))
     parser.add_argument(
+        "--receipt",
+        nargs=2,
+        action="append",
+        metavar=("BATCH_ID", "CUSTOM_ID"),
+        help="confine the serial modes to this receipt; repeat for several",
+    )
+    parser.add_argument(
         "--backup-complete", action="store_true", help="confirm independent DB copy finished"
     )
     parser.add_argument("--verify-group-size", type=int)
@@ -61,6 +68,9 @@ def main() -> int:
         args.scan_limit <= 0 or (args.verify_group_size is None and args.compact_group_size is None)
     ):
         parser.error("--scan-limit requires a positive bound and grouped mode")
+    if args.receipt and (args.verify_group_size or args.compact_group_size):
+        parser.error("--receipt applies to the serial modes only")
+    receipts = [tuple(key) for key in args.receipt] if args.receipt else None
     # Set connection defaults BEFORE importing the pool; no bulk read or
     # stalled client may keep a production transaction open indefinitely.
     os.environ["PGOPTIONS"] = (
@@ -133,7 +143,7 @@ def main() -> int:
         else:
             for _ in range(args.limit):
                 # One payload at a time bounds memory independently of the count.
-                rows = candidates(after=after, limit=1, mode=mode)
+                rows = candidates(after=after, limit=1, mode=mode, receipts=receipts)
                 if not rows:
                     break
                 source = rows[0]
