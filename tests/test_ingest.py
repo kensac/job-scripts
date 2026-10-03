@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 
 from api import db
 from api.ai import verdicts
@@ -226,3 +227,123 @@ def _relisted_candidates() -> set[str]:
         """
     )
     return {r["url"] for r in rows}
+
+
+def _job_versions() -> dict[str, tuple[str, str]]:
+    """Each jobs row's physical version. A new xmin means the row was
+    rewritten, whatever the values in it say."""
+    return {
+        r["url"]: (r["xmin"], r["ctid"])
+        for r in db.query("SELECT url, xmin::text AS xmin, ctid::text AS ctid FROM jobs")
+    }
+
+
+def _catalog_rows() -> dict[str, dict]:
+    return {
+        r["url"]: r
+        for r in db.query(
+            "SELECT url, raw_url, company, title, locations, terms, source, active, "
+            "date_posted, extraction_status FROM jobs"
+        )
+    }
+
+
+def test_a_repull_that_changes_nothing_leaves_every_catalog_row_untouched():
+    """Rewriting every row a pull listed was 1.33M updates in 36 hours on a
+    605k-row catalog and 5.7 GB of WAL (pg_stat_statements, 2026-10-03),
+    against 5,336 returns in job_listing_events in the same window. The
+    second pull carries only what the update would not apply: a later date
+    (the first date seen is kept), a different company and title on a feed
+    row (a feed row keeps the ones it was first stored with), and a raw_url
+    (set on insert only)."""
+    from core import catalog
+
+    posts = [
+        dataclasses.replace(p, company="Rocket Lab", date_posted=1_700_000_000)
+        for p in (
+            _posting("Software Engineer I"),
+            dataclasses.replace(_posting("Software Engineer II"), terms=["Summer 2027"]),
+            dataclasses.replace(_posting("Intern"), active=False),
+        )
+    ]
+    catalog.upsert_postings(posts, "rocketlab")
+    before, values = _job_versions(), _catalog_rows()
+    assert len(before) == 3
+
+    catalog.upsert_postings(
+        [
+            dataclasses.replace(
+                p,
+                date_posted=1_800_000_000,
+                company="Rocket Lab USA",
+                title=p.title + " (Remote)",
+                raw_url="https://elsewhere.test/apply",
+            )
+            for p in posts
+        ],
+        "rocketlab",
+    )
+
+    assert _job_versions() == before
+    assert _catalog_rows() == values
+
+
+def test_a_changed_posting_rewrites_its_row_and_only_its_row():
+    from core import catalog
+
+    posts = [_posting(t) for t in ("A", "B", "C", "D", "E")]
+    catalog.upsert_postings(posts, "rocketlab")
+    db.execute("UPDATE jobs SET date_posted = NULL, company = '' WHERE url = %s", (posts[3].url,))
+    before = _job_versions()
+
+    moved = dataclasses.replace(posts[0], locations=["Remote"])
+    retermed = dataclasses.replace(posts[1], terms=["Fall 2027"])
+    closed = dataclasses.replace(posts[2], active=False)
+    dated = dataclasses.replace(posts[3], date_posted=1_700_000_000, company="Rocket Lab")
+    catalog.upsert_postings([moved, retermed, closed, dated, posts[4]], "rocketlab")
+
+    after = _job_versions()
+    assert {u for u in before if after[u] != before[u]} == {
+        moved.url,
+        retermed.url,
+        closed.url,
+        dated.url,
+    }
+    rows = _catalog_rows()
+    assert rows[moved.url]["locations"] == ["Remote"]
+    assert rows[retermed.url]["terms"] == ["Fall 2027"]
+    assert rows[closed.url]["active"] is False
+    assert rows[dated.url]["date_posted"] is not None
+    assert rows[dated.url]["company"] == "Rocket Lab"
+
+
+def test_a_feed_listing_an_uploaded_posting_takes_it_over_even_when_nothing_else_differs():
+    from core import catalog
+
+    post = _posting("Software Engineer")
+    catalog.upsert_postings([post], "upload")
+    db.execute("UPDATE jobs SET extraction_status = 'pending' WHERE url = %s", (post.url,))
+
+    catalog.upsert_postings([post], "rocketlab")
+
+    row = _catalog_rows()[post.url]
+    assert (row["source"], row["extraction_status"]) == ("rocketlab", "done")
+
+
+def test_a_return_rewrites_the_row_and_records_the_event_once():
+    from core import catalog
+
+    post = _posting("Software Engineer")
+    catalog.upsert_postings([post], "rocketlab")
+    job_id = db.query_one("SELECT id FROM jobs WHERE url = %s", (post.url,))["id"]
+    catalog.retire_unlisted("rocketlab", [])
+    before = _job_versions()
+
+    catalog.upsert_postings([post], "rocketlab")
+    returned = _job_versions()
+    catalog.upsert_postings([post], "rocketlab")
+
+    assert returned[post.url] != before[post.url]
+    assert _job_versions() == returned
+    assert db.query_one("SELECT active FROM jobs WHERE id = %s", (job_id,))["active"]
+    assert _listing_events(job_id) == [False, True]

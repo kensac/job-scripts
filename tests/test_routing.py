@@ -18,7 +18,7 @@ from api import ai, db
 from core import routing
 from core.providers.spec import StructuredOutput as SO
 from core.routing import NoEligibleModel, TaskShape, resolve
-from core.store import add_ai_result, get_custom_result
+from core.store import add_ai_result, has_custom_result
 
 MON_PEAK = datetime.datetime(2026, 9, 7, 3, tzinfo=datetime.UTC)
 MON_OFF = datetime.datetime(2026, 9, 7, 12, tzinfo=datetime.UTC)
@@ -237,7 +237,7 @@ class TestCustomVerdictCostCliff:
         """The real cost of a model switch, and it is not a forked log.
 
         Model appears in no resolution key, so the board is unaffected. But
-        the filter evaluator skips a check by calling get_custom_result WITH
+        the filter evaluator skips a check by calling has_custom_result WITH
         the model, so the first cycle answered by a different model sees no
         cached verdicts and re-runs the whole candidate set at full price - about
         $1.32 for the one enabled filter today, $6.19 if all ten were live.
@@ -250,12 +250,12 @@ class TestCustomVerdictCostCliff:
         add_ai_result(
             url, "passed", "looks good", "custom", model="gpt-5-nano", prompt_hash="hash-1"
         )
-        assert get_custom_result(url, "hash-1", model="gpt-5-nano") is not None
+        assert has_custom_result(url, "hash-1", model="gpt-5-nano") is True
         # Same url, same filter, different model: invisible, so it is re-run.
-        assert get_custom_result(url, "hash-1", model="gpt-5-mini") is None
+        assert has_custom_result(url, "hash-1", model="gpt-5-mini") is False
         # Without a model, any verdict counts - which is why the read path and
         # the board never notice a switch at all.
-        assert get_custom_result(url, "hash-1") is not None
+        assert has_custom_result(url, "hash-1") is True
 
     def test_the_filter_evaluator_scopes_cache_by_model(self):
         """If this call site stops passing the model, the cliff above stops
@@ -266,7 +266,7 @@ class TestCustomVerdictCostCliff:
         from tasks import filter_execution
 
         source = inspect.getsource(filter_execution)
-        assert 'get_custom_result(job["url"], snapshot.prompt_hash, model=cfg.model)' in source
+        assert 'has_custom_result(job["url"], snapshot.prompt_hash, model=cfg.model)' in source
 
 
 def test_no_call_site_still_hardcodes_a_batched_model():

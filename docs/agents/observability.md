@@ -933,6 +933,14 @@ readable and require the separate bounded migration below.
 Query detail and custom-result readers hydrate a missing inline value and fail
 explicitly if referenced content is missing or its digest is wrong.
 
+The custom-verdict cache check (`store.has_custom_result`) answers whether a
+decided verdict exists and returns nothing else, so it selects only the latest
+row's instruction reference. It never reads the page text or inline
+instructions: the filter sweeps call it once per candidate, 1.32M times in 36
+hours (2026-10-03). A row held by reference is still hydrated, so a missing or
+corrupt dictionary entry fails the check as it fails every other reader. A
+caller that needs the verdict row's fields reads them in its own query.
+
 Use `python -m api.ai.migrate_query_instructions MODE --through ID --after ID
 --limit N` with a fixed maximum query ID and saved cursors. `copy` retains inline
 text; a separate `verify` pass reports unreferenced values. Only after an

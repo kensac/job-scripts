@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import os
 import socket
-from typing import Any, LiteralString, cast
+from typing import LiteralString, cast
 
 import dotenv
 
@@ -152,24 +152,34 @@ def add_ai_result(
         return inserted["id"]
 
 
-def get_custom_result(
-    url: str, prompt_hash: str, model: str | None = None
-) -> dict[str, Any] | None:
-    """Latest decided custom result for a url under a specific filter (by hash).
+def has_custom_result(url: str, prompt_hash: str, model: str | None = None) -> bool:
+    """Whether a url already has a decided custom result under a specific
+    filter (by hash), so the check need not run again.
 
     With `model`, only verdicts produced by that model count; without it, any
     model's verdict is reused.
+
+    Reads the latest such row's instruction reference and nothing else. The
+    filter sweeps ask this once per candidate, 1.32M times in 36 hours
+    (pg_stat_statements, 2026-10-03), and reading the whole row detoasted the
+    cached page text every time for an answer nobody used. A row that keeps
+    its instructions by reference is still hydrated, so a missing or corrupt
+    dictionary entry raises here as it did when this returned the row.
     """
     clause = " AND model = %s" if model is not None else ""
     params = (url, prompt_hash, model) if model is not None else (url, prompt_hash)
     with connection() as conn:
         row = conn.execute(
-            "SELECT * FROM ai_queries WHERE url = %s AND check_type = 'custom' "
+            "SELECT CASE WHEN instructions IS NULL THEN instructions_id END AS instructions_id "
+            "FROM ai_queries WHERE url = %s AND check_type = 'custom' "
             f"AND prompt_hash = %s{clause} AND status IN ('passed', 'rejected') "
             "ORDER BY id DESC LIMIT 1",
             params,
         ).fetchone()
-    return query_instructions.hydrate([dict(row)])[0] if row else None
+    if row is None:
+        return False
+    query_instructions.hydrate([{"instructions": None, **row}])
+    return True
 
 
 # A page shorter than this is a login wall, an error stub or a cookie banner,

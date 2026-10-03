@@ -15,7 +15,7 @@ from api.ai.batch_results import progress_counts
 from core import providers
 from core.answers import FilterDecision, FilterResult
 from core.filters import build_custom_decision_instructions, build_custom_input
-from core.store import get_content, get_contents, get_custom_result
+from core.store import get_content, get_contents, has_custom_result
 from tasks.runtime import (
     SCRAPE_CONCURRENCY,
     AdaptiveLimiter,
@@ -66,7 +66,7 @@ async def check_filter(
     """Run one check, unless this exact prompt and model already decided it."""
     # Model scope is load-bearing: changing models deliberately invalidates the
     # cache rather than treating another model's verdict as this model's work.
-    if get_custom_result(job["url"], snapshot.prompt_hash, model=cfg.model):
+    if has_custom_result(job["url"], snapshot.prompt_hash, model=cfg.model):
         return None
     _, usage = await verdicts.run_check(
         cfg,
