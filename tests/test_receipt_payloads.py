@@ -271,22 +271,28 @@ def test_required_receipt_loading_raises_without_acknowledging(f, objects, monke
     assert row(task_id)["consumed_at"] is None
 
 
-def test_verification_works_in_read_only_session(f, objects):
+def test_verification_works_in_read_only_session(f, objects, monkeypatch):
+    from psycopg.rows import dict_row
+    from psycopg_pool import ConnectionPool
+
+    import core.pool as connections
+
     task_id, _ = receipt(f)
     receipt_payloads.migrate(row(task_id), objects, mode="copy")
     original = row(task_id)
-    # The command uses a read-only connection, and must not acquire row locks.
-    from core.pool import pool
-
-    old = pool.kwargs.get("options")
-    pool.kwargs["options"] = "-c default_transaction_read_only=on"
-    pool.drain()
-    try:
+    # A separate read-only pool cannot leak session defaults into later tests.
+    with (
+        ConnectionPool(
+            connections.DATABASE_URL,
+            min_size=1,
+            max_size=1,
+            kwargs={"row_factory": dict_row, "options": "-c default_transaction_read_only=on"},
+        ) as readonly,
+        monkeypatch.context() as patch,
+    ):
+        patch.setattr(connections, "pool", readonly)
+        assert db.query_one("SHOW default_transaction_read_only") == {
+            "default_transaction_read_only": "on"
+        }
         assert receipt_payloads.migrate(original, objects, mode="verify") == "verified"
-    finally:
-        if old is None:
-            pool.kwargs.pop("options", None)
-        else:
-            pool.kwargs["options"] = old
-        pool.drain()
     assert row(task_id) == original
