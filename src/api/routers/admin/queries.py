@@ -89,9 +89,10 @@ def _where(
         clauses.append("url = %(url)s")
         params["url"] = url
     if q:
-        # Default search hits only trigram-indexed columns; including
-        # input_content (unindexed page dumps) forces a sequential scan, so
-        # it's opt-in via deep=true.
+        # A sequential scan of ai_queries: company and job_title have no
+        # trigram index (7c0b33a7fd95 dropped them unscanned), and an OR is
+        # index-backed only when every arm is. deep=true adds input_content,
+        # the page dumps, which multiplies what that scan reads.
         cols = (
             "(reason ILIKE %(q)s OR url ILIKE %(q)s OR company ILIKE %(q)s OR job_title ILIKE %(q)s"
         )
@@ -105,9 +106,10 @@ def _where(
     # which is worse than not linking at all - so both spellings are generated
     # from core.reason_taxonomy and pinned equal by a test.
     #
-    # `~*` is never itself indexed: the trigram index on `reason` cannot serve
-    # a general regex (GIN trigram covers LIKE and similarity only), so do not
-    # read that index's existence as meaning this is.
+    # `~*` can use the trigram index on `reason`: GIN trigram extracts the
+    # trigrams a regex requires. Whether the planner takes it depends on the
+    # pattern; on a 1M-row test copy (2026-10-03) seven of the nine groups
+    # and evidence_missing used idx_ai_queries_reason_trgm.
     #
     # What it scans depends on what it is composed with. A drill-through link
     # carries check_type and prompt_hash, and idx_ai_queries_prompt_hash is on
