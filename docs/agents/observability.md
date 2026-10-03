@@ -622,10 +622,31 @@ New objects use version 2 uncompressed JSON; the reader also accepts historical
 version 1 gzip objects. Deploy version 2 readers everywhere before writing new
 references. Both formats verify the canonical JSON byte size and SHA-256.
 Copy retains inline vectors and verifies a GET before attaching the reference.
-`verify` checks existing references without database writes. All modes process
-one payload at a time, have database timeouts, and return a cursor for `--after
-BATCH_ID CUSTOM_ID`. An unavailable object stops the run with a nonzero exit;
-the cursor remains before that row so a retry cannot silently skip it.
+`verify` checks existing references without database writes. All modes have
+database timeouts and return a cursor for `--after BATCH_ID CUSTOM_ID`. An
+unavailable object, changed receipt or lost eligibility stops the run with a
+nonzero exit; the cursor remains before that row so a retry cannot silently
+skip it. Only the contiguous successful prefix contributes verified byte counts.
+
+Verification defaults to the original serial path. To group reads and overlap
+object GETs, supply all three explicit positive bounds:
+`--verify-group-size N --verify-workers W --verify-byte-budget B`, with W no
+greater than N. These flags apply only to `verify`. Each group reserves the
+serialized receipt bytes plus declared uncompressed object bytes before loading
+payloads. A receipt exceeding B stops before hydration or GET with
+`stop_reason=byte_budget`; retry with an appropriate bound, not a cursor past it.
+This is a serialized-payload budget, not a process RSS limit: decoded JSON,
+driver buffers and metadata have additional bounded overhead.
+
+Grouped verification reads size metadata and exact row snapshots in a short
+read-only transaction, closes it before object IO, then rechecks the full exact
+row and eligibility in one grouped read. GET concurrency never exceeds W and
+only one byte-bounded group is submitted. Completed futures retain scalar
+outcomes, not vector arrays. GETs later in the current group may finish before
+an earlier failure is observed, but their outcomes never advance the cursor or
+verified-byte total past the first failing row. Changing concurrency does not
+weaken reference parsing, SHA-256, byte size, array-shape or inline-equality
+checks. No copy or compaction throughput change is implied by these options.
 
 Deploy the compatible receipt reader before any compaction. After an independent
 database copy finishes, `compact --limit N --backup-complete` verifies the object
