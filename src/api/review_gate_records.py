@@ -130,7 +130,6 @@ def persist(
                 selected["profile_id"],
                 job.get("title") or "",
                 content_hash((contents or {}).get(url)),
-                db.jsonb(policy),
                 db.jsonb(
                     {
                         "version": "review-gate-v1",
@@ -160,8 +159,8 @@ def persist(
     rows = [(*row, policy_id) for row in rows]
     db.executemany(
         "INSERT INTO review_gate_decisions(task_id,url,job_id,user_id,filter_id,managed_board_id,"
-        "revision,prompt_hash,stage,mode,action,reason,profile_id,title,content_hash,policy,evidence,policy_id) "
-        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) "
+        "revision,prompt_hash,stage,mode,action,reason,profile_id,title,content_hash,evidence,policy_id) "
+        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) "
         "ON CONFLICT(task_id,url) DO NOTHING",
         rows,
     )
