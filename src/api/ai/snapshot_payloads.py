@@ -21,6 +21,7 @@ from core.payload_objects import (
     BundleMemberRef,
     PayloadStore,
     PayloadUnavailable,
+    bundle_groups,
     encode_payload,
     parse_ref,
 )
@@ -28,11 +29,6 @@ from core.pool import in_transaction
 
 Mode = Literal["bundle", "copy", "compact", "restore", "verify"]
 STOP_OUTCOMES = frozenset(("unavailable", "changed", "ineligible"))
-# A bundle is read whole to resolve one member, so it stays the size of the
-# largest objects this store already serves: managed-board candidate lists of
-# 7.9 to 8.6 MB per run (observability.md). The member count is bounded
-# separately by the page size the operator passes.
-BUNDLE_MAX_BYTES = 8 * 1024 * 1024
 # A page's locked transaction waits on task and request rows. Any other holder
 # is itself bounded: the migration's own pages by the 5 s statement_timeout set
 # below. Retrying after 2 s and then 4 s, each attempt also waiting its 2 s
@@ -256,19 +252,6 @@ def migrate_many(
     return outcomes + ([failure] if failure is not None else [])
 
 
-def _bundle_groups(sources: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
-    groups: list[list[dict[str, Any]]] = []
-    size = 0
-    for source in sources:
-        member = len(encode_payload(source["snapshot"]))
-        if not groups or size + member > BUNDLE_MAX_BYTES:
-            groups.append([])
-            size = 0
-        groups[-1].append(source)
-        size += member
-    return groups
-
-
 def bundle_many(
     sources: list[dict[str, Any]], store: PayloadStore, *, workers: int = 1
 ) -> list[str]:
@@ -313,7 +296,8 @@ def bundle_many(
         except PayloadUnavailable:
             return None
 
-    groups = _bundle_groups(valid)
+    # A bundle's member count is bounded by the page size the operator passes.
+    groups = bundle_groups(valid, lambda source: len(encode_payload(source["snapshot"])))
     with ThreadPoolExecutor(max_workers=workers) as executor:
         uploaded = list(executor.map(upload, groups))
     refs: dict[str, BundleMemberRef] = {}

@@ -992,6 +992,13 @@ the parent before the child state transition/count, preventing a stale count
 from terminalizing a parent after its child was recovered. Do not deploy this
 lifecycle change without coordinating with the fleet deployment owner.
 
+## Listing text and raw records
+
+Listings hold their text and raw record as members of bundles named by each
+value's digest, with an inline fallback during an outage. The rules, the
+backfill and the rollout order are in
+[sources-and-boards.md](sources-and-boards.md#a-listings-text-and-raw-record-can-be-held-by-reference).
+
 ## Task job lists: managed-board runs and filter chunks
 
 **Every reader of a task's job list goes through `task_jobs.run_jobs`, which

@@ -13,6 +13,8 @@ from api import db
 from api.ai import verdicts
 from core.fetching import boards
 from core.fetching.posting import JobPosting
+from core.listing_payloads import resolve
+from core.payload_objects import PayloadStore, PayloadUnavailable
 from tasks import ingest
 
 TODAY = 2_000_000_000
@@ -169,7 +171,7 @@ def test_every_listing_is_stored_with_its_text_and_the_text_becomes_the_content(
     task_id = f.make_task("ingest_source", {"source": "acme"}, status="running")
     asyncio.run(ingest.handle_ingest_source(task_id, {"source": "acme"}))
 
-    rows = {r["url"]: r for r in db.query("SELECT * FROM listings WHERE source = 'acme'")}
+    rows = {r["url"]: r for r in resolve(db.query("SELECT * FROM listings WHERE source = 'acme'"))}
     assert rows[kept.url]["kept"] is True and rows[dropped.url]["kept"] is False
     assert rows[kept.url]["description"] == kept.description
     assert rows[kept.url]["raw"] == kept.raw
@@ -218,6 +220,10 @@ def _toast_ids(url: str) -> tuple[int | None, int | None]:
     return row["d"], row["r"]
 
 
+def _refuse(self, raw, key):
+    raise PayloadUnavailable("storage down")
+
+
 def _long(posting: JobPosting) -> JobPosting:
     return dataclasses.replace(posting, description=LONG_TEXT, raw=LONG_RAW)
 
@@ -262,7 +268,9 @@ def test_a_changed_field_rewrites_its_row_and_only_its_row(monkeypatch, f):
 def test_an_update_keeps_long_text_it_did_not_change_where_it_already_is(monkeypatch, f):
     """Postgres reuses a TOASTed value only when the new row carries the old
     row's own pointer. A value arriving through EXCLUDED is a fresh copy and
-    is written out again in full, chunk by chunk, even when identical."""
+    is written out again in full, chunk by chunk, even when identical. Held
+    inline, which is what a pull writes while object storage is down."""
+    monkeypatch.setattr(PayloadStore, "_put", _refuse)
     f.make_source("acme")
     posting = _long(LISTED[0])
     _ingest(monkeypatch, f, [posting])

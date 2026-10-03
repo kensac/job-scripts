@@ -80,7 +80,7 @@ async def handle_ingest_source(task_id: int, payload: dict[str, Any]) -> None:
     # titles the board actually listed, a posting a better pattern admits
     # arrives here on the next pull, and a backfill reads the text from here
     # instead of scraping the page again.
-    catalog.record_listings(
+    listings_inline = catalog.record_listings(
         listed,
         source["name"],
         source["title_pattern"] or "",
@@ -88,6 +88,14 @@ async def handle_ingest_source(task_id: int, payload: dict[str, Any]) -> None:
         int(db.get_config("screened_retention_days")),
         int(db.get_config("listings_seen_refresh_hours")),
     )
+    if listings_inline:
+        # Object storage was unavailable, so this pull's new text and raw
+        # records went inline. Nothing is lost and the next pull moves them,
+        # but an outage that lasts is a table growing back, so it is said.
+        telemetry.capture(
+            "listings_stored_inline",
+            properties={"source": source["name"], "values": listings_inline},
+        )
     upserted = catalog.upsert_postings(postings, source["name"])
     # A company board lists every open posting, so a catalog row this pull
     # did not admit is closed (the board dropped it) or retired (the pattern
@@ -202,6 +210,7 @@ async def handle_ingest_source(task_id: int, payload: dict[str, Any]) -> None:
             "fetch_failed": fetch_failed,
             "gone": gone,
             "retired": retired,
+            "listings_inline": listings_inline,
         },
     )
 
