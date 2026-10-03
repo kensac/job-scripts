@@ -699,39 +699,60 @@ does not return filesystem space, and no table rewrite is part of this command.
 
 ## Shared review policy snapshots
 
-Review decisions retain their inline policy during the compatibility rollout
-and also reference `review_gate_policies`. The interning service uses PostgreSQL's
-JSONB serialization and checks exact text equality after digest conflicts. Never
+New review decisions retain their exact policy in `review_gate_policies` and
+store only its reference. The interning service uses PostgreSQL's JSONB
+serialization and checks exact text equality after digest conflicts. Never
 reconstruct historical policy from current configuration or a filter hash.
-Readers accept legacy inline-only rows and reference-only rows, but fail explicitly
-on missing references or disagreement between retained copies. Snapshots have no
-cascade from task, posting or filter retention.
+Readers accept legacy inline-only, dual-written and reference-only rows, but fail
+explicitly on missing references or disagreement between retained copies.
+Snapshots have no cascade from task, posting or filter retention.
 
-`python -m api.migrate_review_policies copy --through ID --after ID --limit N`
-copies at most N decisions in one transaction. Choose the fixed upper ID with
-`SELECT id FROM review_gate_decisions ORDER BY id DESC LIMIT 1`; start after zero
-and resume from the committed `after` in each result. A failed chunk rolls back
-and must be retried with the same cursor. Each invocation requires an explicit
-limit and upper bound and applies five-second statement and two-second lock
-timeouts. The upper ID bounds the population, not an assertion that concurrent
+**Roll the compatible readers across every API and worker before deploying a
+reference-only writer or clearing any inline policy.** The nullable policy
+migration is a coordinated non-additive release. An operator's flag records the
+fleet confirmation; it does not discover deployed versions or establish that the
+rollout happened.
+
+`python -m api.migrate_review_policies MODE --through ID --after ID --limit N`
+operates on at most N decisions in one transaction. Choose the fixed upper ID
+with `SELECT id FROM review_gate_decisions ORDER BY id DESC LIMIT 1`; start after
+zero and resume from the committed `after` in each result. A failed chunk rolls
+back and returns the unchanged cursor for retry. Each invocation requires an
+explicit limit and upper bound and applies five-second statement and two-second
+lock timeouts. The upper ID bounds the population, not an assertion that concurrent
 older transactions have committed: repeat a pass from zero after the fleet
 transition to catch late legacy inserts.
 
-The same command with `verify` is read-only, returns counts of referenced and
-unreferenced decisions, and exits unsuccessfully if the chunk contains
-unreferenced decisions. Missing, mismatched or invalid-digest snapshots fail the
-chunk. Verify from zero across the same fixed upper ID; a final empty chunk does
-not certify earlier chunks. JSONB values travel through the copy as PostgreSQL
-text so historical numeric precision is retained.
+- `copy` adds missing references without removing inline policies. PostgreSQL
+  JSONB text retains historical numeric precision through the copy.
+- `verify` is read-only and checks effective policy even after inline removal.
+  It counts unreferenced decisions separately and exits unsuccessfully if any
+  remain in the chunk. Missing, mismatched or invalid-digest snapshots fail the
+  chunk. Verify from zero across the fixed upper ID; a final empty chunk does
+  not certify earlier chunks.
+- `compact --backup-complete --compatible-readers` requires both explicit
+  confirmations, a reference for every selected decision, exact equality of
+  every retained inline copy and a valid snapshot digest. It clears only the
+  inline column. Decision and snapshot locks keep verification and mutation
+  atomic. Already compacted rows verify and replay without another write.
+- `restore` writes missing inline policies directly from verified snapshots,
+  preserving exact JSONB values and every reference. Legacy inline-only rows
+  remain unchanged. Replaying a restored chunk performs no additional write.
 
-This compatibility phase does not remove inline policies or reclaim storage.
-Before clearing them, confirm all API and worker readers support references,
-finish and verify reference backfill, and coordinate the non-additive nullable
-inline-column transition with the deployment owner. A later clearing operator
-must verify exact equality in the same transaction as each clear. After any
-inline clearing, rollback to older readers requires restoring every inline
-policy from its snapshot and verifying completeness first. Keep snapshots and
-decision identities throughout; do not alter paid outcomes or reprice usage.
+Run and verify reference backfill before compaction, then verify the same
+population afterwards. `inline_remaining` counts inline policies after the
+operation. `inline_policy_bytes_removed` sums PostgreSQL column sizes cleared
+by that invocation; it is neither filesystem space returned nor a table-size
+reduction. Updates can produce temporary bloat and WAL. No rewrite, deletion,
+object cleanup or vacuum is part of the operator.
+
+Rolling back to the compatible-reader release can retain the nullable schema
+and referenced data. Before restoring the old NOT NULL constraint or older
+readers, stop reference-only writers, restore every missing inline policy,
+verify all references and zero missing inline policies, and only then change
+the schema or readers. Repeating a bounded restore pass also catches late
+transactions. Keep snapshots and decision identities throughout; do not alter
+paid outcomes or reprice usage.
 
 ## Request snapshot storage and recovery
 
