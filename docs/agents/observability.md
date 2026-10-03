@@ -678,3 +678,46 @@ must verify exact equality in the same transaction as each clear. After any
 inline clearing, rollback to older readers requires restoring every inline
 policy from its snapshot and verifying completeness first. Keep snapshots and
 decision identities throughout; do not alter paid outcomes or reprice usage.
+
+## Request snapshot storage and recovery
+
+`api.ai.request_snapshots` is the shared reader for inline and external request
+snapshots. New requests remain inline. An external reference that cannot be
+read is a required-input failure, never a legacy unknown request. Hydration and
+object verification must occur outside database transactions, including outer
+transactions inherited through the shared connection context.
+
+After deploying compatible readers to the whole fleet, run bounded operations
+with `python -m api.ai.migrate_snapshot_payloads MODE --limit COUNT`. Modes are
+`copy`, `verify`, `compact`, and `restore`; resume with the reported
+`--after TASK_ID CUSTOM_ID`. Each invocation processes at most COUNT snapshots,
+one object at a time. Compaction requires `--backup-complete`, confirmation that
+the independent database copy has finished. Start with copy and verification,
+then a bounded compaction canary. Keep the emitted counters and cursor. An
+unavailable object stops before advancing past its row; restore the object or
+configuration and retry that cursor. Database errors fail the invocation; rerun
+from the last saved cursor, since completed operations are idempotent.
+
+Eligibility is completed non-profile tasks with no unconsumed receipts. The
+migration locks the task and request and rechecks eligibility and exact source
+values after verified object I/O. It retains task/request identities and all
+receipt outcomes/accounting. No age cutoff or object expiry is implied.
+`restore` requires the verified object and reverses eligible inline removal.
+Logical bytes moved are not a measurement of filesystem space reclaimed.
+
+A worker encountering `PayloadUnavailable` leaves a failed task with a
+`payload_recovery.reason` of `payload_unavailable`, preserving provider batch
+IDs and checkpoint state. The claim's attempt is returned, so repeated storage
+outages do not exhaust execution attempts. After restoring object access, use
+`python -m tasks.retry_payload_task TASK_ID` on the deployed worker environment.
+It verifies external request snapshots and unconsumed receipt payloads before
+requeueing that exact task. Missing evidence reports `unavailable`; concurrent
+changes, ambiguous accepted provider work, and unsupported parent states report
+`conflict`, without mutation. Neither result authorizes a fresh task submission.
+
+Supported chunk parents can move from their derived chunk-failure state back
+to `waiting`, never `pending`; cancelled, completed, or independently failed
+parents require separate investigation. Recovery and parent finalization lock
+the parent before the child state transition/count, preventing a stale count
+from terminalizing a parent after its child was recovered. Do not deploy this
+lifecycle change without coordinating with the fleet deployment owner.
