@@ -1,7 +1,7 @@
 """drop inline review decision columns and the url-keyed indexes
 
 Revision ID: 7ca95d34ef5f
-Revises: f8dbf9b28085
+Revises: cd26607aae44
 Create Date: 2026-10-03 16:26:46.637767
 
 The contract half of f8dbf9b28085. On 2026-10-03 production held 7,782,858
@@ -54,7 +54,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 revision: str = '7ca95d34ef5f'
-down_revision: Union[str, None] = 'f8dbf9b28085'
+down_revision: Union[str, None] = 'cd26607aae44'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
