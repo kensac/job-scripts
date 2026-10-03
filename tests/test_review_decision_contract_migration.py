@@ -17,7 +17,7 @@ from psycopg.rows import dict_row
 
 from core.disposable_db import require_disposable_name
 
-PARENT = "f8dbf9b28085"
+PARENT = "cd26607aae44"
 HEAD = "7ca95d34ef5f"
 ROOT = Path(__file__).parents[1]
 INLINE = {
