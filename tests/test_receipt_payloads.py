@@ -1,4 +1,5 @@
 import gzip
+import hashlib
 import io
 from dataclasses import asdict, replace
 
@@ -61,7 +62,20 @@ def test_verified_object_round_trip_and_deterministic_identity(objects):
     assert objects.get(ref) == value
     assert objects.put_verified(value) == ref
     assert len(objects.client.objects) == 1
-    assert len(gzip.decompress(objects.client.objects[ref.bucket, ref.key])) == ref.size
+    assert ref.version == 2
+    assert objects.client.objects[ref.bucket, ref.key] == b"[[0.125,-1.25],[0,4]]"
+    assert ref.size == len(objects.client.objects[ref.bucket, ref.key])
+
+
+def test_legacy_gzip_objects_remain_readable(objects):
+    raw = b"[[0.125,-1.25],[0,4]]"
+    digest = hashlib.sha256(raw).hexdigest()
+    ref = PayloadRef(objects.bucket, f"payloads/v1/sha256/{digest}.json.gz", digest, len(raw))
+    objects.client.objects[ref.bucket, ref.key] = gzip.compress(raw, mtime=0)
+    assert objects.get(ref) == [[0.125, -1.25], [0, 4]]
+    objects.client.objects[ref.bucket, ref.key] = gzip.compress(b"[[0.125,-1.26],[0,4]]")
+    with pytest.raises(PayloadUnavailable, match="integrity"):
+        objects.get(ref)
 
 
 @pytest.mark.parametrize(
@@ -72,13 +86,13 @@ def test_object_integrity_failures_are_explicit(objects, failure):
     if failure == "missing":
         objects.client.objects.clear()
     elif failure == "corrupt":
-        objects.client.objects[ref.bucket, ref.key] = gzip.compress(b"[[0.6]]")
+        objects.client.objects[ref.bucket, ref.key] = b"[[0.6]]"
     elif failure == "wrong_digest":
         ref = replace(ref, sha256="0" * 64)
     elif failure == "wrong_size":
         ref = replace(ref, size=ref.size + 1)
     else:
-        ref = replace(ref, version=2)
+        ref = replace(ref, version=3)
     with pytest.raises(PayloadUnavailable):
         objects.get(ref)
 
