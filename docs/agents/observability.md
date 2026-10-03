@@ -803,6 +803,28 @@ unavailable, changed or ineligible outcome exits unsuccessfully before advancing
 past its row; investigate or restore the source/object and retry that cursor. Database errors fail the invocation; rerun
 from the last saved cursor, since completed operations are idempotent.
 
+For a fixed historical population, use `--manifest-stdin` instead of a database
+scan. Supply a JSON array of sorted, unique objects with `task_id`, `custom_id`,
+and `snapshot_sha256`. The digest is SHA-256 of `encode_payload(snapshot)`, not
+PostgreSQL's JSONB text representation. Optional `metadata_md5` binds
+`md5((to_jsonb(batch_requests)-'snapshot'-'snapshot_ref')::text)`; optional
+`reference` binds the exact reference obtained after copy. Keep the same original
+payload digest across copy, verification, compaction and restore. Bound each
+input batch by both `--limit` and `--chunk-size`; `--after` is rejected in this mode.
+The manifest service also requires backup confirmation for compaction.
+
+Manifest mode never selects a replacement for a missing or ineligible identity.
+It prints one result per invocation: counts and logical bytes for that invocation,
+`completed` for the successful prefix, `after` for its last identity, and `failed`
+for the first rejected identity. `exhausted=true` means every identity in the
+supplied batch completed, not that the database or an external full manifest is
+exhausted. Resume with the uncompleted suffix of the same evidence manifest.
+Persist results before sending another batch. If the process ends before emitting
+its result, replay the batch; committed rows are checked idempotently. Keep
+independent verification, a fresh preservation audit, and a separate final audit
+as phase gates. The legacy scan mode retains cumulative chunk counters and its
+repeated final summary; do not combine that accounting with manifest deltas.
+
 Eligibility is completed non-profile tasks (the exception above) with no unconsumed receipts. The
 migration locks the task and request and rechecks eligibility and exact source
 values after verified object I/O. It retains task/request identities and all

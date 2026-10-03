@@ -5,7 +5,9 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 from collections import Counter
+from dataclasses import asdict
 from typing import cast
 
 
@@ -21,11 +23,18 @@ def main() -> int:
     parser.add_argument(
         "--workers", type=int, default=1, help="concurrent verified object operations"
     )
+    parser.add_argument(
+        "--manifest-stdin",
+        action="store_true",
+        help="read an exact sorted evidence manifest JSON array from stdin; limit bounds its rows",
+    )
     parser.add_argument("--after", nargs=2, metavar=("TASK_ID", "CUSTOM_ID"))
     parser.add_argument(
         "--backup-complete", action="store_true", help="confirm independent DB copy finished"
     )
     args = parser.parse_args()
+    if args.manifest_stdin and args.after:
+        parser.error("Manifest batches cannot use a database scan cursor")
     if min(args.limit, args.chunk_size, args.workers) <= 0:
         parser.error("--limit, --chunk-size and --workers must be positive")
     if args.mode == "compact" and not args.backup_complete:
@@ -41,6 +50,29 @@ def main() -> int:
     from api.ai.snapshot_payloads import STOP_OUTCOMES, Mode, candidates, migrate_many
     from core.payload_objects import PayloadStore, encode_payload
     from core.pool import pool
+
+    if args.manifest_stdin:
+        from api.ai.snapshot_payloads import migrate_manifest, validate_manifest
+
+        try:
+            entries = validate_manifest(
+                json.load(sys.stdin), limit=min(args.limit, args.chunk_size)
+            )
+        except (ValueError, TypeError) as exc:
+            parser.error(str(exc))
+        try:
+            result = migrate_manifest(
+                entries,
+                PayloadStore.from_env(),
+                mode=cast(Mode, args.mode),
+                limit=args.limit,
+                workers=args.workers,
+                backup_complete=args.backup_complete,
+            )
+        finally:
+            pool.close()
+        print(json.dumps({"mode": args.mode, "scope": "manifest", **asdict(result)}), flush=True)
+        return 0 if result.exhausted else 1
 
     mode = cast(Mode, args.mode)
     after = (int(args.after[0]), args.after[1]) if args.after else None
