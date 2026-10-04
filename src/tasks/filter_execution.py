@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from api import ai, budget, db, filter_routing, review_gate, review_gate_records
-from api.ai import verdicts
+from api.ai import batch_results, verdicts
 from api.ai.batch_results import progress_counts
 from core import providers
 from core.answers import FilterDecision, FilterResult
@@ -27,6 +27,14 @@ from tasks.runtime import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Results per collection transaction. A chunk's round trips do not grow with
+# its size (tests/test_batch_collection_chunks.py), so this bounds only what
+# one transaction holds: its receipt locks and the request text it sends.
+# Measured on a test database, 23,396 results took 852 round trips at 500 per
+# chunk (about 18 per chunk with its progress read; 88 s at the 103 ms `oci`
+# is from the database) where collecting per result took 230,353 (6.6 h).
+COLLECT_CHUNK = 500
 
 
 @dataclass(frozen=True)
@@ -343,56 +351,134 @@ async def execute_batch(
             )
     finally:
         heartbeat_task.cancel()
-    for done, result in enumerate(results, start=1):
-        with consume_result(task_id, result) as receipt:
-            if not receipt.pending:
-                continue
-            url = result.custom_id
-            context = (result.request.context or {}) if result.request else {}
-            stored = FilterSnapshot.from_mapping(context.get("filter") or snapshot.__dict__)
-            job = context.get("job") or (by_url.get(url) or (None, None))[0]
-            usage = ai.batch_usage(result.usage)
-            if job is None:
-                hooks.record_usage(usage, result.model, True)
-                receipt.outcome = "unknown_request"
-                continue
-            parsed = None
-            reason = f"batch: {result.error or 'no output'}"
-            if not result.error and result.text:
-                try:
-                    parsed = FilterResult.model_validate_json(result.text)
-                except ValueError:
-                    reason = "batch: unparsable output"
-            query_id = verdicts.record_ai_verdict(
-                url=url,
-                check_type="custom",
-                rejected=parsed.should_filter if parsed else None,
-                reason=parsed.reason if parsed else reason,
-                parsed_json=result.text if parsed else None,
-                usage=usage,
-                model=result.model,
-                provider="openai",
-                key_source=hooks.key_source,
-                company=job["company"],
-                job_title=job["title"],
-                instructions=result.request.instructions if result.request else None,
-                input_text=result.request.input if result.request else None,
-                filter_name=hooks.verdict_label,
-                prompt_hash=stored.prompt_hash,
-                context="filter-batch",
-                batched=True,
-                batch_id=result.batch_id,
-                error=result.error,
-                reasoning_effort=context.get("reasoning_effort"),
+    for start in range(0, len(results), COLLECT_CHUNK):
+        chunk = results[start : start + COLLECT_CHUNK]
+        try:
+            _collect_chunk(task_id, chunk, snapshot, by_url, hooks)
+        except Exception:
+            # The chunk rolled back whole. Per result, everything before a
+            # poisoned result commits and the poison raises for the task's
+            # retry, exactly as collection behaved before it was chunked.
+            logger.warning(
+                "Task %s: chunk failed, collecting it per result", task_id, exc_info=True
             )
-            hooks.record_usage(usage, result.model, True)
-            review_gate_records.record_outcome(
-                (context.get("review_gate") or {}).get("decision_id"), query_id
-            )
-            receipt.outcome = "written" if parsed else "failed"
-        if done % 50 == 0:
+            for result in chunk:
+                _collect_one(task_id, result, snapshot, by_url, hooks)
+        if start + COLLECT_CHUNK < len(results):
             done_count, total_count = progress_counts(task_id)
             hooks.progress(done_count, total_count, result_label(unavailable, snapshot.name))
     done_count, total_count = progress_counts(task_id)
     hooks.progress(done_count, total_count, result_label(unavailable, snapshot.name))
     hooks.complete()
+
+
+@dataclass
+class _Collected:
+    """What one pending result writes, decided before anything is written."""
+
+    usage: dict[str, int | None]
+    model: str | None
+    outcome: str
+    verdict: verdicts.Verdict | None = None
+    decision_id: int | None = None
+
+
+def _plan(
+    result: Any,
+    snapshot: FilterSnapshot,
+    by_url: dict[str, tuple[dict[str, Any], str | None]],
+    hooks: ExecutionHooks,
+) -> _Collected:
+    url = result.custom_id
+    context = (result.request.context or {}) if result.request else {}
+    stored = FilterSnapshot.from_mapping(context.get("filter") or snapshot.__dict__)
+    job = context.get("job") or (by_url.get(url) or (None, None))[0]
+    usage = ai.batch_usage(result.usage)
+    if job is None:
+        return _Collected(usage, result.model, "unknown_request")
+    parsed = None
+    reason = f"batch: {result.error or 'no output'}"
+    if not result.error and result.text:
+        try:
+            parsed = FilterResult.model_validate_json(result.text)
+        except ValueError:
+            reason = "batch: unparsable output"
+    verdict = verdicts.Verdict(
+        url=url,
+        check_type="custom",
+        rejected=parsed.should_filter if parsed else None,
+        reason=parsed.reason if parsed else reason,
+        parsed_json=result.text if parsed else None,
+        usage=usage,
+        model=result.model,
+        provider="openai",
+        key_source=hooks.key_source,
+        company=job["company"],
+        job_title=job["title"],
+        instructions=result.request.instructions if result.request else None,
+        input_text=result.request.input if result.request else None,
+        filter_name=hooks.verdict_label,
+        prompt_hash=stored.prompt_hash,
+        context="filter-batch",
+        batched=True,
+        batch_id=result.batch_id,
+        error=result.error,
+        reasoning_effort=context.get("reasoning_effort"),
+    )
+    return _Collected(
+        usage,
+        result.model,
+        "written" if parsed else "failed",
+        verdict,
+        (context.get("review_gate") or {}).get("decision_id"),
+    )
+
+
+def _collect_chunk(
+    task_id: int,
+    results: list[Any],
+    snapshot: FilterSnapshot,
+    by_url: dict[str, tuple[dict[str, Any], str | None]],
+    hooks: ExecutionHooks,
+) -> None:
+    """Write a chunk's verdicts, usage, outcomes and receipts in one transaction.
+
+    Ordered so that what can fail does so before any hook runs: the hooks'
+    process metrics cannot be rolled back, and a failed chunk is collected
+    again per result. Each table receives its rows in result order, so ids
+    match the per-result form.
+    """
+    with batch_results.consume_results(task_id, results) as receipts:
+        collected = []
+        for result, receipt in zip(results, receipts, strict=True):
+            if receipt.pending:
+                planned = _plan(result, snapshot, by_url, hooks)
+                receipt.outcome = planned.outcome
+                collected.append(planned)
+        written = [(p.verdict, p.decision_id) for p in collected if p.verdict is not None]
+        query_ids = verdicts.record_ai_verdicts([verdict for verdict, _ in written])
+        with db.pipeline():
+            for (_, decision_id), query_id in zip(written, query_ids, strict=True):
+                review_gate_records.record_outcome(decision_id, query_id)
+        with db.pipeline():
+            for planned in collected:
+                hooks.record_usage(planned.usage, planned.model, True)
+    for verdict, _ in written:
+        verdict.count()
+
+
+def _collect_one(
+    task_id: int,
+    result: Any,
+    snapshot: FilterSnapshot,
+    by_url: dict[str, tuple[dict[str, Any], str | None]],
+    hooks: ExecutionHooks,
+) -> None:
+    with consume_result(task_id, result) as receipt:
+        if not receipt.pending:
+            return
+        planned = _plan(result, snapshot, by_url, hooks)
+        receipt.outcome = planned.outcome
+        query_id = verdicts.record_ai_verdict(planned.verdict) if planned.verdict else None
+        hooks.record_usage(planned.usage, planned.model, True)
+        review_gate_records.record_outcome(planned.decision_id, query_id)

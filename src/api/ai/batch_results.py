@@ -226,6 +226,53 @@ def consume_result(task_id: int, result: BatchResult) -> Iterator[Receipt]:
             )
 
 
+@contextmanager
+def consume_results(task_id: int, results: list[BatchResult]) -> Iterator[list[Receipt]]:
+    """consume_result for a chunk: one transaction, one lock and one acknowledgement.
+
+    Receipts line up with results. A result collected twice is pending only
+    the first time, as it would be consumed in sequence. Every result must
+    hold a receipt, or the whole chunk raises before anything is written.
+    """
+    keys = [(result.batch_id, result.custom_id) for result in results]
+    with db.transaction():
+        rows = db.query(
+            "SELECT provider_batch_id,custom_id,outcome FROM batch_result_receipts "
+            "WHERE task_id=%s AND (provider_batch_id,custom_id) IN "
+            "(SELECT * FROM unnest(%s::text[],%s::text[])) "
+            "ORDER BY provider_batch_id,custom_id FOR UPDATE",
+            (task_id, [key[0] for key in keys], [key[1] for key in keys]),
+        )
+        outcomes = {(row["provider_batch_id"], row["custom_id"]): row["outcome"] for row in rows}
+        receipts = []
+        seen = set()
+        for key in keys:
+            if key not in outcomes:
+                raise RuntimeError("result must be checkpointed before consumption")
+            pending = outcomes[key] is None and key not in seen
+            seen.add(key)
+            receipts.append(Receipt(pending=pending, outcome=outcomes[key] or "processed"))
+        yield receipts
+        acknowledged = [
+            (key, receipt.outcome)
+            for key, receipt in zip(keys, receipts, strict=True)
+            if receipt.pending
+        ]
+        if acknowledged:
+            db.execute(
+                "UPDATE batch_result_receipts r SET outcome=a.outcome,consumed_at=now() "
+                "FROM unnest(%s::text[],%s::text[],%s::text[]) AS a(provider_batch_id,custom_id,outcome) "
+                "WHERE r.task_id=%s AND r.provider_batch_id=a.provider_batch_id "
+                "AND r.custom_id=a.custom_id",
+                (
+                    [key[0] for key, _ in acknowledged],
+                    [key[1] for key, _ in acknowledged],
+                    [outcome for _, outcome in acknowledged],
+                    task_id,
+                ),
+            )
+
+
 def outcome_counts(task_id: int) -> dict[str, int]:
     return {
         row["outcome"]: row["count"]

@@ -91,19 +91,21 @@ def _record_reverify_results(task_id: int, results: list) -> int:
                 ("clearance", parsed.requires_clearance_or_restrictions, parsed.clearance_reason),
             ):
                 verdicts.record_ai_verdict(
-                    url=res.custom_id,
-                    check_type=check,
-                    rejected=rejected,
-                    reason=reason,
-                    parsed_json=res.text,
-                    model=res.model,
-                    usage=usage,
-                    shared_call=shared_call,
-                    company=job["company"],
-                    job_title=job["title"],
-                    context="reverify",
-                    batched=True,
-                    batch_id=res.batch_id,
+                    verdicts.Verdict(
+                        url=res.custom_id,
+                        check_type=check,
+                        rejected=rejected,
+                        reason=reason,
+                        parsed_json=res.text,
+                        model=res.model,
+                        usage=usage,
+                        shared_call=shared_call,
+                        company=job["company"],
+                        job_title=job["title"],
+                        context="reverify",
+                        batched=True,
+                        batch_id=res.batch_id,
+                    )
                 )
                 usage = {}
                 shared_call = True
@@ -452,19 +454,21 @@ async def handle_verify_new(task_id: int, payload: dict[str, Any]) -> None:
             ):
                 if job.get(f"needs_{check}") and check not in settled:
                     verdicts.record_ai_verdict(
-                        url=res.custom_id,
-                        check_type=check,
-                        rejected=rejected,
-                        reason=reason,
-                        parsed_json=res.text,
-                        model=res.model,
-                        company=job["company"],
-                        job_title=job["title"],
-                        context="verify-batch",
-                        usage=usage,
-                        shared_call=written,
-                        batched=True,
-                        batch_id=res.batch_id,
+                        verdicts.Verdict(
+                            url=res.custom_id,
+                            check_type=check,
+                            rejected=rejected,
+                            reason=reason,
+                            parsed_json=res.text,
+                            model=res.model,
+                            company=job["company"],
+                            job_title=job["title"],
+                            context="verify-batch",
+                            usage=usage,
+                            shared_call=written,
+                            batched=True,
+                            batch_id=res.batch_id,
+                        )
                     )
                     usage = {}
                     written = True

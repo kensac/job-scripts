@@ -3,9 +3,11 @@ from __future__ import annotations
 import logging
 import os
 import socket
-from typing import LiteralString, cast
+from collections.abc import Callable
+from typing import Any, LiteralString, cast
 
 import dotenv
+from psycopg import Connection
 
 from core import pricing, query_instructions
 from core.pool import connection
@@ -57,8 +59,54 @@ _INSERT_COLUMNS = [
 
 _WORKER = os.environ.get("JOBTRACKER_WORKER_NAME") or socket.gethostname()
 
+_INSERT_AI_RESULT = _as_query(
+    f"INSERT INTO ai_queries ({', '.join(_INSERT_COLUMNS)}) "
+    f"VALUES ({', '.join(f'%({c})s' for c in _INSERT_COLUMNS)}) RETURNING id"
+)
 
-def add_ai_result(
+
+def add_ai_results(rows: list[dict[str, Any]]) -> list[int]:
+    """Insert rows built by ai_result_row in one round trip, ids in row order.
+
+    executemany pipelines the same statement add_ai_result runs, so each row
+    gets the id and values it would have had inserted alone, in this order.
+    """
+    if not rows:
+        return []
+    with connection() as conn, conn.cursor() as cursor:
+        if len(rows) == 1:
+            inserted = cursor.execute(_INSERT_AI_RESULT, _interned(conn, rows)[0]).fetchone()
+            assert inserted is not None
+            return [inserted["id"]]
+        cursor.executemany(_INSERT_AI_RESULT, _interned(conn, rows), returning=True)
+        ids = []
+        for _ in cursor.results():
+            inserted = cursor.fetchone()
+            assert inserted is not None
+            ids.append(inserted["id"])
+        return ids
+
+
+def _interned(conn: Connection[dict[str, Any]], rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    # Each distinct text once, in first-use order, which is the order the
+    # per-row insert interned them in.
+    ids: dict[str, int] = {}
+    interned = []
+    for row in rows:
+        text = row["instructions"]
+        if text is not None and text not in ids:
+            ids[text] = query_instructions.intern(conn, text)
+        interned.append(
+            {
+                **row,
+                "instructions_id": ids[text] if text is not None else None,
+                "instructions": None,
+            }
+        )
+    return interned
+
+
+def ai_result_row(
     url: str,
     status: str,
     reason: str | None = "",
@@ -82,7 +130,7 @@ def add_ai_result(
     config_name: str | None = None,
     batch_id: str | None = None,
     cache_write_tokens: int | None = None,
-) -> int:
+) -> dict[str, Any]:
     row = {
         # created_at is DELIBERATELY ABSENT: the column defaults to Postgres
         # now(), and letting the database supply it is what keeps every
@@ -137,19 +185,17 @@ def add_ai_result(
         "worker": _WORKER,
         "batch_id": batch_id,
     }
-    columns = ", ".join(_INSERT_COLUMNS)
-    placeholders = ", ".join(f"%({c})s" for c in _INSERT_COLUMNS)
-    with connection() as conn:
-        row["instructions_id"] = (
-            query_instructions.intern(conn, instructions) if instructions is not None else None
-        )
-        row["instructions"] = None
-        inserted = conn.execute(
-            _as_query(f"INSERT INTO ai_queries ({columns}) VALUES ({placeholders}) RETURNING id"),
-            row,
-        ).fetchone()
-        assert inserted is not None
-        return inserted["id"]
+    return row
+
+
+def _inserting[**P](build: Callable[P, dict[str, Any]]) -> Callable[P, int]:
+    def insert(*args: P.args, **kwargs: P.kwargs) -> int:
+        return add_ai_results([build(*args, **kwargs)])[0]
+
+    return insert
+
+
+add_ai_result = _inserting(ai_result_row)
 
 
 def decided_custom_urls(urls: list[str], prompt_hash: str, model: str | None = None) -> set[str]:

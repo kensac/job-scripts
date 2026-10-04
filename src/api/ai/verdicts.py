@@ -5,6 +5,7 @@ import json
 import logging
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any, TypeVar
 from urllib.parse import urlparse
 
@@ -13,7 +14,7 @@ from pydantic import BaseModel
 from api import ai, db, metrics, telemetry
 from api.ai import AIConfig
 from core import pricing
-from core.store import add_ai_result
+from core.store import add_ai_result, add_ai_results, ai_result_row
 
 logger = logging.getLogger(__name__)
 
@@ -63,19 +64,21 @@ async def run_check[T: BaseModel](
         context=context,
         # ai.parse already emits transport metrics for a live call.
         record_call_metrics=False,
-        on_record=on_record,
     )
     start = time.monotonic()
     try:
         parsed, usage = await ai.parse(cfg, instructions, input_text, response_model)
     except Exception as exc:
         record_ai_verdict(
-            rejected=None,
-            reason=f"{check_type} check failed: {str(exc)[:100]}",
-            parsed_json=None,
-            usage=exc.usage if isinstance(exc, ai.PaidParseError) else {},
-            error=str(exc),
-            **common,
+            Verdict(
+                rejected=None,
+                reason=f"{check_type} check failed: {str(exc)[:100]}",
+                parsed_json=None,
+                usage=exc.usage if isinstance(exc, ai.PaidParseError) else {},
+                error=str(exc),
+                **common,
+            ),
+            on_record,
         )
         telemetry.capture(
             "ai_call_failed",
@@ -95,113 +98,145 @@ async def run_check[T: BaseModel](
         verdict_of(parsed) if parsed is not None else (None, "AI returned no parsed response")
     )
     record_ai_verdict(
-        rejected=rejected,
-        reason=reason,
-        parsed_json=json.dumps(parsed.model_dump()) if parsed is not None else None,
-        usage=usage,
-        duration_ms=duration_ms,
-        **common,
+        Verdict(
+            rejected=rejected,
+            reason=reason,
+            parsed_json=json.dumps(parsed.model_dump()) if parsed is not None else None,
+            usage=usage,
+            duration_ms=duration_ms,
+            **common,
+        ),
+        on_record,
     )
     return parsed, usage
 
 
-def record_ai_verdict(
-    *,
-    url: str,
-    check_type: str,
-    rejected: bool | None,
-    reason: str | None,
-    parsed_json: str | None,
-    usage: dict[str, int | None],
-    model: str | None,
-    provider: str = "openai",
-    key_source: str = "owner",
-    company: str = "",
-    job_title: str = "",
-    instructions: str | None = "",
-    input_text: str | None = "",
-    filter_name: str | None = None,
-    prompt_hash: str | None = None,
-    context: str = "worker",
-    batched: bool = False,
-    batch_id: str | None = None,
-    reasoning_effort: str | None = None,
-    duration_ms: int | None = None,
-    error: str | None = None,
-    record_call_metrics: bool = True,
-    shared_call: bool = False,
-    on_record: Callable[[int], None] | None = None,
-) -> int:
-    """Persist the shared result shape. A missing decision is a failed attempt.
+_ZERO_USAGE = dict.fromkeys(
+    (
+        "prompt_tokens",
+        "completion_tokens",
+        "total_tokens",
+        "cached_tokens",
+        "cache_write_tokens",
+        "reasoning_tokens",
+    ),
+    0,
+)
+
+
+@dataclass(frozen=True, kw_only=True)
+class Verdict:
+    """The shared result shape. A missing decision is a failed attempt.
 
     Live calls already emit provider metrics inside ai.parse; batch callers
     emit them here. Both paths keep consumed tokens on failed attempts.
     """
-    if shared_call:
-        if usage:
-            raise ValueError("a companion verdict cannot carry its own provider usage")
-        # The caller already booked this response on another verdict. Explicit
-        # zero allocation is different from an absent provider usage receipt.
-        usage = dict.fromkeys(
-            (
-                "prompt_tokens",
-                "completion_tokens",
-                "total_tokens",
-                "cached_tokens",
-                "cache_write_tokens",
-                "reasoning_tokens",
-            ),
-            0,
-        )
-        record_call_metrics = False
-    status = "failed" if rejected is None else "rejected" if rejected else "passed"
-    with db.transaction():
-        query_id = add_ai_result(
-            url,
-            status,
-            reason,
-            check_type,
-            model=model,
-            filter_name=filter_name,
-            prompt_hash=prompt_hash,
-            company=company,
-            job_title=job_title,
-            instructions=instructions,
-            input_content=input_text,
-            parsed_json=parsed_json,
+
+    url: str
+    check_type: str
+    rejected: bool | None
+    reason: str | None
+    parsed_json: str | None
+    usage: dict[str, int | None]
+    model: str | None
+    provider: str = "openai"
+    key_source: str = "owner"
+    company: str = ""
+    job_title: str = ""
+    instructions: str | None = ""
+    input_text: str | None = ""
+    filter_name: str | None = None
+    prompt_hash: str | None = None
+    context: str = "worker"
+    batched: bool = False
+    batch_id: str | None = None
+    reasoning_effort: str | None = None
+    duration_ms: int | None = None
+    error: str | None = None
+    record_call_metrics: bool = True
+    shared_call: bool = False
+
+    def __post_init__(self) -> None:
+        if self.shared_call:
+            if self.usage:
+                raise ValueError("a companion verdict cannot carry its own provider usage")
+            # The caller already booked this response on another verdict. Explicit
+            # zero allocation is different from an absent provider usage receipt.
+            object.__setattr__(self, "usage", dict(_ZERO_USAGE))
+            object.__setattr__(self, "record_call_metrics", False)
+
+    @property
+    def status(self) -> str:
+        return "failed" if self.rejected is None else "rejected" if self.rejected else "passed"
+
+    def row(self) -> dict[str, Any]:
+        usage = self.usage
+        return ai_result_row(
+            self.url,
+            self.status,
+            self.reason,
+            self.check_type,
+            model=self.model,
+            filter_name=self.filter_name,
+            prompt_hash=self.prompt_hash,
+            company=self.company,
+            job_title=self.job_title,
+            instructions=self.instructions,
+            input_content=self.input_text,
+            parsed_json=self.parsed_json,
             prompt_tokens=usage.get("prompt_tokens"),
             completion_tokens=usage.get("completion_tokens"),
             total_tokens=usage.get("total_tokens"),
-            config_name=context,
-            batch_id=batch_id,
+            config_name=self.context,
+            batch_id=self.batch_id,
             cached_tokens=usage.get("cached_tokens"),
             cache_write_tokens=usage.get("cache_write_tokens"),
             reasoning_tokens=usage.get("reasoning_tokens"),
-            reasoning_effort=reasoning_effort,
-            duration_ms=duration_ms,
-            error=error,
+            reasoning_effort=self.reasoning_effort,
+            duration_ms=self.duration_ms,
+            error=self.error,
         )
+
+    def count(self) -> None:
+        """Process metrics, which a rolled-back transaction cannot take back."""
+        metrics.CHECKS.labels(self.check_type, self.status).inc()
+        if not self.record_call_metrics:
+            return
+        usage = self.usage
+        metrics.AI_CALLS.labels(
+            self.provider, self.model or "unknown", "error" if self.rejected is None else "ok"
+        ).inc()
+        if not usage:
+            return
+        cost = pricing.estimate_cost_usd(
+            self.model,
+            usage.get("prompt_tokens"),
+            usage.get("completion_tokens"),
+            cached_tokens=usage.get("cached_tokens"),
+            cache_write_tokens=usage.get("cache_write_tokens"),
+            batched=self.batched,
+        )
+        if cost is not None:
+            metrics.AI_COST_USD.labels(self.provider, self.model or "unknown", self.key_source).inc(
+                float(cost)
+            )
+
+
+def record_ai_verdict(verdict: Verdict, on_record: Callable[[int], None] | None = None) -> int:
+    with db.transaction():
+        (query_id,) = add_ai_results([verdict.row()])
         if on_record is not None:
             on_record(query_id)
-    metrics.CHECKS.labels(check_type, status).inc()
-    if not record_call_metrics:
-        return query_id
-    metrics.AI_CALLS.labels(
-        provider, model or "unknown", "error" if rejected is None else "ok"
-    ).inc()
-    if not usage:
-        return query_id
-    cost = pricing.estimate_cost_usd(
-        model,
-        usage.get("prompt_tokens"),
-        usage.get("completion_tokens"),
-        cached_tokens=usage.get("cached_tokens"),
-        cache_write_tokens=usage.get("cache_write_tokens"),
-        batched=batched,
-    )
-    if cost is not None:
-        metrics.AI_COST_USD.labels(provider, model or "unknown", key_source).inc(float(cost))
+    verdict.count()
     return query_id
+
+
+def record_ai_verdicts(verdicts: list[Verdict]) -> list[int]:
+    """record_ai_verdict for many, in one round trip, without metrics.
+
+    The caller counts each verdict after its own transaction commits.
+    """
+    return add_ai_results([verdict.row() for verdict in verdicts])
 
 
 def host_paced(url: str) -> bool:
