@@ -24,6 +24,15 @@ Import → classify → match → derive.
 Terminal outcomes beat progress regardless of arrival order. Withdrawal comes
 from the board, not from mail: no employer writes to say you withdrew.
 
+**A request reads the current event and current match once.** "Latest row per
+message" is a pass over every row of both tables, so a surface that needs it
+for several derivations takes it in one statement and derives the rest from
+those rows, as the resolve queue does (`resolve/queue_items.current_rows`).
+Where such a derivation restates one that `mail/pipeline.py` also serves
+(`events_by_application`, `proposals_for`), a test holds the two equal. A
+surface that ranks before it pages reads only what ranking needs for every row
+and reads the shown columns for the page alone.
+
 ## Matching
 
 Tiers run in order and each may decline. **A tier never guesses.** Two
