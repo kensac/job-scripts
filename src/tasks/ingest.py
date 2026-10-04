@@ -15,7 +15,7 @@ from urllib.parse import urlparse
 from api import db, filter_runs, hosts, metrics, telemetry
 from api.ai import verdicts
 from core.store import add_ai_result
-from tasks.board import content_attempted_urls, content_ready_urls
+from tasks.board import content_ready_urls
 from tasks.runtime import Deferred, cancelled, set_progress
 
 logger = logging.getLogger(__name__)
@@ -142,9 +142,11 @@ async def handle_ingest_source(task_id: int, payload: dict[str, Any]) -> None:
     # ~2,800 sequential queries pulling ~15MB to compute a boolean, hourly.
     total = len(candidates)
     have_content = content_ready_urls([p.url for p in candidates])
-    # A posting whose fetch came back empty inside the retry window is not
-    # tried again this hour; see FETCH_RETRY_AFTER for why once a day.
-    tried_recently = content_attempted_urls([p.url for p in candidates]) - have_content
+    # A posting whose fetch keeps coming back empty waits longer each time
+    # and is eventually given up on (verdicts.fetch_parked_sql).
+    tried_recently = verdicts.fetch_parked_urls(
+        [p.url for p in candidates if p.url not in have_content]
+    )
     cached = fetch_failed = gone = 0
     for i, p in enumerate(candidates):
         if i % 10 == 0 and cancelled(task_id):

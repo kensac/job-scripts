@@ -38,11 +38,14 @@ async def handle_fetch_missing_content(task_id: int, payload: dict[str, Any]) ->
           AND NOT EXISTS (
             SELECT 1 FROM ai_queries q WHERE q.url = j.url
               AND q.input_content IS NOT NULL AND length(q.input_content) > 200)
-          -- A fetch that came back empty is not retried inside the window;
-          -- without this the backlog was the same dead postings every cycle.
+          -- Any attempt waits out the base window, including one that
+          -- stored too little text to count above; without this the backlog
+          -- was the same dead postings every cycle.
           AND NOT EXISTS (
             SELECT 1 FROM ai_queries q WHERE q.url = j.url AND q.check_type = 'content'
               AND q.created_at > now() - %s::interval)
+          -- A run of empty fetches waits longer each time, then stops.
+          AND NOT {verdicts.fetch_parked_sql("j.url")}
           -- A posting its board reports gone has no page to fetch. That
           -- result is recorded as a closed verdict, not a content row, so
           -- the window above never saw it: 40 gone postings were re-fetched

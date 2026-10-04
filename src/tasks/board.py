@@ -193,20 +193,6 @@ def fetch_retry_interval() -> str:
     return f"{int(db.get_config('fetch_retry_after_hours'))} hours"
 
 
-def content_attempted_urls(urls: list[str]) -> set:
-    """URLs whose page was fetched, with or without a result, inside the retry
-    window. A failed fetch leaves a 'failed' content row (verdicts.refresh_content)
-    and that row is the only memory of the attempt."""
-    if not urls:
-        return set()
-    rows = db.query(
-        "SELECT DISTINCT url FROM ai_queries WHERE url = ANY(%s) AND check_type = 'content' "
-        "AND created_at > now() - %s::interval",
-        (urls, fetch_retry_interval()),
-    )
-    return {r["url"] for r in rows}
-
-
 def demote_closed() -> int:
     result = db.query_one(
         f"""

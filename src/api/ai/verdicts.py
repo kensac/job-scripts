@@ -272,6 +272,61 @@ def host_paced(url: str) -> bool:
     return False
 
 
+# The run of empty fetches since the url's last successful one. The failed
+# content rows refresh_content writes are the only memory of an attempt, so
+# the run is read off them rather than kept as state that could disagree.
+# It walks idx_ai_queries_url_check, a few dozen rows a url at most.
+FETCH_STREAK = """
+    SELECT count(*) AS failures, max(f.created_at) AS last_failed
+    FROM ai_queries f
+    WHERE f.url = {url} AND f.check_type = 'content' AND f.status = 'failed'
+      AND f.id > COALESCE((SELECT max(p.id) FROM ai_queries p
+                           WHERE p.url = {url} AND p.check_type = 'content'
+                             AND p.status = 'passed'), 0)
+"""
+
+
+def fetch_parked_sql(url: str) -> str:
+    """A predicate, true when no automatic path may fetch the page at `url`
+    (a SQL expression): it is inside the wait after its latest empty fetch,
+    which doubles with each consecutive one up to fetch_retry_max_hours, or it
+    has failed fetch_give_up_after_failures times running and is unfetchable.
+    A manual re-check calls refresh_content without asking, and one success
+    ends the run. Thresholds are read on every call, so a change on the
+    config page applies on the next cycle; they are validated positive ints,
+    which is what makes formatting them in safe."""
+    base = int(db.get_config("fetch_retry_after_hours"))
+    cap = int(db.get_config("fetch_retry_max_hours"))
+    give_up = int(db.get_config("fetch_give_up_after_failures"))
+    return f"""EXISTS (
+        SELECT 1 FROM ({FETCH_STREAK.format(url=url)}) streak
+        WHERE streak.failures >= {give_up}
+           OR streak.last_failed > now() - interval '1 hour'
+                * LEAST({base} * power(2, streak.failures - 1), {cap}))"""
+
+
+def fetch_parked_urls(urls: list[str]) -> set[str]:
+    """The urls fetch_parked_sql keeps every automatic path away from."""
+    if not urls:
+        return set()
+    rows = db.query(
+        f"SELECT u AS url FROM unnest(%s::text[]) u WHERE {fetch_parked_sql('u')}", (urls,)
+    )
+    return {r["url"] for r in rows}
+
+
+def fetch_failure_streaks(urls: list[str]) -> dict[str, int]:
+    """Consecutive empty fetches since the last success, for urls with any."""
+    if not urls:
+        return {}
+    rows = db.query(
+        f"SELECT u AS url, s.failures FROM unnest(%s::text[]) u "
+        f"CROSS JOIN LATERAL ({FETCH_STREAK.format(url='u')}) s WHERE s.failures > 0",
+        (urls,),
+    )
+    return {r["url"]: r["failures"] for r in rows}
+
+
 async def refresh_content(
     url: str,
     company: str = "",
@@ -337,8 +392,8 @@ async def refresh_content(
     if host_paced(url):
         # Deferred, not failed: no row is written, so the next cycle tries
         # again once the host's hour has room. Writing 'failed' here would
-        # park the posting for fetch_retry_after_hours, which is a day of
-        # silence for a host that only asked to be fed slowly.
+        # park the posting (fetch_parked_sql) and count toward giving up on
+        # it, for a host that only asked to be fed slowly.
         return None, None
     # The browserless tier, when the engine config asks for it: a fetch with
     # a real Chrome fingerprint, accepted only when the page plainly came
@@ -381,8 +436,9 @@ async def refresh_content(
         # no record, so every hourly ingest and every backfill tried it again:
         # fulltime had 52 such postings on 2026-09-04 and spent 20 minutes an
         # hour on them, from every worker, which is also most of the fleet's
-        # block rate. The row is the memory the callers key off to wait a day
-        # before retrying. No input_content, so nothing downstream reads it as
+        # block rate. The row is the memory the callers key off to wait
+        # before retrying, and the run of them decides how long and whether
+        # to stop (fetch_parked_sql). No input_content, so nothing downstream reads it as
         # a page; extraction_failing counts it, which it could never do before.
         add_ai_result(
             url, "failed", "fetch returned nothing", "content", config_name="content-cache"

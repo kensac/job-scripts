@@ -117,6 +117,13 @@ async def execute_live(
     stored = get_contents(
         [job["url"] for job in jobs if "content" not in job and job["url"] not in decided]
     )
+    parked = verdicts.fetch_parked_urls(
+        [
+            job["url"]
+            for job in jobs
+            if "content" not in job and job["url"] not in decided and job["url"] not in stored
+        ]
+    )
     total = len(jobs)
     done = 0
     limiter = AdaptiveLimiter()
@@ -127,7 +134,7 @@ async def execute_live(
             return None
         frozen_content = "content" in job
         content = job.get("content") if frozen_content else stored.get(job["url"])
-        if not content and not frozen_content:
+        if not content and not frozen_content and job["url"] not in parked:
             content, _closure = await verdicts.refresh_content(
                 job["url"],
                 company=job.get("company") or "",
@@ -190,14 +197,13 @@ async def prepare_content(
     task_id: int,
     jobs: list[dict[str, Any]],
     *,
-    attempted_urls: Callable[[list[str]], set],
     cancelled: Callable[[], bool],
     refresh_content: Callable[..., Awaitable[tuple[str | None, Any]]] = verdicts.refresh_content,
 ) -> tuple[dict[str, str], int]:
     contents = get_contents([job["url"] for job in jobs])
     missing = [job for job in jobs if job["url"] not in contents]
-    attempted = attempted_urls([job["url"] for job in missing])
-    pending = [job for job in missing if job["url"] not in attempted]
+    parked = verdicts.fetch_parked_urls([job["url"] for job in missing])
+    pending = [job for job in missing if job["url"] not in parked]
     semaphore = asyncio.Semaphore(SCRAPE_CONCURRENCY)
 
     async def fetch(job: dict[str, Any]) -> None:

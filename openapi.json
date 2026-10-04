@@ -35728,6 +35728,14 @@
           "verdict": {
             "type": "string",
             "title": "Verdict"
+          },
+          "content_failures": {
+            "type": "integer",
+            "title": "Content Failures"
+          },
+          "unfetchable": {
+            "type": "boolean",
+            "title": "Unfetchable"
           }
         },
         "type": "object",
@@ -35742,10 +35750,12 @@
           "failed",
           "total_tokens",
           "last_seen",
-          "verdict"
+          "verdict",
+          "content_failures",
+          "unfetchable"
         ],
         "title": "CheckedPosting",
-        "description": "Every check ever run against one url, rolled up. The company and title\nare MAX() over the rows rather than a join to the catalog: this is the\nverdict ledger's own account of a posting, and it answers for urls the\ncatalog no longer holds.\n\n`verdict` is the roll-up of the roll-up: one rejection anywhere makes the\nposting rejected, since a posting that fails any check is out."
+        "description": "Every check ever run against one url, rolled up. The company and title\nare MAX() over the rows rather than a join to the catalog: this is the\nverdict ledger's own account of a posting, and it answers for urls the\ncatalog no longer holds.\n\n`verdict` is the roll-up of the roll-up: one rejection anywhere makes the\nposting rejected, since a posting that fails any check is out. A posting\nwith no verdict whose page fetch has failed fetch_give_up_after_failures\ntimes running is `unfetchable` rather than `other`: nothing automatic\nwill fetch it again until an admin re-check succeeds.\n\n`content_failures` is the run of empty fetches since the last success,\nwhich is what the backoff and the give-up read; `failed` counts every\nfailed row of any check, ever."
       },
       "CheckedPostings": {
         "properties": {
@@ -46253,14 +46263,25 @@
           },
           "decisions": {
             "$ref": "#/components/schemas/ReviewDecisions"
+          },
+          "content_failures": {
+            "type": "integer",
+            "title": "Content Failures"
+          },
+          "unfetchable": {
+            "type": "boolean",
+            "title": "Unfetchable"
           }
         },
         "type": "object",
         "required": [
           "rows",
-          "decisions"
+          "decisions",
+          "content_failures",
+          "unfetchable"
         ],
-        "title": "PostingTimeline"
+        "title": "PostingTimeline",
+        "description": "`content_failures` and `unfetchable` mean what they do on the list."
       },
       "PrefilterCell": {
         "properties": {
