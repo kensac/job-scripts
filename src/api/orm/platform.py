@@ -132,6 +132,10 @@ class Task(Base):
         # Without this the probe walks tasks_pkey backwards: 103 s for 8,021
         # sources over 136,986 ingest tasks, against 39 ms with it (test
         # copy, 2026-10-04).
+        # The latest task of a kind, the receipts of a kind (job profile
+        # report) and the queue's kind/status summary, which reads this
+        # index alone rather than every payload-bearing heap page.
+        Index("idx_tasks_kind", "kind", text("id DESC"), postgresql_include=["status"]),
         Index(
             "idx_tasks_ingest_source_latest",
             text("(payload->>'source')"),

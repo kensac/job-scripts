@@ -116,14 +116,17 @@ WITH base AS (
 # The columns are named, not `base.*`. A star select and the shape that reads
 # it drift apart in silence, which is this module's own defect one level down.
 # The CTEs are their own constant because the page and the total below count
-# the same rows and must keep doing so.
+# the same rows and must keep doing so. The total rides on the page as a
+# window over the cut rows, so the whole-catalog GROUP BY runs once; only a
+# page past the end, which has no row to carry it, runs _COUNT_SQL.
 _BASE_SQL = (
     _BASE_CTES
     + """
 SELECT base.company_key, base.company_name, base.total_postings_seen,
        base.comp_found, base.comp_ran_found_nothing, base.comp_not_attempted,
        COALESCE(apps.applications_n, 0) AS applications_n,
-       apps.last_applied_at
+       apps.last_applied_at,
+       count(*) OVER () AS total_names
 FROM base LEFT JOIN apps ON apps.company_key = base.company_key
 WHERE {cuts}
 ORDER BY {order}, base.company_key
@@ -303,10 +306,16 @@ FROM latest GROUP BY company_key
 # re-listing. It also picks the LARGEST surviving group per company, so a high
 # url_count still means an evergreen requisition rather than a repost cycle;
 # the count is reported so a reader can tell those apart.
+#
+# The display title, mode() over the group's spellings, is taken only for the
+# group that wins. mode() is an ordered-set aggregate, which cannot be
+# computed in parallel parts, so asking for it on all ~10,000 groups of a
+# busy page kept the whole grouping on one process: 850 ms against 430 ms
+# for this shape on the top page of a synthetic catalog (2026-10-04).
 _REPOST_SQL = """
 WITH g AS (
-    SELECT lower(btrim(company)) AS company_key,
-           mode() WITHIN GROUP (ORDER BY title) AS title,
+    SELECT lower(btrim(company)) AS company_key, lower(btrim(title)) AS title_key,
+           source, locations,
            count(*) AS url_count,
            min(date_posted) AS first_posted_at,
            max(date_posted) AS last_posted_at
@@ -316,11 +325,19 @@ WITH g AS (
     GROUP BY lower(btrim(company)), lower(btrim(title)), source, locations
     HAVING count(*) >= %(min_urls)s
        AND max(date_posted) - min(date_posted) > make_interval(days => %(min_span)s)
+), best AS (
+    SELECT DISTINCT ON (company_key) *
+    FROM g ORDER BY company_key, url_count DESC, last_posted_at DESC
 )
-SELECT DISTINCT ON (company_key)
-       company_key, title, url_count, first_posted_at, last_posted_at,
-       (extract(epoch FROM last_posted_at - first_posted_at) / 86400)::int AS span_days
-FROM g ORDER BY company_key, url_count DESC, last_posted_at DESC
+SELECT b.company_key,
+       (SELECT mode() WITHIN GROUP (ORDER BY j.title) FROM jobs j
+        WHERE j.company <> '' AND j.title <> '' AND j.date_posted IS NOT NULL
+          AND lower(btrim(j.company)) = b.company_key
+          AND lower(btrim(j.title)) = b.title_key
+          AND j.source = b.source AND j.locations = b.locations) AS title,
+       b.url_count, b.first_posted_at, b.last_posted_at,
+       (extract(epoch FROM b.last_posted_at - b.first_posted_at) / 86400)::int AS span_days
+FROM best b
 """
 
 _CAVEATS = [
@@ -352,6 +369,7 @@ class _CompanyRow(_CompanyKeyed):
     comp_not_attempted: int
     applications_n: int
     last_applied_at: datetime.date | None
+    total_names: int
 
 
 class _CurrencyRow(_CompanyKeyed):
@@ -818,7 +836,13 @@ def list_companies(
         else {}
     )
 
-    total_row = db.query_one_as(_Count, _COUNT_SQL.format(cuts=_CUTS), params)
+    if rows:
+        total_names = rows[0].total_names
+    elif offset:
+        total_row = db.query_one_as(_Count, _COUNT_SQL.format(cuts=_CUTS), params)
+        total_names = total_row.c if total_row else 0
+    else:
+        total_names = 0
     awaiting = db.query_one_as(
         _Count,
         "SELECT count(*) AS c FROM email_messages m WHERE NOT EXISTS "
@@ -843,7 +867,7 @@ def list_companies(
             messages_awaiting_classification=awaiting.c if awaiting else 0,
             min_sample=min_sample,
         ),
-        total_names=total_row.c if total_row else 0,
+        total_names=total_names,
         caveats=_CAVEATS,
         filters=params_.applied(
             q=[q.strip()] if q and pattern else [],
