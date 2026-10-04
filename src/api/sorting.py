@@ -11,6 +11,8 @@ active sort; it never has to duplicate the default or guess the keys.
 
 from __future__ import annotations
 
+from collections.abc import Collection
+
 
 def parse(sort: str, dir: str, sortable: dict[str, str], default: str) -> list[dict[str, str]]:
     keys = [k.strip() for k in sort.split(",")]
@@ -23,7 +25,20 @@ def parse(sort: str, dir: str, sortable: dict[str, str], default: str) -> list[d
     return sorts or [{"key": default, "dir": "asc" if dirs[0] == "asc" else "desc"}]
 
 
-def clause(sorts: list[dict[str, str]], sortable: dict[str, str]) -> str:
+def clause(
+    sorts: list[dict[str, str]], sortable: dict[str, str], not_null: Collection[str] = ()
+) -> str:
     """The ORDER BY body, every column NULLS LAST so empty cells sink whichever
-    way the column runs. Callers append their own tiebreaker."""
-    return ", ".join(f"{sortable[s['key']]} {s['dir'].upper()} NULLS LAST" for s in sorts)
+    way the column runs. Callers append their own tiebreaker.
+
+    `not_null` names the keys whose column cannot hold NULL, and those get no
+    NULLS clause: the ordering is the same either way, but `DESC NULLS LAST`
+    does not match a plain btree read backwards, so the planner cannot use
+    the index for it. On ai_queries (2.07M rows, 2026-10-04) the default
+    `id DESC NULLS LAST` was a seq scan and top-N sort, 4 s warm; `id DESC`
+    walks the primary key, 3.6 ms, same rows. Derive the set from the schema
+    rather than listing it, so a column that becomes nullable falls back."""
+    return ", ".join(
+        f"{sortable[s['key']]} {s['dir'].upper()}" + ("" if s["key"] in not_null else " NULLS LAST")
+        for s in sorts
+    )

@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from api import db, pagination, scoping, sorting
 from api import params as params_
 from api.auth import AuthedUser
+from api.orm.ai import AiQuery
 from api.review_decision_storage import URL_MATCH
 from api.review_gate_reads import ReviewDecisions, read_decisions
 from api.routers.admin.shared import require_admin
@@ -29,6 +30,9 @@ _SORTABLE = {
     "total_tokens",
     "duration_ms",
 }
+# Read off the model, which CI holds equal to the migrations: a sort key here
+# loses its NULLS LAST (see sorting.clause) only while its column cannot be NULL.
+_NOT_NULL = frozenset(c.name for c in AiQuery.__table__.columns if not c.nullable) & _SORTABLE
 
 
 _LIST_COLS = (
@@ -138,37 +142,56 @@ class QueryFilterOptions(BaseModel):
     workers: list[str]
 
 
+def _distinct(col: str, recent: bool = False) -> list[str]:
+    """`SELECT DISTINCT col ... WHERE col IS NOT NULL ORDER BY col`, as a skip
+    scan: each step asks the index for the next value above the last, so the
+    cost is one descent per distinct value instead of a read of every row.
+    `recent` keeps a value only if a row in the last 30 days has it, which on
+    an index over (col, created_at) is an equality plus a range, one more
+    descent. Every column passed here needs an index that leads with it.
+
+    Measured against production (2.07M rows, 2026-10-04, warm): DISTINCT
+    check_type 2.0 s became 66 ms, status 0.3 s became 3 ms. `col` is a
+    literal in this module, never request input. Values come back in the
+    column's collation either way, because min() and `>` compare as the
+    btree does; the final ORDER BY does not lean on recursion order.
+    """
+    window = (
+        f"AND EXISTS (SELECT 1 FROM ai_queries r WHERE r.{col} = v.x "
+        "AND r.created_at > now() - interval '30 days')"
+        if recent
+        else ""
+    )
+    return [
+        r["x"]
+        for r in db.query(
+            f"""
+            WITH RECURSIVE v(x) AS (
+                SELECT min({col}) FROM ai_queries
+                UNION ALL
+                SELECT (SELECT min({col}) FROM ai_queries WHERE {col} > v.x)
+                FROM v WHERE v.x IS NOT NULL
+            )
+            SELECT x FROM v WHERE x IS NOT NULL {window} ORDER BY x
+            """
+        )
+    ]
+
+
 @router.get("/queries/options")
 def query_options(user: AuthedUser = Depends(require_admin)) -> QueryFilterOptions:
     """Filter vocabularies generated from live data, so the admin dropdowns
     can never drift from what actually exists."""
-
-    def col(sql: str, key: str) -> list[str]:
-        return [r[key] for r in db.query(sql) if r[key]]
-
+    # An empty string is no option here; GET /options has always listed it.
+    sources = [r["name"] for r in db.query("SELECT name FROM sources WHERE active ORDER BY name")]
     return QueryFilterOptions(
-        sources=col("SELECT name FROM sources WHERE active ORDER BY name", "name"),
-        check_types=col(
-            "SELECT DISTINCT check_type FROM ai_queries WHERE check_type IS NOT NULL "
-            "ORDER BY check_type",
-            "check_type",
-        ),
-        statuses=col(
-            "SELECT DISTINCT status FROM ai_queries WHERE status IS NOT NULL ORDER BY status",
-            "status",
-        ),
+        sources=[v for v in sources if v],
+        check_types=[v for v in _distinct("check_type") if v],
+        statuses=[v for v in _distinct("status") if v],
         # Pipeline context (which code path decided), not the dead legacy
         # config names: only values seen in the last 30 days.
-        contexts=col(
-            "SELECT DISTINCT config_name FROM ai_queries WHERE config_name IS NOT NULL "
-            "AND created_at > now() - interval '30 days' ORDER BY config_name",
-            "config_name",
-        ),
-        workers=col(
-            "SELECT DISTINCT worker FROM ai_queries WHERE worker IS NOT NULL "
-            "AND created_at > now() - interval '30 days' ORDER BY worker",
-            "worker",
-        ),
+        contexts=[v for v in _distinct("config_name", recent=True) if v],
+        workers=[v for v in _distinct("worker", recent=True) if v],
     )
 
 
@@ -275,7 +298,7 @@ def list_queries(
     rows = db.query_as(
         QueryListing,
         f"SELECT {_LIST_COLS} FROM ai_queries {where} "
-        f"ORDER BY {sorting.clause(sorts, sortable)}, id DESC LIMIT %(limit)s OFFSET %(offset)s",
+        f"ORDER BY {sorting.clause(sorts, sortable, _NOT_NULL)}, id DESC LIMIT %(limit)s OFFSET %(offset)s",
         {**params, "limit": paging.size, "offset": paging.offset},
     )
     total = total_row["c"] if total_row else 0
@@ -635,18 +658,10 @@ class QueryVocabulary(BaseModel):
 
 @router.get("/options")
 def options(user: AuthedUser = Depends(require_admin)) -> QueryVocabulary:
-    def distinct(col: str) -> list[str]:
-        return [
-            r["v"]
-            for r in db.query(
-                f"SELECT DISTINCT {col} AS v FROM ai_queries WHERE {col} IS NOT NULL ORDER BY {col}"
-            )
-        ]
-
     return QueryVocabulary(
-        check_types=distinct("check_type"),
-        statuses=distinct("status"),
-        configs=distinct("config_name"),
+        check_types=_distinct("check_type"),
+        statuses=_distinct("status"),
+        configs=_distinct("config_name"),
     )
 
 
