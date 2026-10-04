@@ -199,6 +199,14 @@ column expressions. `sort=a,b&dir=asc,desc` is several columns at once, and a
 than refuse, and the response echoes `sorts` as applied and `sortable`. **A
 sort parameter never reaches SQL as text.**
 
+Every sort key orders NULLS LAST, except keys the caller passes to
+`sorting.clause` as NOT NULL, read off the ORM model rather than listed by
+hand. Those get no NULLS clause: the order is the same, and `DESC NULLS LAST`
+does not match a btree read backwards, so the index goes unused. The admin
+queries list's default `id DESC NULLS LAST` was a seq scan of 2.07M rows, 4 s
+warm; `id DESC` is 3.6 ms. A list sorting a NOT NULL column of a large table
+passes its set.
+
 **Every admin list that returns rows a person owns takes `user=<id>[,<id>]`,
 and the predicate per table lives in `api/scoping.py`.** Rows, summaries and
 totals narrow together. The envelope carries `filterable`, the parameters the

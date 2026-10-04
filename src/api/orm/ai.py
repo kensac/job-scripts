@@ -48,6 +48,10 @@ class AiQuery(Base):
         Index("idx_ai_queries_status", "status"),
         Index("idx_ai_queries_check_type", "check_type"),
         Index("idx_ai_queries_created_at", "created_at"),
+        # The admin filter options skip-scan the distinct values of these two
+        # and keep those seen in the last 30 days (routers/admin/queries.py).
+        Index("idx_ai_queries_config_recent", "config_name", "created_at"),
+        Index("idx_ai_queries_worker_recent", "worker", "created_at"),
         Index("idx_ai_queries_prompt_hash", "check_type", "prompt_hash"),
         Index(
             "idx_ai_queries_latest_verdict",
