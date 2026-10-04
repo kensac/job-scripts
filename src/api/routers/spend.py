@@ -15,7 +15,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
-from api import budget, db, scoping
+from api import budget, db, grouped, scoping
 from api import params as params_
 from api.auth import AuthedUser
 from api.routers.admin import require_admin
@@ -343,70 +343,79 @@ class Spend(BaseModel):
     interactive_contexts: list[str]
 
 
-@router.get("/admin/spend")
-def spend(
-    days: int = Query(30, ge=1, le=365),
-    user: AuthedUser = Depends(require_admin),
-) -> Spend:
-    params = {"days": days, "interactive": list(INTERACTIVE_CONTEXTS)}
+# Every verdict sum is COALESCE(SUM(...), 0) except cache_write_tokens, whose
+# NULL means nobody recorded it.
+_VERDICT_SUMS = (
+    "cost_usd",
+    "prompt_tokens",
+    "completion_tokens",
+    "total_tokens",
+    "cached_tokens",
+    "cache_write_tokens",
+    "reasoning_tokens",
+    "batched_cost_usd",
+    "sync_cost_usd",
+    "unrealized_savings_usd",
+)
+_VERDICT_COUNTS = (
+    "calls",
+    "unpriced_calls",
+    "cache_write_unknown_calls",
+    "batched_calls",
+    "sync_calls",
+    "batchable_sync_calls",
+    "joint_call_rows",
+)
 
-    totals = db.query_one_as(
-        VerdictTotals,
+
+def _verdict_breakdowns(
+    params: dict,
+) -> tuple[
+    VerdictTotals,
+    BatchingDiagnostics,
+    list[VerdictCheckTypeSpend],
+    list[VerdictModelSpend],
+    list[VerdictDaySpend],
+]:
+    """Totals, batching and the check type, model and day cuts of the verdict
+    log, from ONE scan of ai_queries grouped by every dimension they cut by.
+
+    Each used to be its own full scan: five of the eight scans /admin/spend
+    ran, which took about 97 s between them on a loaded production host on
+    2026-10-04. One pass grouped by a superset of these keys measured
+    3.2-4.0 s there (327 groups); the rows returned are the window's distinct
+    (day, model, check_type), not its calls. Batching splits are FILTERs
+    inside each group rather than keys. Day stays `created_at::date`, so its
+    boundary is still the session timezone. Costs fold as the Decimals
+    Postgres returned, so a sum of group sums is the number one SUM gave.
+    """
+    groups = db.query(
         f"""
-        SELECT COALESCE(SUM(cost_usd), 0) AS cost_usd,
+        SELECT created_at::date AS day, model, check_type,
                COUNT(*) AS calls,
                COUNT(*) FILTER (WHERE cost_usd IS NULL) AS unpriced_calls,
-               COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
-               COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
-               COALESCE(SUM(cached_tokens), 0) AS cached_tokens,
+               SUM(cost_usd) AS cost_usd,
+               SUM(prompt_tokens) AS prompt_tokens,
+               SUM(completion_tokens) AS completion_tokens,
+               SUM(total_tokens) AS total_tokens,
+               SUM(cached_tokens) AS cached_tokens,
                SUM(cache_write_tokens) AS cache_write_tokens,
                COUNT(*) FILTER (WHERE cache_write_tokens IS NULL) AS cache_write_unknown_calls,
-               COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens,
+               SUM(reasoning_tokens) AS reasoning_tokens,
                MIN(created_at) AS first_call,
-               MAX(created_at) AS last_call
-        FROM ai_queries WHERE {_WINDOW} AND model IS NOT NULL
-        """,
-        params,
-    )
-
-    # An aggregate with no GROUP BY returns its row however empty the window.
-    assert totals
-
-    batching = db.query_one_as(
-        BatchingDiagnostics,
-        f"""
-        SELECT COUNT(*) FILTER (WHERE batch_id IS NOT NULL) AS batched_calls,
+               MAX(created_at) AS last_call,
+               COUNT(*) FILTER (WHERE batch_id IS NOT NULL) AS batched_calls,
                COUNT(*) FILTER (WHERE batch_id IS NULL) AS sync_calls,
-               COALESCE(SUM(cost_usd) FILTER (WHERE batch_id IS NOT NULL), 0) AS batched_cost_usd,
-               COALESCE(SUM(cost_usd) FILTER (WHERE batch_id IS NULL), 0) AS sync_cost_usd,
+               SUM(cost_usd) FILTER (WHERE batch_id IS NOT NULL) AS batched_cost_usd,
+               SUM(cost_usd) FILTER (WHERE batch_id IS NULL) AS sync_cost_usd,
                COUNT(*) FILTER (
                    WHERE batch_id IS NULL
                      AND COALESCE(config_name, '') <> ALL(%(interactive)s)
                ) AS batchable_sync_calls,
-               COALESCE(SUM(cost_usd / 2) FILTER (
+               SUM(cost_usd / 2) FILTER (
                    WHERE batch_id IS NULL
                      AND COALESCE(config_name, '') <> ALL(%(interactive)s)
-               ), 0) AS unrealized_savings_usd
-        FROM ai_queries WHERE {_WINDOW} AND model IS NOT NULL
-        """,
-        params,
-    )
-
-    assert batching
-
-    by_check_type = db.query_as(
-        VerdictCheckTypeSpend,
-        f"""
-        SELECT check_type,
-               COUNT(*) AS calls,
-               COALESCE(SUM(cost_usd), 0) AS cost_usd,
-               COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
-               COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
-               COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens,
-               COALESCE(SUM(cached_tokens), 0) AS cached_tokens,
-               SUM(cache_write_tokens) AS cache_write_tokens,
-               COUNT(*) FILTER (WHERE cache_write_tokens IS NULL) AS cache_write_unknown_calls,
-               COUNT(*) FILTER (WHERE batch_id IS NOT NULL) AS batched_calls,
+               ) AS unrealized_savings_usd,
                -- Decided verdicts carrying no tokens: the answer came from a
                -- sibling row's call, so their cost lives there.
                COUNT(*) FILTER (
@@ -414,36 +423,50 @@ def spend(
                      AND status IN ('passed', 'rejected')
                ) AS joint_call_rows
         FROM ai_queries WHERE {_WINDOW} AND model IS NOT NULL
-        GROUP BY check_type ORDER BY 3 DESC
+        GROUP BY 1, 2, 3
         """,
         params,
     )
 
-    by_model = db.query_as(
-        VerdictModelSpend,
-        f"""
-        SELECT model, COUNT(*) AS calls, COALESCE(SUM(cost_usd), 0) AS cost_usd,
-               COALESCE(SUM(total_tokens), 0) AS total_tokens,
-               COUNT(*) FILTER (WHERE cost_usd IS NULL) AS unpriced_calls
-        FROM ai_queries WHERE {_WINDOW} AND model IS NOT NULL
-        GROUP BY model ORDER BY 3 DESC
-        """,
-        params,
+    def folded(rows: list[dict[str, Any]], **keys: Any) -> dict[str, Any]:
+        acc = grouped.fold(rows, _VERDICT_SUMS, _VERDICT_COUNTS, ("first_call",), ("last_call",))
+        for k in _VERDICT_SUMS:
+            if k != "cache_write_tokens" and acc[k] is None:
+                acc[k] = 0
+        return acc | keys
+
+    whole = folded(groups)
+    # Ties in cost had no order in SQL (ORDER BY cost alone); the key breaks
+    # them now so the order is at least stable.
+    check_types = sorted(
+        (folded(rows, check_type=k) for k, rows in grouped.by(groups, "check_type").items()),
+        key=lambda a: (-a["cost_usd"], a["check_type"] is None, a["check_type"] or ""),
+    )
+    models = sorted(
+        (folded(rows, model=k) for k, rows in grouped.by(groups, "model").items()),
+        key=lambda a: (-a["cost_usd"], a["model"]),
+    )
+    days = sorted(
+        (folded(rows, day=k) for k, rows in grouped.by(groups, "day").items()),
+        key=lambda a: a["day"],
+    )
+    return (
+        grouped.shaped(VerdictTotals, whole),
+        grouped.shaped(BatchingDiagnostics, whole),
+        [grouped.shaped(VerdictCheckTypeSpend, a) for a in check_types],
+        [grouped.shaped(VerdictModelSpend, a) for a in models],
+        [grouped.shaped(VerdictDaySpend, a) for a in days],
     )
 
-    by_day = db.query_as(
-        VerdictDaySpend,
-        f"""
-        SELECT created_at::date AS day,
-               COALESCE(SUM(cost_usd), 0) AS cost_usd,
-               COALESCE(SUM(cost_usd) FILTER (WHERE batch_id IS NOT NULL), 0) AS batched_cost_usd,
-               COALESCE(SUM(cost_usd) FILTER (WHERE batch_id IS NULL), 0) AS sync_cost_usd,
-               COUNT(*) AS calls
-        FROM ai_queries WHERE {_WINDOW} AND model IS NOT NULL
-        GROUP BY 1 ORDER BY 1
-        """,
-        params,
-    )
+
+@router.get("/admin/spend")
+def spend(
+    days: int = Query(30, ge=1, le=365),
+    user: AuthedUser = Depends(require_admin),
+) -> Spend:
+    params = {"days": days, "interactive": list(INTERACTIVE_CONTEXTS)}
+
+    totals, batching, by_check_type, by_model, by_day = _verdict_breakdowns(params)
 
     waste = db.query_one_as(
         Waste,

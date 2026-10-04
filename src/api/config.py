@@ -374,8 +374,9 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
     ),
     # How long GET /admin/stats serves the same answer. The dashboard refetches
     # it on every worker event: 642 calls a day at 583 ms each, five full
-    # scans of ai_queries per call, a quarter of all server time on the box
-    # for lifetime totals that move once an hour. 1 is as good as off.
+    # scans of ai_queries per call when measured (one scan since 2026-10-04),
+    # a quarter of all server time on the box for lifetime totals that move
+    # once an hour. 1 is as good as off.
     "admin_stats_cache_seconds": ConfigKey(
         section="Health",
         default=60,

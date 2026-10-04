@@ -83,6 +83,18 @@ Before changing a hot path, measure requests, queries, transactions and runtime
 before and after at a stated workload scale. Report what was measured; a cleaner
 abstraction or passing test does not establish a performance improvement.
 
+**A page that cuts one large table several ways reads it once.** Group by the
+union of the keys the cuts need, keep conditional measures as `FILTER`s inside
+each group, and fold the groups in Python with `api/grouped.py`, which keeps
+SQL's rule that a SUM of only NULLs is NULL. Numeric sums arrive as exact
+Decimals, so the fold is the same number. /admin/spend and /admin/stats did
+this on 2026-10-04: five per-cut scans each, measured on production at about
+97 s and 9.6 s, against 3.2-4.0 s and 3.98 s for one pass. Keep the old
+per-cut SQL as the reference in the equality test (`tests/test_spend_stats_single_pass.py`).
+`GROUPING SETS` over the raw table measured slower for stats on 2M synthetic
+rows locally (3.2 s against 2.6 s), because it sorts per set and spilled to
+disk.
+
 Prompt changes require before/after output-token and decision-quality evaluation
 on the same inputs. Schema and parsing tests establish compatibility, not outcome
 quality or savings. Keep evaluation costs explicitly bounded.
