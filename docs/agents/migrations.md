@@ -61,6 +61,15 @@ waits for every transaction older than itself, and a timeout turns a wait that
 will not end into a failed start that retries. `bd1e66f153c3` is the worked
 example.
 
+**An index whose definition changes keeps its name through a staged swap.**
+Build the new definition concurrently under a staged name, drop the old one
+concurrently, then `ALTER INDEX ... RENAME` the staged one over it. RENAME
+takes SHARE UPDATE EXCLUSIVE, so readers and writers continue, and the
+readers always have one of the two. Skip the swap when the live definition
+already matches, so a start that died after the rename does not rebuild it.
+Autogenerate does not see a change to `INCLUDE` columns, so the migration is
+written by hand. `1afab52e064c` is the worked example.
+
 **An index with zero scans over the life of the statistics is dropped, after
 checking every query.** Read `idx_scan` from `pg_stat_user_indexes` and
 `stats_reset` from `pg_stat_database`; a zero means something only if the

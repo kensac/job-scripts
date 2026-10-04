@@ -36,6 +36,11 @@ class Job(Base):
         # 12,882 for a seq scan at 224,541 jobs (test copy, 2026-10-04).
         Index("idx_jobs_source_created", "source", "created_at"),
         Index("idx_jobs_uploaded_by", "uploaded_by"),
+        # company_key, which the admin company page reads per page of names.
+        # Off the busiest names it turns each per-page read from a seq scan
+        # into a probe: the repost group 98 ms to 10 ms, the open share
+        # 400 ms to 90 ms (synthetic catalog, 2026-10-04).
+        Index("idx_jobs_company_key", text("lower(btrim(company))")),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)

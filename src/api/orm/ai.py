@@ -58,7 +58,9 @@ class AiQuery(Base):
             "url",
             "check_type",
             text("id DESC"),
-            postgresql_include=["status"],
+            # created_at is for the company page's last_checked_at: without
+            # it every verdict the page reads is a heap fetch.
+            postgresql_include=["status", "created_at"],
             postgresql_where=text(
                 "check_type IN ('closed', 'clearance') AND status IN ('passed', 'rejected')"
             ),
