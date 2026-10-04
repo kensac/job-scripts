@@ -233,14 +233,38 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
         "AG Grid column state entries (colId, hide, pinned, width).",
     ),
     # How long a posting whose page fetch came back empty waits before any
-    # ingest or backfill tries it again. The hourly cycle used to be the
-    # retry: 24 attempts a day at the same dead URL from every worker.
+    # automatic path tries it again, after its first failure. The hourly
+    # cycle used to be the retry: 24 attempts a day at the same dead URL from
+    # every worker. Each further consecutive failure doubles the wait
+    # (verdicts.fetch_parked_sql).
     "fetch_retry_after_hours": ConfigKey(
         section="Fetching",
         default=24,
         value_type=PositiveInt,
         help="Hours a posting whose page fetch came back empty waits before any "
-        "ingest or backfill tries it again.",
+        "automatic path tries it again. Each further consecutive failure doubles the wait.",
+    ),
+    # The longest the doubling wait grows to. A week: with the 24 h base the
+    # retries land on days 1, 3, 7, 14 and 21, so a page that is down for a
+    # weekend or blocked for a few days still comes back inside a month.
+    "fetch_retry_max_hours": ConfigKey(
+        section="Fetching",
+        default=168,
+        value_type=PositiveInt,
+        help="Longest wait, in hours, between automatic retries of a posting whose "
+        "page keeps coming back empty.",
+    ),
+    # Consecutive empty fetches after which no automatic path tries the page
+    # again; an admin re-check still does, and a success resets the count.
+    # Six spans about three weeks under the two defaults above. Before this
+    # the 3,511 postings that had never fetched averaged 9 attempts and
+    # reached 50 (production, 2026-10-04), on a flat day each.
+    "fetch_give_up_after_failures": ConfigKey(
+        section="Fetching",
+        default=6,
+        value_type=PositiveInt,
+        help="Consecutive empty fetches after which a posting is unfetchable: no "
+        "automatic path retries it until a manual re-check succeeds.",
     ),
     # An idle worker beside pending work for this long is a stall: a claim
     # takes one poll (JOBTRACKER_WORKER_POLL, 5s), so ten minutes is not

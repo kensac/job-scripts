@@ -72,6 +72,8 @@ def test_recent_postings_keep_all_checks_ties_orphans_and_page_boundaries(client
         "total_tokens": 30,
         "last_seen": None,
         "verdict": "rejected",
+        "content_failures": 0,
+        "unfetchable": False,
     }
     second = client.get(
         "/v1/admin/jobs", params={"page_size": 1, "page": 2}, headers=admin_headers

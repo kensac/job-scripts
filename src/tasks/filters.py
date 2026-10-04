@@ -15,7 +15,6 @@ from core.store import decided_custom_urls, get_contents
 from tasks import batch_policy
 from tasks.board import (
     candidates_for,
-    content_attempted_urls,
     in_flight_urls,
     materialize_passing,
     submission_exclusions,
@@ -217,7 +216,6 @@ async def handle_run_filter_batch_chunk(task_id: int, payload: dict[str, Any]) -
             contents, unavailable = await prepare_content(
                 task_id,
                 jobs,
-                attempted_urls=content_attempted_urls,
                 cancelled=lambda: cancelled(task_id),
                 refresh_content=verdicts.refresh_content,
             )

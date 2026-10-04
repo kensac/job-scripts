@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 from api import db, grouped, pagination, scoping, sorting
 from api import params as params_
+from api.ai import verdicts
 from api.auth import AuthedUser
 from api.orm.ai import AiQuery
 from api.review_decision_storage import URL_MATCH
@@ -435,7 +436,14 @@ class CheckedPosting(BaseModel):
     catalog no longer holds.
 
     `verdict` is the roll-up of the roll-up: one rejection anywhere makes the
-    posting rejected, since a posting that fails any check is out.
+    posting rejected, since a posting that fails any check is out. A posting
+    with no verdict whose page fetch has failed fetch_give_up_after_failures
+    times running is `unfetchable` rather than `other`: nothing automatic
+    will fetch it again until an admin re-check succeeds.
+
+    `content_failures` is the run of empty fetches since the last success,
+    which is what the backoff and the give-up read; `failed` counts every
+    failed row of any check, ever.
     """
 
     url: str
@@ -449,6 +457,8 @@ class CheckedPosting(BaseModel):
     total_tokens: int
     last_seen: datetime.datetime
     verdict: str
+    content_failures: int
+    unfetchable: bool
 
 
 class CheckedPostings(BaseModel):
@@ -487,13 +497,17 @@ _RECENT_POSTINGS = f"""
         ORDER BY q.created_at DESC, q.url
         LIMIT %(limit)s OFFSET %(offset)s
     )
-    SELECT selected.url, totals.*
+    SELECT selected.url, totals.*, streak.failures AS content_failures
     FROM selected
     CROSS JOIN LATERAL (
         SELECT {_POSTING_TOTALS} FROM ai_queries WHERE url = selected.url
     ) totals
+    CROSS JOIN LATERAL ({verdicts.FETCH_STREAK.format(url="selected.url")}) streak
     ORDER BY selected.created_at DESC, selected.url
 """
+
+
+_URL_STREAK = verdicts.FETCH_STREAK.format(url="ai_queries.url")
 
 
 @router.get("/jobs")
@@ -534,8 +548,11 @@ def list_jobs(
             "HAVING SUM(CASE WHEN status='rejected' THEN 1 ELSE 0 END) = 0 "
             "AND SUM(CASE WHEN status='passed' THEN 1 ELSE 0 END) > 0"
         )
+    # The count below wraps this, and the planner drops a subquery output
+    # nobody reads, so the streak is paid for only on the page.
     base = f"""
-        SELECT url, {_POSTING_TOTALS}
+        SELECT url, {_POSTING_TOTALS},
+            (SELECT streak.failures FROM ({_URL_STREAK}) streak) AS content_failures
         FROM ai_queries
         WHERE url IN (SELECT url FROM ai_queries WHERE {" AND ".join(sub)})
         GROUP BY url
@@ -561,6 +578,7 @@ def list_jobs(
             page_params,
         )
     total = total_row["c"] if total_row else 0
+    give_up = int(db.get_config("fetch_give_up_after_failures"))
     return CheckedPostings(
         rows=[
             CheckedPosting(
@@ -569,7 +587,10 @@ def list_jobs(
                 if r["rejected"] > 0
                 else "passed"
                 if r["passed"] > 0
+                else "unfetchable"
+                if r["content_failures"] >= give_up
                 else "other",
+                unfetchable=r["content_failures"] >= give_up,
             )
             for r in rows
         ],
@@ -624,13 +645,20 @@ class TimelineEntry(BaseModel):
 
 
 class PostingTimeline(BaseModel):
+    """`content_failures` and `unfetchable` mean what they do on the list."""
+
     rows: list[TimelineEntry]
     decisions: ReviewDecisions
+    content_failures: int
+    unfetchable: bool
 
 
 @router.get("/jobs/timeline")
 def job_timeline(url: str, user: AuthedUser = Depends(require_admin)) -> PostingTimeline:
+    failures = verdicts.fetch_failure_streaks([url]).get(url, 0)
     return PostingTimeline(
+        content_failures=failures,
+        unfetchable=failures >= int(db.get_config("fetch_give_up_after_failures")),
         rows=db.query_as(
             TimelineEntry,
             "SELECT id, created_at, config_name, check_type, status, reason, model, "

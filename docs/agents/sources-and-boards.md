@@ -309,11 +309,33 @@ resolve that alert. No host is written into code.
 
 ## A page fetch that returns nothing leaves a record
 
-It is a `content` row with `status = 'failed'` and no text, and nothing
-retries that URL inside `fetch_retry_after_hours`.
+It is a `content` row with `status = 'failed'` and no text. Without the record
+the hourly cycle was the retry: every dead link, every hour, from every
+worker, which was most of the fleet's block rate.
 
-Without the record the hourly cycle was the retry: every dead link, every
-hour, from every worker, which was most of the fleet's block rate.
+## A page that keeps failing is retried less often, then not at all
+
+The run of failed `content` rows since the URL's last passed one decides
+whether an automatic path may fetch it (`verdicts.fetch_parked_sql`). After
+the k-th consecutive failure the wait is `fetch_retry_after_hours * 2^(k-1)`,
+capped at `fetch_retry_max_hours`. At `fetch_give_up_after_failures` the
+posting is unfetchable and nothing automatic fetches it again.
+
+Every automatic fetch path asks this before fetching: ingest, the content
+backfill, filter preparation, the live filter run, and reverify. A new
+automatic caller of `refresh_content` asks it too. `refresh_content` itself
+never asks, so an admin re-check (`POST /admin/checks/run`), a person's
+explain and a forced reverify still fetch, and one success ends the run.
+
+The state is derived from the rows, not stored. A flag beside them could
+disagree with them, and the rows are already the only record of an attempt.
+A host-paced deferral writes no row, so it never counts toward the run.
+
+Before the give-up, 3,511 postings that had never fetched once carried
+31,433 failed rows, 9 a posting on average and 50 at most, on a flat day each
+(production, 2026-10-04). The admin Jobs list and its timeline show the run as
+`content_failures` and `unfetchable`; a posting with no verdict reads
+`unfetchable` instead of `other`.
 
 ## Scheduling and counts
 
@@ -328,7 +350,8 @@ the only record of what one pull saw, and they are what the board detectors in
 `api/health.py` and the admin ingest summary read. A board that pulls fine and
 delivers nothing is visible as exactly that.
 
-The knobs above (`fetch_retry_after_hours`, `screened_retention_days`,
+The knobs above (`fetch_retry_after_hours`, `fetch_retry_max_hours`,
+`fetch_give_up_after_failures`, `screened_retention_days`,
 `listings_seen_refresh_hours`, `queue_stall_minutes`, `ingest_backlog_cycles`) are `app_config` rows, not
 constants; see [engineering-standards.md](engineering-standards.md).
 

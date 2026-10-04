@@ -161,7 +161,11 @@ async def _reverify_jobs(
                 ([r["url"] for r in rows], cutoff),
             )
         }
-        rows = [r for r in rows if r["url"] not in fresh]
+        # A page that keeps coming back empty waits longer each time and is
+        # eventually given up on; a forced sweep is an admin's call and asks
+        # anyway, like a manual re-check.
+        parked = verdicts.fetch_parked_urls([r["url"] for r in rows])
+        rows = [r for r in rows if r["url"] not in fresh and r["url"] not in parked]
         total = len(rows) + len(fresh)
         done = len(fresh)
     limiter = AdaptiveLimiter()
