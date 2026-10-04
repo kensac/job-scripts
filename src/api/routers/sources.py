@@ -187,12 +187,22 @@ class SourceList(BaseModel):
 def list_sources(user: AuthedUser = Depends(require_user)) -> SourceList:
     rows = db.query(
         """
+        WITH bundles AS (
+            SELECT m AS source, array_agg(DISTINCT g.name ORDER BY g.name) AS groups
+            FROM source_groups g, unnest(g.members) AS m WHERE g.active GROUP BY m
+        )
         SELECT s.name, s.listings_url, s.description, s.company, s.active,
                us.user_id IS NOT NULL AS enabled,
-               COALESCE((SELECT array_agg(g.name ORDER BY g.name) FROM source_groups g
-                         WHERE g.active AND s.name = ANY(g.members)), '{}') AS groups
+               COALESCE(b.groups, '{}') AS groups
         FROM sources s
         LEFT JOIN user_sources us ON us.source = s.name AND us.user_id = %s
+        -- Membership aggregated once over the bundles and joined. Matched per
+        -- row with s.name = ANY(g.members), it was a subplan run 4,040 times
+        -- and 5.2 s on production (EXPLAIN ANALYZE, 2026-10-04); this shape
+        -- measured 98 ms with identical output for all 8,021 sources.
+        -- DISTINCT keeps a name listed twice in one bundle from listing that
+        -- bundle twice, which ANY never did.
+        LEFT JOIN bundles b ON b.source = s.name
         -- Every board on offer, plus every board this person holds that is
         -- switched off: a held row has to be on the page to be left.
         WHERE s.active OR us.user_id IS NOT NULL

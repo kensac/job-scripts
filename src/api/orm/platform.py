@@ -126,6 +126,18 @@ class Task(Base):
             text("created_at DESC"),
             postgresql_where=text("kind = 'ingest_source'"),
         ),
+        # A source's latest ingest, by id: the admin ledger reads it with one
+        # LIMIT 1 probe per source. idx_tasks_ingest_source cannot answer it,
+        # being ordered by created_at, which ties and need not follow id.
+        # Without this the probe walks tasks_pkey backwards: 103 s for 8,021
+        # sources over 136,986 ingest tasks, against 39 ms with it (test
+        # copy, 2026-10-04).
+        Index(
+            "idx_tasks_ingest_source_latest",
+            text("(payload->>'source')"),
+            text("id DESC"),
+            postgresql_where=text("kind = 'ingest_source'"),
+        ),
         # A board's latest run and its active-run check. Without this both
         # walk tasks backwards decompressing every payload to read the board
         # id: 150,847 rows and 7.5 s for board 4 on 2026-10-03 (EXPLAIN

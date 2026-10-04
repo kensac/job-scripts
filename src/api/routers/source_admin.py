@@ -195,10 +195,13 @@ def admin_list_sources(
     if shape == "names":
         rows = db.query(
             """
-            SELECT s.name, s.listings_url, s.active,
-                   COALESCE((SELECT array_agg(g.name ORDER BY g.name) FROM source_groups g
-                             WHERE s.name = ANY(g.members)), '{}') AS groups
-            FROM sources s ORDER BY s.active DESC, s.name
+            WITH bundles AS (
+                SELECT m AS source, array_agg(DISTINCT g.name ORDER BY g.name) AS groups
+                FROM source_groups g, unnest(g.members) AS m GROUP BY m
+            )
+            SELECT s.name, s.listings_url, s.active, COALESCE(b.groups, '{}') AS groups
+            FROM sources s LEFT JOIN bundles b ON b.source = s.name
+            ORDER BY s.active DESC, s.name
             """
         )
         return SourceNames(
@@ -241,8 +244,11 @@ def admin_list_sources(
     # computed per source in a correlated subquery. At 751 sources the
     # per-row form ran five subplans and a lateral per row and took 890 ms
     # on production (EXPLAIN ANALYZE, 2026-09-04); this shape is one pass
-    # over jobs, one over user_sources, one over source_groups and one
-    # DISTINCT ON over the ingest tasks.
+    # over jobs, one over user_sources and one over source_groups. The latest
+    # ingest is the exception: an indexed LIMIT 1 per source is cheaper than
+    # a pass over every ingest task. The DISTINCT ON it replaced sorted
+    # 136,986 tasks in 0.59 s on production (2026-10-04); the probe took
+    # 39 ms on a test copy at that scale.
     rows = db.query(
         """
         WITH catalog AS (
@@ -255,12 +261,6 @@ def admin_list_sources(
         bundles AS (
             SELECT m AS source, array_agg(g.name ORDER BY g.name) AS groups
             FROM source_groups g, unnest(g.members) AS m GROUP BY m
-        ),
-        last_ingest AS (
-            SELECT DISTINCT ON (payload->>'source')
-                   payload->>'source' AS source, status, finished_at, error
-            FROM tasks WHERE kind = 'ingest_source'
-            ORDER BY payload->>'source', id DESC
         )
         -- title_pattern is not here: it is a 584-byte regex repeated on
         -- most rows, more than half of a 1.8 MB body at 1,732 sources, and
@@ -286,7 +286,13 @@ def admin_list_sources(
         LEFT JOIN catalog c ON c.source = s.name
         LEFT JOIN subscribers u ON u.source = s.name
         LEFT JOIN bundles b ON b.source = s.name
-        LEFT JOIN last_ingest li ON li.source = s.name
+        -- The latest ingest by id: one probe of idx_tasks_ingest_source_latest
+        -- per source instead of a DISTINCT ON sorting every ingest task.
+        LEFT JOIN LATERAL (
+            SELECT status, finished_at, error FROM tasks
+            WHERE kind = 'ingest_source' AND payload->>'source' = s.name
+            ORDER BY id DESC LIMIT 1
+        ) li ON true
         ORDER BY s.active DESC, s.name
         """
     )
