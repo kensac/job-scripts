@@ -14,7 +14,8 @@ from __future__ import annotations
 
 import datetime
 import logging
-from typing import Any
+from collections.abc import Sequence
+from typing import Any, Protocol
 
 from pydantic import BaseModel
 
@@ -65,6 +66,21 @@ class ApplicationEvent(BaseModel):
             sent_at=None,
             subject=None,
         )
+
+
+class Staged(Protocol):
+    """What `stage_for` reads of an event, and nothing else.
+
+    The queue ranks thousands of rows by stage and needs only these two
+    fields, so it reads them without the message columns `ApplicationEvent`
+    carries for a person checking the stage.
+    """
+
+    @property
+    def id(self) -> int: ...
+
+    @property
+    def kind(self) -> str: ...
 
 
 class ApplicationState(BaseModel):
@@ -221,6 +237,9 @@ STATUS_FROM_EVENT = {
 # confirming what they know rather than telling them something.
 UNRESOLVED_BOARD_STATUSES = ("Application Submitted", "Follow-up")
 
+# Why answering a proposal on an application with no board row moves nothing.
+NOT_ON_BOARD = "This application is not on your board, so there is no status to move."
+
 ACCEPTED = "accepted"
 DISMISSED = "dismissed"
 
@@ -325,9 +344,7 @@ def proposals_for(user_id: int) -> list[Proposal]:
         Proposal(
             **row.model_dump(),
             suggested_status=STATUS_FROM_EVENT[row.kind],
-            board_reason=None
-            if row.board_updatable
-            else "This application is not on your board, so there is no status to move.",
+            board_reason=None if row.board_updatable else NOT_ON_BOARD,
         )
         for row in rows
     ]
@@ -416,7 +433,7 @@ def answer_proposal(
     )
 
 
-def stage_for(events: list[ApplicationEvent], board_status: str | None = None) -> str:
+def stage_for(events: Sequence[Staged], board_status: str | None = None) -> str:
     """Furthest stage reached, with terminal events winning outright.
 
     Terminal beats progress regardless of order because a rejection is not

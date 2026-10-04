@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from api.mail import pipeline as mail_pipeline
@@ -52,7 +53,7 @@ MESSAGE_RANK_REASONS = {
 }
 
 
-def _stage_would_move(kind: str | None, own: list[mail_pipeline.ApplicationEvent]) -> bool:
+def _stage_would_move(kind: str | None, own: Sequence[mail_pipeline.Staged]) -> bool:
     """Would adding an event of this kind change this application's stage?
 
     Asked of the same function the board reads, over the application's real
@@ -79,11 +80,11 @@ def _stage_would_move(kind: str | None, own: list[mail_pipeline.ApplicationEvent
 def rank(
     kind: str,
     candidates: list[dict[str, Any]],
-    events: dict[int, list[mail_pipeline.ApplicationEvent]],
+    events: Mapping[int, Sequence[mail_pipeline.Staged]],
 ) -> int:
     if not candidates:
         return RANK_REFUSAL_ONLY
     for app in candidates:
-        if _stage_would_move(kind, events.get(app["id"], [])):
+        if _stage_would_move(kind, events.get(app["id"], ())):
             return RANK_MOVES_STAGE
     return RANK_ATTACHABLE
