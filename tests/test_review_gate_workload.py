@@ -99,15 +99,15 @@ def test_report_1000_decision_workload(client, admin_headers, monkeypatch, reque
     assert body["avoided_cost"]["estimated_avoided_cost_usd"] == pytest.approx(0.35)
     assert body["avoided_cost"]["reference_outcomes"] == 300
     assert "profile_input_content" not in response.text
-    # One coverage read and two aggregates, independent of posting count.
-    assert len(captured) == 3
+    # Coverage, funnel and estimate in one statement, independent of posting count.
+    assert len(captured) == 1
     plans = []
     for sql, params in captured:
-        if "WITH cohort AS MATERIALIZED" in sql:
-            projection = sql.split(DECISIONS, 1)[0]
-            assert "d.*" not in projection
-            assert "d.policy" not in projection
-            assert "d.evidence," not in projection
+        # Bodies are joined once each, never once per decision through DECISIONS.
+        assert DECISIONS not in sql
+        assert "d.*" not in sql
+        assert "policy" not in sql
+        assert "evidence," not in sql
         explained = query_one("EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) " + sql, params)
         assert explained
         plan = explained["QUERY PLAN"][0]

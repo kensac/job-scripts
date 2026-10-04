@@ -838,6 +838,28 @@ a row's `url_id` and `body_id` and presents the columns the inline table had;
 `URL_MATCH`, which compares `url_id` and uses
 `idx_review_gate_decisions_url_id`; the resolved `url` has no index.
 
+**An aggregate over many decisions reads the stored row, not DECISIONS.**
+DECISIONS resolves a body once per decision, and a body's evidence is read
+with it. GET /admin/review-gates/report over 7.9M decisions spent 431 s in
+that join and 61.7 s in a `min(created_at)` the join kept off the index
+(2026-10-03). The report selects `id, body_id, url_id` from
+`review_gate_decisions`, filters a body column with `body_id IN (SELECT id
+FROM review_gate_decision_bodies WHERE ...)` (`selection(stored=True)`),
+groups by `(body_id, url_id)`, and joins each distinct body once. Counts and
+numeric sums decompose exactly over that grouping, and `count(DISTINCT
+url_id)` equals `count(DISTINCT url)` because the URL is unique. A mean of
+per-decision floats does not: keep it per decision.
+`tests/test_review_gate_report_equivalence.py` holds the per-decision
+definition and compares every column against it.
+
+The report is one statement, so its coverage, funnel and estimate share a
+snapshot without a REPEATABLE READ transaction. The snapshot still lasts as
+long as the statement, and vacuum and `CREATE INDEX CONCURRENTLY` wait on
+it, so the statement has to stay fast: the three-statement version held its
+snapshot for minutes. A float sum such as the avoided cost depends on the order the plan
+adds its terms in. It can differ from an earlier plan in the last bits, and
+the equivalence test allows that difference only for that column.
+
 **The per-task row holds nothing but identity and the two references.**
 `url_id` and `body_id` are NOT NULL under validated foreign keys, so the
 readers' inner joins cannot drop a decision. `(task_id, url_id)` is unique,

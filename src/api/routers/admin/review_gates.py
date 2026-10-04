@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 from api import db, pagination, params
 from api.auth import AuthedUser
-from api.review_decision_storage import DECISIONS, URL_MATCH
+from api.review_decision_storage import URL_MATCH
 from api.review_gate_reads import ReviewDecisions, read_decisions
 from api.routers.admin.shared import require_admin
 
@@ -26,7 +26,9 @@ def selection(
     user: str | None = None,
     managed_board_id: int | None = None,
     filter_id: int | None = None,
+    stored: bool = False,
 ) -> tuple[str, dict, dict[str, list[str]]]:
+    """WHERE over alias d: DECISIONS, or with `stored` the bare review_gate_decisions row."""
     clauses, values, filters = [], {}, {}
     for key, value in {
         "url": url,
@@ -36,7 +38,14 @@ def selection(
         "action": action,
     }.items():
         if value is not None:
-            clauses.append(URL_MATCH if key == "url" else f"d.{key}=%({key})s")
+            if key == "url":
+                clauses.append(URL_MATCH)
+            elif stored:
+                clauses.append(
+                    f"d.body_id IN (SELECT id FROM review_gate_decision_bodies WHERE {key}=%({key})s)"
+                )
+            else:
+                clauses.append(f"d.{key}=%({key})s")
             values[key] = value
             filters[key] = [value]
     users = [int(value) for value in params.csv(user) if value.isdigit()]
@@ -164,9 +173,7 @@ def report(
     filter_id: int | None = Query(None, ge=1),
     admin: AuthedUser = Depends(require_admin),
 ) -> GateReport:
-    with db.transaction():
-        db.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
-        return _report(days, prompt_hash, user, managed_board_id, filter_id)
+    return _report(days, prompt_hash, user, managed_board_id, filter_id)
 
 
 def _report(
@@ -178,70 +185,92 @@ def _report(
 ) -> GateReport:
     end = datetime.datetime.now(datetime.UTC)
     start = end - datetime.timedelta(days=days)
+    # The report reads the stored row, never DECISIONS: url_id and body_id
+    # are NOT NULL under validated foreign keys, so no join can add or drop a
+    # decision, and each body is resolved once rather than once per decision.
+    # Joining all of them to their bodies took 431 s on 7.9M decisions
+    # (2026-10-03); min() over the joined view could not use the created_at
+    # index and took 61.7 s.
     where, values, filters = selection(
-        prompt_hash=prompt_hash, user=user, managed_board_id=managed_board_id, filter_id=filter_id
-    )
-    first = db.query_one(
-        f"SELECT min(d.created_at) AS first FROM {DECISIONS} WHERE {where}", values
+        prompt_hash=prompt_hash,
+        user=user,
+        managed_board_id=managed_board_id,
+        filter_id=filter_id,
+        stored=True,
     )
     cohort = (
-        "SELECT d.id,d.url,d.stage,d.mode,d.action,d.prompt_hash,"
-        "d.evidence->>'planned_model' planned_model,d.evidence->>'transport' transport "
-        f"FROM {DECISIONS} WHERE {where} "
-        "AND d.created_at >= %(start)s AND d.created_at < %(end)s"
+        "SELECT d.id,d.body_id,d.url_id FROM review_gate_decisions d "
+        f"WHERE {where} AND d.created_at >= %(start)s AND d.created_at < %(end)s"
     )
-    bounded = {**values, "start": start, "end": end}
-    rows = db.query_as(
-        GateFunnelRow,
-        f"WITH cohort AS MATERIALIZED ({cohort}), paid AS ("
+    # One statement, so coverage, funnel and estimate read one snapshot without
+    # holding a REPEATABLE READ transaction, and the window is scanned once.
+    # Funnel: grouped by (body, URL) before the body is read. Every column is
+    # a count or a numeric sum, so it decomposes exactly, and
+    # review_gate_urls.url is unique, so distinct url_id counts distinct URLs.
+    # Estimate: the mean is over per-decision float costs, as before, so
+    # reviews stay one row per decision; skips need only a count per body.
+    report = db.query_one(
+        f"WITH cohort AS MATERIALIZED ({cohort}), keys AS MATERIALIZED ("
+        "SELECT b.id,b.stage,b.mode,b.action,b.prompt_hash,b.evidence->>'planned_model' model, "
+        "b.evidence->>'transport' transport FROM review_gate_decision_bodies b "
+        "WHERE b.id IN (SELECT body_id FROM cohort)), paid AS ("
         "SELECT o.decision_id,count(*) n,count(*) FILTER(WHERE o.recorded_cost_usd IS NULL) unknown, "
         "sum(o.recorded_cost_usd) cost, "
         "count(*) FILTER(WHERE o.rejected IS TRUE) rejected, "
         "count(*) FILTER(WHERE o.rejected IS FALSE) passed, "
         "count(*) FILTER(WHERE o.rejected IS NULL) unresolved "
-        "FROM review_gate_outcomes o JOIN cohort c ON c.id=o.decision_id GROUP BY o.decision_id) "
-        "SELECT d.stage,d.mode,d.action,count(*) AS decisions,count(DISTINCT d.url) AS distinct_jobs, "
-        "COALESCE(sum(p.n),0)::bigint recorded_outcomes, "
-        "COALESCE(sum(p.unknown),0)::bigint unpriced_outcomes, "
-        "count(*) FILTER(WHERE d.action='review' AND p.decision_id IS NULL) without_recorded_outcome, "
-        "COALESCE(sum(p.cost),0)::float known_cost_usd, "
-        "CASE WHEN COALESCE(sum(p.unknown),0)=0 AND count(*) FILTER(WHERE d.action='review' "
-        "AND p.decision_id IS NULL)=0 THEN COALESCE(sum(p.cost),0)::float END actual_cost_usd, "
-        "COALESCE(sum(p.rejected) FILTER(WHERE d.mode='shadow' AND d.stage<>'detailed'),0)::bigint agreed_reject, "
-        "COALESCE(sum(p.passed) FILTER(WHERE d.mode='shadow' AND d.stage<>'detailed'),0)::bigint false_reject, "
-        "COALESCE(sum(p.unresolved) FILTER(WHERE d.mode='shadow' AND d.stage<>'detailed'),0)::bigint unresolved "
-        "FROM cohort d LEFT JOIN paid p ON p.decision_id=d.id "
-        "GROUP BY d.stage,d.mode,d.action ORDER BY d.stage,d.mode,d.action",
-        bounded,
-    )
-    estimate = db.query_one(
-        f"WITH cohort AS MATERIALIZED ({cohort}), per_decision AS ("
-        "SELECT d.id,d.prompt_hash,d.planned_model model,d.transport, "
+        "FROM review_gate_outcomes o JOIN cohort c ON c.id=o.decision_id GROUP BY o.decision_id), "
+        "pairs AS (SELECT c.body_id,c.url_id,count(*) decisions, "
+        "count(*) FILTER(WHERE p.decision_id IS NULL) unpaid,sum(p.n) n,sum(p.unknown) unknown, "
+        "sum(p.cost) cost,sum(p.rejected) rejected,sum(p.passed) passed,sum(p.unresolved) unresolved "
+        "FROM cohort c LEFT JOIN paid p ON p.decision_id=c.id GROUP BY c.body_id,c.url_id), "
+        "funnel AS (SELECT k.stage,k.mode,k.action,sum(x.decisions)::bigint AS decisions, "
+        "count(DISTINCT x.url_id) AS distinct_jobs, "
+        "COALESCE(sum(x.n),0)::bigint recorded_outcomes, "
+        "COALESCE(sum(x.unknown),0)::bigint unpriced_outcomes, "
+        "COALESCE(sum(x.unpaid) FILTER(WHERE k.action='review'),0)::bigint without_recorded_outcome, "
+        "COALESCE(sum(x.cost),0)::float known_cost_usd, "
+        "CASE WHEN COALESCE(sum(x.unknown),0)=0 AND COALESCE(sum(x.unpaid) FILTER(WHERE k.action='review'),0)=0 "
+        "THEN COALESCE(sum(x.cost),0)::float END actual_cost_usd, "
+        "COALESCE(sum(x.rejected) FILTER(WHERE k.mode='shadow' AND k.stage<>'detailed'),0)::bigint agreed_reject, "
+        "COALESCE(sum(x.passed) FILTER(WHERE k.mode='shadow' AND k.stage<>'detailed'),0)::bigint false_reject, "
+        "COALESCE(sum(x.unresolved) FILTER(WHERE k.mode='shadow' AND k.stage<>'detailed'),0)::bigint unresolved "
+        "FROM pairs x JOIN keys k ON k.id=x.body_id GROUP BY k.stage,k.mode,k.action), "
+        "per_decision AS ("
+        "SELECT c.id,k.prompt_hash,k.model,k.transport, "
         "sum(o.recorded_cost_usd)::float cost,count(o.id) n, "
         "count(*) FILTER(WHERE o.recorded_cost_usd IS NULL OR o.model IS DISTINCT FROM "
-        "d.planned_model) unknown "
-        "FROM cohort d LEFT JOIN review_gate_outcomes o ON o.decision_id=d.id "
-        "WHERE d.action='review' GROUP BY d.id,d.prompt_hash,d.planned_model,d.transport), baseline AS ("
+        "k.model) unknown "
+        "FROM cohort c JOIN keys k ON k.id=c.body_id "
+        "LEFT JOIN review_gate_outcomes o ON o.decision_id=c.id "
+        "WHERE k.action='review' GROUP BY c.id,k.prompt_hash,k.model,k.transport), baseline AS ("
         "SELECT prompt_hash,model,transport,avg(cost)::float mean_cost,sum(n) n "
         "FROM per_decision GROUP BY prompt_hash,model,transport "
         "HAVING sum(unknown)=0), skipped AS ("
-        "SELECT d.prompt_hash,d.planned_model model,d.transport,count(*) n "
-        "FROM cohort d WHERE d.action='skip' GROUP BY d.prompt_hash,d.planned_model,d.transport) "
+        "SELECT k.prompt_hash,k.model,k.transport,sum(c.n)::bigint n "
+        "FROM (SELECT body_id,count(*) n FROM cohort GROUP BY body_id) c "
+        "JOIN keys k ON k.id=c.body_id WHERE k.action='skip' "
+        "GROUP BY k.prompt_hash,k.model,k.transport), estimate AS ("
         "SELECT CASE WHEN count(r.mean_cost)>0 THEN sum(s.n*r.mean_cost)::float END estimated_avoided_cost_usd, "
         "COALESCE(sum(s.n) FILTER(WHERE r.mean_cost IS NOT NULL),0)::bigint estimated_decisions, "
         "COALESCE(sum(s.n) FILTER(WHERE r.mean_cost IS NULL),0)::bigint unestimated_decisions, "
         "COALESCE(sum(r.n),0)::bigint reference_outcomes "
-        "FROM skipped s LEFT JOIN baseline r USING(prompt_hash,model,transport)",
-        bounded,
+        "FROM skipped s LEFT JOIN baseline r USING(prompt_hash,model,transport)) "
+        # JSON carries each float as its shortest round-trip text, so the
+        # values are the ones a direct column would have returned.
+        f"SELECT (SELECT min(d.created_at) FROM review_gate_decisions d WHERE {where}) AS first, "
+        "(SELECT COALESCE(json_agg(f ORDER BY f.stage,f.mode,f.action),'[]') FROM funnel f) AS rows, "
+        "(SELECT row_to_json(e) FROM estimate e) AS estimate",
+        {**values, "start": start, "end": end},
     )
-    assert estimate is not None
+    assert report is not None
     return GateReport(
         generated_at=end,
         window_start=start,
         window_end=end,
         days=days,
-        first_recorded_at=first["first"] if first else None,
-        rows=rows,
+        first_recorded_at=report["first"],
+        rows=[GateFunnelRow.model_validate(row) for row in report["rows"]],
         filters=filters,
-        avoided_cost=AvoidedCostEstimate.model_validate(estimate),
+        avoided_cost=AvoidedCostEstimate.model_validate(report["estimate"]),
     )
