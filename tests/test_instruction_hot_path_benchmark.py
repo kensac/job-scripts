@@ -149,8 +149,8 @@ def test_instruction_hot_path_workload(size, client, admin_headers, monkeypatch,
 
     def read_workload(label):
         with meter.phase(f"cache_{label}", size):
-            cached = [store.has_custom_result(url, "benchmark-filter") for url in urls]
-        assert cached == [True] * size
+            cached = store.decided_custom_urls(urls, "benchmark-filter")
+        assert cached == set(urls)
         with meter.phase(f"admin_detail_{label}", size, requests=size):
             detail_responses = [
                 client.get(f"/v1/admin/queries/{qid}", headers=admin_headers) for qid in ids

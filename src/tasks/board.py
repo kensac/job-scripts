@@ -108,20 +108,6 @@ def candidates_for(user_id: int) -> list[dict[str, Any]]:
     )
 
 
-def decided_urls(urls: list[str], prompt_hash: str, model: str) -> set:
-    """URLs that already have a decided verdict for this filter+model - one
-    query instead of one per job, so cache-hit reruns cost nothing per row."""
-    if not urls:
-        return set()
-    rows = db.query(
-        "SELECT DISTINCT url FROM ai_queries WHERE url = ANY(%s) "
-        "AND check_type = 'custom' AND prompt_hash = %s AND model = %s "
-        "AND status IN ('passed', 'rejected')",
-        (urls, prompt_hash, model),
-    )
-    return {r["url"] for r in rows}
-
-
 # The URLs a filter chunk holds, in either payload shape (api.task_jobs): the
 # legacy inline `jobs` list, or `urls`, kept inline beside the referenced list
 # because these readers run in SQL and cannot follow a reference. A payload
@@ -174,7 +160,7 @@ def in_flight_urls(user_id: int) -> set:
     A run that splits while those chunks wait at the provider must not
     submit them again. A batch yields nothing until it is terminal, so a
     chunk parked on a straggler holds every url in it undecided for hours,
-    and decided_urls cannot see them; re-selecting would pay twice for the
+    and the verdict cache cannot see them; re-selecting would pay twice for the
     same verdicts. Excluding them is what lets a new run start while an old
     one is still parked: it judges only what arrived since.
     """

@@ -15,7 +15,7 @@ from api.ai.batch_results import progress_counts
 from core import providers
 from core.answers import FilterDecision, FilterResult
 from core.filters import build_custom_decision_instructions, build_custom_input
-from core.store import get_content, get_contents, has_custom_result
+from core.store import decided_custom_urls, get_contents
 from tasks.runtime import (
     SCRAPE_CONCURRENCY,
     AdaptiveLimiter,
@@ -63,11 +63,7 @@ async def check_filter(
     verdict_label: str,
     decision_id: int | None = None,
 ) -> dict[str, int] | None:
-    """Run one check, unless this exact prompt and model already decided it."""
-    # Model scope is load-bearing: changing models deliberately invalidates the
-    # cache rather than treating another model's verdict as this model's work.
-    if has_custom_result(job["url"], snapshot.prompt_hash, model=cfg.model):
-        return None
+    """Run one check. The caller has already excluded what is decided."""
     _, usage = await verdicts.run_check(
         cfg,
         url=job["url"],
@@ -104,14 +100,25 @@ async def execute_live(
         transport="live",
         filter_id=filter_id,
     )
+    # One read of each for the whole run, before the first paid call. Per job,
+    # each cost its own BEGIN, read and COMMIT for every candidate, which a
+    # worker far from the database pays at full latency (observability.md).
+    # Model scope is load-bearing: changing models deliberately invalidates the
+    # cache rather than treating another model's verdict as this model's work.
+    decided = decided_custom_urls([job["url"] for job in jobs], snapshot.prompt_hash, cfg.model)
+    stored = get_contents(
+        [job["url"] for job in jobs if "content" not in job and job["url"] not in decided]
+    )
     total = len(jobs)
     done = 0
     limiter = AdaptiveLimiter()
     scrape_sem = asyncio.Semaphore(SCRAPE_CONCURRENCY)
 
     async def one(job: dict[str, Any]):
+        if job["url"] in decided:
+            return None
         frozen_content = "content" in job
-        content = job.get("content") if frozen_content else get_content(job["url"])
+        content = job.get("content") if frozen_content else stored.get(job["url"])
         if not content and not frozen_content:
             content, _closure = await verdicts.refresh_content(
                 job["url"],

@@ -50,6 +50,20 @@ A worker runs one task at a time, and its housekeeping (reaping, scheduling,
 gauges) runs only between tasks. A long task therefore starves scheduling on
 that worker; keep tasks short and let the queue carry the volume.
 
+**A per-candidate database loop in a task handler is batched.** Workers run
+far from the database: `oci` is about 103 ms from it, the hosts beside it under
+a millisecond. A query issued once per candidate costs its round trips (BEGIN,
+the statement, COMMIT) times the candidate count, which a near host never
+notices and a far host pays in hours. Task 5834132 (run_managed_board_batch,
+23,394 candidates, 2026-10-04) ran 2h40m on `oci` asking the verdict cache one
+url at a time; measured on a test database, that loop was 105,273 round trips
+(about 3 h at 103 ms) and is now 6. Read a candidate list's facts in one
+statement over `= ANY(%s)` (`store.decided_custom_urls`, `store.get_contents`)
+before the per-candidate work starts, and test it by counting statements for N
+candidates, as `tests/test_verdict_cache_batch.py` does. A loop whose every
+pass also makes a provider call is still batched when the query can be lifted
+out of it.
+
 ## Batched work
 
 Location classification uses `classify_locations_max_output_tokens` for new
@@ -1142,12 +1156,13 @@ readable and require the separate bounded migration below.
 Query detail and custom-result readers hydrate a missing inline value and fail
 explicitly if referenced content is missing or its digest is wrong.
 
-The custom-verdict cache check (`store.has_custom_result`) answers whether a
-decided verdict exists and returns nothing else, so it selects only the latest
-row's instruction reference. It never reads the page text or inline
-instructions: the filter sweeps call it once per candidate, 1.32M times in 36
-hours (2026-10-03). A row held by reference is still hydrated, so a missing or
-corrupt dictionary entry fails the check as it fails every other reader. A
+The custom-verdict cache check (`store.decided_custom_urls`) answers which of
+a run's urls have a decided verdict and returns nothing else, so it selects
+only each url's latest row's instruction reference, in one statement for the
+whole list. It never reads the page text or inline instructions: the filter
+sweeps asked it once per candidate, 1.32M times in 36 hours (2026-10-03). A
+latest row held by reference is still hydrated, so a missing or corrupt
+dictionary entry fails the whole check, as it fails every other reader. A
 caller that needs the verdict row's fields reads them in its own query.
 
 Use `python -m api.ai.migrate_query_instructions MODE --through ID --after ID

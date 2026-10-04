@@ -85,7 +85,9 @@ def test_copy_compact_restore_preserves_metadata_cache_and_admin_response(client
     assert {k: v for k, v in compacted.items() if k not in ("instructions", "instructions_id")} == {
         k: v for k, v in original.items() if k not in ("instructions", "instructions_id")
     }
-    assert store.has_custom_result("https://example.test/history", "filter-key") is True
+    assert store.decided_custom_urls(["https://example.test/history"], "filter-key") == {
+        "https://example.test/history"
+    }
     assert store.get_content("https://example.test/history") is None
     assert client.get(f"/v1/admin/queries/{query_id}", headers=admin_headers).json() == before
     responses = client.get(
@@ -182,7 +184,7 @@ def test_dictionary_corruption_is_explicit():
         (query_id,),
     )
     with pytest.raises(InstructionUnavailable):
-        store.has_custom_result("https://example.test/corrupt", "key")
+        store.decided_custom_urls(["https://example.test/corrupt"], "key")
 
 
 def test_service_compaction_requires_backup_and_reader_confirmations():
@@ -276,15 +278,15 @@ def test_the_verdict_cache_check_answers_from_the_row_without_reading_page_text(
 
     monkeypatch.setattr(psycopg.Cursor, "execute", recording)
 
+    urls = ["https://example.test/cached", "https://example.test/undecided"]
     answers = [
-        store.has_custom_result("https://example.test/cached", "key"),
-        store.has_custom_result("https://example.test/cached", "key", model="gpt-5-nano"),
-        store.has_custom_result("https://example.test/cached", "key", model="gpt-5-mini"),
-        store.has_custom_result("https://example.test/cached", "other"),
-        store.has_custom_result("https://example.test/undecided", "key"),
+        store.decided_custom_urls(urls, "key"),
+        store.decided_custom_urls(urls, "key", model="gpt-5-nano"),
+        store.decided_custom_urls(urls, "key", model="gpt-5-mini"),
+        store.decided_custom_urls(urls, "other"),
     ]
 
-    assert answers == [True, True, False, False, False]
+    assert answers == [{urls[0]}, {urls[0]}, set(), set()]
     reads = [s for s in statements if "ai_queries" in s]
     assert reads
     assert not [s for s in reads if "*" in s or "input_content" in s]

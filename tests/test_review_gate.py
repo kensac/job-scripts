@@ -354,7 +354,7 @@ async def test_live_gate_skips_before_content_fetch(f, monkeypatch):
     def forbidden(*_args, **_kwargs):
         raise AssertionError("excluded titles cannot fetch or call a provider")
 
-    monkeypatch.setattr(filter_execution, "get_content", forbidden)
+    monkeypatch.setattr(filter_execution, "get_contents", lambda urls: forbidden() if urls else {})
     monkeypatch.setattr(filter_execution, "check_filter", forbidden)
     await filter_execution.execute_live(
         task,
