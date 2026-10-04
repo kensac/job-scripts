@@ -56,15 +56,17 @@ async def test_joint_verification_allocates_cost_once_and_survives_replay(f, mon
 
 
 def test_missing_usage_is_not_a_shared_call(f):
-    from api.ai.verdicts import record_ai_verdict
+    from api.ai.verdicts import Verdict, record_ai_verdict
 
     query = record_ai_verdict(
-        url="https://example.test/no-receipt",
-        check_type="closed",
-        rejected=False,
-        reason="open",
-        parsed_json="{}",
-        usage={},
-        model="gpt-5-nano",
+        Verdict(
+            url="https://example.test/no-receipt",
+            check_type="closed",
+            rejected=False,
+            reason="open",
+            parsed_json="{}",
+            usage={},
+            model="gpt-5-nano",
+        )
     )
     assert db.query_one("SELECT cost_usd FROM ai_queries WHERE id=%s", (query,))["cost_usd"] is None

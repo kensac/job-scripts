@@ -106,15 +106,17 @@ def test_paid_outcome_uses_exact_stored_price_and_retains_unknown(f, usage):
     _, decisions = review_gate.partition(task, "test-hash", [job], {})
     decision_id = decisions[job["url"]]["decision_id"]
     query_id = verdicts.record_ai_verdict(
-        url=job["url"],
-        check_type="custom",
-        rejected=False,
-        reason=None,
-        parsed_json="{}",
-        usage=usage,
-        model="gpt-5-nano",
-        batch_id="batch-fact",
-        batched=True,
+        verdicts.Verdict(
+            url=job["url"],
+            check_type="custom",
+            rejected=False,
+            reason=None,
+            parsed_json="{}",
+            usage=usage,
+            model="gpt-5-nano",
+            batch_id="batch-fact",
+            batched=True,
+        ),
         on_record=lambda query_id: review_gate_records.record_outcome(decision_id, query_id),
     )
     review_gate_records.record_outcome(decision_id, query_id)
@@ -139,13 +141,15 @@ def test_outcome_failure_rolls_back_verdict_write(f):
 
     with pytest.raises(RuntimeError, match="incomplete evidence"):
         verdicts.record_ai_verdict(
-            url="https://example.test/a",
-            check_type="custom",
-            rejected=False,
-            reason=None,
-            parsed_json="{}",
-            usage={},
-            model=None,
+            verdicts.Verdict(
+                url="https://example.test/a",
+                check_type="custom",
+                rejected=False,
+                reason=None,
+                parsed_json="{}",
+                usage={},
+                model=None,
+            ),
             on_record=fail,
         )
     assert db.query_one("SELECT count(*) n FROM ai_queries WHERE check_type='custom'")["n"] == 0

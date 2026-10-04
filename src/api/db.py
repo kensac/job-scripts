@@ -4,6 +4,8 @@ import datetime
 import decimal
 import json
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any, LiteralString, cast
 
 import dotenv
@@ -169,6 +171,17 @@ def query_one_as[Row](row: type[Row], sql: str, params: Any = None) -> Row | Non
 def execute(sql: str, params: Any = None) -> None:
     with _connection() as conn:
         conn.execute(_as_query(sql), params)
+
+
+@contextmanager
+def pipeline() -> Iterator[None]:
+    """Send the writes issued inside without waiting for each reply.
+
+    The replies are read once, on exit, where any error raises. Only for
+    statements whose result nobody reads; a read inside forces its own wait.
+    """
+    with _connection() as conn, conn.pipeline():
+        yield
 
 
 def execute_count(sql: str, params: Any = None) -> int:

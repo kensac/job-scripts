@@ -85,8 +85,9 @@ work can still run live when its key/provider path does not use batches.
 Price the actual transport with `core.pricing`, not a blanket batch discount.
 
 Filter request inputs live in `core.filters.build_custom_input`, shared by live,
-batch and experiment callers. `api.verdicts.record_ai_verdict` persists their
-common verdict shape; transport exceptions and retries remain the caller's concern.
+batch and experiment callers. `api.ai.verdicts.Verdict` is their common verdict
+shape and `record_ai_verdict` persists it; transport exceptions and retries remain
+the caller's concern.
 Ordinary custom filters request only `FilterDecision.should_filter`; missing
 reason text is stored as NULL. `FilterResult` still reads older paid responses
 with reasons, and the explicit explanation endpoint retains `FilterVerdict`.
@@ -117,6 +118,40 @@ collections too; request snapshots alone never imply accepted submission.
 Consumers use `consume_result` to commit domain writes, user usage and
 acknowledgment in one transaction; replay skips acknowledged
 receipts. Fleet totals and their ledger entry share a transaction in the event hook.
+
+**Collection commits a chunk of receipts per transaction, not one.** Per
+result, a filter verdict cost about ten round trips (BEGIN, the receipt lock,
+the instruction lookup, the verdict, the ledger row, the review outcome, the
+acknowledgement, COMMIT), which for a 23,396-result run measured 230,353
+round trips: 6.6 h at the 103 ms `oci` is from the database. Filter collection
+(`tasks.filter_execution`) now passes `COLLECT_CHUNK` results to
+`batch_results.consume_results`, which locks and acknowledges them in one
+statement each; verdicts go in through `verdicts.record_ai_verdicts` (one
+pipelined insert) and outcomes and ledger rows through `db.pipeline()`. The
+same run is 852 round trips, about 88 s at 103 ms. The contract is the one
+`consume_result` has, held per chunk:
+
+- A chunk is all or nothing. A crash inside it leaves no verdict, ledger row,
+  outcome or acknowledgement, and replay collects it from the unconsumed
+  receipts.
+- A chunk that raises is collected again per result with `consume_result`.
+  That is the isolation per-result collection always had: what precedes a
+  poisoned result commits, the poison raises for the task's retry, and what
+  follows stays unconsumed. Nothing catches a poison and moves on.
+- Each table receives its rows in result order, so a chunk writes the rows
+  the per-result form would, with the same ids unless a failed chunk drew
+  from a sequence first. Timestamps are one per transaction.
+- Whatever can fail runs before any usage hook, and verdict metrics are
+  counted after COMMIT, because a process counter cannot be rolled back. A
+  chunk failing at its ledger insert or COMMIT can still count the hooks'
+  token metrics twice when it is collected again per result.
+
+`tests/test_batch_collection_chunks.py` holds the chunked form to the
+per-result form's database state, crash replay and poison isolation, and
+times collection through a latency proxy so a round trip per result fails it.
+Comp, job profiles, application drafts and the other consumers still consume
+one receipt per transaction; a consumer moved to chunks takes the same
+fallback and the same test.
 Use receipt outcome counts for cumulative progress across partial collection and
 replay. Both checkpoint tables expire with their owning task. Legacy requests
 without a snapshot retain unknown input rather than using a current page.
