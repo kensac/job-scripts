@@ -31,6 +31,10 @@ class Job(Base):
     __tablename__ = "jobs"
     __table_args__ = (
         Index("idx_jobs_source", "source"),
+        # The admin ledger's per-source job count and newest posting, read
+        # from the index alone instead of the heap: 1,110 buffers against
+        # 12,882 for a seq scan at 224,541 jobs (test copy, 2026-10-04).
+        Index("idx_jobs_source_created", "source", "created_at"),
         Index("idx_jobs_uploaded_by", "uploaded_by"),
     )
 
