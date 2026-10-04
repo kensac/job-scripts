@@ -1,4 +1,4 @@
-"""GET /admin/stats is five full scans of ai_queries, asked for on every
+"""GET /admin/stats is a full scan of ai_queries, asked for on every
 worker event. It answers from a cache for admin_stats_cache_seconds."""
 
 from __future__ import annotations

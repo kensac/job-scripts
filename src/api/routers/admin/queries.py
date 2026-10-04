@@ -5,11 +5,12 @@ from __future__ import annotations
 
 import datetime
 import time
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from api import db, pagination, scoping, sorting
+from api import db, grouped, pagination, scoping, sorting
 from api import params as params_
 from api.auth import AuthedUser
 from api.review_decision_storage import URL_MATCH
@@ -733,7 +734,7 @@ _stats_cache: tuple[float, LedgerStats] | None = None
 @router.get("/stats")
 def stats(user: AuthedUser = Depends(require_admin)) -> LedgerStats:
     """Lifetime totals over ai_queries, served from a per-process cache for
-    admin_stats_cache_seconds. Every call is five full scans of the largest
+    admin_stats_cache_seconds. Every call is a full scan of the largest
     table, and the dashboard asks on every worker event; the totals move by
     a few rows an hour. ponytail: per-process cache, so each api replica
     scans once per window; shared cache if replicas multiply."""
@@ -746,91 +747,105 @@ def stats(user: AuthedUser = Depends(require_admin)) -> LedgerStats:
     return result
 
 
+_STATS_SUMS = (
+    "prompt_tokens",
+    "completion_tokens",
+    "cached_tokens",
+    "cache_write_tokens",
+    "reasoning_tokens",
+    "batched_prompt_tokens",
+    "batched_completion_tokens",
+    "batched_cached_tokens",
+    "cost_usd",
+)
+_STATS_COUNTS = ("queries", "unpriced_queries", "cache_write_unknown_queries")
+
+
 def _compute_stats() -> LedgerStats:
-    totals = db.query_one(
+    """Every cut from ONE scan grouped by (day, model, check_type, status).
+
+    It was five full scans, about 9.6 s on a cache miss against production on
+    2026-10-04; one pass measured 3.98 s there. Day is `created_at::date`:
+    created_at is timestamptz since a7c1e9d40b22, and ::date makes the bucket
+    a real calendar day in the session timezone rather than the first ten
+    characters of whatever string the writer produced.
+    """
+    groups = db.query(
         """
-        SELECT COUNT(*) AS queries,
-               COUNT(*) FILTER (WHERE cost_usd IS NULL) AS unpriced_queries,
-               COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
-               COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
-               COALESCE(SUM(cached_tokens), 0) AS cached_tokens,
-               SUM(cache_write_tokens) AS cache_write_tokens,
-               COUNT(*) FILTER (WHERE cache_write_tokens IS NULL) AS cache_write_unknown_queries,
-               COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens,
-               SUM(cost_usd) AS cost_usd
-        FROM ai_queries
-        """
-    )
-    by_check_type = db.query_as(
-        CheckTypeTotals,
-        """
-        SELECT check_type, COUNT(*) AS count,
-               COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
-               COALESCE(SUM(completion_tokens), 0) AS completion_tokens
-        FROM ai_queries GROUP BY check_type ORDER BY count DESC
-        """,
-    )
-    by_status = db.query_as(
-        StatusTotals,
-        "SELECT status, COUNT(*) AS count FROM ai_queries GROUP BY status ORDER BY count DESC",
-    )
-    by_day = db.query_as(
-        DayTotals,
-        """
-        -- created_at is timestamptz since a7c1e9d40b22; substr() has no
-        -- overload for it. ::date also makes the bucket a real calendar day
-        -- in the session timezone rather than the first ten characters of
-        -- whatever string the writer happened to produce.
-        SELECT created_at::date AS day,
+        SELECT created_at::date AS day, model, check_type, status,
                COUNT(*) AS queries,
-               COUNT(*) FILTER (WHERE status = 'failed') AS failed,
-               COUNT(*) FILTER (WHERE status = 'rejected') AS rejected,
                COUNT(*) FILTER (WHERE cost_usd IS NULL) AS unpriced_queries,
-               COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
-               COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
-               COALESCE(SUM(cached_tokens), 0) AS cached_tokens,
+               SUM(prompt_tokens) AS prompt_tokens,
+               SUM(completion_tokens) AS completion_tokens,
+               SUM(cached_tokens) AS cached_tokens,
                SUM(cache_write_tokens) AS cache_write_tokens,
                COUNT(*) FILTER (WHERE cache_write_tokens IS NULL) AS cache_write_unknown_queries,
-               COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens
-        FROM ai_queries GROUP BY day ORDER BY day ASC
-        """,
+               SUM(reasoning_tokens) AS reasoning_tokens,
+               SUM(prompt_tokens) FILTER (WHERE batch_id IS NOT NULL) AS batched_prompt_tokens,
+               SUM(completion_tokens) FILTER (WHERE batch_id IS NOT NULL) AS batched_completion_tokens,
+               SUM(cached_tokens) FILTER (WHERE batch_id IS NOT NULL) AS batched_cached_tokens,
+               SUM(cost_usd) AS cost_usd
+        FROM ai_queries GROUP BY 1, 2, 3, 4
+        """
     )
+
+    def folded(rows: list[dict[str, Any]]) -> dict[str, Any]:
+        acc = grouped.fold(rows, _STATS_SUMS, _STATS_COUNTS)
+        # COALESCE(SUM(...), 0) for tokens; cache_write_tokens and cost_usd
+        # keep NULL, which means nobody recorded or priced them.
+        for k in _STATS_SUMS:
+            if k not in ("cache_write_tokens", "cost_usd") and acc[k] is None:
+                acc[k] = 0
+        return acc
+
     # Usage is grouped here for the dashboard. Cost is read from the stored
     # per-call values rather than recomputed from aggregate tokens, because
     # rates and cache-write coverage can change after a call was recorded.
-    by_model = db.query(
-        """
-        SELECT model,
-               COUNT(*) AS queries,
-               COUNT(*) FILTER (WHERE cost_usd IS NULL) AS unpriced_queries,
-               COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
-               COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
-               COALESCE(SUM(cached_tokens), 0) AS cached_tokens,
-               SUM(cache_write_tokens) AS cache_write_tokens,
-               COUNT(*) FILTER (WHERE cache_write_tokens IS NULL) AS cache_write_unknown_queries,
-               COALESCE(SUM(prompt_tokens) FILTER (WHERE batch_id IS NOT NULL), 0) AS batched_prompt_tokens,
-               COALESCE(SUM(completion_tokens) FILTER (WHERE batch_id IS NOT NULL), 0) AS batched_completion_tokens,
-               COALESCE(SUM(cached_tokens) FILTER (WHERE batch_id IS NOT NULL), 0) AS batched_cached_tokens,
-               SUM(cost_usd) AS cost_usd
-        FROM ai_queries WHERE model IS NOT NULL GROUP BY model ORDER BY queries DESC
-        """
-    )
-    priced: list[ModelTotals] = []
-    for row in by_model:
-        cost_usd = row["cost_usd"]
-        priced.append(
-            ModelTotals(
-                **{**row, "cost_usd": round(float(cost_usd), 6) if cost_usd is not None else None}
-            )
-        )
+    def cost(value: Any) -> float | None:
+        return round(float(value), 6) if value is not None else None
 
-    # COUNT(*) with no GROUP BY, so there is always exactly one row.
-    assert totals is not None
-    total_cost = totals.pop("cost_usd") or 0
+    whole = folded(groups)
+    totals = grouped.shaped(
+        LedgerTotals, whole | {"cost_usd": round(float(whole["cost_usd"] or 0), 6)}
+    )
+    # Ties in the count had no order in SQL (ORDER BY count alone); the key
+    # breaks them now so the order is at least stable.
+    by_check_type = sorted(
+        (
+            grouped.shaped(
+                CheckTypeTotals, (a := folded(rows)) | {"check_type": k, "count": a["queries"]}
+            )
+            for k, rows in grouped.by(groups, "check_type").items()
+        ),
+        key=lambda r: (-r.count, r.check_type is None, r.check_type or ""),
+    )
+    by_status = sorted(
+        (
+            StatusTotals(status=k, count=sum(g["queries"] for g in rows))
+            for k, rows in grouped.by(groups, "status").items()
+        ),
+        key=lambda r: (-r.count, r.status is None, r.status or ""),
+    )
+    by_day = []
+    for day, rows in sorted(grouped.by(groups, "day").items()):
+        a = folded(rows)
+        a["failed"] = sum(g["queries"] for g in rows if g["status"] == "failed")
+        a["rejected"] = sum(g["queries"] for g in rows if g["status"] == "rejected")
+        by_day.append(grouped.shaped(DayTotals, a | {"day": day}))
+    by_model = sorted(
+        (
+            grouped.shaped(
+                ModelTotals, (a := folded(rows)) | {"model": k, "cost_usd": cost(a["cost_usd"])}
+            )
+            for k, rows in grouped.by(groups, "model").items()
+            if k is not None
+        ),
+        key=lambda r: (-r.queries, r.model),
+    )
     return LedgerStats(
-        totals=LedgerTotals(**totals, cost_usd=round(float(total_cost), 6)),
+        totals=totals,
         by_check_type=by_check_type,
         by_status=by_status,
         by_day=by_day,
-        by_model=priced,
+        by_model=by_model,
     )
