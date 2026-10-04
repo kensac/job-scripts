@@ -8,7 +8,7 @@ from typing import Any
 from api import ai, db
 from api import managed_board_runs as runs
 from core.filters import compute_filter_hash
-from core.store import has_custom_result
+from core.store import decided_custom_urls
 from tasks.filter_execution import ExecutionHooks, FilterSnapshot, execute_batch, execute_live
 from tasks.runtime import cancelled, has_batch_work, pending_batch_ids, set_progress
 
@@ -139,17 +139,14 @@ async def _handle_managed_filter(
         assert cfg is not None
         await execute_live(task_id, cfg, snapshot, jobs, hooks)
         return
-    inference_jobs = (
-        jobs
+    decided = (
+        set()
         if existing
-        else [
-            job
-            for job in jobs
-            if not has_custom_result(
-                job["url"], snapshot.prompt_hash, model=payload["requested_model"]
-            )
-        ]
+        else decided_custom_urls(
+            [job["url"] for job in jobs], snapshot.prompt_hash, model=payload["requested_model"]
+        )
     )
+    inference_jobs = [job for job in jobs if job["url"] not in decided]
     await execute_batch(
         task_id,
         cfg,

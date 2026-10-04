@@ -11,12 +11,11 @@ from api.ai import verdicts
 from api.budget import load_config
 from api.task_jobs import run_jobs
 from core.payload_objects import MAX_CONNECTIONS, PayloadStore
-from core.store import get_contents
+from core.store import decided_custom_urls, get_contents
 from tasks import batch_policy
 from tasks.board import (
     candidates_for,
     content_attempted_urls,
-    decided_urls,
     in_flight_urls,
     materialize_passing,
     submission_exclusions,
@@ -125,7 +124,7 @@ async def _run_filters(
     urls = [j["url"] for j in candidates]
     units: list[tuple] = []
     for flt in filters:
-        decided = decided_urls(urls, flt["prompt_hash"], cfg.model)
+        decided = decided_custom_urls(urls, flt["prompt_hash"], cfg.model)
         todo = [j for j in candidates if j["url"] not in decided]
         metrics.CACHED_VERDICTS.inc(len(candidates) - len(todo))
         if use_batch and todo:

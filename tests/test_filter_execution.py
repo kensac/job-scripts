@@ -35,7 +35,9 @@ async def test_identity_neutral_live_adapter_has_no_person_state_effects(f, monk
         assert label == "managed:test-board"
         return {"total_tokens": 9}
 
-    monkeypatch.setattr(filter_execution, "get_content", lambda _url: "prepared posting")
+    monkeypatch.setattr(
+        filter_execution, "get_contents", lambda urls: dict.fromkeys(urls, "prepared posting")
+    )
     monkeypatch.setattr(filter_execution, "check_filter", checked)
     hooks = filter_execution.ExecutionHooks(
         verdict_label="managed:test-board",
@@ -78,7 +80,9 @@ async def test_frozen_content_never_refetches_or_reads_a_later_page(f, monkeypat
     async def must_not_refresh(*args, **kwargs):
         raise AssertionError("a frozen run must not fetch a later page")
 
-    monkeypatch.setattr(filter_execution, "get_content", lambda _url: "later content")
+    monkeypatch.setattr(
+        filter_execution, "get_contents", lambda urls: {"https://job": "later content"}
+    )
     monkeypatch.setattr(filter_execution.verdicts, "refresh_content", must_not_refresh)
     monkeypatch.setattr(filter_execution, "check_filter", checked)
     hooks = filter_execution.ExecutionHooks(
