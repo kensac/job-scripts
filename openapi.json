@@ -3438,7 +3438,7 @@
     "/v1/user/jobs/{job_id}/explain": {
       "post": {
         "summary": "Explain Check",
-        "description": "On-demand debugging: re-runs one check with the reason-ful schema and\nfuller reasoning (default verdicts skip reasons to save output tokens).\nRecords a fresh verdict row (context 'explain') and returns the reason.",
+        "description": "On-demand debugging: re-runs one check with the reason-ful schema and\nfuller reasoning (default verdicts skip reasons to save output tokens), on\nthe caller's own model settings, and returns the reason.\n\nA custom filter's verdict is the caller's own and is recorded as one. A\nclosed or clearance verdict is shared by every board, so the caller's run\nis recorded under `explain:<check>`, which no board reads, and an answer\nthat disagrees with the standing verdict queues a fleet recheck of the\nposting (at most one per posting per day) instead of replacing it.",
         "operationId": "explain_check_v1_user_jobs__job_id__explain_post",
         "parameters": [
           {

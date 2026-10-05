@@ -27,6 +27,7 @@ from api.apply import fill_answers, posting_context
 from api.apply import policy as extension_policy
 from api.apply import recipes as extension_recipes
 from api.auth import AuthedUser, require_user
+from api.board.person_state import touchable_job_ids
 from api.board.person_state import write_board_row as _write_board_row
 from api.models import Ok
 from api.problem import AI_REFUSALS, SIZE_REFUSALS, refuse
@@ -471,7 +472,14 @@ def _seen(event: str, user: AuthedUser, **props: Any) -> None:
 def resolve_form(body: ResolveBody, user: AuthedUser = Depends(require_user)) -> ResolvedForm:
     """What goes in each field. Opens a fill in the ledger; the extension
     closes it with /submitted once the person has clicked submit."""
-    job = db.query_one("SELECT id FROM jobs WHERE url = ANY(%s) LIMIT 1", (posting_urls(body.url),))
+    # The same match apply_context makes: another person's private upload at
+    # this url is not this person's posting, and a fill attached to it would
+    # carry its id into the drafts lookup and, on submit, a board row.
+    job = db.query_one(
+        "SELECT id FROM jobs WHERE url = ANY(%s) "
+        "AND (uploaded_by IS NULL OR uploaded_by = %s) LIMIT 1",
+        (posting_urls(body.url), user.id),
+    )
     job_id = job["id"] if job else None
     fields = apply.resolve(user.id, job_id, body.fields)
     with db.transaction():
@@ -606,14 +614,20 @@ def fill_submitted(
             "UPDATE application_fills SET fields = %s, submitted_at = now() WHERE id = %s",
             (db.jsonb(fields), fill_id),
         )
-        if fill["job_id"] is not None:
-            _write_board_row(user.id, fill["job_id"], {"status": SUBMITTED_STATUS}, publish=False)
-    if fill["job_id"] is not None:
+        # A fill opened before resolve_form matched only touchable postings
+        # may still name another person's private upload. The board row is a
+        # visibility grant, so it obeys the rule every other board write does.
+        job_id = fill["job_id"]
+        if job_id is not None and job_id not in touchable_job_ids(user.id, [job_id]):
+            job_id = None
+        if job_id is not None:
+            _write_board_row(user.id, job_id, {"status": SUBMITTED_STATUS}, publish=False)
+    if job_id is not None:
         row = db.query_one(
             "SELECT status, date_applied, hidden FROM user_jobs WHERE user_id = %s AND job_id = %s",
-            (user.id, fill["job_id"]),
+            (user.id, job_id),
         )
-        events.publish_board_row(user.id, fill["job_id"], row or {})
+        events.publish_board_row(user.id, job_id, row or {})
     _seen(
         "apply_form_submitted",
         user,
@@ -694,6 +708,11 @@ async def suggest(body: SuggestBody, user: AuthedUser = Depends(require_user)) -
         raise refuse(
             422, "FILL_REQUIRED", "Answer review requires one field, its revision and its fill."
         )
+    # Touchable, the rule resolve_form matches a fill's posting by: the
+    # posting text goes into the prompt, and another person's private upload
+    # is not this person's to read.
+    if body.job_id and not touchable_job_ids(user.id, [body.job_id]):
+        raise refuse(404, "NOT_FOUND", "unknown job")
     if body.fill_id is not None:
         token, saved = fill_answers.reserve(
             user.id,
