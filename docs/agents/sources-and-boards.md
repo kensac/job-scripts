@@ -114,14 +114,15 @@ SmartRecruiters, Oracle Recruiting, Workable and Apple list without the text,
 so their postings get it from the matching resolver, one call each, when a
 check needs it. An iCIMS portal card holds a snippet, which is not
 the text and is not stored; the iCIMS resolver reads the text from the
-posting's frame. Taleo, IBM and Eightfold list without the text and no
-resolver returns it, so their postings get it from the page fetch tiers below.
-Every careers.ibm.com page answers the static tier with an AWS WAF challenge
-(202), so IBM's text always comes from the browser (7 of 7 listed postings
-read on 2026-10-05). An Eightfold resolver is not straightforward: tenants
-post on their own domains, so a posting URL does not say it is Eightfold's,
-and a 404 from a guessed endpoint on a host that is not would read as a
-closure.
+posting's frame. Taleo, IBM, Eightfold and Avature list without the text and
+no resolver returns it, so their postings get it from the page fetch tiers
+below. Every careers.ibm.com page answers the static tier with an AWS WAF
+challenge (202), so IBM's text always comes from the browser (7 of 7 listed
+postings read on 2026-10-05); the static tier read Bloomberg's and Two Sigma's
+Avature posting pages whole the same day. An Eightfold resolver is not
+straightforward: tenants post on their own domains, so a posting URL does not
+say it is Eightfold's, and a 404 from a guessed endpoint on a host that is not
+would read as a closure.
 
 **A board whose page is a shell gets a resolver, because the static tier
 cannot tell a shell from a posting.** The static tier accepts any page whose
@@ -455,6 +456,28 @@ closes the heading.
 The legacy `career<N>.successfactors.com/career?company=` site has no
 unauthenticated list call (its search is a session-bound DWR call), so it is
 not a board format.
+
+**A board that builds its own next link is followed, never paged by hand.**
+Avature has no listings API: a tenant's search page is server-rendered HTML in
+a template the tenant designs, and the listings URL is that page on the
+tenant's `*.avature.net` host (`https://twosigma.avature.net/careers/OpenRoles`),
+which redirects to a custom domain where there is one. The custom domain
+cannot be told from any other site by its URL. The tenant fixes the page size
+(6 to 25 on 2026-10-05) whatever is asked, and names the offset parameter
+itself: Siemens pages by `folderOffset` and answers its first page to every
+`jobOffset`. So `_avature` reads only the page's `paginationNextLink`. The RSS
+feed returns the same 20 items at any offset, and the sitemap lists no postings
+on some tenants (Two Sigma), so neither is a listings source. Some templates
+state the count ("1-12 of 348 results"), others none (Two Sigma, Koch) or
+"999+" (Siemens). A search serves no row past offset 2,000 (Koch answers 406,
+Siemens an empty page). A pull is complete when it reaches the stated count,
+or, with no count, ends under that window; meeting a posting it already read
+(the list moved or wrapped) or an article it cannot parse is partial too.
+Fields sit wherever the template puts them: a place is a `list-item-location`
+span, a field labelled Location, or an unlabelled span under the title, and
+Pomerleau shows none. IBM's and Delta's tenants answer every page with a 202
+challenge, also to a browser-fingerprinted client, so they are not sources
+(IBM is read through its own search API, `_ibm`).
 
 ## A switched-off source holds no posting active
 
