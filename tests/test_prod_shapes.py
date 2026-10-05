@@ -142,6 +142,8 @@ def test_enabled_filters_have_unique_prompt_hashes_per_user():
 @pytest.mark.corpus
 def test_no_verdict_claims_a_check_type_we_do_not_write():
     known = {"closed", "clearance", "custom", "content", "extraction", "comp"}
+    # A person's explain run of a shared check, which no board reads.
+    known |= {f"explain:{check}" for check in ("closed", "clearance")}
     seen = {
         r["check_type"]
         for r in db.query(

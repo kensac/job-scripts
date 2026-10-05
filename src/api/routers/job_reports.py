@@ -9,7 +9,8 @@ from pydantic import BaseModel
 
 from api import db
 from api.auth import AuthedUser, require_user
-from api.reports import REPORT_KINDS
+from api.board.access import require_visible_job
+from api.reports import REPORT_KINDS, request_recheck
 
 router = APIRouter()
 
@@ -35,8 +36,7 @@ def report_job(
             400,
             detail={"code": "INVALID_KIND", "message": f"kind must be one of {REPORT_KINDS}"},
         )
-    if not db.query_one("SELECT id FROM jobs WHERE id = %s", (job_id,)):
-        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown job"})
+    job = require_visible_job(user, job_id, "j.url, j.company, j.title")
     row = db.query_one_as(
         ReportFiled,
         """
@@ -53,4 +53,6 @@ def report_job(
         ),
     )
     assert row is not None  # an insert with RETURNING always yields its row
+    if body.kind == "closed":
+        request_recheck(job)
     return row

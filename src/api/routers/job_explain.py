@@ -12,6 +12,7 @@ from api.ai import access as ai_access
 from api.auth import AuthedUser, require_user
 from api.board.access import require_visible_job
 from api.problem import AI_REFUSALS
+from api.reports import request_recheck
 
 router = APIRouter()
 
@@ -43,8 +44,14 @@ async def explain_check(
     job_id: int, body: ExplainBody, user: AuthedUser = Depends(require_user)
 ) -> Explained:
     """On-demand debugging: re-runs one check with the reason-ful schema and
-    fuller reasoning (default verdicts skip reasons to save output tokens).
-    Records a fresh verdict row (context 'explain') and returns the reason."""
+    fuller reasoning (default verdicts skip reasons to save output tokens), on
+    the caller's own model settings, and returns the reason.
+
+    A custom filter's verdict is the caller's own and is recorded as one. A
+    closed or clearance verdict is shared by every board, so the caller's run
+    is recorded under `explain:<check>`, which no board reads, and an answer
+    that disagrees with the standing verdict queues a fleet recheck of the
+    posting (at most one per posting per day) instead of replacing it."""
     import dataclasses
 
     from api import budget
@@ -53,10 +60,9 @@ async def explain_check(
     from core.checks import POSTING_CHECKS
     from core.filters import build_custom_instructions
 
-    # This route writes a verdict into ai_queries, which has no user_id and is
-    # resolved latest-row-per-(url, check_type) for EVERY user. An ungated
-    # job_id here is therefore not a read leak but a write primitive against
-    # everyone's board.
+    # The gate keeps another person's private upload unreadable. It does not
+    # make this caller's model an authority on a posting everyone sees: that
+    # is what recording shared checks under explain:<check> is for, below.
     job = require_visible_job(user, job_id, "j.id, j.url, j.company, j.title")
     fresh, closure_signal = await _verdicts.refresh_content(
         job["url"], company=job["company"], job_title=job["title"], context="explain"
@@ -83,20 +89,25 @@ async def explain_check(
     cfg = ai_access.require_config(user)
     cfg = dataclasses.replace(cfg, params={**cfg.params, "reasoning_effort": "medium"})
 
-    check = body.check
     filter_name = prompt_hash = None
-    spec = POSTING_CHECKS.get(check)
+    spec = POSTING_CHECKS.get(body.check)
     if spec:
         instructions, model_cls, verdict_of = (
             spec.instructions,
             spec.response_model,
             spec.verdict_of,
         )
-    elif check.startswith("filter:"):
+        # ai_queries has no user column and every board takes the latest
+        # closed and clearance row per url, so a row under the shared name
+        # from this caller's model (any key, any base_url) would decide the
+        # posting for everyone. A distinct name keeps the audit row and
+        # leaves the shared verdict to the fleet.
+        check = f"explain:{spec.name}"
+    elif body.check.startswith("filter:"):
         flt = db.query_one(
             "SELECT name, prompt, on_ambiguous, prompt_hash FROM user_filters "
             "WHERE user_id = %s AND id = %s",
-            (user.id, int(check.split(":", 1)[1])),
+            (user.id, int(body.check.split(":", 1)[1])),
         )
         if not flt:
             raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown filter"})
@@ -149,4 +160,13 @@ async def explain_check(
             },
         )
     rejected, reason = verdict_of(parsed)
-    return Explained(check=body.check, status="rejected" if rejected else "passed", reason=reason)
+    status: Verdict = "rejected" if rejected else "passed"
+    if spec:
+        standing = db.query_one(
+            "SELECT status FROM ai_queries WHERE url = %s AND check_type = %s "
+            "AND status IN ('passed', 'rejected') ORDER BY id DESC LIMIT 1",
+            (job["url"], spec.name),
+        )
+        if not standing or standing["status"] != status:
+            request_recheck(job)
+    return Explained(check=body.check, status=status, reason=reason)

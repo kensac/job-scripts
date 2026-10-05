@@ -7,6 +7,7 @@ import datetime
 
 from api import db
 from tasks import runtime as tasks_runtime
+from tests import factories
 from tests.test_api_jobs import _insert_job
 
 
@@ -22,6 +23,9 @@ def test_reports_tasks_batches_scope_by_user(
     me, other = _uid(user_headers), _uid(other_user_headers)
     j1 = _insert_job("src-sc", "https://x.test/sc1")
     j2 = _insert_job("src-sc", "https://x.test/sc2")
+    # A report addresses a job the person can see, like every per-job route.
+    factories.make_board_row(me, j1)
+    factories.make_board_row(other, j2)
     assert (
         client.post(
             f"/v1/user/jobs/{j1}/report", json={"kind": "other"}, headers=user_headers

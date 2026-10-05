@@ -29,10 +29,10 @@ def _visible_job(user: AuthedUser, job_id: int, columns: str) -> dict | None:
 
     Every per-job route needs this and none of them had it: they resolved the
     job with a bare `WHERE id = %s`, so any signed-in user could name any of
-    the 49k job ids. That let them read another user's private upload, pin it
-    to their own board, and - through the explain route, which writes a verdict
-    into an append-only log with no user_id - flip a job's closed status for
-    EVERY user at once, because latest-row-per-(url, check_type) wins globally.
+    the 49k job ids. That let them read another user's private upload and pin
+    it to their own board. Seeing a job does not let a person decide its shared
+    closed or clearance verdict: the explain and report routes queue a fleet
+    recheck instead (api.reports.request_recheck).
 
     The gate is the board's own membership (api.board.visibility.FAST) rather than
     a new predicate. A fourth spelling of "can this user see this job" is how

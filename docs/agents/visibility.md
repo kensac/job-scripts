@@ -156,11 +156,33 @@ and the reason, so the posting leaves every board on the next read and nothing
 re-runs. `active` stays the catalog's fact about whether the board still lists
 it. The report row says `posting_closed` from the same verdict.
 
+## A person's claim about a shared verdict queues a recheck
+
+closed and clearance verdicts are shared: `ai_queries` has no user column and
+every board reads the latest row per (url, check_type). So nothing a person
+runs on their own model settings writes one. `POST /user/jobs/{id}/explain`
+runs a shared check on the caller's settings and records it under
+`explain:<check>`, which no shared reader matches; a custom `filter:<id>`
+verdict is the caller's own and is recorded as `custom`. When the caller's
+answer disagrees with the standing verdict, and whenever a person files a
+`closed` report, `api.reports.request_recheck` queues a forced single-row
+`reverify_chunk`, the fleet's own fetch and model, deduped per url per UTC
+day. The fleet's answer is the one boards read. `tests/test_cross_user_writes.py`
+pins it.
+
 ## Authorisation
 
 **Route-level authorisation says nothing about object-level authorisation.**
 Owning a parent does not imply owning a child: a nested identifier must be
 checked against the caller, not assumed from the path.
+
+A per-job route on the board resolves its job through
+`api.board.access.require_visible_job`, never a bare `WHERE id = %s`. A route
+that addresses a posting by something other than the board (the apply
+extension's url match, its suggest call, the board row a submitted fill
+writes) uses the touchable rule instead, `person_state.touchable_job_ids`:
+the public catalog or the person's own upload, never another person's
+private upload.
 
 Any authenticated request auto-provisions a user row. Treat authentication as
 a write.
