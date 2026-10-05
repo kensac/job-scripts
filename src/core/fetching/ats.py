@@ -7,6 +7,7 @@ import json
 import logging
 import re
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from typing import ClassVar, TypeGuard
 from urllib.parse import parse_qs, unquote, urlparse
@@ -696,6 +697,86 @@ class Ibm(AtsResolver):
         return UNSUPPORTED
 
 
+# Eightfold's two careers-site generations, as the path of a listings URL. A
+# tenant answers one and refuses the other with 403 ("Not authorized for PCSX"
+# on v2, "PCSX is not enabled" on pcsx). core.fetching.boards reads the same
+# two paths to pick its fetcher.
+EIGHTFOLD_PCSX = "/api/pcsx/search"
+EIGHTFOLD_V2 = "/api/apply/v2/jobs"
+
+
+class Eightfold(AtsResolver):
+    """An Eightfold posting, read from its tenant's detail endpoint.
+
+    The posting page is a shell. On 2026-10-05 the static tier returned
+    139,000 to 163,000 characters for eight Lockheed and Northrop postings,
+    the title and the site's theme JSON, and not one 50-character run of the
+    description; the gate passed all eight. A removed posting's page is the
+    same shell. The detail endpoint carries the text and answers 404 for a
+    posting it no longer has.
+
+    A tenant posts on its own domain (jobs.northropgrumman.com), so a posting
+    URL alone does not say it is Eightfold's, and a guessed endpoint on a host
+    that is not would answer 404 and read as a closure. So this never matches
+    a URL by itself: it answers only beside the listings URL of a source on
+    the same host (resolve's listings_url), and its markers stay empty, which
+    also keeps it out of the mail domains.
+    """
+
+    name = "eightfold"
+    markers = ()
+    _JOB = re.compile(r"^/careers/job/(\d+)/?$")
+
+    def matches(self, url: str) -> bool:
+        return False
+
+    def fetch(self, url: str) -> AtsResult:
+        return UNSUPPORTED
+
+    def fetch_listed(self, url: str, listings_url: str) -> AtsResult | None:
+        """The posting's text, or None when listings_url is not an Eightfold
+        listing on the posting's own host."""
+        posting, listing = urlparse(url), urlparse(listings_url)
+        match = self._JOB.match(posting.path)
+        generation = listing.path.rstrip("/")
+        if (
+            not match
+            or posting.netloc.lower() != listing.netloc.lower()
+            or generation not in (EIGHTFOLD_PCSX, EIGHTFOLD_V2)
+        ):
+            return None
+        job_id = match.group(1)
+        origin = f"https://{listing.netloc}"
+        pcsx = generation == EIGHTFOLD_PCSX
+        resp = self.get(
+            f"{origin}/api/pcsx/position_details?position_id={job_id}"
+            if pcsx
+            else f"{origin}{EIGHTFOLD_V2}/{job_id}"
+        )
+        early = self.from_response(resp)
+        if early is not None:
+            return early
+        assert resp is not None
+        body = resp.json()
+        data = (body.get("data") or {}) if pcsx else body
+        text = data.get("jobDescription") if pcsx else data.get("job_description")
+        result = self.result(
+            join(
+                data.get("name"),
+                "; ".join(data.get("locations") or []),
+                clean_html(text or ""),
+            )
+            if text
+            else None
+        )
+        ts = data.get("postedTs") if pcsx else data.get("t_create")
+        posted = datetime.datetime.fromtimestamp(int(ts), datetime.UTC).date() if ts else None
+        return replace(result, posted=posted)
+
+
+EIGHTFOLD = Eightfold()
+
+
 def _json_or_none(text: str) -> object:
     try:
         return json.loads(text)
@@ -815,17 +896,37 @@ def canonicalize(url: str) -> str | None:
 
 
 def resolve(url: str) -> AtsResult:
-    for resolver in RESOLVERS:
-        if not resolver.matches(url):
-            continue
-        try:
-            result = resolver.fetch(url)
-        except Exception as exc:
-            logger.debug(f"[{resolver.name}] resolver error {url}: {exc}")
-            return AtsResult(Status.ERROR, source=resolver.name)
-        if result.ok:
-            logger.info(f"ATS hit [{resolver.name}]: {len(result.text or '')} chars from {url}")
-        elif result.status is Status.GONE:
-            logger.info(f"ATS reports posting gone [{resolver.name}]: {url}")
-        return result
-    return UNSUPPORTED
+    resolver = next((r for r in RESOLVERS if r.matches(url)), None)
+    if resolver is None:
+        return UNSUPPORTED
+    return _logged(resolver, url, lambda: resolver.fetch(url))
+
+
+def resolve_listed(url: str, listings_url: str) -> AtsResult:
+    """An Eightfold posting's text, its tenant known by listings_url: the
+    listing of a source on the posting's host, which a URL cannot name."""
+    return _logged(EIGHTFOLD, url, lambda: EIGHTFOLD.fetch_listed(url, listings_url) or UNSUPPORTED)
+
+
+def _logged(resolver: AtsResolver, url: str, fetch: Callable[[], AtsResult]) -> AtsResult:
+    try:
+        result = fetch()
+    except Exception as exc:
+        logger.debug(f"[{resolver.name}] resolver error {url}: {exc}")
+        return AtsResult(Status.ERROR, source=resolver.name)
+    if result.ok:
+        logger.info(f"ATS hit [{resolver.name}]: {len(result.text or '')} chars from {url}")
+    elif result.status is Status.GONE:
+        logger.info(f"ATS reports posting gone [{resolver.name}]: {url}")
+    return result
+
+
+def eightfold_listing_prefixes(url: str) -> tuple[str, str] | None:
+    """The listings URLs an Eightfold source on this posting's host starts
+    with, or None when the URL is not shaped like an Eightfold posting. The
+    caller finds the source; the resolver never guesses a host is Eightfold's."""
+    parsed = urlparse(url)
+    if parsed.scheme != "https" or not Eightfold._JOB.match(parsed.path):
+        return None
+    origin = f"https://{parsed.netloc.lower()}"
+    return f"{origin}{EIGHTFOLD_PCSX}?", f"{origin}{EIGHTFOLD_V2}?"
