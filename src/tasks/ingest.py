@@ -245,3 +245,22 @@ def schedule_filter_runs(cycle: str) -> None:
         filter_runs.enqueue(
             u["id"], None, policy="scheduled", dedupe_key=f"runall:{u['id']}:{cycle}"
         )
+
+
+async def handle_retire_switched_off(task_id: int, payload: dict[str, Any]) -> None:
+    """Retires the postings of every switched-off source (catalog.retire_switched_off)."""
+    from core import catalog
+
+    retired = await asyncio.to_thread(
+        catalog.retire_switched_off, bool(db.get_config("source_title_patterns_enabled"))
+    )
+    for source, n in retired.items():
+        metrics.INGEST_JOBS.labels(source, "retired").inc(n)
+    total = sum(retired.values())
+    set_progress(
+        task_id,
+        total,
+        total,
+        f"retired {total} postings of {len(retired)} switched-off sources",
+        extra={"retired": total, "sources": len(retired)},
+    )

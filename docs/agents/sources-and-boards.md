@@ -22,8 +22,9 @@ rows on the next authoritative pull, so the experiment is reversible without
 discarding its counterfactual.
 
 `sources.active = false` stops both the scrape and every AI check on that
-board's postings. It keeps every subscription to it: a person can keep or
-leave a switched-off board, only not join it. A bundle (`source_groups`) or a
+board's postings, and retires the postings themselves within the hour (below).
+It keeps every subscription to it: a person can keep or leave a switched-off
+board, only not join it. A bundle (`source_groups`) or a
 format is a way of selecting rows for that flag and the interval through
 `POST /admin/sources/switch`, not a second layer of state.
 
@@ -223,6 +224,35 @@ Inactive rows are excluded from every sweep and leave boards through
 
 An aggregator list is not such a signal, and an empty pull is a broken fetch
 rather than an empty board, so neither retires anything.
+
+## A switched-off source holds no posting active
+
+A source that is off is never pulled, so no pull will ever retire its rows,
+and `active` on them stops meaning anything. On 2026-10-04 that was 50,994
+active rows of 115 switched-off sources (24,736 of them `sr_domino_s`, about
+9,800 the seven jobright aggregators).
+
+`catalog.retire_switched_off` runs every cycle as the `retire_switched_off`
+task and retires every active row of a switched-off source, logged in
+`job_listing_events` like any other retirement. It is the one place this
+happens, so every way a source goes off reaches it: the sources page, a bundle
+switch, the automatic switch-off of a failing board, a direct write. A row
+retires within the hour, not at the click. It is a no-op once the catalog
+agrees, and skips rows a concurrent upsert holds rather than waiting on them.
+
+The exception is a url that a switched-on source lists and would admit: its
+`listings` row belongs to a source that is on, and is `kept` by that source's
+pattern or pattern enforcement is off. That source's next pull would put the
+row straight back and queue a re-check. A posting is therefore active while
+some source that is still pulled says so, whichever source first stored it.
+A url's `listings` row outlives its last listing by `screened_retention_days`,
+so a row the other source stops listing retires up to that much later.
+
+Retirement follows the ordinary path from there: inactive rows leave boards
+through `demote_closed`, which removes only rows nobody has touched, so a
+posting a person gave a status, applied to or wrote a note on stays on their board.
+Switched back on, the source's first pull reactivates its rows through the
+upsert, and each return is logged.
 
 ## A re-check answers both axes, because it has already paid for the page
 

@@ -26,7 +26,7 @@ from tasks.filters import (
     handle_run_filter_chunk,
 )
 from tasks.health import handle_data_health
-from tasks.ingest import handle_ingest_source
+from tasks.ingest import handle_ingest_source, handle_retire_switched_off
 from tasks.job_profiles import handle_classify_job_profiles
 from tasks.locations import handle_classify_locations
 from tasks.mail_classify import handle_classify_mail
@@ -60,6 +60,7 @@ HANDLERS = {
     "run_filter_chunk": handle_run_filter_chunk,
     "run_filter_batch_chunk": handle_run_filter_batch_chunk,
     "ingest_source": handle_ingest_source,
+    "retire_switched_off": handle_retire_switched_off,
     "reverify_open": handle_reverify_open,
     "reverify_chunk": handle_reverify_chunk,
     "extract_comp": handle_extract_comp,
