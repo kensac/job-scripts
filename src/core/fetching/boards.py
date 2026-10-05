@@ -238,6 +238,24 @@ def _ashby(url: str, company: str) -> list[JobPosting]:
 # whatever limit is asked for.
 _WORKDAY_PAGE = 20
 
+# Some tenants stop a search at 2,000 results: the first page says total=2000
+# and every page past offset 2,000 wraps back to the first. Measured on
+# 2026-10-05 on 19 of 355 tenants (Airbus, NVIDIA, Walmart); others page
+# straight past it (CVS, 18,841).
+_WORKDAY_WINDOW = 2000
+
+
+class PartialPull(Exception):
+    """A pull that could not prove it saw every open posting.
+
+    Ingest admits what it holds and retires nothing by absence, because a
+    posting outside what was seen is not evidence of a closure. Closures on
+    such a board come from re-verification instead."""
+
+    def __init__(self, postings: list[JobPosting]):
+        super().__init__(f"{len(postings)} postings from an incomplete pull")
+        self.postings = postings
+
 
 # A count is not a place. Measured 2026-09-12: 1,002 postings in the catalog
 # carry "2 Locations", "3 Locations" and so on as their only location, and 162
@@ -280,12 +298,30 @@ def _workday(url: str, company: str) -> list[JobPosting]:
     A searchText query parameter on the listings URL becomes the search the
     tenant's own careers page would run, which is the only server-side filter
     these boards offer; Boeing returned 334 postings for "new grad" on 2026-09-04.
+
+    A tenant that stops at _WORKDAY_WINDOW is read again in slices, one value
+    of its own facets at a time, and the pull is reported partial.
     """
     parsed = urlparse(url)
     search = (parse_qs(parsed.query).get("searchText") or [""])[0]
     endpoint = urlunparse(parsed._replace(query="", fragment=""))
     site = parsed.path.split("/wday/cxs/", 1)[1].split("/")[1]
     base = f"https://{parsed.netloc}/{site}"
+    postings, total, facets = _workday_slice(endpoint, base, company, search, {})
+    if total != _WORKDAY_WINDOW:
+        return postings
+    seen = {p.url: p for p in postings}
+    for parameter, values in _workday_slicing_facets(facets):
+        for value in values:
+            part, _, _ = _workday_slice(endpoint, base, company, search, {parameter: [value]})
+            seen.update((p.url, p) for p in part)
+    raise PartialPull(list(seen.values()))
+
+
+def _workday_slice(
+    endpoint: str, base: str, company: str, search: str, facets: dict[str, list[str]]
+) -> tuple[list[JobPosting], int, list[dict]]:
+    """Every posting one search returns, its stated total and its facets."""
     out: list[JobPosting] = []
     offset = 0
     # Only the first page carries the count; later pages say total=0. Read
@@ -293,11 +329,12 @@ def _workday(url: str, company: str) -> list[JobPosting]:
     # of 454 Workday sources held exactly 40 postings (Boeing listed 752), and
     # because the pull is authoritative the rest were retired as closed.
     total: int | None = None
+    available: list[dict] = []
     while True:
         resp = _session.post(
             endpoint,
             json={
-                "appliedFacets": {},
+                "appliedFacets": facets,
                 "limit": _WORKDAY_PAGE,
                 "offset": offset,
                 "searchText": search,
@@ -319,9 +356,42 @@ def _workday(url: str, company: str) -> list[JobPosting]:
                 out.append(p)
         if total is None:
             total = int(data.get("total") or 0)
+            available = data.get("facets") or []
         offset += len(page)
-        if not page or offset >= total:
-            return out
+        # Past the window a capped tenant wraps to its first page, so the
+        # window bounds the loop even where the total does not.
+        if not page or offset >= min(total, _WORKDAY_WINDOW):
+            return out, total, available
+
+
+def _workday_slicing_facets(facets: list[dict]) -> list[tuple[str, list[str]]]:
+    """The two facets that cover the most postings with every value under the window.
+
+    Two, because a posting carrying no value of the first is invisible to its
+    slices; on Airbus the best single facet covered 2,755 of about 2,940.
+    Facets whose largest value reaches the window cannot be read whole.
+    """
+
+    def expand(parameter: str, values: list[dict]):
+        # A value carrying its own facetParameter and values is a facet in its
+        # own right (Airbus's locationMainGroup holds locationCountry), and its
+        # ids are only accepted under that inner name: under the outer one the
+        # endpoint answers 400.
+        leaves = [v for v in values if "values" not in v]
+        if leaves:
+            yield parameter, leaves
+        for group in values:
+            if "values" in group and group.get("facetParameter"):
+                yield from expand(group["facetParameter"], group["values"])
+
+    usable = []
+    for facet in facets:
+        for parameter, values in expand(facet["facetParameter"], facet.get("values") or []):
+            counts = [int(v.get("count") or 0) for v in values]
+            if max(counts) < _WORKDAY_WINDOW:
+                usable.append((sum(counts), parameter, [v["id"] for v in values]))
+    usable.sort(key=lambda u: u[0], reverse=True)
+    return [(parameter, ids) for _, parameter, ids in usable[:2]]
 
 
 # SmartRecruiters' public postings API pages 100 at a time whatever limit is

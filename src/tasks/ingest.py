@@ -58,10 +58,13 @@ async def handle_ingest_source(task_id: int, payload: dict[str, Any]) -> None:
     opens = hosts.take(host)
     if opens is not None:
         raise Deferred(opens)
+    complete = True
     try:
         postings = await asyncio.to_thread(
             boards.fetch_listings, source["listings_url"], source["company"]
         )
+    except boards.PartialPull as partial:
+        postings, complete = partial.postings, False
     except Exception as exc:
         response = getattr(exc, "response", None)
         if getattr(response, "status_code", None) == 429:
@@ -128,7 +131,7 @@ async def handle_ingest_source(task_id: int, payload: dict[str, Any]) -> None:
     # rather than an empty board. Nothing did this before: 4,554 of 6,306
     # active company-board rows on 2026-09-04 were titles the pattern no
     # longer admitted, each still eligible for every sweep.
-    if fetched and boards.kind(source["listings_url"]) in boards.AUTHORITATIVE:
+    if fetched and complete and boards.kind(source["listings_url"]) in boards.AUTHORITATIVE:
         retired = catalog.retire_unlisted(source["name"], [p.url for p in postings])
         metrics.INGEST_JOBS.labels(source["name"], "retired").inc(retired)
     else:

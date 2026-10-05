@@ -347,3 +347,41 @@ def test_a_return_rewrites_the_row_and_records_the_event_once():
     assert _job_versions() == returned
     assert db.query_one("SELECT active FROM jobs WHERE id = %s", (job_id,))["active"]
     assert _listing_events(job_id) == [False, True]
+
+
+def test_a_partial_pull_admits_what_it_saw_and_retires_nothing(monkeypatch, f):
+    """A Workday tenant capped at 2,000 results is read in facet slices, and
+    nothing proves the slices saw every posting. Retiring what they missed
+    would close live postings; the complete pull after it still retires."""
+    f.make_source("capped")
+    db.execute(
+        "UPDATE sources SET company = 'Capped', listings_url = %s WHERE name = 'capped'",
+        ("https://capped.wd5.myworkdayjobs.com/wday/cxs/capped/External/jobs",),
+    )
+    seen, missed = _posting("Propulsion Engineer I"), _posting("Structures Engineer I")
+    pulls = [[seen, missed], boards.PartialPull([seen]), [seen]]
+
+    def fetch_listings(url, company=None):
+        result = pulls.pop(0)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    async def no_fetch(*a, **kw):
+        return None, None
+
+    monkeypatch.setattr(boards, "fetch_listings", fetch_listings)
+    monkeypatch.setattr(verdicts, "refresh_content", no_fetch)
+
+    def active() -> set[str]:
+        rows = db.query("SELECT title FROM jobs WHERE source = 'capped' AND active")
+        return {r["title"] for r in rows}
+
+    for expected in (
+        {"Propulsion Engineer I", "Structures Engineer I"},
+        {"Propulsion Engineer I", "Structures Engineer I"},
+        {"Propulsion Engineer I"},
+    ):
+        task_id = f.make_task("ingest_source", {"source": "capped"})
+        asyncio.run(ingest.handle_ingest_source(task_id, {"source": "capped"}))
+        assert active() == expected
