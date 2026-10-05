@@ -1639,7 +1639,9 @@ def test_an_amazon_row_becomes_a_posting_with_its_full_text(monkeypatch):
         "Data Center Operation Technician",
         ["Melbourne, Victoria, AUS"],
     )
-    assert p.url == "https://www.amazon.jobs/en/jobs/10567672/data-center-operation-technician"
+    # The board's own slug link and an aggregator's /apply link are one
+    # posting, so both are stored in the form every spelling reduces to.
+    assert p.url == "https://www.amazon.jobs/en/jobs/10567672"
     assert p.date_posted == int(datetime.datetime(2026, 10, 2, tzinfo=datetime.UTC).timestamp())
     assert "Applicants must be Australian citizens" in p.description
     assert "Basic qualifications\n\n- Valid and active driver's license" in p.description
