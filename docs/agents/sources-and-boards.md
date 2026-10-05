@@ -71,6 +71,23 @@ request with HTTP 200, `errors` and no data; Goldman's roleSearch does so for a
 `pageSize` above 250. Read as a page, that is an empty board. `_goldman`
 raises on `errors`.
 
+## A posting has one URL, whichever feed spelled it
+
+`jobs.url` is the posting's identity, and every row, verdict and link keys on
+it, so two spellings of one posting are two postings. Every URL that enters
+from outside goes through `ats.canonicalize`, directly or through
+`urls.normalize_url`: the board fetchers, the sheet-era lists, uploads, the
+apply panel's lookup (`forms.posting_urls`) and mail matching. A host whose
+postings arrive under several spellings gets a canonical form there, chosen
+as the one spelling every form reduces to without a request. amazon.jobs is
+the worked case: the board lists `/en/jobs/<id>/<slug>`, the aggregators link
+`/jobs/<id>/apply`, every form redirects to the slug page, and the slug
+cannot be derived from the id, so the canonical URL is `/en/jobs/<id>`. A
+host that is not an applicant-tracking system gets a function, not a
+resolver, because a resolver's markers also make its host an ATS mail domain.
+Rows stored before a host's rule existed keep their old spelling; nothing
+rewrites `jobs.url`.
+
 ## A board host is paced per egress address, and the pace is learned
 
 `host_budget` holds one row per upstream host and egress address. A worker

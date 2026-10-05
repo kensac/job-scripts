@@ -882,8 +882,32 @@ def is_ats_email_domain(domain: str | None) -> bool:
     return any(d == k or d.endswith("." + k) for k in known)
 
 
+# amazon.jobs serves one posting under many spellings: its board lists
+# /en/jobs/10567672/data-center-operation-technician, the aggregators link
+# /jobs/10567672/apply, and other locales and the bare id work too. Each
+# redirects to /<locale>/jobs/<id>/<slug> (measured 2026-10-05), and the slug
+# cannot be had without a request, so the id under /en/ is the one spelling
+# every form reduces to. account.amazon.jobs/jobs/<id>/apply is the board's
+# own apply link for the same id. Not a resolver: a resolver's markers also
+# make its host an ATS mail domain (is_ats_email_domain), and amazon.jobs is
+# an employer's site, not an applicant-tracking system.
+_AMAZON_JOB = re.compile(r"^/(?:[A-Za-z-]+/)*jobs/(\d+)(?:/|$)")
+
+
+def amazon_canonical(url: str) -> str | None:
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower()
+    if host != "amazon.jobs" and not host.endswith(".amazon.jobs"):
+        return None
+    match = _AMAZON_JOB.match(parsed.path)
+    return f"https://www.amazon.jobs/en/jobs/{match.group(1)}" if match else None
+
+
 def canonicalize(url: str) -> str | None:
     """Canonical clickable URL for a posting."""
+    amazon = amazon_canonical(url)
+    if amazon:
+        return amazon
     for resolver in RESOLVERS:
         if not resolver.matches(url):
             continue
