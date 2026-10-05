@@ -108,10 +108,10 @@ def test_admin_trigger_is_idempotent_and_report_is_typed(client, admin_headers):
     assert report.json()["classifications"] == 0
 
 
-def test_scheduler_admits_backlog_once_and_skips_no_work(f, monkeypatch):
+def test_scheduler_admits_backlog_once_and_skips_no_work(set_config, f, monkeypatch):
     from api import worker
 
-    monkeypatch.setattr(worker, "INGEST_INTERVAL_MINUTES", 60)
+    set_config("ingest_interval_minutes", 60)
     worker.schedule_ingest_cycle()
     assert (
         db.query_one("SELECT count(*) AS n FROM tasks WHERE kind = 'classify_job_profiles'")["n"]
@@ -150,7 +150,7 @@ def test_disabled_profile_collection_blocks_manual_admission(client, admin_heade
     assert client.post("/v1/admin/job-profiles/run", headers=admin_headers).status_code == 200
 
 
-def test_disabled_profile_collection_skips_scheduled_selection(f, monkeypatch):
+def test_disabled_profile_collection_skips_scheduled_selection(set_config, f, monkeypatch):
     from api import worker
 
     source = f.make_source()
@@ -158,7 +158,7 @@ def test_disabled_profile_collection_skips_scheduled_selection(f, monkeypatch):
     f.subscribe(user_id, source)
     f.make_ready_job(source=source)
     _collection_enabled(False)
-    monkeypatch.setattr(worker, "INGEST_INTERVAL_MINUTES", 60)
+    set_config("ingest_interval_minutes", 60)
     worker.schedule_ingest_cycle()
     assert (
         db.query_one("SELECT count(*) AS n FROM tasks WHERE kind='classify_job_profiles'")["n"] == 0

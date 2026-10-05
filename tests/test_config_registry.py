@@ -42,6 +42,7 @@ def test_every_key_is_filed_under_a_named_section():
         "Catalog",
         "Extension",
         "Fetching",
+        "Fleet",
         "Health",
         "Mail",
     }

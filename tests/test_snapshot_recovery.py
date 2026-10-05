@@ -29,11 +29,14 @@ async def test_payload_outage_does_not_exhaust_attempt_budget(monkeypatch):
 
     monkeypatch.setitem(worker.HANDLERS, "test_kind", unavailable)
     task_id = runtime.enqueue("test_kind", {"batch_ids": ["paid"]})
-    db.execute("UPDATE tasks SET attempts=%s WHERE id=%s", (runtime.MAX_ATTEMPTS - 1, task_id))
+    db.execute(
+        "UPDATE tasks SET attempts=%s WHERE id=%s",
+        (db.get_config("task_max_attempts") - 1, task_id),
+    )
     await worker.run_once()
     assert (
         db.query_one("SELECT attempts FROM tasks WHERE id=%s", (task_id,))["attempts"]
-        == runtime.MAX_ATTEMPTS - 1
+        == db.get_config("task_max_attempts") - 1
     )
 
 

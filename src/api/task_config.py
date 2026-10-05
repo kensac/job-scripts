@@ -16,9 +16,25 @@ from core.routing import TaskShape
 logger = logging.getLogger(__name__)
 
 
+# The app_config key holding each task's per-cycle size. The sweep and the
+# fleet budget both read per_cycle through configured_shape, so the cycle the
+# budget prices is the cycle the sweep runs.
+PER_CYCLE_KEYS = {
+    "comp": "comp_extract_per_cycle",
+    "requirements": "requirements_extract_per_cycle",
+    "locations": "classify_locations_per_cycle",
+    "mail_classify": "mail_classify_per_cycle",
+    "mail_classify_backfill": "mail_classify_per_cycle",
+    "job_profile": "job_profiles_per_cycle",
+}
+
+
 def configured_shape(shape: TaskShape) -> TaskShape:
+    key = PER_CYCLE_KEYS.get(shape.purpose)
+    if key:
+        shape = replace(shape, per_cycle=int(db.get_config(key)))
     if shape.purpose == "locations":
-        return replace(
+        shape = replace(
             shape, max_output_tokens=int(db.get_config("classify_locations_max_output_tokens"))
         )
     return shape

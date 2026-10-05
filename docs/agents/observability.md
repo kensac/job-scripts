@@ -81,9 +81,12 @@ work already handed to the batch runtime may finish submitting. Re-enabling
 the switch resumes normal eligibility selection, not a forced reclassification.
 
 **A task's per-cycle size has one definition, and the fleet budget prices
-the same one the handler applies.** The budget reads `TaskShape.per_cycle`,
-so a handler that caps from a second constant makes the ceiling price a
-fleet that is not running. Mail classification had two, 1,200 in the handler
+the same one the handler applies.** The size is an `app_config` row named in
+`api.task_config.PER_CYCLE_KEYS`, and the sweep and `api.budget` both read
+it through `configured_shape`, so a change reaches both on the next cycle. A
+handler that caps from anything else makes the ceiling price a fleet that is
+not running. The shape's declared `per_cycle` is the row's seeded default,
+and its derivation stays beside it in `core.shapes`. Mail classification had two, 1,200 in the handler
 and 5,000 in the shape, each derived from its own guess at a spec's size.
 A cap sized to fill the batch waves is computed from `core.batch`'s
 `BATCH_TOKEN_BUDGET` and `BATCH_WAVE_CONCURRENCY` over a spec size measured
@@ -228,7 +231,7 @@ run.
 it must never repeat. The retry budget is `attempts - batch_resumes`
 (`api.worker.RETRIES_SPENT`): `resume_parked` counts the claim it hands out,
 and both the transient-error requeue and the reaper compare the difference
-with `MAX_ATTEMPTS`. Counting resumes as attempts let 404 batch tasks reach
+with `task_max_attempts` (app_config). Counting resumes as attempts let 404 batch tasks reach
 the cap in the 30 days to 2026-10-04 by waiting alone; two were then failed at
 a disk-full error and a lost worker with 1,198 paid receipts unconsumed. Do
 not give the attempt back on park instead: a lowered `attempts` lets a later

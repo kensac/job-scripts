@@ -23,7 +23,8 @@ from pydantic import BaseModel
 
 from api import db
 from api.ai.batch_results import progress_counts
-from core.shapes import BACKFILL_TASK, CLASSIFY_PER_CYCLE, ONGOING_TASK
+from api.task_config import configured_shape
+from core.shapes import BACKFILL_TASK, ONGOING_TASK
 from tasks.runtime import consume_result, has_batch_work, run_batched, set_progress
 
 logger = logging.getLogger(__name__)
@@ -514,7 +515,8 @@ async def handle_classify_mail(task_id: int, payload: dict[str, Any]) -> None:
     # one task would build a spec list far larger than a wave can carry, and
     # the failure would arrive as memory pressure on a worker rather than as a
     # rejected parameter.
-    cap = min(int(payload.get("cap") or CLASSIFY_PER_CYCLE), CLASSIFY_PER_CYCLE)
+    per_cycle = configured_shape(shape).per_cycle
+    cap = min(int(payload.get("cap") or per_cycle), per_cycle)
     # Re-classifying an EXPLICIT set of messages, for repairing events that were
     # written wrong rather than for finding ones that are missing. The set is
     # computed by the caller and recorded in the payload, so the task row says

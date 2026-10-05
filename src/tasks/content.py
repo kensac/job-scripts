@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 from typing import Any
 
 from api import db
@@ -20,9 +19,6 @@ from tasks.runtime import SCRAPE_CONCURRENCY, AdaptiveLimiter, cancelled, set_pr
 logger = logging.getLogger(__name__)
 
 
-CONTENT_BACKFILL_PER_CYCLE = int(os.environ.get("JOBTRACKER_CONTENT_BACKFILL_PER_CYCLE", "100"))
-
-
 async def handle_fetch_missing_content(task_id: int, payload: dict[str, Any]) -> None:
     """Jobs nobody ever scraped are invisible to every AI check. They can't be
     verified, filtered, or comp-extracted. This walks that backlog newest-first
@@ -30,7 +26,7 @@ async def handle_fetch_missing_content(task_id: int, payload: dict[str, Any]) ->
     Self-limiting: once every job has content it finds nothing and costs
     nothing."""
 
-    cap = max(1, payload.get("limit") or CONTENT_BACKFILL_PER_CYCLE)
+    cap = max(1, payload.get("limit") or db.get_config("content_backfill_per_cycle"))
     rows = db.query(
         f"""
         SELECT j.url, j.company, j.title FROM jobs j

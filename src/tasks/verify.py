@@ -14,11 +14,10 @@ from api.ai.batch_results import progress_counts
 from core.answers import VERIFICATION_REQUEST
 from core.batch import BatchSpec, structured_response_spec
 from core.routing import resolve
-from core.shapes import REVERIFY_DAYS, REVERIFY_PER_CYCLE, VERIFY_TASK
+from core.shapes import VERIFY_TASK
 from core.store import AI_ELIGIBLE_JOB, CONTENT_LATERAL, add_ai_results, ai_result_row
 from tasks.board import UNTOUCHED, demote_closed
 from tasks.runtime import (
-    CHUNK_SIZE,
     SCRAPE_CONCURRENCY,
     AdaptiveLimiter,
     batch_event_hook,
@@ -356,7 +355,8 @@ async def handle_reverify_open(task_id: int, payload: dict[str, Any]) -> None:
             """
         )
     else:
-        cap_sql = "LIMIT %(cap)s" if REVERIFY_PER_CYCLE else ""
+        cap = int(db.get_config("reverify_per_cycle"))
+        cap_sql = "LIMIT %(cap)s" if cap else ""
         rows = db.query(
             f"""
             SELECT url, company, title FROM (
@@ -393,24 +393,25 @@ async def handle_reverify_open(task_id: int, payload: dict[str, Any]) -> None:
                     (SELECT MAX(q.created_at) FROM ai_queries q
                      WHERE q.url = j.url AND q.check_type = 'closed'), '-infinity')
             """,
-            {"days": REVERIFY_DAYS, "cap": REVERIFY_PER_CYCLE},
+            {"days": int(db.get_config("reverify_days")), "cap": cap},
         )
     if not rows:
         set_progress(task_id, 0, 0, "nothing stale")
         demote_closed()
         return
-    if len(rows) <= CHUNK_SIZE:
+    chunk_size = int(db.get_config("filter_chunk_size"))
+    if len(rows) <= chunk_size:
         await _reverify_jobs(task_id, rows, force=bool(payload.get("full")))
         demote_closed()
         return
     total = len(rows)
     n_chunks = 0
-    for start in range(0, total, CHUNK_SIZE):
+    for start in range(0, total, chunk_size):
         enqueue(
             "reverify_chunk",
             {
                 "parent_id": task_id,
-                "rows": rows[start : start + CHUNK_SIZE],
+                "rows": rows[start : start + chunk_size],
                 "force": bool(payload.get("full")),
             },
         )
@@ -482,11 +483,11 @@ async def handle_verify_new(task_id: int, payload: dict[str, Any]) -> None:
             -- covers every genuinely fresh posting and the stale remainder
             -- drains behind it.
             ORDER BY j.date_posted DESC NULLS LAST
-            LIMIT 4000
+            LIMIT %(cap)s
             )
             SELECT * FROM candidates
             """,
-            candidate_params,
+            {**candidate_params, "cap": int(db.get_config("verify_new_per_cycle"))},
         )
         if not rows:
             set_progress(task_id, 0, 0, "nothing to verify")

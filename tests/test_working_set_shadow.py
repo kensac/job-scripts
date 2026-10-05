@@ -8,7 +8,10 @@ def _comparison(body: dict, name: str) -> dict:
     return body[name]
 
 
-def test_shadow_report_separates_known_unknown_and_proposed_scope(client, admin_headers, f):
+def test_shadow_report_separates_known_unknown_and_proposed_scope(
+    set_config, client, admin_headers, f
+):
+    set_config("reverify_per_cycle", 5)
     source = f.make_source()
     both_user = f.make_user()
     unknown_user = f.make_user()
@@ -60,7 +63,7 @@ def test_shadow_report_separates_known_unknown_and_proposed_scope(client, admin_
         "cannot_tell": 2,
         "reason": working_set_shadow.DIGEST_UNKNOWN_REASON,
     }
-    assert body["reverify_per_cycle"] == working_set_shadow.REVERIFY_PER_CYCLE
+    assert body["reverify_per_cycle"] == 5
 
 
 def test_independent_eligibility_does_not_turn_unknown_scope_into_a_difference(

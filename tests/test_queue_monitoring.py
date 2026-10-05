@@ -45,10 +45,9 @@ def test_an_idle_worker_beside_old_pending_work_is_a_stall_and_a_busy_one_is_not
     assert _queue_alerts() == set()
 
 
-def test_ingest_pending_past_two_cycles_is_a_backlog_and_within_one_is_not(monkeypatch):
-    from api.health import queue as health_queue
+def test_ingest_pending_past_two_cycles_is_a_backlog_and_within_one_is_not(set_config, monkeypatch):
 
-    monkeypatch.setattr(health_queue, "INGEST_INTERVAL_MINUTES", 60)
+    set_config("ingest_interval_minutes", 60)
     _pending("ingest_source", 90, {"source": "a"})
     assert _queue_alerts() == set()
     _pending("ingest_source", 150, {"source": "b"})

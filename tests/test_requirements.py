@@ -227,7 +227,6 @@ class TestContentLateralParity:
         They carried three copies of that decision and one had already drifted
         from get_content; this pins them to one answer."""
         from core.store import CONTENT_LATERAL
-        from tasks.comp import EXTRACT_COMP_PER_CYCLE  # noqa: F401
 
         job_id, url = f.make_ready_job(content="RAW PAGE " * 40)
         f.make_verdict(url, "closed", "passed", content="CHECK COPY " * 40)

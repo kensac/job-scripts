@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import dataclasses
-import os
 from collections.abc import Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -221,24 +220,6 @@ def resolve_ai_config(user_id: int, entitlement: Entitlement):
     raise AIConfigUnavailable("NO_API_KEY", entitlement)
 
 
-# A week's fleet ceiling, expressed as "this many full sweeps of every task at
-# its sanctioned model" rather than as a dollar figure.
-#
-# Dollars would need re-picking every time a task is added or a model changes.
-# This moves with the design: the fleet's sanctioned cost for one cycle of
-# everything is computable from the shapes themselves, and the ceiling is a
-# multiple of it.
-#
-# 24 is derived from observation. One full sweep of every task at its
-# sanctioned models is $11.71; the fleet actually spent $29.19 in its busiest
-# week, which is about 2.5 sweeps' worth, because sweeps mostly find nothing to
-# do. 24 leaves roughly ten times the observed headroom - high enough that
-# growth and a backfill do not trip it, low enough that the runaway this exists
-# to catch does. A single task switched to the dearest model it can reach costs
-# $30 an hour, which breaches this inside a day.
-FLEET_WEEKLY_CYCLES = int(os.environ.get("JOBTRACKER_FLEET_WEEKLY_CYCLES", "24"))
-
-
 def fleet_cycle_cost_usd() -> Decimal:
     """What one sweep of every configurable task costs at its CURRENT model.
 
@@ -299,17 +280,18 @@ def fleet_budget_status(projected_usd: Decimal | None = None) -> dict[str, Any]:
     ask the question before committing rather than after.
     """
     cycle_cost = fleet_cycle_cost_usd()
-    ceiling = cycle_cost * FLEET_WEEKLY_CYCLES if FLEET_WEEKLY_CYCLES > 0 else Decimal(0)
+    cycles = int(db.get_config("fleet_weekly_cycles"))
+    ceiling = cycle_cost * cycles if cycles > 0 else Decimal(0)
     spent = fleet_spend_this_week()
     projected = spent + (projected_usd or Decimal(0))
     return {
-        "enabled": FLEET_WEEKLY_CYCLES > 0 and ceiling > 0,
+        "enabled": cycles > 0 and ceiling > 0,
         "spent_usd": spent,
         "ceiling_usd": ceiling,
         # Expressed in sweeps as well as dollars, because that is the unit the
         # ceiling is actually defined in - a dollar figure alone invites
         # someone to change it to a rounder number and lose the derivation.
-        "cycles": FLEET_WEEKLY_CYCLES,
+        "cycles": cycles,
         "cycle_cost_usd": cycle_cost,
         "headroom_usd": ceiling - spent if ceiling > 0 else None,
         "used_fraction": (spent / ceiling) if ceiling > 0 else None,
@@ -376,8 +358,8 @@ def check_fleet_budget(projected_usd: Decimal | None = None) -> None:
         )
         raise FleetBudgetExceeded(
             f"fleet spend this week is ${spent:.2f}{detail}, against a ceiling of "
-            f"${ceiling:.2f} ({FLEET_WEEKLY_CYCLES} full sweeps at current models); "
-            f"raise JOBTRACKER_FLEET_WEEKLY_CYCLES or wait for the week to roll over"
+            f"${ceiling:.2f} ({status['cycles']} full sweeps at current models); "
+            f"raise fleet_weekly_cycles in the admin config or wait for the week to roll over"
         )
 
 

@@ -152,12 +152,12 @@ async def test_a_full_run_takes_only_postings_believed_open_and_reachable(f, tak
 
 @pytest.mark.asyncio
 async def test_the_per_cycle_cap_bounds_the_stale_branch_and_not_the_relistings(
-    f, taken, monkeypatch
+    set_config, f, taken, monkeypatch
 ):
     """The cap exists to bound a sweep over everything that went stale at once.
     A re-listing costs one check per posting a feed actually put back, so the
     cap must not displace one; moving the LIMIT outside the UNION would."""
-    monkeypatch.setattr(tasks_verify, "REVERIFY_PER_CYCLE", 1)
+    set_config("reverify_per_cycle", 1)
     source = f.make_source("cap-src")
     uid = f.make_user()
     f.subscribe(uid, source)
@@ -200,11 +200,13 @@ async def test_nothing_stale_still_demotes_the_rows_a_closure_left_behind(f, tak
 
 
 @pytest.mark.asyncio
-async def test_more_candidates_than_a_chunk_are_sharded_without_loss(f, taken, monkeypatch):
+async def test_more_candidates_than_a_chunk_are_sharded_without_loss(
+    set_config, f, taken, monkeypatch
+):
     """Every candidate lands in exactly one chunk. A partition that drops or
     repeats a row is invisible in production: the cycle just re-checks, or
     never checks, a posting nobody is watching."""
-    monkeypatch.setattr(tasks_verify, "CHUNK_SIZE", 2)
+    set_config("filter_chunk_size", 2)
     source = f.make_source("chunk-src")
     uid = f.make_user()
     f.subscribe(uid, source)

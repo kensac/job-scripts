@@ -640,3 +640,18 @@ def runs_permitted():
     )
     yield
     db.execute("DELETE FROM app_config WHERE key = 'filter_run_groups'")
+
+
+@pytest.fixture
+def set_config():
+    """Write one app_config row for this test. The per-test reset reseeds the
+    defaults, so nothing needs putting back."""
+
+    def write(key: str, value) -> None:
+        db.execute(
+            "INSERT INTO app_config (key, value) VALUES (%s, %s) "
+            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+            (key, db.jsonb(value)),
+        )
+
+    return write

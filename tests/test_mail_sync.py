@@ -286,13 +286,13 @@ async def test_sync_lets_providererror_propagate_without_killing_the_grant(monke
 
 
 @pytest.mark.asyncio
-async def test_a_sync_that_stops_short_resumes_rather_than_skipping(monkeypatch, f):
+async def test_a_sync_that_stops_short_resumes_rather_than_skipping(set_config, monkeypatch, f):
     """The cursor is the absence of a row, so a capped sweep leaves the rest
     for next time instead of advancing past it. A stored cursor would have
     skipped everything after the cap permanently."""
     uid = f.make_user()
     _connect(uid)
-    monkeypatch.setattr(mail_sync, "SYNC_BATCH", 3)
+    set_config("mail_sync_per_cycle", 3)
     _gmail_stub(monkeypatch, [_message(f"<m{i}@x>") for i in range(7)])
 
     await mail_sync.handle_sync_gmail(1, {"user_id": uid})

@@ -7,7 +7,6 @@ from typing import Any
 
 from api import db
 from api.health.evidence import WORKER_FRESH
-from api.queue import INGEST_INTERVAL_MINUTES
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +76,8 @@ def _detect_queue() -> list[dict[str, Any]]:
         )
 
     cycles = int(db.get_config("ingest_backlog_cycles"))
-    limit_minutes = cycles * INGEST_INTERVAL_MINUTES
+    interval = int(db.get_config("ingest_interval_minutes"))
+    limit_minutes = cycles * interval
     r = db.query_one(
         """
         SELECT COUNT(*) AS pending,
@@ -96,7 +96,7 @@ def _detect_queue() -> list[dict[str, Any]]:
                 "message": (
                     f"{r['pending']} ingests are pending and the oldest has waited "
                     f"{r['oldest_minutes']:.0f} minutes, past {cycles} cycles of "
-                    f"{INGEST_INTERVAL_MINUTES}. The fleet finished {r['done_last_hour']} in the "
+                    f"{interval}. The fleet finished {r['done_last_hour']} in the "
                     "last hour; at that rate the pile is what the number says it is."
                 ),
                 "detail": {

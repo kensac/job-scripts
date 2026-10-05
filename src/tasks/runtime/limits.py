@@ -1,6 +1,7 @@
-"""How much work runs at once, and how a sweep is cut into chunks.
+"""How much work runs at once on this host.
 
-Read by the sweeps to size their own work. Nothing here touches the database.
+Per host, so environment rather than app_config: a 1 GB host and a desktop
+set different values. Nothing here touches the database.
 """
 
 from __future__ import annotations
@@ -61,13 +62,3 @@ class AdaptiveLimiter:
 
 
 SCRAPE_CONCURRENCY = int(os.environ.get("JOBTRACKER_SCRAPE_CONCURRENCY", "2"))
-
-
-# Filter runs shard into chunks of this many checks; the shared queue then
-# load-balances by availability (fast workers simply claim more chunks).
-CHUNK_SIZE = int(os.environ.get("JOBTRACKER_CHUNK_SIZE", "100"))
-
-
-# Scheduled runs batch their AI calls through the OpenAI Batch API at half
-# price; jobs in one batch chunk (content already cached, so no scraping).
-BATCH_CHUNK_SIZE = int(os.environ.get("JOBTRACKER_BATCH_CHUNK_SIZE", "500"))

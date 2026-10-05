@@ -44,8 +44,9 @@ OPENAI_API_KEY=...                       # shared key for budgeted users + inges
 
 Optional worker knobs: `JOBTRACKER_WORKER_POLL`, `JOBTRACKER_WORKER_KINDS`
 (CSV of task kinds to claim), `JOBTRACKER_INGEST_SCHEDULER`,
-`JOBTRACKER_INGEST_INTERVAL_MINUTES`,
-`JOBTRACKER_OWNER_KEY_MODELS`, `JOBTRACKER_ADMIN_GROUPS`.
+`JOBTRACKER_OWNER_KEY_MODELS`, `JOBTRACKER_ADMIN_GROUPS`. Fleet-wide tunables
+(cycle cadence, per-cycle sizes, chunk sizes, retry limits) are rows in
+`app_config`, changed from the admin config page.
 
 ## Running
 
