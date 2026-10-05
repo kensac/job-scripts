@@ -46,6 +46,7 @@ def test_managed_board_create_get_and_list_are_typed_and_deterministic(client, a
         "execution_mode": "managed_filter",
         "on_ambiguous": "filter",
         "fail_closed": False,
+        "bypass_sponsorship_filter": False,
         "criteria": {
             "date_posted_after": None,
             "max_age_days": None,
@@ -305,3 +306,35 @@ def test_bootstrap_drift_refuses_and_rolls_back_both_boards(client, admin_header
         db.query_one("SELECT prompt FROM managed_boards WHERE id = %s", (ids[1],))["prompt"]
         == "drift"
     )
+
+
+def test_a_board_that_bypasses_the_clearance_gate_admits_restricted_postings(
+    client, admin_headers, f
+):
+    """Aerospace postings are mostly citizenship, clearance or ITAR bound: 94 of
+    117 decided in a week of production. A board for that field opts out of
+    the clearance gate the way a person does, and the closed gate still holds."""
+    from api import managed_board_runs
+
+    _source("source-a")
+    _source("source-b")
+    _, open_url = f.make_ready_job(source="source-a")
+    _, restricted_url = f.make_ready_job(source="source-a", clearance="rejected")
+    _, closed_url = f.make_ready_job(source="source-a", closed="rejected")
+    board = _create(client, admin_headers).json()
+
+    def candidate_urls() -> set[str]:
+        loaded = managed_board_runs._board(board["id"])
+        assert loaded is not None
+        return {c.url for c in managed_board_runs._candidates(loaded)}
+
+    assert candidate_urls() == {open_url}
+    response = client.patch(
+        f"/v1/admin/managed-boards/{board['id']}",
+        json={"expected_revision": board["revision"], "bypass_sponsorship_filter": True},
+        headers=admin_headers,
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["bypass_sponsorship_filter"] is True
+    assert candidate_urls() == {open_url, restricted_url}
+    assert closed_url not in candidate_urls()

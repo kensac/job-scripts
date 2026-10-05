@@ -54,7 +54,8 @@ Include only full-time entry-level or new-graduate opportunities in software eng
 
 _BOARD_COLS = (
     "b.id, b.slug, b.name, b.description, b.sponsor_user_id, b.prompt, b.prompt_hash, "
-    "b.requested_model, b.execution_mode, b.on_ambiguous, b.fail_closed, b.criteria, b.title_gate, "
+    "b.requested_model, b.execution_mode, b.on_ambiguous, b.fail_closed, "
+    "b.bypass_sponsorship_filter, b.criteria, b.title_gate, "
     "b.published, b.revision, "
     "b.public_revision, b.projection_updated_at, b.published_at, b.unpublished_at, "
     "b.created_at, b.updated_at, "
@@ -81,6 +82,7 @@ class ManagedBoard(BaseModel):
     execution_mode: str
     on_ambiguous: str
     fail_closed: bool
+    bypass_sponsorship_filter: bool
     criteria: Criteria
     title_gate: TitleGateConfig | None
     published: bool
@@ -126,6 +128,7 @@ class ManagedBoardCreate(BaseModel):
     execution_mode: str = "managed_filter"
     on_ambiguous: str = "keep"
     fail_closed: bool = False
+    bypass_sponsorship_filter: bool = False
     criteria: Criteria = Field(default_factory=Criteria)
     title_gate: TitleGateConfig | None = None
     sources: list[str] = Field(default_factory=list, max_length=5000)
@@ -145,6 +148,7 @@ class ManagedBoardPatch(BaseModel):
     execution_mode: NonNullUpdate[str] = None
     on_ambiguous: NonNullUpdate[str] = None
     fail_closed: NonNullUpdate[bool] = None
+    bypass_sponsorship_filter: NonNullUpdate[bool] = None
     criteria: NonNullUpdate[Criteria] = None
     title_gate: TitleGateConfig | None = None
     sources: NonNullUpdate[Annotated[list[str], Field(max_length=5000)]] = None
@@ -371,8 +375,8 @@ def create_managed_board(
                 _Id,
                 "INSERT INTO managed_boards "
                 "(slug, name, description, sponsor_user_id, prompt, prompt_hash, requested_model, execution_mode, "
-                "on_ambiguous, fail_closed, criteria, title_gate) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                "on_ambiguous, fail_closed, bypass_sponsorship_filter, criteria, title_gate) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
                 "RETURNING id",
                 (
                     body.slug,
@@ -385,6 +389,7 @@ def create_managed_board(
                     body.execution_mode,
                     body.on_ambiguous,
                     body.fail_closed,
+                    body.bypass_sponsorship_filter,
                     db.jsonb(body.criteria.model_dump(mode="json")),
                     db.jsonb(body.title_gate.model_dump(mode="json")) if body.title_gate else None,
                 ),
