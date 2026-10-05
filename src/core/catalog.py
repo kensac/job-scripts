@@ -68,8 +68,14 @@ def retire_unlisted(source: str, listed_and_admitted: list[str]) -> int:
     through upsert_postings when the board lists them and the pattern admits
     them again, so a pattern change in either direction is one pull away."""
     with pool.connection() as conn:
+        # Locked in url order (_LOCK_ORDER) before the update, as every
+        # multi-row writer of jobs and listings does; a bare UPDATE locks in
+        # scan order and deadlocks against another board's upsert of a shared
+        # url.
         dropped = conn.execute(
-            "UPDATE jobs SET active = false WHERE source = %s AND active AND url <> ALL(%s) "
+            "UPDATE jobs SET active = false WHERE id IN ("
+            "  SELECT id FROM jobs WHERE source = %s AND active AND url <> ALL(%s) "
+            f"  ORDER BY url {_LOCK_ORDER} FOR UPDATE) "
             "RETURNING id",
             (source, listed_and_admitted),
         ).fetchall()
@@ -85,6 +91,17 @@ def retire_unlisted(source: str, listed_and_admitted: list[str]) -> int:
 
 
 _BATCH = 500
+
+
+# The one order every multi-row write to jobs and listings takes its row locks
+# in: url, compared by code point. Two writers that lock overlapping rows in
+# the same order cannot deadlock; two that each lock in their own order (a
+# board's listing order, a scan's heap order) can, and did: 36 ingests failed
+# on a deadlock in the 60 days to 2026-10-04, 32 of them inserting into
+# listings, whose upsert ran in board order. Python sorts str by code point,
+# and "C" collation compares UTF-8 bytes, which order the same way, so a
+# sorted executemany and an ORDER BY with this collation agree.
+_LOCK_ORDER: LiteralString = 'COLLATE "C"'
 
 
 def _upsert_batch(batch: list[tuple], retries: int = 3) -> None:
@@ -311,16 +328,27 @@ def record_listings(
         )
         for p, payload in zip(listed, payloads, strict=True)
     ]
-    with pool.connection() as conn, conn.cursor() as cur:
-        if rows:
+    # In url order, because boards share urls and the upsert locks each row
+    # it writes until COMMIT (_LOCK_ORDER).
+    rows.sort(key=lambda r: r[0])
+    if rows:
+        with pool.connection() as conn, conn.cursor() as cur:
             # description and raw are set from the old row when equal, because
             # Postgres reuses a TOASTed value only when handed the old row's own
             # pointer; a value from EXCLUDED is a fresh copy, written out again
             # chunk by chunk.
             cur.executemany(_RECORD_LISTINGS, rows)
-        cur.execute(
-            "DELETE FROM listings WHERE source = %s "
-            "AND last_seen_at < now() - make_interval(days => %s, hours => %s)",
+    # Its own transaction, locking in the same order. Inside the upsert's it
+    # was a second ascending pass after the first, which is not one order:
+    # it waited on a stale row another board was upserting while holding
+    # rows that board would reach next. It deletes only rows no pull has
+    # listed in retention_days, so nothing needs it atomic with the upsert.
+    with pool.connection() as conn:
+        conn.execute(
+            "DELETE FROM listings WHERE url IN ("
+            "  SELECT url FROM listings WHERE source = %s "
+            "  AND last_seen_at < now() - make_interval(days => %s, hours => %s) "
+            f"  ORDER BY url {_LOCK_ORDER} FOR UPDATE)",
             (source, retention_days, refresh_hours),
         )
     return inline
