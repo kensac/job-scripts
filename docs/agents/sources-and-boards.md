@@ -232,6 +232,17 @@ Inactive rows are excluded from every sweep and leave boards through
 An aggregator list is not such a signal, and an empty pull is a broken fetch
 rather than an empty board, so neither retires anything.
 
+**A pull that cannot prove it saw everything retires nothing.** Some Workday
+tenants stop a search at 2,000 results (first page total=2000, later pages wrap
+to the first): 19 of 355 measured on 2026-10-05, among them Airbus, NVIDIA and
+Walmart. `_workday` then reads the tenant again one value of its own facets at
+a time, the two widest facets whose every value is under the window, and raises
+`boards.PartialPull` with the union. Ingest admits those postings but skips
+`retire_unlisted`, because a posting outside the slices is not evidence of a
+closure; re-verification closes them instead. Airbus went from 2,000 to 2,883
+of about 2,940. Sources filter at our gate, the title pattern, and not at the
+board: a listings URL carries no search.
+
 ## A switched-off source holds no posting active
 
 A source that is off is never pulled, so no pull will ever retire its rows,
