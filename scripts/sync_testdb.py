@@ -23,8 +23,7 @@ real rows. See docs/agents/testing.md.
 Every identifying column is rewritten on the way out (see ANONYMISE). The
 mailbox, the addresses and the OAuth tokens do not travel.
 
-Usage:
-    set -a && . ./.env && set +a
+Usage (reads PRODUCTION_DATABASE_URL from the environment or .env):
     python scripts/sync_testdb.py            # structure + data
     python scripts/sync_testdb.py --fast     # skips ai_queries.input_content
 """
@@ -38,6 +37,7 @@ import sys
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
+import dotenv
 import psycopg
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -230,9 +230,12 @@ def main() -> int:
 
     _check_the_two_lists_agree()
 
-    src_url = os.environ.get("DATABASE_URL")
+    # Production by its own name. DATABASE_URL is what the application reads,
+    # and a sync that read it would copy whatever the shell last pointed at.
+    dotenv.load_dotenv()
+    src_url = os.environ.get("PRODUCTION_DATABASE_URL")
     if not src_url:
-        print("DATABASE_URL is not set", file=sys.stderr)
+        print("PRODUCTION_DATABASE_URL is not set (in .env or the environment)", file=sys.stderr)
         return 1
     try:
         require_disposable_name(args.name)

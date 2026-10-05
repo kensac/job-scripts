@@ -10,13 +10,13 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class DevApiGuardTests(unittest.TestCase):
-    def run_dev_api(self, dsn: str) -> subprocess.CompletedProcess[str]:
+    def run_dev_api(self, dsn: str, target: str = "dev-api") -> subprocess.CompletedProcess[str]:
         with tempfile.TemporaryDirectory() as directory:
             launcher = Path(directory) / "uvicorn"
             launcher.write_text('#!/bin/sh\nprintf "API_STARTED\\n"\n')
             launcher.chmod(0o755)
             return subprocess.run(
-                ["make", "--no-print-directory", "dev-api"],
+                ["make", "--no-print-directory", target],
                 cwd=ROOT,
                 env={
                     **os.environ,
@@ -41,6 +41,18 @@ class DevApiGuardTests(unittest.TestCase):
                 result = self.run_dev_api(dsn)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertNotIn("API_STARTED", result.stdout)
+                self.assertNotIn("secret_test_password", result.stdout + result.stderr)
+
+    def test_every_local_database_target_refuses_production(self):
+        # The guard is shared, so one production-shaped name per target is
+        # enough to show each target runs it before connecting.
+        for target in ("dev-worker", "migrate"):
+            with self.subTest(target=target):
+                result = self.run_dev_api(
+                    "postgresql://user:secret_test_password@localhost/jobtracker", target
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("refusing database", result.stderr)
                 self.assertNotIn("secret_test_password", result.stdout + result.stderr)
 
     def test_accepts_disposable_names(self):

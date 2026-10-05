@@ -45,7 +45,7 @@ may send that database and that API.
 
 ```
 set -a && . ./.env && set +a
-psql "$DATABASE_URL" -c "SELECT count(*) FROM … WHERE …"
+psql "$PRODUCTION_DATABASE_URL" -c "SELECT count(*) FROM … WHERE …"
 ```
 
 Either way the body says so. "Not measured, because the schema does not record

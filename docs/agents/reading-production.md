@@ -4,6 +4,28 @@
 radius**, including development tooling. A tool that only reads is not
 therefore safe.
 
+## Production has its own variable name
+
+`.env` holds production's DSN as `PRODUCTION_DATABASE_URL`, never as
+`DATABASE_URL`. `DATABASE_URL` is what the application connects to, and
+nothing loads `.env` into it: the fleet sets it in its compose files, and
+`make dev-api`, `make dev-worker` and `make migrate` set it to the checkout's
+disposable database and refuse any other name. Only the commands that exist to
+read production (`make profile`, `make profile-check`, `make testdb-sync`)
+read `PRODUCTION_DATABASE_URL`. Pointing anything else at production is a
+command that says so:
+
+```
+set -a && . ./.env && set +a
+DATABASE_URL="$PRODUCTION_DATABASE_URL" python tools/publish_recipes.py
+```
+
+Keep it that way. When modules loaded `.env` on import and `.env` named
+production `DATABASE_URL`, `make api`, `make migrate`, `make revision` and a
+tool's `--help` all connected to production, and the api and worker ran
+`init_schema` against it at startup. `.env.example` lists every variable the
+code reads.
+
 ## A long read blocks schema changes
 
 A bulk read holds a shared lock for its whole duration. A queued `ALTER TABLE`

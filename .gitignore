@@ -134,13 +134,12 @@ celerybeat.pid
 # stage it: that happened, and only the gitleaks pre-commit hook stopped three
 # live OpenAI keys from being committed.
 #
-# No exceptions any more. .env.template used to be one, and it named three
-# variables the application does not read from the environment at all: two
-# are configs.toml keys that core/configs.py maps into a dict, and the third
-# is read nowhere. What a person actually has to set is in readme.md, which
-# was right while the template was wrong, so the template went rather than
-# becoming a second copy to keep in step.
+# One exception, .env.example, which holds names and no values.
+# .env.template used to be one too, and it drifted: it named three variables
+# the application does not read from the environment at all. The example is
+# kept in step by tests/test_env_example.py instead of by memory.
 .env.*
+!.env.example
 .venv
 env/
 venv/

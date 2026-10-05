@@ -66,8 +66,11 @@ fills this checkout's test database with the generated corpus. Run starts
 `make dev-api` against that database on a free port. Teardown stops the
 database.
 
-Run never points the API at `.env`'s `DATABASE_URL`, because that is
-production. Keep it that way: a dev server is always the throwaway copy.
+Run never points the API at production. `.env` holds production only as
+`PRODUCTION_DATABASE_URL`, which the application never reads, and `make
+dev-api` refuses a database not named like a disposable one. Keep it that way:
+a dev server is always the throwaway copy. See
+[reading-production.md](reading-production.md).
 
 Ports and container names come from the checkout path or the OS, never from a
 fixed number, so parallel workspaces do not collide. A pytest run empties the
