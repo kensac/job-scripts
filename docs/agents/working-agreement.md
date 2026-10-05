@@ -58,6 +58,21 @@ revision rather than by path:
 git fetch origin && git show origin/main:src/api/routers/resolve.py
 ```
 
+### Superset workspaces
+
+`.superset/config.json` sets up a Superset workspace. Setup copies `.env` and
+the other local-only files from the root checkout, installs dependencies, and
+fills this checkout's test database with the generated corpus. Run starts
+`make dev-api` against that database on a free port. Teardown stops the
+database.
+
+Run never points the API at `.env`'s `DATABASE_URL`, because that is
+production. Keep it that way: a dev server is always the throwaway copy.
+
+Ports and container names come from the checkout path or the OS, never from a
+fixed number, so parallel workspaces do not collide. A pytest run empties the
+same database the dev API reads. `make testdb-down` and Run rebuilds it.
+
 ## Repository documentation
 
 Keep committed documentation durable: explain invariants, where to inspect the
