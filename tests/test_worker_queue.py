@@ -102,6 +102,40 @@ def test_reap_stale_tasks_fails_after_max_attempts():
     assert "worker lost" in row["error"]
 
 
+def test_reaper_does_not_count_batch_resumes_as_attempts():
+    """Five claims, three of them resumes of a parked batch wait: two real
+    attempts spent, so a lost worker is requeued. Task 5690708 was failed
+    here at three claims, at least one of them the resume that collected its
+    batches."""
+    task_id = tasks_runtime.enqueue("run_filter_batch_chunk", {"parent_id": 1})
+    db.execute(
+        "UPDATE tasks SET status = 'running', attempts = 5, batch_resumes = 3, "
+        "last_heartbeat = now() - interval '20 minutes' WHERE id = %s",
+        (task_id,),
+    )
+    worker.reap_stale_tasks()
+    row = db.query_one("SELECT status FROM tasks WHERE id = %s", (task_id,))
+    assert row["status"] == "pending"
+
+
+def test_reaper_failure_keeps_uncollected_batch_ids():
+    """Three real attempts spent: the task fails, but the batches it names
+    were never collected, so the ids that point at them stay."""
+    task_id = tasks_runtime.enqueue(
+        "run_filter_batch_chunk", {"parent_id": 1, "batch_ids": ["batch_paid"]}
+    )
+    db.execute(
+        "UPDATE tasks SET status = 'running', attempts = 5, batch_resumes = 2, "
+        "last_heartbeat = now() - interval '20 minutes' WHERE id = %s",
+        (task_id,),
+    )
+    worker.reap_stale_tasks()
+    row = db.query_one("SELECT status, error FROM tasks WHERE id = %s", (task_id,))
+    assert row["status"] == "failed"
+    assert "after 3 attempts" in row["error"]
+    assert tasks_runtime.pending_batch_ids(task_id) == ["batch_paid"]
+
+
 def test_reap_stale_tasks_leaves_fresh_heartbeat_running():
     task_id = tasks_runtime.enqueue("run_filter", {})
     worker._claim_task()
@@ -292,6 +326,51 @@ def test_finish_clears_batch_ids_so_a_rerun_cannot_recollect():
     row = db.query_one("SELECT status, payload FROM tasks WHERE id = %s", (task_id,))
     assert row["status"] == "done"
     assert row["payload"]["parent_id"] == 1, "only batch_ids is dropped"
+
+
+def test_failed_task_keeps_batch_ids_it_never_collected():
+    task_id = tasks_runtime.enqueue("run_filter_batch_chunk", {"parent_id": 1})
+    worker._claim_task()
+    _hold_claim(task_id)
+    hook = tasks_runtime.batch_event_hook(task_id, "filter", "gpt-5-nano")
+    hook("batch_paid", "in_progress", {"requests": 1, "completed": 0, "failed": 0})
+
+    tasks_runtime.finish(task_id, "failed", "boom")
+    assert tasks_runtime.pending_batch_ids(task_id) == ["batch_paid"]
+
+
+@pytest.mark.asyncio
+async def test_batch_resumes_do_not_spend_the_transient_retries(monkeypatch):
+    """A batch task parks and is resumed more times than MAX_ATTEMPTS, then
+    hits a transient error. It must still get its full retry budget: task
+    5472607 was failed on its first full-disk error because each resume had
+    been counted as an attempt."""
+    resumes = tasks_runtime.MAX_ATTEMPTS + 2
+    calls = 0
+
+    async def handler(task_id, payload):
+        nonlocal calls
+        calls += 1
+        if calls <= resumes:
+            assert tasks_runtime.park_awaiting_batch(task_id, ["batch_slow"])
+            raise tasks_runtime.AwaitingBatch()
+        raise OSError("No space left on device")
+
+    monkeypatch.setitem(worker.HANDLERS, "test_kind", handler)
+    task_id = tasks_runtime.enqueue("test_kind", {})
+    for _ in range(resumes):
+        assert await worker.run_once() is True
+        tasks_runtime.resume_parked(task_id)
+
+    # MAX_ATTEMPTS claims hit the error: every one but the last is requeued.
+    for _ in range(tasks_runtime.MAX_ATTEMPTS - 1):
+        await worker.run_once()
+        row = db.query_one("SELECT status FROM tasks WHERE id = %s", (task_id,))
+        assert row["status"] == "pending"
+    await worker.run_once()
+    row = db.query_one("SELECT status FROM tasks WHERE id = %s", (task_id,))
+    assert row["status"] == "failed", "the budget is still finite"
+    assert tasks_runtime.pending_batch_ids(task_id) == ["batch_slow"]
 
 
 def test_transient_requeue_keeps_batch_ids_for_reattach():

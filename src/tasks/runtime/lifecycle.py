@@ -84,17 +84,23 @@ def finish(task_id: int, status: str, error: str | None = None) -> None:
     Only running tasks can be finished; an admin 'cancelled' status sticks, and
     a worker that lost the claim must not finish the run that took it over.
 
-    batch_ids are dropped here because this is the one point where the batches
-    they name are provably spent. Leaving them behind lets a later re-run of
-    the same row collect those outputs again and write verdicts from scraped
-    text old enough to predate a closure. A retry *within* the run keeps them:
-    that is the reattach path, and it is what stops paid work being resubmitted.
+    batch_ids are dropped when the task is done, because that is the one point
+    where the batches they name are provably spent. Leaving them behind lets a
+    later re-run of the same row collect those outputs again and write
+    verdicts from scraped text old enough to predate a closure. A retry
+    *within* the run keeps them: that is the reattach path, and it is what
+    stops paid work being resubmitted. A failed task keeps them too: the
+    batches they name were never collected, so the ids are what a recovery of
+    the task reattaches to, and a filter chunk that failed holding them keeps
+    its urls from being bought again (tasks.board).
     """
     owned, owned_params = claim_guard(task_id)
     db.execute(
         f"""
         UPDATE tasks SET status = %(status)s, error = %(error)s, finished_at = now(),
-            payload = COALESCE(payload, '{{}}'::jsonb) - 'batch_ids'
+            payload = CASE WHEN %(status)s = 'done'
+                           THEN COALESCE(payload, '{{}}'::jsonb) - 'batch_ids'
+                           ELSE payload END
         WHERE id = %(tid)s AND status = 'running'{owned}
         """,
         {

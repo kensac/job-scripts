@@ -162,6 +162,9 @@ class Task(Base):
     parent_id: Mapped[int | None] = mapped_column(BigInteger)
     status: Mapped[str] = mapped_column(Text, server_default=text("'pending'"))
     attempts: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
+    # Claims that resumed a parked batch wait. The retry budget is attempts
+    # minus these; see api.worker.RETRIES_SPENT.
+    batch_resumes: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
     worker: Mapped[str | None] = mapped_column(Text)
     last_heartbeat: Mapped[datetime.datetime | None]
     progress: Mapped[Any | None] = mapped_column(JSONB)

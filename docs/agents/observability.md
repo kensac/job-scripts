@@ -213,6 +213,22 @@ again from the top with a subset of its results, which every batched sweep
 already is: they iterate the results they were given and re-select on the next
 run.
 
+**A resume is not a retry.** Every claim increments `attempts`, because
+`(worker, attempts)` is the generation stamp claim-guarded writes check, and
+it must never repeat. The retry budget is `attempts - batch_resumes`
+(`api.worker.RETRIES_SPENT`): `resume_parked` counts the claim it hands out,
+and both the transient-error requeue and the reaper compare the difference
+with `MAX_ATTEMPTS`. Counting resumes as attempts let 404 batch tasks reach
+the cap in the 30 days to 2026-10-04 by waiting alone; two were then failed at
+a disk-full error and a lost worker with 1,198 paid receipts unconsumed. Do
+not give the attempt back on park instead: a lowered `attempts` lets a later
+claim reuse a stamp a lost worker still holds.
+
+**A failed task keeps its `batch_ids`.** Only `done` strips them, because only
+then are the batches provably spent. A task failed by the reaper or by an
+error still names batches nothing collected, and those ids are what a
+recovery reattaches to.
+
 **A parked chunk must not hold what its siblings decided, nor the next run.**
 Each filter chunk materializes its own passes when it finishes. A split run
 does not block the next cycle's run: the splitter excludes every url a live
