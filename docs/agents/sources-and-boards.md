@@ -62,7 +62,8 @@ Every pull records every listing in `listings`, matched by the pattern or not.
 Each row holds the posting text the listing call carried and the raw record
 minus that text. Greenhouse (with `content=true`), Lever and Ashby carry the
 text; it is assembled by the same `core/fetching/ats.py` helpers the resolvers use, so
-it is what a per-posting fetch would have returned. Workday, SmartRecruiters,
+it is what a per-posting fetch would have returned. ByteDance carries it too,
+as a description and a requirement, and has no resolver. Workday, SmartRecruiters,
 Oracle Recruiting and Workable list without the text, so their postings get it
 from the matching resolver, one call each, when a check needs it. Taleo lists
 without the text and has no resolver, so its postings get it from the page
@@ -291,6 +292,22 @@ reaches the stated one or a round finds nothing new (one round of five pages
 recovered both), and raises `PartialPull` short of it. Its search body must
 carry `format`: without it every page is an empty 200 stating 0, which reads
 as an empty board.
+
+**A board read by offset is complete only when it saw its stated count of
+distinct postings.** ByteDance's careers API (TikTok and ByteDance, one
+fetcher) pages by offset over a live board, so a posting closed between two
+pages shifts the rest and one goes unseen; `_bytedance` counts distinct urls
+against the first page's count and raises `PartialPull` when short. Its search
+also stops at 10,000 rows: a request whose offset plus limit passes that
+answers no rows and a count of 10,000, which a loop paging until an empty page
+reads as the end of the board. The fetcher never asks past the window, and a
+count at the window is a partial pull (2026-10-05; neither board was near it).
+
+**A listings URL names the board when the host does not.** Both ByteDance hosts
+serve both boards; the `website-path` header picks one, and without it the API
+answers 400. The listings URL therefore carries it as a query parameter
+(`?website-path=tiktok`, `?website-path=en`), sent as the header, and the
+fetcher refuses a value it has no public posting page for.
 
 ## A switched-off source holds no posting active
 
