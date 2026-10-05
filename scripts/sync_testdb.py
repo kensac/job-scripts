@@ -79,7 +79,6 @@ ANONYMISE = {
     "users.sub": "'copied-sub-' || id",
     "user_settings.api_key_enc": "NULL",
     "user_settings.digest_token": "NULL",
-    "user_settings.identities": "NULL",
     # NOT NULL, so it cannot simply be dropped - and a random blob would fail
     # to decrypt somewhere far from here. Marked invalid instead, which is a
     # state the application already knows how to handle: a disconnected
@@ -119,8 +118,6 @@ ANONYMISE = {
     # Opaque, but they are handles on a real Gmail mailbox.
     "email_messages.provider_message_id": "'copied-msg-' || id",
     "email_messages.provider_thread_id": "NULL",
-    # A background image URL is a link to something the person chose.
-    "user_settings.background": "'{}'::jsonb",
     # Machine hostnames, one of which is a laptop named after its owner.
     # md5, not hashtext: hashtext is an undocumented internal. Deterministic,
     # so the same host keeps the same pseudonym and "which worker holds this"
