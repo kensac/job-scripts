@@ -20,11 +20,14 @@ What that means for you:
   push you do not need.
 - **A commit you did not write will appear in your branch.** It is expected.
 
-**This mechanism is the reason CI checks out the branch head rather than the
-merge result**. It has to push back to a real branch. That makes every check in
-that job structurally unable to see your branch combined with the base, so
-anything that only breaks in combination has to be checked in a separate job
-that uses the merge result.
+**A run that pushes a fix fails and judges nothing.** It started from the
+commit before the fix, so the pushed commit needs a run of its own. See
+deployment.md.
+
+**Only `gate` checks out the branch head**, because it has to push back to a
+real branch, and it only lints and formats. Every other job checks out the
+merge result (`github.sha` on a pull request), so anything that breaks only in
+combination with main, such as two migration heads, fails on the pull request.
 
 **The file pins requests, not responses.** Only a handful of operations declare
 a response schema; the rest are empty objects. So it will catch a bad path,
@@ -34,12 +37,10 @@ schema, do. It is the only place that class of drift becomes machine-visible.
 
 ## The migration drift check: checked, never committed
 
-CI generates a migration with `--autogenerate` and fails if it contains any
-schema operation. A non-empty result means the ORM models and the migrations
-disagree.
-
-The generated file is a throwaway and is never committed. **Do not commit it if
-you run the check locally.**
+`make migrations-check` applies every migration to the test database and runs
+`alembic check`, which fails when autogenerate would emit any operation. A
+failure means the ORM models and the migrations disagree. CI and `make check`
+both run that target; it writes no file.
 
 The usual cause is a column defined one way in the model and another in the
 migration: a server default without a matching `nullable=False` is the common

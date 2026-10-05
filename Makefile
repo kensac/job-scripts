@@ -1,22 +1,40 @@
 export PYTHONPATH := src
 
-.PHONY: sync check lint fmt types test dev-api dev-worker dev-headers testdb-up testdb-down testdb-url testdb-sync testdb-sync-fast integration corpus profile profile-check schema migrate db-up db-down
+.PHONY: sync check prose migrations-check test-par lint fmt types test dev-api dev-worker dev-headers testdb-up testdb-down testdb-url testdb-sync testdb-sync-fast integration corpus profile profile-check schema migrate db-up db-down
 
 sync:           ## install exactly the lockfile into .venv (then activate it)
 	uv sync --frozen
 
-check:          ## everything CI gates on: lint, format, types, compile, tests
+# The same gates as .github/workflows/ci.yml. Where a gate is more than one
+# command it is a target here that CI calls, so the two cannot drift apart.
+check:          ## everything CI gates on: lint, format, types, compile, prose, migrations, extension, tests
 	ruff check src tests
 	ruff format --check src tests
 	pyright
 	PYTHONPATH=src lint-imports
 	python -m compileall -q src
-	@if git grep -InF -e "—" -e "\\u2014" -- . ':!Makefile' ':!extension/adapters/recipes/*' ; then echo "em dash found: write a comma, a colon, or a new sentence"; exit 1; fi
+	$(MAKE) prose
+	$(MAKE) migrations-check
 	npm --prefix extension ci
 	npm --prefix extension run typecheck
 	npm --prefix extension run build
 	npm --prefix extension test
-	pytest -q tests
+	$(MAKE) test-par
+
+prose:          ## fail on an em dash anywhere in the repository
+	@if git grep -InF -e "—" -e "\\u2014" -- . ':!Makefile' ':!extension/adapters/recipes/*' ; then echo "em dash found: write a comma, a colon, or a new sentence"; exit 1; fi
+
+# Applies every migration, then fails if the models describe a schema the
+# migrations do not produce. Two heads from parallel branches fail the apply.
+# Reads TEST_DATABASE_URL, else this checkout's test container, and refuses a
+# database not named like a disposable one.
+migrations-check: ## migrations apply and the models match them
+	@url="$${TEST_DATABASE_URL:-$(TESTPG_URL)}"; \
+	TEST_DATABASE_URL="$$url" python -m core.disposable_db --env TEST_DATABASE_URL || exit 1; \
+	DATABASE_URL="$$url" python -m alembic upgrade head || exit 1; \
+	DATABASE_URL="$$url" python -m alembic check || { \
+	  echo 'The ORM models and the migrations disagree. Write the migration:'; \
+	  echo '  make migration m="what changed"'; exit 1; }
 
 lint:           ## report lint findings (add ARGS=--fix to apply)
 	ruff check src tests $(ARGS)

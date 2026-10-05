@@ -43,7 +43,10 @@ populated, look perfectly healthy.
 
 Check for this against **main merged into your branch**, not against your
 branch alone. A check that runs only on your branch is structurally blind to
-it.
+it. CI's `static` job does: on a pull request it runs `make migrations-check`
+on the merge result. That merge result is as old as the run, so a branch
+whose run predates another migration landing on main must be re-run before
+it merges.
 
 When two heads exist, resolve with a merge revision. Verify first that the two
 migrations touch different objects; if they touch the same column, a merge
