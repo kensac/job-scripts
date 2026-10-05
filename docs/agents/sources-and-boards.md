@@ -96,7 +96,9 @@ minus that text. Greenhouse (with `content=true`), Lever and Ashby carry the
 text; it is assembled by the same `core/fetching/ats.py` helpers the resolvers
 use, so it is what a per-posting fetch would have returned. ByteDance carries
 it too, as a description and a requirement, and Jibe and Goldman
-(`ats.goldman_text`) carry it; none of the three has a resolver. Workday,
+(`ats.goldman_text`) carry it; none of the three has a resolver. Amazon carries it too (the
+description and both qualification lists); it has no resolver, so a re-check
+fetches the posting page. Workday,
 SmartRecruiters, Oracle Recruiting, Workable and Apple list without the text,
 so their postings get it from the matching resolver, one call each, when a
 check needs it. An iCIMS portal card holds a snippet, which is not
@@ -363,6 +365,20 @@ serve both boards; the `website-path` header picks one, and without it the API
 answers 400. The listings URL therefore carries it as a query parameter
 (`?website-path=tiktok`, `?website-path=en`), sent as the header, and the
 fetcher refuses a value it has no public posting page for.
+
+**A capped count is not a count.** amazon.jobs stops a search at 10,000 rows
+and reports `hits` 10,000 for any search that reaches it, so the unfiltered
+search said 10,000 for a board of 22,295 (2026-10-05). It refuses a page
+past the window with HTTP 200, `hits` 0 and an `error`, so an unchecked loop
+reads that as the end of the board. `_amazon` reads one job category at a time,
+because categories partition the board and none was near the window (the
+largest held 3,279). The pull is complete only when the category counts sum to
+at least the country facet's total, every category's count is under the window,
+and each category returned as many distinct postings as its first page stated.
+That last check catches a posting closing mid-read, which moves every later row
+up and makes a page boundary skip an open one. Anything else raises
+`PartialPull`. When a format's total can equal its window, treat that total as
+"at least", never as the size of the board.
 
 ## A switched-off source holds no posting active
 
