@@ -6,7 +6,7 @@ these, see [observability.md](observability.md).
 
 ## A source is a row, never a code path
 
-The format is read off its listings URL by `core/boards.py`. A new board in a
+The format is read off its listings URL by `core/fetching/boards.py`. A new board in a
 known format is added on the Sources page, and a new format is one fetcher
 returning the same `JobPosting` as the rest.
 
@@ -54,7 +54,7 @@ upstream. A worker idle beside pulls whose slots are closed is not stalled.
 Every pull records every listing in `listings`, matched by the pattern or not.
 Each row holds the posting text the listing call carried and the raw record
 minus that text. Greenhouse (with `content=true`), Lever and Ashby carry the
-text; it is assembled by the same `core/ats.py` helpers the resolvers use, so
+text; it is assembled by the same `core/fetching/ats.py` helpers the resolvers use, so
 it is what a per-posting fetch would have returned. Workday, SmartRecruiters,
 Oracle Recruiting and Workable list without the text, so their postings get it
 from the matching resolver, one call each, when a check needs it.
@@ -377,7 +377,7 @@ in-flight pull is younger than the interval; a failed pull does not count.
 **Every ingest leaves its counts on its task** (`fetched`, `kept`, `cached`,
 `fetch_failed`, `gone`, `already_cached`, `skipped_recent_failure`). They are
 the only record of what one pull saw, and they are what the board detectors in
-`api/health.py` and the admin ingest summary read. A board that pulls fine and
+`api/health/boards.py` and the admin ingest summary read. A board that pulls fine and
 delivers nothing is visible as exactly that.
 
 The knobs above (`fetch_retry_after_hours`, `fetch_retry_max_hours`,

@@ -1,6 +1,6 @@
 export PYTHONPATH := src
 
-.PHONY: sync check prose migrations-check test-par lint fmt types test dev-api dev-worker dev-headers testdb-up testdb-down testdb-url testdb-sync testdb-sync-fast integration corpus profile profile-check schema migrate db-up db-down
+.PHONY: sync check prose migrations-check lint fmt types coverage test test-par dev-api dev-worker dev-headers testdb-up testdb-down testdb-url testdb-sync testdb-sync-fast integration corpus profile profile-check schema migrate migration
 
 sync:           ## install exactly the lockfile into .venv (then activate it)
 	uv sync --frozen
@@ -100,7 +100,11 @@ dev-api dev-worker migrate: export JOBTRACKER_DEV_DATABASE_URL := $(or $(JOBTRAC
 # Refuses any database not named like a disposable one (*_test, *_dev, ...).
 DEV_DB_GUARD = python -m core.disposable_db --env JOBTRACKER_DEV_DATABASE_URL --allow-dev
 
+# Idempotent: already up on this checkout's port is nothing to do. A container
+# with this name on another port is another checkout's, and the run fails on
+# the name rather than sharing it.
 testdb-up:      ## docker postgres WITH pgvector for THIS checkout's test suite
+	@docker port $(TESTPG_NAME) 5432/tcp 2>/dev/null | grep -q ':$(TESTPG_PORT)$$' || \
 	docker run -d --rm --name $(TESTPG_NAME) -p $(TESTPG_PORT):5432 \
 	  -e POSTGRES_PASSWORD=test -e POSTGRES_DB=jobtracker_test \
 	  pgvector/pgvector:pg18-trixie >/dev/null
@@ -176,16 +180,6 @@ dev-headers:    ## print the identity headers a dev client must send
 	@echo '#   X-User-Groups: infra-admins,jobtracker-users-internal'
 	@echo '# Any authenticated request PROVISIONS a user row if the sub is new,'
 	@echo '# so use a sub that already exists in the copy unless you mean to.'
-
-db-up:          ## throwaway local postgres on :54999 (data in .pgdev)
-	initdb -D .pgdev -U dev --auth=trust -E UTF8 >/dev/null 2>&1 || true
-	pg_ctl -D .pgdev -o "-p 54999 -c unix_socket_directories=''" start
-	createdb -h 127.0.0.1 -p 54999 -U dev jobtracker_dev 2>/dev/null || true
-	@echo 'export DATABASE_URL=postgresql://dev@127.0.0.1:54999/jobtracker_dev'
-
-db-down:        ## stop and delete the throwaway postgres
-	pg_ctl -D .pgdev stop -m fast || true
-	rm -rf .pgdev
 
 # --- test database -------------------------------------------------------
 # A copy of production on the same Postgres instance, refreshed on demand so

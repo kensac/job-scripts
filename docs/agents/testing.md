@@ -176,7 +176,7 @@ Worth knowing before optimising it again, measured 2026-09-11:
 
 Two floors set the shape. **A lane pays 7-8 s before its first test**: the
 interpreter, the plugins, conftest provisioning a database, and collecting
-all 1,671 cases to select its own. Sharding divides the tests and nothing
+every case to select its own. Sharding divides the tests and nothing
 else, which is why six lanes and not twelve. **Setup and call are now about
 equal** (33 s and 32 s across all lanes, 20 ms and 19 ms a test), so the
 per-test reset is no longer the thing to attack; the remaining per-test cost
@@ -198,7 +198,7 @@ obviously right and was not.
   27/28/26 s with `-n auto` on a four-vCPU runner: four workers spend on a
   database create, a migration and an interpreter start about what they win
   by overlapping. It earns its keep locally, where it runs the WHOLE suite:
-  70.6 s against 35.1 s (`make test-par`).
+  about half the serial time (`make test-par`).
 - **`synchronous_commit = off` on the test database.** 139 tests took
   7.90 s and 8.06 s with it on, 9.39 s and 8.41 s with it off. The time is
   round trips, not WAL flushes. `fsync = off` did nothing to the old

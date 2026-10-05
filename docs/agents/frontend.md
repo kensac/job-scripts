@@ -207,7 +207,7 @@ from an earlier request. The model call can still have consumed usage.
 
 Automatic drafting only fills untouched answers. An explicit clear remains a
 person's edit and must not be treated as a request for another automatic draft.
-The request and write rules live in `api/application_writes.py` and
+The request and write rules live in `api/apply/writes.py` and
 `api/routers/application.py`; do not reproduce generation checks in the client.
 
 ## Spend reporting

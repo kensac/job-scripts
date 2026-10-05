@@ -10,9 +10,12 @@ where each user tracks their applications.
 | Path | What it is |
 |---|---|
 | `src/api/` | FastAPI backend (`api.app`), task worker (`api.worker`), SQLAlchemy models + Alembic migrations |
+| `src/tasks/` | The handlers the worker runs, and the runtime they run inside |
 | `src/core/` | Shared pipeline: fetching, scraping (headless Chromium), AI checks, verdict/content cache, catalog |
 | `alembic/` | Schema migrations, applied automatically on API/worker start |
-| `openapi.json` | Generated API schema (`python -m api.export_schema`), canon for frontend types |
+| `tests/` | Integration tests against a real Postgres, including a generated corpus |
+| `extension/` | The browser extension that fills application forms |
+| `openapi.json` | Generated API schema (`make schema`), canon for frontend types |
 
 ## Architecture
 
@@ -33,34 +36,78 @@ where each user tracks their applications.
 - **Metrics**: Prometheus on an internal port (`JOBTRACKER_METRICS_PORT`,
   default 9091). Never expose it publicly.
 
-## Environment
+## Setup
 
-```ini
-DATABASE_URL=postgresql://...            # required everywhere
-JOBTRACKER_SERVICE_TOKEN=...             # API auth (proxy-held secret)
-APP_ENCRYPTION_KEY=...                   # Fernet key for stored user API keys
-OPENAI_API_KEY=...                       # shared key for budgeted users + ingestion
-```
-
-Optional worker knobs: `JOBTRACKER_WORKER_POLL`, `JOBTRACKER_WORKER_KINDS`
-(CSV of task kinds to claim), `JOBTRACKER_INGEST_SCHEDULER`,
-`JOBTRACKER_OWNER_KEY_MODELS`, `JOBTRACKER_ADMIN_GROUPS`. Fleet-wide tunables
-(cycle cadence, per-cycle sizes, chunk sizes, retry limits) are rows in
-`app_config`, changed from the admin config page.
-
-## Running
+You need [uv](https://docs.astral.sh/uv/), Docker, and Node 24 (`make check`
+builds and tests the browser extension under `extension/`). Nothing here needs
+a production credential.
 
 ```bash
-uv sync --frozen && source .venv/bin/activate
-export PYTHONPATH=src
+git clone https://github.com/kensac/job-scripts && cd job-scripts
+make sync && source .venv/bin/activate   # exactly uv.lock, into .venv
 
-uvicorn api.app:app --port 8000      # API (migrates on start)
-python -m api.worker                 # worker (any number, any machine)
+# Postgres with pgvector for this checkout. Its name and port derive from the
+# checkout path, so parallel checkouts never share one.
+make testdb-up && eval "$(make testdb-url)"   # sets TEST_DATABASE_URL
+
+make test-par     # the Python suite, one database per core
+make check        # everything CI gates on, including migrations and the extension
 ```
 
-Container images build for amd64/arm64 via GitHub Actions to
-`ghcr.io/kensac/job-scripts`; `deploy/Dockerfile` bundles Chromium for
-scraping. Healthcheck: `python -m api.healthcheck`.
+The tests read only `TEST_DATABASE_URL`. They refuse a database not named
+`*_test`, `*_ci` or `test_*`, and they empty it between tests.
+`make testdb-down` stops the container. See
+[docs/agents/testing.md](docs/agents/testing.md).
+
+## Running the API locally
+
+The dev API runs against the same throwaway database, filled with the
+generated corpus: a catalog shaped like production that holds none of its
+data, with five users.
+
+```bash
+make testdb-up && eval "$(make testdb-url)"
+export APP_ENCRYPTION_KEY=$(python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
+make migrate      # the schema, into the test database
+make corpus       # fill it (writes ciphertext under APP_ENCRYPTION_KEY)
+make dev-api      # http://127.0.0.1:8000, reloads on change
+make dev-headers  # the identity headers a client must send
+```
+
+Keep the same `APP_ENCRYPTION_KEY` for `corpus` and `dev-api`. A test run
+empties the database the dev API reads, so run `make corpus` again after one.
+`make dev-worker` runs a worker against the same database.
+
+`dev-api`, `dev-worker` and `migrate` use this checkout's test database unless
+`JOBTRACKER_DEV_DATABASE_URL` names another. They refuse any database not
+named like a disposable one. For a dev API over a synced copy of real rows,
+see the comment above `dev-api` in the `Makefile`.
+
+## Environment
+
+`.env.example` lists every variable the code reads.
+
+- The API and the worker read their process environment only. Nothing loads
+  `.env` into them. In production the fleet's compose files set
+  `DATABASE_URL`, `JOBTRACKER_SERVICE_TOKEN`, `APP_ENCRYPTION_KEY`,
+  `OPENAI_API_KEY` and the rest. Locally the Makefile's dev targets set
+  `DATABASE_URL`.
+- `.env` holds production's DSN as `PRODUCTION_DATABASE_URL`, never as
+  `DATABASE_URL`. Only `make profile`, `make profile-check` and
+  `make testdb-sync` read it. See
+  [docs/agents/reading-production.md](docs/agents/reading-production.md).
+- Fleet-wide tunables (cycle cadence, per-cycle sizes, chunk sizes, retry
+  limits) are rows in `app_config`, changed from the admin config page, not
+  environment variables.
+
+## Deployment
+
+Images build for amd64/arm64 via GitHub Actions to
+`ghcr.io/kensac/job-scripts`. `deploy/Dockerfile` bundles Chromium for
+scraping. The api container runs `uvicorn api.app:app` and each worker runs
+`python -m api.worker`. Both apply migrations on start. Healthcheck:
+`python -m api.healthcheck`. See
+[docs/agents/deployment.md](docs/agents/deployment.md).
 
 ## Configuration
 
