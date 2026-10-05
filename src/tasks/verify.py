@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import logging
 from typing import Any
 
-from api import ai, db, events
+from api import ai, db, events, metrics
 from api.ai import verdicts
 from api.ai.batch_results import progress_counts
 from core.answers import VERIFICATION_REQUEST
+from core.batch import BatchSpec, structured_response_spec
 from core.routing import resolve
 from core.shapes import REVERIFY_DAYS, REVERIFY_PER_CYCLE, VERIFY_TASK
-from core.store import AI_ELIGIBLE_JOB, CONTENT_LATERAL
+from core.store import AI_ELIGIBLE_JOB, CONTENT_LATERAL, add_ai_results, ai_result_row
 from tasks.board import UNTOUCHED, demote_closed
 from tasks.runtime import (
     CHUNK_SIZE,
@@ -32,6 +35,93 @@ from tasks.runtime import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Both sweeps submit at the shape's effort; reverify spells the fallback.
+_EFFORT = VERIFY_TASK.effort or "low"
+
+
+def _verification_spec(url: str, content: str, context: dict | None = None) -> BatchSpec:
+    return structured_response_spec(
+        url,
+        VERIFICATION_REQUEST.instructions,
+        VERIFICATION_REQUEST.build_input(content),
+        VERIFICATION_REQUEST.response_model,
+        context=context,
+    )
+
+
+def question_sha256(model: str | None, request: BatchSpec | None) -> str | None:
+    """Identity of the question a verification answers, or None if unknown.
+
+    Everything that could change the answer is in it: the model, the effort,
+    the schema, the instructions and the exact page text. Hashed from the
+    request as submitted (a collected result carries its frozen snapshot), so
+    a prompt edit or a model change is a different question and is paid for.
+    """
+    if not model or request is None:
+        return None
+    digest = hashlib.sha256()
+    for part in (
+        model,
+        _EFFORT,
+        request.schema_name,
+        json.dumps(request.schema, sort_keys=True),
+        request.instructions,
+        request.input,
+    ):
+        digest.update(part.encode())
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def _reuse_unchanged(model: str, fetched: list[tuple[str, str]], jobs: dict[str, dict]) -> set[str]:
+    """Record the standing answers for pages that have not changed; return their urls.
+
+    Measured on production for 2026-09-27 to 10-04: 5,780 of 7,244 re-checks
+    sent the same model byte-identical page text, and 5,776 of them came back
+    with the answer already held. The sweep exists to notice a page that
+    changed, and these had not, so the call bought nothing but noise.
+
+    Reuse requires the latest closed AND clearance verdicts to have answered
+    this exact question. A verdict without a recorded question (legacy, manual,
+    ATS-gone) never matches, so it is asked again, and that answer carries the
+    hash forward. The rows written are model-less like record_manual's, because
+    no call was made, so spend and call counts stay true; they reset the
+    staleness clock exactly as a paid verdict would.
+    """
+    questions = {
+        url: question_sha256(model, _verification_spec(url, text)) for url, text in fetched
+    }
+    if not questions:
+        return set()
+    latest: dict[str, dict[str, dict[str, Any]]] = {}
+    for row in db.query(
+        "SELECT DISTINCT ON (url, check_type) url, check_type, status, reason, request_sha256 "
+        "FROM ai_queries WHERE url = ANY(%s) AND check_type IN ('closed', 'clearance') "
+        "AND status IN ('passed', 'rejected') ORDER BY url, check_type, id DESC",
+        (list(questions),),
+    ):
+        latest.setdefault(row["url"], {})[row["check_type"]] = row
+    rows = [
+        ai_result_row(
+            url,
+            verdict["status"],
+            verdict["reason"],
+            check,
+            company=jobs[url]["company"],
+            job_title=jobs[url]["title"],
+            config_name="reverify-unchanged",
+            request_sha256=questions[url],
+        )
+        for url, checks in latest.items()
+        if len(checks) == 2
+        and all(verdict["request_sha256"] == questions[url] for verdict in checks.values())
+        for check, verdict in checks.items()
+    ]
+    add_ai_results(rows)
+    for row in rows:
+        metrics.CHECKS.labels(row["check_type"], row["status"]).inc()
+    return {row["url"] for row in rows}
 
 
 def _newer_evidence(result, check: str) -> bool:
@@ -105,6 +195,7 @@ def _record_reverify_results(task_id: int, results: list) -> int:
                         context="reverify",
                         batched=True,
                         batch_id=res.batch_id,
+                        request_sha256=question_sha256(res.model, res.request),
                     )
                 )
                 usage = {}
@@ -127,8 +218,6 @@ async def _reverify_jobs(
     """Two phases: gather evidence concurrently (ATS gone-detection, then
     content, the fleet-distributed, network-bound part), then settle every
     remaining verdict in ONE half-price batch instead of a call per job."""
-    from core.batch import structured_response_spec
-
     if has_batch_work(task_id):
         results = await collect_pending(task_id, batch_event_hook(task_id, "reverify", None))
         _record_reverify_results(task_id, results)
@@ -217,25 +306,20 @@ async def _reverify_jobs(
                 t.cancel()
             return
 
+    # A forced sweep is an admin doubting the answers themselves, so it pays.
+    if not force:
+        reused = _reuse_unchanged(model, needs_ai, by_url)
+        needs_ai = [(url, content) for url, content in needs_ai if url not in reused]
     if needs_ai:
         set_progress(task_id, done, total, f"batch of {len(needs_ai)} submitted (half price)")
         if parent_id:
             update_parent_progress(parent_id)
-        specs = [
-            structured_response_spec(
-                url,
-                VERIFICATION_REQUEST.instructions,
-                VERIFICATION_REQUEST.build_input(content),
-                VERIFICATION_REQUEST.response_model,
-                context=by_url[url],
-            )
-            for url, content in needs_ai
-        ]
+        specs = [_verification_spec(url, content, by_url[url]) for url, content in needs_ai]
         results = await submit_or_collect(
             task_id,
             specs,
             model,
-            VERIFY_TASK.effort or "low",
+            _EFFORT,
             VERIFICATION_REQUEST.max_output_tokens,
             hook,
         )
@@ -355,8 +439,6 @@ async def handle_verify_new(task_id: int, payload: dict[str, Any]) -> None:
     half-price call per job yields both verdicts. Idempotent by re-sweep.
     Only successful lines produce verdict rows; anything missed or failed is
     picked up by the next cycle's sweep."""
-    from core.batch import structured_response_spec
-
     specs = []
     if not has_batch_work(task_id):
         from api import verification_candidates
@@ -410,14 +492,10 @@ async def handle_verify_new(task_id: int, payload: dict[str, Any]) -> None:
             set_progress(task_id, 0, 0, "nothing to verify")
             return
         specs = [
-            structured_response_spec(
+            _verification_spec(
                 r["url"],
-                VERIFICATION_REQUEST.instructions,
-                VERIFICATION_REQUEST.build_input(r["input_content"]),
-                VERIFICATION_REQUEST.response_model,
-                context={
-                    key: r[key] for key in ("company", "title", "needs_closed", "needs_clearance")
-                },
+                r["input_content"],
+                {key: r[key] for key in ("company", "title", "needs_closed", "needs_clearance")},
             )
             for r in rows
         ]
@@ -472,6 +550,7 @@ async def handle_verify_new(task_id: int, payload: dict[str, Any]) -> None:
                             shared_call=written,
                             batched=True,
                             batch_id=res.batch_id,
+                            request_sha256=question_sha256(res.model, res.request),
                         )
                     )
                     usage = {}

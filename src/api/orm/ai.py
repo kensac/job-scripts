@@ -122,6 +122,11 @@ class AiQuery(Base):
     worker: Mapped[str | None] = mapped_column(Text)
     batch_id: Mapped[str | None] = mapped_column(Text)
     cost_usd: Mapped[float | None] = mapped_column(Numeric(12, 6))
+    # sha256 of the exact question a verdict answers: model, effort, schema,
+    # instructions and input text. NULL is unknown provenance, never a match.
+    # Re-verification reuses an answer whose question is unchanged instead of
+    # buying it again (tasks/verify.py).
+    request_sha256: Mapped[str | None] = mapped_column(Text)
 
 
 class AiInstructionText(Base):

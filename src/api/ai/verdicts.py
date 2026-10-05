@@ -155,6 +155,7 @@ class Verdict:
     error: str | None = None
     record_call_metrics: bool = True
     shared_call: bool = False
+    request_sha256: str | None = None
 
     def __post_init__(self) -> None:
         if self.shared_call:
@@ -195,6 +196,7 @@ class Verdict:
             reasoning_effort=self.reasoning_effort,
             duration_ms=self.duration_ms,
             error=self.error,
+            request_sha256=self.request_sha256,
         )
 
     def count(self) -> None:
