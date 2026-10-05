@@ -2,13 +2,10 @@ from __future__ import annotations
 
 import os
 
-import dotenv
 from alembic import context
 from sqlalchemy import create_engine
 
 from api.orm import Base
-
-dotenv.load_dotenv()
 
 
 def _url() -> str:

@@ -1,15 +1,9 @@
 export PYTHONPATH := src
 
-.PHONY: sync api worker check lint fmt types test dev-api dev-headers testdb-up testdb-down testdb-url testdb-sync testdb-sync-fast integration corpus profile profile-check schema migrate revision db-up db-down
+.PHONY: sync check lint fmt types test dev-api dev-worker dev-headers testdb-up testdb-down testdb-url testdb-sync testdb-sync-fast integration corpus profile profile-check schema migrate db-up db-down
 
 sync:           ## install exactly the lockfile into .venv (then activate it)
 	uv sync --frozen
-
-api:            ## run the API locally
-	uvicorn api.app:app --port 8000 --reload
-
-worker:         ## run a worker locally
-	python -m api.worker
 
 check:          ## everything CI gates on: lint, format, types, compile, tests
 	ruff check src tests
@@ -47,11 +41,9 @@ test-par:       ## run the python suite across cores (one database per worker)
 schema:         ## regenerate openapi.json (commit it)
 	python -m api.export_schema > openapi.json
 
-migrate:        ## apply migrations to $$DATABASE_URL
-	python -m alembic upgrade head
-
-revision:       ## autogenerate a migration: make revision m="add foo"
-	python -m alembic revision --autogenerate -m "$(m)"
+migrate:        ## apply migrations to the dev database (production migrates itself on start)
+	@$(DEV_DB_GUARD)
+	DATABASE_URL="$$JOBTRACKER_DEV_DATABASE_URL" python -m alembic upgrade head
 
 # One test container PER CHECKOUT. A single shared name and port is not a
 # nuisance, it is a correctness problem: `docker run --rm --name X` from a
@@ -80,6 +72,16 @@ TESTPG_NAME := jobtracker-testdb-$(notdir $(CURDIR))
 TESTPG_PORT := $(shell echo $$((55000 + 0x$(shell pwd | shasum | cut -c1-6) % 1000)))
 TESTPG_URL := postgresql://postgres:test@127.0.0.1:$(TESTPG_PORT)/jobtracker_test
 
+# Local commands reach this checkout's throwaway database and nothing else.
+# The application reads DATABASE_URL from its environment only, never from
+# .env, and these targets set it from JOBTRACKER_DEV_DATABASE_URL, which
+# defaults to the test database above. Point it at the synced copy's dev role
+# to use real rows. Production's DSN is PRODUCTION_DATABASE_URL in .env, read
+# only by the targets that say production: profile, profile-check, testdb-sync.
+dev-api dev-worker migrate: export JOBTRACKER_DEV_DATABASE_URL := $(or $(JOBTRACKER_DEV_DATABASE_URL),$(TESTPG_URL))
+# Refuses any database not named like a disposable one (*_test, *_dev, ...).
+DEV_DB_GUARD = python -m core.disposable_db --env JOBTRACKER_DEV_DATABASE_URL --allow-dev
+
 testdb-up:      ## docker postgres WITH pgvector for THIS checkout's test suite
 	docker run -d --rm --name $(TESTPG_NAME) -p $(TESTPG_PORT):5432 \
 	  -e POSTGRES_PASSWORD=test -e POSTGRES_DB=jobtracker_test \
@@ -94,10 +96,10 @@ testdb-url:     ## print this checkout's TEST_DATABASE_URL
 	@echo 'export TEST_DATABASE_URL=$(TESTPG_URL)' 
 
 # Autogenerate connects to a database to diff the models against it, and bare
-# `alembic revision --autogenerate` reads DATABASE_URL, which is PRODUCTION.
-# It is a read, so nothing was harmed the day this was found, but the next
-# command in that shell is `alembic upgrade` and that one is not. Generate
-# against the throwaway copy, always.
+# `alembic revision --autogenerate` reads whatever DATABASE_URL the shell
+# holds. When .env held production under that name, this was a read of
+# production, and the next command in that shell was `alembic upgrade`, which
+# is not a read. Generate against the throwaway copy, always.
 migration:      ## generate a migration from the models (m="what changed")
 	@test -n "$(m)" || { echo 'usage: make migration m="what changed"'; exit 1; }
 	DATABASE_URL='$(TESTPG_URL)' alembic upgrade head
@@ -117,8 +119,7 @@ migration:      ## generate a migration from the models (m="what changed")
 # DSN connects from anywhere. What keeps this off production is that the dev
 # role cannot log in to it.
 #
-# Setup, once:
-#   set -a && . ./.env && set +a
+# Setup, once (reads PRODUCTION_DATABASE_URL from .env):
 #   python scripts/sync_testdb.py --name jobtracker_test --dev-role jobtracker_dev
 #   # then export the JOBTRACKER_DEV_DATABASE_URL it prints
 #
@@ -131,7 +132,7 @@ migration:      ## generate a migration from the models (m="what changed")
 #
 #   make testdb-up && eval "$(make testdb-url)"
 #   make corpus
-#   JOBTRACKER_DEV_DATABASE_URL=$TEST_DATABASE_URL make dev-api
+#   make dev-api
 #
 # The corpus is generated from a committed measurement of production, so the
 # shapes are real without any of the data being. It also holds five users with
@@ -140,15 +141,14 @@ migration:      ## generate a migration from the models (m="what changed")
 # rows.
 DEV_API_PORT ?= 8000
 
-dev-api:        ## run the API against the throwaway copy (needs JOBTRACKER_DEV_DATABASE_URL)
-	@test -n "$$JOBTRACKER_DEV_DATABASE_URL" || { \
-	  echo "JOBTRACKER_DEV_DATABASE_URL is not set."; \
-	  echo "Create the role and copy first:"; \
-	  echo "  python scripts/sync_testdb.py --name jobtracker_test --dev-role jobtracker_dev"; \
-	  exit 1; }
-	@python -m core.disposable_db --env JOBTRACKER_DEV_DATABASE_URL --allow-dev
+dev-api:        ## run the API against the dev database (migrates it on start)
+	@$(DEV_DB_GUARD)
 	DATABASE_URL="$$JOBTRACKER_DEV_DATABASE_URL" JOBTRACKER_SERVICE_TOKEN=dev-token \
 	  uvicorn api.app:app --port $(DEV_API_PORT) --reload
+
+dev-worker:     ## run a worker against the dev database
+	@$(DEV_DB_GUARD)
+	DATABASE_URL="$$JOBTRACKER_DEV_DATABASE_URL" python -m api.worker
 
 dev-headers:    ## print the identity headers a dev client must send
 	@echo '# API on http://127.0.0.1:$(DEV_API_PORT). Send:'

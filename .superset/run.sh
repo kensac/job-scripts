@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Dev API over this workspace's generated corpus, never production: .env holds
-# the production DATABASE_URL, and dev-api overrides it with the throwaway one.
+# Dev API over this workspace's generated corpus, never production. Named
+# explicitly so a JOBTRACKER_DEV_DATABASE_URL in the shell cannot redirect it.
 set -euo pipefail
 ./.superset/devdb.sh
 source .venv/bin/activate

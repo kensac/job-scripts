@@ -8,18 +8,15 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any, LiteralString, cast
 
-import dotenv
 from psycopg.types.json import Jsonb
 
 from api.config import CONFIG_KEYS
 
-dotenv.load_dotenv()
-
 # The pool and the instrumentation that must precede it live in core/pool.py,
 # which core/store.py and core/catalog.py share. See that module for why
 # there used to be two.
-from core.pool import connection as _connection  # noqa: E402
-from core.pool import pool, transaction  # noqa: E402
+from core.pool import connection as _connection
+from core.pool import pool, transaction
 
 # Weekly owner-key token budgets by Authentik group. Seeded once with ON
 # CONFLICT DO NOTHING so runtime edits via /v1/admin/group-budgets stick;

@@ -800,9 +800,9 @@ def main() -> int:
     args = ap.parse_args()
 
     dotenv.load_dotenv()
-    url = os.environ.get("DATABASE_URL")
+    url = os.environ.get("PRODUCTION_DATABASE_URL")
     if not url:
-        print("DATABASE_URL is not set", file=sys.stderr)
+        print("PRODUCTION_DATABASE_URL is not set (in .env or the environment)", file=sys.stderr)
         return 1
 
     if args.value_types_only:
@@ -826,7 +826,7 @@ def main() -> int:
     print(
         "\nRe-measure and commit the profile, then check whether the corpus - and the "
         "tests reading it - still cover what it now says:\n"
-        "  set -a && . ./.env && set +a && python scripts/measure_profile.py"
+        "  make profile"
     )
     return 1
 

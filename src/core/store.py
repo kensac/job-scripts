@@ -6,7 +6,6 @@ import socket
 from collections.abc import Callable
 from typing import Any, LiteralString, cast
 
-import dotenv
 from psycopg import Connection
 
 from core import pricing, query_instructions
@@ -23,10 +22,6 @@ def _as_query(sql: str) -> LiteralString:
     """
     return cast("LiteralString", sql)
 
-
-dotenv.load_dotenv()
-
-DATABASE_URL = os.environ["DATABASE_URL"]
 
 _INSERT_COLUMNS = [
     "config_name",

@@ -15,13 +15,15 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Any
 
-import dotenv
 from psycopg import Connection
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
-dotenv.load_dotenv()
-
+# The process environment only, never .env. When this module loaded .env, every
+# local command that imported it (make api, make migrate, a tool's --help)
+# connected to production, because .env held production's DSN under this name.
+# The fleet sets DATABASE_URL in its compose files; the Makefile sets it to the
+# checkout's throwaway database. See docs/agents/reading-production.md.
 DATABASE_URL = os.environ["DATABASE_URL"]
 
 # Preserve the combined capacity of the original API and storage pools.

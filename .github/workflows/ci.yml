@@ -30,13 +30,8 @@ jobs:
     # are still applied and checked for drift in `static`, on a real
     # database, and tests/test_openapi_current.py still compares the
     # committed schema against the live routes.
-    #
-    # The DSN still has to be SET: core/pool.py reads DATABASE_URL at import
-    # and raises KeyError without it. Port 1 refuses the connection, the pool
-    # logs that it could not connect, and the export finishes anyway because
-    # it never asks the pool for anything.
+    # api/export_schema.py points the pool at a closed port itself.
     env:
-      DATABASE_URL: postgresql://unused:unused@127.0.0.1:1/no_database_here
       PYTHONPATH: src
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
