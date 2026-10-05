@@ -8,6 +8,18 @@ rearchitect it rather than working around it.
 Preserve concurrency and locking semantics across refactors, and check them
 explicitly rather than assuming a refactor kept them.
 
+**A write that locks several rows another writer can also lock takes them in
+one order.** Boards share urls, so two ingests write overlapping rows of
+`jobs` and `listings`. Each such write locks by url in code-point order
+(`core.catalog._LOCK_ORDER`): an executemany sorts its rows in Python, and an
+UPDATE or DELETE selected by a predicate locks through a subquery ordered
+`COLLATE "C"` with `FOR UPDATE`, because a bare one locks in scan order. One
+transaction holds one ordered pass; a second pass after the first is two
+orders, so it gets its own transaction. 36 ingests failed on deadlocks in the
+60 days to 2026-10-04, 32 on the listings upsert, which ran in board order.
+`tests/test_catalog_lock_order.py` reproduces each interleaving with a held
+row and fails on the deadlock.
+
 When the same logic exists in several places and one has drifted, delete the
 duplication. Do not fix the copy.
 
