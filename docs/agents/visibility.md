@@ -131,6 +131,24 @@ Run button still runs it at once. The board thins to acted-on rows until
 verdicts land, because visibility keys on the current hash; carrying old
 verdicts across an edit is the larger change this flag defers.
 
+**A managed board decides its own clearance gate.** Board candidates pass
+the same structural gates as a person's board, closed and clearance, with
+`managed_boards.bypass_sponsorship_filter` standing where a person's
+`bypass_sponsorship_filter` does (default false). The closed gate always
+holds. Bypass is for a field the restriction defines rather than narrows:
+94 of 117 decided aerospace-titled postings in the week to 2026-10-05 were
+rejected on clearance, citizenship or ITAR.
+
+**A board's title gate is the cheap rung before the model.** A recipe in
+`core/managed_board_title_gate.py` decides from title and source alone, in
+Python for the run and in SQL for verification reach; a test holds the two
+spellings equal per recipe, since a recipe the SQL `CASE` does not name falls
+to `ELSE FALSE`. A new recipe ships in `shadow` mode: the board's first run
+judges every candidate and its `title_gate_report` lists what the gate would
+have dropped, which is the recall measurement. Only then is it set to
+`enforce`. Measured on Tech Internships 2026-10-05, `internship_v1` skips
+96.7% of calls and dropped 7 of 1,494 model keeps.
+
 ## Location criteria match places, not words
 
 Every distinct location string a board writes is one row of `locations`,

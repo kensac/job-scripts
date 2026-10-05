@@ -43087,6 +43087,10 @@
             "type": "boolean",
             "title": "Fail Closed"
           },
+          "bypass_sponsorship_filter": {
+            "type": "boolean",
+            "title": "Bypass Sponsorship Filter"
+          },
           "criteria": {
             "$ref": "#/components/schemas/Criteria"
           },
@@ -43186,6 +43190,7 @@
           "execution_mode",
           "on_ambiguous",
           "fail_closed",
+          "bypass_sponsorship_filter",
           "criteria",
           "title_gate",
           "published",
@@ -43300,6 +43305,11 @@
             "title": "Fail Closed",
             "default": false
           },
+          "bypass_sponsorship_filter": {
+            "type": "boolean",
+            "title": "Bypass Sponsorship Filter",
+            "default": false
+          },
           "criteria": {
             "$ref": "#/components/schemas/Criteria"
           },
@@ -43380,6 +43390,9 @@
             "$ref": "#/components/schemas/NonNullUpdate_str_"
           },
           "fail_closed": {
+            "$ref": "#/components/schemas/NonNullUpdate_bool_"
+          },
+          "bypass_sponsorship_filter": {
             "$ref": "#/components/schemas/NonNullUpdate_bool_"
           },
           "criteria": {
@@ -55516,7 +55529,8 @@
             "type": "string",
             "enum": [
               "internship_v1",
-              "new_grad_v1"
+              "new_grad_v1",
+              "aero_major_v1"
             ],
             "title": "Recipe"
           },

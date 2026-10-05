@@ -119,6 +119,7 @@ class _Board:
     execution_mode: str
     on_ambiguous: str
     fail_closed: bool
+    bypass_sponsorship_filter: bool
     criteria: dict[str, Any]
     title_gate: dict[str, Any] | None
     revision: int
@@ -186,7 +187,8 @@ def _board(board_id: int, *, lock: bool = False) -> _Board | None:
     return db.query_one_as(
         _Board,
         "SELECT b.id, b.sponsor_user_id, b.prompt, b.prompt_hash, b.requested_model, b.execution_mode, "
-        "b.on_ambiguous, b.fail_closed, b.criteria, b.title_gate, b.revision, b.published, "
+        "b.on_ambiguous, b.fail_closed, b.bypass_sponsorship_filter, b.criteria, b.title_gate, "
+        "b.revision, b.published, "
         "COALESCE((SELECT array_agg(s.source ORDER BY s.source) FROM managed_board_sources s "
         "WHERE s.managed_board_id = b.id), '{}') AS sources "
         f"FROM managed_boards b WHERE b.id = %s{suffix}",
@@ -197,7 +199,7 @@ def _board(board_id: int, *, lock: bool = False) -> _Board | None:
 def _candidates(board: _Board) -> list[_Candidate]:
     params = {
         "sources": board.sources,
-        "bypass_sponsorship": False,
+        "bypass_sponsorship": board.bypass_sponsorship_filter,
         **board_criteria.params({"criteria": board.criteria}),
     }
     return db.query_as(
@@ -402,6 +404,7 @@ def _plan(board_id: int) -> _Plan:
         "execution_mode": board.execution_mode,
         "on_ambiguous": board.on_ambiguous,
         "fail_closed": board.fail_closed,
+        "bypass_sponsorship_filter": board.bypass_sponsorship_filter,
         "sources": board.sources,
         "criteria": board.criteria,
         "title_gate": title_gate.model_dump(mode="json") if title_gate else None,

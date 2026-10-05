@@ -8,7 +8,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
-TitleGateRecipe = Literal["internship_v1", "new_grad_v1"]
+TitleGateRecipe = Literal["internship_v1", "new_grad_v1", "aero_major_v1"]
 TitleGateMode = Literal["shadow", "enforce"]
 
 
@@ -37,6 +37,20 @@ _EXPERIENCED = re.compile(
     r"\b(?:senior|sr\.?|principal|lead|director|head|vice president|vp|chief)\b",
     re.IGNORECASE,
 )
+# Work an aerospace engineering degree prepares for, loosely: the field's own
+# words plus the mechanical, structural, controls and systems disciplines it
+# shares. Level and fit are the model's call; this only keeps the call off
+# postings no aerospace major would read. Sized on production 2026-10-05: 1,175
+# of 26,991 verified-open postings in a week (4.4%). Its misses are measured by
+# a shadow run against the model's verdicts before it is enforced.
+_AERO_MAJOR_SIGNAL = re.compile(
+    r"\b(?:aero\w*|astro\w*|avionics?|propulsion|spacecraft|satellites?|launch|rockets?"
+    r"|flight|gn&?c|guidance|aircraft|airframes?|orbital|mechanical|structur(?:al|es)|stress"
+    r"|thermal|fluids?|cfd|aerodynamics?|controls?|dynamics|mechatronics?|composites?"
+    r"|materials|reliability|(?:systems?|test|manufacturing|integration|design|hardware"
+    r"|quality|process|industrial|mission) engineer\w*)\b",
+    re.IGNORECASE,
+)
 _CURATED_INTERNSHIP_SOURCES = frozenset(
     {"internships", "speedyapply_intern", "speedyapply_ai_intern", "internships_ouckah"}
 )
@@ -60,6 +74,7 @@ def sql_for_json(config: str) -> tuple[str, dict[str, object]]:
                 WHEN 'new_grad_v1' THEN NOT (
                     j.title ~* %(title_gate_explicit_internship)s
                     OR j.title ~* %(title_gate_experienced)s)
+                WHEN 'aero_major_v1' THEN j.title ~* %(title_gate_aero_major)s
                 ELSE FALSE
             END)
     """
@@ -68,6 +83,7 @@ def sql_for_json(config: str) -> tuple[str, dict[str, object]]:
         "title_gate_internship_signal": postgres_pattern(_INTERNSHIP_SIGNAL),
         "title_gate_explicit_internship": postgres_pattern(_EXPLICIT_INTERNSHIP),
         "title_gate_experienced": postgres_pattern(_EXPERIENCED),
+        "title_gate_aero_major": postgres_pattern(_AERO_MAJOR_SIGNAL),
     }
 
 
@@ -81,6 +97,10 @@ def evaluate(config: TitleGateConfig | None, *, title: str, source: str) -> Titl
         if _INTERNSHIP_SIGNAL.search(title):
             return TitleGateDecision(True, "internship_title_signal")
         return TitleGateDecision(False, "no_internship_title_signal")
+    if config.recipe == "aero_major_v1":
+        if _AERO_MAJOR_SIGNAL.search(title):
+            return TitleGateDecision(True, "aero_major_title_signal")
+        return TitleGateDecision(False, "no_aero_major_title_signal")
     if _EXPLICIT_INTERNSHIP.search(title):
         return TitleGateDecision(False, "internship_title_signal")
     if _EXPERIENCED.search(title):

@@ -61,6 +61,12 @@ class ManagedBoard(Base):
     fail_closed: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     criteria: Mapped[dict] = mapped_column(server_default=text("'{}'::jsonb"))
     title_gate: Mapped[dict | None]
+    # The board-level spelling of user_settings.bypass_sponsorship_filter: true
+    # admits postings whose clearance verdict was rejected. Measured 2026-10-05,
+    # 94 of 117 decided aerospace-titled postings in a week were rejected on
+    # clearance, citizenship or ITAR, so a board for that field shows a fifth
+    # of it without this.
+    bypass_sponsorship_filter: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     published: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     revision: Mapped[int] = mapped_column(BigInteger, server_default=text("1"))
     public_revision: Mapped[int | None] = mapped_column(BigInteger)
