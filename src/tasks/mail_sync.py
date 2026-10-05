@@ -33,12 +33,6 @@ from tasks.runtime import set_progress
 
 logger = logging.getLogger(__name__)
 
-# Messages fetched per sync. Gmail's own page size is 500 and its per-message
-# get is one quota unit, so this is about bounding a single task rather than
-# about the provider: a sweep that cannot finish in one pass resumes next
-# cycle, because the cursor is "messages we have not stored yet".
-SYNC_BATCH = int(os.environ.get("JOBTRACKER_MAIL_SYNC_BATCH", "500"))
-
 # Rows read from an archive before flushing. The archive readers stream, so
 # this bounds memory rather than the file: 38,685 messages at ~6KB of retained
 # body is well over 200MB if accumulated, and these hosts already have
@@ -112,8 +106,9 @@ def _sync_one(task_id: int, user_id: int) -> None:
     stored = 0
     pending: list[Any] = []
     seen = _stored_ids(user_id)
+    limit = int(db.get_config("mail_sync_per_cycle"))
     for message_id in gmail.list_message_ids(user_id, after=_since(user_id)):
-        if stored >= SYNC_BATCH:
+        if stored >= limit:
             break
         message = gmail.fetch_message(user_id, message_id)
         # The list gives Gmail's own ids; dedupe is on the RFC Message-ID, so
@@ -126,10 +121,10 @@ def _sync_one(task_id: int, user_id: int) -> None:
         if len(pending) >= IMPORT_FLUSH:
             mail_store.store_messages(user_id, pending)
             pending = []
-            set_progress(task_id, stored, SYNC_BATCH, "gmail sync")
+            set_progress(task_id, stored, limit, "gmail sync")
     if pending:
         mail_store.store_messages(user_id, pending)
-    set_progress(task_id, stored, SYNC_BATCH, "gmail sync")
+    set_progress(task_id, stored, limit, "gmail sync")
     logger.info(f"gmail sync: stored {stored} new message(s) for user {user_id}")
 
 

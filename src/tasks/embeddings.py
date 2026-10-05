@@ -38,9 +38,6 @@ logger = logging.getLogger(__name__)
 # widening the then response-only batch collector for twenty-four cents.
 # The shared collector now preserves endpoint-specific snapshots and results;
 # scheduled embeddings use it so the worker can release its slot while waiting.
-# Keep the measured 2,000-posting cycle bound: at 100 inputs per provider
-# request this is 20 requests and the original corpus drained in 11 cycles.
-EMBED_POSTINGS_PER_CYCLE = int(os.environ.get("JOBTRACKER_EMBED_POSTINGS_PER_CYCLE", "2000"))
 
 
 # Postings never embedded, plus postings whose page has been scraped again
@@ -149,7 +146,7 @@ async def handle_embed_postings_batch(task_id: int, payload: dict[str, Any]) -> 
                 _VISIBLE_CANDIDATES
                 if db.get_config("embedding_visible_only", True)
                 else _CANDIDATES,
-                {"cap": EMBED_POSTINGS_PER_CYCLE},
+                {"cap": db.get_config("embed_postings_per_cycle")},
             ),
             table="job_embeddings",
             limit=EMBEDDING_INPUT_CHARS,

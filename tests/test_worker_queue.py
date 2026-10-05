@@ -5,7 +5,6 @@ import pytest
 from api import ai, db, fetching, worker
 from core.store import add_ai_result
 from tasks import content as tasks_content
-from tasks import filters as tasks_filters
 from tasks import runtime as tasks_runtime
 from tasks import verify as tasks_verify
 from tests.factories import finished, make_batch_result, make_task
@@ -341,11 +340,12 @@ def test_failed_task_keeps_batch_ids_it_never_collected():
 
 @pytest.mark.asyncio
 async def test_batch_resumes_do_not_spend_the_transient_retries(monkeypatch):
-    """A batch task parks and is resumed more times than MAX_ATTEMPTS, then
+    """A batch task parks and is resumed more times than task_max_attempts, then
     hits a transient error. It must still get its full retry budget: task
     5472607 was failed on its first full-disk error because each resume had
     been counted as an attempt."""
-    resumes = tasks_runtime.MAX_ATTEMPTS + 2
+    max_attempts = db.get_config("task_max_attempts")
+    resumes = max_attempts + 2
     calls = 0
 
     async def handler(task_id, payload):
@@ -362,8 +362,8 @@ async def test_batch_resumes_do_not_spend_the_transient_retries(monkeypatch):
         assert await worker.run_once() is True
         tasks_runtime.resume_parked(task_id)
 
-    # MAX_ATTEMPTS claims hit the error: every one but the last is requeued.
-    for _ in range(tasks_runtime.MAX_ATTEMPTS - 1):
+    # task_max_attempts claims hit the error: every one but the last is requeued.
+    for _ in range(max_attempts - 1):
         await worker.run_once()
         row = db.query_one("SELECT status FROM tasks WHERE id = %s", (task_id,))
         assert row["status"] == "pending"
@@ -504,9 +504,9 @@ def test_reconcile_chunks_finalizes_waiting_parent_with_no_live_chunks(user_head
 
 
 @pytest.mark.asyncio
-async def test_chunked_run_all_filters_lifecycle(monkeypatch, user_headers):
+async def test_chunked_run_all_filters_lifecycle(set_config, monkeypatch, user_headers):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
-    monkeypatch.setattr(tasks_filters, "CHUNK_SIZE", 5)
+    set_config("filter_chunk_size", 5)
 
     async def no_network(url):
         raise AssertionError(f"scrape attempted for {url}, content should have been cached")
@@ -875,8 +875,10 @@ async def test_transient_error_requeues_instead_of_failing(monkeypatch):
     row = db.query_one("SELECT status, attempts, error FROM tasks WHERE id = %s", (tid,))
     assert row["status"] == "pending" and "transient" in row["error"]
 
-    # Past MAX_ATTEMPTS it gives up rather than looping forever.
-    db.execute("UPDATE tasks SET attempts = %s WHERE id = %s", (tasks_runtime.MAX_ATTEMPTS, tid))
+    # Past task_max_attempts it gives up rather than looping forever.
+    db.execute(
+        "UPDATE tasks SET attempts = %s WHERE id = %s", (db.get_config("task_max_attempts"), tid)
+    )
     assert await worker.run_once() is True
     row = db.query_one("SELECT status FROM tasks WHERE id = %s", (tid,))
     assert row["status"] == "failed"

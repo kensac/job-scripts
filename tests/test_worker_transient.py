@@ -69,7 +69,7 @@ def test_host_resource_exhaustion_is_still_transient(message):
 )
 def test_real_bugs_are_not_transient(exc):
     """The failure this must not develop: treating a genuine defect as
-    transient means retrying it MAX_ATTEMPTS times and then failing anyway,
+    transient means retrying it task_max_attempts times and then failing anyway,
     with the real error buried under two identical retries. Note that
     UndefinedColumn and UniqueViolation are psycopg errors but NOT
     OperationalError subclasses, which is what makes the type test precise

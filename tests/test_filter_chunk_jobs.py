@@ -233,8 +233,10 @@ def _split(f, monkeypatch, n_jobs: int):
 
 
 @pytest.mark.asyncio
-async def test_a_split_writes_each_batch_chunk_list_as_a_verified_object(f, monkeypatch, objects):
-    monkeypatch.setattr(filters, "BATCH_CHUNK_SIZE", 2)
+async def test_a_split_writes_each_batch_chunk_list_as_a_verified_object(
+    set_config, f, monkeypatch, objects
+):
+    set_config("filter_batch_chunk_size", 2)
     uid, flt, jobs, parent = _split(f, monkeypatch, 3)
 
     await filters._run_filters(parent, uid, [flt], batched=True)
@@ -254,8 +256,8 @@ async def test_a_split_writes_each_batch_chunk_list_as_a_verified_object(f, monk
 
 
 @pytest.mark.asyncio
-async def test_a_storage_outage_at_split_enqueues_no_chunk(f, monkeypatch, objects):
-    monkeypatch.setattr(filters, "BATCH_CHUNK_SIZE", 2)
+async def test_a_storage_outage_at_split_enqueues_no_chunk(set_config, f, monkeypatch, objects):
+    set_config("filter_batch_chunk_size", 2)
     uid, flt, _jobs, parent = _split(f, monkeypatch, 3)
     objects.client.fail_put = True
 

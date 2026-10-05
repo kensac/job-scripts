@@ -27,8 +27,6 @@ from tasks.filter_execution import (
     prepare_content,
 )
 from tasks.runtime import (
-    BATCH_CHUNK_SIZE,
-    CHUNK_SIZE,
     cancelled,
     collect_pending,
     enqueue,
@@ -122,16 +120,18 @@ async def _run_filters(
     candidates = [j for j in candidates_for(user_id) if j["url"] not in held]
     urls = [j["url"] for j in candidates]
     units: list[tuple] = []
+    chunk_size = int(db.get_config("filter_chunk_size"))
+    batch_chunk_size = int(db.get_config("filter_batch_chunk_size"))
     for flt in filters:
         decided = decided_custom_urls(urls, flt["prompt_hash"], cfg.model)
         todo = [j for j in candidates if j["url"] not in decided]
         metrics.CACHED_VERDICTS.inc(len(candidates) - len(todo))
         if use_batch and todo:
-            for start in range(0, len(todo), BATCH_CHUNK_SIZE):
-                units.append(("batch", flt, todo[start : start + BATCH_CHUNK_SIZE]))
+            for start in range(0, len(todo), batch_chunk_size):
+                units.append(("batch", flt, todo[start : start + batch_chunk_size]))
             todo = []
-        for start in range(0, len(todo), CHUNK_SIZE):
-            units.append(("live", flt, todo[start : start + CHUNK_SIZE]))
+        for start in range(0, len(todo), chunk_size):
+            units.append(("live", flt, todo[start : start + chunk_size]))
     if not units:
         materialize_passing(user_id)
         set_progress(task_id, 0, 0, "everything already decided")

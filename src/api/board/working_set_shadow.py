@@ -7,7 +7,6 @@ from dataclasses import dataclass
 
 from api import db
 from api.board.person_state import UNTOUCHED
-from core.shapes import REVERIFY_DAYS, REVERIFY_PER_CYCLE
 from core.store import SUBSCRIBED_SOURCE
 
 SAMPLE_LIMIT = 20
@@ -75,6 +74,7 @@ class _ReportRow:
 
 def report() -> ShadowReport:
     """Read every compared population and bounded sample from one snapshot."""
+    reverify_days = int(db.get_config("reverify_days"))
     rows = db.query_as(
         _ReportRow,
         f"""
@@ -247,7 +247,7 @@ def report() -> ShadowReport:
         FROM digest
         ORDER BY row_kind, surface, scope_user_id NULLS FIRST
         """,
-        {"days": REVERIFY_DAYS, "sample": SAMPLE_LIMIT},
+        {"days": reverify_days, "sample": SAMPLE_LIMIT},
     )
     generated_at = rows[0].generated_at if rows else datetime.datetime.now(datetime.UTC)
     comparisons: dict[tuple[str, int | None], Comparison] = {}
@@ -292,8 +292,8 @@ def report() -> ShadowReport:
         global_comparisons.setdefault(surface, _empty_comparison())
     return ShadowReport(
         generated_at=generated_at,
-        reverify_days=REVERIFY_DAYS,
-        reverify_per_cycle=REVERIFY_PER_CYCLE,
+        reverify_days=reverify_days,
+        reverify_per_cycle=int(db.get_config("reverify_per_cycle")),
         global_comparisons=global_comparisons,
         users=[
             UserComparison(

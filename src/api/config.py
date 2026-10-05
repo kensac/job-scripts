@@ -4,12 +4,27 @@ import logging
 from dataclasses import dataclass, field
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, PositiveInt, TypeAdapter
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    JsonValue,
+    NonNegativeInt,
+    PositiveInt,
+    TypeAdapter,
+)
 
 from api.apply.policy import ExtensionPolicy
 from core.filter_policy import RoutingPolicy
 from core.review_gate import ReviewGatePolicy
-from core.shapes import LOCATIONS_TASK
+from core.shapes import (
+    CLASSIFY_LOCATIONS_PER_CYCLE,
+    CLASSIFY_PER_CYCLE,
+    EXTRACT_COMP_PER_CYCLE,
+    EXTRACT_REQUIREMENTS_PER_CYCLE,
+    JOB_PROFILE_TASK,
+    LOCATIONS_TASK,
+)
 
 logger = logging.getLogger(__name__)
 ALL_GROUPS = "*"
@@ -446,7 +461,7 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
     # raised to clear it in one cycle.
     "classify_locations_per_cycle": ConfigKey(
         section="Catalog",
-        default=10000,
+        default=CLASSIFY_LOCATIONS_PER_CYCLE,
         value_type=PositiveInt,
         help="Distinct location strings the hourly classification cycle sends to the model.",
     ),
@@ -546,6 +561,149 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
         value_type=bool,
         help="Whether mailbox syncs, archive imports, and the hourly scheduler enqueue new "
         "mail classification work. Turning it off does not discard already submitted batches.",
+    ),
+    # Each per-cycle size below was an environment variable or a literal
+    # until 2026-10-04. None was set on any host in homelab-config, so every
+    # default is the value production ran. A size derived in core.shapes
+    # keeps its derivation there, beside the number.
+    "comp_extract_per_cycle": ConfigKey(
+        section="Catalog",
+        default=EXTRACT_COMP_PER_CYCLE,
+        value_type=PositiveInt,
+        help="Postings the hourly compensation extraction sends to the model per cycle. "
+        "The fleet budget prices a cycle at this many.",
+    ),
+    "requirements_extract_per_cycle": ConfigKey(
+        section="Catalog",
+        default=EXTRACT_REQUIREMENTS_PER_CYCLE,
+        value_type=PositiveInt,
+        help="Postings the hourly requirements extraction sends to the model per cycle, "
+        "when requirements_extraction_enabled is on. The fleet budget prices a cycle at "
+        "this many.",
+    ),
+    "mail_classify_per_cycle": ConfigKey(
+        section="Mail",
+        default=CLASSIFY_PER_CYCLE,
+        value_type=PositiveInt,
+        help="Messages one mail classification task sends to the model, for the hourly "
+        "sweep and an archive backfill alike. The default fills every batch wave that runs "
+        "at once; more only waits in the provider's queue. The fleet budget prices a cycle "
+        "at this many.",
+    ),
+    "job_profiles_per_cycle": ConfigKey(
+        section="Catalog",
+        default=JOB_PROFILE_TASK.per_cycle,
+        value_type=PositiveInt,
+        help="Postings the shadow job-profile classification sends to the model per cycle. "
+        "The fleet budget prices a cycle at this many.",
+    ),
+    # The newest first, so a backlog cannot starve the day's postings: on
+    # 2026-09-15 214,306 active postings held no closed verdict and 3,440 of
+    # them were posted within three days, so one cycle covers every fresh
+    # posting and the remainder drains behind it.
+    "verify_new_per_cycle": ConfigKey(
+        section="Catalog",
+        default=4000,
+        value_type=PositiveInt,
+        help="Postings without a closed or clearance verdict that the hourly verification "
+        "sends to the model per cycle, newest first.",
+    ),
+    "reverify_days": ConfigKey(
+        section="Catalog",
+        default=7,
+        value_type=PositiveInt,
+        help="Days a posting on someone's board keeps its closed verdict before the hourly "
+        "re-verification fetches the page and asks again.",
+    ),
+    # An emergency brake, not a size: the re-check population is whatever
+    # went stale, and the shadow report compares that whole population and
+    # shows this cap beside it.
+    "reverify_per_cycle": ConfigKey(
+        section="Catalog",
+        default=0,
+        value_type=NonNegativeInt,
+        help="Most postings one re-verification cycle re-checks. 0 means no limit.",
+    ),
+    # At 100 inputs per provider request this is 20 requests, and the
+    # original corpus drained in 11 cycles.
+    "embed_postings_per_cycle": ConfigKey(
+        section="Boards",
+        default=2000,
+        value_type=PositiveInt,
+        help="Postings the hourly similarity embedding sweep embeds per cycle, in one "
+        "provider batch. A cycle waits for the previous batch to return.",
+    ),
+    "content_backfill_per_cycle": ConfigKey(
+        section="Fetching",
+        default=100,
+        value_type=PositiveInt,
+        help="Never-fetched postings the hourly content backfill fetches per cycle, newest "
+        "first. A manual run may pass its own limit.",
+    ),
+    # Gmail's own page size is 500 and a per-message get is one quota unit,
+    # so this bounds one task rather than the provider: a sync that cannot
+    # finish resumes next cycle from the messages not yet stored.
+    "mail_sync_per_cycle": ConfigKey(
+        section="Mail",
+        default=500,
+        value_type=PositiveInt,
+        help="New messages one Gmail sync stores per mailbox. The rest wait for the next cycle.",
+    ),
+    # The scheduler buckets the hour by this, so it must divide 60 for every
+    # bucket to be the same length.
+    "ingest_interval_minutes": ConfigKey(
+        section="Fleet",
+        default=60,
+        value_type=Literal[1, 2, 3, 4, 5, 6, 10, 12, 15, 20, 30, 60],
+        help="Minutes between scheduler cycles: board pulls, mail sync and every hourly sweep. "
+        "Divides 60. The queue backlog alert counts in these cycles.",
+    ),
+    # A week's fleet ceiling as a multiple of one sweep of every task at its
+    # current model, so it moves with the design instead of needing a new
+    # dollar figure each time a task or model changes. One sweep was $11.71
+    # and the busiest week spent $29.19, about 2.5 sweeps, because sweeps
+    # mostly find nothing to do. 24 leaves about ten times that headroom; a
+    # single task switched to the dearest model it can reach costs $30 an
+    # hour and breaches it inside a day.
+    "fleet_weekly_cycles": ConfigKey(
+        section="Fleet",
+        default=24,
+        value_type=NonNegativeInt,
+        help="Weekly fleet spend ceiling, in full sweeps of every task at its current model. "
+        "Batched submissions stop once the week passes it. 0 disables the check, which is "
+        "how a deliberate backfill runs.",
+    ),
+    # The shared queue load-balances by availability, so fast workers claim
+    # more chunks; the size bounds how much work one lost worker takes with it.
+    "filter_chunk_size": ConfigKey(
+        section="Fleet",
+        default=100,
+        value_type=PositiveInt,
+        help="Checks per chunk when a live filter run or a re-verification sweep is split "
+        "across the fleet.",
+    ),
+    "filter_batch_chunk_size": ConfigKey(
+        section="Fleet",
+        default=500,
+        value_type=PositiveInt,
+        help="Postings per chunk when a scheduled filter run is split across the fleet. "
+        "Each chunk submits its own half-price provider batch.",
+    ),
+    "task_max_attempts": ConfigKey(
+        section="Fleet",
+        default=3,
+        value_type=PositiveInt,
+        help="Claims a task gets before a lost worker or a transient error fails it for good.",
+    ),
+    # A worker heartbeats every api.worker.HEARTBEAT_SECONDS (60) from its own
+    # thread whether or not the event loop is free, so a silent quarter hour is
+    # a dead worker, not a slow task. Under two beats a single late beat would
+    # requeue a live task under its worker.
+    "task_heartbeat_timeout_minutes": ConfigKey(
+        section="Fleet",
+        default=15,
+        value_type=Annotated[int, Field(ge=2)],
+        help="Minutes without a heartbeat before the reaper requeues a running task.",
     ),
 }
 

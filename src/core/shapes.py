@@ -16,8 +16,9 @@ caller this move exists for, and the failure would be a fleet cost silently
 computed over no tasks rather than an error.
 
 The constants a shape reads came with it: the model, the output cap, the effort
-preference and the per-cycle size ARE the declaration. The handler imports them
-back for its own SQL, so a cap still has one definition.
+preference and the per-cycle size ARE the declaration. A declared per-cycle
+size is the seeded default of an app_config row; the handler and the fleet
+budget both read the row through api.task_config.configured_shape.
 """
 
 from __future__ import annotations
@@ -30,20 +31,15 @@ from core.batch import BATCH_TOKEN_BUDGET, BATCH_WAVE_CONCURRENCY
 from core.providers.spec import StructuredOutput
 from core.routing import Evidence, TaskShape
 
-# Shared by the re-verification sweep and its pre-cutover shadow report. The
-# report compares the full stale population and carries the ordinary cycle cap
-# separately, so a cap cannot make two different populations appear equal.
-REVERIFY_DAYS = int(os.environ.get("JOBTRACKER_REVERIFY_DAYS", "7"))
-REVERIFY_PER_CYCLE = int(os.environ.get("JOBTRACKER_REVERIFY_PER_CYCLE", "0"))
-
 # --- compensation extraction ---
 
 # Comp extraction runs hourly and each pass is bounded, so one task cannot pull
 # the whole catalog into memory or occupy a worker indefinitely. The size is
 # chosen to fill the batch-wave concurrency rather than picked arbitrarily: a
 # comp spec is ~6.5k tokens against a 1.8M-token wave budget, so ~276 specs per
-# wave, and waves now run BATCH_WAVE_CONCURRENCY at a time.
-EXTRACT_COMP_PER_CYCLE = int(os.environ.get("JOBTRACKER_EXTRACT_COMP_PER_CYCLE", "1100"))
+# wave, and waves now run BATCH_WAVE_CONCURRENCY at a time. The default for
+# comp_extract_per_cycle in app_config, which is what the sweep reads.
+EXTRACT_COMP_PER_CYCLE = 1100
 
 
 COMP_TASK = TaskShape(
@@ -117,9 +113,8 @@ REQUIREMENTS_MAX_OUTPUT_TOKENS = 2000
 # is roughly 45% of a request's input at this posting length. So real waves run
 # under budget rather than over it, which is the safe direction. Whole corpus:
 # 47.0M input and 4.0M output tokens, $9.89 batched at REQUIREMENTS_MODEL.
-EXTRACT_REQUIREMENTS_PER_CYCLE = int(
-    os.environ.get("JOBTRACKER_EXTRACT_REQUIREMENTS_PER_CYCLE", "2179")
-)
+# The default for requirements_extract_per_cycle in app_config.
+EXTRACT_REQUIREMENTS_PER_CYCLE = 2179
 
 
 # The same declaration every other batched extraction makes. The model is the
@@ -206,8 +201,9 @@ REQUIREMENTS_TASK = TaskShape(
 # Strings are short and the answer is a lookup the model already knows, so the
 # whole backlog (8,735 distinct strings on 2026-09-04) fits one cycle; after
 # that a cycle carries only the strings new boards wrote since the last one.
-# Persisted config (classify_locations_per_cycle), so the first pass can be
-# a small sample read off GET /admin/locations before the backlog is paid for.
+# The default for classify_locations_per_cycle in app_config, so the first
+# pass can be a small sample read off GET /admin/locations before the backlog
+# is paid for.
 CLASSIFY_LOCATIONS_PER_CYCLE = 10000
 
 LOCATIONS_TASK = TaskShape(
@@ -320,8 +316,8 @@ CLASSIFY_MAX_TOKENS = 400
 
 # Messages one classification task sends: enough to fill every wave core.batch
 # runs at once, because more only queues work the provider will not start any
-# sooner. The ongoing sweep and a backfill share it, and so does the fleet
-# budget, which prices a cycle at this many.
+# sooner. The default for mail_classify_per_cycle in app_config, which the
+# ongoing sweep, a backfill and the fleet budget all read.
 #
 # A spec's size is core.batch's own estimate, since that is what chunks the
 # waves: characters over BATCH_CHARS_PER_TOKEN plus CLASSIFY_MAX_TOKENS
@@ -432,6 +428,7 @@ APPLICATION_TASK = TaskShape(
 JOB_PROFILE_TASK = TaskShape(
     purpose="job_profile",
     label="Job profile shadow classification",
+    # The default for job_profiles_per_cycle in app_config.
     per_cycle=500,
     notes=(
         "A shadow-only compact taxonomy used to compare general job classifications. "

@@ -7,6 +7,7 @@ from typing import Any
 
 from api import db
 from api.ai import batch_results
+from api.task_config import configured_shape
 from core import skills as skills_lib
 from core.requirements import (
     CLEARANCE_LEVELS,
@@ -20,7 +21,7 @@ from core.requirements import (
     RequirementsExtract,
     in_vocabulary,
 )
-from core.shapes import EXTRACT_REQUIREMENTS_PER_CYCLE, REQUIREMENTS_TASK
+from core.shapes import REQUIREMENTS_TASK
 from core.store import AI_ELIGIBLE_JOB, CONTENT_LATERAL, VERIFIED_OPEN
 from tasks import rescrape
 from tasks.runtime import (
@@ -199,7 +200,11 @@ async def handle_extract_requirements(task_id: int, payload: dict[str, Any]) -> 
     from core.batch import structured_response_spec
 
     resumed = has_batch_work(task_id)
-    rows = [] if resumed else db.query(_CANDIDATES, {"cap": EXTRACT_REQUIREMENTS_PER_CYCLE})
+    rows = (
+        []
+        if resumed
+        else db.query(_CANDIDATES, {"cap": configured_shape(REQUIREMENTS_TASK).per_cycle})
+    )
     rows = rescrape.drop_unchanged(rows, table="job_requirements", limit=REQUIREMENTS_INPUT_CHARS)
     if not rows and not resumed:
         set_progress(task_id, 0, 0, "nothing to extract")

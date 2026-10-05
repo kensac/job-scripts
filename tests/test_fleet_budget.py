@@ -75,16 +75,24 @@ class TestAcknowledgementAtTheDecision:
 
 
 class TestCeilingAtTheSpend:
-    def test_the_ceiling_is_expressed_in_sweeps_not_dollars(self, monkeypatch):
+    def test_the_ceiling_is_expressed_in_sweeps_not_dollars(self, set_config, monkeypatch):
         """So adding a task or changing a model moves it without anyone
         re-picking a number. Asserted by spending just under and just over."""
-        monkeypatch.setattr(budget, "FLEET_WEEKLY_CYCLES", 3)
+        set_config("fleet_weekly_cycles", 3)
         ceiling = budget.fleet_cycle_cost_usd() * 3
         _spend(str(ceiling - Decimal("0.01")))
         budget.check_fleet_budget()
         _spend("0.02")
         with pytest.raises(budget.FleetBudgetExceeded):
             budget.check_fleet_budget()
+
+    def test_the_ceiling_prices_the_configured_cycle_size(self, set_config):
+        """classify_locations_per_cycle was a config row the sweep read while
+        the budget priced the shape's literal, so changing it moved one and not
+        the other."""
+        before = budget.fleet_cycle_cost_usd()
+        set_config("classify_locations_per_cycle", 1)
+        assert budget.fleet_cycle_cost_usd() < before
 
     def test_an_override_is_counted_in_the_ceiling(self, client, admin_headers):
         """A ceiling computed from sanctioned models would be measuring a fleet
@@ -97,31 +105,31 @@ class TestCeilingAtTheSpend:
         _spend("0.01")
         budget.check_fleet_budget()
 
-    def test_spending_over_the_ceiling_refuses(self, monkeypatch):
-        monkeypatch.setattr(budget, "FLEET_WEEKLY_CYCLES", 1)
+    def test_spending_over_the_ceiling_refuses(self, set_config, monkeypatch):
+        set_config("fleet_weekly_cycles", 1)
         _spend(str(budget.fleet_cycle_cost_usd() + Decimal("1")))
         with pytest.raises(budget.FleetBudgetExceeded, match="ceiling"):
             budget.check_fleet_budget()
 
-    def test_the_refusal_names_the_numbers_and_the_way_out(self, monkeypatch):
-        monkeypatch.setattr(budget, "FLEET_WEEKLY_CYCLES", 1)
+    def test_the_refusal_names_the_numbers_and_the_way_out(self, set_config, monkeypatch):
+        set_config("fleet_weekly_cycles", 1)
         _spend(str(budget.fleet_cycle_cost_usd() + Decimal("1")))
         with pytest.raises(budget.FleetBudgetExceeded) as exc:
             budget.check_fleet_budget()
-        assert "JOBTRACKER_FLEET_WEEKLY_CYCLES" in str(exc.value)
+        assert "fleet_weekly_cycles" in str(exc.value)
 
-    def test_a_persons_own_spend_is_not_fleet_spend(self, monkeypatch, f):
+    def test_a_persons_own_spend_is_not_fleet_spend(self, set_config, monkeypatch, f):
         """user_id IS NULL is what makes a row fleet work. Counting a user's
         filter run against the fleet ceiling would let one person's usage stop
         every scheduled sweep."""
-        monkeypatch.setattr(budget, "FLEET_WEEKLY_CYCLES", 1)
+        set_config("fleet_weekly_cycles", 1)
         uid = f.make_user()
         _spend("9999", fleet=False, user_id=uid)
         budget.check_fleet_budget()
 
-    def test_a_zero_ceiling_disables_the_check(self, monkeypatch):
+    def test_a_zero_ceiling_disables_the_check(self, set_config, monkeypatch):
         """How a deliberate backfill runs without editing code."""
-        monkeypatch.setattr(budget, "FLEET_WEEKLY_CYCLES", 0)
+        set_config("fleet_weekly_cycles", 0)
         _spend("9999")
         budget.check_fleet_budget()
 
@@ -197,11 +205,11 @@ class TestFilterWorkIsNotFleetWork:
         row = db.query_one("SELECT input_tokens FROM ai_batches WHERE provider_batch_id='b-usage'")
         assert row is not None and row["input_tokens"] == 1000
 
-    def test_a_users_filter_run_cannot_consume_the_fleet_ceiling(self, monkeypatch):
+    def test_a_users_filter_run_cannot_consume_the_fleet_ceiling(self, set_config, monkeypatch):
         """The control shipped in the spend-ceiling change read this double
         booking as fleet spend, so one person's filters could stop every
         scheduled sweep - which is what its own test said must not happen."""
-        monkeypatch.setattr(budget, "FLEET_WEEKLY_CYCLES", 1)
+        set_config("fleet_weekly_cycles", 1)
         # Enough to breach several times over, so the assertion is about the
         # user_id predicate and not about a magnitude that happens to fit.
         for i in range(60):
@@ -232,7 +240,7 @@ class TestTheCeilingIsVisibleBeforeItFires:
         """Dollars alone invite someone to round the number and lose the
         derivation; the ceiling is a count of full sweeps."""
         st = budget.fleet_budget_status()
-        assert st["cycles"] == budget.FLEET_WEEKLY_CYCLES
+        assert st["cycles"] == db.get_config("fleet_weekly_cycles")
         assert st["ceiling_usd"] == st["cycle_cost_usd"] * st["cycles"]
 
     def test_it_says_what_it_cannot_see(self):
@@ -291,8 +299,8 @@ class TestTheCeilingIsVisibleBeforeItFires:
             assert isinstance(encoded[field], (int, float)), field
             assert not isinstance(encoded[field], bool), field
 
-    def test_a_disabled_ceiling_says_so_rather_than_reporting_zero(self, monkeypatch):
-        monkeypatch.setattr(budget, "FLEET_WEEKLY_CYCLES", 0)
+    def test_a_disabled_ceiling_says_so_rather_than_reporting_zero(self, set_config, monkeypatch):
+        set_config("fleet_weekly_cycles", 0)
         st = budget.fleet_budget_status()
         assert st["enabled"] is False
         assert st["headroom_usd"] is None
@@ -307,7 +315,7 @@ class TestTheCeilingCountsWhatIsAboutToBeSpent:
     """
 
     def test_a_submission_that_would_cross_the_ceiling_is_refused(self):
-        ceiling = budget.fleet_cycle_cost_usd() * budget.FLEET_WEEKLY_CYCLES
+        ceiling = budget.fleet_budget_status()["ceiling_usd"]
         with pytest.raises(budget.FleetBudgetExceeded, match="would add"):
             budget.check_fleet_budget(ceiling + Decimal("1"))
 
@@ -317,15 +325,15 @@ class TestTheCeilingCountsWhatIsAboutToBeSpent:
     def test_the_refusal_names_what_the_submission_would_add(self):
         """So the number in the message is the decision being refused, not a
         running total the reader has to difference themselves."""
-        ceiling = budget.fleet_cycle_cost_usd() * budget.FLEET_WEEKLY_CYCLES
+        ceiling = budget.fleet_budget_status()["ceiling_usd"]
         with pytest.raises(budget.FleetBudgetExceeded) as exc:
             budget.check_fleet_budget(ceiling * 2)
         assert "would add" in str(exc.value)
 
-    def test_history_alone_still_refuses(self, monkeypatch):
+    def test_history_alone_still_refuses(self, set_config, monkeypatch):
         """The original behaviour has to survive: spend already past the
         ceiling stops new work even when the next submission is tiny."""
-        monkeypatch.setattr(budget, "FLEET_WEEKLY_CYCLES", 1)
+        set_config("fleet_weekly_cycles", 1)
         _spend(str(budget.fleet_cycle_cost_usd() + Decimal("1")))
         with pytest.raises(budget.FleetBudgetExceeded):
             budget.check_fleet_budget(Decimal("0.0001"))

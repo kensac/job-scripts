@@ -14,15 +14,9 @@ dependency pointing the wrong way.
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 from api import db, events
-
-# api/worker.py buckets time by it; the ingest_backlog detector in
-# api/health.py measures lateness in multiples of it. Lives here so health
-# never imports the worker.
-INGEST_INTERVAL_MINUTES = int(os.environ.get("JOBTRACKER_INGEST_INTERVAL_MINUTES", "60"))
 
 
 def enqueue(kind: str, payload: dict[str, Any], dedupe_key: str | None = None) -> int | None:

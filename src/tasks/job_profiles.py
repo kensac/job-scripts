@@ -8,6 +8,7 @@ from typing import Any
 
 from api import db, job_profile_derivation
 from api.ai import batch_results
+from api.task_config import configured_shape
 from core.job_profile import (
     CLASSIFIER_VERSION,
     JOB_PROFILE_INPUT_CHARS,
@@ -60,7 +61,11 @@ async def handle_classify_job_profiles(task_id: int, payload: dict[str, Any]) ->
     if not resumed and not db.get_config("job_profile_collection_enabled"):
         set_progress(task_id, 0, 0, "profile collection paused")
         return
-    rows = [] if resumed else job_profile_derivation.candidates(JOB_PROFILE_TASK.per_cycle)
+    rows = (
+        []
+        if resumed
+        else job_profile_derivation.candidates(configured_shape(JOB_PROFILE_TASK).per_cycle)
+    )
     specs = [
         job_profile_spec(
             row["url"],

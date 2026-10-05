@@ -20,13 +20,11 @@ from typing import Any
 import psycopg
 
 from api import db, events, hosts, job_profile_derivation, managed_board_runs, metrics, telemetry
-from api.queue import INGEST_INTERVAL_MINUTES, enqueue
+from api.queue import enqueue
 from core.payload_objects import PayloadUnavailable
 from tasks import HANDLERS
 from tasks.runtime import (
     CHUNK_KINDS,
-    HEARTBEAT_TIMEOUT_MINUTES,
-    MAX_ATTEMPTS,
     AwaitingBatch,
     Deferred,
     TaskClaim,
@@ -150,16 +148,21 @@ def _claim_task() -> dict[str, Any] | None:
 
 def reap_stale_tasks() -> None:
     """Recover tasks whose worker died mid-run (deploy, crash, OOM): heartbeat
-    goes stale -> requeue up to MAX_ATTEMPTS, then fail permanently.
+    goes stale -> requeue up to task_max_attempts, then fail permanently.
 
     A task failed here keeps its batch_ids, for the reason finish() keeps a
     failed task's: the batches they name were never collected."""
+    limits = {
+        "attempts": int(db.get_config("task_max_attempts")),
+        "minutes": int(db.get_config("task_heartbeat_timeout_minutes")),
+    }
     requeued = db.execute_count(
         f"""
         UPDATE tasks SET status = 'pending', started_at = NULL, last_heartbeat = NULL
-        WHERE status = 'running' AND {RETRIES_SPENT} < {MAX_ATTEMPTS}
-          AND COALESCE(last_heartbeat, started_at) < now() - interval '{HEARTBEAT_TIMEOUT_MINUTES} minutes'
-        """
+        WHERE status = 'running' AND {RETRIES_SPENT} < %(attempts)s
+          AND COALESCE(last_heartbeat, started_at) < now() - make_interval(mins => %(minutes)s)
+        """,
+        limits,
     )
     if requeued:
         metrics.REAPER_REQUEUES.inc(requeued)
@@ -171,9 +174,10 @@ def reap_stale_tasks() -> None:
         UPDATE tasks SET status = 'failed', finished_at = now(),
                          error = 'worker lost (heartbeat timeout after '
                                  || {RETRIES_SPENT} || ' attempts)'
-        WHERE status = 'running' AND {RETRIES_SPENT} >= {MAX_ATTEMPTS}
-          AND COALESCE(last_heartbeat, started_at) < now() - interval '{HEARTBEAT_TIMEOUT_MINUTES} minutes'
-        """
+        WHERE status = 'running' AND {RETRIES_SPENT} >= %(attempts)s
+          AND COALESCE(last_heartbeat, started_at) < now() - make_interval(mins => %(minutes)s)
+        """,
+        limits,
     )
     if lost:
         telemetry.capture("tasks_lost", properties={"failed": lost, "worker": WORKER_NAME})
@@ -184,10 +188,9 @@ def schedule_ingest_cycle() -> None:
     dedupe key (source + time bucket) guarantees one task per source per cycle
     across the whole fleet."""
     now = datetime.datetime.now(datetime.UTC)
+    interval = int(db.get_config("ingest_interval_minutes"))
     bucket = now.replace(
-        minute=(now.minute // INGEST_INTERVAL_MINUTES) * INGEST_INTERVAL_MINUTES
-        if INGEST_INTERVAL_MINUTES < 60
-        else 0,
+        minute=(now.minute // interval) * interval if interval < 60 else 0,
         second=0,
         microsecond=0,
     )
@@ -319,7 +322,7 @@ def schedule_ingest_cycle() -> None:
     # alarm wired to the thing it is alarming about.
     enqueue("probe_credentials", {"cycle": cycle}, dedupe_key=f"credprobe:{cycle}")
     # Hourly, but only when the previous pass has finished. Each run is capped
-    # at EXTRACT_COMP_PER_CYCLE jobs and then waits on the Batch API, which can
+    # at comp_extract_per_cycle jobs and then waits on the Batch API, which can
     # take hours - enqueuing unconditionally every hour would stack passes up
     # until all three workers were doing nothing else. The dedupe key stops two
     # tasks per cycle; this stops overlap ACROSS cycles.
@@ -518,9 +521,10 @@ def _is_transient(exc: Exception) -> bool:
 #
 # Bounded above by the two things that read the answer: the admin fleet view
 # calls a worker dead after 90 seconds without a beat, and the reaper requeues
-# a task after HEARTBEAT_TIMEOUT_MINUTES without one. Sixty seconds keeps the
-# screen truthful with a beat of slack, and puts fifteen beats inside the
-# reaper's window so losing several in a row still cannot orphan a live task.
+# a task after task_heartbeat_timeout_minutes without one. Sixty seconds keeps
+# the screen truthful with a beat of slack, and puts fifteen beats inside the
+# default reaper window so losing several in a row still cannot orphan a live
+# task. The config refuses a window under two beats.
 HEARTBEAT_SECONDS = 60
 
 
@@ -649,7 +653,7 @@ async def run_once() -> bool:
         logger.exception("Task %s requires payload restoration before retry", task["id"])
         telemetry.capture_exception(exc, properties={**_task_props(task, exc), **span_ids})
     except Exception as exc:
-        if _is_transient(exc) and task["retries_spent"] < MAX_ATTEMPTS:
+        if _is_transient(exc) and task["retries_spent"] < int(db.get_config("task_max_attempts")):
             # Host ran out of memory/threads, not a broken task: put it back so
             # a healthier worker (or this one, later) takes it. Failing
             # permanently here costs the source a whole ingest cycle.

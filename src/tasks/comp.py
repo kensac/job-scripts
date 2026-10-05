@@ -7,6 +7,7 @@ from typing import Any
 
 from api import compensation_candidates, db
 from api.ai import batch_results
+from api.task_config import configured_shape
 from core.comp import (
     COMP_BASES,
     COMP_INPUT_CHARS,
@@ -15,7 +16,7 @@ from core.comp import (
     PERIOD_TO_YEARLY,
     CompExtract,
 )
-from core.shapes import COMP_TASK, EXTRACT_COMP_PER_CYCLE
+from core.shapes import COMP_TASK
 from core.store import CONTENT_LATERAL, VERIFIED_OPEN
 from tasks import rescrape
 from tasks.runtime import (
@@ -73,7 +74,7 @@ async def handle_extract_comp(task_id: int, payload: dict[str, Any]) -> None:
         ORDER BY j.id DESC
         LIMIT %(cap)s
         """,
-            {"cap": EXTRACT_COMP_PER_CYCLE},
+            {"cap": configured_shape(COMP_TASK).per_cycle},
         )
     )
     if not rows and not resumed:

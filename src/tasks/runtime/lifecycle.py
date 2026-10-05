@@ -19,12 +19,6 @@ from tasks.board import demote_closed, materialize_passing
 logger = logging.getLogger(__name__)
 
 
-MAX_ATTEMPTS = 3
-
-
-HEARTBEAT_TIMEOUT_MINUTES = 15
-
-
 CHUNK_KINDS = ["run_filter_chunk", "reverify_chunk", "run_filter_batch_chunk"]
 
 

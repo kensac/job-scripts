@@ -276,15 +276,18 @@ def test_max_tokens_leaves_room_for_the_schema():
     assert shapes.CLASSIFY_MAX_TOKENS >= 200
 
 
-def test_the_budget_prices_the_cap_the_handler_applies():
+def test_the_budget_prices_the_cap_the_handler_applies(set_config):
     """The handler capped a task at 1,200 while the fleet budget priced a
     cycle at 5,000, each from its own guess at a spec's size."""
+    from api.task_config import configured_shape
+
+    set_config("mail_classify_per_cycle", 7)
     for shape in (shapes.BACKFILL_TASK, shapes.ONGOING_TASK):
-        assert shape.per_cycle == mail_classify.CLASSIFY_PER_CYCLE
+        assert configured_shape(shape).per_cycle == 7
 
 
 @pytest.mark.asyncio
-async def test_the_cap_is_clamped_not_trusted(monkeypatch, f):
+async def test_the_cap_is_clamped_not_trusted(set_config, monkeypatch, f):
     """An enqueuer asking for the whole mailbox would build a spec list far
     larger than a wave can carry, and that failure arrives as memory pressure
     on a worker rather than as a rejected parameter."""
@@ -300,7 +303,7 @@ async def test_the_cap_is_clamped_not_trusted(monkeypatch, f):
         _store(f, mid=f"<cap{i}@x>")
     monkeypatch.setattr(mail_classify, "run_batched", fake)
     monkeypatch.setattr(mail_classify, "set_progress", lambda *a, **k: None)
-    monkeypatch.setattr(mail_classify, "CLASSIFY_PER_CYCLE", 2)
+    set_config("mail_classify_per_cycle", 2)
     await mail_classify.handle_classify_mail(1, {"cap": 999999})
     assert seen["count"] <= 2
 

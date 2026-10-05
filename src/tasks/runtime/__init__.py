@@ -45,8 +45,6 @@ from tasks.runtime.batching import (
 )
 from tasks.runtime.lifecycle import (
     CHUNK_KINDS,
-    HEARTBEAT_TIMEOUT_MINUTES,
-    MAX_ATTEMPTS,
     Deferred,
     TaskClaim,
     cancelled,
@@ -61,19 +59,13 @@ from tasks.runtime.lifecycle import (
     update_parent_progress,
 )
 from tasks.runtime.limits import (
-    BATCH_CHUNK_SIZE,
-    CHUNK_SIZE,
     MAX_CONCURRENCY,
     SCRAPE_CONCURRENCY,
     AdaptiveLimiter,
 )
 
 __all__ = [
-    "BATCH_CHUNK_SIZE",
     "CHUNK_KINDS",
-    "CHUNK_SIZE",
-    "HEARTBEAT_TIMEOUT_MINUTES",
-    "MAX_ATTEMPTS",
     "MAX_CONCURRENCY",
     "SCRAPE_CONCURRENCY",
     "AdaptiveLimiter",
