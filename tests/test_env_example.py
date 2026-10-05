@@ -1,8 +1,9 @@
-"""`.env.example` lists every environment variable the code reads.
+"""`.env.example` lists exactly the environment variables the code reads.
 
 A template was deleted once (#505) because it drifted from the code and named
-variables nothing read. This keeps the second copy honest in one direction:
-a variable the code starts reading fails here until it is listed.
+variables nothing read. This keeps the second copy honest both ways: a
+variable the code starts reading fails here until it is listed, and one the
+code stops reading fails here until it is removed.
 """
 
 from __future__ import annotations
@@ -18,13 +19,35 @@ READS = re.compile(
 )
 # Set by the code for its own children, or the operating system's, not config.
 NOT_CONFIG = {"PGOPTIONS", "USER"}
+# Read where the scan does not look: the Makefile and conftest read the local
+# databases, and payload storage builds its names from a prefix.
+READ_ELSEWHERE = {
+    "TEST_DATABASE_URL",
+    "JOBTRACKER_DEV_DATABASE_URL",
+    *(
+        f"JOBTRACKER_S3_{n}"
+        for n in ("ENDPOINT", "REGION", "BUCKET", "ACCESS_KEY_ID", "SECRET_ACCESS_KEY")
+    ),
+}
 
 
-def test_every_variable_the_code_reads_is_listed():
+def _read() -> set[str]:
     read: set[str] = set()
     for folder in ("src", "tools", "scripts", "alembic"):
         for path in (ROOT / folder).rglob("*.py"):
             read |= set(READS.findall(path.read_text()))
-    listed = set(re.findall(r"^#?\s*([A-Z][A-Z0-9_]*)=", (ROOT / ".env.example").read_text(), re.M))
     assert "DATABASE_URL" in read  # the scan itself works
-    assert read - NOT_CONFIG - listed == set()
+    return read - NOT_CONFIG
+
+
+def _listed() -> set[str]:
+    text = (ROOT / ".env.example").read_text()
+    return set(re.findall(r"^#?\s*([A-Z][A-Z0-9_]*)=", text, re.M))
+
+
+def test_every_variable_the_code_reads_is_listed():
+    assert _read() - _listed() == set()
+
+
+def test_every_listed_variable_is_read():
+    assert _listed() - _read() - READ_ELSEWHERE == set()
