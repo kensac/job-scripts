@@ -39,6 +39,24 @@ retired everything past them as closed. On 2026-10-05 that held 130 of 454
 Workday sources at exactly 40 postings (Boeing listed 752). A source pinned at a
 round multiple of its format's page size is the symptom to look for.
 
+**An iCIMS board is one of two formats, and the listings URL says which.**
+A portal (`https://careers-<tenant>.icims.com/jobs/search`, kind `icims`) is
+HTML: cards in pages of 20 or 50 as the tenant set it, `pr=` zero-based while
+the "Page 1 of 35" heading is one-based, and `pr=` past the end a 200 with no
+cards. The heading counts pages, never postings, so the pull is complete only
+when it read every stated page, every page but the last held as many cards as
+the first, and no posting came twice; anything else is a sort that shifted
+mid-pull, and the fetcher raises `PartialPull`. Fields are whatever the tenant
+labelled them: a location is a field named "Location", "Job Location" or "Job
+Locations" ("Seat Location" is a building), and a date only where the tenant
+shows "Posted Date". A tenant that moved to iCIMS's hosted career site
+(Jibe, kind `jibe`) answers its portal with a script redirect, and the fetch
+fails naming the URL to store instead: `https://<careers host>/api/jobs`.
+That API is JSON, `page=` one-based, `limit=` at most 100, `totalCount` on
+every page, and each job carries its full text and its employer's name. The
+portal search, the portal's own `sitemap.xml` and Jibe's `totalCount` agreed
+posting for posting on 16 tenants on 2026-10-05.
+
 ## A board host is paced per egress address, and the pace is learned
 
 `host_budget` holds one row per upstream host and egress address. A worker
@@ -73,6 +91,13 @@ text from JSON embedded in the page, so the static tier extracts the site's
 navigation alone, which clears `static_fetch_min_chars` (3,278 characters
 against 1,500 on 2026-10-05). `GET https://jobs.apple.com/api/v1/jobDetails/{id}`
 returns the text, for the same id the posting URL carries.
+
+it is what a per-posting fetch would have returned. Jibe carries it too, and
+has no resolver. Workday, SmartRecruiters,
+Oracle Recruiting and Workable list without the text, so their postings get it
+from the matching resolver, one call each, when a check needs it. An iCIMS
+portal card holds a snippet, which is not the text and is not stored; the
+iCIMS resolver reads the text from the posting's frame.
 
 Rows are aged out by `screened_retention_days` after the board stops listing
 them.

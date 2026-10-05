@@ -341,6 +341,12 @@ def test_workday_pages_until_the_first_pages_total_and_builds_the_public_url(mon
             "bytedance",
         ),
         ("https://lifeattiktok.com/search/7686350939411253509", "sheet_era"),
+        ("https://careers-gdms.icims.com/jobs/search", "icims"),
+        ("https://expleo-jobs-us-en.icims.com/jobs/search", "icims"),
+        ("https://careers.spiritaero.com/api/jobs", "jibe"),
+        # A posting on a portal, or a career site's own page, is not its listing.
+        ("https://careers-gdms.icims.com/jobs/75243/job", "sheet_era"),
+        ("https://careers.spiritaero.com/jobs", "sheet_era"),
         # The public pages of those three are not their APIs.
         ("https://jobs.smartrecruiters.com/BoschGroup", "sheet_era"),
         ("https://apply.workable.com/zego/", "sheet_era"),
@@ -373,6 +379,7 @@ def test_boards_that_never_name_a_company_are_the_ones_that_need_one():
         "taleo",
         "apple",
         "bytedance",
+        "icims",
     } == boards.NEEDS_COMPANY
     # Every board that needs a company is one whose absence closes a posting.
     assert boards.NEEDS_COMPANY <= boards.AUTHORITATIVE
@@ -1019,3 +1026,262 @@ def test_a_bytedance_board_that_shifts_mid_pull_is_a_partial_pull(monkeypatch):
     with pytest.raises(boards.PartialPull) as raised:
         boards.fetch_listings(_TIKTOK, "TikTok")
     assert len(raised.value.postings) == len(_TIKTOK_ROWS) - 1
+
+
+# careers-gdms.icims.com/jobs/search?ss=1&in_iframe=1, 2026-10-05: a card with
+# its posted date in the header (exact time in the title attribute), and a
+# Joby card whose locations sit in the header, joined by " | ". Verbatim but
+# for the description snippet, which the fetcher does not read.
+_GDMS_CARD = """
+<li class="iCIMS_JobCardItem">
+<div class="row">
+<div class="col-xs-6 header left">
+</div>
+<div class="col-xs-6 header right">
+<span class="sr-only field-label">Posted Date</span>
+<span title="10/4/2026 5:15 PM">
+8 hours ago<span class="sr-only">(10/4/2026 5:15 PM)</span></span>
+</div>
+<div class="col-xs-12 title">
+<a href="https://careers-gdms.icims.com/jobs/{id}/sr.-advanced-field-support-specialist-%28ts-sci-clearance-required%29/job?in_iframe=1" class="iCIMS_Anchor" title="{id} - {title}">
+<span class="sr-only field-label">Title</span>
+<h3 >
+{title}</h3>
+</a>
+</div>
+<div class="col-xs-12 description">
+Bachelor's degree in a related specialized area...</div>
+<div class="col-xs-12 additionalFields">
+<dl class="iCIMS_JobHeaderGroup">
+<div class="iCIMS_JobHeaderTag">
+<dt class="iCIMS_JobHeaderField">ID</dt>
+<dd class="iCIMS_JobHeaderData"><span >
+2026-{id}</span>
+</dd>
+</div>
+<div class="iCIMS_JobHeaderTag">
+<dt class="iCIMS_JobHeaderField"><span class="glyphicons glyphicons-map-marker" aria-hidden="true"></span>
+<span class="sr-only field-label">Job Location</span>
+</dt>
+<dd class="iCIMS_JobHeaderData"><span >
+US-MD-Annapolis Junction</span>
+</dd>
+</div>
+<div class="iCIMS_JobHeaderTag">
+<dt class="iCIMS_JobHeaderField">Required Clearance</dt>
+<dd class="iCIMS_JobHeaderData"><span >
+TS/SCI</span>
+</dd>
+</div>
+</dl>
+</div>
+</div>
+</li>
+"""
+
+_JOBY_CARD = """
+<li class="iCIMS_JobCardItem">
+<div class="row">
+<div class="col-xs-6 header left">
+<span class="sr-only field-label">Job Locations</span>
+<span >
+US-CA-Marina | US-CA-Watsonville</span>
+</div>
+<div class="col-xs-6 header right">
+</div>
+<div class="col-xs-12 title">
+<a href="https://careers-jobyaviation.icims.com/jobs/{id}/aircraft-maintenance-training-manager/job?in_iframe=1" class="iCIMS_Anchor" title="{id} - {title}">
+<span class="sr-only field-label">Title</span>
+<h3 >
+{title}</h3>
+</a>
+</div>
+<div class="col-xs-12 additionalFields">
+<dl class="iCIMS_JobHeaderGroup">
+<div class="iCIMS_JobHeaderTag">
+<dt class="iCIMS_JobHeaderField">Category</dt>
+<dd class="iCIMS_JobHeaderData"><span >
+Air Operations</span>
+</dd>
+</div>
+</dl>
+</div>
+</div>
+</li>
+"""
+
+
+def _icims_page(card: str, ids: list[int], page: int, pages: int) -> str:
+    """One search page as the portal serves it. Past the last page it answers
+    200 with neither cards nor the "Page N of M" heading (GDMS pr=35, Peraton
+    pr=31, Joby pr=8, 2026-10-05). The search form above the results carries
+    the same heading class with no count in it (Expleo)."""
+    if page >= pages:
+        return '<div class="iCIMS_SearchResultsHeader"></div>'
+    cards = "".join(card.format(id=i, title=f"Role {i}") for i in ids)
+    return (
+        '<p class="iCIMS_SubHeader iCIMS_SubHeader_Jobs">Search by keyword</p>'
+        '<div class="container-fluid iCIMS_SearchResultsHeader"><div class="row">'
+        '<div class="pull-left"><h2 class="iCIMS_SubHeader iCIMS_SubHeader_Jobs">\n'
+        f"Search Results\nPage {page + 1} of {pages} \n</h2></div></div></div>"
+        f'<ul class="container-fluid iCIMS_JobsTable">{cards}</ul>'
+    )
+
+
+def _serve_icims(monkeypatch, card: str, by_page: dict[int, list[int]], pages: int):
+    asked: list[str] = []
+
+    def get(url, **kw):
+        asked.append(url)
+        pr = int(url.split("pr=")[1].split("&")[0])
+        return _Resp(_icims_page(card, by_page.get(pr, []), pr, pages))
+
+    monkeypatch.setattr(boards._session, "get", get)
+    return asked
+
+
+def test_icims_pages_by_zero_based_pr_to_the_count_its_first_page_states(monkeypatch):
+    """pr= is zero-based where the heading is one-based, and the page size is
+    the tenant's (GDMS 20, Electric Boat 50), so the stated page count is what
+    ends the pull. A loop that started at pr=1, or stopped on a short or empty
+    page of an assumed size, asks a different sequence."""
+    asked = _serve_icims(monkeypatch, _GDMS_CARD, {0: [1, 2, 3], 1: [4, 5, 6], 2: [7]}, pages=3)
+    out = boards.fetch_listings(
+        "https://careers-gdms.icims.com/jobs/search", "General Dynamics Mission Systems"
+    )
+    assert [p.title for p in out] == [f"Role {i}" for i in range(1, 8)]
+    assert [u.split("pr=")[1] for u in asked] == ["0", "1", "2"]
+    assert all("in_iframe=1" in u and "ss=1" in u for u in asked)
+    p = out[0]
+    # The posting a person opens: the portal page, without the iframe flag or
+    # the slug, which iCIMS ignores.
+    assert p.url == "https://careers-gdms.icims.com/jobs/1/job"
+    assert p.company == "General Dynamics Mission Systems"
+    assert p.locations == ["US-MD-Annapolis Junction"]
+    assert p.date_posted == int(datetime.datetime(2026, 10, 4, tzinfo=datetime.UTC).timestamp())
+    # The card's snippet is not the posting's text; the page fetch supplies it.
+    assert p.description == ""
+    assert p.raw is not None and p.raw["Required Clearance"] == "TS/SCI"
+
+
+def test_icims_reads_header_locations_split_on_the_bar(monkeypatch):
+    _serve_icims(monkeypatch, _JOBY_CARD, {0: [4815]}, pages=1)
+    (p,) = boards.fetch_listings("https://careers-jobyaviation.icims.com/jobs/search", "Joby")
+    assert p.locations == ["US-CA-Marina", "US-CA-Watsonville"]
+    assert p.date_posted == 0
+
+
+def test_icims_a_page_that_shifted_under_the_pull_makes_it_partial(monkeypatch):
+    """A posting added mid-pull pushes the last card of page one onto page
+    two: every page is full and the page count holds, but one posting repeats
+    and another was never served. Returning the deduplicated list would retire
+    the unseen one as closed."""
+    _serve_icims(monkeypatch, _GDMS_CARD, {0: [1, 2], 1: [2, 3], 2: [4]}, pages=3)
+    with pytest.raises(boards.PartialPull) as raised:
+        boards.fetch_listings("https://careers-gdms.icims.com/jobs/search", "GDMS")
+    assert sorted(p.title for p in raised.value.postings) == [
+        "Role 1",
+        "Role 2",
+        "Role 3",
+        "Role 4",
+    ]
+
+
+def test_icims_a_page_cut_short_before_the_last_makes_it_partial(monkeypatch):
+    _serve_icims(monkeypatch, _GDMS_CARD, {0: [1, 2], 1: [3], 2: [4]}, pages=3)
+    with pytest.raises(boards.PartialPull):
+        boards.fetch_listings("https://careers-gdms.icims.com/jobs/search", "GDMS")
+
+
+def test_an_icims_portal_that_moved_names_its_career_site(monkeypatch):
+    # careers-spiritaero.icims.com/jobs/search?ss=1&in_iframe=1, 2026-10-05,
+    # verbatim: the whole 200 body.
+    body = (
+        '<script type="text/javascript">\n'
+        "window.top.location.href = 'https:\\/\\/careers.spiritaero.com\\/jobs';\n"
+        "</script>\n"
+    )
+    monkeypatch.setattr(boards._session, "get", lambda url, **kw: _Resp(body))
+    with pytest.raises(ValueError, match=r"https://careers\.spiritaero\.com/api/jobs"):
+        boards.fetch_listings("https://careers-spiritaero.icims.com/jobs/search", "Spirit")
+
+
+def _jibe_job(slug: str, description: str = "<p>Overview</p>") -> dict:
+    """careers.spiritaero.com/api/jobs, 2026-10-05, one job trimmed to the keys
+    the fetcher reads and some beside them. The locations are a V2X job's,
+    whose full_location repeats a place."""
+    return {
+        "data": {
+            "slug": slug,
+            "language": "en-us",
+            "req_id": slug,
+            "title": f"Role {slug}",
+            "city": "Fayetteville",
+            "full_location": "Fayetteville, North Carolina; Fayetteville, North Carolina",
+            "multipleLocations": True,
+            "description": description,
+            "qualifications": "<p>Basic Qualifications</p>",
+            "responsibilities": "<p>Position Responsibilities</p>",
+            "hiring_organization": "Spirit AeroSystems",
+            "posted_date": "2026-10-02T20:07:00+0000",
+            "apply_url": f"https://careers-spiritaero.icims.com/jobs/{slug}/login",
+            "ats_code": "icims",
+        }
+    }
+
+
+def _serve_jibe(monkeypatch, slugs: list[str], total: int):
+    """page= is one-based, limit= is honoured up to 100, totalCount rides on
+    every page, and a page past the end is an empty list (Spirit, 2026-10-05:
+    limit=100&page=3 gave 22 of 222, page=24 at the default 10 gave none)."""
+    asked: list[str] = []
+
+    def get(url, **kw):
+        asked.append(url)
+        q = {k: int(v) for k, v in (x.split("=") for x in url.split("?")[1].split("&"))}
+        assert q["page"] >= 1, "page=0 is a 422 on the live API"
+        start = (q["page"] - 1) * q["limit"]
+        jobs = [_jibe_job(s) for s in slugs[start : start + q["limit"]]]
+        return _Resp({"jobs": jobs, "totalCount": total, "count": total})
+
+    monkeypatch.setattr(boards._session, "get", get)
+    return asked
+
+
+def test_jibe_pages_one_based_at_the_largest_page_it_accepts(monkeypatch):
+    slugs = [str(17000 + i) for i in range(205)]
+    asked = _serve_jibe(monkeypatch, slugs, total=205)
+    out = boards.fetch_listings("https://careers.spiritaero.com/api/jobs", "ignored")
+    assert asked == [
+        f"https://careers.spiritaero.com/api/jobs?limit=100&page={n}" for n in (1, 2, 3)
+    ]
+    assert len(out) == 205
+    p = out[0]
+    assert p.url == "https://careers.spiritaero.com/jobs/17000"
+    assert p.company == "Spirit AeroSystems"
+    assert p.locations == ["Fayetteville, North Carolina"]
+    assert p.date_posted == int(
+        datetime.datetime(2026, 10, 2, 20, 7, tzinfo=datetime.UTC).timestamp()
+    )
+    # The description, and the sections it left out (V2X, 17 of 765).
+    assert p.description == "Overview\n\nPosition Responsibilities\n\nBasic Qualifications"
+    assert p.raw is not None and "qualifications" not in p.raw and "description" not in p.raw
+
+
+def test_jibe_does_not_repeat_sections_the_description_already_holds(monkeypatch):
+    held = "<p>Overview</p><p>Position Responsibilities</p><p>Basic Qualifications</p>"
+    monkeypatch.setattr(
+        boards._session,
+        "get",
+        lambda url, **kw: _Resp({"jobs": [_jibe_job("1", held)], "totalCount": 1}),
+    )
+    (p,) = boards.fetch_listings("https://careers.spiritaero.com/api/jobs", "")
+    assert "Basic Qualifications" in p.description
+    assert p.description.count("Basic Qualifications") == 1
+
+
+def test_jibe_short_of_its_stated_total_is_partial(monkeypatch):
+    _serve_jibe(monkeypatch, ["1", "2"], total=3)
+    with pytest.raises(boards.PartialPull) as raised:
+        boards.fetch_listings("https://careers.spiritaero.com/api/jobs", "")
+    assert len(raised.value.postings) == 2

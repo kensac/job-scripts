@@ -27,10 +27,11 @@ from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 import ftfy
 import requests
+from bs4 import BeautifulSoup, Tag
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-from core.fetching.ats import ashby_text, greenhouse_text, join, lever_text
+from core.fetching.ats import ashby_text, clean_html, greenhouse_text, join, lever_text
 from core.fetching.listings import fetch_job_postings
 from core.fetching.posting import JobPosting
 from core.fetching.urls import normalize_url
@@ -76,16 +77,26 @@ def kind(url: str) -> str:
         return "apple"
     if host in _BYTEDANCE_HOSTS and parsed.path == _BYTEDANCE_SEARCH:
         return "bytedance"
+    # An iCIMS portal is a subdomain per tenant, not always careers-<name>
+    # (expleo-jobs-us-en.icims.com); the search page is the listing.
+    if host.endswith(".icims.com") and parsed.path.rstrip("/") == "/jobs/search":
+        return "icims"
+    # iCIMS's hosted career sites (Jibe) sit on the employer's own domain and
+    # answer one path: careers.amd.com/api/jobs, careers.spiritaero.com/api/jobs.
+    if parsed.path.rstrip("/") == "/api/jobs":
+        return "jibe"
     if parsed.path.endswith(".md"):
         return "markdown"
     return "sheet_era"
 
 
-# Lever, Ashby, Workday, Oracle, Workable, Taleo, Apple and ByteDance list a
-# company's own openings and never say whose; Greenhouse and SmartRecruiters
-# name the company on every job and the aggregators name it per row.
+# Lever, Ashby, Workday, Oracle, Workable, Taleo, Apple, ByteDance and the
+# iCIMS portal list a company's own openings and never say whose (the portal
+# names it only in its page title); Greenhouse, SmartRecruiters and Jibe
+# (hiring_organization) name the company on every job and the aggregators
+# name it per row.
 NEEDS_COMPANY = frozenset(
-    {"lever", "ashby", "workday", "oracle", "workable", "taleo", "apple", "bytedance"}
+    {"lever", "ashby", "workday", "oracle", "workable", "taleo", "apple", "bytedance", "icims"}
 )
 
 # A company's own board lists every open posting, so a posting missing from
@@ -94,6 +105,8 @@ NEEDS_COMPANY = frozenset(
 # sweep instead. A Taleo careersection is a company's own board, but its
 # search counts rows it never lists, and a pull short of that count raises
 # PartialPull and retires nothing (see _taleo).
+# The iCIMS portal and Jibe are a company's own board, and
+# each fetcher raises PartialPull when it cannot show it read all of it.
 AUTHORITATIVE = frozenset(
     {
         "greenhouse",
@@ -106,6 +119,8 @@ AUTHORITATIVE = frozenset(
         "taleo",
         "apple",
         "bytedance",
+        "icims",
+        "jibe",
     }
 )
 
@@ -122,6 +137,8 @@ def fetch_listings(url: str, company: str | None = None) -> list[JobPosting]:
         "taleo": _taleo,
         "apple": _apple,
         "bytedance": _bytedance,
+        "icims": _icims,
+        "jibe": _jibe,
         "markdown": _markdown,
     }.get(kind(url))
     if fetcher is None:
@@ -761,6 +778,180 @@ def _bytedance(url: str, company: str) -> list[JobPosting]:
     if len(seen) < total or total >= _BYTEDANCE_WINDOW:
         raise PartialPull(list(seen.values()))
     return list(seen.values())
+
+
+# "Search Results Page 1 of 35" in the results heading is the portal's only
+# statement of its size (Expleo writes "page 1 of 1"). It counts pages, not
+# postings, and pr= is zero-based where the heading is not.
+_ICIMS_PAGES = re.compile(r"\bpage\s+(\d+)\s+of\s+(\d+)", re.I)
+# A tenant that moved to a hosted career site answers its portal with a script
+# that sends the top window there (careers-spiritaero, careers-amd, 2026-10-05).
+_ICIMS_MOVED = re.compile(r"window\.top\.location\.href\s*=\s*'([^']+)'")
+# The labels a tenant gives its location field: GDMS "Job Location", Electric
+# Boat "Location" (beside "Seat Location", a building), Joby "Job Locations".
+_ICIMS_LOCATION = re.compile(r"^(job\s+)?locations?$", re.I)
+_ICIMS_DATE = re.compile(r"(\d{1,2})/(\d{1,2})/(\d{4})")
+
+
+def _icims(url: str, company: str) -> list[JobPosting]:
+    """GET https://careers-{tenant}.icims.com/jobs/search?pr={page}&in_iframe=1
+
+    HTML, a page of 20 or 50 cards as the tenant configured it (GDMS 20,
+    Electric Boat 50). The first page says how many pages there are; pr= past
+    the last answers 200 with no cards. Measured on ten tenants, 2026-10-05.
+
+    The pull is complete only if it read that many pages, every page but the
+    last was as full as the first, and no posting appeared twice. A posting
+    added or removed mid-pull shifts the sort under the pages, which shows as
+    a repeat or a short page, and the pull is then partial.
+    """
+    seen: dict[str, JobPosting] = {}
+    rows = 0
+    complete = True
+    pages = size = 0
+    page = 0
+    while page == 0 or page < pages:
+        resp = _session.get(_with_query(url, ss="1", in_iframe="1", pr=str(page)), timeout=TIMEOUT)
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.text, "html.parser")
+        cards = [
+            a.find_parent(class_="row") or a for a in soup.select(".iCIMS_JobsTable .title a[href]")
+        ]
+        stated = _ICIMS_PAGES.search(
+            " ".join(h.get_text(" ") for h in soup.select(".iCIMS_SubHeader_Jobs"))
+        )
+        if page == 0:
+            moved = _ICIMS_MOVED.search(resp.text)
+            if not cards and moved:
+                target = urlparse(moved.group(1).replace("\\/", "/"))
+                raise ValueError(
+                    f"{url} sends its visitors to {target.netloc}; "
+                    f"list it as https://{target.netloc}/api/jobs"
+                )
+            if not cards:
+                return []
+            if not stated:
+                raise ValueError(f"{url} lists postings but states no page count")
+            pages, size = int(stated.group(2)), len(cards)
+        elif not stated or int(stated.group(2)) != pages:
+            complete = False
+        last = page == pages - 1
+        if not cards or (len(cards) != size and not last) or len(cards) > size:
+            complete = False
+        # Counted per card, so a card the parser cannot read also fails the
+        # proof rather than vanishing from it.
+        rows += len(cards)
+        for card in cards:
+            p = _icims_posting(card, company)
+            if p:
+                seen[p.url] = p
+        page += 1
+    postings = list(seen.values())
+    if not complete or len(postings) != rows:
+        raise PartialPull(postings)
+    return postings
+
+
+def _icims_posting(card: Tag, company: str) -> JobPosting | None:
+    anchor = card.select_one(".title a[href]") or card
+    heading = anchor.find("h3")
+    title = heading.get_text(" ", strip=True) if heading else ""
+    # Every field is a label and a value: a <dt>/<dd> pair in the card's
+    # body, or an sr-only label beside a value span in its header, whose
+    # title attribute holds the exact date where the text says "8 hours ago".
+    fields: dict[str, str] = {}
+    for tag in card.select(".iCIMS_JobHeaderTag"):
+        dt, dd = tag.find("dt"), tag.find("dd")
+        if dt and dd:
+            fields[dt.get_text(" ", strip=True)] = dd.get_text(" ", strip=True)
+    for label in card.select(".header .field-label"):
+        value = label.find_next_sibling("span")
+        if isinstance(value, Tag):
+            text = value.get("title") or value.get_text(" ", strip=True)
+            fields[label.get_text(" ", strip=True)] = str(text)
+    locations = [
+        place.strip()
+        for label, value in fields.items()
+        if _ICIMS_LOCATION.match(label)
+        for place in value.split("|")
+    ]
+    posted = next((v for k, v in fields.items() if "posted" in k.lower()), "")
+    # Month first: every US tenant measured writes 10/4/2026 for 4 October.
+    day = _ICIMS_DATE.search(posted)
+    href = anchor.get("href")
+    return _posting(
+        company,
+        title,
+        locations,
+        str(href) if href else None,
+        int(
+            datetime.datetime(
+                int(day.group(3)), int(day.group(1)), int(day.group(2)), tzinfo=datetime.UTC
+            ).timestamp()
+        )
+        if day
+        else 0,
+        raw=fields,
+    )
+
+
+# Jibe answers 422 to limit=101 and above (careers.spiritaero.com, 2026-10-05).
+_JIBE_PAGE = 100
+
+
+def _jibe(url: str, company: str) -> list[JobPosting]:
+    """GET https://{careers site}/api/jobs?limit=100&page={n}
+
+    iCIMS's hosted career sites (Jibe). page= is one-based (page=0 is a 422),
+    every page states totalCount, and a page past the end is empty. Each job
+    carries its full text and names its employer. The posting a person opens
+    is /jobs/{slug} on the same host, which redirects where a tenant mounts
+    its site under a path (AMD's /careers-home).
+    """
+    host = urlparse(url).netloc
+    seen: dict[str, JobPosting] = {}
+    rows = total = 0
+    page = 1
+    while True:
+        resp = _session.get(
+            _with_query(url, limit=str(_JIBE_PAGE), page=str(page)), timeout=TIMEOUT
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        jobs = [j.get("data") or {} for j in data.get("jobs") or []]
+        if page == 1:
+            total = int(data.get("totalCount") or 0)
+        for j in jobs:
+            p = _posting(
+                j.get("hiring_organization") or company,
+                j.get("title"),
+                list(dict.fromkeys(s.strip() for s in (j.get("full_location") or "").split(";"))),
+                f"https://{host}/jobs/{j['slug']}" if j.get("slug") else None,
+                _iso_ts(j.get("posted_date")),
+                raw={k: v for k, v in j.items() if k not in _JIBE_TEXT},
+                description=_jibe_text(j),
+            )
+            if p:
+                seen[p.url] = p
+        rows += len(jobs)
+        if not jobs or rows >= total:
+            break
+        page += 1
+    postings = list(seen.values())
+    if len(postings) != max(rows, total):
+        raise PartialPull(postings)
+    return postings
+
+
+_JIBE_TEXT = ("responsibilities", "qualifications")
+
+
+def _jibe_text(job: dict) -> str:
+    """The description, which on most tenants already holds the
+    responsibilities and qualifications; V2X left them out of 17 of 765."""
+    body = job.get("description") or ""
+    extra = [job.get(k) or "" for k in _JIBE_TEXT]
+    return clean_html(join(body, *[e for e in extra if e.strip() and e not in body]))
 
 
 def _place(loc: dict) -> str:
