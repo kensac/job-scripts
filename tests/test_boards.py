@@ -235,7 +235,7 @@ def test_lever_and_ashby_take_the_company_from_the_source(monkeypatch):
     )
 
 
-def test_workday_pages_until_the_total_and_builds_the_public_url(monkeypatch):
+def test_workday_pages_until_the_first_pages_total_and_builds_the_public_url(monkeypatch):
     posts = []
 
     def post(url, json, **kw):
@@ -263,8 +263,18 @@ def test_workday_pages_until_the_total_and_builds_the_public_url(monkeypatch):
                     "title": "Software Engineer",
                 }
             ],
+            3: [
+                {
+                    "externalPath": "/job/z/Structures-Engineer_JR3",
+                    "locationsText": "Seattle, WA",
+                    "postedOn": "Posted Today",
+                    "title": "Structures Engineer",
+                }
+            ],
         }[json["offset"]]
-        return _Resp({"total": 3, "jobPostings": page})
+        # As the live API does: the count rides on the first page only, and
+        # every later page says 0 (Boeing, 2026-10-05: 752, then 0, then 0).
+        return _Resp({"total": 4 if json["offset"] == 0 else 0, "jobPostings": page})
 
     monkeypatch.setattr(boards._session, "post", post)
     out = boards.fetch_listings(
@@ -275,6 +285,7 @@ def test_workday_pages_until_the_total_and_builds_the_public_url(monkeypatch):
         "F-18 General Mechanic",
         "Associate Software Engineer",
         "Software Engineer",
+        "Structures Engineer",
     ]
     assert out[0].url == (
         "https://boeing.wd1.myworkdayjobs.com/EXTERNAL_CAREERS/job/USA---NAS-JRB-New-Orleans-LA/"
@@ -286,8 +297,12 @@ def test_workday_pages_until_the_total_and_builds_the_public_url(monkeypatch):
     # where the first ended.
     assert [u for u, _ in posts] == [
         "https://boeing.wd1.myworkdayjobs.com/wday/cxs/boeing/EXTERNAL_CAREERS/jobs"
-    ] * 2
-    assert [(j["offset"], j["searchText"]) for _, j in posts] == [(0, "new grad"), (2, "new grad")]
+    ] * 3
+    assert [(j["offset"], j["searchText"]) for _, j in posts] == [
+        (0, "new grad"),
+        (2, "new grad"),
+        (3, "new grad"),
+    ]
 
 
 @pytest.mark.parametrize(
