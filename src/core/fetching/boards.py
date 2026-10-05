@@ -610,7 +610,7 @@ def _apple(url: str, company: str) -> list[JobPosting]:
     One row per posting and location, each its own public page at
     /en-us/details/{id}/{slug}, which is how the careers site links them. The
     row carries a summary, not the posting's text, so the text comes from the
-    page itself.
+    Apple resolver in core/fetching/ats.py.
 
     Sorted newest, the managed pipeline roles (evergreen retail openings) are
     stamped with the request's own time and so tie at the top, in an order
