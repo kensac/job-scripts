@@ -128,6 +128,10 @@ so a partial text is judged as if it were complete. IBM's index carries a
 the years of experience (posting 134730: 3,668 characters of a 7,663-character
 page, 2026-10-05), so `_ibm` stores neither. A Goldman role without
 `descriptionHtml` (5 of 953) stores none, rather than its title and place.
+A SuccessFactors feed item carries the posting's whole body as HTML, stored as
+title, location and the cleaned body (L3Harris posting 1407143600: 4,312
+characters against the page's 4,243-character job description, ending on the
+same line, 2026-10-05).
 
 Rows are aged out by `screened_retention_days` after the board stops listing
 them.
@@ -379,6 +383,30 @@ That last check catches a posting closing mid-read, which moves every later row
 up and makes a page boundary skip an open one. Anything else raises
 `PartialPull`. When a format's total can equal its window, treat that total as
 "at least", never as the size of the board.
+
+**A feed that states no count is checked against a list that does.** A
+SuccessFactors Career Site Builder board (an employer's own domain, listings URL
+`https://<host>/services/rss/job/`) publishes one RSS feed with no total and no
+paging: it returns its first `rows` items, 20 without the parameter, and
+ignores `startrow`, `start`, `page` and `offset`. `_successfactors` asks for
+far more rows than any board holds, then compares the requisition ids against
+the site's `/sitemap.xml`, which lists the same `/job/` urls; an id in the
+sitemap and not in the feed raises `PartialPull`. The sitemap is either a
+`urlset` (its namespace varies) or a Google Base RSS feed of every posting read
+by `<link>` (Deere, Halliburton, Boston Scientific, SAP); any other shape
+proves nothing and the pull is partial. On 2026-10-05 the two agreed exactly
+on nine boards, 115 to 2,233 postings. Quirks the fetcher depends on:
+the feed answers 406 unless the request accepts `application/rss+xml`; a
+malformed query answers 200 with `<xml>Error: ...</xml>`, which is a failed
+pull; the feed spans every language the site posts in (Hensoldt's English and
+German search pages said 535 and 512, the feed held 1,051), so the search
+page's "Results 1 to 25 of N" is not the board's count; and an item's title is
+`<title> (<primary location>)`, and either half can carry parentheses of its
+own ("Saône (Haute), FR" on Deere), so the location is the balanced group that
+closes the heading.
+The legacy `career<N>.successfactors.com/career?company=` site has no
+unauthenticated list call (its search is a session-bound DWR call), so it is
+not a board format.
 
 ## A switched-off source holds no posting active
 
