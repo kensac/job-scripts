@@ -32,6 +32,13 @@ The list shape (`GET /admin/sources`) carries everything but `title_pattern`;
 one row (`GET /admin/sources/{name}`) carries it. At 1,732 sources the pattern
 was more than half of a 1.8 MB body, and only the edit form reads it.
 
+**A paged listing stops on the count its first page states.** Workday sends
+`total` on the first page only and 0 on every later one; a fetcher that re-read
+it per page stopped after two pages, and because the pull is authoritative,
+retired everything past them as closed. On 2026-10-05 that held 130 of 454
+Workday sources at exactly 40 postings (Boeing listed 752). A source pinned at a
+round multiple of its format's page size is the symptom to look for.
+
 ## A board host is paced per egress address, and the pace is learned
 
 `host_budget` holds one row per upstream host and egress address. A worker

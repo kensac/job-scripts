@@ -288,6 +288,11 @@ def _workday(url: str, company: str) -> list[JobPosting]:
     base = f"https://{parsed.netloc}/{site}"
     out: list[JobPosting] = []
     offset = 0
+    # Only the first page carries the count; later pages say total=0. Read
+    # per page, that stopped every tenant after two pages: on 2026-10-05, 130
+    # of 454 Workday sources held exactly 40 postings (Boeing listed 752), and
+    # because the pull is authoritative the rest were retired as closed.
+    total: int | None = None
     while True:
         resp = _session.post(
             endpoint,
@@ -312,8 +317,10 @@ def _workday(url: str, company: str) -> list[JobPosting]:
             )
             if p:
                 out.append(p)
+        if total is None:
+            total = int(data.get("total") or 0)
         offset += len(page)
-        if not page or offset >= int(data.get("total") or 0):
+        if not page or offset >= total:
             return out
 
 
