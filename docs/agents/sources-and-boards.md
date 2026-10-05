@@ -57,6 +57,20 @@ every page, and each job carries its full text and its employer's name. The
 portal search, the portal's own `sitemap.xml` and Jibe's `totalCount` agreed
 posting for posting on 16 tenants on 2026-10-05.
 
+**An offset walk needs a sort that cannot tie.** IBM's careers search sorts an
+empty query by score and page views, every posting ties, and its 20 shards
+break the tie differently per request: a `from`/`size` walk of 2,002 postings
+returned 1,890 distinct on 2026-10-05, and the 112 it never saw would have been
+retired as closed. `_ibm` walks by `search_after` on `_id` instead, which reads
+the index to its end (2,002 of 2,002), and keeps the first page's count only as
+the check. Before trusting an offset, pull a board twice and count distinct
+urls against the stated total.
+
+**A refusal inside a 200 fails the pull.** A GraphQL endpoint answers a bad
+request with HTTP 200, `errors` and no data; Goldman's roleSearch does so for a
+`pageSize` above 250. Read as a page, that is an empty board. `_goldman`
+raises on `errors`.
+
 ## A board host is paced per egress address, and the pace is learned
 
 `host_budget` holds one row per upstream host and egress address. A worker
@@ -81,13 +95,14 @@ Each row holds the posting text the listing call carried and the raw record
 minus that text. Greenhouse (with `content=true`), Lever and Ashby carry the
 text; it is assembled by the same `core/fetching/ats.py` helpers the resolvers
 use, so it is what a per-posting fetch would have returned. ByteDance carries
-it too, as a description and a requirement, and Jibe carries it; neither has a
-resolver. Workday, SmartRecruiters, Oracle Recruiting, Workable and Apple list
-without the text, so their postings get it from the matching resolver, one call
-each, when a check needs it. An iCIMS portal card holds a snippet, which is not
+it too, as a description and a requirement, and Jibe and Goldman
+(`ats.goldman_text`) carry it; none of the three has a resolver. Workday,
+SmartRecruiters, Oracle Recruiting, Workable and Apple list without the text,
+so their postings get it from the matching resolver, one call each, when a
+check needs it. An iCIMS portal card holds a snippet, which is not
 the text and is not stored; the iCIMS resolver reads the text from the
-posting's frame. Taleo lists without the text and has no resolver, so its
-postings get it from the page fetch tiers below.
+posting's frame. Taleo and IBM list without the text and have no resolver, so
+their postings get it from the page fetch tiers below.
 
 **A board whose page is a shell gets a resolver, because the static tier
 cannot tell a shell from a posting.** The static tier accepts any page whose
@@ -103,6 +118,14 @@ it. Its 200 is not proof of listing, since one requisition the board no longer
 listed still answered 200 with full text, so that closure comes from the
 board's authoritative pull. A new board gets the same check before it is
 switched on: does the static tier's text contain the posting.
+
+**A listing's text is stored only when it is the whole posting.** Ingest stores
+a non-empty `description` as the posting's content and never fetches the page,
+so a partial text is judged as if it were complete. IBM's index carries a
+256-character snippet and a `body` that drops the headings, the education and
+the years of experience (posting 134730: 3,668 characters of a 7,663-character
+page, 2026-10-05), so `_ibm` stores neither. A Goldman role without
+`descriptionHtml` (5 of 953) stores none, rather than its title and place.
 
 Rows are aged out by `screened_retention_days` after the board stops listing
 them.
@@ -281,6 +304,8 @@ closure; re-verification closes them instead. Airbus went from 2,000 to 2,883
 of about 2,940. Sources filter at our gate, the title pattern, and not at the
 board: a listings URL carries no search. Oracle serves at most 10,000 rows of a search, newest first,
 and a pull that ends short of the stated count raises `PartialPull` the same way.
+So do IBM and Goldman. A role Goldman closes mid-walk shifts the next one back
+past a page boundary unseen, and the count is what catches it.
 
 **A Taleo careersection is read to its count, and its count is never met.**
 The listings URL is the section's own search page,

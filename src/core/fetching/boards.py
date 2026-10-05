@@ -31,7 +31,15 @@ from bs4 import BeautifulSoup, Tag
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-from core.fetching.ats import ashby_text, clean_html, greenhouse_text, join, lever_text
+from core.fetching.ats import (
+    ashby_text,
+    clean_html,
+    goldman_place,
+    goldman_text,
+    greenhouse_text,
+    join,
+    lever_text,
+)
 from core.fetching.listings import fetch_job_postings
 from core.fetching.posting import JobPosting
 from core.fetching.urls import normalize_url
@@ -85,6 +93,10 @@ def kind(url: str) -> str:
     # answer one path: careers.amd.com/api/jobs, careers.spiritaero.com/api/jobs.
     if parsed.path.rstrip("/") == "/api/jobs":
         return "jibe"
+    if host == "www-api.ibm.com" and parsed.path == "/search/api/v2":
+        return "ibm"
+    if host == "api-higher.gs.com" and parsed.path == "/gateway/api/v1/graphql":
+        return "goldman"
     if parsed.path.endswith(".md"):
         return "markdown"
     return "sheet_era"
@@ -94,9 +106,23 @@ def kind(url: str) -> str:
 # iCIMS portal list a company's own openings and never say whose (the portal
 # names it only in its page title); Greenhouse, SmartRecruiters and Jibe
 # (hiring_organization) name the company on every job and the aggregators
-# name it per row.
+# name it per row. Goldman's roles carry no company, and IBM's carry the
+# hiring legal entity ("(0063) IBM India Private Limited") rather than the
+# name a person searches for.
 NEEDS_COMPANY = frozenset(
-    {"lever", "ashby", "workday", "oracle", "workable", "taleo", "apple", "bytedance", "icims"}
+    {
+        "lever",
+        "ashby",
+        "workday",
+        "oracle",
+        "workable",
+        "taleo",
+        "apple",
+        "bytedance",
+        "icims",
+        "ibm",
+        "goldman",
+    }
 )
 
 # A company's own board lists every open posting, so a posting missing from
@@ -121,6 +147,8 @@ AUTHORITATIVE = frozenset(
         "bytedance",
         "icims",
         "jibe",
+        "ibm",
+        "goldman",
     }
 )
 
@@ -139,6 +167,8 @@ def fetch_listings(url: str, company: str | None = None) -> list[JobPosting]:
         "bytedance": _bytedance,
         "icims": _icims,
         "jibe": _jibe,
+        "ibm": _ibm,
+        "goldman": _goldman,
         "markdown": _markdown,
     }.get(kind(url))
     if fetcher is None:
@@ -1093,6 +1123,178 @@ def _taleo_date(cell: str, lang: str) -> int:
         return int(datetime.datetime.strptime(f"{text} +0000", f"{form} %z").timestamp())
     except ValueError:
         return 0
+
+
+# IBM's search API answers 400 to a size above 100 (200 and 1,000 tried,
+# 2026-10-05).
+_IBM_PAGE = 100
+
+# The careers index names its facets by slot. Measured 2026-10-05 against the
+# careers search page's own filters: 05 country, 08 area of work, 17 work
+# arrangement, 18 position type, 19 "City, CC" or "Multiple Cities", and
+# field_text_01 the job id in the posting url. The API refuses a _source
+# naming any field outside its allow list, so these are asked for by name.
+_IBM_FIELDS = [
+    "title",
+    "url",
+    "field_text_01",
+    "field_keyword_05",
+    "field_keyword_08",
+    "field_keyword_17",
+    "field_keyword_18",
+    "field_keyword_19",
+]
+
+
+def _ibm(url: str, company: str) -> list[JobPosting]:
+    """POST https://www-api.ibm.com/search/api/v2, the search behind
+    www.ibm.com/careers/search.
+
+    Pages by search_after on _id. Paging by from repeats rows: the site's own
+    sort ties on every posting of an empty search, and 20 shards break the tie
+    differently per request, so a from/size walk of 2,002 postings returned
+    1,890 distinct on 2026-10-05. A from walk also stops at from+size 10,000.
+    The cursor reads the index to its end, and the first page's count is
+    then only the check that nothing was lost on the way.
+
+    No text is carried. `description` is a 256-character snippet, and `body`
+    is the posting's prose without its headings, education or years of
+    experience (134730: 3,668 characters of a 7,663-character page), which
+    stored as the posting would read as complete and be judged short. The
+    posting page is fetched for the text like any other.
+    """
+    body: dict[str, Any] = {
+        "appId": "careers",
+        "scopes": ["careers2"],
+        "query": {"bool": {"must": []}},
+        "lang": "zz",
+        "localeSelector": {},
+        "sm": {"query": "", "lang": "zz"},
+        "_source": _IBM_FIELDS,
+        "size": _IBM_PAGE,
+        "sort": [{"_id": "asc"}],
+    }
+    endpoint = urlunparse(urlparse(url)._replace(query="", fragment=""))
+    out: list[JobPosting] = []
+    total: int | None = None
+    while True:
+        resp = _session.post(endpoint, json=body, timeout=TIMEOUT)
+        resp.raise_for_status()
+        hits = resp.json()["hits"]
+        page = hits.get("hits") or []
+        if total is None:
+            total = int((hits.get("total") or {}).get("value") or 0)
+        for h in page:
+            j = h.get("_source") or {}
+            place = j.get("field_keyword_19")
+            p = _posting(
+                company,
+                j.get("title"),
+                # "Multiple Cities" is no more a place than Workday's "2
+                # Locations" (349 of 2,013 on 2026-10-05); the country is.
+                [j.get("field_keyword_05") if place == "Multiple Cities" else place],
+                j.get("url"),
+                0,
+                raw=j,
+            )
+            if p:
+                out.append(p)
+        if len(page) < _IBM_PAGE:
+            break
+        body["search_after"] = page[-1]["sort"]
+    if len(out) < total:
+        raise PartialPull(out)
+    return out
+
+
+# Goldman's roleSearch refuses a pageSize above 250 ("must be less than or
+# equal to 250", 2026-10-05).
+_GOLDMAN_PAGE = 250
+
+# The experiences a person outside the firm can apply to. The schema's fourth,
+# INTERNAL_MOBILITY, is for employees. The careers site's results page asks
+# for the first two (715 roles on 2026-10-05) and its students page for
+# CAMPUS (238), which is where the internships and analyst programs are.
+_GOLDMAN_EXPERIENCES = ["EARLY_CAREER", "PROFESSIONAL", "CAMPUS"]
+
+_GOLDMAN_QUERY = """query GetRoles($searchQueryInput: RoleSearchQueryInput!) {
+  roleSearch(searchQueryInput: $searchQueryInput) {
+    totalCount
+    items {
+      roleId jobTitle corporateTitle jobFunction division status lastPostedDate
+      locations { primary city state country }
+      compensation { minSalary maxSalary currency }
+      descriptionHtml
+      externalSource { sourceId }
+    }
+  }
+}"""
+
+
+def _goldman(url: str, company: str) -> list[JobPosting]:
+    """POST https://api-higher.gs.com/gateway/api/v1/graphql, the roleSearch
+    behind higher.gs.com, unauthenticated.
+
+    Pages are numbered from 0. A refused request is HTTP 200 with `errors`
+    and no data, which must fail the pull rather than read as an empty board.
+    The role's public page is /roles/{externalSource.sourceId}; the roleId
+    carries a suffix (_GS_MID_CAREER, _GS_CAMPUS, or a uuid) the page does not.
+    """
+    out: list[JobPosting] = []
+    seen: set[str] = set()
+    total: int | None = None
+    number = 0
+    while True:
+        resp = _session.post(
+            url,
+            json={
+                "operationName": "GetRoles",
+                "query": _GOLDMAN_QUERY,
+                "variables": {
+                    "searchQueryInput": {
+                        "page": {"pageSize": _GOLDMAN_PAGE, "pageNumber": number},
+                        "sort": {"sortStrategy": "POSTED_DATE", "sortOrder": "DESC"},
+                        "filters": [],
+                        "experiences": _GOLDMAN_EXPERIENCES,
+                        "searchTerm": "",
+                    }
+                },
+            },
+            timeout=TIMEOUT,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        if data.get("errors"):
+            raise RuntimeError(f"roleSearch refused: {data['errors']}")
+        result = data["data"]["roleSearch"]
+        page = result.get("items") or []
+        if total is None:
+            total = int(result.get("totalCount") or 0)
+        for j in page:
+            source_id = (j.get("externalSource") or {}).get("sourceId")
+            if not source_id or source_id in seen:
+                continue
+            seen.add(source_id)
+            p = _posting(
+                company,
+                j.get("jobTitle"),
+                [goldman_place(loc) for loc in j.get("locations") or []],
+                f"https://higher.gs.com/roles/{source_id}",
+                _iso_ts(j.get("lastPostedDate")),
+                raw=j,
+                description=goldman_text(j) if j.get("descriptionHtml") else "",
+            )
+            if p:
+                out.append(p)
+        number += 1
+        if len(page) < _GOLDMAN_PAGE:
+            break
+    # Newest first, so a role posted mid-pull pushes rows onto later pages
+    # and is read twice rather than skipped; a role closed mid-pull pulls one
+    # past the page boundary unseen, and the count catches it.
+    if len(seen) < total:
+        raise PartialPull(out)
+    return out
 
 
 # --- markdown tables ---------------------------------------------------------
