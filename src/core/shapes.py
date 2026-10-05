@@ -26,6 +26,7 @@ import datetime
 import os
 
 from core.answers import VERIFICATION_REQUEST
+from core.batch import BATCH_TOKEN_BUDGET, BATCH_WAVE_CONCURRENCY
 from core.providers.spec import StructuredOutput
 from core.routing import Evidence, TaskShape
 
@@ -276,20 +277,6 @@ VERIFY_TASK = TaskShape(
 BACKFILL_MODEL = os.environ.get("JOBTRACKER_MAIL_BACKFILL_MODEL", "gpt-6-luna")
 ONGOING_MODEL = os.environ.get("JOBTRACKER_MAIL_ONGOING_MODEL", "gpt-6-luna")
 
-
-# A backfill may ask for more, because it is a ONE-TIME sweep over a mailbox
-# rather than an hourly trickle: at the ongoing cap, 34,000 archived messages
-# take about 28 hours of cycles to work through.
-#
-# The ceiling is derived from what a wave can actually carry rather than
-# picked: core.batch budgets BATCH_TOKEN_BUDGET tokens per wave and runs
-# BATCH_WAVE_CONCURRENCY waves at once, and a classification spec is ~1,500
-# tokens (measured on real mail, not estimated). That is ~1,200 specs per wave
-# and ~4,800 in flight, so asking for much beyond that only queues work the
-# provider will not start any sooner.
-MAX_CLASSIFY_PER_CYCLE = int(os.environ.get("JOBTRACKER_MAIL_CLASSIFY_MAX", "5000"))
-
-
 # Reasoning effort is PER MODEL, because these two do not accept the same
 # values. Probed against the live APIs, which name the sets in their 400s:
 #
@@ -331,6 +318,21 @@ FALLBACK_EFFORT = "low"
 CLASSIFY_MAX_TOKENS = 400
 
 
+# Messages one classification task sends: enough to fill every wave core.batch
+# runs at once, because more only queues work the provider will not start any
+# sooner. The ongoing sweep and a backfill share it, and so does the fleet
+# budget, which prices a cycle at this many.
+#
+# A spec's size is core.batch's own estimate, since that is what chunks the
+# waves: characters over BATCH_CHARS_PER_TOKEN plus CLASSIFY_MAX_TOKENS
+# reserved. Measured from ai_batches.est_tokens over every classification
+# batch production submitted (270 batches, 89,413 requests, 2026-09-02 to
+# 09-13): 2,162 a request. The two figures this replaced were 1,500 and 6,000,
+# and gave caps of 5,000 and 1,200.
+CLASSIFY_SPEC_EST_TOKENS = 2162
+CLASSIFY_PER_CYCLE = BATCH_WAVE_CONCURRENCY * BATCH_TOKEN_BUDGET // CLASSIFY_SPEC_EST_TOKENS
+
+
 def _classify_task(model: str, purpose: str, label: str) -> TaskShape:
     """One model per shape, never a list.
 
@@ -343,7 +345,7 @@ def _classify_task(model: str, purpose: str, label: str) -> TaskShape:
     return TaskShape(
         purpose=purpose,
         label=label,
-        per_cycle=MAX_CLASSIFY_PER_CYCLE,
+        per_cycle=CLASSIFY_PER_CYCLE,
         evidence=(
             Evidence(
                 model="gpt-5-nano",
@@ -375,9 +377,10 @@ def _classify_task(model: str, purpose: str, label: str) -> TaskShape:
         structured=StructuredOutput.JSON_SCHEMA,
         batched=True,
         max_output_tokens=CLASSIFY_MAX_TOKENS,
-        # Ranking only, and only ever against itself here, since there is one
-        # candidate. The real spec size is ~6k tokens.
-        est_prompt_tokens=6000,
+        # Billed input a request, over the same 2026-09-02 to 09-13 batches:
+        # ai_batches.input_tokens / completed was 2,580 (84,345 completed).
+        # It prices the fleet cycle; ranking has one candidate.
+        est_prompt_tokens=2580,
         effort_preference=_CLASSIFY_EFFORT_PREFERENCE,
         candidates=(model,),
     )

@@ -276,10 +276,11 @@ def test_max_tokens_leaves_room_for_the_schema():
     assert shapes.CLASSIFY_MAX_TOKENS >= 200
 
 
-def test_a_backfill_may_ask_for_more_than_the_hourly_cap():
-    """34,000 archived messages take ~28 hours of hourly cycles at the ongoing
-    cap. A one-time sweep is a different job from a trickle."""
-    assert shapes.MAX_CLASSIFY_PER_CYCLE > mail_classify.CLASSIFY_PER_CYCLE
+def test_the_budget_prices_the_cap_the_handler_applies():
+    """The handler capped a task at 1,200 while the fleet budget priced a
+    cycle at 5,000, each from its own guess at a spec's size."""
+    for shape in (shapes.BACKFILL_TASK, shapes.ONGOING_TASK):
+        assert shape.per_cycle == mail_classify.CLASSIFY_PER_CYCLE
 
 
 @pytest.mark.asyncio
@@ -299,7 +300,7 @@ async def test_the_cap_is_clamped_not_trusted(monkeypatch, f):
         _store(f, mid=f"<cap{i}@x>")
     monkeypatch.setattr(mail_classify, "run_batched", fake)
     monkeypatch.setattr(mail_classify, "set_progress", lambda *a, **k: None)
-    monkeypatch.setattr(mail_classify, "MAX_CLASSIFY_PER_CYCLE", 2)
+    monkeypatch.setattr(mail_classify, "CLASSIFY_PER_CYCLE", 2)
     await mail_classify.handle_classify_mail(1, {"cap": 999999})
     assert seen["count"] <= 2
 
