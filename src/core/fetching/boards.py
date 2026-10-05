@@ -22,8 +22,10 @@ import json
 import logging
 import re
 import time
+import xml.etree.ElementTree as ET
+from email.utils import parsedate_to_datetime
 from typing import Any
-from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
+from urllib.parse import parse_qs, urlencode, urljoin, urlparse, urlunparse
 
 import ftfy
 import requests
@@ -97,18 +99,31 @@ def kind(url: str) -> str:
         return "ibm"
     if host == "api-higher.gs.com" and parsed.path == "/gateway/api/v1/graphql":
         return "goldman"
+    if host == "www.amazon.jobs" and parsed.path.endswith("/search.json"):
+        return "amazon"
+    # SuccessFactors Career Site Builder runs on each employer's own domain
+    # (jobs.l3harris.com, jobs.ulalaunch.com), so the feed path is the marker.
+    if parsed.path == "/services/rss/job/":
+        return "successfactors"
+    # Eightfold tenants serve from their own domains (jobs.northropgrumman.com,
+    # apply.careers.microsoft.com), so the path is the only mark of the format.
+    if parsed.path.rstrip("/") in (_EIGHTFOLD_PCSX, _EIGHTFOLD_V2):
+        return "eightfold"
     if parsed.path.endswith(".md"):
         return "markdown"
     return "sheet_era"
 
 
-# Lever, Ashby, Workday, Oracle, Workable, Taleo, Apple, ByteDance and the
-# iCIMS portal list a company's own openings and never say whose (the portal
-# names it only in its page title); Greenhouse, SmartRecruiters and Jibe
-# (hiring_organization) name the company on every job and the aggregators
-# name it per row. Goldman's roles carry no company, and IBM's carry the
-# hiring legal entity ("(0063) IBM India Private Limited") rather than the
-# name a person searches for.
+# Lever, Ashby, Workday, Oracle, Workable, Taleo, Apple, ByteDance, the iCIMS
+# portal and SuccessFactors list a company's own openings and never say whose
+# (the iCIMS portal names it only in its page title; a SuccessFactors feed's
+# channel title is whatever the site was named, "L3HHCM20 - Custom Search" on
+# L3Harris); Greenhouse, SmartRecruiters and Jibe (hiring_organization) name
+# the company on every job and the aggregators name it per row. Goldman's
+# roles carry no company, and IBM's carry the hiring legal entity ("(0063) IBM
+# India Private Limited") rather than the name a person searches for. Amazon
+# names a legal entity per row too ("Amazon.com Services LLC", "ADCI HYD 13
+# SEZ"). An Eightfold row names a department and never the company.
 NEEDS_COMPANY = frozenset(
     {
         "lever",
@@ -122,6 +137,9 @@ NEEDS_COMPANY = frozenset(
         "icims",
         "ibm",
         "goldman",
+        "amazon",
+        "successfactors",
+        "eightfold",
     }
 )
 
@@ -131,7 +149,7 @@ NEEDS_COMPANY = frozenset(
 # sweep instead. A Taleo careersection is a company's own board, but its
 # search counts rows it never lists, and a pull short of that count raises
 # PartialPull and retires nothing (see _taleo).
-# The iCIMS portal and Jibe are a company's own board, and
+# The iCIMS portal, Jibe and Eightfold are a company's own board, and
 # each fetcher raises PartialPull when it cannot show it read all of it.
 AUTHORITATIVE = frozenset(
     {
@@ -149,6 +167,9 @@ AUTHORITATIVE = frozenset(
         "jibe",
         "ibm",
         "goldman",
+        "amazon",
+        "successfactors",
+        "eightfold",
     }
 )
 
@@ -169,6 +190,9 @@ def fetch_listings(url: str, company: str | None = None) -> list[JobPosting]:
         "jibe": _jibe,
         "ibm": _ibm,
         "goldman": _goldman,
+        "amazon": _amazon,
+        "successfactors": _successfactors,
+        "eightfold": _eightfold,
         "markdown": _markdown,
     }.get(kind(url))
     if fetcher is None:
@@ -984,6 +1008,197 @@ def _jibe_text(job: dict) -> str:
     return clean_html(join(body, *[e for e in extra if e.strip() and e not in body]))
 
 
+# The feed returns its first `rows` postings and nothing more: it has no
+# paging (startrow, start, page and offset were all ignored on 2026-10-05), and
+# without `rows` it returns 20. Asked for more than a board holds it returns
+# them all, measured to 2,233 of 2,233 on L3Harris, the largest board found.
+# Whether it stops silently somewhere above that is unmeasured, which is why
+# completeness is read off the sitemap and not off this number.
+_SUCCESSFACTORS_ROWS = 100_000
+
+
+def _successfactors_heading(heading: str) -> tuple[str, str]:
+    """Title and primary location from a feed item's "<title> (<location>)".
+
+    Either half can carry parentheses of its own, so the location is the
+    balanced group that closes the heading: "Sr Spec, Quality Engrg (Supplier
+    Quality) (Rochester, NY, US, 14623)" on L3Harris, "Stagiaire Ingénieur
+    Test et Mesure (F/H) (Arc Les Gray Cedex, Saône (Haute), FR, 70103)" on
+    Deere, "Senior Enterprise Account Executive FSI (Southbank (Melbourne),
+    VIC, AU, 3006)" on SAP, where 69 of 877 locations nest one. A heading that does not close on
+    a group is all title.
+    """
+    text = heading.strip()
+    depth = 0
+    for i in range(len(text) - 1, -1, -1):
+        depth += {")": 1, "(": -1}.get(text[i], 0)
+        if depth == 0:
+            if i and text[i] == "(" and text[:i].strip():
+                return text[:i].strip(), text[i + 1 : -1].strip()
+            break
+    return text, ""
+
+
+_ROOT_TAG = re.compile(rb"<[A-Za-z]")
+
+
+def _xml(raw: bytes) -> ET.Element:
+    """Parse a document a board serves, refusing one that declares a DOCTYPE.
+
+    ElementTree expands internal entities, so a DOCTYPE is how a billion-laughs
+    document hangs a worker. Neither the sitemap nor the feed declares one (six
+    boards, 2026-10-05). A DOCTYPE can only stand before the root element, so
+    the prolog is all that needs reading; the same rule as the mail importer's.
+    """
+    root = _ROOT_TAG.search(raw)
+    if b"<!DOCTYPE" in raw[: root.start() if root else len(raw)].upper():
+        raise ValueError("refusing an XML document with a DOCTYPE")
+    return ET.fromstring(raw)  # noqa: S314 - DOCTYPE refused above
+
+
+def _successfactors_id(link: str) -> str:
+    """The requisition id, the last segment of /job/<slug>/<id>/."""
+    return urlparse(link).path.rstrip("/").rsplit("/", 1)[-1]
+
+
+def _successfactors(url: str, company: str) -> list[JobPosting]:
+    """GET https://{host}/services/rss/job/ on a SuccessFactors Career Site Builder site.
+
+    One call carries every posting with its text and date, across all of the
+    site's languages (Hensoldt's search pages said 535 in English and 512 in
+    German; the feed held 1,051). The feed states no total, so the site's
+    /sitemap.xml, which lists the same /job/ urls, is the count: on 2026-10-05
+    the two held identical requisition ids on nine boards, from 115 (ULA) to
+    2,233 (L3Harris). A requisition in the sitemap and not in the feed
+    makes the pull partial. The sitemap is read first, so a posting opened
+    between the two calls only adds to the feed, and one closed between them
+    costs a partial pull, never a wrong retirement.
+    """
+    parsed = urlparse(url)
+    sitemap = _session.get(f"{parsed.scheme}://{parsed.netloc}/sitemap.xml", timeout=TIMEOUT)
+    sitemap.raise_for_status()
+    root = _xml(sitemap.content)
+    # Two shapes, each listing every posting url. A urlset of <loc>s, whose
+    # namespace is not the standard one everywhere (ULA's is
+    # http://www.google.com/schemas/sitemap/0.9), so the local name is
+    # matched. Or a Google Base RSS feed of every posting, read by its <link>s:
+    # SAP, Deere, Halliburton and Boston Scientific serve that, and on the
+    # last three its ids equalled the feed's (337, 442, 548). A sitemap index
+    # has never been seen on one of these sites; its <loc>s name further
+    # sitemaps, so it, or any other shape, cannot prove the pull complete.
+    shape = root.tag.rsplit("}", 1)[-1]
+    complete = shape in ("urlset", "rss")
+    link = "loc" if shape == "urlset" else "link"
+    listed = {
+        _successfactors_id(e.text or "")
+        for e in root.iter()
+        if e.tag.rsplit("}", 1)[-1] == link and "/job/" in (e.text or "")
+    }
+
+    # The feed answers 406 to the session's JSON Accept and to application/xml.
+    resp = _session.get(
+        _with_query(url, rows=str(_SUCCESSFACTORS_ROWS)),
+        headers={"Accept": "application/rss+xml"},
+        timeout=TIMEOUT,
+    )
+    resp.raise_for_status()
+    feed = _xml(resp.content)
+    # A malformed query answers 200 with <xml>Error: There is a problem with a
+    # jobs query</xml> (keywords=() on ULA, 2026-10-05): a broken fetch, not
+    # an empty board.
+    if feed.tag != "rss":
+        raise ValueError(f"not an RSS feed: {resp.content[:200]!r}")
+    out: list[JobPosting] = []
+    seen: set[str] = set()
+    for item in feed.iterfind("./channel/item"):
+        link = item.findtext("link") or ""
+        # The link carries feedId and utm_ parameters; the posting is the path.
+        public = urlunparse(urlparse(link)._replace(query="", fragment="")) if link else None
+        heading = item.findtext("title") or ""
+        title, location = _successfactors_heading(heading)
+        pub = item.findtext("pubDate")
+        p = _posting(
+            company,
+            title,
+            [location],
+            public,
+            int(parsedate_to_datetime(pub).timestamp()) if pub else 0,
+            raw={"title": heading, "link": link, "pubDate": pub},
+            description=join(title, location, clean_html(item.findtext("description") or "")),
+        )
+        if p:
+            out.append(p)
+            seen.add(_successfactors_id(link))
+    if not complete or listed - seen:
+        raise PartialPull(out)
+    return out
+
+
+# Eightfold's two careers-site generations. A tenant answers one and refuses
+# the other with 403 ("Not authorized for PCSX" on v2, "PCSX is not enabled"
+# on pcsx), so the listings URL names the one its tenant serves.
+_EIGHTFOLD_PCSX = "/api/pcsx/search"
+_EIGHTFOLD_V2 = "/api/apply/v2/jobs"
+# One pace for every tenant, whatever domain it serves from: one AWS WAF fronts
+# them, and once it challenged an address on 2026-10-05 Lockheed, Northrop,
+# CACI, PayPal and Netflix all answered 405 with x-amzn-waf-action: captcha
+# for a few minutes (Microsoft's did not). See ingest_host_pace_seconds.
+_EIGHTFOLD_PACE = "eightfold.ai"
+
+
+def _eightfold(url: str, company: str) -> list[JobPosting]:
+    """GET https://{host}/api/pcsx/search?domain={domain}
+    or  https://{host}/api/apply/v2/jobs?domain={domain}
+
+    Both page by `start` at ten postings whatever `num` asks for, state the
+    count on every page, take any offset and answer an empty page past the
+    end; no result window was found up to 21,774 (Starbucks, 2026-10-05).
+    Neither list carries the posting's text.
+
+    The order is not stable from one request to the next, so a pull reads
+    some postings twice and others never. A posting re-dated or removed
+    mid-pull shifts every later page (Microsoft, whose count moved between
+    2,297 and 2,300: 2,256 distinct), and the order moves with the count
+    unchanged too (Qualcomm, 2,052 throughout: 2,009 distinct in one pull and
+    2,043 in the next), all on 2026-10-05. A pull is complete only when it
+    holds as many distinct postings as the largest count any page stated;
+    anything short is PartialPull.
+    """
+    parsed = urlparse(url)
+    pcsx = parsed.path.rstrip("/") == _EIGHTFOLD_PCSX
+    origin = f"{parsed.scheme}://{parsed.netloc}"
+    seen: dict[str, JobPosting] = {}
+    stated = 0
+    start = 0
+    while True:
+        _pace(_EIGHTFOLD_PACE)
+        resp = _session.get(_with_query(url, start=str(start)), timeout=TIMEOUT)
+        resp.raise_for_status()
+        data = resp.json()
+        data = (data.get("data") or {}) if pcsx else data
+        page = data.get("positions") or []
+        stated = max(stated, int(data.get("count") or 0))
+        for j in page:
+            link = j.get("positionUrl") if pcsx else j.get("canonicalPositionUrl")
+            p = _posting(
+                company,
+                j.get("name"),
+                j.get("locations") or [j.get("location")],
+                urljoin(origin, link) if link else None,
+                int((j.get("postedTs") if pcsx else j.get("t_create")) or 0),
+                raw=j,
+            )
+            if p:
+                seen[p.url] = p
+        if not page:
+            break
+        start += len(page)
+    postings = list(seen.values())
+    if len(postings) < stated:
+        raise PartialPull(postings)
+    return postings
+
+
 def _place(loc: dict) -> str:
     """City, region, country as the ATS spells them, skipping what is unset."""
     return ", ".join(str(loc[k]) for k in ("city", "region", "country") if loc.get(k))
@@ -1295,6 +1510,116 @@ def _goldman(url: str, company: str) -> list[JobPosting]:
     if len(seen) < total:
         raise PartialPull(out)
     return out
+
+
+# amazon.jobs answers "Result limit cannot be greater than 100" past 100 a
+# request, and refuses a page reaching past row 10,000 of a search ("Cannot
+# return more than 10000 results at once", with HTTP 200, hits 0 and no jobs).
+# Its `hits` stops at the window too: the unfiltered search said 10,000 for a
+# board of 22,295 on 2026-10-05.
+_AMAZON_PAGE = 100
+_AMAZON_WINDOW = 10_000
+
+# The row's text, kept out of raw for the reason _TEXT_FIELDS gives.
+_AMAZON_TEXT = frozenset(
+    {"description", "description_short", "basic_qualifications", "preferred_qualifications"}
+)
+
+
+def _amazon(url: str, company: str) -> list[JobPosting]:
+    """GET https://www.amazon.jobs/en/search.json
+
+    The board is past the window, so it is read one job category at a time.
+    Categories partition it: on 2026-10-05 their counts summed to 22,295, the
+    same as the country facet's, and the largest held 3,279. A pull is complete
+    only when the categories account for every posting the country facet
+    counts, no category reaches the window, and each category's pages yielded
+    as many distinct postings as its first page stated; otherwise it is partial.
+    """
+    first = _amazon_get(
+        url, {"result_limit": 1, "facets[]": ["category", "normalized_country_code"]}
+    )
+    categories = _amazon_facet(first, "category_facet")
+    complete = sum(categories.values()) >= sum(
+        _amazon_facet(first, "normalized_country_code_facet").values()
+    )
+    seen: dict[str, JobPosting] = {}
+    for category in categories:
+        part, whole = _amazon_slice(url, company, category)
+        complete = complete and whole
+        seen.update((p.url, p) for p in part)
+    if not complete:
+        raise PartialPull(list(seen.values()))
+    return list(seen.values())
+
+
+def _amazon_get(url: str, params: dict) -> dict:
+    resp = _session.get(url, params=params, timeout=TIMEOUT)
+    resp.raise_for_status()
+    data = resp.json()
+    if data.get("error"):
+        raise ValueError(f"amazon.jobs refused {params}: {data['error']}")
+    return data
+
+
+def _amazon_facet(data: dict, name: str) -> dict[str, int]:
+    """A facet as {value: count}; amazon.jobs sends it as one-key objects."""
+    return {
+        k: int(v) for entry in (data.get("facets") or {}).get(name) or [] for k, v in entry.items()
+    }
+
+
+def _amazon_slice(url: str, company: str, category: str) -> tuple[list[JobPosting], bool]:
+    """One category's postings, and whether they are every one it stated."""
+    seen: dict[str, JobPosting] = {}
+    offset = 0
+    total: int | None = None
+    while True:
+        data = _amazon_get(
+            url,
+            {
+                "result_limit": min(_AMAZON_PAGE, _AMAZON_WINDOW - offset),
+                "offset": offset,
+                "category[]": category,
+                "sort": "recent",
+            },
+        )
+        page = data.get("jobs") or []
+        for j in page:
+            p = _posting(
+                company,
+                j.get("title"),
+                [json.loads(x).get("normalizedLocation") for x in j.get("locations") or []]
+                or [j.get("normalized_location")],
+                f"https://www.amazon.jobs{j['job_path']}" if j.get("job_path") else None,
+                posted_ts(j.get("posted_date") or ""),
+                raw={k: v for k, v in j.items() if k not in _AMAZON_TEXT},
+                description=_amazon_text(j),
+            )
+            if p:
+                seen[p.url] = p
+        if total is None:
+            total = int(data.get("hits") or 0)
+        offset += len(page)
+        if not page or offset >= min(total, _AMAZON_WINDOW):
+            # A posting that closes mid-read moves every later row up one, so
+            # a page boundary skips an open posting; that shows as fewer
+            # distinct postings than the first page's count. One that opens
+            # moves them down and repeats a row, which loses nothing.
+            return list(seen.values()), total < _AMAZON_WINDOW and len(seen) >= total
+
+
+def _amazon_text(j: dict) -> str:
+    sections = (
+        ("Basic qualifications", clean_html(j.get("basic_qualifications") or "")),
+        ("Preferred qualifications", clean_html(j.get("preferred_qualifications") or "")),
+    )
+    return join(
+        j.get("title"),
+        j.get("normalized_location"),
+        clean_html(j.get("description") or ""),
+        *[join(heading, text) for heading, text in sections if text],
+    )
 
 
 # --- markdown tables ---------------------------------------------------------

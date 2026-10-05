@@ -97,7 +97,17 @@ host's own rate drains.
 
 A 429 doubles the gap and defers the pull (`Deferred`: back to pending with
 `not_before`, no attempt spent); a good pull narrows it toward the floor in
-`ingest_host_pace_seconds`.
+`ingest_host_pace_seconds`. A response carrying `x-amzn-waf-action` is the
+same refusal: an AWS WAF challenge, which Eightfold answers with a 405.
+Counted as a failure it would switch the board off.
+
+**A pace key can cover many hosts.** One WAF fronts the Eightfold tenants on
+whatever domain they serve, and once it challenged an address on 2026-10-05,
+Lockheed Martin, Northrop Grumman, CACI, PayPal and Netflix all answered 405
+for a few minutes (Microsoft's tenant did not). So every Eightfold page waits
+on the `eightfold.ai` entry of `ingest_host_pace_seconds`, not on its own
+host's. About 110 requests a minute from one address held for ten minutes;
+the limit itself was not measured.
 
 apply.workable.com refused 143 of 172 boards the hour a bundle first pulled,
 on one address two workers shared. That is why the row is per address, and why
@@ -113,13 +123,18 @@ minus that text. Greenhouse (with `content=true`), Lever and Ashby carry the
 text; it is assembled by the same `core/fetching/ats.py` helpers the resolvers
 use, so it is what a per-posting fetch would have returned. ByteDance carries
 it too, as a description and a requirement, and Jibe and Goldman
-(`ats.goldman_text`) carry it; none of the three has a resolver. Workday,
+(`ats.goldman_text`) carry it; none of the three has a resolver. Amazon carries it too (the
+description and both qualification lists); it has no resolver, so a re-check
+fetches the posting page. Workday,
 SmartRecruiters, Oracle Recruiting, Workable and Apple list without the text,
 so their postings get it from the matching resolver, one call each, when a
 check needs it. An iCIMS portal card holds a snippet, which is not
 the text and is not stored; the iCIMS resolver reads the text from the
-posting's frame. Taleo and IBM list without the text and have no resolver, so
-their postings get it from the page fetch tiers below.
+posting's frame. Taleo, IBM and Eightfold list without the text and have no
+resolver, so their postings get it from the page fetch tiers below. An
+Eightfold resolver is not straightforward: tenants post on their own domains,
+so a posting URL does not say it is Eightfold's, and a 404 from a guessed
+endpoint on a host that is not would read as a closure.
 
 **A board whose page is a shell gets a resolver, because the static tier
 cannot tell a shell from a posting.** The static tier accepts any page whose
@@ -143,6 +158,10 @@ so a partial text is judged as if it were complete. IBM's index carries a
 the years of experience (posting 134730: 3,668 characters of a 7,663-character
 page, 2026-10-05), so `_ibm` stores neither. A Goldman role without
 `descriptionHtml` (5 of 953) stores none, rather than its title and place.
+A SuccessFactors feed item carries the posting's whole body as HTML, stored as
+title, location and the cleaned body (L3Harris posting 1407143600: 4,312
+characters against the page's 4,243-character job description, ending on the
+same line, 2026-10-05).
 
 Rows are aged out by `screened_retention_days` after the board stops listing
 them.
@@ -375,11 +394,65 @@ answers no rows and a count of 10,000, which a loop paging until an empty page
 reads as the end of the board. The fetcher never asks past the window, and a
 count at the window is a partial pull (2026-10-05; neither board was near it).
 
+**A page advances by the rows it returned, never by the size asked for.**
+Eightfold returns ten rows a page whatever `num` says, so a loop stepping by
+its own page size reads one row in ten. Its listings URL is the tenant's
+search endpoint with its `domain`
+(`https://jobs.northropgrumman.com/api/pcsx/search?domain=ngc.com`, or
+`/api/apply/v2/jobs?domain=` on a tenant still on the older site); a tenant
+answers one generation and refuses the other with 403. Both state the count
+on every page and answer an empty 200 past the end, with no result window up
+to 21,774 (Starbucks, 2026-10-05). The search does not hold its order from
+one request to the next: a posting re-dated or removed mid-pull shifts later
+pages, and the order also moves while the count holds still (Qualcomm stated
+2,052 on every page of two pulls on 2026-10-05, which held 2,009 and 2,043
+distinct postings). `_eightfold` raises `PartialPull` when it holds fewer
+distinct postings than the largest count any page stated, so on such a
+tenant closures mostly come from re-verification.
+
 **A listings URL names the board when the host does not.** Both ByteDance hosts
 serve both boards; the `website-path` header picks one, and without it the API
 answers 400. The listings URL therefore carries it as a query parameter
 (`?website-path=tiktok`, `?website-path=en`), sent as the header, and the
 fetcher refuses a value it has no public posting page for.
+
+**A capped count is not a count.** amazon.jobs stops a search at 10,000 rows
+and reports `hits` 10,000 for any search that reaches it, so the unfiltered
+search said 10,000 for a board of 22,295 (2026-10-05). It refuses a page
+past the window with HTTP 200, `hits` 0 and an `error`, so an unchecked loop
+reads that as the end of the board. `_amazon` reads one job category at a time,
+because categories partition the board and none was near the window (the
+largest held 3,279). The pull is complete only when the category counts sum to
+at least the country facet's total, every category's count is under the window,
+and each category returned as many distinct postings as its first page stated.
+That last check catches a posting closing mid-read, which moves every later row
+up and makes a page boundary skip an open one. Anything else raises
+`PartialPull`. When a format's total can equal its window, treat that total as
+"at least", never as the size of the board.
+
+**A feed that states no count is checked against a list that does.** A
+SuccessFactors Career Site Builder board (an employer's own domain, listings URL
+`https://<host>/services/rss/job/`) publishes one RSS feed with no total and no
+paging: it returns its first `rows` items, 20 without the parameter, and
+ignores `startrow`, `start`, `page` and `offset`. `_successfactors` asks for
+far more rows than any board holds, then compares the requisition ids against
+the site's `/sitemap.xml`, which lists the same `/job/` urls; an id in the
+sitemap and not in the feed raises `PartialPull`. The sitemap is either a
+`urlset` (its namespace varies) or a Google Base RSS feed of every posting read
+by `<link>` (Deere, Halliburton, Boston Scientific, SAP); any other shape
+proves nothing and the pull is partial. On 2026-10-05 the two agreed exactly
+on nine boards, 115 to 2,233 postings. Quirks the fetcher depends on:
+the feed answers 406 unless the request accepts `application/rss+xml`; a
+malformed query answers 200 with `<xml>Error: ...</xml>`, which is a failed
+pull; the feed spans every language the site posts in (Hensoldt's English and
+German search pages said 535 and 512, the feed held 1,051), so the search
+page's "Results 1 to 25 of N" is not the board's count; and an item's title is
+`<title> (<primary location>)`, and either half can carry parentheses of its
+own ("Saône (Haute), FR" on Deere), so the location is the balanced group that
+closes the heading.
+The legacy `career<N>.successfactors.com/career?company=` site has no
+unauthenticated list call (its search is a session-bound DWR call), so it is
+not a board format.
 
 ## A switched-off source holds no posting active
 

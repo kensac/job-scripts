@@ -9,6 +9,7 @@ that sat beside them.
 from __future__ import annotations
 
 import datetime
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 
@@ -333,6 +334,10 @@ def test_workday_pages_until_the_first_pages_total_and_builds_the_public_url(mon
             "oracle",
         ),
         ("https://apply.workable.com/api/v3/accounts/zego/jobs", "workable"),
+        # Eightfold serves from each tenant's own domain; the path is the mark.
+        ("https://jobs.northropgrumman.com/api/pcsx/search?domain=ngc.com", "eightfold"),
+        ("https://explore.jobs.netflix.net/api/apply/v2/jobs?domain=netflix.com", "eightfold"),
+        ("https://jobs.northropgrumman.com/careers?domain=ngc.com", "sheet_era"),
         (
             "https://api.lifeattiktok.com/api/v1/public/supplier/search/job/posts?website-path=tiktok",
             "bytedance",
@@ -351,6 +356,9 @@ def test_workday_pages_until_the_first_pages_total_and_builds_the_public_url(mon
         # The public pages of those three are not their APIs.
         ("https://jobs.smartrecruiters.com/BoschGroup", "sheet_era"),
         ("https://apply.workable.com/zego/", "sheet_era"),
+        ("https://www.amazon.jobs/en/search.json", "amazon"),
+        # A posting page on the same host is not the search.
+        ("https://www.amazon.jobs/en/jobs/10567672/data-center-operation-technician", "sheet_era"),
         (
             "https://textron.taleo.net/careersection/textron/jobsearch.ftl?lang=en&portal=8140753014",
             "taleo",
@@ -369,6 +377,9 @@ def test_workday_pages_until_the_first_pages_total_and_builds_the_public_url(mon
         # IBM's and Goldman's public search pages are not their APIs.
         ("https://www.ibm.com/careers/search", "sheet_era"),
         ("https://higher.gs.com/results", "sheet_era"),
+        ("https://jobs.l3harris.com/services/rss/job/", "successfactors"),
+        # A Career Site Builder search page is not its feed.
+        ("https://jobs.l3harris.com/search/?q=", "sheet_era"),
     ],
 )
 def test_kind_is_read_off_the_url(url, expected):
@@ -388,6 +399,9 @@ def test_boards_that_never_name_a_company_are_the_ones_that_need_one():
         "icims",
         "ibm",
         "goldman",
+        "amazon",
+        "successfactors",
+        "eightfold",
     } == boards.NEEDS_COMPANY
     # Every board that needs a company is one whose absence closes a posting.
     assert boards.NEEDS_COMPANY <= boards.AUTHORITATIVE
@@ -1510,3 +1524,458 @@ def test_a_goldman_pull_short_of_its_count_is_a_partial_pull(monkeypatch):
     with pytest.raises(boards.PartialPull) as raised:
         boards.fetch_listings("https://api-higher.gs.com/gateway/api/v1/graphql", "Goldman Sachs")
     assert len(raised.value.postings) == 3
+
+
+# www.amazon.jobs/en/search.json, 2026-10-05: one row, its text trimmed.
+AMAZON_ROW = {
+    "basic_qualifications": (
+        "- Valid and active driver's license<br/>"
+        "- Experience with computer hardware troubleshooting and repair"
+    ),
+    "business_category": "aws",
+    "company_name": "Amazon Corporate Services Pty Ltd",
+    "country_code": "AUS",
+    "description": (
+        "G'day! You've found an opportunity that could define your next chapter.<br/><br/>"
+        "Applicants must be Australian citizens"
+    ),
+    "description_short": "G'day! You've found an opportunity that could define your next chapter.",
+    "id_icims": "10567672",
+    "job_category": "Operations, IT, & Support Engineering",
+    "job_path": "/en/jobs/10567672/data-center-operation-technician",
+    "location": "AU, VIC, Melbourne",
+    "locations": [
+        '{"normalizedStateName":"Victoria","normalizedCountryCode":"AUS","city":"Melbourne",'
+        '"countryIso2a":"AU","type":"ONSITE","normalizedLocation":"Melbourne, Victoria, AUS",'
+        '"location":"AU, VIC, Melbourne","region":"VIC"}'
+    ],
+    "normalized_location": "Melbourne, Victoria, AUS",
+    "posted_date": "October  2, 2026",
+    "preferred_qualifications": "- Experience in data center",
+    "title": "Data Center Operation Technician ",
+    "url_next_step": "https://account.amazon.jobs/jobs/10567672/apply",
+}
+
+AMAZON_URL = "https://www.amazon.jobs/en/search.json"
+
+
+def _amazon_board(by_category: dict[str, int], countries: int | None = None, shift=()):
+    """amazon.jobs as measured on 2026-10-05: at most 100 rows a request and
+    none past row 10,000, each refused with HTTP 200 and an error; `hits`
+    stops at 10,000; a facet is a list of one-key objects. A category in
+    `shift` loses its first row after the first page, as a posting closing
+    mid-read does, so every later page starts one row further on."""
+    rows = {
+        c: [{"title": f"{c} {i}", "job_path": f"/en/jobs/{c}-{i}/x"} for i in range(n)]
+        for c, n in by_category.items()
+    }
+    total = sum(by_category.values())
+    asked = []
+
+    def get(url, params, **kw):
+        asked.append(params)
+        limit, offset = int(params["result_limit"]), int(params.get("offset", 0))
+        if limit > 100:
+            error = "Result limit cannot be greater than 100"
+            return _Resp({"error": error, "hits": 0, "jobs": None})
+        if offset + limit > 10_000:
+            error = "Cannot return more than 10000 results at once"
+            return _Resp({"error": error, "hits": 0, "jobs": None})
+        category = params.get("category[]")
+        found = rows[category] if category else [r for rs in rows.values() for r in rs]
+        if category in shift and offset:
+            found = found[1:]
+        return _Resp(
+            {
+                "error": None,
+                "hits": min(len(rows[category]) if category else total, 10_000),
+                "jobs": found[offset : offset + limit],
+                "facets": {
+                    "category_facet": [{c: n} for c, n in by_category.items()],
+                    "normalized_country_code_facet": [
+                        {"USA": total if countries is None else countries}
+                    ],
+                },
+            }
+        )
+
+    return get, asked
+
+
+def test_amazon_reads_a_board_past_its_window_one_category_at_a_time(monkeypatch):
+    """22,295 postings on 2026-10-05 against a search that stops at 10,000:
+    paging the unfiltered search returns 10,000 and retires the rest."""
+    get, asked = _amazon_board({"Software Development": 6_000, "Operations": 4_100, "Legal": 1})
+    monkeypatch.setattr(boards._session, "get", get)
+    out = boards.fetch_listings(AMAZON_URL, "Amazon")
+    assert len({p.url for p in out}) == 10_101
+    assert all(int(p["result_limit"]) <= 100 for p in asked)
+
+
+def test_an_amazon_row_becomes_a_posting_with_its_full_text(monkeypatch):
+    def get(url, params, **kw):
+        return _Resp(
+            {
+                "error": None,
+                "hits": 1,
+                "jobs": [AMAZON_ROW],
+                "facets": {
+                    "category_facet": [{"Operations, IT, & Support Engineering": 1}],
+                    "normalized_country_code_facet": [{"AUS": 1}],
+                },
+            }
+        )
+
+    monkeypatch.setattr(boards._session, "get", get)
+    [p] = boards.fetch_listings(AMAZON_URL, "Amazon")
+    assert (p.company, p.title, p.locations) == (
+        "Amazon",
+        "Data Center Operation Technician",
+        ["Melbourne, Victoria, AUS"],
+    )
+    assert p.url == "https://www.amazon.jobs/en/jobs/10567672/data-center-operation-technician"
+    assert p.date_posted == int(datetime.datetime(2026, 10, 2, tzinfo=datetime.UTC).timestamp())
+    assert "Applicants must be Australian citizens" in p.description
+    assert "Basic qualifications\n\n- Valid and active driver's license" in p.description
+    assert "Preferred qualifications\n\n- Experience in data center" in p.description
+    assert "description" not in p.raw and "basic_qualifications" not in p.raw
+    assert p.raw["id_icims"] == "10567672"
+
+
+@pytest.mark.parametrize(
+    "by_category, countries, shift",
+    [
+        # A category at the window cannot be read whole.
+        ({"Software Development": 10_050, "Legal": 1}, None, ()),
+        # The country facet counts a posting no category holds.
+        ({"Legal": 3}, 4, ()),
+        # A posting closed mid-read and the later pages skipped an open one.
+        ({"Legal": 150}, None, ("Legal",)),
+    ],
+)
+def test_an_amazon_pull_that_cannot_prove_it_saw_everything_is_partial(
+    monkeypatch, by_category, countries, shift
+):
+    get, _ = _amazon_board(by_category, countries, shift)
+    monkeypatch.setattr(boards._session, "get", get)
+    with pytest.raises(boards.PartialPull) as raised:
+        boards.fetch_listings(AMAZON_URL, "Amazon")
+    assert raised.value.postings
+
+
+# SuccessFactors Career Site Builder, as jobs.ulalaunch.com, jobs.l3harris.com
+# and jobs.deere.com answered on 2026-10-05. The first three items are verbatim
+# from those feeds (descriptions trimmed); the rest are the same shape with
+# their own ids.
+_SF_VERBATIM = [
+    (
+        "Program Control Analyst 4 (Centennial, CO, US, 80112)",
+        "https://jobs.ulalaunch.com/job/Centennial-Program-Control-Analyst-4-CO-80112/1407431200/"
+        "?feedId=null&amp;utm_source=J2WRSS&amp;utm_medium=rss&amp;utm_campaign=J2W_RSS",
+        "Sun, 04 Oct 2026 7:00:00 GMT",
+        "<p><b>Requisition ID: </b>1858</p>\n\n<p><b>Location: </b>ULA - Denver<b> </b></p>",
+    ),
+    (
+        "Sr Spec, Quality Engrg (Supplier Quality) (Rochester, NY, US, 14623)",
+        "https://jobs.l3harris.com/job/Rochester-Sr-Spec%2C-Quality-Engrg-%28Supplier-Quality%29"
+        "-NY-14623/1436563800/?feedId=null&amp;utm_source=J2WRSS&amp;utm_medium=rss&amp;utm_campaign=J2W_RSS",
+        "Mon, 05 Oct 2026 0:00:00 GMT",
+        "<p>Job Title: Sr Spec, Quality Engrg</p>",
+    ),
+    (
+        "Stagiaire Ingénieur Test et Mesure (F/H) (Arc Les Gray Cedex, Saône (Haute), FR, 70103)",
+        "https://jobs.deere.com/eightfold/job/Arc-Les-Gray-Cedex-Stagiaire-Ing%C3%A9nieur-Test-et"
+        "-Mesure-%28FH%29-Sa%C3%B4n-70103/1436128200/?feedId=null&amp;utm_source=J2WRSS"
+        "&amp;utm_medium=rss&amp;utm_campaign=J2W_RSS",
+        "Fri, 02 Oct 2026 0:00:00 GMT",
+        "<p>Stage.</p>",
+    ),
+]
+# 25 postings, more than the 20 the feed returns when `rows` is not asked for.
+_SF_ITEMS = _SF_VERBATIM + [
+    (
+        f"Structural Analyst {n} (Decatur, AL, US, 35601)",
+        f"https://jobs.ulalaunch.com/job/Decatur-Structural-Analyst-{n}-AL-35601/14128{n:05d}/"
+        "?feedId=null&amp;utm_source=J2WRSS",
+        "Sat, 03 Oct 2026 7:00:00 GMT",
+        "<p>Analyse structures.</p>",
+    )
+    for n in range(22)
+]
+
+
+def _sf_feed(items):
+    body = "".join(
+        f"<item><title><![CDATA[{t}]]></title><description><![CDATA[{d}]]></description>"
+        f"<pubDate>{p}</pubDate><link>{u}</link><guid>{u}</guid></item>"
+        for t, u, p, d in items
+    )
+    return (
+        '<?xml version="1.0" encoding="UTF-8" ?><rss version=\'2.0\' '
+        "xmlns:atom='http://www.w3.org/2005/Atom'><channel><title>United Launch Alliance - "
+        f"Custom Search </title><ttl>720</ttl> {body}</channel></rss>"
+    ).encode()
+
+
+def _sf_sitemap(items, shape):
+    if shape == "urlset":
+        # ULA's urlset is in Google's old namespace, not sitemaps.org's.
+        locs = "".join(
+            f"<url><loc>{u.split('?')[0]}</loc><lastmod>2026-10-03</lastmod></url>"
+            for _, u, _, _ in items
+        )
+        return (
+            '<?xml version="1.0" encoding="UTF-8"?><urlset '
+            f'xmlns="http://www.google.com/schemas/sitemap/0.9">{locs}</urlset>'
+        ).encode()
+    # Deere, Halliburton, Boston Scientific and SAP serve a Google Base feed of
+    # every posting there instead, its urls in <link>, and a channel <link>
+    # that is not a posting.
+    rows = "".join(
+        f"<item><title>{t.replace('&', '&amp;')}</title><link>{u.split('?')[0]}</link>"
+        f"<g:id>{u.split('?')[0].rstrip('/').rsplit('/', 1)[-1]}</g:id></item>"
+        for t, u, _, _ in items
+    )
+    return (
+        '<?xml version="1.0" encoding="UTF-8" ?><rss version="2.0" '
+        'xmlns:g="http://base.google.com/ns/1.0"><channel><title>Jobs at John Deere</title>'
+        f"<link>https://jobs.deere.com/</link>{rows}</channel></rss>"
+    ).encode()
+
+
+class _Bytes(_Resp):
+    @property
+    def content(self):
+        return self.body
+
+
+def _sf_board(monkeypatch, feed_items, sitemap_items, feed=None, shape="urlset"):
+    """The feed as it behaves live: the first `rows` items, 20 without it,
+    startrow and every other paging parameter ignored, and 406 unless the
+    request accepts RSS."""
+    asked = []
+
+    def get(url, headers=None, **kw):
+        asked.append(url)
+        parsed = urlparse(url)
+        if parsed.path == "/sitemap.xml":
+            return _Bytes(_sf_sitemap(sitemap_items, shape))
+        assert "rss" in (headers or {}).get("Accept", ""), "the feed answers 406"
+        rows = int((parse_qs(parsed.query).get("rows") or ["20"])[0])
+        return _Bytes(feed if feed is not None else _sf_feed(feed_items[:rows]))
+
+    monkeypatch.setattr(boards._session, "get", get)
+    return asked
+
+
+@pytest.mark.parametrize("shape", ["urlset", "rss"])
+def test_successfactors_reads_every_posting_in_one_call_and_proves_it_on_the_sitemap(
+    monkeypatch, shape
+):
+    asked = _sf_board(monkeypatch, _SF_ITEMS, _SF_ITEMS, shape=shape)
+    out = boards.fetch_listings("https://jobs.ulalaunch.com/services/rss/job/", "ULA")
+    # All 25: a fetcher that leaves out `rows` gets 20, and one that pages by
+    # startrow gets the first page again, and the sitemap says 25.
+    assert len({p.url for p in out}) == 25
+    assert asked[0] == "https://jobs.ulalaunch.com/sitemap.xml"
+    a, b, c = out[:3]
+    assert (a.title, a.locations) == ("Program Control Analyst 4", ["Centennial, CO, US, 80112"])
+    # The title's own parentheses stay in the title; the last group is the place.
+    assert (b.title, b.locations) == (
+        "Sr Spec, Quality Engrg (Supplier Quality)",
+        ["Rochester, NY, US, 14623"],
+    )
+    # And the place can carry its own: the group that closes the heading.
+    assert (c.title, c.locations) == (
+        "Stagiaire Ingénieur Test et Mesure (F/H)",
+        ["Arc Les Gray Cedex, Saône (Haute), FR, 70103"],
+    )
+    # The page a person opens, without the feed's tracking parameters.
+    assert a.url == (
+        "https://jobs.ulalaunch.com/job/Centennial-Program-Control-Analyst-4-CO-80112/1407431200"
+    )
+    assert a.date_posted == int(datetime.datetime(2026, 10, 4, 7, tzinfo=datetime.UTC).timestamp())
+    assert a.company == "ULA"
+    assert a.description == (
+        "Program Control Analyst 4\n\nCentennial, CO, US, 80112\n\n"
+        "Requisition ID: \n1858\n\nLocation: \nULA - Denver"
+    )
+
+
+@pytest.mark.parametrize("shape", ["urlset", "rss"])
+def test_successfactors_is_partial_when_the_sitemap_lists_more_than_the_feed(monkeypatch, shape):
+    # A feed that stops short of the board, as one capped above 2,233 would.
+    _sf_board(monkeypatch, _SF_ITEMS[:24], _SF_ITEMS, shape=shape)
+    with pytest.raises(boards.PartialPull) as raised:
+        boards.fetch_listings("https://jobs.ulalaunch.com/services/rss/job/", "ULA")
+    assert len(raised.value.postings) == 24
+
+
+def test_successfactors_query_error_is_a_failed_pull_not_an_empty_board(monkeypatch):
+    error = b"<xml>Error: There is a problem with a jobs query: Query execution failed</xml>"
+    _sf_board(monkeypatch, [], [], feed=error)
+    with pytest.raises(ValueError):
+        boards.fetch_listings("https://jobs.ulalaunch.com/services/rss/job/", "ULA")
+
+
+def test_successfactors_refuses_a_document_that_declares_entities(monkeypatch):
+    bomb = (
+        b'<?xml version="1.0"?><!DOCTYPE rss [<!ENTITY a "aaaaaaaaaa">'
+        b'<!ENTITY b "&a;&a;&a;&a;&a;&a;&a;&a;&a;&a;">]><rss><channel/></rss>'
+    )
+    _sf_board(monkeypatch, [], [], feed=bomb)
+    with pytest.raises(ValueError, match="DOCTYPE"):
+        boards.fetch_listings("https://jobs.ulalaunch.com/services/rss/job/", "ULA")
+
+
+# jobs.northropgrumman.com/api/pcsx/search?domain=ngc.com, first row, 2026-10-05.
+NGC_ROW = {
+    "id": 1340074304655,
+    "displayJobId": "R10250443",
+    "name": "U103 PRODUCTION COORD A",
+    "locations": ["United States-California-Sunnyvale"],
+    "standardizedLocations": ["Sunnyvale, CA, US"],
+    "postedTs": 1791158400,
+    "solrScore": None,
+    "stars": 0,
+    "department": "NGC - Non - NGJF Union",
+    "creationTs": 1789689600,
+    "isHot": 0,
+    "workLocationOption": "onsite",
+    "locationFlexibility": None,
+    "atsJobId": "R10250443",
+    "positionUrl": "/careers/job/1340074304655",
+}
+
+
+def _pcsx_board(rows: list[dict], asked: list[str]):
+    """The live contract, measured on Northrop, Lockheed and Starbucks on
+    2026-10-05: ten rows from `start` whatever `num` says, the count on every
+    page, and an empty page (still 200, still the count) past the end."""
+
+    def get(url, **kw):
+        asked.append(url)
+        start = int(parse_qs(urlparse(url).query)["start"][0])
+        return _Resp(
+            {
+                "status": 200,
+                "error": {"message": "", "body": ""},
+                "data": {"positions": rows[start : start + 10], "count": len(rows)},
+            }
+        )
+
+    return get
+
+
+def _ngc_rows(n: int) -> list[dict]:
+    return [
+        NGC_ROW | {"id": i, "name": f"Engineer {i}", "positionUrl": f"/careers/job/{i}"}
+        for i in range(n)
+    ]
+
+
+def test_eightfold_pages_by_the_ten_rows_it_returns_until_an_empty_page(monkeypatch):
+    asked: list[str] = []
+    monkeypatch.setattr(boards._session, "get", _pcsx_board(_ngc_rows(23), asked))
+    out = boards.fetch_listings(
+        "https://jobs.northropgrumman.com/api/pcsx/search?domain=ngc.com", "Northrop Grumman"
+    )
+    # Every row, so a loop that advanced by a page size it asked for, or
+    # stopped on a short first page, fails here.
+    assert [p.title for p in out] == [f"Engineer {i}" for i in range(23)]
+    assert [parse_qs(urlparse(u).query)["start"] for u in asked] == [
+        ["0"],
+        ["10"],
+        ["20"],
+        ["23"],
+    ]
+    assert all(parse_qs(urlparse(u).query)["domain"] == ["ngc.com"] for u in asked)
+    p = out[0]
+    assert p.url == "https://jobs.northropgrumman.com/careers/job/0"
+    assert p.company == "Northrop Grumman"
+    # The tenant's own place, not standardizedLocations, which Eightfold
+    # derives and gets wrong (Lockheed's Dartmouth, Nova Scotia read
+    # "Dartmouth, England, GB").
+    assert p.locations == ["United States-California-Sunnyvale"]
+    assert p.date_posted == 1791158400
+    assert p.raw is not None and p.raw["atsJobId"] == "R10250443"
+
+
+def test_an_eightfold_pull_that_lost_a_posting_to_a_shifting_page_is_partial(monkeypatch):
+    """Microsoft, 2026-10-05: one 3-minute pull read 2,300 rows of which 2,256
+    were distinct against a stated 2,297. Here the posting at row 12 is
+    re-dated to the top after the first page is read: every later row shifts
+    down by one, row 9 comes back on the second page and row 12 is never
+    seen. The count never changes, so only counting distinct rows catches it."""
+    rows = _ngc_rows(15)
+    asked: list[str] = []
+    board = _pcsx_board(rows, asked)
+
+    def get(url, **kw):
+        if len(asked) == 1:
+            rows.insert(0, rows.pop(12))
+        return board(url, **kw)
+
+    monkeypatch.setattr(boards._session, "get", get)
+    with pytest.raises(boards.PartialPull) as raised:
+        boards.fetch_listings("https://x.eightfold.ai/api/pcsx/search?domain=x.com", "X")
+    assert sorted(int(p.url.rsplit("/", 1)[1]) for p in raised.value.postings) == [
+        i for i in range(15) if i != 12
+    ]
+
+
+def test_eightfold_v2_reads_its_own_shape(monkeypatch):
+    # explore.jobs.netflix.net/api/apply/v2/jobs?domain=netflix.com, 2026-10-05.
+    row = {
+        "id": 790298014263,
+        "name": "AI Engineer 6 - AI Foundation & Tooling, Ads Platform",
+        "posting_name": "AI Engineer 6 - AI Foundation & Tooling, Ads Platform",
+        "location": "Remote, United States",
+        "locations": ["Remote, United States"],
+        "hot": 1,
+        "department": "Data & Insights",
+        "business_unit": "Streaming",
+        "t_update": 1779148800,
+        "t_create": 1721692800,
+        "ats_job_id": "AJRT30201",
+        "display_job_id": "AJRT30201",
+        "type": "ATS",
+        "id_locale": "AJRT30201-en-US",
+        "job_description": "",
+        "locale": "en-US",
+        "stars": 0,
+        "medallionProgram": None,
+        "location_flexibility": None,
+        "work_location_option": "onsite",
+        "canonicalPositionUrl": "https://explore.jobs.netflix.net/careers/job/790298014263",
+        "isPrivate": False,
+    }
+
+    def get(url, **kw):
+        first = parse_qs(urlparse(url).query)["start"] == ["0"]
+        return _Resp({"domain": "netflix.com", "positions": [row] if first else [], "count": 1})
+
+    monkeypatch.setattr(boards._session, "get", get)
+    (p,) = boards.fetch_listings(
+        "https://explore.jobs.netflix.net/api/apply/v2/jobs?domain=netflix.com", "Netflix"
+    )
+    assert p.url == "https://explore.jobs.netflix.net/careers/job/790298014263"
+    assert (p.title, p.locations, p.date_posted) == (
+        "AI Engineer 6 - AI Foundation & Tooling, Ads Platform",
+        ["Remote, United States"],
+        1721692800,
+    )
+
+
+def test_every_eightfold_tenant_shares_one_pace(monkeypatch):
+    """One WAF fronts tenants on different domains, so two tenants' pages wait
+    on each other as one host's would."""
+    slept = []
+    monkeypatch.setattr(boards.time, "sleep", lambda s: slept.append(round(s, 1)))
+    monkeypatch.setattr(boards._session, "get", _pcsx_board([], []))
+    monkeypatch.setattr(boards, "_PACE_SECONDS", {})
+    monkeypatch.setattr(boards, "_last_call", {})
+    boards.set_pace({"eightfold.ai": 1})
+    boards.fetch_listings("https://jobs.northropgrumman.com/api/pcsx/search?domain=ngc.com", "N")
+    boards.fetch_listings("https://caci.eightfold.ai/api/pcsx/search?domain=caci.com", "C")
+    assert slept and 0.0 < slept[-1] <= 1.0
