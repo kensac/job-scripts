@@ -55,6 +55,7 @@ _INSERT_COLUMNS = [
     "cost_usd",
     "worker",
     "batch_id",
+    "request_sha256",
 ]
 
 _WORKER = os.environ.get("JOBTRACKER_WORKER_NAME") or socket.gethostname()
@@ -130,6 +131,7 @@ def ai_result_row(
     config_name: str | None = None,
     batch_id: str | None = None,
     cache_write_tokens: int | None = None,
+    request_sha256: str | None = None,
 ) -> dict[str, Any]:
     row = {
         # created_at is DELIBERATELY ABSENT: the column defaults to Postgres
@@ -184,6 +186,7 @@ def ai_result_row(
         ),
         "worker": _WORKER,
         "batch_id": batch_id,
+        "request_sha256": request_sha256,
     }
     return row
 

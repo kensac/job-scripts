@@ -112,6 +112,21 @@ build the market table from a smaller slice than the filters admit. If the
 verified-open cost still reads as too high, that is the next step, and it
 is the same one-line change to the same two selections.
 
+**The same question is not bought twice.** A verification verdict records
+`request_sha256`, the hash of everything that could change its answer: model,
+effort, schema, instructions and the exact page text (`tasks/verify.py`,
+`question_sha256`, hashed from the request as submitted). Re-verification
+re-fetches the page and, where the latest closed and clearance verdicts both
+answered the identical question, writes the standing answer again under
+`config_name = 'reverify-unchanged'` with no model and no tokens, the shape
+`record_manual` uses for a verdict no call produced, so spend and call counts
+stay true. NULL never matches: legacy and manual verdicts are asked again,
+and that answer carries the hash forward. A forced sweep always pays. Measured
+for the week to 2026-10-04: 5,780 of 7,244 re-checks sent byte-identical text
+to the same model, and 5,776 got back the answer already held. A new purpose
+that re-asks on a timer gets the same treatment rather than a second
+mechanism.
+
 ## Time
 
 Containers run on a local timezone by deliberate convention; hosts and the
