@@ -363,6 +363,11 @@ def test_workday_pages_until_the_first_pages_total_and_builds_the_public_url(mon
         ("https://jobs.apple.com/api/v1/search", "apple"),
         # Apple's public search page is not its API.
         ("https://jobs.apple.com/en-us/search", "sheet_era"),
+        ("https://www-api.ibm.com/search/api/v2", "ibm"),
+        ("https://api-higher.gs.com/gateway/api/v1/graphql", "goldman"),
+        # IBM's and Goldman's public search pages are not their APIs.
+        ("https://www.ibm.com/careers/search", "sheet_era"),
+        ("https://higher.gs.com/results", "sheet_era"),
     ],
 )
 def test_kind_is_read_off_the_url(url, expected):
@@ -380,6 +385,8 @@ def test_boards_that_never_name_a_company_are_the_ones_that_need_one():
         "apple",
         "bytedance",
         "icims",
+        "ibm",
+        "goldman",
     } == boards.NEEDS_COMPANY
     # Every board that needs a company is one whose absence closes a posting.
     assert boards.NEEDS_COMPANY <= boards.AUTHORITATIVE
@@ -1285,3 +1292,220 @@ def test_jibe_short_of_its_stated_total_is_partial(monkeypatch):
     with pytest.raises(boards.PartialPull) as raised:
         boards.fetch_listings("https://careers.spiritaero.com/api/jobs", "")
     assert len(raised.value.postings) == 2
+
+
+# www-api.ibm.com/search/api/v2 on 2026-10-05: verbatim hits, in _id order.
+IBM_HITS = [
+    {
+        "_id": "0181e51151251524430513cb843db9ee33255526dbc24195bbb2d832f9193640",
+        "_source": {
+            "title": "Product Management Intern | Infrastructure Growth & Innovation - "
+            "Poughkeepsie, NY / Austin, TX - 2027",
+            "url": "https://careers.ibm.com/careers/JobDetail?jobId=131158",
+            "field_text_01": 131158,
+            "field_keyword_05": "United States",
+            "field_keyword_08": "Product Management",
+            "field_keyword_17": "Hybrid",
+            "field_keyword_18": "Internship",
+            "field_keyword_19": "Multiple Cities",
+        },
+    },
+    {
+        "_id": "0630b4c19c3ac0f2d74de9b57566074deaf113cfcae7def7a35ee2e81e0e9533",
+        "_source": {
+            "title": "Associate Threat Analyst Researcher and Consultant 2027",
+            "url": "https://careers.ibm.com/careers/JobDetail?jobId=128676",
+            "field_text_01": 128676,
+            "field_keyword_05": "United States",
+            "field_keyword_08": "Consulting",
+            "field_keyword_17": "",
+            "field_keyword_18": "Entry Level",
+            "field_keyword_19": "Austin, US",
+        },
+    },
+    {
+        "_id": "0f4831b26e3dd9abad68616071fe498630390e8f5f1090e589c68e94ee552972",
+        "_source": {
+            "title": "Client Engineering",
+            "url": "https://careers.ibm.com/careers/JobDetail?jobId=129622",
+            "field_text_01": 129622,
+            "field_keyword_05": "Switzerland",
+            "field_keyword_08": "Sales",
+            "field_keyword_17": "Hybrid",
+            "field_keyword_18": "Entry Level",
+            "field_keyword_19": "Zurich, CH",
+        },
+    },
+]
+
+
+def _ibm_search(hits, stated, asked):
+    """The search as measured: a size above 100 is a 400, and only a
+    search_after on _id moves through the index. `from` is ignored here, so a
+    walk by it reads the first page again, as the live walk re-read rows."""
+
+    def post(url, json, **kw):
+        asked.append({**json})
+        if json["size"] > 100:
+            raise boards.requests.HTTPError("400 Parameter 'size' has an invalid value")
+        cursor = "search_after" in json and json.get("sort") == [{"_id": "asc"}]
+        after = json["search_after"][0] if cursor else ""
+        page = [{**h, "sort": [h["_id"]]} for h in hits if h["_id"] > after][: json["size"]]
+        return _Resp({"hits": {"total": {"value": stated, "relation": "eq"}, "hits": page}})
+
+    return post
+
+
+def test_ibm_walks_the_index_by_cursor_and_links_the_public_posting(monkeypatch):
+    asked = []
+    monkeypatch.setattr(boards, "_IBM_PAGE", 1)
+    monkeypatch.setattr(boards._session, "post", _ibm_search(IBM_HITS, 3, asked))
+    out = boards.fetch_listings("https://www-api.ibm.com/search/api/v2", "IBM")
+    assert [(p.title, p.locations) for p in out] == [
+        (
+            "Product Management Intern | Infrastructure Growth & Innovation - "
+            "Poughkeepsie, NY / Austin, TX - 2027",
+            # "Multiple Cities" is not a place; the country is.
+            ["United States"],
+        ),
+        ("Associate Threat Analyst Researcher and Consultant 2027", ["Austin, US"]),
+        ("Client Engineering", ["Zurich, CH"]),
+    ]
+    assert out[1].url == "https://careers.ibm.com/careers/JobDetail?jobId=128676"
+    assert all(p.company == "IBM" for p in out)
+    # The listing carries no complete text, so none is stored as the posting.
+    assert [p.description for p in out] == ["", "", ""]
+    assert [a.get("search_after") for a in asked] == [
+        None,
+        [IBM_HITS[0]["_id"]],
+        [IBM_HITS[1]["_id"]],
+        [IBM_HITS[2]["_id"]],
+    ]
+
+
+def test_an_ibm_cursor_that_ends_short_of_the_stated_count_is_a_partial_pull(monkeypatch):
+    monkeypatch.setattr(boards, "_IBM_PAGE", 1)
+    monkeypatch.setattr(boards._session, "post", _ibm_search(IBM_HITS, 4, []))
+    with pytest.raises(boards.PartialPull) as raised:
+        boards.fetch_listings("https://www-api.ibm.com/search/api/v2", "IBM")
+    assert len(raised.value.postings) == 3
+
+
+# api-higher.gs.com roleSearch on 2026-10-05: verbatim roles, each with the
+# experience it was listed under, the first description trimmed.
+GOLDMAN_ROLES = [
+    (
+        "CAMPUS",
+        {
+            "roleId": "182810_GS_CAMPUS",
+            "jobTitle": "2027 | Americas | New York City Area | Executive Office, "
+            "Sustainable Finance Group | Summer Analyst",
+            "corporateTitle": "Summer Analyst",
+            "jobFunction": "",
+            "division": "Executive Office Division",
+            "status": "POSTED",
+            "lastPostedDate": "2026-10-02T18:48:53.034Z",
+            "locations": [
+                {"primary": True, "state": "NY", "country": "United States", "city": "New York"}
+            ],
+            "compensation": {"minSalary": 80000.0, "maxSalary": 110000.0, "currency": "USD"},
+            "descriptionHtml": "\n<p><b><u>About the program</u></b></p>\n<p>Our Summer "
+            "Analyst Program is a nine to ten week summer internship.</p>",
+            "externalSource": {"sourceId": "182810"},
+        },
+    ),
+    (
+        "PROFESSIONAL",
+        {
+            "roleId": "183334_GS_MID_CAREER",
+            "jobTitle": "Engineering-L2-Bengaluru- Vice president-Software Engineering",
+            "corporateTitle": "Vice President",
+            "status": "POSTED",
+            "lastPostedDate": "2026-10-01T05:58:03.663Z",
+            "locations": [
+                {"primary": True, "state": "Karnataka", "country": "India", "city": "Bengaluru"}
+            ],
+            "compensation": {"minSalary": None, "maxSalary": None, "currency": None},
+            "descriptionHtml": None,
+            "externalSource": {"sourceId": "183334"},
+        },
+    ),
+    (
+        "EARLY_CAREER",
+        {
+            "roleId": "182221_GS_EARLY_CAREER",
+            "jobTitle": "Marcus by Goldman Sachs, Complaints Team Leader, Analyst | Draper, UT",
+            "corporateTitle": "Call Center Representative",
+            "status": "POSTED",
+            "lastPostedDate": "2026-09-29T19:50:16.032Z",
+            "locations": [
+                {"primary": True, "state": "TX", "country": "United States", "city": "Richardson"},
+                {"primary": False, "state": "UT", "country": "United States", "city": "Draper"},
+            ],
+            "compensation": {"minSalary": None, "maxSalary": None, "currency": "USD"},
+            "descriptionHtml": "<p>Lead the complaints team.</p>",
+            "externalSource": {"sourceId": "182221"},
+        },
+    ),
+]
+
+
+def _goldman_search(roles, stated, asked):
+    """roleSearch as measured: pages numbered from 0, a pageSize above 250
+    refused as HTTP 200 with errors and no data, and only the experiences
+    asked for in the result."""
+
+    def post(url, json, **kw):
+        query = json["variables"]["searchQueryInput"]
+        asked.append(query)
+        size, number = query["page"]["pageSize"], query["page"]["pageNumber"]
+        if size > 250:
+            return _Resp({"errors": [{"message": "Validation Exception."}], "data": None})
+        rows = [r for e, r in roles if e in query["experiences"]]
+        page = rows[number * size : (number + 1) * size]
+        return _Resp({"data": {"roleSearch": {"totalCount": stated, "items": page}}})
+
+    return post
+
+
+def test_goldman_pages_from_zero_across_every_public_experience(monkeypatch):
+    asked = []
+    monkeypatch.setattr(boards, "_GOLDMAN_PAGE", 1)
+    monkeypatch.setattr(boards._session, "post", _goldman_search(GOLDMAN_ROLES, 3, asked))
+    out = boards.fetch_listings("https://api-higher.gs.com/gateway/api/v1/graphql", "Goldman Sachs")
+    assert [(p.url, p.locations) for p in out] == [
+        ("https://higher.gs.com/roles/182810", ["New York, NY, United States"]),
+        ("https://higher.gs.com/roles/183334", ["Bengaluru, Karnataka, India"]),
+        (
+            "https://higher.gs.com/roles/182221",
+            ["Richardson, TX, United States", "Draper, UT, United States"],
+        ),
+    ]
+    assert out[0].date_posted == 1790966933
+    assert out[0].description.startswith(
+        "2027 | Americas | New York City Area | Executive Office, Sustainable Finance Group | "
+        "Summer Analyst\n\nNew York, NY, United States\n\nSummer Analyst\n\n"
+        "USD 80,000 - 110,000\n\nAbout the program"
+    )
+    assert out[0].description.endswith("nine to ten week summer internship.")
+    # A role whose listing carries no description stores none, rather than
+    # its title and place passing for the posting's text.
+    assert out[1].description == ""
+    assert out[2].raw is not None and out[2].raw["roleId"] == "182221_GS_EARLY_CAREER"
+    assert "descriptionHtml" not in out[2].raw
+    assert all(p.company == "Goldman Sachs" for p in out)
+    assert [q["page"]["pageNumber"] for q in asked] == [0, 1, 2, 3]
+
+
+def test_a_refused_goldman_search_fails_the_pull(monkeypatch):
+    monkeypatch.setattr(boards, "_GOLDMAN_PAGE", 251)
+    monkeypatch.setattr(boards._session, "post", _goldman_search(GOLDMAN_ROLES, 3, []))
+    with pytest.raises(RuntimeError, match="roleSearch refused"):
+        boards.fetch_listings("https://api-higher.gs.com/gateway/api/v1/graphql", "Goldman Sachs")
+
+
+def test_a_goldman_pull_short_of_its_count_is_a_partial_pull(monkeypatch):
+    monkeypatch.setattr(boards._session, "post", _goldman_search(GOLDMAN_ROLES, 4, []))
+    with pytest.raises(boards.PartialPull) as raised:
+        boards.fetch_listings("https://api-higher.gs.com/gateway/api/v1/graphql", "Goldman Sachs")
+    assert len(raised.value.postings) == 3

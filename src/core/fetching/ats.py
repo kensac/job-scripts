@@ -127,6 +127,27 @@ def ashby_text(job: dict) -> str:
     )
 
 
+def goldman_text(role: dict) -> str:
+    """One role as Goldman's roleSearch returns it. The posting page shows the
+    same description beside its overview (title, place, corporate title, pay)
+    and a block of firm-wide benefits, which is left out."""
+    comp = role.get("compensation") or {}
+    pay = ""
+    if comp.get("minSalary") and comp.get("maxSalary"):
+        pay = f"{comp.get('currency') or ''} {comp['minSalary']:,.0f} - {comp['maxSalary']:,.0f}"
+    return join(
+        role.get("jobTitle"),
+        "; ".join(goldman_place(loc) for loc in role.get("locations") or []),
+        role.get("corporateTitle"),
+        pay,
+        clean_html(role.get("descriptionHtml") or ""),
+    )
+
+
+def goldman_place(loc: dict) -> str:
+    return ", ".join(str(loc[k]) for k in ("city", "state", "country") if loc.get(k))
+
+
 def oracle_text(item: dict) -> str:
     """One requisition as Oracle Recruiting's detail call returns it. The
     listing call carries the same keys minus the description, so a listing
