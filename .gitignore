@@ -227,6 +227,7 @@ service_account_credentials.json
 !extension/package-lock.json
 !extension/adapters/recipes/*.json
 !extension/adapters/hosts.json
+!.superset/config.json
 extension/node_modules/
 extension/.wxt/
 extension/.output/
