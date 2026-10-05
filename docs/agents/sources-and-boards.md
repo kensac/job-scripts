@@ -105,19 +105,23 @@ Each row holds the posting text the listing call carried and the raw record
 minus that text. Greenhouse (with `content=true`), Lever and Ashby carry the
 text; it is assembled by the same `core/fetching/ats.py` helpers the resolvers
 use, so it is what a per-posting fetch would have returned. ByteDance carries
-it too, as a description and a requirement, and Jibe and Goldman
-(`ats.goldman_text`) carry it; none of the three has a resolver. Amazon carries it too (the
-description and both qualification lists); it has no resolver, so a re-check
-fetches the posting page. Workday,
+it too, as a description and a requirement, and Jibe carries it; neither has a
+resolver. Amazon carries it too (the description and both qualification
+lists); it has no resolver, so a re-check fetches the posting page. Goldman
+carries it (`ats.goldman_text`), and its resolver reads the same text back
+from the site's GraphQL `role`. Workday,
 SmartRecruiters, Oracle Recruiting, Workable and Apple list without the text,
 so their postings get it from the matching resolver, one call each, when a
 check needs it. An iCIMS portal card holds a snippet, which is not
 the text and is not stored; the iCIMS resolver reads the text from the
-posting's frame. Taleo, IBM and Eightfold list without the text and have no
-resolver, so their postings get it from the page fetch tiers below. An
-Eightfold resolver is not straightforward: tenants post on their own domains,
-so a posting URL does not say it is Eightfold's, and a 404 from a guessed
-endpoint on a host that is not would read as a closure.
+posting's frame. Taleo, IBM and Eightfold list without the text and no
+resolver returns it, so their postings get it from the page fetch tiers below.
+Every careers.ibm.com page answers the static tier with an AWS WAF challenge
+(202), so IBM's text always comes from the browser (7 of 7 listed postings
+read on 2026-10-05). An Eightfold resolver is not straightforward: tenants
+post on their own domains, so a posting URL does not say it is Eightfold's,
+and a 404 from a guessed endpoint on a host that is not would read as a
+closure.
 
 **A board whose page is a shell gets a resolver, because the static tier
 cannot tell a shell from a posting.** The static tier accepts any page whose
@@ -133,6 +137,21 @@ it. Its 200 is not proof of listing, since one requisition the board no longer
 listed still answered 200 with full text, so that closure comes from the
 board's authoritative pull. A new board gets the same check before it is
 switched on: does the static tier's text contain the posting.
+
+**A resolver says GONE only on an answer the board gives a closed posting and
+nothing else.** Measure it against ids the board no longer lists (an
+aggregator's history against a fresh pull) and ids it does, and open a few of
+each in a browser. Anything that also answers an outage or a made-up id is
+ERROR, and the page tiers and the board pull decide. Goldman's `role` gives
+44 of 44 delisted roles the same INTERNAL_ERROR a made-up id and an upstream
+failure give, and their pages read "Oops, something went wrong", so the
+`Goldman` resolver never says GONE. IBM's Avature host redirects a closed
+posting to `/careers/Error` before any WAF challenge: 19 of 19 delisted ids
+did, and 9 of 10 listed ids went to the posting instead. The tenth was a
+posting the search index still listed and IBM's own page called closed, so
+the `Ibm` resolver reports that closure, and a closed posting can stay in an
+authoritative pull until it does. An open IBM posting is UNSUPPORTED there,
+and its text comes from the browser.
 
 **A listing's text is stored only when it is the whole posting.** Ingest stores
 a non-empty `description` as the posting's content and never fetches the page,

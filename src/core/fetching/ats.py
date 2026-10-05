@@ -591,6 +591,111 @@ class Apple(AtsResolver):
         return replace(result, posted=_iso_date(data.get("postDateInGMT")))
 
 
+class Goldman(AtsResolver):
+    """A higher.gs.com role, read from the careers site's own GraphQL `role`.
+
+    The text is goldman_text over the same fields the listing fetcher reads,
+    so a re-check sees the text the listing stored. The page itself is
+    server-rendered and the static tier reads it too (7 of 7 listed roles on
+    2026-10-05), with the site's navigation and a firm-wide benefits block
+    around the description.
+
+    A role the board no longer lists has no closure signal: 44 of 44 such
+    roles from an aggregator's history answered INTERNAL_ERROR, "An exception
+    occurred when making a request to an external service", exactly as a
+    made-up id and an upstream failure do, and their pages read "Oops,
+    something went wrong". So any error is ERROR and never GONE, the page
+    tiers get their turn, and the board's authoritative pull closes the role.
+    """
+
+    name = "goldman"
+    # The path keeps the marker out of the mail domains, which inherit
+    # resolver markers: whether higher.gs.com sends application mail has not
+    # been measured.
+    markers = ("higher.gs.com/roles/",)
+    _ROLE = re.compile(r"higher\.gs\.com/roles/(\d+)")
+    _QUERY = """query Role($id: String!) {
+  role(externalSourceId: $id) {
+    jobTitle corporateTitle status externalJobStatus lastPostedDate
+    locations { city state country }
+    compensation { minSalary maxSalary currency }
+    descriptionHtml
+  }
+}"""
+
+    def fetch(self, url: str) -> AtsResult:
+        match = self._ROLE.search(url)
+        if not match:
+            return UNSUPPORTED
+        try:
+            resp = _session.post(
+                "https://api-higher.gs.com/gateway/api/v1/graphql",
+                json={"query": self._QUERY, "variables": {"id": match.group(1)}},
+                timeout=TIMEOUT,
+            )
+        except requests.RequestException as exc:
+            logger.debug(f"[{self.name}] request failed {url}: {exc}")
+            return AtsResult(Status.ERROR, source=self.name)
+        if resp.status_code != 200:
+            return AtsResult(Status.ERROR, source=self.name)
+        role = (resp.json().get("data") or {}).get("role") or {}
+        # Every role listed on 2026-10-05 read POSTED. The schema also has
+        # UNPOSTED, EXPIRED and SCHEDULED, none of them seen, so their text is
+        # not offered as a live posting's.
+        if role.get("externalJobStatus") not in (None, "POSTED") or not role.get("descriptionHtml"):
+            return AtsResult(Status.ERROR, source=self.name)
+        return replace(
+            self.result(goldman_text(role)), posted=_iso_date(role.get("lastPostedDate"))
+        )
+
+
+class Ibm(AtsResolver):
+    """A careers.ibm.com posting's closure, read off the Avature host's redirect.
+
+    No unauthenticated endpoint returns the full text. The careers search
+    index carries a 256-character snippet and a body without the headings,
+    education or years of experience; every careers.ibm.com page and feed
+    answers a plain or Chrome-fingerprinted request with an AWS WAF challenge
+    (202), so the static tier never gets the page; the browser does (7 of 7
+    listed postings on 2026-10-05, about 91% of the index body's 8-word runs
+    on the page). So an open posting is UNSUPPORTED here and its text comes
+    from the browser.
+
+    ibmglobal.avature.net/en_US/careers/JobDetail?jobId={id} answers without
+    a challenge: 301 to careers.ibm.com's JobDetail for an open posting, and
+    301 to /careers/Error for one IBM has closed. Measured 2026-10-05: 19 of
+    19 ids an aggregator held and the board no longer listed went to Error,
+    so did 1 of 10 the search index still listed, and in a browser every one
+    of the 9 opened (that one among them) ended on IBM's page "this job is
+    closed"; the other 9 listed went to JobDetail. A made-up id goes to Error
+    too.
+    """
+
+    name = "ibm"
+    # The paths keep the markers out of the mail domains; ibmglobal.avature.net
+    # is what aggregators link (SimplifyJobs, 19 of 19).
+    markers = ("careers.ibm.com/", "ibmglobal.avature.net/")
+    _JOB = re.compile(r"(?:careers\.ibm\.com|ibmglobal\.avature\.net)/.*[?&]jobId=(\d+)")
+
+    def fetch(self, url: str) -> AtsResult:
+        match = self._JOB.search(url)
+        if not match:
+            return UNSUPPORTED
+        try:
+            resp = _session.get(
+                f"https://ibmglobal.avature.net/en_US/careers/JobDetail?jobId={match.group(1)}",
+                timeout=TIMEOUT,
+                allow_redirects=False,
+            )
+        except requests.RequestException as exc:
+            logger.debug(f"[{self.name}] request failed {url}: {exc}")
+            return AtsResult(Status.ERROR, source=self.name)
+        location = urlparse(resp.headers.get("location") or "").path
+        if resp.status_code in (301, 302) and location.endswith("/careers/Error"):
+            return AtsResult(Status.GONE, source=self.name)
+        return UNSUPPORTED
+
+
 def _json_or_none(text: str) -> object:
     try:
         return json.loads(text)
@@ -623,6 +728,8 @@ RESOLVERS: list[AtsResolver] = [
     Workable(),
     ICims(),
     Apple(),
+    Goldman(),
+    Ibm(),
 ]
 
 
