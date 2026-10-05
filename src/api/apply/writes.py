@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime
 import logging
+from collections.abc import Mapping
 
 from api import budget, db
 from api.ai import batch_results
@@ -88,7 +89,7 @@ def apply_result(
     user_id: int,
     request: dict | None,
     answer: str | None,
-    usage: dict[str, int],
+    usage: Mapping[str, int | None],
     key_source: str,
     model: str | None,
     kind: str,
@@ -126,7 +127,7 @@ def record_result(
     user_id: int,
     custom_id: str,
     answer: str | None,
-    usage: dict[str, int],
+    usage: Mapping[str, int | None],
     key_source: str,
     model: str | None,
     kind: str,

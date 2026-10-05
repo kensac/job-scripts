@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from typing import Any
@@ -56,7 +56,7 @@ class ExecutionHooks:
     verdict_label: str
     key_source: str
     record_failure: Callable[[str | None], AbstractContextManager[None]]
-    record_usage: Callable[[dict[str, int], str | None, bool], None]
+    record_usage: Callable[[Mapping[str, int | None], str | None, bool], None]
     budget_exceeded: Callable[[], bool]
     cancelled: Callable[[], bool]
     progress: Callable[[int, int, str], None]
@@ -70,7 +70,7 @@ async def check_filter(
     snapshot: FilterSnapshot,
     verdict_label: str,
     decision_id: int | None = None,
-) -> dict[str, int] | None:
+) -> dict[str, int | None]:
     """Run one check. The caller has already excluded what is decided."""
     _, usage = await verdicts.run_check(
         cfg,

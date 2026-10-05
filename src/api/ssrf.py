@@ -15,7 +15,7 @@ def _addr_ok(ip_str: str) -> bool:
         addr = ipaddress.ip_address(ip_str)
     except ValueError:
         return False
-    if addr.version == 6 and addr.ipv4_mapped is not None:
+    if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped is not None:
         addr = addr.ipv4_mapped
     if (
         addr.is_private
