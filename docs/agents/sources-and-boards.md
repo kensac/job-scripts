@@ -66,7 +66,12 @@ it is what a per-posting fetch would have returned. Workday, SmartRecruiters,
 Oracle Recruiting and Workable list without the text, so their postings get it
 from the matching resolver, one call each, when a check needs it. Taleo lists
 without the text and has no resolver, so its postings get it from the page
-fetch tiers below.
+fetch tiers below. Apple lists
+a summary only (kept in `raw`) and has no resolver. Its posting page builds the
+text from JSON embedded in the page, so the static tier extracts the site's
+navigation alone, which clears `static_fetch_min_chars` (3,278 characters
+against 1,500 on 2026-10-05). `GET https://jobs.apple.com/api/v1/jobDetails/{id}`
+returns the text, for the same id the posting URL carries.
 
 Rows are aged out by `screened_retention_days` after the board stops listing
 them.
@@ -274,6 +279,18 @@ only a `tz` header, without which it answers 500. Its contract, measured on
 - Rows carry no text and no company. Which column holds the title, the
   locations (a JSON list inside a string) and the date is per section; the
   date is `10/02/2026` on Textron and `Oct 5, 2026` on AAR, both `lang=en`.
+
+**A paged pull is held to its distinct postings, not its rows.** A sort with
+ties lets each page request order the tied rows afresh, so a pass can return
+exactly the stated count while serving some rows twice and others never.
+jobs.apple.com does this: sorted newest, its managed pipeline roles carry the
+request's own timestamp and tie at the top, and one pass on 2026-10-05
+returned 6,192 rows of 6,192 with 6,190 distinct, the same in three runs.
+`_apple` re-reads the pages that held those roles until the distinct count
+reaches the stated one or a round finds nothing new (one round of five pages
+recovered both), and raises `PartialPull` short of it. Its search body must
+carry `format`: without it every page is an empty 200 stating 0, which reads
+as an empty board.
 
 ## A switched-off source holds no posting active
 
