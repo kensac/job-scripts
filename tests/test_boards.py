@@ -61,8 +61,9 @@ def test_markdown_reads_the_columns_from_the_header():
         ("Amazon", "Software Dev Engineer I - Graviton Software - Annapurna Labs", ["Austin, TX"]),
     ]
     assert speedy[0].url == "https://lifeattiktok.com/search/7679156878833682693"
-    # The tracking parameter is gone from the key and kept on the raw URL.
-    assert speedy[1].url == "https://www.amazon.jobs/jobs/10526808/apply"
+    # The key is the posting's one spelling, and the tracking parameter is
+    # kept on the raw URL.
+    assert speedy[1].url == "https://www.amazon.jobs/en/jobs/10526808"
     assert speedy[1].raw_url.endswith("?utm_source=speedyapply")
     # Two tables with different column counts in one file, each read from its
     # own header: the second has no Salary column and the link still lands.

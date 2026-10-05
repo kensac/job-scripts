@@ -22,6 +22,8 @@ from urllib.parse import parse_qsl, urlparse, urlsplit, urlunsplit
 
 import requests
 
+from core.fetching.ats import amazon_canonical
+
 TIMEOUT = 20
 _HEADERS = {"User-Agent": "Mozilla/5.0", "Accept": "application/json, text/html"}
 
@@ -193,6 +195,9 @@ def posting_urls(url: str) -> list[str]:
     boards.greenhouse.io/embed/job_app?for=<board>&token=<id>, and a
     Greenhouse posting is stored under whichever of its two hosts the
     board listed it from. The query string is otherwise tracking."""
+    amazon = amazon_canonical(url)
+    if amazon:
+        return [amazon]
     parts = urlsplit(url)
     if parts.netloc.endswith("greenhouse.io"):
         q = dict(parse_qsl(parts.query))
