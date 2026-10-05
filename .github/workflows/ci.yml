@@ -5,10 +5,9 @@ on:
   push:
     branches:
       - main
-  # A push by the workflow token starts no workflow, so the auto-fix commit
-  # below gets no run of its own. It does not need one: the run that pushes it
-  # takes its revision afterwards and judges what it pushed. Kept for running
-  # the workflow by hand.
+  # Kept for running the workflow by hand. The auto-fix below does not use it:
+  # a commit it pushes gets its run from the author's next push, or from
+  # AUTOFIX_TOKEN when that secret is set.
   workflow_dispatch:
 
 # Pull requests run without production credentials. Forks receive only a
@@ -16,12 +15,8 @@ on:
 jobs:
   gate:
     runs-on: ubuntu-latest
-    outputs:
-      corrected: ${{ steps.autofix.outputs.changed }}
-      revision: ${{ steps.revision.outputs.sha }}
     permissions:
       contents: write
-      actions: write
     # No database here. The schema export reads the app's routes, not its
     # tables: exported against a DSN pointing at a closed port it produces a
     # file identical to the committed one, byte for byte. Booting Postgres
@@ -36,7 +31,9 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          # Test the event's exact revision; fixes push explicitly to its branch.
+          # The branch head, not the merge result: a fix has to be pushed back
+          # to a real branch. Every other job judges github.sha, which on a
+          # pull request is the head merged into main.
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
@@ -45,17 +42,14 @@ jobs:
       - run: echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
       # Mechanical fixes are committed, not reported. Lint autofixes,
       # formatting and the generated openapi.json are the three things a
-      # human only ever fixes by running a command, so the run runs it: when
-      # anything changed, the fix is pushed as its own commit, this workflow is
-      # dispatched on that commit, and this run stops here green. The
-      # dispatched run is the one that judges the branch; a fix that leaves a
-      # real failure behind fails there, on a commit that already carries the
-      # mechanical corrections. Only the pull request's own run fixes, and only
-      # for branches in this repository: the dispatched run judges and never
-      # fixes, so a fix that does not converge (a schema that differs run to
-      # run) shows up as one failing check rather than an unbounded chain of
-      # green runs each pushing a commit; a fork's token cannot push, and its
-      # run falls through to the checks below.
+      # human only ever fixes by running a command, so the run runs it and
+      # pushes the result as its own commit. Then it FAILS, and everything
+      # below is skipped: this run started from the commit before the fix, so
+      # any verdict it gave would sit on a commit that is no longer the head,
+      # about a tree that is not what the branch holds. The pushed commit is
+      # judged by a run of its own. Only the pull request's own run fixes, and
+      # only for branches in this repository; a fork's token cannot push, and
+      # its run falls through to the checks below.
       - name: Auto-fix lint, format and schema
         id: autofix
         if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
@@ -66,13 +60,10 @@ jobs:
           HEAD_BRANCH: ${{ github.head_ref }}
           # A push authenticated by the workflow token starts no ordinary run:
           # GitHub gates it as action_required so a workflow cannot trigger
-          # itself forever. The gated run sits on the pull request's new head,
-          # which is why the request shows no verdict even though this run
-          # produced one. A token belonging to a person or an app does not
+          # itself forever. A token belonging to a person or an app does not
           # have that restriction, so with AUTOFIX_TOKEN set the pushed commit
           # gets a real run whose checks land on the request. Without it the
-          # verdict below is still correct, it is just attached to the commit
-          # this run started from.
+          # author's next push is what starts that run.
           AUTOFIX_TOKEN: ${{ secrets.AUTOFIX_TOKEN }}
         run: |
           ruff check --fix src tests || true
@@ -89,10 +80,8 @@ jobs:
             schema_status=1
           fi
           # Preserve lint and format fixes even when schema generation fails.
-          # The steps below check migrations and the schema independently, on
-          # this same run and on the commit this one pushes.
+          # The pushed commit's own run checks the schema again.
           if git diff --quiet -- src tests openapi.json; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
             exit "$schema_status"
           fi
           git config user.name "github-actions[bot]"
@@ -105,10 +94,14 @@ jobs:
           else
             git push origin "HEAD:$HEAD_BRANCH"
           fi
-          echo "changed=true" >> "$GITHUB_OUTPUT"
-          echo "::notice::Pushed mechanical fixes as a new commit; this run judges it"
-      - id: revision
-        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          fixed=$(git rev-parse --short HEAD)
+          if [ -n "$AUTOFIX_TOKEN" ]; then
+            next="Its own run has started; that run is the verdict."
+          else
+            next="Nothing has judged it yet. Pull it and push again, for example: git pull && git commit --allow-empty -m 'ci: judge the auto-fix' && git push"
+          fi
+          echo "::error::Auto-fix pushed $fixed (lint, format or openapi.json). This run started from the commit before it, so it judges nothing. $next"
+          exit 1
       - name: Lint
         run: ruff check src tests
       - name: Format check
@@ -139,7 +132,7 @@ jobs:
             pgvector/pgvector:pg18-trixie@sha256:78bf48b801e792f99e3ac62b5036fd3876e9be48afda16c1e331af1c75ceb2ff >/dev/null 2>&1 &
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ needs.gate.outputs.revision }}
+          ref: ${{ github.sha }}
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           enable-cache: true
@@ -165,8 +158,15 @@ jobs:
         run: lint-imports
       - name: Compile all sources
         run: python -m compileall -q src
-      - name: Migrations apply cleanly
-        run: python -m alembic upgrade head
+      # The same targets `make check` runs, so the two cannot drift apart.
+      # On a pull request this tree is the branch merged into main, which is
+      # where two migration heads from parallel branches first exist.
+      - name: Migrations apply cleanly and match the models
+        env:
+          TEST_DATABASE_URL: postgresql://ci:ci@localhost:5432/jobtracker_ci
+        run: make migrations-check
+      - name: No em dashes
+        run: make prose
       - name: Collect the complete test manifest
         env:
           TEST_DATABASE_URL: postgresql://ci:ci@localhost:5432/jobtracker_ci
@@ -180,14 +180,6 @@ jobs:
           name: test-manifest
           path: manifest.json
           if-no-files-found: error
-      - name: Models match migrations (autogen must be empty)
-        run: |
-          python -m alembic revision --autogenerate -m ci_drift_check
-          f=$(ls alembic/versions/*ci_drift_check*.py)
-          if grep -qE "op\.(add|drop|create|alter)" "$f"; then
-            echo "::error::ORM models drifted from migrations - generate a real migration"; cat "$f"; exit 1
-          fi
-
 
   extension:
     needs: gate
@@ -197,7 +189,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: ${{ needs.gate.outputs.revision }}
+          ref: ${{ github.sha }}
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: '24'
@@ -234,21 +226,15 @@ jobs:
       # lane takes the pytest step to roughly 13 s and the job to about 30 s,
       # at the cost of three more container boots.
       shards: 6
-      revision: ${{ needs.gate.outputs.revision }}
+      revision: ${{ github.sha }}
 
-  # Preserve the required check name. Every lane must pass and account for
-  # the complete collection before this gate can be green.
-  #
-  # There used to be an exemption here: when the auto-fix step pushed a
-  # commit, the test lanes were skipped and this gate passed on preparation
-  # alone, because a dispatched run was expected to judge the new commit. That
-  # run's checks never attach to the pull request, so the exemption was a
-  # green check that had judged nothing. The fix is not a better token: the
-  # run that pushes the commit now takes its revision afterwards and judges
-  # exactly what it pushed.
+  # Preserve the required check name. Every job must pass and the lanes must
+  # account for the complete collection before this gate can be green. There
+  # is no exemption for an auto-fix push: that run fails in `gate`, so a green
+  # `check` only ever comes from a run that judged the commit it started from.
   check:
     if: always()
-    needs: [gate, static, tests]
+    needs: [gate, static, extension, tests]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -257,32 +243,23 @@ jobs:
         env:
           GATE_RESULT: ${{ needs.gate.result }}
           STATIC_RESULT: ${{ needs.static.result }}
+          EXTENSION_RESULT: ${{ needs.extension.result }}
           TEST_RESULT: ${{ needs.tests.result }}
-          CORRECTED: ${{ needs.gate.outputs.corrected }}
         run: |
           test "$GATE_RESULT" = success
-          # An auto-fix push deliberately skips the static checks and the
-          # lanes: the run it dispatches on the pushed commit is the one that
-          # judges them. Requiring them here would fail every branch that
-          # needed a mechanical fix.
-          if [ "$CORRECTED" != true ]; then
-            test "$STATIC_RESULT" = success
-            test "$TEST_RESULT" = success
-          fi
+          test "$STATIC_RESULT" = success
+          test "$EXTENSION_RESULT" = success
+          test "$TEST_RESULT" = success
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        if: needs.gate.outputs.corrected != 'true'
         with:
-          ref: ${{ needs.gate.outputs.revision }}
+          ref: ${{ github.sha }}
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        if: needs.gate.outputs.corrected != 'true'
         with:
           name: test-manifest
           path: collection
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        if: needs.gate.outputs.corrected != 'true'
         with:
           pattern: timings-*
           path: measurements
       - name: Verify every collected test executed exactly once
-        if: needs.gate.outputs.corrected != 'true'
         run: python tools/test_performance.py measurements --shards=6 --manifest=collection/manifest.json | tee "$GITHUB_STEP_SUMMARY"

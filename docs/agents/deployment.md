@@ -2,17 +2,26 @@
 
 ## Verify, never infer
 
-**A green check is not always a verdict.** When CI's auto-fix step pushes a
-commit, the pull request's head moves to a commit that the judging run did not
-start from, so the request can show no checks, or gated ones, while a correct
-verdict exists on the previous commit. Read which SHA a check belongs to
-before trusting it, the same way an image digest is read rather than a tag.
+**A green `check` means the commit it sits on was judged, and nothing more.**
+When CI's auto-fix step pushes a commit, the run that pushed it fails in
+`gate` and judges nothing: it started from the commit before the fix, and a
+verdict there would describe a tree the branch no longer holds. The pushed
+commit needs a run of its own. Without the repository secret `AUTOFIX_TOKEN`
+that run starts on the author's next push (an empty commit will do); the
+workflow token cannot start it, by design, because a workflow that could
+trigger itself would not stop. With `AUTOFIX_TOKEN` set to a token belonging
+to a person or a GitHub App, the push starts the run itself.
 
-Setting the repository secret `AUTOFIX_TOKEN` to a token belonging to a person
-or a GitHub App closes it: a push authenticated that way starts an ordinary
-run on the new head, and its checks attach to the request. The workflow token
-cannot, by design, because a workflow that could trigger itself would not
-stop.
+`check` requires every job: `gate`, `static`, `extension` and all test lanes.
+A job missing from its `needs` is a job whose failure merges. Read which SHA
+a check belongs to before trusting it, the same way an image digest is read
+rather than a tag.
+
+**On a pull request, everything after `gate` judges the merge result**, the
+branch merged into main as GitHub computed it when the run started. A merge
+result goes stale when main moves, so a green check from before another
+merge says nothing about the combination with it. Re-run, or update the
+branch, before merging anything that touches migrations or a shared schema.
 
 
 **Never claim something is deployed because it merged.** Hosts follow a pinned

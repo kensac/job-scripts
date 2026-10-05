@@ -42,22 +42,21 @@ jobs:
       - run: uv sync --frozen --no-dev
       - run: echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
 
+      # A check that cannot run fails. Skipping here was green every night
+      # while nothing was measured, which reads exactly like "production
+      # still matches".
       - name: Check credential is configured
-        id: creds
         env:
           PRODUCTION_DATABASE_URL: ${{ secrets.PRODUCTION_READONLY_DATABASE_URL }}
         run: |
           if [ -z "$PRODUCTION_DATABASE_URL" ]; then
-            echo "PRODUCTION_READONLY_DATABASE_URL is not set; skipping."
-            echo "configured=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "configured=true" >> "$GITHUB_OUTPUT"
+            echo "::error::Repository secret PRODUCTION_READONLY_DATABASE_URL is not set, so the profile drift check measured nothing. Set it to a read-only production DSN."
+            exit 1
           fi
 
       # SELECT only. The script opens its transaction with
       # `SET default_transaction_read_only = on`, so a bug in it cannot write.
       - name: Production still matches the measured profile
-        if: steps.creds.outputs.configured == 'true'
         env:
           PRODUCTION_DATABASE_URL: ${{ secrets.PRODUCTION_READONLY_DATABASE_URL }}
           PYTHONPATH: src
@@ -74,22 +73,41 @@ jobs:
       - run: uv sync --frozen
       - run: echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
 
-      # Absent secret = skipped, not failed. A red badge for "not configured"
-      # teaches people to ignore the badge.
-      - name: Check credential is configured
-        id: creds
+      # A check that cannot run fails. The integration tests skip themselves
+      # on a database that is not a synced copy (tests/conftest.py reads the
+      # testdb_synced_at stamp), so without this the job reported "13
+      # skipped" in green every night and checked nothing.
+      - name: Check the database holds a synced copy of production
         env:
           TEST_DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}
+          PYTHONPATH: src
         run: |
           if [ -z "$TEST_DATABASE_URL" ]; then
-            echo "TEST_DATABASE_URL is not set; skipping."
-            echo "configured=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "configured=true" >> "$GITHUB_OUTPUT"
+            echo "::error::Repository secret TEST_DATABASE_URL is not set, so no real-data test ran."
+            exit 1
           fi
+          python - <<'EOF'
+          import os, sys
+          import psycopg
+          try:
+              with psycopg.connect(os.environ["TEST_DATABASE_URL"]) as conn:
+                  row = conn.execute(
+                      "SELECT value FROM app_config WHERE key = 'testdb_synced_at'"
+                  ).fetchone()
+          except psycopg.Error as exc:
+              print(f"::error::Could not read TEST_DATABASE_URL: {type(exc).__name__}")
+              sys.exit(1)
+          if not row:
+              print(
+                  "::error::The database behind secret TEST_DATABASE_URL holds no synced "
+                  "copy of production (no testdb_synced_at stamp), so every integration "
+                  "test would skip. Refresh it with scripts/sync_testdb.py."
+              )
+              sys.exit(1)
+          print(f"synced copy from {row[0]}")
+          EOF
 
       - name: Run the tests that need real data
-        if: steps.creds.outputs.configured == 'true'
         env:
           TEST_DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}
           APP_ENCRYPTION_KEY: ${{ secrets.APP_ENCRYPTION_KEY }}
