@@ -408,9 +408,15 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
     # Host -> seconds between LISTING requests per worker process. Workable
     # limits by address and two workers share hetzner's; six seconds was not
     # enough, twenty holds. Read by core.fetching.boards through the ingest task.
+    # "eightfold.ai" paces every Eightfold tenant's pages together, whatever
+    # domain it serves from, because one WAF fronts them: on 2026-10-05 about
+    # 110 requests a minute from one address held for ten minutes, and
+    # thirteen tenants pulled at once with no pace put that address behind a
+    # captcha on every tenant tried but Microsoft. The limit itself was not
+    # measured. One second keeps a worker near 60 a minute.
     "ingest_host_pace_seconds": ConfigKey(
         section="Fetching",
-        default={"apply.workable.com": 20},
+        default={"apply.workable.com": 20, "eightfold.ai": 1},
         value_type=dict[str, PositiveInt],
         kind="hosts",
         help="Host to the smallest gap in seconds between pulls from one address, "

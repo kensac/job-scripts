@@ -25,7 +25,7 @@ import time
 import xml.etree.ElementTree as ET
 from email.utils import parsedate_to_datetime
 from typing import Any
-from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
+from urllib.parse import parse_qs, urlencode, urljoin, urlparse, urlunparse
 
 import ftfy
 import requests
@@ -105,6 +105,10 @@ def kind(url: str) -> str:
     # (jobs.l3harris.com, jobs.ulalaunch.com), so the feed path is the marker.
     if parsed.path == "/services/rss/job/":
         return "successfactors"
+    # Eightfold tenants serve from their own domains (jobs.northropgrumman.com,
+    # apply.careers.microsoft.com), so the path is the only mark of the format.
+    if parsed.path.rstrip("/") in (_EIGHTFOLD_PCSX, _EIGHTFOLD_V2):
+        return "eightfold"
     if parsed.path.endswith(".md"):
         return "markdown"
     return "sheet_era"
@@ -119,7 +123,7 @@ def kind(url: str) -> str:
 # roles carry no company, and IBM's carry the hiring legal entity ("(0063) IBM
 # India Private Limited") rather than the name a person searches for. Amazon
 # names a legal entity per row too ("Amazon.com Services LLC", "ADCI HYD 13
-# SEZ").
+# SEZ"). An Eightfold row names a department and never the company.
 NEEDS_COMPANY = frozenset(
     {
         "lever",
@@ -135,6 +139,7 @@ NEEDS_COMPANY = frozenset(
         "goldman",
         "amazon",
         "successfactors",
+        "eightfold",
     }
 )
 
@@ -144,7 +149,7 @@ NEEDS_COMPANY = frozenset(
 # sweep instead. A Taleo careersection is a company's own board, but its
 # search counts rows it never lists, and a pull short of that count raises
 # PartialPull and retires nothing (see _taleo).
-# The iCIMS portal and Jibe are a company's own board, and
+# The iCIMS portal, Jibe and Eightfold are a company's own board, and
 # each fetcher raises PartialPull when it cannot show it read all of it.
 AUTHORITATIVE = frozenset(
     {
@@ -164,6 +169,7 @@ AUTHORITATIVE = frozenset(
         "goldman",
         "amazon",
         "successfactors",
+        "eightfold",
     }
 )
 
@@ -186,6 +192,7 @@ def fetch_listings(url: str, company: str | None = None) -> list[JobPosting]:
         "goldman": _goldman,
         "amazon": _amazon,
         "successfactors": _successfactors,
+        "eightfold": _eightfold,
         "markdown": _markdown,
     }.get(kind(url))
     if fetcher is None:
@@ -1125,6 +1132,71 @@ def _successfactors(url: str, company: str) -> list[JobPosting]:
     if not complete or listed - seen:
         raise PartialPull(out)
     return out
+
+
+# Eightfold's two careers-site generations. A tenant answers one and refuses
+# the other with 403 ("Not authorized for PCSX" on v2, "PCSX is not enabled"
+# on pcsx), so the listings URL names the one its tenant serves.
+_EIGHTFOLD_PCSX = "/api/pcsx/search"
+_EIGHTFOLD_V2 = "/api/apply/v2/jobs"
+# One pace for every tenant, whatever domain it serves from: one AWS WAF fronts
+# them, and once it challenged an address on 2026-10-05 Lockheed, Northrop,
+# CACI, PayPal and Netflix all answered 405 with x-amzn-waf-action: captcha
+# for a few minutes (Microsoft's did not). See ingest_host_pace_seconds.
+_EIGHTFOLD_PACE = "eightfold.ai"
+
+
+def _eightfold(url: str, company: str) -> list[JobPosting]:
+    """GET https://{host}/api/pcsx/search?domain={domain}
+    or  https://{host}/api/apply/v2/jobs?domain={domain}
+
+    Both page by `start` at ten postings whatever `num` asks for, state the
+    count on every page, take any offset and answer an empty page past the
+    end; no result window was found up to 21,774 (Starbucks, 2026-10-05).
+    Neither list carries the posting's text.
+
+    The order is not stable from one request to the next, so a pull reads
+    some postings twice and others never. A posting re-dated or removed
+    mid-pull shifts every later page (Microsoft, whose count moved between
+    2,297 and 2,300: 2,256 distinct), and the order moves with the count
+    unchanged too (Qualcomm, 2,052 throughout: 2,009 distinct in one pull and
+    2,043 in the next), all on 2026-10-05. A pull is complete only when it
+    holds as many distinct postings as the largest count any page stated;
+    anything short is PartialPull.
+    """
+    parsed = urlparse(url)
+    pcsx = parsed.path.rstrip("/") == _EIGHTFOLD_PCSX
+    origin = f"{parsed.scheme}://{parsed.netloc}"
+    seen: dict[str, JobPosting] = {}
+    stated = 0
+    start = 0
+    while True:
+        _pace(_EIGHTFOLD_PACE)
+        resp = _session.get(_with_query(url, start=str(start)), timeout=TIMEOUT)
+        resp.raise_for_status()
+        data = resp.json()
+        data = (data.get("data") or {}) if pcsx else data
+        page = data.get("positions") or []
+        stated = max(stated, int(data.get("count") or 0))
+        for j in page:
+            link = j.get("positionUrl") if pcsx else j.get("canonicalPositionUrl")
+            p = _posting(
+                company,
+                j.get("name"),
+                j.get("locations") or [j.get("location")],
+                urljoin(origin, link) if link else None,
+                int((j.get("postedTs") if pcsx else j.get("t_create")) or 0),
+                raw=j,
+            )
+            if p:
+                seen[p.url] = p
+        if not page:
+            break
+        start += len(page)
+    postings = list(seen.values())
+    if len(postings) < stated:
+        raise PartialPull(postings)
+    return postings
 
 
 def _place(loc: dict) -> str:

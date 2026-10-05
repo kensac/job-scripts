@@ -152,6 +152,35 @@ async def test_a_429_from_the_board_defers_the_pull_and_teaches_the_budget(monke
     assert (excinfo.value.not_before - datetime.datetime.now(datetime.UTC)).total_seconds() < 10
 
 
+@pytest.mark.asyncio
+async def test_a_waf_challenge_is_a_refusal_not_a_failed_pull(monkeypatch, f):
+    """Eightfold's answer once an address asked too much, 2026-10-05: 405 from
+    CloudFront with x-amzn-waf-action: captcha. A failure would count toward
+    switching the board off; a refusal defers the pull and widens the gap."""
+    f.make_source("ngc")
+    db.execute(
+        "UPDATE sources SET listings_url = "
+        "'https://jobs.northropgrumman.com/api/pcsx/search?domain=ngc.com' WHERE name = 'ngc'"
+    )
+    task_id = db.query_one(
+        "INSERT INTO tasks (kind, payload, status) VALUES ('ingest_source', %s, 'running') RETURNING id",
+        (db.jsonb({"source": "ngc", "host": "jobs.northropgrumman.com"}),),
+    )["id"]
+    resp = requests.Response()
+    resp.status_code = 405
+    resp.headers["x-amzn-waf-action"] = "captcha"
+
+    def challenge(url, company):
+        raise requests.HTTPError("405 Client Error", response=resp)
+
+    from core.fetching import boards
+
+    monkeypatch.setattr(boards, "fetch_listings", challenge)
+    with pytest.raises(Deferred):
+        await ingest.handle_ingest_source(task_id, {"source": "ngc"})
+    assert _budget("jobs.northropgrumman.com", hosts.EGRESS_GROUP)["refused"] == 1
+
+
 def test_an_idle_worker_beside_only_throttled_or_deferred_work_is_not_stalled(f):
     _config("queue_stall_minutes", 1)
     db.execute(
