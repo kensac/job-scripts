@@ -121,6 +121,8 @@ _OWNERS = {
     "batch_parked_too_long": "_detect_sources",
     "batch_failed_whole": "_detect_sources",
     "ingest_failing": "_detect_boards",
+    "source_switched_off": "_detect_boards",
+    "sources_never_produced": "_detect_boards",
     "ingest_host_failing": "_detect_boards",
     "source_feed_empty": "_detect_boards",
     "source_pattern_admits_all": "_detect_boards",

@@ -281,6 +281,33 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
         help="Consecutive empty fetches after which a posting is unfetchable: no "
         "automatic path retries it until a manual re-check succeeds.",
     ),
+    # The longest a board that keeps failing waits between pulls. After the
+    # k-th failure in a row the wait is the board's own interval times
+    # 2^(k-1), never less than the interval. Every failure run that ended on
+    # its own in the 30 days to 2026-10-04 (502s, 403s) ended within 53 hours,
+    # so a three-day cap still pulls a board that came back within three days
+    # of its return.
+    "ingest_retry_max_hours": ConfigKey(
+        section="Fetching",
+        default=72,
+        value_type=PositiveInt,
+        help="Longest wait, in hours, between pulls of a board whose pulls keep failing. "
+        "Each failure in a row doubles the board's interval up to this.",
+    ),
+    # Failed pulls in a row after which the board is switched off, which
+    # retires its postings. Eight spans about five days on an hourly board and
+    # eighteen on a daily one under the cap above. Before this a failed pull
+    # did not count toward the interval: twelve boards, most answering 404,
+    # were pulled every hour for up to eleven days, and every board together
+    # failed 1,509 pulls in the week to 2026-10-04.
+    "ingest_give_up_after_failures": ConfigKey(
+        section="Fetching",
+        default=8,
+        value_type=PositiveInt,
+        help="Failed pulls in a row after which a board is switched off and its postings "
+        "retired. Switch it back on once its listings URL is fixed; one more failure "
+        "switches it off again, and one success ends the run.",
+    ),
     # An idle worker beside pending work for this long is a stall: a claim
     # takes one poll (JOBTRACKER_WORKER_POLL, 5s), so ten minutes is not
     # latency. Kinds allowlists (JOBTRACKER_WORKER_KINDS) are the one

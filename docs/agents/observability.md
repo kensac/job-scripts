@@ -489,7 +489,7 @@ inside which request or task". Four things ship:
 - Every unhandled exception in a request handler or a worker's handler.
 - A queryable event wherever the service swallows or retries a failure that
   would otherwise leave no trace (`task_failed`, `task_requeued`,
-  `tasks_reaped`, `tasks_lost`, `ingest_pull_failed`, `fetch_failed`,
+  `tasks_reaped`, `tasks_lost`, `ingest_pull_failed`, `source_switched_off`, `fetch_failed`,
   `fetch_deferred`, `ai_call_failed`, `alert_opened`, `alert_resolved`,
   `worker_started`).
 - Every log record at INFO and above, through OpenTelemetry, uvicorn's request

@@ -372,7 +372,37 @@ Before the give-up, 3,511 postings that had never fetched once carried
 **The scheduler queues one ingest per source, however far behind.** A pending
 ingest blocks the next cycle's for that source; a running one does not. A
 source on a longer interval than the cycle waits while its last successful or
-in-flight pull is younger than the interval; a failed pull does not count.
+in-flight pull is younger than the interval.
+
+## A board that keeps failing is pulled less often, then switched off
+
+A failed pull counts toward the interval, and a run of them backs off. After
+the k-th failed pull in a row the board waits its own interval times 2^(k-1),
+capped at `ingest_retry_max_hours` but never below the interval
+(`queue.pull_wait_hours`). Before this a failed pull did not count, so a board
+answering 404 was pulled every hour: twelve boards for up to eleven days, and
+every board together failed 1,509 pulls in the week to 2026-10-04.
+
+The pull that makes the run `ingest_give_up_after_failures` long switches the
+source off (`tasks.ingest`). That retires its postings through the ordinary
+path for switched-off sources, sends a `source_switched_off` event, and opens a
+`source_switched_off` warning. The warning stays open until someone switches
+the board back on or deletes it. A board switched back on is pulled at the next
+cycle. One success ends the run. One more failure switches it off again.
+
+The run is derived from the `ingest_source` tasks, never stored
+(`queue.failure_runs`): failed tasks since the source's last done one. A task
+that failed because the source was already off (`INACTIVE_SOURCE_ERROR`) never
+asked the board, so it does not count. A 429 is a deferral, not a failure. The
+`ingest_failing` alert reads the same run instead of a time window, because a
+daily board's third failure now lands three days after its first.
+
+A board that pulls fine and lists nothing is not switched off. An empty board
+may be a company with no open roles, and the pull costs about one request a
+day. Switching it off would miss the day it posts a role. Instead, one
+`sources_never_produced` warning lists every switched-on board that has
+existed for over a week, listed nothing in 8 days, and never had a posting or
+a listing. There were 105 on 2026-10-04.
 
 **Every ingest leaves its counts on its task** (`fetched`, `kept`, `cached`,
 `fetch_failed`, `gone`, `already_cached`, `skipped_recent_failure`). They are
@@ -381,7 +411,8 @@ the only record of what one pull saw, and they are what the board detectors in
 delivers nothing is visible as exactly that.
 
 The knobs above (`fetch_retry_after_hours`, `fetch_retry_max_hours`,
-`fetch_give_up_after_failures`, `screened_retention_days`,
+`fetch_give_up_after_failures`, `ingest_retry_max_hours`,
+`ingest_give_up_after_failures`, `screened_retention_days`,
 `listings_seen_refresh_hours`, `queue_stall_minutes`, `ingest_backlog_cycles`) are `app_config` rows, not
 constants; see [engineering-standards.md](engineering-standards.md).
 
