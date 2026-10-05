@@ -131,15 +131,26 @@ SmartRecruiters, Oracle Recruiting, Workable and Apple list without the text,
 so their postings get it from the matching resolver, one call each, when a
 check needs it. An iCIMS portal card holds a snippet, which is not
 the text and is not stored; the iCIMS resolver reads the text from the
-posting's frame. Taleo, IBM, Eightfold and Avature list without the text and
+posting's frame. Taleo, IBM and Avature list without the text and
 no resolver returns it, so their postings get it from the page fetch tiers
 below. Every careers.ibm.com page answers the static tier with an AWS WAF
 challenge (202), so IBM's text always comes from the browser (7 of 7 listed
 postings read on 2026-10-05); the static tier read Bloomberg's and Two Sigma's
-Avature posting pages whole the same day. An Eightfold resolver is not
-straightforward: tenants post on their own domains, so a posting URL does not
-say it is Eightfold's, and a 404 from a guessed endpoint on a host that is not
-would read as a closure.
+Avature posting pages whole the same day. Eightfold lists without the text,
+and its resolver reads it from the tenant's detail endpoint.
+
+**A board on its employers' own domains is known by its sources, never by a
+URL's shape.** An Eightfold tenant posts on its own host
+(`jobs.northropgrumman.com/careers/job/<id>`), so `refresh_content` looks for
+a source whose listings URL is an Eightfold search on the posting's host and
+hands that URL to `ats.resolve`; without one the resolver does not answer.
+A posting host that differs from its listing host (Bayer lists on
+bayer.eightfold.ai and posts on talent.bayer.com) is not resolved. The page is
+a shell that clears the static gate: on 2026-10-05 the static tier returned
+139,000 to 163,000 characters for eight Lockheed and Northrop postings, the
+title and the site's theme JSON with no part of the description, and a removed
+posting's page is the same shell. So a posting with an Eightfold source whose
+resolver did not answer skips the static tier and goes to the browser.
 
 **A board whose page is a shell gets a resolver, because the static tier
 cannot tell a shell from a posting.** The static tier accepts any page whose
@@ -709,3 +720,11 @@ when it is a Greenhouse API listing URL. The original posting URL remains the
 verdict key and browser fallback. An explicit board's HTTP 404/410 is terminal;
 a hostname-derived guess returning 404 is inconclusive and must not close a
 posting. Never replace an authoritative response with a later guess.
+
+An Eightfold detail endpoint answers HTTP 404 for a position the tenant no
+longer has (`Position not found` on pcsx, `Job with ID <id> not found` on
+v2), and the resolver reads that as `GONE` only because a source vouches that
+the host is the tenant's. On 2026-10-05 the 72 Qualcomm postings in an
+aggregator's history split exactly on the board: the 30 Qualcomm no longer
+listed answered 404 and the 42 it listed answered 200 with their text. A WAF
+challenge (405) or a 429 is `ERROR`.

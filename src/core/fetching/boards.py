@@ -34,6 +34,8 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from core.fetching.ats import (
+    EIGHTFOLD_PCSX,
+    EIGHTFOLD_V2,
     ashby_text,
     clean_html,
     goldman_place,
@@ -109,7 +111,7 @@ def kind(url: str) -> str:
         return "successfactors"
     # Eightfold tenants serve from their own domains (jobs.northropgrumman.com,
     # apply.careers.microsoft.com), so the path is the only mark of the format.
-    if parsed.path.rstrip("/") in (_EIGHTFOLD_PCSX, _EIGHTFOLD_V2):
+    if parsed.path.rstrip("/") in (EIGHTFOLD_PCSX, EIGHTFOLD_V2):
         return "eightfold"
     if parsed.path.endswith(".md"):
         return "markdown"
@@ -1140,11 +1142,8 @@ def _successfactors(url: str, company: str) -> list[JobPosting]:
     return out
 
 
-# Eightfold's two careers-site generations. A tenant answers one and refuses
-# the other with 403 ("Not authorized for PCSX" on v2, "PCSX is not enabled"
-# on pcsx), so the listings URL names the one its tenant serves.
-_EIGHTFOLD_PCSX = "/api/pcsx/search"
-_EIGHTFOLD_V2 = "/api/apply/v2/jobs"
+# Eightfold's two careers-site generations live in core.fetching.ats beside
+# the resolver, which recognises a tenant by its listings URL the same way.
 # One pace for every tenant, whatever domain it serves from: one AWS WAF fronts
 # them, and once it challenged an address on 2026-10-05 Lockheed, Northrop,
 # CACI, PayPal and Netflix all answered 405 with x-amzn-waf-action: captcha
@@ -1171,7 +1170,7 @@ def _eightfold(url: str, company: str) -> list[JobPosting]:
     anything short is PartialPull.
     """
     parsed = urlparse(url)
-    pcsx = parsed.path.rstrip("/") == _EIGHTFOLD_PCSX
+    pcsx = parsed.path.rstrip("/") == EIGHTFOLD_PCSX
     origin = f"{parsed.scheme}://{parsed.netloc}"
     seen: dict[str, JobPosting] = {}
     stated = 0
