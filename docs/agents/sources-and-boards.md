@@ -241,7 +241,8 @@ a time, the two widest facets whose every value is under the window, and raises
 `retire_unlisted`, because a posting outside the slices is not evidence of a
 closure; re-verification closes them instead. Airbus went from 2,000 to 2,883
 of about 2,940. Sources filter at our gate, the title pattern, and not at the
-board: a listings URL carries no search.
+board: a listings URL carries no search. Oracle serves at most 10,000 rows of a search, newest first,
+and a pull that ends short of the stated count raises `PartialPull` the same way.
 
 ## A switched-off source holds no posting active
 

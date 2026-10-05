@@ -456,6 +456,7 @@ def _oracle(url: str, company: str) -> list[JobPosting]:
     base = f"https://{parsed.netloc}/hcmUI/CandidateExperience/en/sites/{site}/job/"
     out: list[JobPosting] = []
     offset = 0
+    total: int | None = None
     while True:
         finder = (
             f"findReqs;siteNumber={site},limit={_ORACLE_PAGE},offset={offset},"
@@ -482,8 +483,16 @@ def _oracle(url: str, company: str) -> list[JobPosting]:
             )
             if p:
                 out.append(p)
+        if total is None:
+            total = int(items[0].get("TotalJobsCount") or 0)
         offset += len(page)
-        if not page or offset >= int(items[0].get("TotalJobsCount") or 0):
+        if not page or offset >= total:
+            # Oracle serves at most 10,000 rows of a search: past that the
+            # page is empty and the count reads 0 (AutoZone listed 10,788,
+            # Marriott 12,979, on 2026-10-05). The newest 10,000 arrive, by
+            # the sort above, and the rest are unseen, not closed.
+            if offset < total:
+                raise PartialPull(out)
             return out
 
 

@@ -611,3 +611,25 @@ def test_a_workday_tenant_under_the_window_is_one_complete_pull(monkeypatch):
     monkeypatch.setattr(boards._session, "post", post)
     out = boards.fetch_listings("https://x.wd1.myworkdayjobs.com/wday/cxs/x/Ext/jobs", "X")
     assert [p.title for p in out] == ["t"]
+
+
+def test_an_oracle_search_past_its_window_is_a_partial_pull(monkeypatch):
+    """AutoZone on 2026-10-05: TotalJobsCount 10,788, and at offset 10,000 the
+    page is empty and the count reads 0. Returning what arrived as the whole
+    board retired the rest on every pull."""
+
+    def get(url, **kw):
+        offset = int(url.split("offset=")[1].split(",")[0])
+        if offset >= 2:
+            return _Resp({"items": [{"TotalJobsCount": 0, "requisitionList": []}]})
+        row = {"Id": str(offset), "Title": f"Role {offset}", "PrimaryLocation": "US"}
+        return _Resp({"items": [{"TotalJobsCount": 3, "requisitionList": [row]}]})
+
+    monkeypatch.setattr(boards._session, "get", get)
+    with pytest.raises(boards.PartialPull) as raised:
+        boards.fetch_listings(
+            "https://x.fa.us2.oraclecloud.com/hcmRestApi/resources/latest/"
+            "recruitingCEJobRequisitions?siteNumber=CX_1",
+            "AutoZone",
+        )
+    assert [p.title for p in raised.value.postings] == ["Role 0", "Role 1"]
