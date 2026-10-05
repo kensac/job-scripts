@@ -79,25 +79,30 @@ upstream. A worker idle beside pulls whose slots are closed is not stalled.
 Every pull records every listing in `listings`, matched by the pattern or not.
 Each row holds the posting text the listing call carried and the raw record
 minus that text. Greenhouse (with `content=true`), Lever and Ashby carry the
-text; it is assembled by the same `core/fetching/ats.py` helpers the resolvers use, so
-it is what a per-posting fetch would have returned. ByteDance carries it too,
-as a description and a requirement, and has no resolver. Workday, SmartRecruiters,
-Oracle Recruiting and Workable list without the text, so their postings get it
-from the matching resolver, one call each, when a check needs it. Taleo lists
-without the text and has no resolver, so its postings get it from the page
-fetch tiers below. Apple lists
-a summary only (kept in `raw`) and has no resolver. Its posting page builds the
-text from JSON embedded in the page, so the static tier extracts the site's
-navigation alone, which clears `static_fetch_min_chars` (3,278 characters
-against 1,500 on 2026-10-05). `GET https://jobs.apple.com/api/v1/jobDetails/{id}`
-returns the text, for the same id the posting URL carries.
+text; it is assembled by the same `core/fetching/ats.py` helpers the resolvers
+use, so it is what a per-posting fetch would have returned. ByteDance carries
+it too, as a description and a requirement, and Jibe carries it; neither has a
+resolver. Workday, SmartRecruiters, Oracle Recruiting, Workable and Apple list
+without the text, so their postings get it from the matching resolver, one call
+each, when a check needs it. An iCIMS portal card holds a snippet, which is not
+the text and is not stored; the iCIMS resolver reads the text from the
+posting's frame. Taleo lists without the text and has no resolver, so its
+postings get it from the page fetch tiers below.
 
-it is what a per-posting fetch would have returned. Jibe carries it too, and
-has no resolver. Workday, SmartRecruiters,
-Oracle Recruiting and Workable list without the text, so their postings get it
-from the matching resolver, one call each, when a check needs it. An iCIMS
-portal card holds a snippet, which is not the text and is not stored; the
-iCIMS resolver reads the text from the posting's frame.
+**A board whose page is a shell gets a resolver, because the static tier
+cannot tell a shell from a posting.** The static tier accepts any page whose
+extracted text clears `static_fetch_min_chars`, and a careers site's navigation
+alone can clear it. Apple's posting page builds its text from JSON embedded in
+the page: on 2026-10-05 the static tier returned 3,268 to 3,322 characters for
+nine postings, none of them the posting's own text, and a check would have
+judged the site's menu. The `Apple` resolver reads
+`GET https://jobs.apple.com/api/v1/jobDetails/{id}` instead (45 of 45 listed
+postings, 2,014 to 6,655 characters, every one with its qualifications). Its
+404 is the closure: 68 of 68 requisitions the board no longer listed answered
+it. Its 200 is not proof of listing, since one requisition the board no longer
+listed still answered 200 with full text, so that closure comes from the
+board's authoritative pull. A new board gets the same check before it is
+switched on: does the static tier's text contain the posting.
 
 Rows are aged out by `screened_retention_days` after the board stops listing
 them.
