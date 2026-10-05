@@ -93,6 +93,22 @@ def test_recent_or_dead_worker_is_not_a_progress_stall():
     assert _silent() == set()
 
 
+def test_progress_from_before_the_current_claim_is_not_a_stall():
+    """progress_at survives a park and a requeue. A task resumed five minutes
+    ago, whose last progress was written before it parked on a provider batch
+    for hours, has been silent for five minutes, not for hours."""
+    db.execute(
+        """
+        INSERT INTO tasks (kind, payload, status, worker, started_at, last_heartbeat, progress_at,
+                           progress)
+        VALUES ('run_managed_board_batch', '{}', 'running', 'worker',
+                now() - interval '5 minutes', now(), now() - interval '4 hours',
+                '{"done": 0, "total": 811, "label": "batch of 811 submitted (half price)"}')
+        """
+    )
+    assert _silent() == set()
+
+
 def test_a_kind_failing_three_times_fires_but_ingest_has_its_own():
     for _ in range(3):
         _task("probe_credentials", "failed", error="InvalidToken")

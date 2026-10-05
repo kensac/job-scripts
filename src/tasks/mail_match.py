@@ -19,6 +19,8 @@ so the wrong order poisons the matcher permanently and silently.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
+from functools import partial
 from typing import Any
 
 from api import db
@@ -55,6 +57,16 @@ APPLIED_KINDS = frozenset(
 APPLIED_STATUSES = ("Application Submitted", "Follow-up")
 
 DERIVED = "derived"
+
+# Progress is written every this many messages or applications, because a
+# single user's sweep is most of a run: 4,853 messages and 2,587 applications
+# for the one user in production on 2026-10-04, which took 4 minutes on a host
+# beside the database and 110 on one 100 ms from it. Written once per user,
+# that whole run looked like one stalled step. 110 minutes over those 7,440
+# items is under 1 s an item, so this is a write every two minutes or less on
+# the far host; per item it would add a round trip and an event publish to
+# every message.
+PROGRESS_EVERY = 100
 
 # A derived application needs a role. An application is a (company, role) pair,
 # and mail that names an employer but no role is half an entity - a careers
@@ -373,7 +385,12 @@ def recompute_derived_floors(user_id: int) -> int:
     return moved
 
 
-def match_pending(user_id: int, *, limit: int | None = None) -> dict[str, int]:
+def match_pending(
+    user_id: int,
+    *,
+    limit: int | None = None,
+    progress: Callable[[int, int], None] | None = None,
+) -> dict[str, int]:
     """Run the tiers over every job-related message with no match recorded.
 
     UNMATCHED is recorded, not skipped. "We looked and found nothing" is a
@@ -435,7 +452,9 @@ def match_pending(user_id: int, *, limit: int | None = None) -> dict[str, int]:
         {"user": user_id, "limit": limit},
     )
     counts: dict[str, int] = {}
-    for row in rows:
+    for index, row in enumerate(rows):
+        if progress and index % PROGRESS_EVERY == 0:
+            progress(index, len(rows))
         if row["kind"] in mail_match.UNATTACHABLE_KINDS:
             match = mail_match.Match(
                 None,
@@ -502,6 +521,12 @@ def detach_unattachable(user_id: int) -> int:
     return len(rows)
 
 
+def _step_progress(
+    task_id: int, index: int, users: int, user_id: int, what: str, done: int, total: int
+) -> None:
+    set_progress(task_id, index, users, f"matching user {user_id}: {what} {done}/{total}")
+
+
 async def handle_match_mail(task_id: int, payload: dict[str, Any]) -> None:
     """Match every user's mail, or one user's when asked.
 
@@ -554,12 +579,17 @@ async def handle_match_mail(task_id: int, payload: dict[str, Any]) -> None:
     }
     for index, user_id in enumerate(user_ids):
         set_progress(task_id, index, len(user_ids), f"matching user {user_id}")
+        step = partial(_step_progress, task_id, index, len(user_ids), user_id)
         totals["tracked"] += seed_from_tracker(user_id)
         totals["detached"] += detach_unattachable(user_id)
         # Before matching, so a floor lowered now releases its messages in the
         # same sweep rather than the next one.
         totals["floors_lowered"] += recompute_derived_floors(user_id)
-        counts = match_pending(user_id, limit=int(limit) if limit else None)
+        counts = match_pending(
+            user_id,
+            limit=int(limit) if limit else None,
+            progress=partial(step, "messages"),
+        )
         totals["swept"] += sum(counts.values())
         # Messages that came out of this sweep holding an application. The
         # verdicts that attach nothing - `unmatched`, and the deliberate
@@ -572,7 +602,10 @@ async def handle_match_mail(task_id: int, payload: dict[str, Any]) -> None:
         )
         created, _ = seed_from_mail(user_id)
         totals["derived"] += created
-        for app in db.query("SELECT id FROM applications WHERE user_id = %s", (user_id,)):
+        apps = db.query("SELECT id FROM applications WHERE user_id = %s", (user_id,))
+        for done, app in enumerate(apps):
+            if done % PROGRESS_EVERY == 0:
+                step("applications", done, len(apps))
             result = sync_action_items(app["id"])
             totals["opened"] += result["opened"]
             totals["resolved"] += result["resolved"]
