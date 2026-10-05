@@ -105,16 +105,18 @@ def retire_switched_off(patterns_enforced: bool) -> dict[str, int]:
     reaches every way a source is switched off: the sources page, a bundle
     switch, the automatic switch-off of a board that keeps failing, or a
     direct write. Rows a concurrent upsert holds are skipped, not waited on,
-    and the next cycle takes them. Returns the count per source."""
+    and the next cycle takes them, so it cannot deadlock against an ingest.
+    It still locks in url order (_LOCK_ORDER), as every multi-row writer of
+    jobs does. Returns the count per source."""
     with pool.connection() as conn:
         rows = conn.execute(
-            """
+            f"""
             WITH doomed AS (
                 SELECT j.id FROM jobs j JOIN sources s ON s.name = j.source AND NOT s.active
                 WHERE j.active AND NOT EXISTS (
                     SELECT 1 FROM listings l JOIN sources o ON o.name = l.source AND o.active
                     WHERE l.url = j.url AND (l.kept OR NOT %(enforced)s))
-                ORDER BY j.id FOR UPDATE OF j SKIP LOCKED
+                ORDER BY j.url {_LOCK_ORDER} FOR UPDATE OF j SKIP LOCKED
             ),
             retired AS (
                 UPDATE jobs SET active = false FROM doomed

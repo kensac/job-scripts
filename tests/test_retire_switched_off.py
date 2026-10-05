@@ -110,3 +110,19 @@ def test_the_task_retires_and_the_scheduler_queues_it_every_cycle(f):
     assert db.query_one(
         "SELECT 1 FROM tasks WHERE kind = 'retire_switched_off' AND dedupe_key IS NOT NULL"
     )
+
+
+def test_a_row_an_ingest_holds_is_skipped_and_retired_next_cycle(f):
+    """It runs beside every ingest. Waiting on a held row is how two writers
+    deadlock; skipping it costs one cycle."""
+    from core.pool import pool
+
+    f.make_source("off", active=False)
+    held = f.make_job(source="off", url="https://jobs.test/held")
+    free = f.make_job(source="off", url="https://jobs.test/free")
+    with pool.connection() as holder:
+        holder.execute("SELECT 1 FROM jobs WHERE id = %s FOR UPDATE", (held,))
+        assert catalog.retire_switched_off(patterns_enforced=True) == {"off": 1}
+    assert _active(held) and not _active(free)
+    assert catalog.retire_switched_off(patterns_enforced=True) == {"off": 1}
+    assert not _active(held)
