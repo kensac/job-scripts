@@ -268,7 +268,7 @@ headline was wrong and was nearly acted on. That is why this exists.
 Browser autofill stops at the free-response box on an application form. The
 questions are public on four ATSs (Greenhouse and Workable as JSON, Ashby
 through the GraphQL call its own page makes, Lever as the apply page's HTML;
-`core/forms.py`), read once per posting url into `application_forms` from
+`core/fetching/forms.py`), read once per posting url into `application_forms` from
 inside the task, under the same per-host budget as an ingest. Workday and
 Oracle keep the form behind a sign-in and SmartRecruiters publishes none;
 there the person pastes the question in (`source = 'manual'`). Only the
@@ -477,7 +477,7 @@ another.
 **Metrics** (`api/metrics.py`, Prometheus) answer "how much, how fast":
 counters and gauges, no identity.
 
-**Conditions** (`api/health.py`, `health_alerts`) answer "is something wrong":
+**Conditions** (`api/health/`, `health_alerts`) answer "is something wrong":
 app-aware detectors comparing a window against a baseline, opening and
 resolving alerts, mailing once. A new detector is written when a pattern
 emerges, never one per traceback.

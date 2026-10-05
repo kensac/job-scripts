@@ -139,7 +139,7 @@ carry that width rather than inventing an hour by casting.
 These exist in exactly one place each. Change them there, and never write a
 fresh copy:
 
-- **Job visibility**: `api/visibility.py`. `FULL` is the one spelling of the
+- **Job visibility**: `api/board/visibility.py`. `FULL` is the one spelling of the
   predicate and only the recompute task runs it; `FAST` is the one spelling of
   the read, and every board read, per-object route and requirements slice goes
   through it. The board task's materialise and candidate queries share
@@ -161,7 +161,7 @@ fresh copy:
   strict JSON schema are derived together by `structured_response_spec`.
   Prompts, inputs, context, output limits, model choice and persistence remain
   owned by their domain or task.
-- **Listing formats**: `core/boards.py`, one fetcher per board format, chosen
+- **Listing formats**: `core/fetching/boards.py`, one fetcher per board format, chosen
   by the listings URL. See [sources-and-boards.md](sources-and-boards.md).
 - **What the mail implies the board should say**: `mail_pipeline.proposals_for`
   and `answer_proposal`. The route that lists proposals and the queue that

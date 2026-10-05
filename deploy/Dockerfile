@@ -32,4 +32,7 @@ ENV PATH="/app/.venv/bin:/usr/lib/chromium:${PATH}" \
     PYTHONPATH="/app/src" \
     JOBTRACKER_REVISION=${GIT_SHA}
 
-CMD ["python", "-m", "trackers.run_tracker", "ft"]
+# Every fleet compose file names its own command (uvicorn for the api,
+# `python -m api.worker` for workers), so this is only the bare `docker run`
+# default. Most containers are workers.
+CMD ["python", "-m", "api.worker"]
