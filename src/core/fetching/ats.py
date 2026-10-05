@@ -3,11 +3,12 @@ from __future__ import annotations
 import datetime
 import enum
 import html
+import json
 import logging
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, replace
-from typing import ClassVar
+from typing import ClassVar, TypeGuard
 from urllib.parse import parse_qs, unquote, urlparse
 
 import ftfy
@@ -153,7 +154,6 @@ def workable_text(data: dict) -> str:
 class AtsResolver(ABC):
     name: ClassVar[str]
     markers: ClassVar[tuple[str, ...]]
-    enabled: ClassVar[bool] = True
 
     def matches(self, url: str) -> bool:
         return any(m in url for m in self.markers)
@@ -443,19 +443,76 @@ class Workable(AtsResolver):
 
 
 class ICims(AtsResolver):
-    """No public content API; registered for URL canonicalization only."""
+    """An iCIMS portal posting, read from the frame its public page embeds.
+
+    The public URL serves the portal's chrome with the posting inside an
+    iframe, which neither the static fetch nor the browser's body text reads:
+    GDMS answered 7,417 characters of site navigation and none of the posting,
+    Joby 472 (2026-10-05). The frame itself, the same URL with in_iframe=1,
+    carries the posting as schema.org JobPosting JSON-LD. A posting that is
+    not public answers 410: 40 of 40 ids missing from two tenants' sitemaps
+    did, and 6 of 6 listed ids answered 200 with the JSON-LD.
+    """
 
     name = "icims"
     markers = ("icims.com",)
-    enabled = False
+    _JOB = re.compile(r"/jobs/(\d+)(?:/[^/]*)?/job")
+    _LD = re.compile(r'<script type="application/ld\+json">(.*?)</script>', re.S)
 
     def canonical(self, url: str) -> str | None:
         parsed = urlparse(url)
-        match = re.search(r"/jobs/(\d+)(?:/[^/]*)?/job", parsed.path)
+        match = self._JOB.search(parsed.path)
         return f"https://{parsed.netloc.lower()}/jobs/{match.group(1)}/job" if match else None
 
     def fetch(self, url: str) -> AtsResult:
-        return UNSUPPORTED
+        parsed = urlparse(url)
+        host = parsed.netloc.lower()
+        match = self._JOB.search(parsed.path)
+        if not host.endswith(".icims.com") or not match:
+            return UNSUPPORTED
+        resp = self.get(f"https://{host}/jobs/{match.group(1)}/job?in_iframe=1")
+        early = self.from_response(resp)
+        if early is not None:
+            return early
+        assert resp is not None
+        posting = next(
+            (d for d in map(_json_or_none, self._LD.findall(resp.text)) if _is_job_posting(d)),
+            None,
+        )
+        if posting is None:
+            return self.result(None)
+        places = posting.get("jobLocation") or []
+        places = places if isinstance(places, list) else [places]
+        result = self.result(
+            join(
+                posting.get("title"),
+                "; ".join(_ld_place(p) for p in places if _ld_place(p)),
+                clean_html(posting.get("description") or ""),
+            )
+        )
+        return replace(result, posted=_iso_date(posting.get("datePosted")))
+
+
+def _json_or_none(text: str) -> object:
+    try:
+        return json.loads(text)
+    except ValueError:
+        return None
+
+
+def _is_job_posting(data: object) -> TypeGuard[dict]:
+    return isinstance(data, dict) and data.get("@type") == "JobPosting"
+
+
+def _ld_place(place: object) -> str:
+    address = place.get("address") if isinstance(place, dict) else None
+    if not isinstance(address, dict):
+        return ""
+    # iCIMS writes UNAVAILABLE where a tenant left a part empty (AMD Hsinchu
+    # has no region, Peraton's remote postings no city).
+    keys = ("addressLocality", "addressRegion", "addressCountry")
+    parts = (str(address.get(k) or "").strip() for k in keys)
+    return ", ".join(p for p in parts if p and p != "UNAVAILABLE")
 
 
 RESOLVERS: list[AtsResolver] = [
@@ -539,8 +596,7 @@ def is_ats_email_domain(domain: str | None) -> bool:
 
 
 def canonicalize(url: str) -> str | None:
-    """Canonical clickable URL for a posting, independent of whether the
-    provider's content bypass is enabled."""
+    """Canonical clickable URL for a posting."""
     for resolver in RESOLVERS:
         if not resolver.matches(url):
             continue
@@ -554,7 +610,7 @@ def canonicalize(url: str) -> str | None:
 
 def resolve(url: str) -> AtsResult:
     for resolver in RESOLVERS:
-        if not resolver.enabled or not resolver.matches(url):
+        if not resolver.matches(url):
             continue
         try:
             result = resolver.fetch(url)
