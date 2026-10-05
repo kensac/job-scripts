@@ -413,8 +413,11 @@ def pending_batch_ids(task_id: int) -> list[str]:
 
 
 def resume_parked(task_id: int) -> None:
+    """Back to pending for the claim that collects. That claim is not a retry,
+    so it is counted in batch_resumes and the retry budget gives it back."""
     db.execute(
-        "UPDATE tasks SET status = 'pending', started_at = NULL, last_heartbeat = NULL "
+        "UPDATE tasks SET status = 'pending', started_at = NULL, last_heartbeat = NULL, "
+        "batch_resumes = batch_resumes + 1 "
         "WHERE id = %s AND status = 'awaiting_batch'",
         (task_id,),
     )

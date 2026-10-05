@@ -101,6 +101,18 @@ WORKER_NAME = os.environ.get("JOBTRACKER_WORKER_NAME") or socket.gethostname()
 _managed_board_schedule_attempts: set[tuple[str, int]] = set()
 
 
+# The retry budget, which is not the claim count. Every claim increments
+# attempts, because (worker, attempts) is the generation stamp a claim's
+# writes are guarded by and a repeated stamp would let a lost worker write
+# over the run that replaced it. A claim that resumes a parked batch wait is
+# not a retry, so resume_parked counts it in batch_resumes and the budget
+# subtracts it. Counting resumes against the budget let 404 batch tasks reach
+# the cap in the 30 days to 2026-10-04 without a single failure, and two of
+# them were then failed at their first real error with 1,198 paid receipts
+# unconsumed.
+RETRIES_SPENT = "(attempts - batch_resumes)"
+
+
 def _claim_task() -> dict[str, Any] | None:
     """Only kinds this image has a handler for. A roll goes host by host, and
     a host still on the old image sees the new kind a rolled host enqueued:
@@ -124,7 +136,7 @@ def _claim_task() -> dict[str, Any] | None:
                             AND b.egress_group = %(egress)s
                             AND b.next_allowed_at > now())
                     ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED)
-        RETURNING id, kind, payload, attempts, worker
+        RETURNING id, kind, payload, attempts, worker, {RETRIES_SPENT} AS retries_spent
         """,
         {
             "known": list(HANDLERS),
@@ -138,11 +150,14 @@ def _claim_task() -> dict[str, Any] | None:
 
 def reap_stale_tasks() -> None:
     """Recover tasks whose worker died mid-run (deploy, crash, OOM): heartbeat
-    goes stale -> requeue up to MAX_ATTEMPTS, then fail permanently."""
+    goes stale -> requeue up to MAX_ATTEMPTS, then fail permanently.
+
+    A task failed here keeps its batch_ids, for the reason finish() keeps a
+    failed task's: the batches they name were never collected."""
     requeued = db.execute_count(
         f"""
         UPDATE tasks SET status = 'pending', started_at = NULL, last_heartbeat = NULL
-        WHERE status = 'running' AND attempts < {MAX_ATTEMPTS}
+        WHERE status = 'running' AND {RETRIES_SPENT} < {MAX_ATTEMPTS}
           AND COALESCE(last_heartbeat, started_at) < now() - interval '{HEARTBEAT_TIMEOUT_MINUTES} minutes'
         """
     )
@@ -154,9 +169,9 @@ def reap_stale_tasks() -> None:
     lost = db.execute_count(
         f"""
         UPDATE tasks SET status = 'failed', finished_at = now(),
-                         error = 'worker lost (heartbeat timeout after ' || attempts || ' attempts)',
-                         payload = COALESCE(payload, '{{}}'::jsonb) - 'batch_ids'
-        WHERE status = 'running' AND attempts >= {MAX_ATTEMPTS}
+                         error = 'worker lost (heartbeat timeout after '
+                                 || {RETRIES_SPENT} || ' attempts)'
+        WHERE status = 'running' AND {RETRIES_SPENT} >= {MAX_ATTEMPTS}
           AND COALESCE(last_heartbeat, started_at) < now() - interval '{HEARTBEAT_TIMEOUT_MINUTES} minutes'
         """
     )
@@ -634,7 +649,7 @@ async def run_once() -> bool:
         logger.exception("Task %s requires payload restoration before retry", task["id"])
         telemetry.capture_exception(exc, properties={**_task_props(task, exc), **span_ids})
     except Exception as exc:
-        if _is_transient(exc) and task["attempts"] < MAX_ATTEMPTS:
+        if _is_transient(exc) and task["retries_spent"] < MAX_ATTEMPTS:
             # Host ran out of memory/threads, not a broken task: put it back so
             # a healthier worker (or this one, later) takes it. Failing
             # permanently here costs the source a whole ingest cycle.
