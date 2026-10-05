@@ -48,6 +48,7 @@ _SUBJECT_KINDS = {
     "batch_parked_too_long": SUBJECT_TASK_KIND,
     "batch_failed_whole": SUBJECT_PURPOSE,
     "ingest_failing": SUBJECT_SOURCE,
+    "source_switched_off": SUBJECT_SOURCE,
     "ingest_host_failing": SUBJECT_HOST,
     "source_feed_empty": SUBJECT_SOURCE,
     "source_pattern_excludes_all": SUBJECT_SOURCE,

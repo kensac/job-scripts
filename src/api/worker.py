@@ -19,7 +19,16 @@ from typing import Any
 
 import psycopg
 
-from api import db, events, hosts, job_profile_derivation, managed_board_runs, metrics, telemetry
+from api import (
+    db,
+    events,
+    hosts,
+    job_profile_derivation,
+    managed_board_runs,
+    metrics,
+    queue,
+    telemetry,
+)
 from api.queue import enqueue
 from core.payload_objects import PayloadUnavailable
 from tasks import HANDLERS
@@ -216,11 +225,17 @@ def schedule_ingest_cycle() -> None:
     # claimed as soon as it finishes.
     #
     # A source on a longer interval than the cycle is skipped while its last
-    # successful or in-flight ingest is younger than that interval. A FAILED
-    # one does not count, so a board on a daily interval that failed retries
-    # next cycle rather than tomorrow. Hourly sources (interval 1) are governed
-    # by the per-cycle dedupe alone, which is exact where an age check drifts.
-    for s in db.query(
+    # successful or in-flight ingest is younger than that interval. Hourly
+    # sources (interval 1) are governed by the per-cycle dedupe alone, which
+    # is exact where an age check drifts.
+    #
+    # A failed pull counts toward the interval too, and a run of them backs
+    # off (queue.backing_off). It used to retry next cycle: twelve boards,
+    # most answering 404, were pulled every hour for up to eleven days, and
+    # every board together failed 1,509 pulls in the week to 2026-10-04. Asked
+    # in a second query of only the sources this one selects, because over
+    # every source it is 0.68 s, every minute, on every worker.
+    due = db.query(
         """
         SELECT name, listings_url FROM sources s WHERE active
           AND NOT EXISTS (
@@ -232,7 +247,11 @@ def schedule_ingest_cycle() -> None:
               AND t.payload->>'source' = s.name
               AND t.created_at > now() - make_interval(hours => s.ingest_interval_hours)))
         """
-    ):
+    )
+    waiting = queue.backing_off([s["name"] for s in due])
+    for s in due:
+        if s["name"] in waiting:
+            continue
         enqueue(
             "ingest_source",
             {"source": s["name"], "cycle": cycle, "host": hosts.host_of(s["listings_url"])},

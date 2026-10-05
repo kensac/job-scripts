@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from api import db
+from api import db, queue
 from api.health.evidence import (
     MIN_CONTENT_SAMPLES,
     _int_from,
@@ -32,35 +32,91 @@ def _detect_boards() -> list[dict[str, Any]]:
     """
     found: list[dict[str, Any]] = []
 
-    # 1. The fetch itself failing, hour after hour. One failure is a blip;
-    #    the hourly cycle is its retry.
-    for r in db.query(
-        """
-        WITH recent AS (
-            SELECT payload->>'source' AS source, status, error,
-                   row_number() OVER (PARTITION BY payload->>'source' ORDER BY id DESC) AS rn
-            FROM tasks
-            WHERE kind = 'ingest_source' AND status IN ('done', 'failed')
-              AND created_at > now() - interval '3 days'
+    # 1. The fetch itself failing, pull after pull. One failure is a blip.
+    #    Read as a run rather than a window, because a failing board backs
+    #    off (queue.backing_off) and a daily board's third failure lands three
+    #    days after its first. A board that ran into
+    #    ingest_give_up_after_failures has been switched off by its last pull
+    #    (tasks.ingest), and says so until someone switches it back on or
+    #    deletes it: its postings are retired, which nobody should learn
+    #    from a board going quiet.
+    give_up = int(db.get_config("ingest_give_up_after_failures"))
+    for name, r in sorted(queue.failure_runs(at_least=INGEST_FAILURE_STREAK).items()):
+        error = (r["last_error"] or "")[:160]
+        detail = {
+            "source": name,
+            "failures": r["failures"],
+            "last_failed": r["last_failed"].isoformat(),
+            "error": r["last_error"],
+        }
+        if r["active"]:
+            found.append(
+                {
+                    "kind": "ingest_failing",
+                    "subject": name,
+                    "severity": "critical",
+                    "message": (
+                        f"the last {r['failures']} ingests of {name} all failed; it is "
+                        f"switched off at {give_up}. Last error: {error}"
+                    ),
+                    "detail": detail,
+                }
+            )
+        elif r["failures"] >= give_up:
+            found.append(
+                {
+                    "kind": "source_switched_off",
+                    "subject": name,
+                    "severity": "warning",
+                    "message": (
+                        f"{name} is switched off and its last {r['failures']} pulls failed, "
+                        f"the last at {r['last_failed']:%Y-%m-%d %H:%M} UTC, so its postings "
+                        f"are retired. Last error: {error}. Fix its listings URL and switch "
+                        "it back on, or delete it."
+                    ),
+                    "detail": detail,
+                }
+            )
+
+    # 1b. A board that pulls fine and has never listed a posting. Not a
+    #     failure: an empty pull may be a company with no open roles, and
+    #     switching it off would miss the day it posts one, for about one
+    #     request a day. But pulled forever unseen, it is a slug that never
+    #     matched anything; 105 such boards on 2026-10-04. One alert for the
+    #     set, since each is a cleanup and not an incident.
+    never = [
+        r["source"]
+        for r in db.query(
+            f"""
+            WITH pulls AS (
+                SELECT payload->>'source' AS source,
+                       max({_int_from("progress", "fetched")}) AS most
+                FROM tasks
+                WHERE kind = 'ingest_source' AND status = 'done' AND progress ? 'fetched'
+                  AND created_at > now() - interval '8 days'
+                GROUP BY 1
+            )
+            SELECT p.source FROM pulls p JOIN sources s ON s.name = p.source AND s.active
+            WHERE p.most = 0 AND s.created_at < now() - interval '7 days'
+              AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.source = p.source)
+              AND NOT EXISTS (SELECT 1 FROM listings l WHERE l.source = p.source)
+            ORDER BY p.source
+            """
         )
-        SELECT r.source, max(r.error) AS error
-        FROM recent r JOIN sources s ON s.name = r.source AND s.active
-        WHERE r.rn <= %(streak)s
-        GROUP BY r.source
-        HAVING count(*) = %(streak)s AND count(*) FILTER (WHERE r.status = 'failed') = %(streak)s
-        """,
-        {"streak": INGEST_FAILURE_STREAK},
-    ):
+    ]
+    if never:
         found.append(
             {
-                "kind": "ingest_failing",
-                "subject": r["source"],
-                "severity": "critical",
+                "kind": "sources_never_produced",
+                "subject": "boards",
+                "severity": "warning",
                 "message": (
-                    f"the last {INGEST_FAILURE_STREAK} ingests of {r['source']} all failed; "
-                    f"last error: {(r['error'] or '')[:160]}"
+                    f"{len(never)} switched-on boards older than a week pulled fine for the "
+                    "last 8 days, listed nothing, and have never put a posting in the "
+                    f"catalog: {', '.join(never[:10])}{', ...' if len(never) > 10 else ''}. "
+                    "Check each listings URL; an empty board may only have no open roles."
                 ),
-                "detail": {"source": r["source"], "error": r["error"]},
+                "detail": {"sources": never},
             }
         )
 

@@ -41,10 +41,11 @@ def test_a_source_still_queued_from_the_last_cycle_is_not_queued_again(monkeypat
     assert _pending("idle") == 1
 
 
-def test_a_daily_source_is_pulled_once_a_day_and_a_failure_does_not_count(f):
+def test_a_daily_source_is_pulled_once_a_day_and_a_failure_counts_too(f):
     """A source on a longer interval than the cycle waits while its last
     successful or in-flight pull is younger than the interval. A failed pull
-    is not a pull, so the next cycle retries it rather than tomorrow."""
+    counts as well: retried every cycle, a board answering 404 was pulled 24
+    times a day (tests/test_ingest_backoff.py has the run that backs off)."""
     from api import worker
 
     for name in ("done_recently", "done_long_ago", "failed_recently", "running_now"):
@@ -71,7 +72,7 @@ def test_a_daily_source_is_pulled_once_a_day_and_a_failure_does_not_count(f):
     assert _pending("done_recently") == 0
     assert _pending("running_now") == 0
     assert _pending("done_long_ago") == 1
-    assert _pending("failed_recently") == 1
+    assert _pending("failed_recently") == 0
 
 
 def test_requirements_extraction_runs_only_when_switched_on(f):

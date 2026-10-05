@@ -12,13 +12,34 @@ import re
 from typing import Any
 from urllib.parse import urlparse
 
-from api import db, filter_runs, hosts, metrics, telemetry
+from api import db, filter_runs, hosts, metrics, queue, telemetry
 from api.ai import verdicts
 from core.store import add_ai_result
 from tasks.board import content_ready_urls
 from tasks.runtime import Deferred, cancelled, set_progress
 
 logger = logging.getLogger(__name__)
+
+
+def _switch_off_if_given_up(source: str, exc: Exception) -> None:
+    """This failed pull, with the run before it, reached
+    ingest_give_up_after_failures: the board is switched off, which retires
+    its postings (catalog.retire_switched_off) and opens source_switched_off
+    so an administrator sees why. Switched back on, the board is pulled at
+    the next cycle and one more failure switches it off again."""
+    run = queue.failure_runs([source]).get(source)
+    failures = (run["failures"] if run else 0) + 1  # this pull is still running
+    if failures < int(db.get_config("ingest_give_up_after_failures")):
+        return
+    if not db.execute_count(
+        "UPDATE sources SET active = false WHERE name = %s AND active", (source,)
+    ):
+        return
+    logger.warning(f"Ingest {source}: switched off after {failures} failed pulls in a row")
+    telemetry.capture(
+        "source_switched_off",
+        properties={"source": source, "failures": failures, "error": str(exc)[:500]},
+    )
 
 
 async def handle_ingest_source(task_id: int, payload: dict[str, Any]) -> None:
@@ -28,7 +49,7 @@ async def handle_ingest_source(task_id: int, payload: dict[str, Any]) -> None:
 
     source = db.query_one("SELECT * FROM sources WHERE name = %s AND active", (payload["source"],))
     if not source:
-        raise LookupError("unknown or inactive source")
+        raise LookupError(queue.INACTIVE_SOURCE_ERROR)
 
     boards.set_pace(db.get_config("ingest_host_pace_seconds") or {})
     host = hosts.host_of(source["listings_url"])
@@ -64,6 +85,7 @@ async def handle_ingest_source(task_id: int, payload: dict[str, Any]) -> None:
                 "error": str(exc)[:500],
             },
         )
+        _switch_off_if_given_up(source["name"], exc)
         raise
     hosts.succeeded(host)
     fetched = len(postings)
