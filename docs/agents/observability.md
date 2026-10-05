@@ -80,6 +80,16 @@ switch after selecting its inputs, immediately before handing off new work;
 work already handed to the batch runtime may finish submitting. Re-enabling
 the switch resumes normal eligibility selection, not a forced reclassification.
 
+**A task's per-cycle size has one definition, and the fleet budget prices
+the same one the handler applies.** The budget reads `TaskShape.per_cycle`,
+so a handler that caps from a second constant makes the ceiling price a
+fleet that is not running. Mail classification had two, 1,200 in the handler
+and 5,000 in the shape, each derived from its own guess at a spec's size.
+A cap sized to fill the batch waves is computed from `core.batch`'s
+`BATCH_TOKEN_BUDGET` and `BATCH_WAVE_CONCURRENCY` over a spec size measured
+from `ai_batches.est_tokens / requests`, which is the estimate that chunks
+the waves, not the billed input.
+
 Batched work parks rather than holding a worker. Scheduled filter and draft
 work can still run live when its key/provider path does not use batches.
 Price the actual transport with `core.pricing`, not a blanket batch discount.

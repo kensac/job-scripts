@@ -15,7 +15,6 @@ from __future__ import annotations
 import dataclasses
 import datetime
 import logging
-import os
 import re
 import zoneinfo
 from typing import Any, Literal
@@ -24,16 +23,10 @@ from pydantic import BaseModel
 
 from api import db
 from api.ai.batch_results import progress_counts
-from core.shapes import BACKFILL_TASK, MAX_CLASSIFY_PER_CYCLE, ONGOING_TASK
+from core.shapes import BACKFILL_TASK, CLASSIFY_PER_CYCLE, ONGOING_TASK
 from tasks.runtime import consume_result, has_batch_work, run_batched, set_progress
 
 logger = logging.getLogger(__name__)
-
-
-# A classification spec is the instructions plus a body capped at 20k chars,
-# so ~6k tokens against the same 1.8M-token wave budget comp.py sizes against:
-# ~300 specs per wave, times BATCH_WAVE_CONCURRENCY waves in flight.
-CLASSIFY_PER_CYCLE = int(os.environ.get("JOBTRACKER_MAIL_CLASSIFY_PER_CYCLE", "1200"))
 
 
 _INSTRUCTIONS = """You classify a single email from a job seeker's mailbox.
@@ -521,7 +514,7 @@ async def handle_classify_mail(task_id: int, payload: dict[str, Any]) -> None:
     # one task would build a spec list far larger than a wave can carry, and
     # the failure would arrive as memory pressure on a worker rather than as a
     # rejected parameter.
-    cap = min(int(payload.get("cap") or CLASSIFY_PER_CYCLE), MAX_CLASSIFY_PER_CYCLE)
+    cap = min(int(payload.get("cap") or CLASSIFY_PER_CYCLE), CLASSIFY_PER_CYCLE)
     # Re-classifying an EXPLICIT set of messages, for repairing events that were
     # written wrong rather than for finding ones that are missing. The set is
     # computed by the caller and recorded in the payload, so the task row says
