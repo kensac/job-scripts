@@ -342,6 +342,15 @@ guaranteed floor. Measured on 2026-09-04 over 431 pages: the static tier
 recovered one browser-served page in seven whole, and every JavaScript shell
 fell under the gate.
 
+**A page that frames its posting is read through the frame.** An iCIMS
+portal posting (`*.icims.com/jobs/<id>/job`) is the portal's chrome with the
+posting in an iframe. The static tier reads the chrome, which is long enough
+to clear the gate (GDMS, 7,417 characters of navigation), and the browser's
+body text never includes a frame, so neither tier ever saw the posting. The
+iCIMS resolver reads the frame (`?in_iframe=1`) and its JobPosting JSON-LD;
+a posting that is not public answers 410, which is gone. A frame without
+the JSON-LD is an error, never text.
+
 The content row's reason (`ats text`, `static`, `scraped`) is how the share
 each tier serves is read, so the engine can be switched in config and judged
 from the rows rather than assumed.
