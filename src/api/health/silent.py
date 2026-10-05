@@ -111,16 +111,22 @@ def _detect_silent() -> list[dict[str, Any]]:
             }
         )
 
+    # Silence is measured from the later of the last progress change and the
+    # current claim. progress_at survives a park, a graceful release and a
+    # reaper requeue, so a resumed task otherwise inherits the hours it spent
+    # waiting on a provider batch or in the queue and reads as stalled the
+    # moment it is claimed again. Waiting on a provider batch is
+    # `awaiting_batch`, not `running`, and is never judged here.
     stall_minutes = int(db.get_config("task_progress_stall_minutes"))
     for r in db.query(
         """
         SELECT id, kind, worker, progress,
-               EXTRACT(EPOCH FROM now() - COALESCE(progress_at, started_at)) / 60
+               EXTRACT(EPOCH FROM now() - GREATEST(progress_at, started_at)) / 60
                    AS stale_minutes
         FROM tasks
         WHERE status = 'running'
           AND last_heartbeat > now() - %(fresh)s::interval
-          AND COALESCE(progress_at, started_at)
+          AND GREATEST(progress_at, started_at)
               < now() - make_interval(mins => %(stall)s)
         """,
         {"fresh": WORKER_FRESH, "stall": stall_minutes},

@@ -679,3 +679,38 @@ def test_an_ambiguous_company_lowers_no_floor(f):
         for r in db.query("SELECT applied_at FROM applications WHERE user_id = %s", (uid,))
     }
     assert dates == {late}
+
+
+@pytest.mark.asyncio
+async def test_one_users_sweep_advances_progress_as_it_goes(f, monkeypatch):
+    """Progress written once per user made a whole run one step: production
+    has one user, so a 110-minute sweep on a far host looked stalled to the
+    detector for all of it. The task row must move inside the sweep, over
+    messages and over applications, not only between users."""
+    monkeypatch.setattr(task, "PROGRESS_EVERY", 2)
+    uid = f.make_user()
+    for i in range(3):
+        mid = _message(uid)
+        _event(mid, "rejection", company=f"Nowhere{i}")
+    for i in range(3):
+        job = f.make_job(company=f"Acme{i}", title="Engineer")
+        f.make_board_row(uid, job, status="Application Submitted")
+    task_id = f.make_task("match_mail", {})
+
+    written: list[str] = []
+    original = task.set_progress
+
+    def observe(*args, **kwargs):
+        original(*args, **kwargs)
+        row = db.query_one("SELECT progress->>'label' AS l FROM tasks WHERE id = %s", (task_id,))
+        written.append(row["l"])
+
+    monkeypatch.setattr(task, "set_progress", observe)
+    await task.handle_match_mail(task_id, {"user_id": uid})
+
+    assert [label for label in written if label.startswith(f"matching user {uid}:")] == [
+        f"matching user {uid}: messages 0/3",
+        f"matching user {uid}: messages 2/3",
+        f"matching user {uid}: applications 0/3",
+        f"matching user {uid}: applications 2/3",
+    ]

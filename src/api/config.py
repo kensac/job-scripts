@@ -302,13 +302,16 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
     # A live handler that has not changed its progress for this long is wedged,
     # even when its timer heartbeat remains fresh. Measured 2026-09-11: the
     # completed seven-day sample's p95 finish-after-progress gap was under 0.22
-    # minutes and its maximum was 15.4 minutes across sampled kinds; a live
-    # match_mail task had stopped advancing for 166.5 minutes.
+    # minutes and its maximum was 15.4 minutes across sampled kinds. The live
+    # match_mail task that looked stopped for 166.5 minutes was not: it wrote
+    # progress once per user, and production has one. 128 of the 235 stall
+    # alerts in the 30 days to 2026-10-04 were that, and it now writes progress
+    # every 100 messages.
     "task_progress_stall_minutes": ConfigKey(
         section="Health",
         default=30,
         value_type=PositiveInt,
-        help="Minutes a running task may go without changing its reported progress before it counts as stalled.",
+        help="Minutes a running task may go without changing its reported progress, counted from its last progress or its current claim, whichever is later, before it counts as stalled.",
     ),
     # How long a posting a title pattern screened out stays on record after
     # its board stops listing it. Long enough to evaluate a new pattern

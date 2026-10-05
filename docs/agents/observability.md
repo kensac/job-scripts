@@ -568,6 +568,28 @@ three times in three hours, a task the reaper keeps handing back, an open
 alert never mailed, and a pattern that admits every posting. A batched sweep
 counts a line as done only when its row lands.
 
+**`task_progress_stalled` means a handler is not advancing, so progress is
+written at a granularity a slow host still advances.** The worker's heartbeat
+is a thread: it proves the process is alive and nothing about the handler.
+The detector judges the handler by `progress_at`, so a handler that writes
+progress once per phase looks stuck for the whole phase. A loop over
+messages, candidates or applications writes progress every few minutes of
+work on the farthest host. `match_mail` wrote once per user, production has
+one user, and its sweep of 4,853 messages and 2,587 applications ran 110
+minutes on a host 100 ms from the database: 128 of the 235 stall alerts in
+the 30 days to 2026-10-04 were that single write. It now writes every
+`PROGRESS_EVERY` items. A phase that cannot report because it is one long
+call is usually a per-candidate loop to batch, as the managed-board verdict
+cache was (96 more of the 235, none since #769).
+
+Silence is measured from the later of `progress_at` and the current claim's
+`started_at`, because `progress_at` survives a park, a graceful release and a
+requeue; a resumed task must not inherit the hours it waited. Waiting on a
+provider batch is `awaiting_batch`, not `running`, and is never judged. The
+alert is critical because nothing else recovers a handler that has stopped:
+its heartbeat thread keeps the reaper away and there is no runtime limit, so
+it holds its worker until a person cancels it.
+
 Application drafts carry a reserved answer ID and revision from submission to
 collection. A result applies only while that reservation still owns the answer;
 question changes and newer user intent invalidate it. Results without an
