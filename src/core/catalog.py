@@ -90,6 +90,50 @@ def retire_unlisted(source: str, listed_and_admitted: list[str]) -> int:
         return len(dropped)
 
 
+def retire_switched_off(patterns_enforced: bool) -> dict[str, int]:
+    """Marks inactive every active row whose source is switched off, unless a
+    switched-on source lists the url and would admit it. A switched-off source
+    is never pulled, so nothing else ever retires its rows: on 2026-10-04
+    production held 50,994 active rows of 115 switched-off sources, 24,736 of
+    them sr_domino_s. The exception is a url whose listings row belongs to a
+    source that is on, kept by its pattern or admitted because enforcement is
+    off: that source's next pull would put it back, and every return queues a
+    re-check (371 rows on that day). Re-enabled, the source's own pull
+    reactivates its rows through upsert_postings, so this is reversible.
+
+    Runs every cycle and is a no-op once the catalog agrees, which is what
+    reaches every way a source is switched off: the sources page, a bundle
+    switch, the automatic switch-off of a board that keeps failing, or a
+    direct write. Rows a concurrent upsert holds are skipped, not waited on,
+    and the next cycle takes them, so it cannot deadlock against an ingest.
+    It still locks in url order (_LOCK_ORDER), as every multi-row writer of
+    jobs does. Returns the count per source."""
+    with pool.connection() as conn:
+        rows = conn.execute(
+            f"""
+            WITH doomed AS (
+                SELECT j.id FROM jobs j JOIN sources s ON s.name = j.source AND NOT s.active
+                WHERE j.active AND NOT EXISTS (
+                    SELECT 1 FROM listings l JOIN sources o ON o.name = l.source AND o.active
+                    WHERE l.url = j.url AND (l.kept OR NOT %(enforced)s))
+                ORDER BY j.url {_LOCK_ORDER} FOR UPDATE OF j SKIP LOCKED
+            ),
+            retired AS (
+                UPDATE jobs SET active = false FROM doomed
+                WHERE jobs.id = doomed.id AND jobs.active
+                RETURNING jobs.id, jobs.source
+            ),
+            logged AS (
+                INSERT INTO job_listing_events (job_id, source, listed)
+                SELECT id, source, false FROM retired
+            )
+            SELECT source, count(*) AS n FROM retired GROUP BY source
+            """,
+            {"enforced": patterns_enforced},
+        ).fetchall()
+    return {r["source"]: r["n"] for r in rows}
+
+
 _BATCH = 500
 
 

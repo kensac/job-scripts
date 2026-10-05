@@ -219,6 +219,12 @@ the meaning of title-pattern rejection, aggregator absence TTLs, retention and
 whether deletion is permitted for source facts. Do not encode defaults for
 those choices in a migration.
 
+Availability for disabled sources has an interim rule over today's tables: a
+switched-off source's posting is retired unless a switched-on source lists it
+and would admit it (`catalog.retire_switched_off`,
+[sources-and-boards.md](sources-and-boards.md)). The projection should
+reproduce that rule or replace it deliberately.
+
 **Never in a loop:** any write to the production database, and any migration
 that can refuse to apply ([migrations.md](migrations.md)). Neither of these is
 covered by the standing instruction above, because neither is gated by CI.
