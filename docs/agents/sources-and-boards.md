@@ -64,7 +64,14 @@ minus that text. Greenhouse (with `content=true`), Lever and Ashby carry the
 text; it is assembled by the same `core/fetching/ats.py` helpers the resolvers use, so
 it is what a per-posting fetch would have returned. Workday, SmartRecruiters,
 Oracle Recruiting and Workable list without the text, so their postings get it
-from the matching resolver, one call each, when a check needs it.
+from the matching resolver, one call each, when a check needs it. Taleo lists
+without the text and has no resolver, so its postings get it from the page
+fetch tiers below. Apple lists
+a summary only (kept in `raw`) and has no resolver. Its posting page builds the
+text from JSON embedded in the page, so the static tier extracts the site's
+navigation alone, which clears `static_fetch_min_chars` (3,278 characters
+against 1,500 on 2026-10-05). `GET https://jobs.apple.com/api/v1/jobDetails/{id}`
+returns the text, for the same id the posting URL carries.
 
 Rows are aged out by `screened_retention_days` after the board stops listing
 them.
@@ -243,6 +250,47 @@ closure; re-verification closes them instead. Airbus went from 2,000 to 2,883
 of about 2,940. Sources filter at our gate, the title pattern, and not at the
 board: a listings URL carries no search. Oracle serves at most 10,000 rows of a search, newest first,
 and a pull that ends short of the stated count raises `PartialPull` the same way.
+
+**A Taleo careersection is read to its count, and its count is never met.**
+The listings URL is the section's own search page,
+`https://{tenant}.taleo.net/careersection/{section}/jobsearch.ftl?lang=en&portal={portal}`;
+the section names the posting URL (`jobdetail.ftl?job={contestNo}`) and the
+portal is what the search endpoint takes (a URL without it costs one GET to
+read `portalNo` off the page). The endpoint,
+`POST /careersection/rest/jobboard/searchjobs`, needs no cookie or token,
+only a `tz` header, without which it answers 500. Its contract, measured on
+2026-10-05:
+
+- Pages are 25 rows and every page repeats `totalCount`. A page past the last
+  returns the last page again (Kautex: pages 5 to 500 held the same posting),
+  so the loop stops at the page the count implies, never on an empty page.
+- Never send `pageSize`. It is echoed back, but the server caches a page by
+  query and number, not size, for some minutes and for every caller: after a
+  run at other sizes, a pull at 25 saw 100-row pages and 616 of Textron's 691.
+  Postings are keyed by url, so a repeated row counts once.
+- Pages come back short of 25 because the count includes requisitions the list
+  never renders, on Bell the same ones under twelve sort orders and every
+  job-type slice, so no re-reading recovers them. Textron listed
+  691 of 751, Bell 111 of 133, Textron Aviation 97 of 106, AAR 187 of 193. A
+  public posting can also be absent from the search entirely. So `_taleo`
+  raises `PartialPull` whenever it holds fewer postings than the count, which
+  on every section measured is every pull: Taleo boards close postings through
+  re-verification, not by absence.
+- Rows carry no text and no company. Which column holds the title, the
+  locations (a JSON list inside a string) and the date is per section; the
+  date is `10/02/2026` on Textron and `Oct 5, 2026` on AAR, both `lang=en`.
+
+**A paged pull is held to its distinct postings, not its rows.** A sort with
+ties lets each page request order the tied rows afresh, so a pass can return
+exactly the stated count while serving some rows twice and others never.
+jobs.apple.com does this: sorted newest, its managed pipeline roles carry the
+request's own timestamp and tie at the top, and one pass on 2026-10-05
+returned 6,192 rows of 6,192 with 6,190 distinct, the same in three runs.
+`_apple` re-reads the pages that held those roles until the distinct count
+reaches the stated one or a round finds nothing new (one round of five pages
+recovered both), and raises `PartialPull` short of it. Its search body must
+carry `format`: without it every page is an empty 200 stating 0, which reads
+as an empty board.
 
 ## A switched-off source holds no posting active
 
