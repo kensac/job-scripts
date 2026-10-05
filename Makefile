@@ -42,7 +42,7 @@ lint:           ## report lint findings (add ARGS=--fix to apply)
 fmt:            ## format the codebase
 	ruff format src tests
 
-types:          ## type-check the live code (src/api, src/core)
+types:          ## type-check the live code (src/api, src/core, src/tasks)
 	pyright
 
 coverage:       ## measure test coverage (never gated, see docs/agents)

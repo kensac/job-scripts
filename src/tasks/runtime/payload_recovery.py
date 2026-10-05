@@ -99,7 +99,7 @@ def retry(task_id: int, store: PayloadStore | None = None) -> str:
             (MARKER, task_id),
         )
     events.publish_task(task_id)
-    if parent is not None:
+    if parent_id is not None:
         events.publish_task(parent_id)
     return "pending"
 

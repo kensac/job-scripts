@@ -102,7 +102,9 @@ async def _handle_managed_filter(
             or job["title_gate_keep"]
         )
     ]
-    frozen_contents = {
+    # Keyed by the job's content_query_id, which is None for a job with no
+    # content: that lookup misses and the job is checked on an empty page.
+    frozen_contents: dict[int | None, str] = {
         row.id: row.input_content
         for row in db.query_as(
             _Content,

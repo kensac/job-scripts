@@ -177,3 +177,16 @@ in CI and in the image. To add or move a pin, edit `pyproject.toml` and run
 `uv lock`, then commit both files in the same change. A lockfile that does not
 match the declaration fails the install rather than resolving something new,
 which is the point: what ran in CI is what the image carries.
+
+## Types
+
+`pyright` checks every package under `src` that runs: `src/api`, `src/core`
+and `src/tasks`, listed in `pyrightconfig.json`. A new top-level package goes
+into `include` in the change that creates it. Code outside the list is not
+type-checked, however green the check is. `src/tasks` was outside it until
+2026-10-04 and had seven errors that nobody saw. `pythonVersion` is the
+interpreter the image runs (`deploy/Dockerfile`), because typeshed's stubs
+differ between versions.
+
+Fix a type error with the true type or real `None` handling. A
+`# type: ignore` is acceptable only when the checker is wrong, and it says why.
