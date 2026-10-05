@@ -67,7 +67,13 @@ async def handle_ingest_source(task_id: int, payload: dict[str, Any]) -> None:
         postings, complete = partial.postings, False
     except Exception as exc:
         response = getattr(exc, "response", None)
-        if getattr(response, "status_code", None) == 429:
+        # An AWS WAF challenge is the same refusal in another shape: Eightfold
+        # answers 405 with x-amzn-waf-action: captcha once an address has
+        # asked too much (on 2026-10-05, every tenant tried but Microsoft), and
+        # counted as a failure it would switch the boards off.
+        if getattr(response, "status_code", None) == 429 or (
+            response is not None and response.headers.get("x-amzn-waf-action")
+        ):
             # The host said too many for THIS address: its gap doubles and its
             # slot closes, but the pull itself goes back almost at once, so an
             # address the host is not refusing takes it. Holding the pull

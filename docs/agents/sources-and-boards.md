@@ -80,7 +80,17 @@ host's own rate drains.
 
 A 429 doubles the gap and defers the pull (`Deferred`: back to pending with
 `not_before`, no attempt spent); a good pull narrows it toward the floor in
-`ingest_host_pace_seconds`.
+`ingest_host_pace_seconds`. A response carrying `x-amzn-waf-action` is the
+same refusal: an AWS WAF challenge, which Eightfold answers with a 405.
+Counted as a failure it would switch the board off.
+
+**A pace key can cover many hosts.** One WAF fronts the Eightfold tenants on
+whatever domain they serve, and once it challenged an address on 2026-10-05,
+Lockheed Martin, Northrop Grumman, CACI, PayPal and Netflix all answered 405
+for a few minutes (Microsoft's tenant did not). So every Eightfold page waits
+on the `eightfold.ai` entry of `ingest_host_pace_seconds`, not on its own
+host's. About 110 requests a minute from one address held for ten minutes;
+the limit itself was not measured.
 
 apply.workable.com refused 143 of 172 boards the hour a bundle first pulled,
 on one address two workers shared. That is why the row is per address, and why
@@ -103,8 +113,11 @@ SmartRecruiters, Oracle Recruiting, Workable and Apple list without the text,
 so their postings get it from the matching resolver, one call each, when a
 check needs it. An iCIMS portal card holds a snippet, which is not
 the text and is not stored; the iCIMS resolver reads the text from the
-posting's frame. Taleo and IBM list without the text and have no resolver, so
-their postings get it from the page fetch tiers below.
+posting's frame. Taleo, IBM and Eightfold list without the text and have no
+resolver, so their postings get it from the page fetch tiers below. An
+Eightfold resolver is not straightforward: tenants post on their own domains,
+so a posting URL does not say it is Eightfold's, and a 404 from a guessed
+endpoint on a host that is not would read as a closure.
 
 **A board whose page is a shell gets a resolver, because the static tier
 cannot tell a shell from a posting.** The static tier accepts any page whose
@@ -363,6 +376,22 @@ also stops at 10,000 rows: a request whose offset plus limit passes that
 answers no rows and a count of 10,000, which a loop paging until an empty page
 reads as the end of the board. The fetcher never asks past the window, and a
 count at the window is a partial pull (2026-10-05; neither board was near it).
+
+**A page advances by the rows it returned, never by the size asked for.**
+Eightfold returns ten rows a page whatever `num` says, so a loop stepping by
+its own page size reads one row in ten. Its listings URL is the tenant's
+search endpoint with its `domain`
+(`https://jobs.northropgrumman.com/api/pcsx/search?domain=ngc.com`, or
+`/api/apply/v2/jobs?domain=` on a tenant still on the older site); a tenant
+answers one generation and refuses the other with 403. Both state the count
+on every page and answer an empty 200 past the end, with no result window up
+to 21,774 (Starbucks, 2026-10-05). The search does not hold its order from
+one request to the next: a posting re-dated or removed mid-pull shifts later
+pages, and the order also moves while the count holds still (Qualcomm stated
+2,052 on every page of two pulls on 2026-10-05, which held 2,009 and 2,043
+distinct postings). `_eightfold` raises `PartialPull` when it holds fewer
+distinct postings than the largest count any page stated, so on such a
+tenant closures mostly come from re-verification.
 
 **A listings URL names the board when the host does not.** Both ByteDance hosts
 serve both boards; the `website-path` header picks one, and without it the API
