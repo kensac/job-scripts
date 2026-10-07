@@ -149,7 +149,30 @@ to `ELSE FALSE`. A new recipe ships in `shadow` mode: the board's first run
 judges every candidate and its `title_gate_report` lists what the gate would
 have dropped, which is the recall measurement. Only then is it set to
 `enforce`. Measured on Tech Internships 2026-10-05, `internship_v1` skips
-96.7% of calls and dropped 7 of 1,494 model keeps.
+96.7% of calls and dropped 7 of 1,494 model keeps. `aero_major_v1` would drop
+70 of the Aerospace board's 268 keeps and `new_grad_v1` 59 of Tech New Grad's
+1,068 (2026-10-07), so neither is enforced.
+
+**A board's question rides on the posting's verification request.** Every board
+candidate has passed verification, so verification has always read the posting
+first, and each board then paid to read the same text again. `verify_new` asks
+each published board whose run would buy an answer
+(`managed_board_runs.verification_questions`: its sources, criteria, enforced
+title gate and title review gate admit the posting, it has no verdict under its
+prompt and model, and it runs on verification's model and effort) inside the
+same request (`core.answers.joint_verification`). The board's verdict is
+written under its own prompt hash, and its run finds it through
+`decided_custom_urls` like any cached verdict. A posting no board admits keeps
+the plain verification request, byte for byte. The board's closed and
+clearance gates still apply to the cached verdict when its run projects.
+
+Judged against re-running today's separate requests, not against stored
+verdicts: re-asking the identical request flipped 56 of 188 past Tech New Grad
+keeps (2026-10-07). On the same postings the joint request kept 136 of 400 for
+Tech New Grad against 133 (sign test p=0.76), 32 against 29 for Aerospace
+(p=0.45), found 173 against 169 of 300 stored closures (p=0.34), and agreed on
+clearance. The call is booked once, to verification: a board's cost page counts
+only what its own runs still buy. `verify_answers_board_questions` turns it off.
 
 ## Location criteria match places, not words
 

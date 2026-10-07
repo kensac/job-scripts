@@ -269,6 +269,83 @@ def _reuse_candidates(sponsor_id: int, resolved_model: str) -> list[_Candidate]:
     )
 
 
+@dataclass(frozen=True)
+class BoardQuestion:
+    board_id: int
+    prompt_hash: str
+    criteria: str
+    model: str
+
+
+def verification_questions(
+    jobs: list[dict[str, Any]], model: str, effort: str
+) -> dict[str, list[BoardQuestion]]:
+    """The published boards whose question can ride on each posting's verification.
+
+    A board is asked here only where its own run would buy an answer: the
+    posting is from one of its sources, inside its criteria, through its
+    enforced title gate and title review gate, and has no verdict under its
+    prompt and model yet. It must also run on the verification model and
+    effort, since a verdict is keyed by model and the effort is part of the
+    question. Closed and clearance are not checked: verification is what
+    answers them, and the board's run applies them to the cached verdict as it
+    applies them to its own.
+    """
+    from api.review_gate import load_policy
+    from core.filters import custom_criteria_instructions
+    from core.review_gate import title_rejection
+    from core.store import decided_custom_urls
+
+    urls = [job["url"] for job in jobs]
+    if not urls:
+        return {}
+    policy = load_policy()
+    questions: dict[str, list[BoardQuestion]] = {}
+    for row in db.query(
+        "SELECT id FROM managed_boards WHERE published AND execution_mode = 'managed_filter' "
+        "ORDER BY id"
+    ):
+        board = _board(row["id"])
+        if board is None or board.requested_model != model:
+            continue
+        try:
+            choice = resolve(_batch_shape(board.requested_model))
+        except NoEligibleModel:
+            continue
+        if choice.params.get("reasoning_effort") != effort:
+            continue
+        rows = db.query(
+            "SELECT j.url, j.title, j.source FROM jobs j "
+            "WHERE j.url = ANY(%(urls)s) AND j.source = ANY(%(sources)s) " + board_criteria.SQL,
+            {
+                "urls": urls,
+                "sources": board.sources,
+                **board_criteria.params({"criteria": board.criteria}),
+            },
+        )
+        title_gate = TitleGateConfig.model_validate(board.title_gate) if board.title_gate else None
+        scope = policy.scopes.get(board.prompt_hash)
+        review_titles = bool(scope and scope.title_recipe and policy.title_mode == "enforce")
+        admitted = {
+            r["url"]: r["title"] or ""
+            for r in rows
+            if title_gate is None
+            or title_gate.mode == "shadow"
+            or evaluate_title_gate(title_gate, title=r["title"] or "", source=r["source"]).keep
+        }
+        decided = decided_custom_urls(
+            sorted(admitted), board.prompt_hash, model=board.requested_model
+        )
+        criteria = custom_criteria_instructions(board.prompt, board.on_ambiguous)
+        for url, title in admitted.items():
+            if url in decided or (review_titles and title_rejection(title)):
+                continue
+            questions.setdefault(url, []).append(
+                BoardQuestion(board.id, board.prompt_hash, criteria, board.requested_model)
+            )
+    return questions
+
+
 def _allowance(sponsor: _Sponsor) -> tuple[bool, int | None]:
     return budget.owner_budget(sponsor.groups)
 
