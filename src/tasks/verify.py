@@ -8,14 +8,27 @@ import json
 import logging
 from typing import Any
 
-from api import ai, db, events, metrics
+from api import ai, db, events, managed_board_runs, metrics
 from api.ai import verdicts
 from api.ai.batch_results import progress_counts
-from core.answers import VERIFICATION_REQUEST
+from api.task_config import configured_model, configured_shape
+from core.answers import (
+    VERIFICATION_REQUEST,
+    FilterDecision,
+    joint_question_key,
+    joint_verification,
+)
 from core.batch import BatchSpec, structured_response_spec
+from core.filters import build_custom_input
 from core.routing import resolve
 from core.shapes import VERIFY_TASK
-from core.store import AI_ELIGIBLE_JOB, CONTENT_LATERAL, add_ai_results, ai_result_row
+from core.store import (
+    AI_ELIGIBLE_JOB,
+    CONTENT_LATERAL,
+    add_ai_results,
+    ai_result_row,
+    decided_custom_urls,
+)
 from tasks.board import UNTOUCHED, demote_closed
 from tasks.runtime import (
     SCRAPE_CONCURRENCY,
@@ -46,6 +59,44 @@ def _verification_spec(url: str, content: str, context: dict | None = None) -> B
         VERIFICATION_REQUEST.build_input(content),
         VERIFICATION_REQUEST.response_model,
         context=context,
+    )
+
+
+def _submission_model() -> tuple[str, str]:
+    """The model and effort run_batched will submit the new-posting sweep with."""
+    shape = configured_shape(VERIFY_TASK)
+    chosen = resolve(shape, override=configured_model(VERIFY_TASK.purpose))
+    return chosen.model, str(chosen.params.get("reasoning_effort") or shape.resolved_effort() or "")
+
+
+def _joint_spec(
+    row: dict[str, Any],
+    questions: list[managed_board_runs.BoardQuestion],
+    model: str,
+    effort: str,
+) -> BatchSpec:
+    """Verification plus the boards' questions, reading the posting once."""
+    instructions, response_model = joint_verification(
+        {question.board_id: question.criteria for question in questions}
+    )
+    content = VERIFICATION_REQUEST.build_input(row["input_content"])
+    return structured_response_spec(
+        row["url"],
+        instructions,
+        build_custom_input(row["company"], row["title"], content),
+        response_model,
+        context={
+            **{key: row[key] for key in ("company", "title", "needs_closed", "needs_clearance")},
+            "model": model,
+            "effort": effort,
+            "verify_question": question_sha256(
+                model, _verification_spec(row["url"], row["input_content"])
+            ),
+            "boards": [
+                {"board_id": q.board_id, "prompt_hash": q.prompt_hash, "model": q.model}
+                for q in questions
+            ],
+        },
     )
 
 
@@ -492,8 +543,16 @@ async def handle_verify_new(task_id: int, payload: dict[str, Any]) -> None:
         if not rows:
             set_progress(task_id, 0, 0, "nothing to verify")
             return
+        model, effort = _submission_model()
+        questions = (
+            managed_board_runs.verification_questions(rows, model, effort)
+            if db.get_config("verify_answers_board_questions")
+            else {}
+        )
         specs = [
-            _verification_spec(
+            _joint_spec(r, questions[r["url"]], model, effort)
+            if questions.get(r["url"])
+            else _verification_spec(
                 r["url"],
                 r["input_content"],
                 {key: r[key] for key in ("company", "title", "needs_closed", "needs_clearance")},
@@ -513,12 +572,34 @@ async def handle_verify_new(task_id: int, payload: dict[str, Any]) -> None:
             if res.error or not res.text:
                 receipt.outcome = "failed"
                 continue
+            boards = job.get("boards") or []
+            decisions: dict[int, FilterDecision] = {}
             try:
-                parsed = VERIFICATION_REQUEST.response_model.model_validate_json(res.text)
-            except ValueError:
+                if boards:
+                    answer = json.loads(res.text)
+                    parsed = VERIFICATION_REQUEST.response_model.model_validate(
+                        answer["verification"]
+                    )
+                    decisions = {
+                        board["board_id"]: FilterDecision.model_validate(
+                            answer[joint_question_key(board["board_id"])]
+                        )
+                        for board in boards
+                    }
+                else:
+                    parsed = VERIFICATION_REQUEST.response_model.model_validate_json(res.text)
+            except (ValueError, KeyError, TypeError):
                 logger.warning("verify_new: unparsable batch output for %s", res.custom_id)
                 receipt.outcome = "invalid_output"
                 continue
+            if boards:
+                parsed_json = parsed.model_dump_json()
+                # The question verification answered, as if it had been asked alone,
+                # so reverify's unchanged-page reuse still recognises it.
+                question = job.get("verify_question") if res.model == job.get("model") else None
+            else:
+                parsed_json = res.text
+                question = question_sha256(res.model, res.request)
             # A verdict settled after submission takes precedence over this
             # missing-check request, even if its original snapshot asked for it.
             settled = {
@@ -542,7 +623,7 @@ async def handle_verify_new(task_id: int, payload: dict[str, Any]) -> None:
                             check_type=check,
                             rejected=rejected,
                             reason=reason,
-                            parsed_json=res.text,
+                            parsed_json=parsed_json,
                             model=res.model,
                             company=job["company"],
                             job_title=job["title"],
@@ -551,11 +632,42 @@ async def handle_verify_new(task_id: int, payload: dict[str, Any]) -> None:
                             shared_call=written,
                             batched=True,
                             batch_id=res.batch_id,
-                            request_sha256=question_sha256(res.model, res.request),
+                            request_sha256=question,
                         )
                     )
                     usage = {}
                     written = True
+            for board in boards:
+                # A verdict is keyed by the model that gave it; one the board did not
+                # ask for, or that its own run has bought meanwhile, is not written.
+                if res.model != board["model"] or decided_custom_urls(
+                    [res.custom_id], board["prompt_hash"], model=res.model
+                ):
+                    continue
+                verdicts.record_ai_verdict(
+                    verdicts.Verdict(
+                        url=res.custom_id,
+                        check_type="custom",
+                        rejected=decisions[board["board_id"]].should_filter,
+                        reason=None,
+                        parsed_json=decisions[board["board_id"]].model_dump_json(),
+                        model=res.model,
+                        company=job["company"],
+                        job_title=job["title"],
+                        instructions=res.request.instructions if res.request else None,
+                        input_text=res.request.input if res.request else None,
+                        filter_name=f"managed-board:{board['board_id']}",
+                        prompt_hash=board["prompt_hash"],
+                        context="verify-batch",
+                        usage=usage,
+                        shared_call=written,
+                        batched=True,
+                        batch_id=res.batch_id,
+                        reasoning_effort=job.get("effort"),
+                    )
+                )
+                usage = {}
+                written = True
             receipt.outcome = "written" if written else "superseded"
     done, total = progress_counts(task_id)
     set_progress(task_id, done, total, "verified")

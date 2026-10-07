@@ -117,6 +117,16 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
         "personal filters keep their existing policy. Prompts and decision criteria are unchanged; "
         "submitted requests retain their original policy. Re-enable to restore default caching.",
     ),
+    "verify_answers_board_questions": ConfigKey(
+        section="Boards",
+        default=True,
+        value_type=bool,
+        help="Ask each published managed board's question inside the new-posting verification "
+        "request, so the posting text is paid for once instead of once per board. Only boards "
+        "on the same model and effort as verification, whose sources, criteria and enforced "
+        "gates admit the posting and that have no verdict for it yet. Board runs then reuse "
+        "those verdicts. Turning this off restores separate board requests from the next sweep.",
+    ),
     "filter_review_gate": ConfigKey(
         section="Boards",
         default=ReviewGatePolicy().model_dump(mode="json"),

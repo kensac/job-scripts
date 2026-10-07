@@ -10,6 +10,7 @@ Structured-output schemas and instruction text for the AI checks."""
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -106,6 +107,51 @@ VERIFICATION_REQUEST = VerificationRequestRecipe(
     input_chars=VERIFY_INPUT_CHARS,
     max_output_tokens=1000,
 )
+
+
+_COUNTS = {2: "two", 3: "three", 4: "four", 5: "five", 6: "six"}
+
+
+def joint_question_key(board_id: int) -> str:
+    return f"board_{board_id}"
+
+
+def joint_verification(board_criteria: dict[int, str]) -> tuple[str, type[BaseModel]]:
+    """Verification and each board's decision about one posting, in one request.
+
+    Every board reviews the same posting text that verification has just read,
+    so asking separately paid for that text once per board. Measured on
+    2026-10-07 against re-running today's separate requests on the same
+    postings (live, gpt-6-luna, low effort): Tech New Grad kept 136 of 400
+    joint vs 133 separate (sign test p=0.76), Aerospace 32 vs 29 (p=0.45),
+    closed 173 vs 169 of 300 stored-closed (p=0.34) and clearance identical.
+    Re-running the separate request itself flips 30% of past Tech New Grad
+    keeps, so equality is judged against that, not against stored verdicts.
+
+    `board_criteria` maps a board id to its criteria and ambiguity rule
+    (core.filters.custom_criteria_instructions). The wording below is the one
+    measured; changing it is a new measurement.
+    """
+    from pydantic import create_model
+
+    keys = [joint_question_key(board_id) for board_id in sorted(board_criteria)]
+    blocks = [f'<question name="verification">\n{_VERIFY_INSTRUCTIONS}\n</question>'] + [
+        f'<question name="{key}">\n{board_criteria[board_id]}\n</question>'
+        for key, board_id in zip(keys, sorted(board_criteria), strict=True)
+    ]
+    count = len(blocks)
+    instructions = (
+        f"You will answer {_COUNTS.get(count, str(count))} independent questions about one job "
+        "posting. Answer each exactly as if it were the only question; one answer must not "
+        "influence another.\n\n"
+        + "\n\n".join(blocks)
+        + "\n\nReturn only a JSON object with verification (its four fields) and "
+        + ", ".join(f"{key}.should_filter" for key in keys)
+        + ". Do not include reasons for the should_filter answers."
+    )
+    fields: dict[str, Any] = {"verification": (VerifyVerdict, ...)}
+    fields.update({key: (FilterDecision, ...) for key in keys})
+    return instructions, create_model("JointVerification", **fields)
 
 
 # The vocabulary the mail classifier must answer within. Read by the router
