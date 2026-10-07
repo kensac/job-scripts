@@ -295,6 +295,7 @@ def get_public_job_list(
     min_comp: Decimal | None = Query(default=None, ge=0, le=100000000),
     comp_currency: str | None = Query(default=None, pattern="^[A-Z]{3}$"),
     comp_period: Literal["year", "month", "week", "day", "hour"] | None = None,
+    hide_restricted: bool = False,
     if_none_match: str | None = Header(default=None),
 ) -> PublicJobList | Response:
     wanted_terms = csv(terms)
@@ -334,6 +335,14 @@ def get_public_job_list(
             "AND COALESCE(j.comp_max, j.comp_min) >= %(min_comp)s AND j.comp_currency = %(comp_currency)s AND j.comp_period = %(comp_period)s"
         )
         params.update(min_comp=min_comp, comp_currency=comp_currency, comp_period=comp_period)
+    if hide_restricted:
+        # A board may admit postings the clearance gate rejected (citizenship,
+        # clearance, ITAR); a viewer can drop them. No verdict yet is not a rejection.
+        filters.append(
+            "AND (SELECT q.status FROM ai_queries q WHERE q.url = j.url "
+            "AND q.check_type = 'clearance' AND q.status IN ('passed', 'rejected') "
+            "ORDER BY q.id DESC LIMIT 1) IS DISTINCT FROM 'rejected'"
+        )
     selection = " ".join(filters)
     if cursor:
         filters.append(_cursor_predicate(expression, dir, cursor_value))
@@ -388,6 +397,7 @@ def get_public_job_list(
             str(min_comp),
             comp_currency or "",
             comp_period or "",
+            str(hide_restricted),
             str(matched_count),
             "\0".join(wanted_terms),
             next_cursor or "",

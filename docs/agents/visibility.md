@@ -137,7 +137,9 @@ the same structural gates as a person's board, closed and clearance, with
 `bypass_sponsorship_filter` does (default false). The closed gate always
 holds. Bypass is for a field the restriction defines rather than narrows:
 94 of 117 decided aerospace-titled postings in the week to 2026-10-05 were
-rejected on clearance, citizenship or ITAR.
+rejected on clearance, citizenship or ITAR. A viewer of a published list can
+take those rows back out with `hide_restricted=true`, which drops a posting
+whose latest clearance verdict is a rejection and keeps one with no verdict.
 
 **A board's title gate is the cheap rung before the model.** A recipe in
 `core/managed_board_title_gate.py` decides from title and source alone, in

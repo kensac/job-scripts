@@ -1405,6 +1405,16 @@
             }
           },
           {
+            "name": "hide_restricted",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Hide Restricted"
+            }
+          },
+          {
             "name": "if-none-match",
             "in": "header",
             "required": false,

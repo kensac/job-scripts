@@ -38,6 +38,25 @@ def test_public_discovery_filters_apply_before_pagination(client, query, expecte
     assert not body["has_more"]
 
 
+def test_public_hide_restricted_drops_only_a_latest_clearance_rejection(client):
+    board = _published_board()
+    now = datetime.datetime.now(datetime.UTC)
+    ids = [_job(board, i, now) for i in range(1, 4)]
+    url = "https://boards.greenhouse.io/example/jobs/{}"
+    # 1: rejected then passed (latest wins), 2: rejected, 3: no verdict.
+    for index, status in [(1, "rejected"), (1, "passed"), (2, "rejected")]:
+        db.execute(
+            "INSERT INTO ai_queries (url, check_type, status) VALUES (%s, 'clearance', %s)",
+            (url.format(index), status),
+        )
+    shown = client.get("/v1/public/job-lists/engineering", params={"hide_restricted": "true"})
+    assert shown.status_code == 200
+    assert sorted(j["job_id"] for j in shown.json()["jobs"]) == [ids[0], ids[2]]
+    assert shown.json()["matched_count"] == 2
+    every = client.get("/v1/public/job-lists/engineering")
+    assert every.json()["matched_count"] == 3
+
+
 def test_public_compensation_filter_requires_units(client):
     _published_board()
     response = client.get("/v1/public/job-lists/engineering?min_comp=100000")
