@@ -174,6 +174,22 @@ Tech New Grad against 133 (sign test p=0.76), 32 against 29 for Aerospace
 clearance. The call is booked once, to verification: a board's cost page counts
 only what its own runs still buy. `verify_answers_board_questions` turns it off.
 
+**Verification does not read what no board or filter keeps.** Reading a posting
+is most of what a posting costs, and since the Workday paging fix (2026-10-05)
+most new volume comes from employers whose postings are store, clinic and
+warehouse roles. `verification_volume_gate` lists the prompt hashes that opt in;
+for those targets, `verification_candidates.REACHABLE` skips a posting from a
+source with at least `min_judged` postings judged in `window_days` and no keep
+by any board or filter (except a fixed `audit_percent` sample of its urls, so a
+source that starts producing keeps comes back without anyone noticing it had
+gone), and a posting whose title names an occupation in
+`core.review_gate.OCCUPATION_WORDS` and no technical word. Measured 2026-10-07:
+37 sources with 200+ judged and no keep were 29% of postings judged since
+2026-10-05; the 47 occupation words drop 0 of 27,241 keeps over all history and
+skip 3 to 11% of verified postings. A posting someone tracks is always read. A
+new or edited prompt is not covered until its hash is added, because both rules
+were measured against these prompts' keeps.
+
 ## Location criteria match places, not words
 
 Every distinct location string a board writes is one row of `locations`,
