@@ -16,7 +16,7 @@ from pydantic import (
 
 from api.apply.policy import ExtensionPolicy
 from core.filter_policy import RoutingPolicy
-from core.review_gate import ReviewGatePolicy
+from core.review_gate import ReviewGatePolicy, VolumeGate
 from core.shapes import (
     CLASSIFY_LOCATIONS_PER_CYCLE,
     CLASSIFY_PER_CYCLE,
@@ -126,6 +126,17 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
         "on the same model and effort as verification, whose sources, criteria and enforced "
         "gates admit the posting and that have no verdict for it yet. Board runs then reuse "
         "those verdicts. Turning this off restores separate board requests from the next sweep.",
+    ),
+    "verification_volume_gate": ConfigKey(
+        section="Boards",
+        default=VolumeGate().model_dump(mode="json"),
+        value_type=VolumeGate,
+        help="Postings verification skips for the listed boards and filters (exact prompt "
+        "hashes in scopes; empty means off). Skips sources with at least min_judged postings "
+        "judged in window_days and no keep by any board or filter, except audit_percent of "
+        "their postings, so a source that starts producing keeps returns by itself. Also "
+        "skips titles naming a listed occupation with no technical word. A posting someone "
+        "tracks is always read. A new prompt hash is not listed until added here.",
     ),
     "filter_review_gate": ConfigKey(
         section="Boards",
