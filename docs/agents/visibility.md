@@ -176,6 +176,20 @@ it flags (a passed axis's reason is empty and the board shows none); measured
 equal on every axis and 8 to 12% cheaper (2026-10-09). The call is booked once, to verification: a board's cost page counts
 only what its own runs still buy. `verify_answers_board_questions` turns it off.
 
+**A posting that is a near copy of a verified one is not read again.** Many
+employers list one role per location with the same text. `verify_new` keys
+every candidate with `core.near_copy.key` (title and text, short location lines
+and numbers removed) into `jobs.near_copy_key`; a candidate whose twin from the
+same source already holds closed and clearance verdicts takes those and the
+twin's verdicts under every live board and filter prompt, as `verify-near-copy`
+rows that cost nothing, and one whose twin is in this sweep or a parked one
+waits for it. The posting's own location, date and gates still apply where each
+board and filter reads the verdict. Measured on 51,114 postings verified
+2026-10-06 to 10-08: 17.6% had a twin, and across 674 twin groups Tech New
+Grad agreed in 673, Aerospace in 674, closed in 672 and clearance in 671
+(re-asking the same request flips about 10% of borderline keeps).
+`verify_near_copy_reuse` turns it off.
+
 **Verification does not read what no board or filter keeps.** Reading a posting
 is most of what a posting costs, and since the Workday paging fix (2026-10-05)
 most new volume is store, clinic and warehouse roles reposted under the same
