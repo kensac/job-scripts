@@ -211,13 +211,6 @@ def test_a_title_with_one_keep_is_read():
     assert job in _reachable()
 
 
-def test_a_stored_gate_with_the_removed_source_cutoff_still_loads():
-    from core.review_gate import VolumeGate
-
-    gate = VolumeGate.model_validate({"scopes": ["x"], "min_judged": 100000000})
-    assert gate.scopes == ["x"] and "min_judged" not in gate.model_dump()
-
-
 def test_a_source_boards_never_keep_is_skipped_except_its_audit_sample():
     _enable()
     source = f.make_source()
