@@ -4,6 +4,7 @@ from api.routers import (
     job_board,
     job_detail,
     job_explain,
+    job_path,
     job_reports,
     job_review_decisions,
     job_tasks,
@@ -17,6 +18,7 @@ router.include_router(job_board.router)
 router.include_router(person_jobs.patch_router)
 router.include_router(job_detail.router)
 router.include_router(job_review_decisions.router)
+router.include_router(job_path.router)
 router.include_router(job_explain.router)
 router.include_router(person_jobs.delete_router)
 router.include_router(job_uploads.router)

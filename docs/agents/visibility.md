@@ -216,6 +216,23 @@ Donnelley); the audit sample is what returns such a source. #821 first shipped
 this at 300 postings as if it were zero-loss, which is why it was briefly
 removed (#825).
 
+## A posting's path is one read, in the drawer
+
+`api.posting_path` answers "why is this posting on, or off, this board or
+filter" in the order the pipeline decides it: catalog, stored text,
+verification (and where each verdict came from, including the twin a
+near-copy verdict was copied from), then per board or filter: source,
+criteria (each named criterion), the verification volume gate, the title gate,
+the review gate, the closed and clearance gate, the verdict and its origin, and
+membership. A step is `recorded` when a row says what happened and
+`evaluated_now` when the rule leaves no row (criteria, title gates, the volume
+gate, reachability decide by leaving a posting out of a SELECT) and is run
+again for this posting today. GET /admin/jobs/path?url= covers every published
+board and enabled filter; GET /user/jobs/{id}/path covers the caller's own
+filters and board, gated like every per-job route. Both job drawers render it;
+a new rule that reads, skips, judges or shows a posting adds its stage here, or
+the drawer goes back to having no answer for it.
+
 ## Location criteria match places, not words
 
 Every distinct location string a board writes is one row of `locations`,
