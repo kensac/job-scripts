@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Literal
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 from core.job_profile import JobProfileAnswer
 
@@ -141,12 +141,3 @@ class VolumeGate(BaseModel):
     title_min_judged: int = Field(default=50, ge=0)
     source_min_judged: int = Field(default=50, ge=0)
     source_max_keep_rate: float = Field(default=0.0, ge=0.0, le=0.05)
-
-    @model_validator(mode="before")
-    @classmethod
-    def _drop_source_rule(cls, value: Any) -> Any:
-        # The removed whole-source cutoff, still in the stored config until it
-        # is rewritten without it.
-        if isinstance(value, dict):
-            value = {k: v for k, v in value.items() if k != "min_judged"}
-        return value
