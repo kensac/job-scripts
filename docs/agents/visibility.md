@@ -176,23 +176,22 @@ only what its own runs still buy. `verify_answers_board_questions` turns it off.
 
 **Verification does not read what no board or filter keeps.** Reading a posting
 is most of what a posting costs, and since the Workday paging fix (2026-10-05)
-most new volume comes from employers whose postings are store, clinic and
-warehouse roles. `verification_volume_gate` lists the prompt hashes that opt in;
-for those targets, `verification_candidates.REACHABLE` skips a posting from a
-source with at least `min_judged` postings judged in `window_days` and no keep
-by any board or filter (except a fixed `audit_percent` sample of its urls, so a
-source that starts producing keeps comes back without anyone noticing it had
-gone), and a posting whose title names an occupation in
-`core.review_gate.OCCUPATION_WORDS` and no technical word. Measured 2026-10-07:
-37 sources with 200+ judged and no keep were 29% of postings judged since
-2026-10-05; the 47 occupation words drop 0 of 27,241 keeps over all history and
-skip 3 to 11% of verified postings. The same rule runs per (source, title): a title judged
-`title_min_judged` (50) times in the window with no keep is skipped, with the
-same audit sample. 50 is the smallest that dropped no keep on three held-out
-splits; it skipped 19.7% of what verification still read after the source and
-occupation rules (2026-10-08). A posting someone tracks is always read. A
-new or edited prompt is not covered until its hash is added, because both rules
-were measured against these prompts' keeps.
+most new volume is store, clinic and warehouse roles reposted under the same
+titles. `verification_volume_gate` lists the prompt hashes that opt in; for
+those targets `verification_candidates.REACHABLE` skips a posting whose (source,
+title) was judged `title_min_judged` (50) times in `window_days` with no keep by
+any board or filter, except a fixed `audit_percent` sample of urls so a title
+that starts producing keeps comes back by itself, and a posting whose title
+names an occupation in `core.review_gate.OCCUPATION_WORDS` and no technical
+word. Both dropped no keep on three held-out splits. A posting someone tracks is
+always read. A new or edited prompt is not covered until its hash is added,
+because both rules were measured against these prompts' keeps.
+
+**There is no whole-source rule, and should not be.** Skipping a source with
+300 judged postings and no keep (shipped in #821, switched off 2026-10-09)
+dropped 5, 1 and 1 later keeps on the same held-out splits, and 500 still
+dropped one: a source that has only ever posted store roles starts posting an
+analyst program. Judge a title, not an employer.
 
 ## Location criteria match places, not words
 

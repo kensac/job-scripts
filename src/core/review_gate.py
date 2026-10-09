@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import re
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from core.job_profile import JobProfileAnswer
 
@@ -111,27 +111,34 @@ OCCUPATION_SQL_PATTERN = _postgres(r"\b(?:" + "|".join(OCCUPATION_WORDS) + r")\b
 class VolumeGate(BaseModel):
     """Postings verification does not read for the listed boards and filters.
 
-    A source is skipped once at least `min_judged` of its postings have been
-    judged in `window_days` and none was kept by any board or filter. Zero keeps
-    in 300 puts the source's keep rate under 1% with 95% confidence (3/300), no
-    better than an average posting, which boards keep about 1% of the time.
-    `audit_percent` of its postings (a fixed hash of the url) are still read, so
-    a source that starts producing keeps leaves the list on its own. Titles
-    naming an occupation in OCCUPATION_WORDS, with no technical word, are
-    skipped too. `scopes` names the exact prompt hashes that opt in; a target
-    not listed reads everything as before.
+    A (source, title) pair judged `title_min_judged` times in `window_days`
+    with no keep by any board or filter is skipped, except `audit_percent` of
+    its postings (a fixed hash of the url), so a title that starts producing
+    keeps returns on its own. 50 is the smallest cutoff that dropped no keep on
+    three held-out splits (2026-09-17, 09-24, 10-01; 20 dropped 2 to 9, 10
+    dropped 3 to 28). Titles naming an occupation in OCCUPATION_WORDS, with no
+    technical word, are skipped too. `scopes` names the exact prompt hashes that
+    opt in; a target not listed reads everything as before.
+
+    There is no whole-source rule. Skipping a source with 300 judged postings
+    and no keep dropped 5, 1 and 1 later keeps on the same three splits (Bank
+    of America, RR Donnelley), and 500 still dropped one: a source's mix
+    changes faster than its history says.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     scopes: list[str] = Field(default_factory=list)
-    min_judged: int = Field(default=300, ge=50)
     window_days: int = Field(default=90, ge=7, le=365)
     audit_percent: int = Field(default=5, ge=0, le=100)
     occupation_titles: bool = True
-    # A (source, title) pair judged this many times with no keep is skipped
-    # like an unproductive source, sharing its audit sample; 0 turns it off.
-    # 50 is the smallest that dropped no keep on three held-out splits
-    # (2026-09-17, 09-24, 10-01; 20 dropped 2 to 9, 10 dropped 3 to 28), and it
-    # skipped 19.7% of what verification still read after #821 (2026-10-08).
     title_min_judged: int = Field(default=50, ge=0)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_source_rule(cls, value: Any) -> Any:
+        # The removed whole-source cutoff, still in the stored config until it
+        # is rewritten without it.
+        if isinstance(value, dict):
+            value = {k: v for k, v in value.items() if k != "min_judged"}
+        return value
