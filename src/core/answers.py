@@ -109,6 +109,29 @@ VERIFICATION_REQUEST = VerificationRequestRecipe(
 )
 
 
+# Verification inside the joint request writes a reason only for an axis it flags.
+# A passed axis's reason ("no closure signals") was ~45 output tokens nobody reads:
+# the board shows a reason only when it explains a rejection. Measured 2026-10-09
+# against the joint request as before, same postings: closed 173 vs 174 of 300
+# stored closures, clearance 65 vs 64, Tech New Grad keeps 151 vs 150 of 400,
+# Aerospace 33 vs 32 (every paired sign test p=1.0); output 174 -> 127 tokens.
+# The plain request keeps its wording, because reverify's unchanged-page reuse
+# keys on that exact question.
+_REASONS_ALWAYS = (
+    "closed_reason / clearance_reason: <=20 words each, citing the specific text that "
+    "decided that axis. They are read when a human asks why a posting was ruled out, so "
+    "quote the signal rather than restating the verdict."
+)
+_JOINT_VERIFY_INSTRUCTIONS = _VERIFY_INSTRUCTIONS.replace(
+    _REASONS_ALWAYS,
+    "closed_reason / clearance_reason: when that axis is true, <=20 words citing the specific "
+    "text that decided it; they are read when a human asks why a posting was ruled out, so "
+    "quote the signal rather than restating the verdict. When that axis is false, an empty "
+    "string.",
+)
+assert _JOINT_VERIFY_INSTRUCTIONS != _VERIFY_INSTRUCTIONS
+
+
 _COUNTS = {2: "two", 3: "three", 4: "four", 5: "five", 6: "six"}
 
 
@@ -135,7 +158,7 @@ def joint_verification(board_criteria: dict[int, str]) -> tuple[str, type[BaseMo
     from pydantic import create_model
 
     keys = [joint_question_key(board_id) for board_id in sorted(board_criteria)]
-    blocks = [f'<question name="verification">\n{_VERIFY_INSTRUCTIONS}\n</question>'] + [
+    blocks = [f'<question name="verification">\n{_JOINT_VERIFY_INSTRUCTIONS}\n</question>'] + [
         f'<question name="{key}">\n{board_criteria[board_id]}\n</question>'
         for key, board_id in zip(keys, sorted(board_criteria), strict=True)
     ]

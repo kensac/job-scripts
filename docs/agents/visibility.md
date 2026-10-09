@@ -171,7 +171,9 @@ verdicts: re-asking the identical request flipped 56 of 188 past Tech New Grad
 keeps (2026-10-07). On the same postings the joint request kept 136 of 400 for
 Tech New Grad against 133 (sign test p=0.76), 32 against 29 for Aerospace
 (p=0.45), found 173 against 169 of 300 stored closures (p=0.34), and agreed on
-clearance. The call is booked once, to verification: a board's cost page counts
+clearance. Inside the joint request verification writes a reason only for an axis
+it flags (a passed axis's reason is empty and the board shows none); measured
+equal on every axis and 8 to 12% cheaper (2026-10-09). The call is booked once, to verification: a board's cost page counts
 only what its own runs still buy. `verify_answers_board_questions` turns it off.
 
 **Verification does not read what no board or filter keeps.** Reading a posting
