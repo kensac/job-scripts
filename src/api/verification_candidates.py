@@ -26,17 +26,25 @@ verification_targets AS (
 )
 """
 
+# How a title is compared: case and runs of whitespace do not make a new title.
+TITLE_KEY = "lower(regexp_replace(j.title, '\\s+', ' ', 'g'))"
+
 # A target in the volume gate's scopes does not read a posting from a source
 # with no keeps (bar a fixed sample of its urls) or one whose title names an
 # occupation and no technical word. core.review_gate.VolumeGate says why.
-_VOLUME_SKIP = """
+_VOLUME_SKIP = (
+    """
         AND NOT (target.prompt_hash = ANY(%(volume_gate_scopes)s::text[]) AND (
-            (j.source = ANY(%(volume_gate_sources)s::text[])
+            ((j.source = ANY(%(volume_gate_sources)s::text[])
+              OR j.source || E'\\x1f' || """
+    + TITLE_KEY
+    + """ = ANY(%(volume_gate_title_keys)s::text[]))
              AND abs(hashtext(j.url)) %% 100 >= %(volume_gate_audit_percent)s)
             OR (%(volume_gate_titles)s
                 AND j.title !~* %(volume_gate_technical)s
                 AND j.title ~* %(volume_gate_occupations)s)))
 """
+)
 
 REACHABLE = f"""
 (
@@ -59,36 +67,50 @@ REACHABLE = f"""
 LEGACY_REACHABLE = AI_ELIGIBLE_JOB.format(job="j")
 
 
-def unproductive_sources(gate: VolumeGate) -> list[str]:
-    """Sources with at least min_judged postings judged in the window and no keep.
+def unproductive(gate: VolumeGate) -> tuple[list[str], list[str]]:
+    """Sources, and (source, title) keys, judged enough in the window with no keep.
 
     Every custom verdict counts, whichever board or filter gave it, so one keep
-    anywhere returns a source to full reading.
+    anywhere returns the source or title to full reading. One pass: a posting
+    has one source and one title, so a source's distinct postings are the sum
+    of its titles' distinct postings.
     """
     if not gate.scopes:
-        return []
-    return [
-        row["source"]
-        for row in db.query(
-            "SELECT j.source FROM ai_queries q JOIN jobs j ON j.url = q.url "
-            "WHERE q.check_type = 'custom' AND q.status IN ('passed', 'rejected') "
-            "AND q.created_at >= now() - make_interval(days => %s) "
-            "GROUP BY j.source "
-            "HAVING count(DISTINCT q.url) >= %s AND NOT bool_or(q.status = 'passed') "
-            "ORDER BY j.source",
-            (gate.window_days, gate.min_judged),
-        )
-    ]
+        return [], []
+    rows = db.query(
+        f"""
+        WITH t AS (
+            SELECT j.source, {TITLE_KEY} AS title, count(*) AS verdicts,
+                   count(DISTINCT q.url) AS postings, bool_or(q.status = 'passed') AS kept
+            FROM ai_queries q JOIN jobs j ON j.url = q.url
+            WHERE q.check_type = 'custom' AND q.status IN ('passed', 'rejected')
+              AND q.created_at >= now() - make_interval(days => %(days)s)
+            GROUP BY 1, 2)
+        SELECT source, NULL AS title FROM t GROUP BY source
+        HAVING sum(postings) >= %(sources)s AND NOT bool_or(kept)
+        UNION ALL
+        SELECT source, title FROM t
+        WHERE %(titles)s > 0 AND NOT kept AND verdicts >= %(titles)s
+        """,
+        {"days": gate.window_days, "sources": gate.min_judged, "titles": gate.title_min_judged},
+    )
+    sources = sorted(row["source"] for row in rows if row["title"] is None)
+    titles = sorted(
+        f"{row['source']}\x1f{row['title']}" for row in rows if row["title"] is not None
+    )
+    return sources, titles
 
 
 def params() -> dict[str, object]:
     gate = VolumeGate.model_validate(db.get_config("verification_volume_gate"))
+    sources, title_keys = unproductive(gate)
     return {
         "verification_reachability_gate_enabled": bool(
             db.get_config("verification_reachability_gate_enabled")
         ),
         "volume_gate_scopes": gate.scopes,
-        "volume_gate_sources": unproductive_sources(gate),
+        "volume_gate_sources": sources,
+        "volume_gate_title_keys": title_keys,
         "volume_gate_audit_percent": gate.audit_percent,
         "volume_gate_titles": gate.occupation_titles,
         "volume_gate_technical": TECHNICAL_SQL_PATTERN,

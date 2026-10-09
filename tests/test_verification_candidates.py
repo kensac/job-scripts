@@ -197,3 +197,39 @@ def test_occupation_titles_are_skipped_unless_a_technical_word_wins():
     assert _reachable() == {informatics, nursery}
     _gate([_scoped_target(source)], occupation_titles=False)
     assert {nurse, cook} <= _reachable()
+
+
+def test_a_title_judged_often_with_no_keep_is_skipped_except_its_audit_sample():
+    _enable()
+    source = f.make_source()
+    _gate([_scoped_target(source)], min_judged=10_000, title_min_judged=50, occupation_titles=False)
+    for _ in range(50):
+        job = f.make_job(source=source, title="Store  Associate")
+        url = db.query_one("SELECT url FROM jobs WHERE id = %s", (job,))["url"]
+        f.make_verdict(url, "custom", "rejected")
+        db.execute("UPDATE jobs SET active = false WHERE id = %s", (job,))
+    same = {f.make_job(source=source, title="store associate") for _ in range(40)}
+    other = f.make_job(source=source, title="Software Engineer")
+    urls = {
+        r["id"]: r["url"]
+        for r in db.query("SELECT id, url FROM jobs WHERE id = ANY(%s)", (list(same),))
+    }
+
+    reached = _reachable()
+
+    assert other in reached
+    assert reached & same == {job for job in same if _audited(urls[job])}
+
+
+def test_a_title_with_one_keep_is_read():
+    _enable()
+    source = f.make_source()
+    _gate([_scoped_target(source)], min_judged=10_000, title_min_judged=50, occupation_titles=False)
+    for status in ["rejected"] * 49 + ["passed"]:
+        job = f.make_job(source=source, title="Data Analyst")
+        url = db.query_one("SELECT url FROM jobs WHERE id = %s", (job,))["url"]
+        f.make_verdict(url, "custom", status)
+        db.execute("UPDATE jobs SET active = false WHERE id = %s", (job,))
+    job = f.make_job(source=source, title="Data Analyst")
+
+    assert job in _reachable()
