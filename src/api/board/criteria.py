@@ -28,23 +28,27 @@ _PLACE_MATCH = """
                     AND (xp->>'region' IS NULL OR xp->>'region' = lp->>'region')
                     AND (xp->>'city' IS NULL OR xp->>'city' = lp->>'city'))"""
 
-SQL = f"""
-        AND (%(crit_date)s::date IS NULL OR j.date_posted >= %(crit_date)s::date)
-        AND (%(crit_max_age)s::int IS NULL
+# Each criterion on its own, named, so a posting's path can say which one it
+# failed (api.posting_path); SQL is their conjunction and the only spelling.
+CONDITIONS: dict[str, str] = {
+    "posted_after": "(%(crit_date)s::date IS NULL OR j.date_posted >= %(crit_date)s::date)",
+    "max_age": """(%(crit_max_age)s::int IS NULL
              OR COALESCE(j.date_posted, j.created_at)
-                >= now() - make_interval(days => %(crit_max_age)s::int))
-        AND (NOT %(crit_has_excl)s OR NOT EXISTS (
+                >= now() - make_interval(days => %(crit_max_age)s::int))""",
+    "excluded_locations": f"""(NOT %(crit_has_excl)s OR NOT EXISTS (
               SELECT 1 FROM unnest(j.locations) loc
               JOIN locations l ON l.text = btrim(loc)
               JOIN locations x ON x.text = ANY(%(crit_excl)s::text[])
-              WHERE {_PLACE_MATCH}))
-        AND (NOT %(crit_has_incl)s OR cardinality(j.locations) = 0 OR EXISTS (
+              WHERE {_PLACE_MATCH}))""",
+    "included_locations": f"""(NOT %(crit_has_incl)s OR cardinality(j.locations) = 0 OR EXISTS (
               SELECT 1 FROM unnest(j.locations) loc
               JOIN locations l ON l.text = btrim(loc)
               JOIN locations x ON x.text = ANY(%(crit_incl)s::text[])
-              WHERE {_PLACE_MATCH}))
-        AND (NOT %(crit_has_terms)s OR j.terms && %(crit_terms)s::text[])
-"""
+              WHERE {_PLACE_MATCH}))""",
+    "terms": "(NOT %(crit_has_terms)s OR j.terms && %(crit_terms)s::text[])",
+}
+
+SQL = "".join(f"\n        AND {condition}" for condition in CONDITIONS.values()) + "\n"
 
 
 def json_sql(criteria: str) -> str:

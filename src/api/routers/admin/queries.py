@@ -10,7 +10,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from api import db, grouped, pagination, scoping, sorting
+from api import db, grouped, pagination, posting_path, scoping, sorting
 from api import params as params_
 from api.ai import verdicts
 from api.auth import AuthedUser
@@ -673,6 +673,15 @@ def job_timeline(url: str, user: AuthedUser = Depends(require_admin)) -> Posting
             {"url": [url]},
         ),
     )
+
+
+@router.get("/jobs/path")
+def job_path(url: str, user: AuthedUser = Depends(require_admin)) -> posting_path.PostingPath:
+    """Every published board's and every enabled filter's path for one posting."""
+    path = posting_path.for_admin(url)
+    if path is None:
+        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown job"})
+    return path
 
 
 class QueryVocabulary(BaseModel):
