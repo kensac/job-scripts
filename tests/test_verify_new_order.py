@@ -62,3 +62,23 @@ async def test_the_sweep_takes_the_freshest_postings_first(f, submitted):
     assert submitted.index(old) < submitted.index(undated), (
         "a posting with no date carries no claim to be fresh"
     )
+
+
+@pytest.mark.asyncio
+async def test_a_new_sweep_skips_what_a_parked_sweep_already_submitted(f, submitted):
+    source = f.make_source("verify-inflight-src")
+    uid = f.make_user()
+    f.subscribe(uid, source)
+    f.make_filter(uid)
+    _, parked_url = f.make_ready_job(source=source, closed="", clearance="")
+    _, fresh_url = f.make_ready_job(source=source, closed="", clearance="")
+    parked = f.make_task("verify_new", {}, status="awaiting_batch")
+    db.execute(
+        "INSERT INTO batch_requests (task_id, custom_id, snapshot) VALUES (%s, %s, '{}'::jsonb)",
+        (parked, parked_url),
+    )
+
+    task_id = f.make_task("verify_new", {}, status="running")
+    await tasks_verify.handle_verify_new(task_id, {})
+
+    assert fresh_url in submitted and parked_url not in submitted

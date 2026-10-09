@@ -64,8 +64,8 @@ def _running(kind: str, minutes: float, worker: str = "oci") -> int:
 
 class TestVerifyNewDoesNotOverlapItself:
     """verify_new batches and parks, and its predicate - jobs with no verdict -
-    stays true while the batch is in flight. A second task re-selects the same
-    jobs and pays again. Its three siblings all guard against this; it did not.
+    stays true while the batch is in flight. Two sweeps never select at once;
+    a parked one no longer blocks the next, which skips what it submitted.
     """
 
     def _schedule(self):
@@ -80,10 +80,11 @@ class TestVerifyNewDoesNotOverlapItself:
         self._schedule()
         assert len(self._verify_tasks()) == 1
 
-    def test_a_cycle_does_not_enqueue_it_while_one_is_parked(self, f):
+    def test_a_parked_sweep_does_not_block_the_next(self, f):
+        # It excludes what the parked one submitted instead (tasks.verify._in_flight).
         parked = _park("verify_new")
         self._schedule()
-        assert [t["id"] for t in self._verify_tasks()] == [parked]
+        assert len(self._verify_tasks()) == 2 and self._verify_tasks()[0]["id"] == parked
 
     def test_a_cycle_does_not_enqueue_it_while_one_is_running(self, f):
         db.execute(
