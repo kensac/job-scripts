@@ -147,11 +147,21 @@ async def run_single_check(
                 "SELECT user_id, name, prompt, on_ambiguous, prompt_hash FROM user_filters WHERE id = %s",
                 (int(check.split(":", 1)[1]),),
             )
+        if not flt and check.startswith("hash:"):
+            # A managed board's question is cached by its prompt hash too, and
+            # its verdicts are named for the board (managed_board_runs).
+            flt = db.query_one(
+                "SELECT NULL AS user_id, 'managed-board:' || id AS name, prompt, on_ambiguous, "
+                "prompt_hash FROM managed_boards WHERE prompt_hash = %s ORDER BY id LIMIT 1",
+                (check.split(":", 1)[1],),
+            )
         if not flt:
             raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown filter"})
         instructions = build_custom_instructions(flt["prompt"], flt["on_ambiguous"])
         model_cls, verdict_of = FilterVerdict, (lambda p: (p.should_filter, p.reason))
-        filter_name = f"user{flt['user_id']}:{flt['name']}"
+        filter_name = (
+            flt["name"] if flt["user_id"] is None else f"user{flt['user_id']}:{flt['name']}"
+        )
         prompt_hash = flt["prompt_hash"]
         check = "custom"
     else:

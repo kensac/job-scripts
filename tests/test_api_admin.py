@@ -326,6 +326,26 @@ def test_manual_check_addresses_filters_by_hash(client, admin_headers):
     assert bad.status_code == 400 and bad.json()["detail"]["code"] == "INVALID_CHECK"
 
 
+def test_manual_check_addresses_a_managed_board_by_hash(client, admin_headers):
+    uid = db.query_one("SELECT id FROM users WHERE sub = %s", (admin_headers["X-User-Sub"],))["id"]
+    db.execute(
+        "INSERT INTO managed_boards (slug, name, sponsor_user_id, prompt, prompt_hash, "
+        "requested_model) VALUES ('mb-hash', 'MB', %s, 'new grad roles', 'board-hash', 'gpt-6-luna')",
+        (uid,),
+    )
+    db.execute(
+        "INSERT INTO jobs (url, source, company, title) VALUES ('https://mb.test/1','s','C','T')"
+    )
+    jid = db.query_one("SELECT id FROM jobs WHERE url = 'https://mb.test/1'")["id"]
+    resp = client.post(
+        "/v1/admin/checks/run",
+        json={"job_id": jid, "check": "hash:board-hash"},
+        headers=admin_headers,
+    )
+    # Past the addressing (no "unknown filter"), stopped at the content guard.
+    assert resp.status_code == 409 and resp.json()["detail"]["code"] == "NO_CONTENT"
+
+
 def test_delete_source_refuses_while_in_use_then_succeeds(client, admin_headers):
     db.execute("INSERT INTO sources (name, listings_url) VALUES ('doomed', 'https://x')")
     db.execute("INSERT INTO source_groups (name, members) VALUES ('grp', ARRAY['doomed','other'])")
