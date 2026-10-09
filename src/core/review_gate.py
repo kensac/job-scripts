@@ -129,3 +129,9 @@ class VolumeGate(BaseModel):
     window_days: int = Field(default=90, ge=7, le=365)
     audit_percent: int = Field(default=5, ge=0, le=100)
     occupation_titles: bool = True
+    # A (source, title) pair judged this many times with no keep is skipped
+    # like an unproductive source, sharing its audit sample; 0 turns it off.
+    # 50 is the smallest that dropped no keep on three held-out splits
+    # (2026-09-17, 09-24, 10-01; 20 dropped 2 to 9, 10 dropped 3 to 28), and it
+    # skipped 19.7% of what verification still read after #821 (2026-10-08).
+    title_min_judged: int = Field(default=50, ge=0)

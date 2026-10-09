@@ -186,7 +186,11 @@ gone), and a posting whose title names an occupation in
 `core.review_gate.OCCUPATION_WORDS` and no technical word. Measured 2026-10-07:
 37 sources with 200+ judged and no keep were 29% of postings judged since
 2026-10-05; the 47 occupation words drop 0 of 27,241 keeps over all history and
-skip 3 to 11% of verified postings. A posting someone tracks is always read. A
+skip 3 to 11% of verified postings. The same rule runs per (source, title): a title judged
+`title_min_judged` (50) times in the window with no keep is skipped, with the
+same audit sample. 50 is the smallest that dropped no keep on three held-out
+splits; it skipped 19.7% of what verification still read after the source and
+occupation rules (2026-10-08). A posting someone tracks is always read. A
 new or edited prompt is not covered until its hash is added, because both rules
 were measured against these prompts' keeps.
 
