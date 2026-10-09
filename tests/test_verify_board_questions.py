@@ -212,3 +212,11 @@ async def test_a_different_answering_model_writes_no_board_verdict(f, submitted,
         for r in db.query("SELECT check_type FROM ai_queries WHERE url = %s", (url,))
     }
     assert checks == {"content", "closed", "clearance"}
+
+
+def test_the_joint_request_asks_for_reasons_only_on_a_flagged_axis():
+    from core.answers import _VERIFY_INSTRUCTIONS, joint_verification
+
+    instructions, _ = joint_verification({1: "criteria"})
+    assert "When that axis is false, an empty string." in instructions
+    assert "When that axis is false" not in _VERIFY_INSTRUCTIONS, "the plain request is unchanged"
