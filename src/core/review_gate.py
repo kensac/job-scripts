@@ -120,10 +120,16 @@ class VolumeGate(BaseModel):
     technical word, are skipped too. `scopes` names the exact prompt hashes that
     opt in; a target not listed reads everything as before.
 
-    There is no whole-source rule. Skipping a source with 300 judged postings
-    and no keep dropped 5, 1 and 1 later keeps on the same three splits (Bank
-    of America, RR Donnelley), and 500 still dropped one: a source's mix
-    changes faster than its history says.
+    A source (a company's board) with at least `source_min_judged` postings
+    judged in the window and a keep rate at or below `source_max_keep_rate` is
+    skipped too, with the same audit sample. This is a volume decision, not a
+    zero-loss one (Kanishk, 2026-10-09: "if there are companies that aren't
+    getting on boards I don't see merit in keeping them"): on held-out splits a
+    zero-keep source occasionally produced a later keep (Bank of America, RR
+    Donnelley), which the audit sample is what brings back. Measured over the 30
+    days to 2026-10-08: 50 judged and zero keeps covered 164 sources and 22% of
+    the last week's judged volume, with no keep from them in those 30 days;
+    a 0.2% keep rate would cover 35% and 68 of 18,566 keeps.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -133,6 +139,8 @@ class VolumeGate(BaseModel):
     audit_percent: int = Field(default=5, ge=0, le=100)
     occupation_titles: bool = True
     title_min_judged: int = Field(default=50, ge=0)
+    source_min_judged: int = Field(default=50, ge=0)
+    source_max_keep_rate: float = Field(default=0.0, ge=0.0, le=0.05)
 
     @model_validator(mode="before")
     @classmethod

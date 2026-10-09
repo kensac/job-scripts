@@ -189,11 +189,18 @@ word. Both dropped no keep on three held-out splits. A posting someone tracks is
 always read. A new or edited prompt is not covered until its hash is added,
 because both rules were measured against these prompts' keeps.
 
-**There is no whole-source rule, and should not be.** Skipping a source with
-300 judged postings and no keep (shipped in #821, switched off 2026-10-09)
-dropped 5, 1 and 1 later keeps on the same held-out splits, and 500 still
-dropped one: a source that has only ever posted store roles starts posting an
-analyst program. Judge a title, not an employer.
+**A company's board that boards and filters do not keep is not read.** This one
+is a volume decision, not a zero-loss one (Kanishk, 2026-10-09: "if there are
+companies that aren't getting on boards I don't see merit in keeping them").
+A source with `source_min_judged` (50) postings judged in `window_days` and a
+keep rate at or below `source_max_keep_rate` (0) is skipped, with the same
+audit sample. Over the 30 days to 2026-10-08 that was 164 sources, 22% of the
+last week's judged volume, and none of their postings was kept in those 30
+days; a 0.2% rate would reach 35% for 68 of 18,566 keeps. On held-out splits a
+zero-keep source occasionally produced a later keep (Bank of America, RR
+Donnelley); the audit sample is what returns such a source. #821 first shipped
+this at 300 postings as if it were zero-loss, which is why it was briefly
+removed (#825).
 
 ## Location criteria match places, not words
 

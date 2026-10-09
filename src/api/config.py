@@ -132,9 +132,11 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
         default=VolumeGate().model_dump(mode="json"),
         value_type=VolumeGate,
         help="Postings verification skips for the listed boards and filters (exact prompt "
-        "hashes in scopes; empty means off). Skips a source's title judged title_min_judged "
+        "hashes in scopes; empty means off). Skips a source with source_min_judged postings "
+        "judged in window_days and a keep rate at or below source_max_keep_rate (0 = never "
+        "kept), and a source's title judged title_min_judged "
         "times in window_days with no keep by any board or filter, except audit_percent of "
-        "its postings, so a title that starts producing keeps returns by itself. Also "
+        "their postings, so a source or title that starts producing keeps returns by itself. Also "
         "skips titles naming a listed occupation with no technical word. A posting someone "
         "tracks is always read. A new prompt hash is not listed until added here.",
     ),

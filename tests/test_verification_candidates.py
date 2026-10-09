@@ -174,7 +174,9 @@ def test_occupation_titles_are_skipped_unless_a_technical_word_wins():
 def test_a_title_judged_often_with_no_keep_is_skipped_except_its_audit_sample():
     _enable()
     source = f.make_source()
-    _gate([_scoped_target(source)], title_min_judged=50, occupation_titles=False)
+    _gate(
+        [_scoped_target(source)], title_min_judged=50, occupation_titles=False, source_min_judged=0
+    )
     for _ in range(50):
         job = f.make_job(source=source, title="Store  Associate")
         url = db.query_one("SELECT url FROM jobs WHERE id = %s", (job,))["url"]
@@ -196,7 +198,9 @@ def test_a_title_judged_often_with_no_keep_is_skipped_except_its_audit_sample():
 def test_a_title_with_one_keep_is_read():
     _enable()
     source = f.make_source()
-    _gate([_scoped_target(source)], title_min_judged=50, occupation_titles=False)
+    _gate(
+        [_scoped_target(source)], title_min_judged=50, occupation_titles=False, source_min_judged=0
+    )
     for status in ["rejected"] * 49 + ["passed"]:
         job = f.make_job(source=source, title="Data Analyst")
         url = db.query_one("SELECT url FROM jobs WHERE id = %s", (job,))["url"]
@@ -212,3 +216,36 @@ def test_a_stored_gate_with_the_removed_source_cutoff_still_loads():
 
     gate = VolumeGate.model_validate({"scopes": ["x"], "min_judged": 100000000})
     assert gate.scopes == ["x"] and "min_judged" not in gate.model_dump()
+
+
+def test_a_source_boards_never_keep_is_skipped_except_its_audit_sample():
+    _enable()
+    source = f.make_source()
+    _gate([_scoped_target(source)], title_min_judged=0, occupation_titles=False)
+    _judged(source, 50)
+    jobs = {f.make_job(source=source) for _ in range(60)}
+    urls = {
+        r["id"]: r["url"]
+        for r in db.query("SELECT id, url FROM jobs WHERE id = ANY(%s)", (list(jobs),))
+    }
+
+    reached = _reachable()
+
+    assert reached == {job for job in jobs if _audited(urls[job])}
+    assert reached, "the audit sample keeps reading the source"
+
+
+def test_a_source_over_the_keep_rate_is_read():
+    _enable()
+    source = f.make_source()
+    _gate(
+        [_scoped_target(source)],
+        title_min_judged=0,
+        occupation_titles=False,
+        source_max_keep_rate=0.01,
+    )
+    _judged(source, 98)
+    _judged(source, 2, "passed")
+    job = f.make_job(source=source)
+
+    assert job in _reachable(), "2 keeps in 100 is above a 1% rate"
