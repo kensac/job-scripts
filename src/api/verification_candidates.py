@@ -29,16 +29,18 @@ verification_targets AS (
 # How a title is compared: case and runs of whitespace do not make a new title.
 TITLE_KEY = "lower(regexp_replace(j.title, '\\s+', ' ', 'g'))"
 
-# A target in the volume gate's scopes does not read a posting whose source and
-# title have been judged often with no keep (bar a fixed sample of its urls) or
-# whose title names an occupation and no technical word.
-# core.review_gate.VolumeGate says why, and why there is no whole-source rule.
+# A target in the volume gate's scopes does not read a posting from a source
+# that boards and filters do not keep, or whose source and title have been
+# judged often with no keep (bar a fixed sample of urls for both), or whose
+# title names an occupation and no technical word. core.review_gate.VolumeGate
+# says why.
 _VOLUME_SKIP = (
     """
         AND NOT (target.prompt_hash = ANY(%(volume_gate_scopes)s::text[]) AND (
-            (j.source || E'\\x1f' || """
+            ((j.source = ANY(%(volume_gate_sources)s::text[])
+              OR j.source || E'\\x1f' || """
     + TITLE_KEY
-    + """ = ANY(%(volume_gate_title_keys)s::text[])
+    + """ = ANY(%(volume_gate_title_keys)s::text[]))
              AND abs(hashtext(j.url)) %% 100 >= %(volume_gate_audit_percent)s)
             OR (%(volume_gate_titles)s
                 AND j.title !~* %(volume_gate_technical)s
@@ -88,6 +90,28 @@ def unproductive_titles(gate: VolumeGate) -> list[str]:
     )
 
 
+def unproductive_sources(gate: VolumeGate) -> list[str]:
+    """Sources judged source_min_judged times in the window at or below the keep rate.
+
+    Postings are counted once whichever board or filter judged them, and a
+    posting any of them kept counts as kept.
+    """
+    if not gate.scopes or not gate.source_min_judged:
+        return []
+    return [
+        row["source"]
+        for row in db.query(
+            "SELECT j.source FROM ai_queries q JOIN jobs j ON j.url = q.url "
+            "WHERE q.check_type = 'custom' AND q.status IN ('passed', 'rejected') "
+            "AND q.created_at >= now() - make_interval(days => %s) "
+            "GROUP BY j.source HAVING count(DISTINCT q.url) >= %s "
+            "AND count(DISTINCT q.url) FILTER (WHERE q.status = 'passed') "
+            "<= %s * count(DISTINCT q.url) ORDER BY j.source",
+            (gate.window_days, gate.source_min_judged, gate.source_max_keep_rate),
+        )
+    ]
+
+
 def params() -> dict[str, object]:
     gate = VolumeGate.model_validate(db.get_config("verification_volume_gate"))
     return {
@@ -95,6 +119,7 @@ def params() -> dict[str, object]:
             db.get_config("verification_reachability_gate_enabled")
         ),
         "volume_gate_scopes": gate.scopes,
+        "volume_gate_sources": unproductive_sources(gate),
         "volume_gate_title_keys": unproductive_titles(gate),
         "volume_gate_audit_percent": gate.audit_percent,
         "volume_gate_titles": gate.occupation_titles,
