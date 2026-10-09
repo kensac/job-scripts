@@ -12,6 +12,7 @@ from api import ai, db, events, managed_board_runs, metrics
 from api.ai import verdicts
 from api.ai.batch_results import progress_counts
 from api.task_config import configured_model, configured_shape
+from core import near_copy
 from core.answers import (
     VERIFICATION_REQUEST,
     FilterDecision,
@@ -504,6 +505,132 @@ def _in_flight(task_id: int) -> list[str]:
     ]
 
 
+def _reuse_near_copies(task_id: int, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Give a posting its verified twin's verdicts; return the ones still to ask.
+
+    A twin is the same source, title and text once places and numbers are
+    removed (core.near_copy). A candidate whose twin already holds closed and
+    clearance verdicts takes those and the twin's verdicts under every live
+    board and filter prompt, as rows marked verify-near-copy that cost nothing.
+    One whose twin is in this sweep or in a parked one waits for it, so the
+    text is read once. The posting's own location, date and gates still apply
+    where each board and filter reads the verdict.
+    """
+    keys = {r["url"]: near_copy.key(r["title"] or "", r["input_content"] or "") for r in rows}
+    db.execute(
+        "UPDATE jobs SET near_copy_key = k.key FROM unnest(%s::text[], %s::text[]) AS k(url, key) "
+        "WHERE jobs.url = k.url AND jobs.near_copy_key IS DISTINCT FROM k.key",
+        (list(keys), list(keys.values())),
+    )
+    pairs = {(r["source"], keys[r["url"]]) for r in rows}
+    sources, digests = [p[0] for p in pairs], [p[1] for p in pairs]
+    twins = {
+        (row["source"], row["near_copy_key"]): row["url"]
+        for row in db.query(
+            "SELECT DISTINCT ON (j.source, j.near_copy_key) j.source, j.near_copy_key, j.url "
+            "FROM jobs j WHERE (j.source, j.near_copy_key) IN "
+            "(SELECT * FROM unnest(%s::text[], %s::text[])) AND NOT (j.url = ANY(%s::text[])) "
+            "AND EXISTS (SELECT 1 FROM ai_queries c WHERE c.url = j.url "
+            "AND c.check_type = 'closed' AND c.status IN ('passed', 'rejected')) "
+            "AND EXISTS (SELECT 1 FROM ai_queries c WHERE c.url = j.url "
+            "AND c.check_type = 'clearance' AND c.status IN ('passed', 'rejected')) "
+            "ORDER BY j.source, j.near_copy_key, j.id DESC",
+            (sources, digests, list(keys)),
+        )
+    }
+    pending = {
+        (row["source"], row["near_copy_key"])
+        for row in db.query(
+            "SELECT source, near_copy_key FROM jobs WHERE url = ANY(%s) "
+            "AND near_copy_key IS NOT NULL",
+            (_in_flight(task_id),),
+        )
+    }
+    ask, reuse, chosen = [], [], set()
+    for r in rows:
+        pair = (r["source"], keys[r["url"]])
+        if pair in twins:
+            reuse.append((r, twins[pair]))
+        elif pair in pending or pair in chosen:
+            continue
+        else:
+            chosen.add(pair)
+            ask.append(r)
+    if reuse:
+        _copy_twin_verdicts(reuse)
+    return ask
+
+
+def _copy_twin_verdicts(reuse: list[tuple[dict[str, Any], str]]) -> None:
+    twin_urls = sorted({twin for _, twin in reuse})
+    checks = {
+        (row["url"], row["check_type"]): row
+        for row in db.query(
+            "SELECT DISTINCT ON (url, check_type) url, check_type, status, reason "
+            "FROM ai_queries WHERE url = ANY(%s) AND check_type IN ('closed', 'clearance') "
+            "AND status IN ('passed', 'rejected') ORDER BY url, check_type, id DESC",
+            (twin_urls,),
+        )
+    }
+    customs: dict[str, list[dict[str, Any]]] = {}
+    for row in db.query(
+        "SELECT DISTINCT ON (q.url, q.prompt_hash, q.model) q.url, q.prompt_hash, q.model, "
+        "q.filter_name, q.status, q.reason, q.parsed_json FROM ai_queries q "
+        "WHERE q.url = ANY(%s) AND q.check_type = 'custom' "
+        "AND q.status IN ('passed', 'rejected') AND q.prompt_hash IN ("
+        "SELECT prompt_hash FROM managed_boards WHERE published "
+        "UNION SELECT prompt_hash FROM user_filters WHERE enabled) "
+        "ORDER BY q.url, q.prompt_hash, q.model, q.id DESC",
+        (twin_urls,),
+    ):
+        customs.setdefault(row["url"], []).append(row)
+    decided = {
+        (row["url"], row["prompt_hash"], row["model"])
+        for row in db.query(
+            "SELECT DISTINCT url, prompt_hash, model FROM ai_queries WHERE url = ANY(%s) "
+            "AND check_type = 'custom' AND status IN ('passed', 'rejected')",
+            ([job["url"] for job, _ in reuse],),
+        )
+    }
+    rows = []
+    for job, twin in reuse:
+        for check in ("closed", "clearance"):
+            verdict = checks.get((twin, check))
+            if job[f"needs_{check}"] and verdict:
+                rows.append(
+                    ai_result_row(
+                        job["url"],
+                        verdict["status"],
+                        verdict["reason"],
+                        check,
+                        company=job["company"],
+                        job_title=job["title"],
+                        config_name="verify-near-copy",
+                    )
+                )
+        for verdict in customs.get(twin, []):
+            if (job["url"], verdict["prompt_hash"], verdict["model"]) in decided:
+                continue
+            rows.append(
+                ai_result_row(
+                    job["url"],
+                    verdict["status"],
+                    verdict["reason"],
+                    "custom",
+                    model=verdict["model"],
+                    filter_name=verdict["filter_name"],
+                    prompt_hash=verdict["prompt_hash"],
+                    parsed_json=verdict["parsed_json"],
+                    company=job["company"],
+                    job_title=job["title"],
+                    config_name="verify-near-copy",
+                )
+            )
+    add_ai_results(rows)
+    for row in rows:
+        metrics.CHECKS.labels(row["check_type"], row["status"]).inc()
+
+
 async def handle_verify_new(task_id: int, payload: dict[str, Any]) -> None:
     """Batched replacement for ingest-time closed/clearance checks: one
     half-price call per job yields both verdicts. Idempotent by re-sweep.
@@ -517,7 +644,7 @@ async def handle_verify_new(task_id: int, payload: dict[str, Any]) -> None:
         rows = db.query(
             f"""
             WITH {verification_candidates.TARGETS}, candidates AS (
-            SELECT j.url, j.company, j.title, q.input_content,
+            SELECT j.url, j.source, j.company, j.title, q.input_content,
                    NOT EXISTS (
                        SELECT 1 FROM ai_queries c WHERE c.url = j.url
                          AND c.check_type = 'closed'
@@ -566,6 +693,11 @@ async def handle_verify_new(task_id: int, payload: dict[str, Any]) -> None:
         if not rows:
             set_progress(task_id, 0, 0, "nothing to verify")
             return
+        if db.get_config("verify_near_copy_reuse"):
+            rows = _reuse_near_copies(task_id, rows)
+            if not rows:
+                set_progress(task_id, 0, 0, "every candidate reused a twin's verdicts")
+                return
         model, effort = _submission_model()
         questions = (
             managed_board_runs.verification_questions(rows, model, effort)

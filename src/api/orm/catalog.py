@@ -41,6 +41,13 @@ class Job(Base):
         # into a probe: the repost group 98 ms to 10 ms, the open share
         # 400 ms to 90 ms (synthetic catalog, 2026-10-04).
         Index("idx_jobs_company_key", text("lower(btrim(company))")),
+        # verify_new's twin lookup (core.near_copy).
+        Index(
+            "idx_jobs_near_copy",
+            "source",
+            "near_copy_key",
+            postgresql_where=text("near_copy_key IS NOT NULL"),
+        ),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
@@ -51,6 +58,8 @@ class Job(Base):
     locations: Mapped[list[str]] = mapped_column(server_default=text("'{}'"))
     terms: Mapped[list[str]] = mapped_column(server_default=text("'{}'"))
     source: Mapped[str] = mapped_column(Text)
+    # core.near_copy.key of the text verification read; twins share it.
+    near_copy_key: Mapped[str | None] = mapped_column(Text)
     # NOT "this role is open". This is feed state, and it means different
     # things by source. catalog.upsert_postings writes whatever the board last
     # said (active = EXCLUDED.active); a feed with a per-posting flag

@@ -127,6 +127,15 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
         "gates admit the posting and that have no verdict for it yet. Board runs then reuse "
         "those verdicts. Turning this off restores separate board requests from the next sweep.",
     ),
+    "verify_near_copy_reuse": ConfigKey(
+        section="Boards",
+        default=True,
+        value_type=bool,
+        help="Give a posting its verified twin's verdicts (closed, clearance and every live board "
+        "and filter prompt) instead of reading the same text again. A twin is the same source, "
+        "title and text once location lines and numbers are removed. The posting's own "
+        "location, date and gates still apply. Turning this off asks for every posting again.",
+    ),
     "verification_volume_gate": ConfigKey(
         section="Boards",
         default=VolumeGate().model_dump(mode="json"),

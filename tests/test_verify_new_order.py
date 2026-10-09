@@ -41,6 +41,11 @@ def _post(url: str, days_ago: int | None) -> None:
 
 @pytest.mark.asyncio
 async def test_the_sweep_takes_the_freshest_postings_first(f, submitted):
+    # Identical postings are twins (core.near_copy); this is about a different rule.
+    db.execute(
+        "INSERT INTO app_config (key, value) VALUES ('verify_near_copy_reuse', 'false') "
+        "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+    )
     source = f.make_source("verify-order-src")
     uid = f.make_user()
     f.subscribe(uid, source)

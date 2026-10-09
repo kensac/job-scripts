@@ -1280,6 +1280,12 @@ async def test_verify_new_writes_no_verdict_for_a_line_it_could_not_read(monkeyp
     verdict off an unreadable line would settle it forever on nothing."""
     from core import batch as core_batch
 
+    # Identical postings are twins (core.near_copy); this is about a different rule.
+    db.execute(
+        "INSERT INTO app_config (key, value) VALUES ('verify_near_copy_reuse', 'false') "
+        "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+    )
+
     source = f.make_source("badline-src")
     uid = f.make_user()
     f.subscribe(uid, source)
