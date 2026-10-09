@@ -486,6 +486,24 @@ async def handle_reverify_chunk(task_id: int, payload: dict[str, Any]) -> None:
     )
 
 
+def _in_flight(task_id: int) -> list[str]:
+    """Postings another parked sweep has already submitted.
+
+    A sweep no longer waits for the previous one to finish (a straggling batch
+    held one for 15 hours on 2026-10-08, and no new posting was verified until
+    it returned), so each excludes what the others are already paying for.
+    """
+    return [
+        row["custom_id"]
+        for row in db.query(
+            "SELECT r.custom_id FROM batch_requests r JOIN tasks t ON t.id = r.task_id "
+            "WHERE t.kind = 'verify_new' AND t.id <> %s "
+            "AND t.status IN ('pending', 'running', 'waiting', 'awaiting_batch')",
+            (task_id,),
+        )
+    ]
+
+
 async def handle_verify_new(task_id: int, payload: dict[str, Any]) -> None:
     """Batched replacement for ingest-time closed/clearance checks: one
     half-price call per job yields both verdicts. Idempotent by re-sweep.
@@ -510,7 +528,8 @@ async def handle_verify_new(task_id: int, payload: dict[str, Any]) -> None:
                          AND c.status IN ('passed', 'rejected')) AS needs_clearance
             FROM jobs j
             {CONTENT_LATERAL.format(url="j.url", columns="input_content")}
-            WHERE j.active AND {verification_candidates.REACHABLE} AND (
+            WHERE j.active AND {verification_candidates.REACHABLE}
+              AND NOT (j.url = ANY(%(in_flight)s::text[])) AND (
                 NOT EXISTS (
                     SELECT 1 FROM ai_queries c WHERE c.url = j.url
                       AND c.check_type = 'closed' AND c.status IN ('passed', 'rejected'))
@@ -538,7 +557,11 @@ async def handle_verify_new(task_id: int, payload: dict[str, Any]) -> None:
             )
             SELECT * FROM candidates
             """,
-            {**candidate_params, "cap": int(db.get_config("verify_new_per_cycle"))},
+            {
+                **candidate_params,
+                "cap": int(db.get_config("verify_new_per_cycle")),
+                "in_flight": _in_flight(task_id),
+            },
         )
         if not rows:
             set_progress(task_id, 0, 0, "nothing to verify")

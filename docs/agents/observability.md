@@ -226,6 +226,14 @@ again from the top with a subset of its results, which every batched sweep
 already is: they iterate the results they were given and re-select on the next
 run.
 
+**A parked sweep does not hold up the next one.** A sweep whose predicate stays
+true while its batch is in flight (no verdict yet) must not re-select what it
+submitted, but it must not block every later posting either: one straggling
+verify batch held the only `verify_new` for 15 hours on 2026-10-08 and no new
+posting reached a board. `verify_new` starts a new sweep whenever none is
+pending, running or waiting, and `tasks.verify._in_flight` excludes the
+postings a parked sweep's `batch_requests` already name.
+
 **A resume is not a retry.** Every claim increments `attempts`, because
 `(worker, attempts)` is the generation stamp claim-guarded writes check, and
 it must never repeat. The retry budget is `attempts - batch_resumes`
