@@ -113,7 +113,7 @@ def _gate(scopes: list[str], **overrides) -> None:
     db.execute(
         "INSERT INTO app_config (key, value) VALUES ('verification_volume_gate', %s) "
         "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
-        (db.jsonb({"scopes": scopes, "min_judged": 50, **overrides}),),
+        (db.jsonb({"scopes": scopes, **overrides}),),
     )
 
 
@@ -134,34 +134,6 @@ def _judged(source: str, n: int, status: str = "rejected") -> None:
 
 def _audited(url: str) -> bool:
     return db.query_one("SELECT abs(hashtext(%s)) %% 100 < 5 AS a", (url,))["a"]
-
-
-def test_a_source_with_no_keeps_is_skipped_except_its_audit_sample():
-    _enable()
-    source = f.make_source()
-    _gate([_scoped_target(source)])
-    _judged(source, 50)
-    jobs = {f.make_job(source=source) for _ in range(60)}
-    urls = {
-        row["id"]: row["url"]
-        for row in db.query("SELECT id, url FROM jobs WHERE id = ANY(%s)", (list(jobs),))
-    }
-
-    reached = _reachable()
-
-    assert reached == {job for job in jobs if _audited(urls[job])}
-    assert reached, "the audit sample keeps reading the source"
-
-
-def test_one_keep_anywhere_returns_the_source():
-    _enable()
-    source = f.make_source()
-    _gate([_scoped_target(source)])
-    _judged(source, 49)
-    _judged(source, 1, "passed")
-    job = f.make_job(source=source)
-
-    assert _reachable() == {job}
 
 
 def test_an_unlisted_target_and_a_tracked_posting_read_everything():
@@ -202,7 +174,7 @@ def test_occupation_titles_are_skipped_unless_a_technical_word_wins():
 def test_a_title_judged_often_with_no_keep_is_skipped_except_its_audit_sample():
     _enable()
     source = f.make_source()
-    _gate([_scoped_target(source)], min_judged=10_000, title_min_judged=50, occupation_titles=False)
+    _gate([_scoped_target(source)], title_min_judged=50, occupation_titles=False)
     for _ in range(50):
         job = f.make_job(source=source, title="Store  Associate")
         url = db.query_one("SELECT url FROM jobs WHERE id = %s", (job,))["url"]
@@ -224,7 +196,7 @@ def test_a_title_judged_often_with_no_keep_is_skipped_except_its_audit_sample():
 def test_a_title_with_one_keep_is_read():
     _enable()
     source = f.make_source()
-    _gate([_scoped_target(source)], min_judged=10_000, title_min_judged=50, occupation_titles=False)
+    _gate([_scoped_target(source)], title_min_judged=50, occupation_titles=False)
     for status in ["rejected"] * 49 + ["passed"]:
         job = f.make_job(source=source, title="Data Analyst")
         url = db.query_one("SELECT url FROM jobs WHERE id = %s", (job,))["url"]
@@ -233,3 +205,10 @@ def test_a_title_with_one_keep_is_read():
     job = f.make_job(source=source, title="Data Analyst")
 
     assert job in _reachable()
+
+
+def test_a_stored_gate_with_the_removed_source_cutoff_still_loads():
+    from core.review_gate import VolumeGate
+
+    gate = VolumeGate.model_validate({"scopes": ["x"], "min_judged": 100000000})
+    assert gate.scopes == ["x"] and "min_judged" not in gate.model_dump()
