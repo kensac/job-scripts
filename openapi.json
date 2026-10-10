@@ -52015,7 +52015,7 @@
           "subscribed"
         ],
         "title": "SourceGroup",
-        "description": "A bundle of boards a person can take in one press. `subscribed` is\ncomputed per caller rather than stored: the bundle is theirs only while\nthey hold every board in it."
+        "description": "A bundle of boards a person can take in one press. `subscribed` is\ntrue while the caller follows it, or holds every board in it that is\nswitched on."
       },
       "SourceGroupBody": {
         "properties": {

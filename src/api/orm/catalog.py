@@ -443,6 +443,23 @@ class UserSource(Base):
     source: Mapped[str] = mapped_column(Text, primary_key=True)
 
 
+class UserSourceGroup(Base):
+    """A person following a bundle: every active member reaches them, the
+    ones added later included. `user_sources` holds what they picked one by
+    one; the view `user_source_set` is the two together, and is what every
+    reader reads (api/source_selection.py)."""
+
+    __tablename__ = "user_source_groups"
+
+    user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    group_name: Mapped[str] = mapped_column(
+        Text, ForeignKey("source_groups.name", ondelete="CASCADE"), primary_key=True
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+
+
 class SourceRequest(Base):
     __tablename__ = "source_requests"
     __table_args__ = (Index("idx_source_requests_status", "status", "id"),)

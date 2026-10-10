@@ -10,8 +10,9 @@ from typing import Any
 from api import user_settings
 from api.board import criteria
 from core import verdict_reads
+from core.store import PERSON_SOURCE
 
-SUBSCRIBED = "j.source IN (SELECT source FROM user_sources WHERE user_id = %(uid)s)"
+SUBSCRIBED = PERSON_SOURCE.format(source="j.source", user="%(uid)s")
 
 # Verdicts are keyed by prompt hash; duplicate filters must not multiply the
 # number of passes needed when reading legacy rows with the same prompt.

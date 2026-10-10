@@ -320,7 +320,7 @@ def schedule_ingest_cycle() -> None:
     for u in db.query(
         """
         SELECT id FROM users u
-        WHERE EXISTS (SELECT 1 FROM user_sources s WHERE s.user_id = u.id)
+        WHERE EXISTS (SELECT 1 FROM user_source_set s WHERE s.user_id = u.id)
            OR EXISTS (SELECT 1 FROM user_jobs j WHERE j.user_id = u.id)
            OR EXISTS (SELECT 1 FROM jobs j WHERE j.uploaded_by = u.id)
         ORDER BY id

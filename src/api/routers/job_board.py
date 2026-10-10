@@ -294,7 +294,7 @@ def job_options(user: AuthedUser = Depends(require_user)) -> BoardOptions:
     sources = [
         r["source"]
         for r in db.query(
-            "SELECT source FROM user_sources WHERE user_id = %s ORDER BY source",
+            "SELECT source FROM user_source_set WHERE user_id = %s ORDER BY source",
             (user.id,),
         )
     ]
