@@ -721,112 +721,43 @@ Handlers read the settings through `api.run_configs.filter_of` and
 `with_board_settings`, which also accept a payload that still holds the old
 copy; `tasks.board.submission_exclusions` is the one SQL reader.
 
-## Historical embedding receipt payloads
+## Embedding receipt vectors
 
-`api.ai.receipt_payloads` copies only vector arrays from consumed receipts of
-`done` embedding tasks. The response retains text, usage, errors and an
-`embedding_vectors_ref` containing bucket, content-addressed key, SHA-256,
-uncompressed byte size and format version. Receipt identity, outcome and
-acknowledgement timestamps remain in Postgres. Profile receipts and active
-work are excluded. No object lifecycle expiration or garbage collection may
-remove referenced objects.
+A receipt's response keeps text, usage, errors and an `embedding_vectors_ref`:
+bucket, content-addressed key, SHA-256, uncompressed byte size and format
+version. The vectors themselves are an object. Receipt identity, outcome and
+acknowledgement timestamps remain in Postgres. No object lifecycle expiration
+or garbage collection may remove referenced objects.
 
 **A new receipt's vectors are written to object storage before the receipt
-exists, and the receipt holds only `embedding_vectors_ref`.** Never write
-them inline again: on 2026-10-03, four receipts written after the backfill
-still carried inline vectors for the tooling below to move.
-`batch_results.checkpoint` uploads every result's vectors with
-`PayloadStore.put_verified` outside any transaction, concurrently up to
-`payload_objects.MAX_CONNECTIONS`, then writes the receipts and clears the
-collected batch IDs in one transaction. Storage that is unconfigured or
-failing raises `PayloadUnavailable` before any receipt is written, with the
-provider batch IDs still pending, so the task takes the payload recovery path
-below and its next run collects the same finished provider batch again;
-nothing is resubmitted or paid twice. An upload whose receipt was never
-written stays unreferenced and is reused by the retry, since objects are
-content-addressed. Every reader of receipt vectors goes through
-`batch_results.response_payload` (`unconsumed`, `payload_recovery.retry`);
-the tooling below verifies references directly against their inline values.
+exists, and the receipt holds only `embedding_vectors_ref`.** There is no
+inline shape: 0 of 1,619 receipts held inline vectors on 2026-10-10, and the
+tools that moved them were removed. `batch_results.checkpoint` uploads every
+result's vectors with `PayloadStore.put_verified` outside any transaction,
+concurrently up to `payload_objects.MAX_CONNECTIONS`, then writes the receipts
+and clears the collected batch IDs in one transaction. Storage that is
+unconfigured or failing raises `PayloadUnavailable` before any receipt is
+written, with the provider batch IDs still pending, so the task takes the
+payload recovery path below and its next run collects the same finished
+provider batch again; nothing is resubmitted or paid twice. An upload whose
+receipt was never written stays unreferenced and is reused by the retry, since
+objects are content-addressed. Every reader of receipt vectors goes through
+`batch_results.response_payload` (`unconsumed`, `payload_recovery.retry`).
 
-Run `python -m api.ai.migrate_receipt_payloads copy --limit N` with the private
-`JOBTRACKER_S3_ENDPOINT`, `REGION`, `BUCKET`, `ACCESS_KEY_ID` and
-`SECRET_ACCESS_KEY` variables (each with the `JOBTRACKER_S3_` prefix).
-New objects use version 2 uncompressed JSON; the reader also accepts historical
-version 1 gzip objects. Deploy version 2 readers everywhere before writing new
-references. Both formats verify the canonical JSON byte size and SHA-256.
-Copy retains inline vectors and verifies a GET before attaching the reference.
-`verify` checks existing references without database writes. All modes have
-database timeouts and return a cursor for `--after BATCH_ID CUSTOM_ID`. An
-unavailable object, changed receipt or lost eligibility stops the run with a
-nonzero exit; the cursor remains before that row so a retry cannot silently
-skip it. Only the contiguous successful prefix contributes verified byte counts.
-
-To move or roll back a known set of receipts rather than scan from a cursor,
-name each with `--receipt BATCH_ID CUSTOM_ID` (repeatable, serial modes only).
-Every mode then selects only those keys, so `verify` and `restore`, whose
-predicates match every referenced receipt, cannot reach any other row.
-
-Verification defaults to the original serial path. To group reads and overlap
-object GETs, supply all three explicit positive bounds:
-`--verify-group-size N --verify-workers W --verify-byte-budget B`, with W no
-greater than N. These flags apply only to `verify`. Each group reserves the
-serialized receipt bytes plus declared uncompressed object bytes before loading
-payloads. A receipt exceeding B stops before hydration or GET with
-`stop_reason=byte_budget`; retry with an appropriate bound, not a cursor past it.
-This is a serialized-payload budget, not a process RSS limit: decoded JSON,
-driver buffers and metadata have additional bounded overhead.
-
-Grouped verification reads size metadata and exact row snapshots in a short
-read-only transaction, closes it before object IO, then rechecks the full exact
-row and eligibility in one grouped read. GET concurrency never exceeds W and
-only one byte-bounded group is submitted. Completed futures retain scalar
-outcomes, not vector arrays. GETs later in the current group may finish before
-an earlier failure is observed, but their outcomes never advance the cursor or
-verified-byte total past the first failing row. Changing concurrency does not
-weaken reference parsing, SHA-256, byte size, array-shape or inline-equality
-checks. These verification options do not change copy or compaction throughput.
-
-For grouped compaction, explicitly supply `--compact-group-size N
---compact-workers W --compact-byte-budget B` with `--backup-complete`. The same
-serialized-byte reservation and GET bounds apply. Each object is downloaded and
-verified again even after a previous verification pass. No database lock or
-transaction spans object IO. Afterwards, the operator locks parent tasks in
-ascending ID order and receipts in cursor order, rechecks exact canonical rows
-and eligibility, and removes only `embedding_vectors` with a native JSONB update
-for the successful ordered prefix. Other response fields retain their exact
-PostgreSQL values, without a Python JSON round trip.
-
-Each grouped conditional update must affect the entire verified prefix; a count
-mismatch or transaction failure rolls back that group. The returned cursor and
-byte count retain only earlier committed groups. A later object failure or
-eligibility change permits only its earlier unchanged prefix to commit. Retry
-from the returned cursor; already compacted receipts are not selected again.
-A `database_error` stop reason requires resolving the database problem before
-retrying. Grouped controls are opt-in; serial compaction remains available.
-Neither path deletes references or objects, reprices usage, or touches live
-embedding vectors.
-
-Deploy the compatible receipt reader before any compaction. After an independent
-database copy finishes, `compact --limit N --backup-complete` verifies the object
-again and removes only inline vectors. `restore --limit N` restores the exact
-vector array and removes the reference. Both recheck eligibility and the entire
-source receipt under task and receipt locks after object IO. Never wrap these
-operations in an outer database transaction. A failed upload or changed receipt
-leaves inline data intact; an interrupted copy may leave an unreferenced object.
+New objects are version 2 uncompressed JSON. The reader also accepts version 1
+gzip objects, which 501 receipts still referenced on 2026-10-10. Both formats
+verify the canonical JSON byte size and SHA-256.
 
 Replay reads only unconsumed receipts, so missing historical vectors cannot
 reopen acknowledged work. A required external input raises `PayloadUnavailable`
 before acknowledgement, never an empty substitute or a new paid submission.
-The personal and administrative board reads continue using `job_embeddings`;
-archival does not alter those vectors or board membership. Report verified
-logical bytes separately from table size and filesystem space: removal alone
-does not return filesystem space, and no table rewrite is part of this command.
+The personal and administrative board reads continue using `job_embeddings`.
 
 ## Request snapshot storage and recovery
 
-`api.ai.request_snapshots` is the shared reader for inline and external request
-snapshots. An external reference that cannot be
-read is a required-input failure, never a legacy unknown request. Hydration and
+`api.ai.request_snapshots` is the one reader of request snapshots. A reference
+that cannot be read is a required-input failure, never a legacy unknown
+request. Hydration and
 object verification must occur outside database transactions, including outer
 transactions inherited through the shared connection context.
 
@@ -835,9 +766,10 @@ reference, with nothing inline.** There is no exception by kind, task status or
 receipt state. Two shapes for one population means every reader, test and
 audit must handle both, and the second shape becomes the place where the next
 rule quietly does not apply. A hot path that needs care gets a solution, such
-as proving a stored request by its digest (`batch_results.snapshot_sha256`)
-instead of reading it. It never gets an exempt population. Readers still accept inline values and version 1 and 2 references,
-so a rollback past this release can read what it wrote.
+as proving a stored request by its digest instead of reading it. It never gets an exempt population. On 2026-10-10
+every one of 1,580,979 rows was a version 3 member with nothing inline, so
+readers accept nothing else and the tools that converted the other shapes were
+removed. The `snapshot` column is empty and no reader names it.
 
 **A new request is written to object storage before its row exists, and the row
 holds only the reference.** `batch_results.snapshot_specs` puts every request
@@ -845,14 +777,12 @@ the task has no row for into bundles (`PayloadStore.put_bundle`, split at
 `payload_objects.BUNDLE_MAX_BYTES` by `bundle_groups`). The bundles upload
 outside any transaction, concurrently up to the client's connection pool
 (`payload_objects.MAX_CONNECTIONS`), and each one is read back member by member
-before anything is written. Then each request is inserted with `snapshot=NULL`
-and its member reference. One call's requests are one task's, so a bundle never
-mixes tasks. Never write a new request inline: a second copy written for the
-backfill to move later costs the bytes twice and leaves dead TOAST behind.
-Never write a new per-row (version 2) reference either: that is the second
-shape the backfill below exists to remove.
-An existing row, inline or referenced, always wins the conflict and is what gets
-frozen and resubmitted; a request that already has a row is not uploaded again.
+before anything is written. Then each request is inserted with its member
+reference. One call's requests are one task's, so a bundle never
+mixes tasks. Never write a request inline or as a per-row (version 2)
+reference: either is a second shape, and nothing reads it any more.
+An existing row always wins the conflict and is what gets frozen and
+resubmitted; a request that already has a row is not uploaded again.
 A row this call just wrote is frozen from the value its upload read back, with
 no further read. Freezing rows that already existed reads each of their bundles
 once. Storage that is unconfigured or failing raises
@@ -861,159 +791,27 @@ task takes the payload recovery path below with nothing paid. An object whose
 insert lost the conflict, or whose batch failed on a later upload, stays
 unreferenced; it is content-addressed, so a retry reuses it.
 
-After deploying compatible readers to the whole fleet, run bounded operations
-with `python -m api.ai.migrate_snapshot_payloads MODE --limit COUNT`. Modes are
-`copy`, `verify`, `compact`, and `restore`; resume with the reported
-`--after TASK_ID CUSTOM_ID`. Each invocation processes at most COUNT snapshots,
-in pages selected by `--chunk-size` (default 100). `--workers` is the number of
-pages in flight (default 1); each page does its object I/O serially and commits
-on its own, and the object client's connection pool is sized to match. Object
-storage is bound by per-request latency, not bandwidth: on 2026-10-03 one PUT
-took about 0.67 s, 16 concurrent PUTs reached about 11/s and 64 about 16/s.
-Object I/O finishes before a short transaction locks the page's request rows
-in key order and performs one conditional set-based update. Pages are reported in
-cursor order, one line per page with its cursor. If an object fails or a source
-changes, only the preceding ordered prefix of that page
-commits and the cursor stops before it. Pages already in flight past it still
-commit and are counted, but the cursor never passes an uncommitted row; a rerun
-from it finds them already done. **A page locks only its own request rows,
-never the task's row.** Pages are disjoint key ranges, so pages of one task
-run side by side. When pages also locked the task row, on 2026-10-03 single
-tasks held up to 37,329 rows, about 38 bundle pages. Concurrent pages of one
-task queued on that one row past the 2 s `lock_timeout` and aborted the run.
-Not locking the task also keeps the migration out of the way of a live
-worker's own task updates. A lock or statement timeout in a page's locked transaction is retried
-twice (`LOCK_RETRY_DELAYS`); if it persists, that page commits nothing, the
-run prints `{"error": "lock_timeout", "at": [TASK_ID, CUSTOM_ID]}`, counts
-`lock_timeout`, stops the cursor before the page and exits nonzero, like any
-other failure. Later successful uploads remain unreferenced
-until retry. Compaction requires `--backup-complete`, confirmation that
-the independent database copy has finished. `copy` writes the superseded per-row
-version 2 shape and is not part of the cutover; `bundle` below is. If anything
-runs `copy`, a later `bundle` re-points what it wrote. Keep the emitted counters and cursor. An
-unavailable, changed or ineligible outcome exits unsuccessfully before advancing
-past its row; investigate or restore the source/object and retry that cursor. Other database errors fail the invocation; rerun
-from the last saved cursor, since completed operations are idempotent.
-
-For a fixed historical population, use `--manifest-stdin` instead of a database
-scan. Supply a JSON array of sorted, unique objects with `task_id`, `custom_id`,
-and `snapshot_sha256`. The digest is SHA-256 of `encode_payload(snapshot)`, not
-PostgreSQL's JSONB text representation. Optional `metadata_md5` binds
-`md5((to_jsonb(batch_requests)-'snapshot'-'snapshot_ref')::text)`; optional
-`reference` binds the exact reference obtained after copy. Keep the same original
-payload digest across copy, verification, compaction and restore. Bound each
-input batch by both `--limit` and `--chunk-size`; `--after` is rejected in this mode.
-The manifest service also requires backup confirmation for compaction.
-
-Manifest mode never selects a replacement for a missing or ineligible identity.
-It prints one result per invocation: counts and logical bytes for that invocation,
-`completed` for the successful prefix, `after` for its last identity, and `failed`
-for the first rejected identity. `exhausted=true` means every identity in the
-supplied batch completed, not that the database or an external full manifest is
-exhausted. Resume with the uncompleted suffix of the same evidence manifest.
-Persist results before sending another batch. If the process ends before emitting
-its result, replay the batch; committed rows are checked idempotently. Keep
-independent verification, a fresh preservation audit, and a separate final audit
-as phase gates. The legacy scan mode retains cumulative chunk counters and its
-repeated final summary; do not combine that accounting with manifest deltas.
-
-**A historical snapshot can be a member of a bundle: one object holding many
-snapshots of one task.** One object per row is bound by object storage write
-latency, not bytes: on 2026-10-03 Garage (data on CIFS with `data_fsync=true`)
-took about 0.67 s per PUT and reached about 16 PUTs/s at 64 in parallel, so
-1,081,787 remaining rows were about 20 hours of copying and 2 more of
-compaction GETs. Their reference is version 3:
+**A request is a member of a bundle: one object holding many requests of one
+task.** One object per row is bound by object storage write latency, not
+bytes: on 2026-10-03 Garage (data on CIFS with `data_fsync=true`) took about
+0.67 s per PUT and reached about 16 PUTs/s at 64 in parallel. The reference
+is version 3:
 `{bucket, key, sha256, size, version: 3, member, member_sha256, member_size}`.
 `key`, `sha256` and `size` describe the bundle, which is `encode_payload` of a
 JSON object mapping each `custom_id` to its snapshot, stored at
 `payloads/v3/sha256/<sha256>.json`. `member` is the row's `custom_id`;
-`member_sha256` and `member_size` are of `encode_payload(snapshot)`, the same
-digest a manifest binds. A reader checks the bundle's size and digest, then the
+`member_sha256` and `member_size` are of `encode_payload(snapshot)`. A reader checks the bundle's size and digest, then the
 member's, and refuses a member named for another request.
-`payload_objects.parse_ref` reads every version; `PayloadRef.parse` still
-accepts only 1 and 2, so a reader that predates bundles fails closed with
-`PayloadUnavailable` instead of reading a bundle as a snapshot.
+`request_snapshots.load` reads only a member reference (`BundleMemberRef`);
+`PayloadRef.parse` refuses one, so no other reader can mistake a bundle for a
+single value.
 
 Every reader of `snapshot_ref` goes through `request_snapshots.resolve` or
 `request_snapshots.load`. A caller resolving many rows passes one
 `BundleCache` for that call, so each bundle is read once:
 `batch_results.snapshot_specs`, `batch_results.unconsumed`,
-`payload_recovery.retry`, and `snapshot_payloads.migrate_many`, which reads
-every bundle a chunk references before verifying, compacting or restoring its
-members. The cache lives for one call and is never filled inside a transaction.
-
-**Rollout order for bundles.** Deploy the readers to every API and worker
-before any member reference is written; the bundle backfill is a separate,
-later release. Rolling back past the readers requires restoring every
-member-referenced row first (`restore` writes the inline value back and clears
-the reference).
-
-`migrate_snapshot_payloads bundle --limit COUNT` is the backfill to the one
-shape. It takes every row that is not yet a member: inline-only rows, and rows
-holding a per-row (version 1 or 2) reference, with or without their inline
-value. Each page is one task's rows, at most `--chunk-size` of them (default
-1,000 in this mode). It is uploaded as one bundle, split further only past
-`BUNDLE_MAX_BYTES`. A row's member is its inline value when it has one, since
-that is what readers resolve. Otherwise it is the row's verified object,
-read and validated first. Then one short locked transaction rechecks each row's
-exact inline value and reference and swaps in the member reference, keeping
-any inline value for `compact`. The superseded per-row object is left in place,
-never deleted. A row that changed after its upload is
-skipped and counted `changed`: the run continues, exits nonzero, and the row
-keeps what it had for a later run. An upload, an unreadable per-row object or
-an invalid snapshot is `unavailable` and stops before its row, like `copy`.
-A row with neither an inline value nor a reference is a legacy unknown request
-with nothing to store, and is not a candidate. `--manifest-stdin` does
-not take `bundle`; manifests verify, compact and restore member rows with the
-member's digest. `compact`, `verify` and `restore` handle member rows as they
-handle version 2, reading each bundle once per chunk, so a compaction chunk the
-size of a bundle page GETs about one bundle.
-
-1. Deploy this release to every API and worker, so nothing writes a new
-   inline or version 2 request.
-2. `bundle --workers W` from the start; `verify` the same range. A nonzero exit with only
-   `changed` counts means rerun `bundle` from the start.
-3. Confirm the independent backup, compact a bounded canary, `verify` it, then
-   compact the rest with `--chunk-size 1000 --workers W`. Overlapping pages,
-   not a larger chunk, is what reaches Garage's concurrency; 16 to 64 pages
-   in flight hold that many pages of rows in memory.
-4. Count the end state. Both numbers must be 0:
-   `SELECT count(*) FILTER (WHERE snapshot IS NOT NULL),
-   count(*) FILTER (WHERE snapshot_ref->>'version' IS DISTINCT FROM '3'
-   AND snapshot_ref IS NOT NULL) FROM batch_requests`. Rows with neither are
-   legacy unknown requests; count them separately, since nothing can move them.
-
-**Every row is a candidate, whatever its task's kind or status and whether it
-has unconsumed receipts.** The migration changes what a row stores, never what
-it resolves to. These paths run concurrently with it:
-
-- **Readers.** `request_snapshots.resolve` prefers the inline value and
-  otherwise reads the verified object. Every step leaves a row resolving to the
-  same request. `bundle` adds a reference beside an existing inline value, or
-  swaps one verified reference for another. `compact` clears an inline value
-  only after its object has been read back equal to it. A reader sees one
-  committed version of the row, either side of the swap, and gets the same
-  spec. `unconsumed()` reads with one query and resolves outside any
-  transaction, as it already does for every request written since #740.
-- **Consumption** (`consume_result`) locks only `batch_result_receipts` rows.
-  The migration locks only `batch_requests` rows, so they never wait on each
-  other.
-- **`snapshot_specs`** never replaces an existing row (`DO UPDATE SET
-  snapshot=batch_requests.snapshot` keeps both columns). The conflict locks the
-  row, so it serializes with the migration's `FOR UPDATE`, and the migration's
-  update is conditioned on the row being exactly as read. Whatever it returns
-  is frozen by the same reader.
-- **`payload_recovery.retry`** compares every request row before and after its
-  locked transaction. A swap in between makes it report `conflict` with no
-  mutation; rerunning it then succeeds.
-
-Converting a running task's inline rows means that task now needs object
-storage to read them, as every task created since #740 already does. An outage
-fails it into the payload recovery path below, with nothing lost. It retains
-task/request identities and all
-receipt outcomes/accounting. No age cutoff or object expiry is implied.
-`restore` requires the verified object and reverses inline removal.
-Logical bytes moved are not a measurement of filesystem space reclaimed.
+and `payload_recovery.retry`. The cache lives for one call and is never filled
+inside a transaction.
 
 A worker encountering `PayloadUnavailable` leaves a failed task with a
 `payload_recovery.reason` of `payload_unavailable`, preserving provider batch
@@ -1044,8 +842,8 @@ backfill and the rollout order are in
 ## Task job lists: managed-board runs and filter chunks
 
 **Every reader of a task's job list goes through `task_jobs.run_jobs`, which
-reads both shapes:** inline `jobs`, and `jobs_ref` with `candidate_count`, a
-verified object. Two populations carry one (`task_jobs.POPULATIONS`):
+reads both shapes:** inline `jobs` (a live filter chunk), and `jobs_ref` with
+`candidate_count`, a verified object. Two populations carry one (`task_jobs.POPULATIONS`):
 
 - **Managed-board runs.** The candidate list was 7.9 to 8.6 MB of JSON per run
   and 94 percent of the payload (measured 2026-10-03). Its readers are the
@@ -1100,50 +898,11 @@ run kinds. Its readers spell the kinds as SQL literals
 (`Population.kinds_sql`), because a prepared statement's generic plan cannot
 prove a partial predicate from a bound array.
 
-**Legacy inline lists move to exactly the shape the writer produces; a list
-is never deleted.** The end state is zero tasks of either population with
-inline `jobs`. **Roll the `run_jobs` and `CHUNK_URLS` readers across every API
-and worker before converting a filter chunk**: an older worker reads
-`payload["jobs"]` and fails the chunk. `externalize` converts every inline
-task whatever its status, in-flight ones included: the handler holds the list
-it already read, and a resume or recovery reads the row again through
-`run_jobs`. Per task it uploads the exact inline list with `put_verified`
-outside any transaction, then in one short transaction locks the row,
-requires the identical list (same canonical bytes) and no reference keys
-beside it, and replaces `jobs` with `jobs_ref`, `candidate_count` and, for
-filter chunks, `urls`, in one UPDATE. Every other payload key is left as it
-was. A list that changed in between writes nothing and reports `changed`.
-Nothing runs this automatically. Choose a fixed high-water id with
-`SELECT max(id) FROM tasks`, then, with `POPULATION` one of `managed_board`
-or `filter_chunk`:
-
-```
-python -m api.migrate_task_jobs POPULATION count --through ID --after 0 --limit 20
-python -m api.migrate_task_jobs POPULATION externalize --through ID --after 0 --limit 20 --workers 4
-python -m api.migrate_task_jobs POPULATION verify --through ID --after 0 --limit 20
-```
-
-Each invocation examines at most `--limit` tasks in id order, so it
-decompresses at most that many legacy payloads. Repeat from the printed
-`after` until `exhausted` is true. `count` and `verify` run read-only: `count`
-classifies tasks as `inline`, `referenced`, `missing` or `conflict` without
-reading objects, and `verify` reads every reference through `run_jobs`, so a
-missing object, a length that disagrees with `candidate_count` or URLs that
-disagree with `urls` is `unavailable`. A writing invocation stops its cursor
-before the first `changed` or `unavailable` task; resume from the same
-`after`, and tasks already converted report `referenced`. `missing` and
-`conflict` (a filter chunk reference without `urls`, a managed one with them,
-an inline list beside reference keys) are not shapes any writer produced;
-they are listed by id under `failed` (exit status 1) for a person to look at,
-and the cursor moves past them. Done means `count` over the whole range
-reports no `inline` and `verify` no `failed`.
-
-`restore` is the rollback: it reads each reference through `run_jobs`, then
-under the row lock puts the exact list back as `jobs` and removes `jobs_ref`,
-`candidate_count` and `urls`, returning a legacy payload to exactly what it
-was. Readers older than `run_jobs` need it on every task, including those
-written with a reference. Objects are never deleted, so a restore is always
-possible.
+**Only a live filter chunk holds its list inline.** On 2026-10-10 every one
+of 18,683 tasks with a list held it by reference, and the tool that converted
+older inline lists was removed. Do not reintroduce an inline managed-board run
+or batch chunk: an inline list beside a referenced one is the second shape
+this rule exists to avoid.
 
 ## Shared query instruction text
 
@@ -1177,20 +936,3 @@ backup and compatible-reader confirmations, so direct calls cannot bypass the
 CLI checks. Keep dictionary rows permanently while referenced. Before reverting to
 old readers, restore and verify inline text. Logical bytes removed do not prove
 that PostgreSQL relation files or filesystem use decreased.
-
-Grouped receipt verification and compaction select a materialized page of cheap eligible
-receipt keys before accessing any response JSON. The metadata size query therefore
-detoasts at most that key page, including rows subsequently skipped for missing
-references (or missing inline vectors in compact mode). `--scan-limit` bounds metadata
-keys inspected per invocation, including repeated probes after byte-budget splits;
-its default is `--limit` times the group size. This is independent of the successful
-receipt limit and the serialized-byte reservation.
-
-Grouped JSON summaries include `scanned`, `skipped`, `verified_after`, and `exhausted`.
-`after` is the safe restart cursor through successful receipts and explicitly skipped
-keys; `verified_after` is the last receipt verified or compacted in that invocation.
-An all-skipped page is not end of input. Runners must continue from `after` until
-`exhausted` is true, never infer completion from successful count below `--limit`.
-Exhaustion is reported only after a fully processed short or empty key page, with no
-blocked candidate. A scan or successful-count bound can finish with `exhausted=false`;
-a bad reference or oversized candidate stops before that key and reports a failure.

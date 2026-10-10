@@ -3,7 +3,6 @@ the same jobs and URLs whichever shape the payload holds."""
 
 from __future__ import annotations
 
-import json
 from types import SimpleNamespace
 
 import pytest
@@ -46,27 +45,14 @@ def _chunk(jobs, *, uid=7, prompt_hash="criteria", status="running", kind=None, 
     )
 
 
-def _all(mode: str, objects, *, limit: int = 100, workers: int = 1) -> list[dict]:
-    through = db.query_one("SELECT max(id) AS n FROM tasks")["n"]
-    results, cursor = [], 0
-    while not results or not results[-1]["exhausted"]:
-        results.append(
-            task_jobs.migrate(
-                CHUNKS,
-                mode,
-                after=cursor,
-                through=through,
-                limit=limit,
-                store=objects,
-                workers=workers,
-            )
+def _reference_every_chunk(objects) -> None:
+    """Move every inline list to the shape a batch chunk's writer produces."""
+    for row in db.query("SELECT id, payload->'jobs' AS jobs FROM tasks WHERE payload ? 'jobs'"):
+        keys = task_jobs.reference(CHUNKS, row["jobs"], objects.put_verified(row["jobs"]))
+        db.execute(
+            "UPDATE tasks SET payload = (payload - 'jobs') || %s WHERE id = %s",
+            (db.jsonb(keys), row["id"]),
         )
-        cursor = results[-1]["after"]
-    return results
-
-
-def _count(results: list[dict], outcome: str) -> int:
-    return sum(result["counts"].get(outcome, 0) for result in results)
 
 
 def test_sql_readers_see_the_urls_of_a_referenced_chunk():
@@ -123,51 +109,20 @@ def test_sql_readers_return_identical_results_before_and_after_externalizing(obj
     before = read()
     assert before == ({a, b, c}, {g}, {a, b, c, e, g}, {b})
 
-    assert _count(_all("externalize", objects), "externalized") == 7
+    _reference_every_chunk(objects)
     assert all("jobs" not in _payload(task_id) for task_id in _texts())
     assert read() == before
 
-    _all("restore", objects)
-    assert read() == before
 
-
-def test_externalize_keeps_the_urls_inline_and_restore_puts_back_the_exact_payload(objects):
-    jobs = _jobs("a", "b")
-    task_id = _chunk(jobs, parent_id=3, scheduled=True, batch_ids=["x"])
-    other = make_task("run_managed_board_batch", {"managed_board_id": 1, "jobs": jobs})
-    original = _texts()
-
-    [result] = _all("externalize", objects)
-
-    assert result["counts"] == {"externalized": 1} and not result["failed"]
-    payload = _payload(task_id)
-    assert payload["urls"] == ["https://a", "https://b"] and payload["candidate_count"] == 2
-    assert task_jobs.run_jobs(payload, objects) == jobs
-    rest = {k: v for k, v in payload.items() if k not in ("jobs_ref", "candidate_count", "urls")}
-    assert rest == {k: v for k, v in json.loads(original[task_id]).items() if k != "jobs"}
-    assert _texts()[other] == original[other]
-
-    assert _count(_all("count", objects), "referenced") == 1
-    assert _count(_all("verify", objects), "verified") == 1
-    assert _count(_all("restore", objects), "restored") == 1
-    assert _texts() == original
-
-
-def test_verify_refuses_urls_that_disagree_with_the_object(objects):
+def test_run_jobs_refuses_urls_that_disagree_with_the_object(objects):
     tampered = _chunk(_jobs("a", "b"))
-    no_urls = _chunk(_jobs("c"))
-    _all("externalize", objects)
+    _reference_every_chunk(objects)
+    assert task_jobs.run_jobs(_payload(tampered), objects) == _jobs("a", "b")
     db.execute(
         "UPDATE tasks SET payload = jsonb_set(payload, '{urls}', '[\"https://b\", \"https://a\"]') "
         "WHERE id = %s",
         (tampered,),
     )
-    db.execute("UPDATE tasks SET payload = payload - 'urls' WHERE id = %s", (no_urls,))
-
-    [result] = _all("verify", objects)
-
-    assert result["counts"] == {"unavailable": 1, "conflict": 1}
-    assert result["failed"] == [tampered, no_urls]
     with pytest.raises(PayloadUnavailable):
         task_jobs.run_jobs(_payload(tampered), objects)
 
@@ -176,7 +131,7 @@ def test_verify_refuses_urls_that_disagree_with_the_object(objects):
 async def test_batch_chunk_handler_reads_its_jobs_from_the_reference(objects, monkeypatch):
     jobs = _jobs("a")
     task = _chunk(jobs, parent_id=None, scheduled=True)
-    _all("externalize", objects)
+    _reference_every_chunk(objects)
     payload = _payload(task)
     assert "jobs" not in payload
     payload["filter"].update(name="test", prompt="criteria", on_ambiguous="filter")
@@ -204,7 +159,7 @@ async def test_batch_chunk_handler_reads_its_jobs_from_the_reference(objects, mo
 
 def test_an_unreadable_chunk_list_is_held_for_payload_recovery(objects):
     task = _chunk(_jobs("a"), status="failed")
-    _all("externalize", objects)
+    _reference_every_chunk(objects)
     db.execute(
         "UPDATE tasks SET payload = payload || "
         '\'{"payload_recovery":{"reason":"payload_unavailable"}}\' WHERE id = %s',

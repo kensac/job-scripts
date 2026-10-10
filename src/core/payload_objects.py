@@ -113,12 +113,6 @@ class BundleMemberRef:
             raise PayloadUnavailable("Invalid bundle member reference") from exc
 
 
-def parse_ref(value: Any) -> PayloadRef | BundleMemberRef:
-    if isinstance(value, dict) and value.get("version") == 3:
-        return BundleMemberRef.parse(value)
-    return PayloadRef.parse(value)
-
-
 def bundle_groups[T](items: Iterable[T], size: Callable[[T], int]) -> list[list[T]]:
     """Consecutive runs of items, each a bundle of at most BUNDLE_MAX_BYTES
     unless one item alone is larger."""
@@ -300,8 +294,3 @@ class PayloadStore:
         if len(raw) != ref.member_size or hashlib.sha256(raw).hexdigest() != ref.member_sha256:
             raise PayloadUnavailable("Payload bundle member integrity check failed")
         return value
-
-    def get_ref(self, ref: PayloadRef | BundleMemberRef, cache: BundleCache | None = None) -> Any:
-        if isinstance(ref, BundleMemberRef):
-            return self.get_member(ref, cache)
-        return self.get(ref)
