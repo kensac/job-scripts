@@ -16,7 +16,7 @@ from api.config import CONFIG_KEYS
 # which core/store.py and core/catalog.py share. See that module for why
 # there used to be two.
 from core.pool import connection as _connection
-from core.pool import pool, transaction
+from core.pool import pool, statement, transaction
 
 # Weekly owner-key token budgets by Authentik group. Seeded once with ON
 # CONFLICT DO NOTHING so runtime edits via /v1/admin/group-budgets stick;
@@ -129,12 +129,12 @@ def _as_query(sql: str) -> LiteralString:
 
 
 def query(sql: str, params: Any = None) -> list[dict[str, Any]]:
-    with _connection() as conn:
+    with statement() as conn:
         return [dict(r) for r in conn.execute(_as_query(sql), params).fetchall()]
 
 
 def query_one(sql: str, params: Any = None) -> dict[str, Any] | None:
-    with _connection() as conn:
+    with statement() as conn:
         row = conn.execute(_as_query(sql), params).fetchone()
     return dict(row) if row else None
 
@@ -155,18 +155,18 @@ def query_as[Row](row: type[Row], sql: str, params: Any = None) -> list[Row]:
     apart in one commit and are found in the next test run, not in a bug
     report about a missing field.
     """
-    with _connection() as conn:
+    with statement() as conn:
         return [row(**r) for r in conn.execute(_as_query(sql), params).fetchall()]
 
 
 def query_one_as[Row](row: type[Row], sql: str, params: Any = None) -> Row | None:
-    with _connection() as conn:
+    with statement() as conn:
         got = conn.execute(_as_query(sql), params).fetchone()
     return row(**got) if got else None
 
 
 def execute(sql: str, params: Any = None) -> None:
-    with _connection() as conn:
+    with statement() as conn:
         conn.execute(_as_query(sql), params)
 
 
@@ -184,7 +184,7 @@ def pipeline() -> Iterator[None]:
 def execute_count(sql: str, params: Any = None) -> int:
     """execute(), but returns how many rows it touched - for the callers whose
     whole purpose is that number (the reaper counting requeues, say)."""
-    with _connection() as conn:
+    with statement() as conn:
         return conn.execute(_as_query(sql), params).rowcount
 
 

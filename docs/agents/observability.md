@@ -94,6 +94,19 @@ candidates, as `tests/test_verdict_cache_batch.py` does. A loop whose every
 pass also makes a provider call is still batched when the query can be lifted
 out of it.
 
+**A lone statement runs in autocommit.** `db.query`, `query_one`,
+`query_as`, `query_one_as`, `execute` and `execute_count` go through
+`core.pool.statement()`: the open `transaction()` when there is one, otherwise
+a pooled connection in autocommit, returned to the pool with autocommit off.
+An implicit transaction around one statement adds BEGIN and COMMIT, two round
+trips that change nothing. From a laptop against production on 2026-10-10 that
+was 337 ms a statement against 110 ms. On `oci` the worker's housekeeping
+(reaper, chunk reconcile, gauges, scheduler) held it about 28 s of every
+minute between tasks during the 2026-10-10 backlog, against 8 s on `gcp-vps`
+and under a second beside the database. Several statements that must commit
+together still go in `transaction()`; `executemany` and `pipeline()` keep
+their implicit transaction.
+
 ## Batched work
 
 Location classification uses `classify_locations_max_output_tokens` for new
