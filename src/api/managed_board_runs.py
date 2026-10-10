@@ -11,12 +11,12 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from api import ai, budget, db, events, task_jobs
+from api import budget, db, events, task_jobs
 from api.board import criteria as board_criteria
 from api.board import eligibility
 from api.task_admission import ACTIVE_STATUSES, TaskProgress
 from api.task_jobs import run_jobs
-from core import verdict_reads
+from core import providers, routing, verdict_reads
 from core.batch import BATCH_CHARS_PER_TOKEN
 from core.filters import build_custom_decision_instructions, build_custom_input
 from core.managed_board_title_gate import TitleGateConfig
@@ -426,8 +426,8 @@ def _plan(board_id: int) -> _Plan:
         title_gate = None
     else:
         owner, cap = _allowance(sponsor)
-        provider = ai.provider_of_model(board.requested_model)
-        if not owner or provider is None or not ai.server_key(provider):
+        provider = providers.provider_of(board.requested_model)
+        if not owner or provider is None or not routing.server_key(provider):
             raise RunRefusal("NO_SERVER_KEY", "the sponsor has no server-key allowance")
         if provider != "openai":
             raise RunRefusal(

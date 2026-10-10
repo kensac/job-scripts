@@ -20,9 +20,9 @@ def test_worker_registry_declares_managed_board_handler():
 
 
 def _admissible(monkeypatch) -> None:
-    from api import ai, budget
+    from api import budget
 
-    monkeypatch.setattr(ai, "server_key", lambda provider: "test-server-key")
+    monkeypatch.setattr("core.routing.server_key", lambda provider: "test-server-key")
     monkeypatch.setattr(budget, "owner_budget", lambda groups: (True, 1_000_000))
     monkeypatch.setattr(budget, "owner_allowed_models", lambda groups: ["gpt-6-luna"])
 
@@ -98,9 +98,8 @@ def test_sponsor_budget_reserves_across_managed_boards(client, admin_headers, f,
 @pytest.mark.asyncio
 async def test_handler_attributes_usage_and_atomically_replaces_projection(f, monkeypatch):
     """A pre-cutover payload remains receivable through its original live path."""
-    from api import ai
 
-    monkeypatch.setattr(ai, "server_key", lambda provider: "test-server-key")
+    monkeypatch.setattr("core.routing.server_key", lambda provider: "test-server-key")
     sponsor = f.make_user(groups=["infra-admins"])
     source = f.make_source("managed-source")
     job_id, url = f.make_ready_job(source=source)
@@ -173,9 +172,8 @@ async def test_handler_attributes_usage_and_atomically_replaces_projection(f, mo
 
 @pytest.mark.asyncio
 async def test_new_execution_contract_uses_batch_only_and_prices_batch(f, monkeypatch):
-    from api import ai
 
-    monkeypatch.setattr(ai, "server_key", lambda provider: "test-server-key")
+    monkeypatch.setattr("core.routing.server_key", lambda provider: "test-server-key")
     sponsor = f.make_user(groups=["infra-admins"])
     source = f.make_source("managed-batch-source")
     job_id, url = f.make_ready_job(source=source)

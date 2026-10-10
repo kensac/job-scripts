@@ -8,6 +8,7 @@ from typing import Any
 from api import ai, db
 from api import managed_board_runs as runs
 from api.model_calls import Payer
+from core import providers, routing
 from core.filters import compute_filter_hash
 from core.store import decided_custom_urls
 from tasks.filter_execution import ExecutionHooks, FilterSnapshot, execute_batch, execute_live
@@ -60,12 +61,12 @@ async def _handle_managed_filter(
     if compute_filter_hash(payload["prompt"], payload["on_ambiguous"]) != payload["prompt_hash"]:
         raise ValueError("managed board task snapshot has an invalid prompt hash")
     existing = has_batch_work(task_id) if not legacy_live else False
-    provider = ai.provider_of_model(payload["requested_model"])
+    provider = providers.provider_of(payload["requested_model"])
     if provider is None:
         raise LookupError("managed board task snapshot names an unknown model")
     if not legacy_live and provider != "openai":
         raise ValueError("managed board batch snapshot names an unsupported provider")
-    key = ai.server_key(provider) if not existing else ""
+    key = routing.server_key(provider) if not existing else ""
     if not key and not existing:
         raise LookupError("managed board task model has no server key")
     cfg = (

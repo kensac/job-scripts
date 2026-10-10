@@ -9,6 +9,7 @@ from api import ai, db, model_calls
 from api.auth import AuthedUser
 from api.problem import PROVIDER_REFUSALS, UNAVAILABLE_REFUSALS, refuse
 from api.routers.admin.shared import require_admin
+from core import providers, routing
 
 router = APIRouter()
 
@@ -207,8 +208,8 @@ async def run_single_check(
         # still one they may run; otherwise the cheapest default.
         remembered = _recheck_defaults(user.id).get(body.check)
         model = remembered if remembered in allowed else ai.DEFAULT_OPENAI_MODEL
-    provider = ai.provider_of_model(model) or "openai"
-    key = ai.server_key(provider)
+    provider = providers.provider_of(model) or "openai"
+    key = routing.server_key(provider)
     if not key:
         raise refuse(503, "NO_SERVER_KEY", "no server key")
     cfg = ai.AIConfig(

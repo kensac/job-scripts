@@ -40,9 +40,8 @@ def test_missing_model_has_same_reason_in_filter_admission_and_ai_errors(
 def test_filter_admission_refuses_missing_owner_provider_key(
     client, user_headers, monkeypatch, runs_permitted
 ):
-    from api import ai
 
-    monkeypatch.setattr(ai, "server_key", lambda provider: "")
+    monkeypatch.setattr("core.routing.server_key", lambda provider: "")
     listed = client.get("/v1/user/filters", headers=user_headers).json()
     assert listed["run_all_admission"]["allowed"] is False
     assert listed["run_all_admission"]["reason"] == "NO_API_KEY"

@@ -39,22 +39,12 @@ MODEL_CATALOG: dict[str, list[dict[str, str]]] = {
 OWNER_KEY_MODELS = set(env_list("JOBTRACKER_OWNER_KEY_MODELS", "gpt-5-nano,gpt-5-mini,gpt-6-luna"))
 
 
-def server_key(provider: str) -> str:
-    """Delegates to core.routing, which owns the one reading of a provider's
-    declared key env var. Kept as a name here because most callers are in api."""
-    return routing.server_key(provider)
-
-
-def provider_of_model(model: str) -> str | None:
-    return providers.provider_of(model)
-
-
 def owner_models(unlimited: bool) -> list:
     """Models usable on the server's keys: everything for unlimited users,
     the allowlist for budgeted ones - per provider with a key configured."""
     out = []
     for provider in providers.PROVIDERS:
-        if not server_key(provider):
+        if not routing.server_key(provider):
             continue
         for m in MODEL_CATALOG[provider]:
             if unlimited or m["model"] in OWNER_KEY_MODELS:
@@ -94,13 +84,6 @@ def _declared_efforts(provider: str, model: str | None) -> tuple[tuple[str, ...]
     for m in known.models:
         accepts.update(m.reasoning.accepts)
     return tuple(sorted(accepts)), ()
-
-
-def _effort_param(provider: str) -> str | None:
-    known = providers.PROVIDERS.get(provider)
-    if known is None or not known.models:
-        return None
-    return known.models[0].reasoning.param
 
 
 T = TypeVar("T", bound=BaseModel)

@@ -146,7 +146,7 @@ N = 40
 
 @pytest.mark.asyncio
 async def test_managed_batch_admission_reads_the_cache_once_for_n_candidates(f, monkeypatch):
-    monkeypatch.setattr(ai, "server_key", lambda provider: "test-server-key")
+    monkeypatch.setattr("core.routing.server_key", lambda provider: "test-server-key")
     sponsor = f.make_user(groups=["infra-admins"])
     source = f.make_source("managed-cache-source")
     prompt_hash = compute_filter_hash("prompt", "filter")

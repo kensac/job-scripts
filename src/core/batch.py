@@ -80,10 +80,6 @@ def completion_window_seconds() -> int:
 _TERMINAL_STATES = {"completed", "failed", "expired", "cancelled"}
 
 
-def batch_enabled() -> bool:
-    return os.environ.get("BATCH_MODE", "").strip().lower() in ("1", "true", "yes", "on")
-
-
 @dataclass
 class BatchSpec:
     custom_id: str
@@ -580,11 +576,6 @@ async def batch_progress(batch_ids: list[str]) -> dict[str, BatchProgress]:
         except Exception as exc:
             logger.warning(f"Batch {batch_id} status check failed: {exc}")
     return out
-
-
-async def batch_states(batch_ids: list[str]) -> dict[str, str]:
-    """Status only, for callers that do not need the counts."""
-    return {k: v.status for k, v in (await batch_progress(batch_ids)).items()}
 
 
 def is_terminal(state: str) -> bool:

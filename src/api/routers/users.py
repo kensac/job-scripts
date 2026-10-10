@@ -13,6 +13,7 @@ from api.board import visibility
 from api.models import ApiKeyPut, Criteria, Ok, SettingsPut
 from api.problem import refuse
 from core import providers as core_providers
+from core import routing
 from core.answers import DEFAULT_STYLE
 
 router = APIRouter()
@@ -307,7 +308,7 @@ def models(user: AuthedUser = Depends(require_user)):
         if ent.owner_key:
             owner_allowed = budget.owner_allowed_models(user.groups)
         for provider in ai.MODEL_CATALOG:
-            keyed = bool(ai.server_key(provider))
+            keyed = bool(routing.server_key(provider))
             models_list = []
             for m in _catalog(provider):
                 if m["model"] in owner_allowed:

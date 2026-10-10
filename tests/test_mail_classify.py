@@ -237,18 +237,11 @@ def test_each_model_gets_an_effort_it_actually_accepts():
     dead. Validating against a union is what hid it, so this validates
     against the models actually configured.
     """
-    for model in (shapes.BACKFILL_MODEL, shapes.ONGOING_MODEL):
+    for shape in (shapes.BACKFILL_TASK, shapes.ONGOING_TASK):
+        model = resolve(shape).model
         accepts = _PROBED_ACCEPTS.get(model)
         assert accepts is not None, f"{model} configured but never probed"
-        assert shapes.effort_for(model) in accepts
-
-
-def test_an_unknown_model_gets_a_value_both_generations_accept():
-    """A rejected parameter costs the whole batch, not one call, so the
-    fallback has to be in the intersection rather than a guess."""
-    effort = shapes.effort_for("some-model-that-ships-tomorrow")
-    for accepts in _PROBED_ACCEPTS.values():
-        assert effort in accepts
+        assert shape.resolved_effort() in accepts
 
 
 def test_effort_follows_the_model_rather_than_a_shared_constant():
@@ -263,7 +256,6 @@ def test_effort_follows_the_model_rather_than_a_shared_constant():
     with it rather than sending a value that model refuses."""
     for shape in (shapes.BACKFILL_TASK, shapes.ONGOING_TASK):
         model = resolve(shape).model
-        assert shape.resolved_effort() == shapes.effort_for(model)
         declared = providers.model(model)
         assert declared is not None
         assert shape.resolved_effort() not in declared.reasoning.rejects

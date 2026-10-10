@@ -821,7 +821,7 @@ def test_a_recheck_runs_on_the_chosen_model_and_that_choice_becomes_the_default(
         "VALUES ('infra-admins', NULL, ARRAY['gpt-5-nano', 'gpt-5.6-luna']) "
         "ON CONFLICT (group_name) DO UPDATE SET allowed_models = EXCLUDED.allowed_models"
     )
-    monkeypatch.setattr(ai, "server_key", lambda provider: "sk-test")
+    monkeypatch.setattr("core.routing.server_key", lambda provider: "sk-test")
 
     async def fake_refresh(url, **kw):
         return "A posting body long enough to check.", None

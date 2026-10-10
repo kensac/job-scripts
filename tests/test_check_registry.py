@@ -44,7 +44,7 @@ def _stub_model(monkeypatch, spec):
     from api import ai
     from api.ai import verdicts
 
-    monkeypatch.setattr(ai, "server_key", lambda provider: "sk-test")
+    monkeypatch.setattr("core.routing.server_key", lambda provider: "sk-test")
 
     async def fake_refresh(url, **kw):
         return "A posting body long enough to check.", None
