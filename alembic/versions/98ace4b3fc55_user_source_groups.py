@@ -16,7 +16,7 @@ for the OR form and 0.38 to 0.43 s for the picks table alone.
 A new empty table and two views that only read; nothing is rewritten.
 
 Revision ID: 98ace4b3fc55
-Revises: 53da75ac7394
+Revises: 72dc0fd47e51
 Create Date: 2026-10-10 00:58:32.479260
 
 """
@@ -27,7 +27,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 revision: str = '98ace4b3fc55'
-down_revision: Union[str, None] = '53da75ac7394'
+down_revision: Union[str, None] = '72dc0fd47e51'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
