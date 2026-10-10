@@ -439,7 +439,12 @@ Kanishk chose the three product meanings the storage cutover needed
   (postings the person can see). The person-facing surface shows visible and
   acted on; the admin surface shows all three. The overloaded `user_jobs`
   count goes away. A response whose shape changes keeps its old field until
-  the frontend reads the new one.
+  the frontend reads the new one. The counts are spelled once,
+  `api.board.populations.per_user_counts` and `person_state.PERSON_STATE`:
+  `GET /user/stats` totals carry `visible` and `acted_on`, and
+  `GET /admin/users` rows and source analytics `board_yield` carry
+  `acted_on`, `working_set` and `visible` beside the old `tracked` and
+  `board_rows`.
 
 The cutover follows the parallel-cutover rule below, one step a PR: run the
 split backfill, observe a complete filter cycle, read this report on

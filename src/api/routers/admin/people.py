@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 from api import db, scoping, sorting, user_settings
 from api.auth import AuthedUser
+from api.board import populations
 from api.models import Ok
 from api.problem import PROVIDER_REFUSALS, refuse
 from api.routers.admin.shared import require_admin
@@ -31,6 +32,9 @@ _USERS_SORTABLE = {
     "email": "lower(u.email)",
     "name": "lower(u.name)",
     "board_rows": "board_rows",
+    "acted_on": "acted_on",
+    "working_set": "working_set",
+    "visible": "visible",
     "enabled_filters": "enabled_filters",
     "sources": "sources",
     "owner_tokens_week": "owner_tokens_week",
@@ -38,9 +42,14 @@ _USERS_SORTABLE = {
 
 
 class UserLedgerRow(BaseModel):
-    """One person, with the four counts the ledger sorts on. Each is a
+    """One person, with the counts the ledger sorts on. Each is a
     correlated count rather than a join, so a person with no board rows and no
     filters still appears with zeros.
+
+    `acted_on`, `working_set` and `visible` are the three labelled
+    populations (phase 2b): postings the person acted on, postings their
+    filters picked, postings they can see. `board_rows` is the old overloaded
+    user_jobs count, kept until the frontend reads the three.
 
     `has_byo_key` says whether they hold their own provider key, which is what
     decides whose budget their runs come out of. The key itself never leaves
@@ -59,6 +68,9 @@ class UserLedgerRow(BaseModel):
     ai_model: str | None
     bypass_sponsorship_filter: bool | None
     board_rows: int
+    acted_on: int
+    working_set: int
+    visible: int
     enabled_filters: int
     sources: int
     owner_tokens_week: int
@@ -101,6 +113,7 @@ def list_users(
                s.api_key_enc IS NOT NULL AS has_byo_key,
                s.ai_provider, s.ai_model, s.bypass_sponsorship_filter,
                (SELECT COUNT(*) FROM user_jobs uj WHERE uj.user_id = u.id) AS board_rows,
+               {populations.per_user_counts("u.id")},
                (SELECT COUNT(*) FROM user_filters uf
                 WHERE uf.user_id = u.id AND uf.enabled) AS enabled_filters,
                (SELECT COUNT(*) FROM user_sources us WHERE us.user_id = u.id) AS sources,
