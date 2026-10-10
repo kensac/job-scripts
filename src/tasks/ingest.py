@@ -44,14 +44,14 @@ def _switch_off_if_given_up(source: str, exc: Exception) -> None:
 
 async def handle_ingest_source(task_id: int, payload: dict[str, Any]) -> None:
     from core import catalog
-    from core.fetching import boards
+    from core.fetching import boards, client
     from core.fetching.posting import FALLBACK_CUTOFF_TS
 
     source = db.query_one("SELECT * FROM sources WHERE name = %s AND active", (payload["source"],))
     if not source:
         raise LookupError(queue.INACTIVE_SOURCE_ERROR)
 
-    boards.set_pace(db.get_config("ingest_host_pace_seconds") or {})
+    client.set_pace(db.get_config("ingest_host_pace_seconds") or {})
     host = pace_key(source["listings_url"])
     # This address's slot for the host, or the task waits for it: the claim
     # checks the same row, so this is the race of two workers on one address.

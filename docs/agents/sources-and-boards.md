@@ -10,6 +10,19 @@ The format is read off its listings URL by `core/fetching/boards.py`. A new boar
 known format is added on the Sources page, and a new format is one fetcher
 returning the same `JobPosting` as the rest.
 
+**Every request a fetcher makes goes through `core.fetching.client`.** Board
+pulls, ATS resolvers, form reads and the aggregator feeds share one session:
+one user agent, one timeout, one transport retry (three retries on a 5xx or
+a dropped connection, idempotent methods only) and the host's page pace. A
+fetcher builds its request and parses the answer; it never sets any of those.
+A 429 is returned at once, never retried there, because the host budget
+answers a refusal for the whole address. A fetcher does not catch its own
+failures: a feed that answered with something it cannot parse fails the pull,
+so the failure run backs it off and switches it off. Before the aggregator
+fetcher raised, it returned an empty list after its own retries; `Loop`
+(a Rippling page, not a JSON feed) read as 151 empty pulls in the week to
+2026-10-10.
+
 The row carries what ingest needs and nothing derived: `company` (required
 where the system never names it), a `title_pattern` that normally gates which
 titles enter the catalog, and an `ingest_interval_hours`.
@@ -103,8 +116,9 @@ Counted as a failure it would switch the board off.
 
 **A pace is kept under one key, and `core.fetching.hosts.pace_key` is the
 only thing that computes it.** The `host_budget` row a pull takes, the
-`ingest_host_pace_seconds` entry, the page pace inside a pull and a form
-read's budget all ask it, so a refusal learned by one is the pace of the
+`ingest_host_pace_seconds` entry, the page pace inside a pull
+(`client.pace`, which every pull request waits on whatever its format) and a
+form read's budget all ask it, so a refusal learned by one is the pace of the
 others. A key can cover many hosts: Workday tenants are `myworkdayjobs.com`,
 every Greenhouse host is `boards-api.greenhouse.io`, and every Eightfold
 tenant is `eightfold.ai` whatever domain it serves from. One WAF fronts the

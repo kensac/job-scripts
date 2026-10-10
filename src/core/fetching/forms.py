@@ -20,13 +20,9 @@ from dataclasses import asdict, dataclass
 from html import unescape
 from urllib.parse import parse_qsl, urlsplit, urlunsplit
 
-import requests
-
 from core.fetching.ats import amazon_canonical
+from core.fetching.client import session
 from core.fetching.hosts import hostname
-
-TIMEOUT = 20
-_HEADERS = {"User-Agent": "Mozilla/5.0", "Accept": "application/json, text/html"}
 
 
 @dataclass
@@ -42,15 +38,13 @@ class Question:
 
 
 def _get(url: str) -> str:
-    r = requests.get(url, headers=_HEADERS, timeout=TIMEOUT)
+    r = session.get(url)
     r.raise_for_status()
     return r.text
 
 
 def _post_json(url: str, body: dict) -> str:
-    r = requests.post(
-        url, json=body, headers={**_HEADERS, "Content-Type": "application/json"}, timeout=TIMEOUT
-    )
+    r = session.post(url, json=body)
     r.raise_for_status()
     return r.text
 

@@ -16,18 +16,10 @@ import ftfy
 import requests
 from bs4 import BeautifulSoup
 
+from core.fetching.client import session as _session
 from core.fetching.hosts import EIGHTFOLD_PCSX, EIGHTFOLD_V2
 
 logger = logging.getLogger(__name__)
-
-TIMEOUT = 20.0
-USER_AGENT = (
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
-)
-
-_session = requests.Session()
-_session.headers.update({"User-Agent": USER_AGENT, "Accept": "*/*"})
 
 
 class Status(enum.Enum):
@@ -191,7 +183,7 @@ class AtsResolver(ABC):
 
     def get(self, url: str) -> requests.Response | None:
         try:
-            return _session.get(url, timeout=TIMEOUT)
+            return _session.get(url)
         except requests.RequestException as exc:
             logger.debug(f"[{self.name}] request failed {url}: {exc}")
             return None
@@ -634,7 +626,6 @@ class Goldman(AtsResolver):
             resp = _session.post(
                 "https://api-higher.gs.com/gateway/api/v1/graphql",
                 json={"query": self._QUERY, "variables": {"id": match.group(1)}},
-                timeout=TIMEOUT,
             )
         except requests.RequestException as exc:
             logger.debug(f"[{self.name}] request failed {url}: {exc}")
@@ -687,7 +678,6 @@ class Ibm(AtsResolver):
         try:
             resp = _session.get(
                 f"https://ibmglobal.avature.net/en_US/careers/JobDetail?jobId={match.group(1)}",
-                timeout=TIMEOUT,
                 allow_redirects=False,
             )
         except requests.RequestException as exc:

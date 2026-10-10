@@ -439,7 +439,7 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
     ),
     # Host -> seconds between LISTING requests per worker process. Workable
     # limits by address and two workers share hetzner's; six seconds was not
-    # enough, twenty holds. Read by core.fetching.boards through the ingest task.
+    # enough, twenty holds. Read by core.fetching.client through the ingest task.
     # "eightfold.ai" paces every Eightfold tenant's pages together, whatever
     # domain it serves from, because one WAF fronts them: on 2026-10-05 about
     # 110 requests a minute from one address held for ten minutes, and

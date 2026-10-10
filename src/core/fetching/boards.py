@@ -21,7 +21,6 @@ import datetime
 import json
 import logging
 import re
-import time
 import xml.etree.ElementTree as ET
 from email.utils import parsedate_to_datetime
 from typing import Any
@@ -30,8 +29,6 @@ from urllib.parse import parse_qs, urlencode, urljoin, urlparse, urlunparse
 import ftfy
 import requests
 from bs4 import BeautifulSoup, Tag
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
 
 from core.fetching.ats import (
     ashby_text,
@@ -42,25 +39,26 @@ from core.fetching.ats import (
     join,
     lever_text,
 )
-from core.fetching.hosts import EIGHTFOLD_PCSX, EIGHTFOLD_V2, pace_key
+from core.fetching.client import pace
+from core.fetching.client import session as _session
+from core.fetching.hosts import EIGHTFOLD_PCSX, EIGHTFOLD_V2
 from core.fetching.listings import fetch_job_postings
 from core.fetching.posting import JobPosting
 from core.fetching.urls import normalize_url
 
 logger = logging.getLogger(__name__)
 
-TIMEOUT = 30.0
 
-# The hourly cycle is the real retry; this only rides out a blip inside one
-# fetch, which the markdown fetcher it replaces also did (three attempts).
-_session = requests.Session()
-_session.headers.update({"User-Agent": "Mozilla/5.0", "Accept": "application/json, text/plain"})
-_session.mount(
-    "https://",
-    HTTPAdapter(
-        max_retries=Retry(total=3, backoff_factor=1, status_forcelist=(500, 502, 503, 504))
-    ),
-)
+# Every request a pull makes waits out its host's floor, whichever format
+# made it, so a floor set for a host holds between pages as the config says.
+def _get(url: str, **kwargs: Any) -> requests.Response:
+    pace(url)
+    return _session.get(url, **kwargs)
+
+
+def _post(url: str, **kwargs: Any) -> requests.Response:
+    pace(url)
+    return _session.post(url, **kwargs)
 
 
 def kind(url: str) -> str:
@@ -275,7 +273,7 @@ def _with_query(url: str, **params: str) -> str:
 def _greenhouse(url: str, company: str) -> list[JobPosting]:
     # content=true returns every posting's text in the one call, so nothing
     # downstream has to fetch the posting to read it.
-    resp = _session.get(_with_query(url, content="true"), timeout=TIMEOUT)
+    resp = _get(_with_query(url, content="true"))
     resp.raise_for_status()
     out = []
     for j in resp.json().get("jobs", []):
@@ -295,7 +293,7 @@ def _greenhouse(url: str, company: str) -> list[JobPosting]:
 
 
 def _lever(url: str, company: str) -> list[JobPosting]:
-    resp = _session.get(url, timeout=TIMEOUT)
+    resp = _get(url)
     resp.raise_for_status()
     out = []
     for j in resp.json():
@@ -317,7 +315,7 @@ def _lever(url: str, company: str) -> list[JobPosting]:
 def _ashby(url: str, company: str) -> list[JobPosting]:
     # The board call already carries every posting's description; asking for
     # compensation too makes it the same text the resolver assembles.
-    resp = _session.get(_with_query(url, includeCompensation="true"), timeout=TIMEOUT)
+    resp = _get(_with_query(url, includeCompensation="true"))
     resp.raise_for_status()
     out = []
     for j in resp.json().get("jobs", []):
@@ -434,7 +432,7 @@ def _workday_slice(
     total: int | None = None
     available: list[dict] = []
     while True:
-        resp = _session.post(
+        resp = _post(
             endpoint,
             json={
                 "appliedFacets": facets,
@@ -442,7 +440,6 @@ def _workday_slice(
                 "offset": offset,
                 "searchText": search,
             },
-            timeout=TIMEOUT,
         )
         resp.raise_for_status()
         data = resp.json()
@@ -511,9 +508,8 @@ def _smartrecruiters(url: str, company: str) -> list[JobPosting]:
     out: list[JobPosting] = []
     offset = 0
     while True:
-        resp = _session.get(
+        resp = _get(
             _with_query(url, limit=str(_SMARTRECRUITERS_PAGE), offset=str(offset)),
-            timeout=TIMEOUT,
         )
         resp.raise_for_status()
         data = resp.json()
@@ -565,9 +561,8 @@ def _oracle(url: str, company: str) -> list[JobPosting]:
             f"findReqs;siteNumber={site},limit={_ORACLE_PAGE},offset={offset},"
             "sortBy=POSTING_DATES_DESC"
         )
-        resp = _session.get(
+        resp = _get(
             f"{endpoint}?onlyData=true&expand=requisitionList.secondaryLocations&finder={finder}",
-            timeout=TIMEOUT,
         )
         resp.raise_for_status()
         items = resp.json().get("items") or [{}]
@@ -599,33 +594,6 @@ def _oracle(url: str, company: str) -> list[JobPosting]:
             return out
 
 
-# Pace key (core.fetching.hosts) -> seconds between requests from this
-# process, the same key the pull's host_budget row is. apply.workable.com
-# answers 429 to a burst: 143 of 172 boards failed the hour the bundle first
-# pulled (2026-09-05), and six seconds was not enough where two workers share
-# one egress address. The values are app_config ingest_host_pace_seconds,
-# handed in by the ingest task before each pull, so a host is tuned from the
-# alert rather than from a deploy.
-_PACE_SECONDS: dict[str, float] = {}
-_last_call: dict[str, float] = {}
-
-
-def set_pace(hosts: dict) -> None:
-    _PACE_SECONDS.clear()
-    _PACE_SECONDS.update({str(h): float(s) for h, s in (hosts or {}).items() if s})
-
-
-def _pace(url: str) -> None:
-    host = pace_key(url)
-    wait = _PACE_SECONDS.get(host)
-    if not wait:
-        return
-    ahead = _last_call.get(host, 0.0) + wait - time.monotonic()
-    if ahead > 0:
-        time.sleep(ahead)
-    _last_call[host] = time.monotonic()
-
-
 def _workable(url: str, company: str) -> list[JobPosting]:
     """POST https://apply.workable.com/api/v3/accounts/{account}/jobs
 
@@ -638,8 +606,7 @@ def _workable(url: str, company: str) -> list[JobPosting]:
     body: dict = {"query": "", "location": [], "department": [], "worktype": [], "remote": []}
     out: list[JobPosting] = []
     while True:
-        _pace(url)
-        resp = _session.post(url, json=body, timeout=TIMEOUT)
+        resp = _post(url, json=body)
         resp.raise_for_status()
         data = resp.json()
         page = data.get("results") or []
@@ -684,8 +651,7 @@ def _apple(url: str, company: str) -> list[JobPosting]:
     """
 
     def page(number: int) -> tuple[list[dict], int]:
-        _pace(url)
-        resp = _session.post(
+        resp = _post(
             url,
             # Without "format" every page is empty and says totalRecords 0,
             # with a 200, which reads as an empty board. "filters" missing is
@@ -698,7 +664,6 @@ def _apple(url: str, company: str) -> list[JobPosting]:
                 "sort": "newest",
                 "format": {"longDate": "MMMM D, YYYY", "mediumDate": "MMM D, YYYY"},
             },
-            timeout=TIMEOUT,
         )
         resp.raise_for_status()
         res = resp.json().get("res") or {}
@@ -768,7 +733,7 @@ _BYTEDANCE_POSTING = {
 
 # The limit asked for is honoured: 5,000 returned TikTok's whole board in one
 # 18 MB reply on 2026-10-05. 500 keeps a reply near 2 MB and at most about 11
-# seconds (ByteDance's slowest page that day), inside TIMEOUT, and reads TikTok
+# seconds (ByteDance's slowest page that day), inside client.TIMEOUT, and reads TikTok
 # (4,289) in 9 requests rather than 43.
 _BYTEDANCE_PAGE = 500
 
@@ -795,11 +760,10 @@ def _bytedance(url: str, company: str) -> list[JobPosting]:
     offset = 0
     total: int | None = None
     while True:
-        resp = _session.post(
+        resp = _post(
             endpoint,
             json={"limit": min(_BYTEDANCE_PAGE, _BYTEDANCE_WINDOW - offset), "offset": offset},
             headers={"website-path": board},
-            timeout=TIMEOUT,
         )
         resp.raise_for_status()
         reply = resp.json()
@@ -874,7 +838,7 @@ def _icims(url: str, company: str) -> list[JobPosting]:
     pages = size = 0
     page = 0
     while page == 0 or page < pages:
-        resp = _session.get(_with_query(url, ss="1", in_iframe="1", pr=str(page)), timeout=TIMEOUT)
+        resp = _get(_with_query(url, ss="1", in_iframe="1", pr=str(page)))
         resp.raise_for_status()
         soup = BeautifulSoup(resp.text, "html.parser")
         cards = [
@@ -976,9 +940,7 @@ def _jibe(url: str, company: str) -> list[JobPosting]:
     rows = total = 0
     page = 1
     while True:
-        resp = _session.get(
-            _with_query(url, limit=str(_JIBE_PAGE), page=str(page)), timeout=TIMEOUT
-        )
+        resp = _get(_with_query(url, limit=str(_JIBE_PAGE), page=str(page)))
         resp.raise_for_status()
         data = resp.json()
         jobs = [j.get("data") or {} for j in data.get("jobs") or []]
@@ -1084,7 +1046,7 @@ def _successfactors(url: str, company: str) -> list[JobPosting]:
     costs a partial pull, never a wrong retirement.
     """
     parsed = urlparse(url)
-    sitemap = _session.get(f"{parsed.scheme}://{parsed.netloc}/sitemap.xml", timeout=TIMEOUT)
+    sitemap = _get(f"{parsed.scheme}://{parsed.netloc}/sitemap.xml")
     sitemap.raise_for_status()
     root = _xml(sitemap.content)
     # Two shapes, each listing every posting url. A urlset of <loc>s, whose
@@ -1105,10 +1067,9 @@ def _successfactors(url: str, company: str) -> list[JobPosting]:
     }
 
     # The feed answers 406 to the session's JSON Accept and to application/xml.
-    resp = _session.get(
+    resp = _get(
         _with_query(url, rows=str(_SUCCESSFACTORS_ROWS)),
         headers={"Accept": "application/rss+xml"},
-        timeout=TIMEOUT,
     )
     resp.raise_for_status()
     feed = _xml(resp.content)
@@ -1168,8 +1129,7 @@ def _eightfold(url: str, company: str) -> list[JobPosting]:
     stated = 0
     start = 0
     while True:
-        _pace(url)
-        resp = _session.get(_with_query(url, start=str(start)), timeout=TIMEOUT)
+        resp = _get(_with_query(url, start=str(start)))
         resp.raise_for_status()
         data = resp.json()
         data = (data.get("data") or {}) if pcsx else data
@@ -1219,8 +1179,7 @@ def _avature(url: str, company: str) -> list[JobPosting]:
     incomplete = False
     page_url: str | None = url
     while page_url:
-        _pace(page_url)
-        resp = _session.get(page_url, timeout=TIMEOUT)
+        resp = _get(page_url)
         if resp.status_code == 406 and seen:
             # Past the window (below); the rest are unseen, not closed.
             raise PartialPull(list(seen.values()))
@@ -1358,8 +1317,7 @@ def _taleo(url: str, company: str) -> list[JobPosting]:
     seen: dict[str, JobPosting] = {}
     page_no = total = last = 1
     while True:
-        _pace(url)
-        resp = _session.post(
+        resp = _post(
             f"{endpoint}?lang={lang}&portal={portal}",
             json={
                 "multilineEnabled": False,
@@ -1373,7 +1331,6 @@ def _taleo(url: str, company: str) -> list[JobPosting]:
                 "pageNo": page_no,
             },
             headers={"tz": "GMT+00:00"},
-            timeout=TIMEOUT,
         )
         resp.raise_for_status()
         data = resp.json()
@@ -1411,7 +1368,7 @@ def _taleo(url: str, company: str) -> list[JobPosting]:
 
 
 def _taleo_portal(url: str) -> str:
-    resp = _session.get(url, timeout=TIMEOUT)
+    resp = _get(url)
     resp.raise_for_status()
     match = re.search(r"portalNo: '(\d+)'", resp.text)
     if not match:
@@ -1498,7 +1455,7 @@ def _ibm(url: str, company: str) -> list[JobPosting]:
     out: list[JobPosting] = []
     total: int | None = None
     while True:
-        resp = _session.post(endpoint, json=body, timeout=TIMEOUT)
+        resp = _post(endpoint, json=body)
         resp.raise_for_status()
         hits = resp.json()["hits"]
         page = hits.get("hits") or []
@@ -1565,7 +1522,7 @@ def _goldman(url: str, company: str) -> list[JobPosting]:
     total: int | None = None
     number = 0
     while True:
-        resp = _session.post(
+        resp = _post(
             url,
             json={
                 "operationName": "GetRoles",
@@ -1580,7 +1537,6 @@ def _goldman(url: str, company: str) -> list[JobPosting]:
                     }
                 },
             },
-            timeout=TIMEOUT,
         )
         resp.raise_for_status()
         data = resp.json()
@@ -1659,7 +1615,7 @@ def _amazon(url: str, company: str) -> list[JobPosting]:
 
 
 def _amazon_get(url: str, params: dict) -> dict:
-    resp = _session.get(url, params=params, timeout=TIMEOUT)
+    resp = _get(url, params=params)
     resp.raise_for_status()
     data = resp.json()
     if data.get("error"):
@@ -1794,7 +1750,7 @@ def parse_markdown(text: str) -> list[JobPosting]:
 
 
 def _markdown(url: str, company: str) -> list[JobPosting]:
-    resp = _session.get(url, timeout=TIMEOUT)
+    resp = _get(url)
     resp.raise_for_status()
     return parse_markdown(resp.text)
 
