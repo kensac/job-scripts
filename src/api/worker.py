@@ -120,6 +120,32 @@ _managed_board_schedule_attempts: set[tuple[str, int]] = set()
 RETRIES_SPENT = "(attempts - batch_resumes)"
 
 
+# The order eligible tasks are claimed in: by age, except that a scheduled
+# source pull counts as created one of its source's own intervals later.
+#
+# A scheduled pull is the task whose payload names a host (the key api.hosts
+# paces on); the hourly scheduler makes one per active source at once, about
+# hundreds of them, and nothing else fans out like that. Every other kind is
+# at most one pending task per key. Plain id order put each burst of pulls
+# ahead of whatever came after it: on 2026-10-10 a poll_batches created at
+# 05:11 waited 95 minutes behind 240 pulls and 115 board recomputes, so paid
+# batches sat uncollected.
+#
+# The shift is the source's ingest_interval_hours: a pull that waits that long
+# has missed one pull of its own, and the scheduler makes no second one while
+# it is pending, so nothing stacks. It bounds the wait too: a pull created at T
+# is claimed before any task created after T plus its interval. A source pull
+# a person asked for carries no host and is not shifted.
+#
+# A scalar subquery, not a join, so FOR UPDATE locks only the task row and
+# never a sources row that admission locks.
+CLAIM_ORDER = """
+    created_at + CASE WHEN payload ? 'host' THEN COALESCE(
+        (SELECT make_interval(hours => s.ingest_interval_hours) FROM sources s
+          WHERE s.name = tasks.payload->>'source'), interval '0') ELSE interval '0' END,
+    id"""
+
+
 def _claim_task() -> dict[str, Any] | None:
     """Only kinds this image has a handler for. A roll goes host by host, and
     a host still on the old image sees the new kind a rolled host enqueued:
@@ -142,7 +168,7 @@ def _claim_task() -> dict[str, Any] | None:
                           WHERE b.host = tasks.payload->>'host'
                             AND b.egress_group = %(egress)s
                             AND b.next_allowed_at > now())
-                    ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED)
+                    ORDER BY {CLAIM_ORDER} LIMIT 1 FOR UPDATE SKIP LOCKED)
         RETURNING id, kind, payload, attempts, worker, {RETRIES_SPENT} AS retries_spent
         """,
         {
