@@ -31,7 +31,7 @@ def _per_job(url: str, prompt_hash: str, model: str | None = None) -> bool:
     params = (url, prompt_hash, model) if model is not None else (url, prompt_hash)
     with connection() as conn:
         row = conn.execute(
-            "SELECT CASE WHEN instructions IS NULL THEN instructions_id END AS instructions_id "
+            "SELECT instructions_id "
             "FROM ai_queries WHERE url = %s AND check_type = 'custom' "
             f"AND prompt_hash = %s{clause} AND status IN ('passed', 'rejected') "
             "ORDER BY id DESC LIMIT 1",
@@ -39,13 +39,8 @@ def _per_job(url: str, prompt_hash: str, model: str | None = None) -> bool:
         ).fetchone()
     if row is None:
         return False
-    query_instructions.hydrate([{"instructions": None, **row}])
+    query_instructions.hydrate([row])
     return True
-
-
-def _inline(query_id: int, instructions: str) -> None:
-    """A row written before instructions moved to the dictionary keeps its text."""
-    db.execute("UPDATE ai_queries SET instructions=%s WHERE id=%s", (instructions, query_id))
 
 
 def _corrupt(query_id: int) -> None:
@@ -66,7 +61,7 @@ def _custom(url: str, status: str = "passed", **kwargs) -> int:
 def _mixed_fixture() -> list[str]:
     u = [f"https://cache.test/{name}" for name in range(10)]
     _custom(u[0])  # referenced instructions
-    _inline(_custom(u[1], "rejected"), "inline text")  # inline instructions
+    _custom(u[1], "rejected")  # rejected is decided too
     # u[2]: nothing at all
     _custom(u[3], "failed")  # undecided only
     _custom(u[4], prompt_hash="h2")  # another filter
@@ -76,7 +71,7 @@ def _mixed_fixture() -> list[str]:
     add_ai_result(u[7], "passed", check_type="closed", prompt_hash="h1", model="m1")
     # The latest decided row is the one hydrated; an older broken one is not read.
     _corrupt(_custom(u[8], instructions="older"))
-    _inline(_custom(u[8], instructions="newer"), "newer")
+    _custom(u[8], instructions="newer")
     _custom(u[9], instructions=None)  # decided with no instructions recorded
     return u
 
