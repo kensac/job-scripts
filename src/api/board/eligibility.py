@@ -9,7 +9,7 @@ from typing import Any
 
 from api import user_settings
 from api.board import criteria
-from core import verdict_reads
+from core import catalog, verdict_reads
 from core.store import PERSON_SOURCE
 
 SUBSCRIBED = PERSON_SOURCE.format(source="j.source", user="%(uid)s")
@@ -30,9 +30,9 @@ latest_check AS (
 )
 """
 
-STRUCTURAL = """
-        j.active
-        {criteria}
+STRUCTURAL = f"""
+        {catalog.IS_AVAILABLE.format(job="j")}
+        {{criteria}}
         AND EXISTS (SELECT 1 FROM latest_check lc
                     WHERE lc.url = j.url AND lc.check_type = 'closed' AND lc.status = 'passed')
         AND (%(bypass_sponsorship)s
