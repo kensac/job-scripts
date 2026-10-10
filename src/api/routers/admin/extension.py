@@ -5,11 +5,12 @@ from __future__ import annotations
 import datetime
 import re
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, JsonValue
 
 from api.apply import recipes as extension_recipes
 from api.auth import AuthedUser
+from api.problem import refuse
 from api.routers.admin.shared import require_admin
 
 router = APIRouter()
@@ -56,11 +57,11 @@ def publish_extension_recipe(
     adapter: str, body: RecipePut, user: AuthedUser = Depends(require_admin)
 ) -> RecipePublished:
     if not re.fullmatch(r"[a-z][a-z0-9_-]{0,63}", adapter):
-        raise HTTPException(400, detail={"code": "INVALID_RECIPE", "message": "bad adapter id"})
+        raise refuse(400, "INVALID_RECIPE", "bad adapter id")
     try:
         revision = extension_recipes.publish(adapter, body.recipe, user.email or user.sub)
     except ValueError as exc:
-        raise HTTPException(400, detail={"code": "INVALID_RECIPE", "message": str(exc)}) from exc
+        raise refuse(400, "INVALID_RECIPE", str(exc)) from exc
     return RecipePublished(adapter=adapter, revision=revision)
 
 
@@ -70,7 +71,5 @@ def rollback_extension_recipe(
 ) -> RecipePublished:
     revision = extension_recipes.rollback(adapter)
     if revision is None:
-        raise HTTPException(
-            404, detail={"code": "NO_PREVIOUS_RECIPE", "message": "nothing earlier to go back to"}
-        )
+        raise refuse(404, "NO_PREVIOUS_RECIPE", "nothing earlier to go back to")
     return RecipePublished(adapter=adapter, revision=revision)

@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import datetime
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from api import db
 from api.auth import AuthedUser, require_user
 from api.board import visibility
 from api.models import SourcesPut
+from api.problem import refuse
 from core.fetching import boards
 
 router = APIRouter()
@@ -63,14 +64,12 @@ def apply_source_group(
     body: ApplyGroupBody, user: AuthedUser = Depends(require_user)
 ) -> GroupApplied:
     if body.mode not in ("replace", "add"):
-        raise HTTPException(
-            400, detail={"code": "INVALID_MODE", "message": "mode must be replace or add"}
-        )
+        raise refuse(400, "INVALID_MODE", "mode must be replace or add")
     group = db.query_one(
         "SELECT members FROM source_groups WHERE name = %s AND active", (body.name,)
     )
     if not group:
-        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown group"})
+        raise refuse(404, "NOT_FOUND", "unknown group")
     members = [
         r["name"]
         for r in db.query(
@@ -125,9 +124,7 @@ def create_source_request(
     body: SourceRequestBody, user: AuthedUser = Depends(require_user)
 ) -> NewSourceRequest:
     if not body.url.startswith(("http://", "https://")):
-        raise HTTPException(
-            400, detail={"code": "INVALID_URL", "message": "the board link must be a URL"}
-        )
+        raise refuse(400, "INVALID_URL", "the board link must be a URL")
     row = db.query_one_as(
         NewSourceRequest,
         "INSERT INTO source_requests (user_id, url, note) VALUES (%s, %s, %s) "
@@ -248,19 +245,14 @@ def _check_names(user_id: int, names: set[str], adding: set[str]) -> None:
     known = {r["name"]: r["active"] for r in rows}
     unknown = sorted(n for n in names if n not in known)
     if unknown:
-        raise HTTPException(
-            400, detail={"code": "UNKNOWN_SOURCE", "message": f"unknown sources: {unknown}"}
-        )
+        raise refuse(400, "UNKNOWN_SOURCE", f"unknown sources: {unknown}")
     held = {
         r["source"]
         for r in db.query("SELECT source FROM user_sources WHERE user_id = %s", (user_id,))
     }
     off = sorted(n for n in adding if not known[n] and n not in held)
     if off:
-        raise HTTPException(
-            400,
-            detail={"code": "SOURCE_INACTIVE", "message": f"switched off, cannot subscribe: {off}"},
-        )
+        raise refuse(400, "SOURCE_INACTIVE", f"switched off, cannot subscribe: {off}")
 
 
 @router.patch("/user/sources")

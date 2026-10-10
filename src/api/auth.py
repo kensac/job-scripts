@@ -5,9 +5,10 @@ import logging
 import os
 from dataclasses import dataclass
 
-from fastapi import Header, HTTPException
+from fastapi import Header
 
 from api import db, metrics, params
+from api.problem import refuse
 from core.env import env_list
 
 logger = logging.getLogger(__name__)
@@ -38,9 +39,7 @@ def require_service(x_service_token: str = Header(default="")) -> None:
     """Proxy-level auth only, for routes that identify their subject by a
     token in the request (e.g. one-click unsubscribe) rather than headers."""
     if not SERVICE_TOKEN or not hmac.compare_digest(x_service_token, SERVICE_TOKEN):
-        raise HTTPException(
-            401, detail={"code": "UNAUTHORIZED", "message": "invalid service token"}
-        )
+        raise refuse(401, "UNAUTHORIZED", "invalid service token")
 
 
 def require_user(
@@ -51,34 +50,20 @@ def require_user(
     x_user_groups: str = Header(default=""),
 ) -> AuthedUser:
     if not SERVICE_TOKEN or not hmac.compare_digest(x_service_token, SERVICE_TOKEN):
-        raise HTTPException(
-            401, detail={"code": "UNAUTHORIZED", "message": "invalid service token"}
-        )
+        raise refuse(401, "UNAUTHORIZED", "invalid service token")
     if not x_user_sub:
-        raise HTTPException(401, detail={"code": "UNAUTHORIZED", "message": "missing user subject"})
+        raise refuse(401, "UNAUTHORIZED", "missing user subject")
     groups = params.csv(x_user_groups)
     existing = db.query_one("SELECT id FROM users WHERE sub = %s", (x_user_sub,))
     if existing is None and not db.get_config("signups_enabled", True):
         if not is_admin(groups) and "jobtracker-users-internal" not in groups:
-            raise HTTPException(
-                403,
-                detail={
-                    "code": "SIGNUPS_DISABLED",
-                    "message": "new signups are currently disabled",
-                },
-            )
+            raise refuse(403, "SIGNUPS_DISABLED", "new signups are currently disabled")
     if existing is None and not (x_user_email or "").strip():
         # Provisioning a user is a real side effect, and this endpoint trusts
         # whatever identity the proxy forwards. A malformed or mistyped sub
         # would otherwise mint a phantom user row silently; every genuine
         # identity carries an email, so its absence means the request is wrong.
-        raise HTTPException(
-            400,
-            detail={
-                "code": "IDENTITY_INCOMPLETE",
-                "message": "cannot provision a user without an email",
-            },
-        )
+        raise refuse(400, "IDENTITY_INCOMPLETE", "cannot provision a user without an email")
     row = db.query_one(
         """
         INSERT INTO users (sub, email, name, groups)

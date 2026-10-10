@@ -7,13 +7,13 @@ import logging
 import os
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from api import db, scoping, sorting
 from api.auth import AuthedUser
 from api.models import Ok
-from api.problem import PROVIDER_REFUSALS
+from api.problem import PROVIDER_REFUSALS, refuse
 from api.routers.admin.shared import require_admin
 
 router = APIRouter()
@@ -255,7 +255,7 @@ def user_detail(user_id: int, user: AuthedUser = Depends(require_admin)) -> User
         (user_id,),
     )
     if not u:
-        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown user"})
+        raise refuse(404, "NOT_FOUND", "unknown user")
     from api import budget as _budget
 
     # The Users page showed a weekly token total one click from a page showing
@@ -396,10 +396,7 @@ def create_invite(body: InviteBody, user: AuthedUser = Depends(require_admin)) -
     to the jobtracker enrollment flow and emails the link. The invitee picks
     their own username/name/password during enrollment."""
     if not _invites_configured():
-        raise HTTPException(
-            503,
-            detail={"code": "INVITES_NOT_CONFIGURED", "message": "authentik invite env missing"},
-        )
+        raise refuse(503, "INVITES_NOT_CONFIGURED", "authentik invite env missing")
     import datetime as _dt
     import re as _re
 
@@ -420,13 +417,7 @@ def create_invite(body: InviteBody, user: AuthedUser = Depends(require_admin)) -
             },
         )
         if resp.status_code >= 300:
-            raise HTTPException(
-                502,
-                detail={
-                    "code": "AUTHENTIK_ERROR",
-                    "message": f"invitation create failed ({resp.status_code})",
-                },
-            )
+            raise refuse(502, "AUTHENTIK_ERROR", f"invitation create failed ({resp.status_code})")
         inv = resp.json()
     invite_url = f"{AUTHENTIK_URL}/if/flow/{AUTHENTIK_INVITE_FLOW}/?itoken={inv['pk']}"
     emailed = False
@@ -474,9 +465,7 @@ def list_invites(user: AuthedUser = Depends(require_admin)) -> InviteList:
             "/stages/invitation/invitations/", params={"flow__slug": AUTHENTIK_INVITE_FLOW}
         )
         if resp.status_code >= 300:
-            raise HTTPException(
-                502, detail={"code": "AUTHENTIK_ERROR", "message": "invitation list failed"}
-            )
+            raise refuse(502, "AUTHENTIK_ERROR", "invitation list failed")
         data = resp.json()
     return InviteList(
         rows=[
@@ -495,16 +484,11 @@ def list_invites(user: AuthedUser = Depends(require_admin)) -> InviteList:
 @router.delete("/invites/{pk}", responses=PROVIDER_REFUSALS)
 def revoke_invite(pk: str, user: AuthedUser = Depends(require_admin)) -> Ok:
     if not _invites_configured():
-        raise HTTPException(
-            503,
-            detail={"code": "INVITES_NOT_CONFIGURED", "message": "authentik invite env missing"},
-        )
+        raise refuse(503, "INVITES_NOT_CONFIGURED", "authentik invite env missing")
     with _authentik_client() as ak:
         resp = ak.delete(f"/stages/invitation/invitations/{pk}/")
         if resp.status_code >= 300 and resp.status_code != 404:
-            raise HTTPException(
-                502, detail={"code": "AUTHENTIK_ERROR", "message": "invitation revoke failed"}
-            )
+            raise refuse(502, "AUTHENTIK_ERROR", "invitation revoke failed")
     return Ok()
 
 
@@ -555,10 +539,7 @@ def put_group_budget(
         known = {m["model"] for models in ai.MODEL_CATALOG.values() for m in models}
         unknown = [m for m in body.allowed_models if m not in known]
         if unknown:
-            raise HTTPException(
-                400,
-                detail={"code": "UNKNOWN_MODEL", "message": f"unknown models: {unknown}"},
-            )
+            raise refuse(400, "UNKNOWN_MODEL", f"unknown models: {unknown}")
     db.execute(
         """
         INSERT INTO group_budgets (group_name, weekly_token_budget, allowed_models)

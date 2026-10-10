@@ -73,6 +73,7 @@ def test_invalid_filters_are_rejected_not_silently_ignored(client, user_headers,
         "/v1/user/jobs", headers=user_headers, params={"column_filters": json.dumps(rules)}
     )
     assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "INVALID_COLUMN_FILTER"
 
 
 def test_column_filters_apply_before_pagination_and_totals(client, user_headers, f):

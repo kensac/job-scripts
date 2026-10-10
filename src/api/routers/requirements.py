@@ -14,13 +14,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
 from api import db
 from api.auth import AuthedUser, require_user
 from api.board import criteria, visibility
 from api.board.access import require_visible_job
+from api.problem import refuse
 from core.requirements import (
     CLEARANCE_LEVELS,
     DEGREE_LEVELS,
@@ -315,9 +316,7 @@ def similar(job_id: int, user: AuthedUser = Depends(require_user)) -> Similar:
     if not anchor:
         # Not an error: the sweep is a backlog walker, so a posting ingested in
         # the last hour legitimately has no vector yet.
-        raise HTTPException(
-            404, detail={"code": "NOT_EMBEDDED", "message": "no embedding for this posting yet"}
-        )
+        raise refuse(404, "NOT_EMBEDDED", "no embedding for this posting yet")
     params = _params(user, None, None)
     return Similar(
         job_id=job_id,

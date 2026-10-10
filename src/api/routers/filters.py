@@ -4,7 +4,7 @@ import datetime
 import os
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from psycopg.errors import UniqueViolation
 from pydantic import BaseModel
 
@@ -14,7 +14,7 @@ from api.auth import AuthedUser, is_admin, require_user
 from api.board import visibility
 from api.config import group_access_allowed
 from api.models import FilterCreate, FilterPatch, ImprovePromptRequest, Ok
-from api.problem import AI_REFUSALS
+from api.problem import AI_REFUSALS, refuse
 from core.filters import ON_AMBIGUOUS_VALUES, compute_filter_hash
 
 router = APIRouter()
@@ -120,12 +120,8 @@ def _hash(prompt: str, on_ambiguous: str) -> str:
 
 def _validate_ambiguous(value: str) -> str:
     if value not in ON_AMBIGUOUS_VALUES:
-        raise HTTPException(
-            400,
-            detail={
-                "code": "INVALID_ON_AMBIGUOUS",
-                "message": f"on_ambiguous must be one of {ON_AMBIGUOUS_VALUES}",
-            },
+        raise refuse(
+            400, "INVALID_ON_AMBIGUOUS", f"on_ambiguous must be one of {ON_AMBIGUOUS_VALUES}"
         )
     return value
 
@@ -141,17 +137,13 @@ def _refuse_second_enabled(user_id: int, except_id: int | None = None) -> None:
         (user_id, except_id, except_id),
     )
     if other:
-        raise HTTPException(
+        raise refuse(
             409,
-            detail={
-                "code": "ONE_FILTER",
-                "message": (
-                    f'One filter runs at a time, and "{other["name"]}" is on. '
-                    "Turn it off first, or fold this into it: one prompt can hold "
-                    "every condition you want."
-                ),
-                "enabled_filter_id": other["id"],
-            },
+            "ONE_FILTER",
+            f'One filter runs at a time, and "{other["name"]}" is on. '
+            "Turn it off first, or fold this into it: one prompt can hold "
+            "every condition you want.",
+            enabled_filter_id=other["id"],
         )
 
 
@@ -191,7 +183,7 @@ def _may_run_by_hand(user: AuthedUser) -> bool:
 
 def _refuse_unpermitted_run(user: AuthedUser) -> None:
     if not _may_run_by_hand(user):
-        raise HTTPException(403, detail={"code": "NOT_PERMITTED", "message": NOT_PERMITTED_MESSAGE})
+        raise refuse(403, "NOT_PERMITTED", NOT_PERMITTED_MESSAGE)
 
 
 def _enqueue_on_change(user: AuthedUser, filter_id: int) -> tuple[int | None, _BLOCKED | None]:
@@ -203,10 +195,10 @@ def _enqueue_on_change(user: AuthedUser, filter_id: int) -> tuple[int | None, _B
     return _enqueue(user, filter_id, defer_conflict=True)
 
 
-def _blocked_message(user: AuthedUser, blocked: _BLOCKED | None) -> str | None:
+def _blocked_message(user: AuthedUser, blocked: _BLOCKED) -> str:
     if blocked == "DEFERRED":
         return DEFERRED_MESSAGE
-    return budget.access_message(blocked, budget.get_entitlement(user)) if blocked else None
+    return budget.access_message(blocked, budget.get_entitlement(user))
 
 
 def _running(
@@ -238,14 +230,7 @@ def _refuse_second_run(running: task_admission.InFlight | None) -> None:
     reload could queue the same run twice while the first parked on the
     provider's batch."""
     if running:
-        raise HTTPException(
-            409,
-            detail={
-                "code": "IN_PROGRESS",
-                "message": "this run is already in progress",
-                "task_id": running.id,
-            },
-        )
+        raise refuse(409, "IN_PROGRESS", "this run is already in progress", task_id=running.id)
 
 
 @router.get("/user/filters")
@@ -307,7 +292,7 @@ def _after_filter_change(user: AuthedUser, row: Filter, previous: Filter | None)
         **row.model_dump(),
         task_id=task_id,
         run_blocked=blocked,
-        run_blocked_message=_blocked_message(user, blocked),
+        run_blocked_message=_blocked_message(user, blocked) if blocked else None,
     )
 
 
@@ -320,9 +305,7 @@ def create_filter(body: FilterCreate, user: AuthedUser = Depends(require_user)) 
             "SELECT id FROM user_filters WHERE user_id = %s AND name = %s",
             (user.id, body.name),
         ):
-            raise HTTPException(
-                409, detail={"code": "DUPLICATE_NAME", "message": "filter name already exists"}
-            )
+            raise refuse(409, "DUPLICATE_NAME", "filter name already exists")
         if body.enabled:
             _refuse_second_enabled(user.id)
         row = db.query_one_as(
@@ -360,12 +343,10 @@ def patch_filter(
             (filter_id, user.id),
         )
         if not existing:
-            raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown filter"})
+            raise refuse(404, "NOT_FOUND", "unknown filter")
         fields = body.model_dump(exclude_unset=True)
         if not fields:
-            raise HTTPException(
-                400, detail={"code": "EMPTY_PATCH", "message": "no fields to update"}
-            )
+            raise refuse(400, "EMPTY_PATCH", "no fields to update")
         if "on_ambiguous" in fields:
             _validate_ambiguous(fields["on_ambiguous"])
         if fields.get("enabled") and not existing.enabled:
@@ -384,9 +365,7 @@ def patch_filter(
         except UniqueViolation as exc:
             # create_filter pre-checks the name; renaming has to answer the same
             # way rather than letting user_filters_user_id_name_key escape as a 500.
-            raise HTTPException(
-                409, detail={"code": "DUPLICATE_NAME", "message": "filter name already exists"}
-            ) from exc
+            raise refuse(409, "DUPLICATE_NAME", "filter name already exists") from exc
         assert row is not None
     return _after_filter_change(user, row, existing)
 
@@ -404,12 +383,10 @@ def run_filter(filter_id: int, user: AuthedUser = Depends(require_user)) -> RunQ
     if not db.query_one(
         "SELECT id FROM user_filters WHERE id = %s AND user_id = %s", (filter_id, user.id)
     ):
-        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown filter"})
+        raise refuse(404, "NOT_FOUND", "unknown filter")
     task_id, blocked = _enqueue(user, filter_id)
     if blocked:
-        raise HTTPException(
-            402, detail={"code": blocked, "message": _blocked_message(user, blocked)}
-        )
+        raise refuse(402, blocked, _blocked_message(user, blocked))
     return RunQueued(task_id=task_id)
 
 
@@ -418,9 +395,7 @@ def run_all_filters(user: AuthedUser = Depends(require_user)) -> RunQueued:
     _refuse_unpermitted_run(user)
     task_id, blocked = _enqueue(user, None)
     if blocked:
-        raise HTTPException(
-            402, detail={"code": blocked, "message": _blocked_message(user, blocked)}
-        )
+        raise refuse(402, blocked, _blocked_message(user, blocked))
     return RunQueued(task_id=task_id)
 
 
@@ -540,7 +515,7 @@ def adopt_preset(preset_id: int, user: AuthedUser = Depends(require_user)) -> Sa
             (preset_id,),
         )
         if not preset:
-            raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown preset"})
+            raise refuse(404, "NOT_FOUND", "unknown preset")
         name = preset.name
         # Adopted is a fact on the row (preset_id), not a guess from the name: a
         # renamed adopted filter is still adopted, and a hand-written filter that
@@ -549,13 +524,7 @@ def adopt_preset(preset_id: int, user: AuthedUser = Depends(require_user)) -> Sa
             "SELECT id FROM user_filters WHERE user_id = %s AND (preset_id = %s OR name = %s)",
             (user.id, preset_id, name),
         ):
-            raise HTTPException(
-                409,
-                detail={
-                    "code": "ALREADY_ADOPTED",
-                    "message": "this preset is already in your filters",
-                },
-            )
+            raise refuse(409, "ALREADY_ADOPTED", "this preset is already in your filters")
         _refuse_second_enabled(user.id)
         row = db.query_one_as(
             Filter,
@@ -634,5 +603,5 @@ async def improve_prompt(
         usage,
     )
     if not parsed:
-        raise HTTPException(502, detail={"code": "AI_ERROR", "message": "no response from model"})
+        raise refuse(502, "AI_ERROR", "no response from model")
     return parsed

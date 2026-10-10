@@ -40,8 +40,20 @@ class ProblemResponse(BaseModel):
     detail: Problem
 
 
-def refuse(status: int, code: str, message: str) -> HTTPException:
-    return HTTPException(status, detail=Problem(code=code, message=message).model_dump())
+def refuse(
+    status: int,
+    code: str,
+    message: str,
+    *,
+    headers: dict[str, str] | None = None,
+    **extra: object,
+) -> HTTPException:
+    """`extra` adds keys beside `code` and `message` for a refusal that
+    carries what the client needs to act, such as the id of a task already
+    running. The two required keys are always present."""
+    return HTTPException(
+        status, detail=Problem(code=code, message=message).model_dump() | extra, headers=headers
+    )
 
 
 def _problems(*statuses: int) -> dict[int | str, dict[str, type[BaseModel]]]:

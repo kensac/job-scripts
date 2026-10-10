@@ -5,11 +5,12 @@ from __future__ import annotations
 import datetime
 from dataclasses import dataclass
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from api import db, events
 from api.auth import AuthedUser
+from api.problem import refuse
 from api.routers.admin.shared import require_admin
 from core.job_profile import CLASSIFIER_VERSION, JOB_PROFILE_MODEL
 
@@ -80,13 +81,11 @@ def _latest() -> JobProfileTaskStatus | None:
 def run_job_profiles(user: AuthedUser = Depends(require_admin)) -> JobProfileAdmission:
     with db.transaction():
         if not db.get_config("job_profile_collection_enabled"):
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "code": "PROFILE_COLLECTION_PAUSED",
-                    "message": "Profile collection is paused. Enable job_profile_collection_enabled "
-                    "in admin configuration to resume. Submitted batches will still finish.",
-                },
+            raise refuse(
+                409,
+                "PROFILE_COLLECTION_PAUSED",
+                "Profile collection is paused. Enable job_profile_collection_enabled "
+                "in admin configuration to resume. Submitted batches will still finish.",
             )
         existing = db.query_one_as(
             _TaskId,

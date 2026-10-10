@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from api import db
 from api.ai import access as ai_access
 from api.auth import AuthedUser, require_user
 from api.board.access import require_visible_job
-from api.problem import AI_REFUSALS
+from api.problem import AI_REFUSALS, refuse
 from api.reports import request_recheck
 from core import verdict_reads
 
@@ -82,10 +82,7 @@ async def explain_check(
                 refetched=True,
                 closure_signal=closure_signal,
             )
-        raise HTTPException(
-            409,
-            detail={"code": "NO_CONTENT", "message": "could not fetch this posting just now"},
-        )
+        raise refuse(409, "NO_CONTENT", "could not fetch this posting just now")
     content_row = {"input_content": fresh}
     cfg = ai_access.require_config(user)
     cfg = dataclasses.replace(cfg, params={**cfg.params, "reasoning_effort": "medium"})
@@ -111,7 +108,7 @@ async def explain_check(
             (user.id, int(body.check.split(":", 1)[1])),
         )
         if not flt:
-            raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown filter"})
+            raise refuse(404, "NOT_FOUND", "unknown filter")
         instructions = build_custom_instructions(flt["prompt"], flt["on_ambiguous"])
         model_cls = FilterVerdict
         verdict_of = lambda p: (p.should_filter, p.reason)
@@ -119,12 +116,10 @@ async def explain_check(
         prompt_hash = flt["prompt_hash"]
         check = "custom"
     else:
-        raise HTTPException(
+        raise refuse(
             400,
-            detail={
-                "code": "INVALID_CHECK",
-                "message": f"check must be one of {', '.join(POSTING_CHECKS)}, or filter:<id>",
-            },
+            "INVALID_CHECK",
+            f"check must be one of {', '.join(POSTING_CHECKS)}, or filter:<id>",
         )
 
     with budget.record_parse_failures(user.id, cfg.key_source, "explain", cfg.model):
@@ -153,13 +148,7 @@ async def explain_check(
         # run_check records the 'failed' row and returns None when the model
         # produces no parseable output; the tokens are already spent, so this
         # must read as a real outcome rather than an unhandled AttributeError.
-        raise HTTPException(
-            502,
-            detail={
-                "code": "NO_VERDICT",
-                "message": "the model returned no usable answer; try again",
-            },
-        )
+        raise refuse(502, "NO_VERDICT", "the model returned no usable answer; try again")
     rejected, reason = verdict_of(parsed)
     status: Verdict = "rejected" if rejected else "passed"
     if spec:

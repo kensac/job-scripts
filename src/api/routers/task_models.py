@@ -31,11 +31,12 @@ from __future__ import annotations
 import datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from api import db
 from api.auth import AuthedUser
+from api.problem import refuse
 from api.routers.admin import require_admin
 from api.task_config import configured_shape
 from core import providers
@@ -402,22 +403,18 @@ def _require_cost_acknowledgement(purpose: str, shape, body: TaskModelPut) -> No
     multiple = new.est_cycle_cost_usd / current.est_cycle_cost_usd
     if multiple <= COST_ACKNOWLEDGEMENT_MULTIPLE:
         return
-    raise HTTPException(
+    raise refuse(
         400,
-        detail={
-            "code": "COST_ACKNOWLEDGEMENT_REQUIRED",
-            "message": (
-                f"{body.model} costs {multiple:.1f}x what {current_name} costs for this "
-                f"task - {_money(new.est_cycle_cost_usd)} against "
-                f"{_money(current.est_cycle_cost_usd)} per cycle. Re-send with "
-                f"acknowledge_cost to proceed."
-            ),
-            "multiple": f"{multiple:.1f}",
-            "current_model": current_name,
-            "current_cycle_cost_usd": _money(current.est_cycle_cost_usd),
-            "new_cycle_cost_usd": _money(new.est_cycle_cost_usd),
-            "threshold": COST_ACKNOWLEDGEMENT_MULTIPLE,
-        },
+        "COST_ACKNOWLEDGEMENT_REQUIRED",
+        f"{body.model} costs {multiple:.1f}x what {current_name} costs for this "
+        f"task - {_money(new.est_cycle_cost_usd)} against "
+        f"{_money(current.est_cycle_cost_usd)} per cycle. Re-send with "
+        f"acknowledge_cost to proceed.",
+        multiple=f"{multiple:.1f}",
+        current_model=current_name,
+        current_cycle_cost_usd=_money(current.est_cycle_cost_usd),
+        new_cycle_cost_usd=_money(new.est_cycle_cost_usd),
+        threshold=COST_ACKNOWLEDGEMENT_MULTIPLE,
     )
 
 
@@ -446,7 +443,7 @@ def list_task_models(_: AuthedUser = Depends(require_admin)) -> TaskModelList:
 @router.get("/task-models/{purpose}")
 def get_task_model(purpose: str, _: AuthedUser = Depends(require_admin)) -> TaskModel:
     if purpose not in SHAPES:
-        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown task"})
+        raise refuse(404, "NOT_FOUND", "unknown task")
     return _view(purpose)
 
 
@@ -463,20 +460,15 @@ def put_task_model(
     re-derived later against a sanctioned list that has since moved.
     """
     if purpose not in SHAPES:
-        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown task"})
+        raise refuse(404, "NOT_FOUND", "unknown task")
     shape = configured_shape(SHAPES[purpose])
     if body.model is not None:
         if providers.model(body.model) is None:
-            raise HTTPException(
-                400,
-                detail={"code": "UNKNOWN_MODEL", "message": f"{body.model} is not declared"},
-            )
+            raise refuse(400, "UNKNOWN_MODEL", f"{body.model} is not declared")
         try:
             resolve(shape, override=body.model)
         except NoEligibleModel as exc:
-            raise HTTPException(
-                400, detail={"code": "INELIGIBLE_MODEL", "message": str(exc)}
-            ) from exc
+            raise refuse(400, "INELIGIBLE_MODEL", str(exc)) from exc
         _require_cost_acknowledgement(purpose, shape, body)
     db.execute(
         "INSERT INTO task_model_overrides (purpose, model, overrode_sanctioned, reason, "
@@ -503,5 +495,5 @@ def task_model_history(purpose: str, _: AuthedUser = Depends(require_admin)) -> 
     later, which only works if the switch is still here.
     """
     if purpose not in SHAPES:
-        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown task"})
+        raise refuse(404, "NOT_FOUND", "unknown task")
     return TaskModelHistory(purpose=purpose, changes=_history(purpose, 200))

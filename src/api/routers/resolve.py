@@ -25,9 +25,10 @@ belong here rather than beside it.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 
 from api.auth import AuthedUser, require_user
+from api.problem import refuse
 from api.resolve.choice_policy import by_company as by_company
 from api.resolve.choice_policy import choices_for_message as choices_for_message
 from api.resolve.choice_policy import thread_size as thread_size
@@ -64,13 +65,7 @@ def resolve_queue(
     answers to it is the shape it replaced.
     """
     if kind and set(kind) - set(ITEM_KINDS):
-        raise HTTPException(
-            400,
-            detail={
-                "code": "UNKNOWN_KIND",
-                "message": f"kind must be one of {', '.join(ITEM_KINDS)}",
-            },
-        )
+        raise refuse(400, "UNKNOWN_KIND", f"kind must be one of {', '.join(ITEM_KINDS)}")
     return queue_for(user.id, limit, offset, kind)
 
 

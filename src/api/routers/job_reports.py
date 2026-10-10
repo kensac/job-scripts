@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import datetime
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from api import db
 from api.auth import AuthedUser, require_user
 from api.board.access import require_visible_job
+from api.problem import refuse
 from api.reports import REPORT_KINDS, request_recheck
 
 router = APIRouter()
@@ -32,10 +33,7 @@ def report_job(
     job_id: int, body: JobReport, user: AuthedUser = Depends(require_user)
 ) -> ReportFiled:
     if body.kind not in REPORT_KINDS:
-        raise HTTPException(
-            400,
-            detail={"code": "INVALID_KIND", "message": f"kind must be one of {REPORT_KINDS}"},
-        )
+        raise refuse(400, "INVALID_KIND", f"kind must be one of {REPORT_KINDS}")
     job = require_visible_job(user, job_id, "j.url, j.company, j.title")
     row = db.query_one_as(
         ReportFiled,

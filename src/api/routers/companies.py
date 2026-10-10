@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
 from api import db, rates, signals, sorting
@@ -36,6 +36,7 @@ from api import params as params_
 from api.auth import AuthedUser
 from api.mail import pipeline as mail_pipeline
 from api.mail.current import current_event
+from api.problem import refuse
 from api.rates import Rate
 from api.routers.admin import require_admin
 
@@ -745,13 +746,9 @@ def _offset_from(cursor: str | None) -> int:
     try:
         offset = int(cursor)
     except ValueError as exc:
-        raise HTTPException(
-            400, detail={"code": "BAD_CURSOR", "message": "cursor must be an offset"}
-        ) from exc
+        raise refuse(400, "BAD_CURSOR", "cursor must be an offset") from exc
     if offset < 0:
-        raise HTTPException(
-            400, detail={"code": "BAD_CURSOR", "message": "cursor must not be negative"}
-        )
+        raise refuse(400, "BAD_CURSOR", "cursor must not be negative")
     return offset
 
 

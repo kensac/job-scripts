@@ -4,13 +4,14 @@ import datetime
 from typing import Any
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from api import ai, budget, crypto, db
 from api.auth import AuthedUser, is_admin, require_service, require_user
 from api.board import visibility
 from api.models import ApiKeyPut, Criteria, Ok, SettingsPut
+from api.problem import refuse
 from core import providers as core_providers
 from core.answers import DEFAULT_STYLE
 
@@ -462,15 +463,11 @@ MAX_AGE_CAP_DAYS = 30
 def put_settings(body: SettingsPut, user: AuthedUser = Depends(require_user)) -> UserSettingsSaved:
     if body.criteria is not None and not is_admin(user.groups):
         if (body.criteria.max_age_days or 0) > MAX_AGE_CAP_DAYS:
-            raise HTTPException(
+            raise refuse(
                 400,
-                detail={
-                    "code": "MAX_AGE_DAYS",
-                    "message": (
-                        f"Postings older than {MAX_AGE_CAP_DAYS} days are not kept on your "
-                        f"board; {MAX_AGE_CAP_DAYS} is the most your account can set."
-                    ),
-                },
+                "MAX_AGE_DAYS",
+                f"Postings older than {MAX_AGE_CAP_DAYS} days are not kept on your "
+                f"board; {MAX_AGE_CAP_DAYS} is the most your account can set.",
             )
         if body.criteria.max_age_days is None:
             body.criteria.max_age_days = MAX_AGE_CAP_DAYS
@@ -485,7 +482,7 @@ def put_settings(body: SettingsPut, user: AuthedUser = Depends(require_user)) ->
     if body.ai_params is not None:
         error = ai.validate_params(provider, body.ai_params, body.ai_model)
         if error:
-            raise HTTPException(400, detail={"code": "INVALID_PARAMS", "message": error})
+            raise refuse(400, "INVALID_PARAMS", error)
     if body.ai_model is not None:
         has_key = bool(row and row["has_key"])
         if has_key:
@@ -495,13 +492,7 @@ def put_settings(body: SettingsPut, user: AuthedUser = Depends(require_user)) ->
             ent = budget.get_entitlement(user)
             valid = ent.owner_key and body.ai_model in budget.owner_allowed_models(user.groups)
         if not valid:
-            raise HTTPException(
-                400,
-                detail={
-                    "code": "INVALID_MODEL",
-                    "message": "that model is not available with your current key",
-                },
-            )
+            raise refuse(400, "INVALID_MODEL", "that model is not available with your current key")
     db.execute(
         """
         INSERT INTO user_settings (user_id, column_layout, prefs, ai_model, ai_params,
@@ -573,29 +564,17 @@ def digest_unsubscribe(token: str, _: None = Depends(require_service)) -> Ok:
         (token,),
     )
     if not row:
-        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown token"})
+        raise refuse(404, "NOT_FOUND", "unknown token")
     return Ok()
 
 
 @router.put("/user/settings/api-key")
 def put_api_key(body: ApiKeyPut, user: AuthedUser = Depends(require_user)) -> Ok:
     if body.provider not in ai.PROVIDERS:
-        raise HTTPException(
-            400,
-            detail={
-                "code": "INVALID_PROVIDER",
-                "message": f"provider must be one of {ai.PROVIDERS}",
-            },
-        )
+        raise refuse(400, "INVALID_PROVIDER", f"provider must be one of {ai.PROVIDERS}")
     if body.provider == "openai_compatible":
         if not body.base_url:
-            raise HTTPException(
-                400,
-                detail={
-                    "code": "BASE_URL_REQUIRED",
-                    "message": "openai_compatible needs a base_url",
-                },
-            )
+            raise refuse(400, "BASE_URL_REQUIRED", "openai_compatible needs a base_url")
         from api import ssrf
 
         error = ssrf.validate_base_url(body.base_url)
@@ -605,7 +584,7 @@ def put_api_key(body: ApiKeyPut, user: AuthedUser = Depends(require_user)) -> Ok
             except ValueError as exc:
                 error = str(exc)
         if error:
-            raise HTTPException(400, detail={"code": "INVALID_BASE_URL", "message": error})
+            raise refuse(400, "INVALID_BASE_URL", error)
     db.execute(
         """
         INSERT INTO user_settings (user_id, api_key_enc, ai_provider, ai_base_url, updated_at)

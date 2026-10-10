@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from api import ai, db
 from api.auth import AuthedUser
-from api.problem import PROVIDER_REFUSALS, UNAVAILABLE_REFUSALS
+from api.problem import PROVIDER_REFUSALS, UNAVAILABLE_REFUSALS, refuse
 from api.routers.admin.shared import require_admin
 
 router = APIRouter()
@@ -121,7 +121,7 @@ async def run_single_check(
 
     job = db.query_one("SELECT id, url, company, title FROM jobs WHERE id = %s", (body.job_id,))
     if not job:
-        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown job"})
+        raise refuse(404, "NOT_FOUND", "unknown job")
     filter_name = prompt_hash = None
     check = body.check
     spec = POSTING_CHECKS.get(check)
@@ -156,7 +156,7 @@ async def run_single_check(
                 (check.split(":", 1)[1],),
             )
         if not flt:
-            raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown filter"})
+            raise refuse(404, "NOT_FOUND", "unknown filter")
         instructions = build_custom_instructions(flt["prompt"], flt["on_ambiguous"])
         model_cls, verdict_of = FilterVerdict, (lambda p: (p.should_filter, p.reason))
         filter_name = (
@@ -165,15 +165,10 @@ async def run_single_check(
         prompt_hash = flt["prompt_hash"]
         check = "custom"
     else:
-        raise HTTPException(
+        raise refuse(
             400,
-            detail={
-                "code": "INVALID_CHECK",
-                "message": (
-                    f"check must be one of {', '.join(POSTING_CHECKS)}, "
-                    "filter:<id>, or hash:<prompt_hash>"
-                ),
-            },
+            "INVALID_CHECK",
+            f"check must be one of {', '.join(POSTING_CHECKS)}, filter:<id>, or hash:<prompt_hash>",
         )
     # Re-fetch: a recheck against cached text cannot discover that a posting
     # has since closed, which is usually the whole reason for asking.
@@ -195,21 +190,16 @@ async def run_single_check(
                 refetched=True,
                 closure_signal=closure_signal,
             )
-        raise HTTPException(
-            409,
-            detail={"code": "NO_CONTENT", "message": "could not fetch this posting just now"},
-        )
+        raise refuse(409, "NO_CONTENT", "could not fetch this posting just now")
     content = {"input_content": fresh}
     allowed = _recheck_models(user)
     if body.model is not None:
         if body.model not in allowed:
-            raise HTTPException(
+            raise refuse(
                 400,
-                detail={
-                    "code": "MODEL_NOT_ALLOWED",
-                    "message": f"{body.model} is not a model you can run a re-check on",
-                    "allowed": allowed,
-                },
+                "MODEL_NOT_ALLOWED",
+                f"{body.model} is not a model you can run a re-check on",
+                allowed=allowed,
             )
         model = body.model
     else:
@@ -220,7 +210,7 @@ async def run_single_check(
     provider = ai.provider_of_model(model) or "openai"
     key = ai.server_key(provider)
     if not key:
-        raise HTTPException(503, detail={"code": "NO_SERVER_KEY", "message": "no server key"})
+        raise refuse(503, "NO_SERVER_KEY", "no server key")
     cfg = ai.AIConfig(
         provider=provider,
         api_key=key,
@@ -243,13 +233,7 @@ async def run_single_check(
         context="manual",
     )
     if parsed is None:
-        raise HTTPException(
-            502,
-            detail={
-                "code": "NO_VERDICT",
-                "message": "the model returned no usable answer; try again",
-            },
-        )
+        raise refuse(502, "NO_VERDICT", "the model returned no usable answer; try again")
     rejected, reason = verdict_of(parsed)
     if body.model is not None:
         # Only a run that happened sets the default: a refused or failed

@@ -7,7 +7,7 @@ import datetime
 import time
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
 from api import db, grouped, pagination, posting_path, scoping, sorting
@@ -15,6 +15,7 @@ from api import params as params_
 from api.ai import verdicts
 from api.auth import AuthedUser
 from api.orm.ai import AiQuery
+from api.problem import refuse
 from api.review_decision_storage import URL_MATCH
 from api.review_gate_reads import ReviewDecisions, read_decisions
 from api.routers.admin.shared import require_admin
@@ -285,13 +286,11 @@ def list_queries(
         # An unknown group key is a bad request, not a server fault. The keys
         # are a closed server-side vocabulary, so a caller sending one that
         # does not exist has a stale link, and should be told which.
-        raise HTTPException(
+        raise refuse(
             400,
-            detail={
-                "code": "UNKNOWN_REASON_GROUP",
-                "message": f"unknown reason_group: {reason_group}",
-                "valid": [g.key for g in reason_taxonomy.GROUPS],
-            },
+            "UNKNOWN_REASON_GROUP",
+            f"unknown reason_group: {reason_group}",
+            valid=[g.key for g in reason_taxonomy.GROUPS],
         ) from None
     paging = pagination.Page.from_params(page, page_size, maximum=500)
     total_row = db.query_one(f"SELECT COUNT(*) AS c FROM ledger_rows {where}", params)
@@ -392,7 +391,7 @@ def get_query(query_id: int, user: AuthedUser = Depends(require_admin)) -> Query
         f"SELECT {_ROW_COLS}, instructions_id FROM ledger_rows WHERE id = %s", (query_id,)
     )
     if not row:
-        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown query"})
+        raise refuse(404, "NOT_FOUND", "unknown query")
     return QueryRecord.model_validate(query_instructions.hydrate([row])[0])
 
 
@@ -682,7 +681,7 @@ def job_path(url: str, user: AuthedUser = Depends(require_admin)) -> posting_pat
     """Every published board's and every enabled filter's path for one posting."""
     path = posting_path.for_admin(url)
     if path is None:
-        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown job"})
+        raise refuse(404, "NOT_FOUND", "unknown job")
     return path
 
 

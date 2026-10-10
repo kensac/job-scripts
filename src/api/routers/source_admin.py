@@ -21,11 +21,12 @@ import datetime
 import logging
 import re
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from api import db
 from api.auth import AuthedUser
+from api.problem import refuse
 from api.routers.admin import require_admin
 from core.fetching import boards
 
@@ -346,33 +347,26 @@ def _check_source(listings_url: str, company: str | None, title_pattern: str | N
     system that never names the company, and a pattern that ingest cannot
     compile. Both would surface only as a failed ingest an hour later."""
     if boards.kind(listings_url) in boards.NEEDS_COMPANY and not (company or "").strip():
-        raise HTTPException(
+        raise refuse(
             400,
-            detail={
-                "code": "COMPANY_REQUIRED",
-                "message": f"a {boards.kind(listings_url)} board never names its company; "
-                "set company to the employer it belongs to",
-            },
+            "COMPANY_REQUIRED",
+            f"a {boards.kind(listings_url)} board never names its company; "
+            "set company to the employer it belongs to",
         )
     if title_pattern:
         try:
             re.compile(title_pattern, re.IGNORECASE)
         except re.error as exc:
-            raise HTTPException(
-                400,
-                detail={"code": "BAD_TITLE_PATTERN", "message": f"title_pattern: {exc}"},
-            ) from exc
+            raise refuse(400, "BAD_TITLE_PATTERN", f"title_pattern: {exc}") from exc
 
 
 @router.post("/sources")
 def create_source(body: SourceBody, user: AuthedUser = Depends(require_admin)) -> CatalogSource:
     if not body.name or not body.listings_url:
-        raise HTTPException(
-            400, detail={"code": "MISSING_FIELDS", "message": "name and listings_url are required"}
-        )
+        raise refuse(400, "MISSING_FIELDS", "name and listings_url are required")
     _check_source(body.listings_url, body.company, body.title_pattern)
     if db.query_one("SELECT name FROM sources WHERE name = %s", (body.name,)):
-        raise HTTPException(409, detail={"code": "DUPLICATE_NAME", "message": "source name exists"})
+        raise refuse(409, "DUPLICATE_NAME", "source name exists")
     row = db.query_one(
         "INSERT INTO sources (name, listings_url, description, active, company, title_pattern, "
         f"ingest_interval_hours) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING {_SOURCE_COLS}",
@@ -401,7 +395,7 @@ def delete_source(
     group pointing at a deleted source is silent debris."""
     src = db.query_one("SELECT name FROM sources WHERE name = %s", (name,))
     if not src:
-        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown source"})
+        raise refuse(404, "NOT_FOUND", "unknown source")
     attached = db.query_one(
         """
         SELECT (SELECT count(*) FROM jobs WHERE source = %(n)s) AS jobs,
@@ -417,17 +411,13 @@ def delete_source(
     # subscript an Optional - a silent None here would 500 mid-delete.
     assert attached is not None
     if not force and any(attached.values()):
-        raise HTTPException(
+        raise refuse(
             409,
-            detail={
-                "code": "SOURCE_IN_USE",
-                "message": (
-                    f"{name} still has {attached['jobs']} jobs, "
-                    f"{attached['subscribers']} subscribers, {attached['board_rows']} board rows, "
-                    f"{attached['managed_boards']} managed boards"
-                ),
-                "attached": attached,
-            },
+            "SOURCE_IN_USE",
+            f"{name} still has {attached['jobs']} jobs, "
+            f"{attached['subscribers']} subscribers, {attached['board_rows']} board rows, "
+            f"{attached['managed_boards']} managed boards",
+            attached=attached,
         )
     with db.transaction():
         affected_boards = db.query_as(
@@ -458,7 +448,7 @@ def get_source(name: str, user: AuthedUser = Depends(require_admin)) -> CatalogS
     """One source as stored, title_pattern included; the list shape omits it."""
     row = db.query_one(f"SELECT {_SOURCE_COLS} FROM sources WHERE name = %s", (name,))
     if not row:
-        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown source"})
+        raise refuse(404, "NOT_FOUND", "unknown source")
     return CatalogSource(**row, kind=boards.kind(row["listings_url"]))
 
 
@@ -468,13 +458,13 @@ def patch_source(
 ) -> CatalogSource:
     fields = body.model_dump(exclude_unset=True, exclude={"name"})
     if not fields:
-        raise HTTPException(400, detail={"code": "EMPTY_PATCH", "message": "no fields to update"})
+        raise refuse(400, "EMPTY_PATCH", "no fields to update")
     for k in ("company", "title_pattern"):
         if k in fields:
             fields[k] = (fields[k] or "").strip() or None
     current = db.query_one(f"SELECT {_SOURCE_COLS} FROM sources WHERE name = %s", (name,))
     if not current:
-        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown source"})
+        raise refuse(404, "NOT_FOUND", "unknown source")
     merged = {**current, **fields}
     _check_source(merged["listings_url"], merged["company"], merged["title_pattern"])
     cols = ", ".join(f"{k} = %({k})s" for k in fields)
@@ -483,7 +473,7 @@ def patch_source(
         {"name": name, **fields},
     )
     if not row:
-        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown source"})
+        raise refuse(404, "NOT_FOUND", "unknown source")
     return CatalogSource(**row, kind=boards.kind(row["listings_url"]))
 
 
@@ -515,22 +505,14 @@ def switch_sources(
     (the quant firms), and names catch the rest.
     """
     if body.kind is None and body.group is None and not body.names:
-        raise HTTPException(
-            400, detail={"code": "NO_SELECTION", "message": "give a kind, a group, or names"}
-        )
+        raise refuse(400, "NO_SELECTION", "give a kind, a group, or names")
     if body.active is None and body.ingest_interval_hours is None:
-        raise HTTPException(
-            400,
-            detail={
-                "code": "NOTHING_TO_SET",
-                "message": "give active, ingest_interval_hours, or both",
-            },
-        )
+        raise refuse(400, "NOTHING_TO_SET", "give active, ingest_interval_hours, or both")
     selected: set[str] = set(body.names or [])
     if body.group is not None:
         grp = db.query_one("SELECT members FROM source_groups WHERE name = %s", (body.group,))
         if not grp:
-            raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown group"})
+            raise refuse(404, "NOT_FOUND", "unknown group")
         selected |= set(grp["members"])
     if body.kind is not None:
         selected |= {
@@ -574,13 +556,11 @@ def pattern_preview(
     current pattern screened out. Nothing is written. The pattern that goes
     live is whichever one the admin chooses after seeing both sides."""
     if not db.query_one("SELECT 1 FROM sources WHERE name = %s", (name,)):
-        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown source"})
+        raise refuse(404, "NOT_FOUND", "unknown source")
     try:
         candidate = re.compile(body.title_pattern, re.IGNORECASE)
     except re.error as exc:
-        raise HTTPException(
-            400, detail={"code": "BAD_TITLE_PATTERN", "message": f"title_pattern: {exc}"}
-        ) from exc
+        raise refuse(400, "BAD_TITLE_PATTERN", f"title_pattern: {exc}") from exc
     titles = db.query(
         """
         SELECT url, title, CASE WHEN kept THEN 'catalog' ELSE 'screened' END AS held_in

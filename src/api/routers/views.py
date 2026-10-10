@@ -14,12 +14,13 @@ import datetime
 import json
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from psycopg.errors import UniqueViolation
 from pydantic import BaseModel, Field, StringConstraints
 
 from api import db
 from api.auth import AuthedUser, require_user
+from api.problem import refuse
 from api.updates import NonNullUpdate
 
 router = APIRouter(prefix="/user/views")
@@ -82,13 +83,7 @@ def _lock_owner(user_id: int) -> None:
 
 def _check_state(state: dict[str, Any]) -> None:
     if len(json.dumps(state)) > _MAX_STATE_BYTES:
-        raise HTTPException(
-            400,
-            detail={
-                "code": "STATE_TOO_LARGE",
-                "message": f"state must be under {_MAX_STATE_BYTES} bytes",
-            },
-        )
+        raise refuse(400, "STATE_TOO_LARGE", f"state must be under {_MAX_STATE_BYTES} bytes")
 
 
 def _own(view_id: int, user: AuthedUser) -> dict[str, Any]:
@@ -96,7 +91,7 @@ def _own(view_id: int, user: AuthedUser) -> dict[str, Any]:
         f"SELECT {_COLS} FROM saved_views WHERE id = %s AND user_id = %s", (view_id, user.id)
     )
     if not row:
-        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown view"})
+        raise refuse(404, "NOT_FOUND", "unknown view")
     return row
 
 
@@ -148,12 +143,8 @@ def create_view(body: ViewCreate, user: AuthedUser = Depends(require_user)) -> V
     except UniqueViolation as exc:
         if exc.diag.constraint_name != "uq_saved_views_user_page_name":
             raise
-        raise HTTPException(
-            409,
-            detail={
-                "code": "DUPLICATE_NAME",
-                "message": f"a view named {body.name!r} already exists on {body.page}",
-            },
+        raise refuse(
+            409, "DUPLICATE_NAME", f"a view named {body.name!r} already exists on {body.page}"
         ) from None
     # An INSERT that did not raise returned its row.
     assert row
@@ -165,7 +156,7 @@ def patch_view(view_id: int, body: ViewPatch, user: AuthedUser = Depends(require
     """Rename, restate, reorder, or make default; a field left out is left alone."""
     fields = body.model_dump(exclude_unset=True)
     if not fields:
-        raise HTTPException(400, detail={"code": "EMPTY_PATCH", "message": "no fields to update"})
+        raise refuse(400, "EMPTY_PATCH", "no fields to update")
     if "state" in fields:
         _check_state(fields["state"])
         fields["state"] = db.jsonb(fields["state"])
@@ -185,12 +176,8 @@ def patch_view(view_id: int, body: ViewPatch, user: AuthedUser = Depends(require
     except UniqueViolation as exc:
         if exc.diag.constraint_name != "uq_saved_views_user_page_name":
             raise
-        raise HTTPException(
-            409,
-            detail={
-                "code": "DUPLICATE_NAME",
-                "message": "a view with that name already exists on this page",
-            },
+        raise refuse(
+            409, "DUPLICATE_NAME", "a view with that name already exists on this page"
         ) from None
     # _own has already refused a view that is not the caller's, so the UPDATE
     # matched.
