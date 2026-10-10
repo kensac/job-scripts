@@ -53,9 +53,8 @@ def _age_closed_verdict(url: str, days: int) -> None:
 
 
 def _machine_row(uid: int, job_id: int) -> None:
-    """What materialize_passing writes for a passing posting: an empty board
-    row and the working-set pair the sweep reads."""
-    db.execute("INSERT INTO user_jobs (user_id, job_id) VALUES (%s, %s)", (uid, job_id))
+    """What materialize_passing writes for a passing posting: the
+    working-set pair the sweep reads."""
     db.execute("INSERT INTO user_job_working_set (user_id, job_id) VALUES (%s, %s)", (uid, job_id))
 
 
@@ -301,37 +300,6 @@ async def test_a_splitter_resuming_a_parked_batch_selects_no_new_candidates(f, t
 
     assert taken == [{"rows": [], "parent_id": None, "force": False}]
     assert _urls(taken) == set(), "the stale posting waits for the batch in flight"
-
-
-_STALE = (
-    "COALESCE((SELECT MAX(q.created_at) FROM ai_queries q WHERE q.url = j.url"
-    " AND q.check_type = 'closed'), '-infinity') < now() - make_interval(days => %(days)s)"
-)
-
-
-@pytest.mark.corpus
-def test_the_working_set_stale_branch_equals_the_legacy_one_on_the_corpus():
-    """Every corpus machine row was written by materialize_passing, which
-    writes the working-set pair beside it, as the split backfill does for
-    legacy rows. So the legacy stale branch (the reference) and the cutover
-    select the same postings here; on production the same comparison is the
-    PR's shadow SQL. Run without the per-cycle cap, which only truncates."""
-    from api.board.person_state import UNTOUCHED
-
-    days = {"days": int(db.get_config("reverify_days"))}
-    legacy = db.query(
-        f"SELECT DISTINCT j.url FROM user_jobs uj JOIN jobs j ON j.id = uj.job_id "
-        f"WHERE {UNTOUCHED} AND {_STALE}",
-        days,
-    )
-    cutover = db.query(
-        f"SELECT DISTINCT j.url FROM user_job_working_set ws JOIN jobs j ON j.id = ws.job_id "
-        f"WHERE NOT EXISTS (SELECT 1 FROM user_jobs uj WHERE uj.user_id = ws.user_id "
-        f"AND uj.job_id = ws.job_id AND NOT ({UNTOUCHED})) AND {_STALE}",
-        days,
-    )
-    assert legacy, "the corpus must hold stale machine rows or this compares nothing"
-    assert {r["url"] for r in cutover} == {r["url"] for r in legacy}
 
 
 # ---------------------------------------------------------------------------

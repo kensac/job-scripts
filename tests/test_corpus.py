@@ -104,13 +104,11 @@ def test_materialisation_actually_put_rows_on_a_board():
     corpus. If it produces nothing, every board and visibility test downstream
     asserts over zero rows.
 
-    Counted on UNTOUCHED rows specifically. The generator only ever writes
-    board rows with a status on them, so an untouched row is one the
-    application's predicate put there and nothing else could have. Asserting
-    on user_jobs as a whole passed with materialisation disabled entirely,
-    which is how this ended up spelled this way."""
+    Counted on the working set specifically. The generator only ever writes
+    person rows into user_jobs, so a working-set pair is one the
+    application's predicate put there and nothing else could have."""
     assert _one("SELECT count(*) FROM user_jobs") > 0
-    materialised = _one("SELECT count(*) FROM user_jobs WHERE status IS NULL")
+    materialised = _one("SELECT count(*) FROM user_job_working_set")
     assert materialised > 0, (
         "no untouched board rows; the write-time predicate produced nothing "
         "over this corpus, so every board test below is vacuous"
