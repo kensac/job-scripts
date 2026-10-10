@@ -621,9 +621,30 @@ JSON feed's inactive record against another source that lists the posting).
 A later change drops the fallback once the shadow's `projected=None` cells
 for active rows hold only explained classes.
 
-`IS_AVAILABLE` is a correlated subquery per row. Over the whole catalog it
-costs about 10 seconds where `j.active` costs 0.4, so a reader that scanned
-every active row by the flag is measured on production before it moves.
+**Availability is stored, in `jobs.available`.** Computed per row,
+`AVAILABLE` cost every reader that moved: the AI-eligible count went from
+2.0 s to 6.5 s and a board recompute from 27 s to 38 s, at 992 recomputes a
+day, about three hours of database time a day (production, 2026-10-10).
+`IS_AVAILABLE` now reads `COALESCE(j.available, j.active)`, which costs
+what `j.active` did. `AVAILABLE` stays the one definition, and three writers
+store it:
+
+- `catalog.observe` refreshes the rows its observations changed, after they
+  commit, in batches of 500.
+- `catalog.set_active` refreshes its row in its own transaction.
+- `catalog.reconcile_available`, in the hourly `retire_switched_off` task,
+  writes every row where the stored value differs. A source switched on or
+  off and the title pattern setting change availability without an
+  observation, and land within the hour, as `retire_switched_off`'s own rule
+  does.
+
+Each writer locks first, in url order, and evaluates in a second statement.
+Under READ COMMITTED that statement's snapshot is taken after the locks are
+held, so it sees every observation committed before them, and a writer that
+commits one later refreshes again behind it. Measured cost: about 8 to 10 s
+an hour to evaluate the whole catalog, 0.3 s per 500 refreshed rows, and
+writes only where the value changes. On deploy the first reconcile writes
+about 161,000 rows, and later pulls write the rest as they are observed.
 
 Every reader of `jobs.active`, and where it stands.
 `tests/test_availability_readers.py` fails on a new `j.active` outside the
@@ -635,7 +656,7 @@ files listed there:
 | `api/routers/analytics.py` source inventory | the owning feed's own flag, per source | stays |
 | `tasks/comp.py`, `tasks/content.py`, `tasks/verify.py` (three sweeps), `tasks/locations.py`, `tasks/application.py` (three), `api/experiments.py` | which postings get work | moved |
 | `api/board/eligibility.py` `STRUCTURAL` (board recompute, materialize, managed board runs), `tasks/board.py` `demote_closed` | which postings a board may show | moved |
-| `api/routers/filters.py` preset coverage gates | how many postings a preset would show | stays on `jobs.active`, the one deliberate exception (decided 2026-10-10): with `IS_AVAILABLE` each of its two counts took 7.0 s instead of 4.3 s on a request a person waits for, and the counts differ on 111 of 198,319 postings |
+| `api/routers/filters.py` preset coverage gates | how many postings a preset would show | stays on `jobs.active`, the one deliberate exception (decided 2026-10-10): with availability computed per row, each of its two counts took 7.0 s instead of 4.3 s on a request a person waits for, and the counts differ on 111 of 198,319 postings. Stored availability removes that cost, so this is open to decide again |
 | `api/routers/job_board.py`, `job_detail.py`, `public_job_lists.py` (`active` in the response), `api/board/column_filters.py` ("Listed by source"), `api/posting_path.py` | what a person is told | moved |
 
 **Never in a loop:** any write to the production database, and any migration

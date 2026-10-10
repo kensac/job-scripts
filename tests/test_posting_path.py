@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from api import db, posting_path
+from core import catalog
 from tests.test_verify_board_questions import _board
 
 
@@ -192,6 +193,8 @@ def test_the_catalog_step_reads_availability_not_the_feed_flag(f):
         (listed_id, source),
     )
     _, imported_url = f.make_ready_job(source="sheet_import")
+    # What the hourly reconcile stores (catalog.reconcile_available).
+    catalog.reconcile_available()
 
     def catalog_failures(url):
         path = posting_path.for_admin(url)

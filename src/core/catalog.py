@@ -181,6 +181,7 @@ def set_active(job_id: int, active: bool) -> bool:
             "INSERT INTO source_observations (job_id, source, kind) VALUES (%s, %s, %s)",
             (job_id, CORRECTION_SOURCE, "reappeared" if active else "unlisted"),
         )
+        _refresh_available(conn, [job_id], skip_locked=False)
         return True
 
 
@@ -364,26 +365,97 @@ AVAILABLE: LiteralString = (
         END))"""
 )
 
-# What a reader of availability uses until every switched-on source has been
-# observed: AVAILABLE, and jobs.active where AVAILABLE cannot tell. The
-# fallback shrinks as each source's first pull after the dual write lands,
-# and goes once the shadow's projected=None cells for active rows hold only
-# explained classes (docs/agents/architecture-migration.md, phase 3).
-IS_AVAILABLE: LiteralString = "COALESCE(" + AVAILABLE + ", {job}.active)"
+# What a reader of availability uses: AVAILABLE as stored in jobs.available,
+# and jobs.active where it cannot tell (NULL) until every switched-on source
+# has been observed. The fallback goes once the shadow's projected=None cells
+# for active rows hold only explained classes
+# (docs/agents/architecture-migration.md, phase 3). Stored, because computed
+# per row it cost every reader: the AI-eligible count went from 2.0 s to
+# 6.5 s, a board recompute from 27 s to 38 s (production, 2026-10-10).
+IS_AVAILABLE: LiteralString = "COALESCE({job}.available, {job}.active)"
+
+_RECONCILE_CHUNK = 20_000
+
+
+def _refresh_available(conn, ids: list[int], skip_locked: bool) -> int:
+    """Writes AVAILABLE into jobs.available for these rows where it differs.
+    Locks first, in url order (_LOCK_ORDER), then evaluates in a second
+    statement: under READ COMMITTED that statement's snapshot is taken after
+    the locks are held, so every observation committed before them is seen,
+    and a writer that commits one after them refreshes again behind this
+    one. Evaluated with the lock in one statement, the value would come from
+    a snapshot older than the lock. Returns the rows written."""
+    if not ids:
+        return 0
+    locked = [
+        r["id"]
+        for r in conn.execute(
+            f"SELECT id FROM jobs WHERE id = ANY(%s) ORDER BY url {_LOCK_ORDER} "
+            f"FOR NO KEY UPDATE{' SKIP LOCKED' if skip_locked else ''}",
+            (ids,),
+        ).fetchall()
+    ]
+    if not locked:
+        return 0
+    available = AVAILABLE.format(job="jobs")
+    return conn.execute(
+        f"UPDATE jobs SET available = {available} "
+        f"WHERE id = ANY(%s) AND available IS DISTINCT FROM {available}",
+        (locked,),
+    ).rowcount
+
+
+def refresh_available(ids: list[int]) -> int:
+    """jobs.available for rows whose observations just changed, in batches of
+    their own transaction (_BATCH), so a source's first pull does not hold
+    thousands of row locks against the other pulls."""
+    written = 0
+    for start in range(0, len(ids), _BATCH):
+        with transaction(), connection() as conn:
+            written += _refresh_available(conn, ids[start : start + _BATCH], skip_locked=False)
+    return written
+
+
+def reconcile_available() -> int:
+    """jobs.available over the whole catalog, in id chunks of their own
+    transaction: what observations do not announce, a source switched on or
+    off and the title pattern setting flipped, lands here within the hour,
+    as retire_switched_off's own rule does. Only rows that differ are locked,
+    and rows a concurrent writer holds are skipped for the next run, so it
+    cannot deadlock against an ingest. Safe to stop and rerun. Returns the
+    rows written."""
+    available = AVAILABLE.format(job="j")
+    with pool.connection() as conn:
+        bounds = conn.execute("SELECT min(id) AS lo, max(id) AS hi FROM jobs").fetchone()
+    if not bounds or bounds["lo"] is None:
+        return 0
+    written = 0
+    for lo in range(bounds["lo"], bounds["hi"] + 1, _RECONCILE_CHUNK):
+        with transaction(), connection() as conn:
+            stale = [
+                r["id"]
+                for r in conn.execute(
+                    f"SELECT j.id FROM jobs j WHERE j.id >= %s AND j.id < %s "
+                    f"AND j.available IS DISTINCT FROM {available}",
+                    (lo, lo + _RECONCILE_CHUNK),
+                ).fetchall()
+            ]
+            written += _refresh_available(conn, stale, skip_locked=True)
+    return written
 
 
 def availability_shadow() -> list[dict]:
-    """jobs.active against AVAILABLE over the whole catalog, in one snapshot:
-    a count per (legacy, projected, owning source) with up to three example
-    job ids. Read-only. Run beside retire_switched_off until the fallback in
-    IS_AVAILABLE goes, so each cycle leaves one comparison on its task."""
-    available = AVAILABLE.format(job="j")
+    """jobs.active against jobs.available over the whole catalog, in one
+    snapshot: a count per (legacy, projected, owning source) with up to three
+    example job ids. Read-only. Run beside retire_switched_off until the
+    fallback in IS_AVAILABLE goes, so each cycle leaves one comparison on its
+    task."""
     with pool.connection() as conn:
         return conn.execute(
-            f"""
+            """
             SELECT legacy, projected, source, count(*) AS n,
                    (array_agg(id ORDER BY id))[1:3] AS examples
-            FROM (SELECT j.id, j.source, j.active AS legacy, {available} AS projected
+            FROM (SELECT j.id, j.source, j.active AS legacy, j.available AS projected
                   FROM jobs j) p
             GROUP BY legacy, projected, source
             """
@@ -462,6 +534,8 @@ def observe(
                 "VALUES (%s, %s, %s, %s)",
                 [(job_id, source, kind, run_id) for _, job_id, kind in rows],
             )
+        # After the insert commits, so the refresh's snapshot sees it.
+        refresh_available(sorted({job_id for _, job_id, _ in rows}))
     return dict(Counter(kind for _, _, kind in rows))
 
 

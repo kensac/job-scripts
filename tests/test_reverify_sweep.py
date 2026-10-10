@@ -20,6 +20,7 @@ import asyncio
 import pytest
 
 from api import db, fetching
+from core import catalog
 from core.fetching import ats as core_ats
 from tasks import runtime as tasks_runtime
 from tasks import verify as tasks_verify
@@ -176,6 +177,8 @@ async def test_a_full_run_takes_only_postings_believed_open_and_reachable(f, tak
     # sheet_import is a switched-off source (catalog.AVAILABLE): not available,
     # so nothing spends on it.
     _, sheet_url = f.make_ready_job(source="sheet_import")
+    # What the hourly reconcile stores (catalog.reconcile_available).
+    catalog.reconcile_available()
 
     task_id = f.make_task("reverify_open", {}, status="running")
     await tasks_verify.handle_reverify_open(task_id, {"full": True})
