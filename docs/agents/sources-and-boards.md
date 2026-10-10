@@ -644,9 +644,9 @@ iCIMS resolver reads the frame (`?in_iframe=1`) and its JobPosting JSON-LD;
 a posting that is not public answers 410, which is gone. A frame without
 the JSON-LD is an error, never text.
 
-The content row's reason (`ats text`, `static`, `scraped`) is how the share
+A page fetch's `method` (`ats text`, `static`, `scraped`) is how the share
 each tier serves is read, so the engine can be switched in config and judged
-from the rows rather than assumed.
+from `page_fetches` rather than assumed.
 
 ## A host that blocks bursts is drip-fed, not pulled off
 

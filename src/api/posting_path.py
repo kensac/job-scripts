@@ -169,7 +169,7 @@ def _catalog_steps(job: dict[str, Any]) -> list[PathStep]:
 
 def _content_step(job: dict[str, Any]) -> PathStep:
     row = db.query_one(
-        "SELECT reason, created_at FROM ai_queries WHERE url = %s AND check_type = 'content' "
+        "SELECT method AS reason, created_at FROM page_fetches WHERE url = %s "
         "AND status = 'passed' ORDER BY id DESC LIMIT 1",
         (job["url"],),
     )

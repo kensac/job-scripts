@@ -63,7 +63,7 @@ _CANDIDATES = f"""
     WITH current_row AS (
         SELECT c.url, q.content_row_id
         FROM (
-            SELECT DISTINCT a.url FROM ai_queries a
+            SELECT DISTINCT a.url FROM ledger_rows a
             LEFT JOIN jobs j ON j.url = a.url
             WHERE j.url IS NULL
                OR ({AI_ELIGIBLE_JOB.format(job="j")} AND {VERIFIED_OPEN.format(url="j.url")})

@@ -59,7 +59,7 @@ logger = logging.getLogger(__name__)
 # page from one that did not. An identical re-scrape refreshes the id and pays
 # for nothing.
 _LEGACY_SCOPE = f"""
-    SELECT DISTINCT a.url FROM ai_queries a
+    SELECT DISTINCT a.url FROM ledger_rows a
     LEFT JOIN jobs j ON j.url = a.url
     WHERE j.url IS NULL OR {AI_ELIGIBLE_JOB.format(job="j")}
 """

@@ -313,7 +313,7 @@ async def test_a_page_that_will_not_come_back_keeps_its_verdict(f, submitted, mo
     assert closed["status"] == "passed", "the prior verdict stands"
     assert closed["config_name"] != "reverify", "and the sweep did not write over it"
     failure = db.query_one(
-        "SELECT status, input_content FROM ai_queries WHERE url = %s AND check_type = 'content' "
+        "SELECT status, content AS input_content FROM page_fetches WHERE url = %s "
         "ORDER BY id DESC LIMIT 1",
         (url,),
     )

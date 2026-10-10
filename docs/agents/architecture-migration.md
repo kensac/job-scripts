@@ -105,11 +105,25 @@ reader:
 2. `page_texts`: page text, the same way. Done. It excludes a custom
    filter's input, which wraps the page with the company and title, and
    `on_verdict` marks text that older verification stored only on its
-   answer. Reads of fetch attempts and failures (`check_type = 'content'`
-   with any status) are a fetch log, a fourth kind, and stay on the table
-   until step 3 gives them a home.
-3. Page text as its own table; an answer points at the page it judged
-   instead of copying it.
+   answer.
+3. Page fetches as their own table, `page_fetch_rows`, written only by
+   `core.page_fetches.record`. A fetch is a fact with none of an answer's
+   columns. In progress:
+   - Done: writers append to the table; readers use `page_fetches` (every
+     fetch, in either place), `page_texts` (fetched text plus the old copies
+     on answers) and `ledger_rows` (every row ai_queries ever held, for the
+     admin ledger, board spend and the derivation scopes, so their numbers do
+     not move while rows do). Ids come from `ai_queries_id_seq`, so a moved
+     fetch keeps its id and every `content_row_id` stays true.
+   - Next: a resumable task moves the old fetch rows, deleting and inserting
+     in one statement so each is in exactly one place. It also brings the
+     text copies on answers (11,142 urls) over as fetches with method
+     `verification`, and relabels fetches with no recorded origin. Then
+     `on_verdict` is always false and is removed, the views drop their
+     ai_queries arms, the table takes the name `page_fetches`, and
+     `job_profiles.content_row_id` gets its foreign key back, to the table.
+   - Then: an answer points at the fetch it judged, and the copies of page
+     text on answers are cleared.
 4. Call usage as one ledger that other tables point at instead of copying
    cost into themselves.
 

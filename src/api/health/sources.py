@@ -45,20 +45,19 @@ def _detect_sources() -> list[dict[str, Any]]:
                -- path taking over as a collapse: gh_point72, 98 to 47 percent,
                -- 2026-09-06, with 58 of 100 rows being listing text.
                COUNT(*) FILTER (WHERE q.created_at > now() - interval '24 hours'
-                                AND q.reason IN ('ats text', 'listing text')) AS recent_ats,
+                                AND q.method IN ('ats text', 'listing text')) AS recent_ats,
                COUNT(*) FILTER (WHERE q.created_at BETWEEN now() - interval '8 days'
                                 AND now() - interval '24 hours') AS base_total,
                COUNT(*) FILTER (WHERE q.created_at BETWEEN now() - interval '8 days'
                                 AND now() - interval '24 hours'
-                                AND q.reason IN ('ats text', 'listing text')) AS base_ats
-        FROM ai_queries q JOIN jobs j ON j.url = q.url
-        WHERE q.check_type = 'content'
-          -- Only rows that record where the text CAME from. Other writers
-          -- (pittcsc's 'content cached') log a content row with no origin,
-          -- and counting those in the denominator silently buries the ATS
-          -- share far below the `base >= 0.30` floor, which is why this
-          -- detector had never once fired.
-          AND q.reason IN ('ats text', 'listing text', 'scraped', 'static')
+                                AND q.method IN ('ats text', 'listing text')) AS base_ats
+        FROM page_fetches q JOIN jobs j ON j.url = q.url
+        -- Only rows that record where the text CAME from. Other writers
+        -- (pittcsc's 'content cached') log a fetch with no origin,
+        -- and counting those in the denominator silently buries the ATS
+        -- share far below the `base >= 0.30` floor, which is why this
+        -- detector had never once fired.
+        WHERE q.method IN ('ats text', 'listing text', 'scraped', 'static')
           AND q.created_at > now() - interval '8 days'
           -- Backlog sweeps and live ingest are different populations with
           -- different ATS-text shares, so comparing a backfill-heavy baseline
