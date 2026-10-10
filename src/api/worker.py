@@ -262,6 +262,14 @@ def schedule_ingest_cycle() -> None:
     # never pulled, so nothing else would retire its postings. A no-op once
     # the catalog agrees (catalog.retire_switched_off).
     enqueue("retire_switched_off", {"cycle": cycle}, dedupe_key=f"retire-off:{cycle}")
+    # The page fetches still stored in ai_queries move to their own table
+    # (tasks.page_fetch_move). A run with nothing left to move only reads.
+    # One at a time: a second run would only wait on the first's row locks.
+    if not db.query_one(
+        "SELECT 1 FROM tasks WHERE kind = 'move_page_fetches' "
+        "AND status IN ('pending', 'running') LIMIT 1"
+    ):
+        enqueue("move_page_fetches", {"cycle": cycle}, dedupe_key=f"page-fetch-move:{cycle}")
     # Board membership for every person who can have one, every
     # board_refresh_minutes, so new verdicts reach a board without anyone
     # touching a preference. Bucketed like the ingest cycle; a person's own

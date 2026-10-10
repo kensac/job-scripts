@@ -53,7 +53,7 @@ def _detect_sources() -> list[dict[str, Any]]:
                                 AND q.method IN ('ats text', 'listing text')) AS base_ats
         FROM page_fetches q JOIN jobs j ON j.url = q.url
         -- Only rows that record where the text CAME from. Other writers
-        -- (pittcsc's 'content cached') log a fetch with no origin,
+        -- (pittcsc's, labelled 'unknown') log a fetch with no origin,
         -- and counting those in the denominator silently buries the ATS
         -- share far below the `base >= 0.30` floor, which is why this
         -- detector had never once fired.
