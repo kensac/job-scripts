@@ -91,6 +91,28 @@ def retire_unlisted(source: str, listed_and_admitted: list[str]) -> int:
         return len(dropped)
 
 
+def set_near_copy_keys(keys: dict[str, str]) -> None:
+    """Records the near-copy key (core.near_copy) of the text verification is
+    about to read, by url. Several rows in one statement, so they are locked
+    in url order (_LOCK_ORDER) like every multi-row writer of jobs: ingest
+    upserts the same urls concurrently."""
+    if not keys:
+        return
+    with pool.connection() as conn:
+        conn.execute(
+            f"""
+            WITH locked AS (
+                SELECT j.id, k.key
+                FROM jobs j JOIN unnest(%s::text[], %s::text[]) AS k(url, key) ON k.url = j.url
+                WHERE j.near_copy_key IS DISTINCT FROM k.key
+                ORDER BY j.url {_LOCK_ORDER} FOR UPDATE OF j
+            )
+            UPDATE jobs SET near_copy_key = locked.key FROM locked WHERE jobs.id = locked.id
+            """,
+            (list(keys), list(keys.values())),
+        )
+
+
 def retire_switched_off(patterns_enforced: bool) -> dict[str, int]:
     """Marks inactive every active row whose source is switched off, unless a
     switched-on source lists the url and would admit it. A switched-off source
