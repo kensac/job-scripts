@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from fastapi import HTTPException
-
 from api import db
 from api.mail import match as mail_match
 from api.mail import pipeline as mail_pipeline
+from api.mail.store import owned_message
+from api.problem import refuse
 from api.resolve.contracts import (
     ACCEPT_STATUS,
     ASSIGN,
@@ -19,24 +19,14 @@ from api.resolve.contracts import (
 )
 
 
-def _owned_message(message_id: int, owner_id: int) -> None:
-    row = db.query_one(
-        "SELECT id FROM email_messages WHERE id = %s AND user_id = %s", (message_id, owner_id)
-    )
-    if row is None:
-        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown queue item"})
-
-
 def _resolve_message(
     message_id: int, body: ResolveRequest, owner_id: int, actor_user_id: int
 ) -> ResolveResult:
-    _owned_message(message_id, owner_id)
+    owned_message(message_id, owner_id)
 
     if body.choice == ASSIGN:
         if body.target is None:
-            raise HTTPException(
-                400, detail={"code": "TARGET_REQUIRED", "message": "assign needs an application"}
-            )
+            raise refuse(400, "TARGET_REQUIRED", "assign needs an application")
         # `dismissed_at IS NULL` is the same predicate the verb's eligibility is
         # declared from, ENFORCED HERE rather than only announced. Without it
         # the server said "no application at this company yet" for a dismissed
@@ -49,17 +39,15 @@ def _resolve_message(
             (body.target, owner_id),
         )
         if owner is None:
-            raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown application"})
+            raise refuse(404, "NOT_FOUND", "unknown application")
         if owner["dismissed_at"] is not None:
             # 409 rather than 404: it exists and the caller may see it, but the
             # state it is in refuses the verb, and saying so is what lets them
             # restore it instead of guessing at a missing row.
-            raise HTTPException(
+            raise refuse(
                 409,
-                detail={
-                    "code": "DISMISSED",
-                    "message": "that application is dismissed; restore it before assigning to it",
-                },
+                "DISMISSED",
+                "that application is dismissed; restore it before assigning to it",
             )
         mail_match.record(
             message_id,
@@ -125,15 +113,9 @@ def _resolve_match(
         (match_id, owner_id),
     )
     if row is None:
-        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown queue item"})
+        raise refuse(404, "NOT_FOUND", "unknown queue item")
     if not row["is_current"]:
-        raise HTTPException(
-            409,
-            detail={
-                "code": "STALE",
-                "message": "this attachment has already been superseded; reload the queue",
-            },
-        )
+        raise refuse(409, "STALE", "this attachment has already been superseded; reload the queue")
 
     if body.choice == CONFIRM_MATCH:
         mail_match.confirm(row["message_id"], row, actor_user_id=actor_user_id, note=body.note)
@@ -157,7 +139,7 @@ def _resolve_proposal(
         mail_pipeline.ACCEPTED if body.choice == ACCEPT_STATUS else mail_pipeline.DISMISSED,
     )
     if answered is None:
-        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown queue item"})
+        raise refuse(404, "NOT_FOUND", "unknown queue item")
     return ResolveResult(
         ok=True,
         choice=body.choice,
@@ -174,7 +156,7 @@ def _resolve_action(action_id: int, body: ResolveRequest, owner_id: int) -> Reso
         (action_id, owner_id),
     )
     if row is None:
-        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown queue item"})
+        raise refuse(404, "NOT_FOUND", "unknown queue item")
     if row["resolved_at"] is None:
         db.execute(
             "UPDATE action_items SET resolved_at = now(), resolution = %s WHERE id = %s",
@@ -197,15 +179,9 @@ def resolve(item_id: str, body: ResolveRequest, owner_id: int, actor_user_id: in
     kind, _, raw = item_id.partition(":")
     parts = raw.split(":")
     if kind not in _CHOICES_BY_KIND or not all(p.isdigit() for p in parts):
-        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown queue item"})
+        raise refuse(404, "NOT_FOUND", "unknown queue item")
     if body.choice not in _CHOICES_BY_KIND[kind]:
-        raise HTTPException(
-            400,
-            detail={
-                "code": "WRONG_CHOICE",
-                "message": f"{body.choice} is not a verb on a {kind} item",
-            },
-        )
+        raise refuse(400, "WRONG_CHOICE", f"{body.choice} is not a verb on a {kind} item")
 
     if kind == "message" and len(parts) == 1:
         return _resolve_message(int(parts[0]), body, owner_id, actor_user_id)
@@ -215,4 +191,4 @@ def resolve(item_id: str, body: ResolveRequest, owner_id: int, actor_user_id: in
         return _resolve_proposal(int(parts[0]), int(parts[1]), body, owner_id)
     if kind == "action" and len(parts) == 1:
         return _resolve_action(int(parts[0]), body, owner_id)
-    raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown queue item"})
+    raise refuse(404, "NOT_FOUND", "unknown queue item")

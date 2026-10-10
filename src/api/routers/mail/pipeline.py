@@ -10,7 +10,7 @@ from __future__ import annotations
 import datetime
 from typing import Any, NamedTuple
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
 from api import db
@@ -21,6 +21,7 @@ from api.mail import pipeline as mail_pipeline
 from api.mail.current import current_match
 from api.mail.pipeline import ApplicationEvent, SenderSignal
 from api.models import Ok
+from api.problem import refuse
 from api.routers.mail.shared import Evidence, _evidence_for
 
 router = APIRouter()
@@ -461,7 +462,7 @@ def pipeline_detail(
         (application_id, user.id),
     )
     if app is None:
-        raise HTTPException(status_code=404, detail="application not found")
+        raise refuse(404, "NOT_FOUND", "application not found")
     events = mail_pipeline.events_for(application_id)
     matches = db.query_as(
         MatchRow,
@@ -542,7 +543,7 @@ def _owned_application(application_id: int, user_id: int) -> dict[str, Any]:
         (application_id, user_id),
     )
     if app is None:
-        raise HTTPException(status_code=404, detail="application not found")
+        raise refuse(404, "NOT_FOUND", "application not found")
     return app
 
 
@@ -572,7 +573,7 @@ def detach_match(
         (match_id, application_id),
     )
     if match is None:
-        raise HTTPException(status_code=404, detail="match not found on this application")
+        raise refuse(404, "NOT_FOUND", "match not found on this application")
     mail_match.reject(
         match["message_id"], actor_user_id=user.id, note=body.note or "detached by the user"
     )
@@ -599,7 +600,7 @@ def reattach_match(
         (match_id, application_id),
     )
     if match is None:
-        raise HTTPException(status_code=404, detail="match not found on this application")
+        raise refuse(404, "NOT_FOUND", "match not found on this application")
     mail_match.record(
         match["message_id"],
         mail_match.Match(
@@ -628,9 +629,10 @@ def dismiss_application(
     """
     app = _owned_application(application_id, user.id)
     if app["source_provenance"] != "email":
-        raise HTTPException(
-            status_code=409,
-            detail="only a mail-derived application can be dismissed; this one came from the tracker",
+        raise refuse(
+            409,
+            "TRACKER_APPLICATION",
+            "only a mail-derived application can be dismissed; this one came from the tracker",
         )
     db.execute(
         "UPDATE applications SET dismissed_at = now(), dismissed_reason = %s, updated_at = now() "

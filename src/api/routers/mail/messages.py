@@ -13,7 +13,7 @@ from __future__ import annotations
 import datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
 from api import db
@@ -21,6 +21,8 @@ from api.auth import AuthedUser, require_user
 from api.mail import match as mail_match
 from api.mail import pipeline as mail_pipeline
 from api.mail.current import current_event, current_match
+from api.mail.store import owned_message
+from api.problem import refuse
 from api.routers.mail.shared import (
     Candidates,
     Reclassification,
@@ -72,17 +74,6 @@ class Assignment(BaseModel):
     # correcting one message of a thread means the thread, and making them do
     # it five times is the kind of chore this system exists to remove.
     whole_thread: bool = True
-
-
-def _owned_message(message_id: int, user_id: int) -> dict[str, Any]:
-    row = db.query_one(
-        "SELECT id, subject, from_email, sent_at, body_text, provider_thread_id "
-        "FROM email_messages WHERE id = %s AND user_id = %s",
-        (message_id, user_id),
-    )
-    if row is None:
-        raise HTTPException(status_code=404, detail="message not found")
-    return row
 
 
 _USER_MAIL_SORTS = {
@@ -282,7 +273,7 @@ def match_candidates(
     most often wants is "this belongs to a job I tracked but never recorded
     applying to", and there is nothing to attach to until one exists.
     """
-    message = _owned_message(message_id, user.id)
+    message = owned_message(message_id, user.id)
     return _candidates_payload(message, user.id, q, limit)
 
 
@@ -311,7 +302,7 @@ def assign_message(
     predating the catalog. Never the other way round: an email does not get to
     invent a `jobs` row.
     """
-    _owned_message(message_id, user.id)
+    owned_message(message_id, user.id)
     application_id = body.application_id
 
     if application_id is not None:
@@ -320,7 +311,7 @@ def assign_message(
             (application_id, user.id),
         )
         if owned is None:
-            raise HTTPException(status_code=404, detail="application not found")
+            raise refuse(404, "NOT_FOUND", "application not found")
     elif body.job_id is not None:
         job = db.query_one(
             "SELECT j.id, j.company, j.title, uj.date_applied FROM jobs j "
@@ -328,7 +319,7 @@ def assign_message(
             (user.id, body.job_id),
         )
         if job is None:
-            raise HTTPException(status_code=404, detail="job not on your board")
+            raise refuse(404, "NOT_FOUND", "job not on your board")
         existing = db.query_one(
             "SELECT id FROM applications WHERE user_id = %s AND job_id = %s",
             (user.id, body.job_id),
@@ -342,8 +333,7 @@ def assign_message(
                 "RETURNING id",
                 (user.id, job["id"], job["company"], job["title"], job["date_applied"]),
             )
-            if created is None:
-                raise HTTPException(status_code=500, detail="could not create the application")
+            assert created is not None
             application_id = created["id"]
     elif body.company_name:
         created = db.query_one(
@@ -352,13 +342,13 @@ def assign_message(
             "(SELECT sent_at FROM email_messages WHERE id = %s)) RETURNING id",
             (user.id, body.company_name, body.title, message_id),
         )
-        if created is None:
-            raise HTTPException(status_code=500, detail="could not create the application")
+        assert created is not None
         application_id = created["id"]
     else:
-        raise HTTPException(
-            status_code=400,
-            detail="give an application_id, a job_id, or a company_name to create one",
+        raise refuse(
+            400,
+            "TARGET_REQUIRED",
+            "give an application_id, a job_id, or a company_name to create one",
         )
 
     # The provider's own thread id, never a derived one. Grouping threadless
@@ -481,7 +471,7 @@ def message_detail(message_id: int, user: AuthedUser = Depends(require_user)) ->
         (message_id, user.id),
     )
     if row is None:
-        raise HTTPException(status_code=404, detail="message not found")
+        raise refuse(404, "NOT_FOUND", "message not found")
     # Sanitised on READ, never stored sanitised: body_html stays the message as
     # it arrived, so a better sanitiser improves every message ever received
     # rather than only the ones that come next. The raw markup is deliberately
@@ -528,7 +518,7 @@ def correct_classification(
     The stage recomputes on read, so the correction propagates with nobody
     restating it - the same property that makes detaching work.
     """
-    message = _owned_message(message_id, user.id)
+    message = owned_message(message_id, user.id)
     return _apply_classification(message, body, actor_user_id=user.id)
 
 
@@ -555,7 +545,7 @@ def revert_classification(message_id: int, user: AuthedUser = Depends(require_us
     the log still has to show that both happened. Refused when the model has
     never classified this message, because there is nothing to restore.
     """
-    _owned_message(message_id, user.id)
+    owned_message(message_id, user.id)
     return _apply_revert(message_id, actor_user_id=user.id)
 
 
@@ -619,7 +609,7 @@ def read_thread(
     messages, which is a mailing list reusing a thread id rather than a
     conversation, and a reader who asked for a thread should not be handed one.
     """
-    _owned_message(message_id, user.id)
+    owned_message(message_id, user.id)
     rows = db.query(
         f"""
         WITH key AS (

@@ -12,7 +12,7 @@ from __future__ import annotations
 import datetime
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
 from api import db, pagination, rates, scoping, sorting
@@ -22,6 +22,7 @@ from api.mail import match as mail_match
 from api.mail import pipeline as mail_pipeline
 from api.mail.current import current_event, current_match
 from api.mail.match import CurrentMatch
+from api.problem import refuse
 from api.rates import Rate
 from api.routers.admin import require_admin
 from api.routers.mail.shared import (
@@ -759,7 +760,7 @@ def mail_detail(message_id: int, user: AuthedUser = Depends(require_admin)) -> A
         (message_id,),
     )
     if not message:
-        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown message"})
+        raise refuse(404, "NOT_FOUND", "unknown message")
     return AdminMailDetail(
         message=message,
         events=db.query_as(
@@ -805,7 +806,7 @@ class MatchOverride(BaseModel):
 def _admin_message(message_id: int) -> dict[str, Any]:
     """Any user's message, for an administrator.
 
-    Deliberately NOT `_owned_message`: the whole point of these routes is that
+    Deliberately NOT `store.owned_message`: the whole point of these routes is that
     the admin corrects other people's mailboxes - friends and family, not a
     hypothetical. The ownership rule that applies is `require_admin` on the
     route; what this returns is the OWNER, because every helper below needs to
@@ -817,7 +818,7 @@ def _admin_message(message_id: int) -> dict[str, Any]:
         (message_id,),
     )
     if message is None:
-        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown message"})
+        raise refuse(404, "NOT_FOUND", "unknown message")
     return message
 
 
@@ -890,7 +891,7 @@ def override_match(
     """
     message = db.query_one("SELECT user_id FROM email_messages WHERE id = %s", (message_id,))
     if not message:
-        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown message"})
+        raise refuse(404, "NOT_FOUND", "unknown message")
     if body.application_id is not None:
         owner = db.query_one(
             "SELECT user_id FROM applications WHERE id = %s", (body.application_id,)
@@ -899,7 +900,7 @@ def override_match(
             # Cross-user match would attribute one person's outcome to
             # another's application. 404 rather than 403: whether that
             # application exists is not something the caller is entitled to.
-            raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown application"})
+            raise refuse(404, "NOT_FOUND", "unknown application")
     # A deliberate refusal is recorded as the matcher's own refusal method, so
     # every reader that already distinguishes the two - the unmatched cut, the
     # analytics breakdown, the pipeline filter - sees it without being taught a

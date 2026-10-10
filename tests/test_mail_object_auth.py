@@ -103,3 +103,26 @@ def test_answering_a_suggestion_refuses_an_event_from_elsewhere(mine, f):
         )["c"]
         == 0
     )
+
+
+def test_another_users_message_is_refused_alike_on_every_route(mine, f, client):
+    """One ownership check behind the mail routes and the resolve queue, and
+    one refusal shape. The mail routes used to answer a bare string while the
+    queue answered `{code, message}` for the same missing message."""
+    headers, _uid, _my_app = mine
+    _their_app, their_match, _their_event = _other_user_application(f)
+    message = db.query_one(
+        "SELECT message_id FROM application_matches WHERE id = %s", (their_match,)
+    )["message_id"]
+
+    for method, path, body in (
+        ("get", f"/v1/user/messages/{message}", None),
+        ("get", f"/v1/user/messages/{message}/candidates", None),
+        ("get", f"/v1/user/messages/{message}/thread", None),
+        ("post", f"/v1/user/messages/{message}/assign", {"company_name": "Mine"}),
+        ("post", f"/v1/user/messages/{message}/classify", {"kind": "rejection"}),
+        ("post", f"/v1/user/resolve/message:{message}", {"choice": "not_job_related"}),
+    ):
+        resp = client.request(method, path, json=body, headers=headers)
+        assert resp.status_code == 404, (path, resp.text)
+        assert resp.json()["detail"]["code"] == "NOT_FOUND", (path, resp.text)
