@@ -3,11 +3,12 @@ production path.
 
 The 2026-09-06 filter comparison was a hand export and a script, and the
 script fed every request the posting's first line; its headline was wrong
-and was nearly acted on. An experiment here builds each request with the
-step's own instructions, schema and input, submits one provider batch per
-arm (model and effort), and reports per arm: cost, tokens, parse failures,
-and agreement with a reference arm and with what production decided. The
-sample is drawn by seed, so the same postings can be re-measured later.
+and was nearly acted on. The step declarations here build each request with
+the step's own instructions, schema and input, and `score` reports per arm
+(model and effort): cost, tokens, parse failures, and agreement with a
+reference arm and with what production decided. The sample is drawn by seed,
+so the same postings can be re-measured later. `api.run_experiment` is the
+only caller.
 """
 
 from __future__ import annotations
@@ -21,8 +22,6 @@ from pydantic import BaseModel
 from api import db
 from core import providers, verdict_reads
 from core.store import AI_ELIGIBLE_JOB, CONTENT_LATERAL
-
-PURPOSE = "experiment"
 
 Params = dict[str, Any]
 Posting = dict[str, Any]
@@ -317,17 +316,6 @@ def _agreement(a: dict[str, Any], b: dict[str, Any]) -> dict[str, float]:
         else:
             out[k] = 1.0 if x == y else 0.0
     return out
-
-
-def summarise(experiment_id: int) -> dict[str, Any]:
-    exp = db.query_one("SELECT purpose, params FROM ai_experiments WHERE id = %s", (experiment_id,))
-    assert exp is not None
-    rows = db.query(
-        "SELECT arm, url, output, usage, cost_usd, error FROM ai_experiment_results "
-        "WHERE experiment_id = %s ORDER BY arm, url",
-        (experiment_id,),
-    )
-    return score(exp["purpose"], exp["params"], rows)
 
 
 def score(purpose: str, params: Params, rows: list[dict[str, Any]]) -> dict[str, Any]:

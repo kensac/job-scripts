@@ -257,8 +257,9 @@ class AiBatchError(Base):
 
 
 class AiExperiment(Base):
-    """One AI step measured across models and efforts on a seeded sample,
-    through the production path. See tasks.experiments."""
+    """Runs of the removed admin experiments screen. Nothing reads or writes
+    it; experiments run from `api.run_experiment` and keep their answers in
+    files. Dropped once no running image names it."""
 
     __tablename__ = "ai_experiments"
 
