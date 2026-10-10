@@ -208,9 +208,13 @@ async def test_a_split_writes_each_batch_chunk_list_as_a_verified_object(
         read.extend(task_jobs.run_jobs(payload, objects))
     assert read == jobs
     assert in_flight_urls(uid) == {job["url"] for job in jobs}
-    # Both chunks point at one stored copy of the filter they copied.
+    # Both chunks point at one stored copy of the filter instead of copying it.
+    assert all("filter" not in child["payload"] for child in children)
     assert {child["payload"]["config_id"] for child in children} == {
-        run_configs.intern(run_configs.FILTER, children[0]["payload"]["filter"])
+        run_configs.intern(
+            run_configs.FILTER,
+            {k: flt[k] for k in ("name", "prompt", "on_ambiguous", "prompt_hash")},
+        )
     }
 
 

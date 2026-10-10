@@ -57,13 +57,10 @@ def test_run_admission_snapshots_board_candidates_and_refuses_overlap(
     assert payload["execution_version"] == 2
     assert payload["inference_transport"] == "batch"
     assert payload["reasoning_effort"] == "low"
-    assert payload["sources"] == ["managed-source"]
     assert payload["title_screens"] == []
-    config = db.query_one(
-        "SELECT kind, body FROM run_configs WHERE id = %s", (payload["config_id"],)
-    )
-    assert config["kind"] == "managed_board"
-    assert config["body"] == {key: payload[key] for key in run_configs.BOARD_KEYS}
+    # The board's settings are stored once, not copied into the run.
+    assert not set(run_configs.BOARD_KEYS) & set(payload)
+    assert run_configs.with_board_settings(payload)["sources"] == ["managed-source"]
     jobs = managed_board_runs.run_jobs(payload)
     assert [job["id"] for job in jobs] == [job_id]
     assert jobs[0]["source"] == "managed-source"

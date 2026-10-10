@@ -462,27 +462,27 @@ def _plan(board_id: int) -> _Plan:
         }
         for candidate in candidates
     ]
-    payload = {
-        "managed_board_id": board.id,
-        "sponsor_user_id": board.sponsor_user_id,
-        "revision": board.revision,
+    settings = {
         "prompt": board.prompt,
         "prompt_hash": board.prompt_hash,
-        "requested_model": resolved_model,
-        "execution_mode": board.execution_mode,
         "on_ambiguous": board.on_ambiguous,
         "fail_closed": board.fail_closed,
         "bypass_sponsorship_filter": board.bypass_sponsorship_filter,
         "sources": board.sources,
         "criteria": board.criteria,
+    }
+    payload = {
+        "managed_board_id": board.id,
+        "sponsor_user_id": board.sponsor_user_id,
+        "revision": board.revision,
+        "config_id": run_configs.intern(run_configs.BOARD, settings),
+        "requested_model": resolved_model,
+        "execution_mode": board.execution_mode,
         "title_screens": recipes,
         "published": board.published,
         "reserved_tokens": reserved,
         "candidate_count": len(jobs),
     }
-    payload["config_id"] = run_configs.intern(
-        run_configs.BOARD, {key: payload[key] for key in run_configs.BOARD_KEYS}
-    )
     if board.execution_mode == "managed_filter":
         payload.update(
             {
