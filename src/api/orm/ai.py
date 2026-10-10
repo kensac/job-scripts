@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import datetime
 from decimal import Decimal
-from typing import Any
 
 from sqlalchemy import (
     BigInteger,
@@ -159,12 +158,6 @@ class AiBatch(Base):
     failed_count: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
     status: Mapped[str] = mapped_column(Text, server_default=text("'submitted'"))
     est_tokens: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
-    # Nothing writes these four since #923; tasks.usage_copies empties them
-    # and the next release drops them.
-    input_tokens: Mapped[int | None] = mapped_column(BigInteger)
-    output_tokens: Mapped[int | None] = mapped_column(BigInteger)
-    cache_write_tokens: Mapped[int | None] = mapped_column(BigInteger)
-    est_cost_usd: Mapped[Any | None] = mapped_column(Numeric(12, 6))
     submitted_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
     updated_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
     completed_at: Mapped[datetime.datetime | None]
@@ -215,42 +208,6 @@ class AiBatchError(Base):
     custom_id: Mapped[str] = mapped_column(Text, server_default=text("''"))
     error: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
-
-
-class ApiUsage(Base):
-    __tablename__ = "api_usage"
-    __table_args__ = (
-        Index("idx_api_usage_user_created", "user_id", "created_at"),
-        Index("idx_api_usage_purpose", "purpose", "created_at"),
-        Index("idx_api_usage_managed_board_created", "managed_board_id", "created_at"),
-        CheckConstraint(
-            "user_id IS NULL OR managed_board_id IS NULL", name="ck_api_usage_single_subject"
-        ),
-    )
-
-    id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
-    # NULL for fleet work. Catalog-wide extraction is charged to nobody in
-    # particular, and attributing it to whichever admin is user 1 would make
-    # per-user spend a fiction.
-    user_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("users.id", ondelete="CASCADE")
-    )
-    managed_board_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("managed_boards.id", ondelete="RESTRICT")
-    )
-    created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
-    key_source: Mapped[str] = mapped_column(Text)
-    purpose: Mapped[str] = mapped_column(Text)
-    model: Mapped[str | None] = mapped_column(Text)
-    prompt_tokens: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
-    completion_tokens: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
-    total_tokens: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
-    batched: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
-    cached_tokens: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
-    cache_write_tokens: Mapped[int | None] = mapped_column(BigInteger)
-    # NULL means the model had no published price, which must stay distinct
-    # from a call that genuinely cost nothing.
-    cost_usd: Mapped[Any | None] = mapped_column(Numeric(12, 6))
 
 
 class ModelCall(Base):
@@ -316,7 +273,7 @@ class ModelCall(Base):
     model: Mapped[str | None] = mapped_column(Text)
     # Who pays: 'fleet', 'user' or 'managed_board'. NULL is a backfilled call
     # whose payer nothing recorded, which is not the fleet. The delete rules
-    # are api_usage's, which this replaces, so a person's or a board's removal
+    # are the old usage ledger's, so a person's or a board's removal
     # behaves as it does today.
     payer: Mapped[str | None] = mapped_column(Text)
     user_id: Mapped[int | None] = mapped_column(
@@ -346,6 +303,6 @@ class ModelCall(Base):
     cost_usd: Mapped[Decimal | None] = mapped_column(Numeric(12, 6))
     # 'call': written when the call was made. The others are the backfill and
     # name the table it came from: a verdict, a batch receipt, a batch's
-    # totals, or an api_usage row; source_id is that row's id.
+    # totals, or a row of the old usage ledger; source_id is that row's id.
     source: Mapped[str] = mapped_column(Text, server_default=text("'call'"))
     source_id: Mapped[int | None] = mapped_column(BigInteger)

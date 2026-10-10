@@ -157,7 +157,7 @@ def record_batch_items(results: Iterable[BatchResult]) -> None:
                 model=batch["model"],
                 payer=payer,
                 # Batches run on the server's key. A person's or a board's
-                # share of it is 'owner', as api_usage books it.
+                # share of it is 'owner', as the old usage ledger booked it.
                 key_source="server" if payer == FLEET else "owner",
                 usage=batch_usage(result.usage),
                 task_id=batch["task_id"],

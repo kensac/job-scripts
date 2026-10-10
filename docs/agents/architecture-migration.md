@@ -311,6 +311,11 @@ it showed.
 4. Contract: stop the copies, then drop `api_usage`, the usage columns on
    `ai_queries` and `job_embeddings`, and the totals
    on `ai_batches`, each with the empty-then-drop sequence (migrations.md).
+   `api_usage`, the `ai_batches` totals and the `job_embeddings` shares go
+   first. `review_gate_outcomes` goes with the review gate tables. The usage
+   columns on `ai_queries` wait for the verdict diagnostics of /admin/spend
+   to read calls, and are cleared in the same rewrite that clears the page
+   text copied onto answers, so the 9 GB table is rewritten once.
 
 ## What may be done unattended
 

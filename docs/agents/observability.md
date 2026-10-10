@@ -175,8 +175,9 @@ usage, the admin's view of a person, and a board's cost all do. A count of
 calls is `SUM(requests)`: a backfilled batch that kept no per-request record
 is one row standing for its requests. A batch's token totals and cost are a sum
 over its calls (`model_calls.BATCH_TOTALS`), not columns of `ai_batches`.
-Nothing writes `api_usage`, the totals on `ai_batches` or the cost shares on
-`job_embeddings`; the next release drops them.
+There is no other usage ledger: `api_usage`, the totals on `ai_batches` and
+the cost shares on `job_embeddings` were dropped once the ledger held their
+history.
 
 On resume, `collect_pending` attaches model provenance from each `ai_batches`
 row. `run_batched` resolves routing only for new submissions; absent persisted
