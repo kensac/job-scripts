@@ -123,7 +123,9 @@ def _catalog_steps(job: dict[str, Any]) -> list[PathStep]:
         ]
     steps = []
     listing = db.query_one(
-        "SELECT pattern, kept, last_seen_at FROM listings WHERE url = %s", (job["url"],)
+        "SELECT t.pattern, l.kept, l.last_seen_at FROM listings l "
+        "JOIN title_patterns t ON t.id = l.pattern_id WHERE l.url = %s",
+        (job["url"],),
     )
     if listing:
         steps.append(

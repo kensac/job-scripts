@@ -145,6 +145,47 @@ def test_a_candidate_pattern_is_judged_against_everything_the_board_listed(
     assert all(row["pattern"] == "new grad" for row in page["rows"])
 
 
+def test_the_length_limit_binds_a_new_pattern_not_the_stored_one(f, client, admin_headers):
+    """2,483 sources held one 583-character pattern when the limit was 500. An
+    edit that leaves it as it is, and a preview of it, are accepted; a new
+    pattern that long is not."""
+    stored = "|".join(f"title{i:03d}" for i in range(60))
+    assert len(stored) > 500
+    f.make_source("acme")
+    db.execute("UPDATE sources SET title_pattern = %s WHERE name = 'acme'", (stored,))
+
+    def patch(body: dict):
+        return client.patch("/v1/admin/sources/acme", json=body, headers=admin_headers)
+
+    assert patch({"description": "x"}).status_code == 200
+    assert patch({"title_pattern": stored, "description": "y"}).status_code == 200
+    r = client.post(
+        "/v1/admin/sources/acme/pattern-preview",
+        json={"title_pattern": stored},
+        headers=admin_headers,
+    )
+    assert r.status_code == 200, r.text
+
+    longer = stored + "|title999"
+    for r in (
+        patch({"title_pattern": longer}),
+        client.post(
+            "/v1/admin/sources/acme/pattern-preview",
+            json={"title_pattern": longer},
+            headers=admin_headers,
+        ),
+        client.post(
+            "/v1/admin/sources",
+            json={"name": "b", "listings_url": "https://b.test/jobs.json", "title_pattern": longer},
+            headers=admin_headers,
+        ),
+    ):
+        assert r.status_code == 400 and r.json()["detail"]["code"] == "TITLE_PATTERN_TOO_LONG"
+    assert db.query_one("SELECT title_pattern FROM sources WHERE name = 'acme'") == {
+        "title_pattern": stored
+    }
+
+
 def test_every_listing_is_stored_with_its_text_and_the_text_becomes_the_content(monkeypatch, f):
     """Kept or not, the listing is on record with the text the board carried
     and the raw record; ingest stores that text as the posting's content

@@ -336,16 +336,36 @@ class SourceBody(BaseModel):
     description: str | None = Field(default=None, max_length=500)
     active: bool | None = None
     company: str | None = Field(default=None, max_length=200)
-    title_pattern: str | None = Field(default=None, max_length=500)
+    # Bounded by _check_source, which lets a stored pattern through unchanged.
+    title_pattern: str | None = None
     # Hours between pulls; 1 is the hourly cycle. Bounded above by a week so a
     # typo cannot park a board for a year while it reads as active.
     ingest_interval_hours: int | None = Field(default=None, ge=1, le=168)
 
 
-def _check_source(listings_url: str, company: str | None, title_pattern: str | None) -> None:
-    """The two facts a source row can get wrong silently: a company board on a
+# The limit since #315. It binds what an admin writes, not what is stored:
+# 2,483 sources held one 583-character pattern on 2026-10-10, and an edit that
+# leaves a stored pattern as it is must not be refused for its length.
+TITLE_PATTERN_MAX = 500
+
+
+def _check_pattern_length(title_pattern: str | None, stored: str | None) -> None:
+    if title_pattern and title_pattern != stored and len(title_pattern) > TITLE_PATTERN_MAX:
+        raise refuse(
+            400,
+            "TITLE_PATTERN_TOO_LONG",
+            f"title_pattern: at most {TITLE_PATTERN_MAX} characters",
+        )
+
+
+def _check_source(
+    listings_url: str, company: str | None, title_pattern: str | None, stored: str | None = None
+) -> None:
+    """The facts a source row can get wrong silently: a company board on a
     system that never names the company, and a pattern that ingest cannot
-    compile. Both would surface only as a failed ingest an hour later."""
+    compile. Both would surface only as a failed ingest an hour later.
+    `stored` is the pattern the row holds now, which is valid as it is."""
+    _check_pattern_length(title_pattern, stored)
     if boards.kind(listings_url) in boards.NEEDS_COMPANY and not (company or "").strip():
         raise refuse(
             400,
@@ -466,7 +486,9 @@ def patch_source(
     if not current:
         raise refuse(404, "NOT_FOUND", "unknown source")
     merged = {**current, **fields}
-    _check_source(merged["listings_url"], merged["company"], merged["title_pattern"])
+    _check_source(
+        merged["listings_url"], merged["company"], merged["title_pattern"], current["title_pattern"]
+    )
     cols = ", ".join(f"{k} = %({k})s" for k in fields)
     row = db.query_one(
         f"UPDATE sources SET {cols} WHERE name = %(name)s RETURNING {_SOURCE_COLS}",
@@ -542,7 +564,8 @@ def switch_sources(
 
 
 class PatternPreviewBody(BaseModel):
-    title_pattern: str = Field(max_length=500)
+    # Bounded like an edit: the stored pattern previews at any length.
+    title_pattern: str
     # How many example titles to return on each side.
     samples: int = Field(default=25, ge=0, le=200)
 
@@ -555,8 +578,10 @@ def pattern_preview(
     title this board has listed: the ones in the catalog and the ones the
     current pattern screened out. Nothing is written. The pattern that goes
     live is whichever one the admin chooses after seeing both sides."""
-    if not db.query_one("SELECT 1 FROM sources WHERE name = %s", (name,)):
+    source = db.query_one("SELECT title_pattern FROM sources WHERE name = %s", (name,))
+    if not source:
         raise refuse(404, "NOT_FOUND", "unknown source")
+    _check_pattern_length(body.title_pattern, source["title_pattern"])
     try:
         candidate = re.compile(body.title_pattern, re.IGNORECASE)
     except re.error as exc:
@@ -597,13 +622,17 @@ def screened_postings(
     newest listing first, so an admin can see what a pattern is costing."""
     limit = max(1, min(limit, 500))
     total = db.query_one(
-        "SELECT count(*) AS n FROM listings WHERE source = %s AND NOT kept", (name,)
+        "SELECT count(*) AS n FROM listings "
+        "WHERE source = %s AND NOT kept AND pattern_id IS NOT NULL",
+        (name,),
     )
     rows = db.query_as(
         ScreenedPosting,
-        "SELECT url, company, title, locations, date_posted, pattern, first_seen_at, last_seen_at "
-        "FROM listings WHERE source = %s AND NOT kept "
-        "ORDER BY date_posted DESC NULLS LAST, title LIMIT %s OFFSET %s",
+        "SELECT l.url, l.company, l.title, l.locations, l.date_posted, t.pattern, "
+        "l.first_seen_at, l.last_seen_at "
+        "FROM listings l JOIN title_patterns t ON t.id = l.pattern_id "
+        "WHERE l.source = %s AND NOT l.kept "
+        "ORDER BY l.date_posted DESC NULLS LAST, l.title LIMIT %s OFFSET %s",
         (name, limit, max(0, offset)),
     )
     n = total["n"] if total else 0
