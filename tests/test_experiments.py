@@ -418,3 +418,64 @@ def test_experiment_summary_scales_cost_before_display_rounding():
     assert arm["known_cost_usd"] == 0.0001
     assert arm["cost_usd"] == 0.0001
     assert arm["cost_per_100_usd"] == 0.009
+
+
+def test_the_agent_cli_sends_nothing_without_submit_and_scores_runs_side_by_side(
+    f, monkeypatch, tmp_path, capsys
+):
+    """`python -m api.run_experiment` is the agent's path: the same step
+    declarations, answers to files, nothing written to the database. Two
+    labelled runs on the same seed are a before and after."""
+    from api import run_experiment as cli
+    from core.batch import BatchResult
+
+    urls = _sample(f, 3)
+    sent: list[tuple[str, str, int, int]] = []
+    recipe = answers.VERIFICATION_REQUEST
+    answer = {
+        "is_closed": False,
+        "closed_reason": "",
+        "requires_clearance_or_restrictions": False,
+        "clearance_reason": "",
+    }
+
+    async def fake_batch(specs, model, effort, max_out, on_event=None):
+        sent.append((model, effort, len(specs), max_out))
+        assert all(s.instructions == recipe.instructions for s in specs)
+        return {
+            s.custom_id: BatchResult(
+                s.custom_id,
+                text=json.dumps(answer),
+                usage={
+                    "input_tokens": 1000,
+                    "output_tokens": 50,
+                    "input_tokens_details": {"cached_tokens": 0, "cache_write_tokens": 0},
+                },
+            )
+            for s in specs
+        }
+
+    monkeypatch.setattr("core.batch.run_responses_batch", fake_batch)
+    experiments_before = db.query_one("SELECT count(*) AS n FROM ai_experiments")["n"]
+    common = ["run", "--step", "verify", "--arm", "gpt-6-luna@low", "--sample", "3"]
+    common += ["--seed", "s1"]
+
+    assert cli.main([*common, "--out", str(tmp_path / "dry")]) == 0
+    assert sent == [] and not (tmp_path / "dry").exists()
+    assert json.loads(capsys.readouterr().out)["requests"] == 3
+
+    for label in ("main", "branch"):
+        out = tmp_path / label
+        assert cli.main([*common, "--label", label, "--out", str(out), "--submit"]) == 0
+        assert {json.loads(line)["url"] for line in (out / "results.jsonl").open()} == set(urls)
+    capsys.readouterr()
+    assert sent == [("gpt-6-luna", "low", 3, recipe.max_output_tokens)] * 2
+
+    assert cli.main(["score", str(tmp_path / "main"), str(tmp_path / "branch")]) == 0
+    summary = json.loads(capsys.readouterr().out)
+    assert set(summary["arms"]) == {"main:gpt-6-luna@low", "branch:gpt-6-luna@low"}
+    assert summary["missing_results"] == 0 and summary["missing_arms"] == []
+    branch = summary["arms"]["branch:gpt-6-luna@low"]
+    assert branch["agreement_with_reference"]["n"] == 3
+    assert branch["cost_usd"] is not None and branch["cost_usd"] > 0
+    assert db.query_one("SELECT count(*) AS n FROM ai_experiments")["n"] == experiments_before

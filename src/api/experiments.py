@@ -147,8 +147,10 @@ def steps() -> Mapping[str, ExperimentStep]:
     }
 
 
-def arm_name(model: str, effort: str) -> str:
-    return f"{model}@{effort}"
+def arm_name(model: str, effort: str, label: str | None = None) -> str:
+    """`label` names the checkout a run came from, so the same arm measured
+    on main and on a branch can be scored side by side."""
+    return f"{label}:{model}@{effort}" if label else f"{model}@{effort}"
 
 
 def arm_ok(model: str, effort: str) -> str | None:
@@ -165,19 +167,47 @@ def arm_ok(model: str, effort: str) -> str | None:
     return None
 
 
+# About a third of eligible postings are verified open (2026-10-10), so one
+# chunk covers a sample of a few hundred.
+_SAMPLE_CHUNK = 1000
+
+
 def sample(n: int, seed: str) -> list[dict[str, Any]]:
     """n verified-open postings with content, in an order fixed by the seed,
-    so a later run measures the same postings."""
-    return db.query(
+    so a later run measures the same postings.
+
+    The draw orders the eligible postings first and checks verdicts and
+    content a chunk at a time, stopping at n. One query that filtered and
+    joined content before ordering read page text for every verified-open
+    posting and passed a 300 s statement timeout on production (161,623 of
+    481,709 eligible, 2026-10-10)."""
+    order = db.query(
         f"""
-        SELECT j.url, j.company, j.title, q.input_content
-        FROM jobs j
-        {CONTENT_LATERAL.format(url="j.url", columns="input_content")}
-        WHERE j.active AND {AI_ELIGIBLE_JOB.format(job="j")} AND {verdict_reads.verified_open("j.url")}
-        ORDER BY md5(j.url || %(seed)s) LIMIT %(n)s
+        SELECT j.url FROM jobs j
+        WHERE j.active AND {AI_ELIGIBLE_JOB.format(job="j")}
+        ORDER BY md5(j.url || %(seed)s)
         """,
-        {"seed": seed, "n": n},
+        {"seed": seed},
     )
+    out: list[dict[str, Any]] = []
+    for start in range(0, len(order), _SAMPLE_CHUNK):
+        chunk = [r["url"] for r in order[start : start + _SAMPLE_CHUNK]]
+        found = {
+            r["url"]: r
+            for r in db.query(
+                f"""
+                SELECT j.url, j.company, j.title, q.input_content
+                FROM jobs j
+                {CONTENT_LATERAL.format(url="j.url", columns="input_content")}
+                WHERE j.url = ANY(%(urls)s) AND {verdict_reads.verified_open("j.url")}
+                """,
+                {"urls": chunk},
+            )
+        }
+        out += [found[u] for u in chunk if u in found]
+        if len(out) >= n:
+            break
+    return out[:n]
 
 
 def usage(res: Any) -> dict[str, int | None]:
@@ -294,12 +324,19 @@ def _agreement(a: dict[str, Any], b: dict[str, Any]) -> dict[str, float]:
 def summarise(experiment_id: int) -> dict[str, Any]:
     exp = db.query_one("SELECT purpose, params FROM ai_experiments WHERE id = %s", (experiment_id,))
     assert exp is not None
-    step = steps()[exp["purpose"]]
     rows = db.query(
         "SELECT arm, url, output, usage, cost_usd, error FROM ai_experiment_results "
         "WHERE experiment_id = %s ORDER BY arm, url",
         (experiment_id,),
     )
+    return score(exp["purpose"], exp["params"], rows)
+
+
+def score(purpose: str, params: Params, rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Score answers already collected: per arm cost, tokens, failures and
+    agreement with the reference arm and with what production decided. Each
+    row carries arm, url, output, usage, cost_usd and error."""
+    step = steps()[purpose]
     by_arm: dict[str, dict[str, Any]] = {}
     fields_by_arm: dict[str, dict[str, dict]] = {}
     for r in rows:
@@ -332,8 +369,8 @@ def summarise(experiment_id: int) -> dict[str, Any]:
             a["ok"] += 1
             fields_by_arm.setdefault(r["arm"], {})[r["url"]] = step.project(r["output"])
     urls = sorted({r["url"] for r in rows})
-    deployed = deployed_verdicts(exp["purpose"], urls, exp["params"])
-    explicit_reference = exp["params"].get("reference")
+    deployed = deployed_verdicts(purpose, urls, params)
+    explicit_reference = params.get("reference")
     incomplete_costs = any(a["unpriced_results"] for a in by_arm.values())
     reference = explicit_reference or (
         max(by_arm, key=lambda k: by_arm[k]["known_cost_usd"])
@@ -369,15 +406,15 @@ def summarise(experiment_id: int) -> dict[str, Any]:
                 "n": len(common),
                 **{k: round(v / len(common), 3) for k, v in per_field.items()},
             }
-        if exp["purpose"] == "filter" and mine:
+        if purpose == "filter" and mine:
             a["pass_rate"] = round(
                 sum(1 for f in mine.values() if not f.get("should_filter")) / len(mine), 3
             )
-    skipped = exp["params"].get("skipped") or {}
+    skipped = params.get("skipped") or {}
     expected_arms = {
-        arm_name(arm["model"], arm["effort"]) for arm in exp["params"].get("arms", [])
+        arm_name(arm["model"], arm["effort"], arm.get("label")) for arm in params.get("arms", [])
     } - set(skipped)
-    sampled = exp["params"].get("sampled")
+    sampled = params.get("sampled")
     expected = sampled * len(expected_arms) if sampled is not None else None
     return {
         "reference": reference,

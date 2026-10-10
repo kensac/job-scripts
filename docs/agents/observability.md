@@ -271,6 +271,32 @@ postings later. The 2026-09-06 filter comparison was a script over an
 export, and the script fed every request the posting's first line; its
 headline was wrong and was nearly acted on. That is why this exists.
 
+**An agent runs an experiment from its checkout with `api.run_experiment`.**
+It uses the same step declarations, sample and scoring as the task, and the
+production transport (`core.batch.run_responses_batch`), so a run on a branch
+measures the branch's prompt and caps. It only reads the database, under a
+read-only session, and writes answers to files, so it can point at production:
+
+```
+set -a && . ./.env && set +a
+DATABASE_URL="$PRODUCTION_DATABASE_URL" PYTHONPATH=src python -m api.run_experiment run \
+  --step verify --arm gpt-6-luna@low --arm gpt-6-luna@none \
+  --sample 100 --seed s1 --label main --out ../exp/verify-main
+```
+
+Without `--submit` it sends nothing and prints the plan: requests, the
+shortest, median and longest input (read them; a 110-character input is the
+2026-09-06 bug), and the most the run can cost (every request spending its
+whole output cap). `--submit` refuses a bound above `--max-usd`, 0.50 by
+default. The run writes `run.json`, `results.jsonl` (answer, usage and cost
+per arm and posting) and `summary.json`. A prompt change is evaluated by
+running the same seed and arm on main and on the branch with different
+`--label`s and scoring both together:
+`python -m api.run_experiment score ../exp/verify-main ../exp/verify-branch`.
+Put the summary in the PR. Spend from this path is in the run's files and the
+provider's account, not in `api_usage`, because the tool does not write the
+database.
+
 ## Application answers
 
 Browser autofill stops at the free-response box on an application form. The

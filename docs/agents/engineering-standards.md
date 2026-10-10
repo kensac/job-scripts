@@ -114,7 +114,9 @@ disk.
 
 Prompt changes require before/after output-token and decision-quality evaluation
 on the same inputs. Schema and parsing tests establish compatibility, not outcome
-quality or savings. Keep evaluation costs explicitly bounded.
+quality or savings. Keep evaluation costs explicitly bounded. `api.run_experiment`
+runs the same seed on main and on the branch and scores them together; see
+[observability.md](observability.md).
 
 ## A fix must reach its own population
 
