@@ -656,7 +656,7 @@ files listed there:
 | `api/routers/analytics.py` source inventory | the owning feed's own flag, per source | stays |
 | `tasks/comp.py`, `tasks/content.py`, `tasks/verify.py` (three sweeps), `tasks/locations.py`, `tasks/application.py` (three), `api/experiments.py` | which postings get work | moved |
 | `api/board/eligibility.py` `STRUCTURAL` (board recompute, materialize, managed board runs), `tasks/board.py` `demote_closed` | which postings a board may show | moved |
-| `api/routers/filters.py` preset coverage gates | how many postings a preset would show | stays on `jobs.active`, the one deliberate exception (decided 2026-10-10): with availability computed per row, each of its two counts took 7.0 s instead of 4.3 s on a request a person waits for, and the counts differ on 111 of 198,319 postings. Stored availability removes that cost, so this is open to decide again |
+| `api/routers/filters.py` preset coverage gates | how many postings a preset would show | moved, once availability was stored |
 | `api/routers/job_board.py`, `job_detail.py`, `public_job_lists.py` (`active` in the response), `api/board/column_filters.py` ("Listed by source"), `api/posting_path.py` | what a person is told | moved |
 
 **Never in a loop:** any write to the production database, and any migration
