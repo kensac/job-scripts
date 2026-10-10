@@ -99,6 +99,14 @@ change, and will disagree with the server in the meantime.
 resolves an unset `column_layout` from `board_default_column_layout` in
 `app_config`. Render the returned layout for both a new account and a reset.
 
+**Named views live only in `saved_views`, through `/user/views`.**
+`column_layout` in settings is the board's default layout, not a view.
+`prefs.views` is the older home: `5a7c2e9d1b40` converted every page still
+holding it, the way the tracker's `prefsViewStore` copied a page on its first
+empty read. Nothing new is written there, and it is removed once no screen
+reads it. A page that cannot reach `/user/views` keeps views in the browser,
+never in `prefs`.
+
 **A config-driven reader's table can be published, and the bundled copy is
 the fallback.** `GET /v1/extension/recipe?schema_version=1&adapter=<id>`
 serves the newest enabled publish for an adapter as a zlib-compressed,
