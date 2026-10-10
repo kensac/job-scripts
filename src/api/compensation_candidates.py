@@ -18,7 +18,7 @@ latest_filter AS MATERIALIZED (
     {_LATEST_FILTER}
 ),
 compensation_demand AS MATERIALIZED (
-    SELECT id FROM jobs WHERE uploaded_by IS NOT NULL
+    SELECT job_id AS id FROM posting_uploads
     UNION
     SELECT uj.job_id FROM user_jobs uj
     WHERE {PERSON_STATE}

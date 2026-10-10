@@ -8,6 +8,7 @@ from api.mail import applications
 from api.routers.job_board import NOT_APPLIED
 from core import page_fetches
 from core.store import add_ai_result
+from tests import factories
 
 SERVICE_TOKEN = os.environ["JOBTRACKER_SERVICE_TOKEN"]
 
@@ -46,6 +47,8 @@ def _insert_job(
             uploaded_by,
         ),
     )
+    if uploaded_by is not None:
+        factories.upload(row["id"], uploaded_by)
     return row["id"]
 
 

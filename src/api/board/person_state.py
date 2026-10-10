@@ -58,7 +58,8 @@ def touchable_job_ids(user_id: int, job_ids: list[int]) -> set[int]:
     private upload is not, and that is the only distinction that matters.
     """
     rows = db.query(
-        "SELECT id FROM jobs WHERE id = ANY(%s) AND (uploaded_by IS NULL OR uploaded_by = %s)",
+        "SELECT id FROM jobs WHERE id = ANY(%s) "
+        "AND id NOT IN (SELECT job_id FROM posting_uploads WHERE uploaded_by <> %s)",
         (job_ids, user_id),
     )
     return {row["id"] for row in rows}

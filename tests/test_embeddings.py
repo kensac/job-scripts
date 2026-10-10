@@ -49,7 +49,7 @@ class TestCandidateSelection:
 
     def test_skips_already_embedded_urls(self, f):
         job_id, url = f.make_ready_job(content=CONTENT)
-        db.execute("UPDATE jobs SET uploaded_by = %s WHERE id = %s", (f.make_user(), job_id))
+        f.upload(job_id, f.make_user())
         assert url in [r["url"] for r in db.query(_CANDIDATES, {"cap": 100})]
         f.make_embedding(url)
         assert url not in [r["url"] for r in db.query(_CANDIDATES, {"cap": 100})]

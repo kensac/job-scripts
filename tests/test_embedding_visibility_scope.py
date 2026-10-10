@@ -16,7 +16,7 @@ async def test_new_embedding_submissions_follow_visibility(f, monkeypatch):
     for url in urls:
         f.make_fetch(url, content=f"Detailed posting at {url} " * 30)
     db.execute("INSERT INTO board_visible(user_id,job_id) VALUES (%s,%s)", (uid, jobs[0]))
-    db.execute("UPDATE jobs SET uploaded_by=%s WHERE id=%s", (uid, jobs[1]))
+    f.upload(jobs[1], uid)
     db.execute(
         "INSERT INTO user_jobs(user_id,job_id,notes) VALUES (%s,%s,'follow up')",
         (uid, jobs[2]),
@@ -40,7 +40,7 @@ async def test_new_embedding_submissions_follow_visibility(f, monkeypatch):
 def test_scope_tracks_visibility_changes_and_matches_personal_reads(f):
     owners = [f.make_user(), f.make_user()]
     jobs = [f.make_job() for _ in range(4)]
-    db.execute("UPDATE jobs SET uploaded_by=%s WHERE id=%s", (owners[0], jobs[0]))
+    f.upload(jobs[0], owners[0])
     db.execute(
         "INSERT INTO user_jobs(user_id,job_id,status) VALUES (%s,%s,'Applied')",
         (owners[1], jobs[1]),

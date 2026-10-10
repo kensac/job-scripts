@@ -11,6 +11,7 @@ from __future__ import annotations
 import pytest
 
 from api import db
+from tests import factories
 
 
 def _uid(headers: dict) -> int:
@@ -36,6 +37,7 @@ def private_upload(user_headers):
         ),
     )
     assert row is not None
+    factories.upload(row["id"], uid)
     return row["id"]
 
 

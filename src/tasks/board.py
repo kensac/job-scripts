@@ -52,7 +52,8 @@ def materialize_passing(user_id: int) -> int:
             pass_all AS MATERIALIZED (
                 SELECT j.id FROM jobs j
                 WHERE ({board_eligibility.SUBSCRIBED}
-                       OR j.source = 'sheet_import' OR j.uploaded_by = %(uid)s)
+                       OR j.source = 'sheet_import'
+                       OR j.id IN (SELECT job_id FROM posting_uploads WHERE uploaded_by = %(uid)s))
                   AND {board_eligibility.STRUCTURAL.format(criteria=criteria.SQL)}
                   AND (SELECT COUNT(*) FROM enabled) > 0
                   AND (SELECT COUNT(*) FROM enabled e WHERE {filter_status} = 'passed')
@@ -82,7 +83,8 @@ def candidates_for(user_id: int) -> list[dict[str, Any]]:
         WITH {board_eligibility.LATEST_CHECK}
         SELECT j.url, j.company, j.title, j.source FROM jobs j
         WHERE {board_eligibility.STRUCTURAL.format(criteria=criteria.SQL)}
-          AND ({board_eligibility.SUBSCRIBED} OR j.uploaded_by = %(uid)s)
+          AND ({board_eligibility.SUBSCRIBED}
+               OR j.id IN (SELECT job_id FROM posting_uploads WHERE uploaded_by = %(uid)s))
         ORDER BY j.id DESC
         """,
         board_eligibility.settings_params(user_id),
