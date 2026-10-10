@@ -12,7 +12,7 @@ from api import ai, db, managed_board_runs, metrics
 from api.ai import verdicts
 from api.ai.batch_results import progress_counts
 from api.task_config import configured_model, configured_shape
-from core import near_copy, verdict_reads
+from core import near_copy, routing, verdict_reads
 from core.answers import (
     VERIFICATION_REQUEST,
     FilterDecision,
@@ -280,7 +280,7 @@ async def _reverify_jobs(
         if parent_id:
             update_parent_progress(parent_id)
         return
-    if not ai.server_key("openai"):
+    if not routing.server_key("openai"):
         raise LookupError("no server OpenAI key for reverification")
     model = resolve(VERIFY_TASK).model
     by_url = {r["url"]: r for r in rows}

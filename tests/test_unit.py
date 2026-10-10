@@ -4,7 +4,7 @@ import hashlib
 
 from api import ai, fetching, ssrf, worker
 from api.board import criteria as crit
-from core import filters, pricing
+from core import filters, pricing, providers
 from tasks import runtime as tasks_runtime
 
 # ---------------------------------------------------------------------------
@@ -135,9 +135,9 @@ def test_validate_params_temperature_follows_the_declared_capability():
 
 
 def test_provider_of_model():
-    assert ai.provider_of_model("gpt-5-nano") == "openai"
-    assert ai.provider_of_model("claude-sonnet-5") == "anthropic"
-    assert ai.provider_of_model("no-such-model") is None
+    assert providers.provider_of("gpt-5-nano") == "openai"
+    assert providers.provider_of("claude-sonnet-5") == "anthropic"
+    assert providers.provider_of("no-such-model") is None
 
 
 def test_prices_cover_every_catalog_model():

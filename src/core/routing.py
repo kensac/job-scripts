@@ -48,7 +48,7 @@ a model can do is declared; whether this host holds a key for it is not, and a
 resolver that needed one could not answer a question without spending money.
 
 core does not import api. server_key reads the env var each provider declares,
-which is why api.ai.server_key delegates here rather than keeping its own map.
+and every caller, in api or not, reads it here.
 """
 
 from __future__ import annotations

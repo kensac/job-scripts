@@ -301,13 +301,6 @@ ONGOING_MODEL = os.environ.get("JOBTRACKER_MAIL_ONGOING_MODEL", "gpt-6-luna")
 _CLASSIFY_EFFORT_PREFERENCE = ("none", "minimal", "low")
 
 
-# Every model in the intersection above, so a model the registry has not been
-# taught still gets a value both generations accept rather than failing the
-# whole batch. Deliberately not the cheapest: guessing cheap at an unknown
-# model is how the 400 happened.
-FALLBACK_EFFORT = "low"
-
-
 # Enough for the schema's handful of short fields. The model does not reason
 # here, so a larger ceiling buys nothing and a smaller one truncates JSON
 # mid-string, which arrives as an unparsable line rather than an error.
@@ -386,20 +379,6 @@ BACKFILL_TASK = _classify_task(
     BACKFILL_MODEL, "mail_classify_backfill", "Mail classification (backfill)"
 )
 ONGOING_TASK = _classify_task(ONGOING_MODEL, "mail_classify", "Mail classification (ongoing)")
-
-
-def effort_for(model: str) -> str:
-    """The cheapest reasoning effort this model actually accepts.
-
-    Unknown models get the intersection value rather than a guess: a batch
-    submits whole and fails whole, so a rejected parameter costs the entire
-    run, not one call.
-
-    The choosing itself now lives in core.routing, which every task resolves
-    through; this keeps the name and the unknown-model floor that callers here
-    rely on, without a second copy of the preference walk.
-    """
-    return _classify_task(model, "effort_probe", "").resolved_effort() or FALLBACK_EFFORT
 
 
 # --- application answers ---

@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 
 from api import crypto, db, model_calls
 from api.auth import AuthedUser
-from core import pricing
+from core import pricing, providers, routing
 
 _CACHE_WRITE_UNSET = object()
 
@@ -147,7 +147,7 @@ def owner_allowed_models(groups: list[str]) -> list[str]:
     keyed = {
         m["model"]
         for provider, models in ai.MODEL_CATALOG.items()
-        if ai.server_key(provider)
+        if routing.server_key(provider)
         for m in models
     }
     return sorted(allowed & keyed)
@@ -207,10 +207,10 @@ def resolve_ai_config(user_id: int, entitlement: Entitlement):
                     f"{model} was used instead. Add your own API key to choose freely."
                 )
         if model:
-            provider = ai.provider_of_model(model) or "openai"
+            provider = providers.provider_of(model) or "openai"
             return ai.AIConfig(
                 provider=provider,
-                api_key=ai.server_key(provider),
+                api_key=routing.server_key(provider),
                 key_source="owner",
                 model=model,
                 params={k: v for k, v in params.items() if k != "temperature"},

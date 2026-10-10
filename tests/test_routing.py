@@ -14,7 +14,7 @@ from decimal import Decimal
 
 import pytest
 
-from api import ai, db
+from api import db
 from core import routing
 from core.providers.spec import StructuredOutput as SO
 from core.routing import NoEligibleModel, TaskShape, resolve
@@ -219,13 +219,10 @@ class TestKeyAvailability:
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
         assert resolve(_shape()).model == "gpt-5-nano"
 
-    def test_server_key_has_one_implementation(self, monkeypatch):
-        """api.ai.server_key delegates to core.routing rather than keeping a
-        second map of provider-to-env-var."""
+    def test_server_key_of_an_unknown_provider_is_empty(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
-        assert ai.server_key("openai") == "sk-test"
         assert routing.server_key("openai") == "sk-test"
-        assert ai.server_key("no-such-provider") == ""
+        assert routing.server_key("no-such-provider") == ""
 
     def test_the_key_env_var_comes_from_the_datasheet(self, monkeypatch):
         monkeypatch.setenv("DEEPSEEK_API_KEY", "ds-test")
