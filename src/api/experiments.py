@@ -241,19 +241,11 @@ def _filter_deployed(urls: list[str], params: Params) -> Deployed:
 
 
 def _verify_deployed(urls: list[str], params: Params) -> Deployed:
-    rows = db.query(
-        verdict_reads.latest_per(
-            "url, check_type",
-            "url, check_type, status",
-            "url = ANY(%s) AND check_type IN ('closed', 'clearance')",
-        ),
-        (urls,),
-    )
-    out: Deployed = {}
-    for r in rows:
-        key = "is_closed" if r["check_type"] == "closed" else "requires_clearance_or_restrictions"
-        out.setdefault(r["url"], {})[key] = r["status"] == "rejected"
-    return out
+    keys = {"closed": "is_closed", "clearance": "requires_clearance_or_restrictions"}
+    return {
+        url: {keys[check]: verdict.status == "rejected" for check, verdict in checks.items()}
+        for url, checks in verdict_reads.latest_checks(urls).items()
+    }
 
 
 def _comp_deployed(urls: list[str], params: Params) -> Deployed:

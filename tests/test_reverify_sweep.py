@@ -130,6 +130,8 @@ async def test_a_full_run_takes_only_postings_believed_open_and_reachable(f, tak
 
     _, open_url = f.make_ready_job(source=subscribed)
     _, closed_url = f.make_ready_job(source=subscribed, closed="rejected")
+    _, closed_since_url = f.make_ready_job(source=subscribed)
+    f.make_verdict(closed_since_url, "closed", "rejected")
     _, inactive_url = f.make_ready_job(source=subscribed, active=False)
     _, unreachable_url = f.make_ready_job(source=unsubscribed)
     # Nobody subscribes to its source either, but a person kept it, so it is
@@ -145,6 +147,7 @@ async def test_a_full_run_takes_only_postings_believed_open_and_reachable(f, tak
 
     assert _urls(taken) == {open_url, kept_url, imported_url}
     assert closed_url not in _urls(taken), "a full run asks for verdicts that passed"
+    assert closed_since_url not in _urls(taken), "the latest closed answer decides"
     assert inactive_url not in _urls(taken)
     assert unreachable_url not in _urls(taken), "no user can open it, so no tokens go to it"
     assert taken[0]["force"] is True, "a forced sweep must not skip a verdict made today"
