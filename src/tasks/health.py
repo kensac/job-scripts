@@ -6,7 +6,7 @@ import asyncio
 import logging
 from typing import Any
 
-from api import db, metrics
+from api import auth, db, metrics
 from tasks.runtime import set_progress
 
 logger = logging.getLogger(__name__)
@@ -68,10 +68,11 @@ def _notify(fresh: list[dict[str, Any]]) -> None:
         return
 
     admins = db.query(
-        "SELECT DISTINCT email FROM users WHERE email LIKE '%%@%%' AND 'infra-admins' = ANY(groups)"
+        "SELECT DISTINCT email FROM users WHERE email LIKE '%%@%%' AND groups && %s",
+        (sorted(auth.ADMIN_GROUPS),),
     )
     if not admins:
-        logger.error("health alert NOT mailed: no infra-admins with an address (ids=%s)", ids)
+        logger.error("health alert NOT mailed: no admins with an address (ids=%s)", ids)
         return
 
     delivered = 0

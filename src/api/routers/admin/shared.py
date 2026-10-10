@@ -7,21 +7,13 @@ because the queue and the ingest summaries agree on it and neither owns it.
 
 from __future__ import annotations
 
-import os
-
 from fastapi import Depends, HTTPException
 
-from api.auth import AuthedUser, require_user
-
-ADMIN_GROUPS = {
-    g.strip()
-    for g in os.environ.get("JOBTRACKER_ADMIN_GROUPS", "infra-admins").split(",")
-    if g.strip()
-}
+from api.auth import AuthedUser, is_admin, require_user
 
 
 def require_admin(user: AuthedUser = Depends(require_user)) -> AuthedUser:
-    if not ADMIN_GROUPS.intersection(user.groups):
+    if not is_admin(user.groups):
         raise HTTPException(403, detail={"code": "FORBIDDEN", "message": "admin group required"})
     return user
 

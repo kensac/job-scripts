@@ -10,12 +10,11 @@ from pydantic import BaseModel
 
 from api import ai, budget, db, filter_runs, task_admission
 from api.ai import access as ai_access
-from api.auth import AuthedUser, require_user
+from api.auth import AuthedUser, is_admin, require_user
 from api.board import visibility
 from api.config import group_access_allowed
 from api.models import FilterCreate, FilterPatch, ImprovePromptRequest, Ok
 from api.problem import AI_REFUSALS
-from api.routers.admin.shared import ADMIN_GROUPS
 from core.filters import ON_AMBIGUOUS_VALUES, compute_filter_hash
 
 router = APIRouter()
@@ -187,9 +186,7 @@ def _may_run_by_hand(user: AuthedUser) -> bool:
     that id away for exactly the people who cannot start one, who still have
     the hourly sweep running for them and still want to watch it.
     """
-    return bool(ADMIN_GROUPS.intersection(user.groups)) or group_access_allowed(
-        RUN_GROUPS_KEY, user.groups
-    )
+    return is_admin(user.groups) or group_access_allowed(RUN_GROUPS_KEY, user.groups)
 
 
 def _refuse_unpermitted_run(user: AuthedUser) -> None:
