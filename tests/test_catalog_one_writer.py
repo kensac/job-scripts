@@ -27,8 +27,6 @@ _ALLOWED = {
     # Stream G is moving pay off jobs into a derived table; the comp_* write
     # moves with it rather than into the catalog first.
     "tasks/comp.py": "comp_* columns, owned by the derived facts move",
-    # near_copy_key belongs to the same move as the comp columns.
-    "tasks/verify.py": "near_copy_key, owned by the derived facts move",
     # Seeds a disposable database only (make dev-api refuses any other), and
     # writes the comp columns the derived facts move owns.
     "api/devseed.py": "dev seed of comp columns, owned by the derived facts move",

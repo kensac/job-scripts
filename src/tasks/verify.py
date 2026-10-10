@@ -13,7 +13,7 @@ from api.ai import verdicts
 from api.ai.batch_results import progress_counts
 from api.board.person_state import UNTOUCHED
 from api.task_config import configured_model, configured_shape
-from core import near_copy, routing, verdict_reads
+from core import catalog, near_copy, routing, verdict_reads
 from core.answers import (
     VERIFICATION_REQUEST,
     FilterDecision,
@@ -507,11 +507,7 @@ def _reuse_near_copies(task_id: int, rows: list[dict[str, Any]]) -> list[dict[st
     where each board and filter reads the verdict.
     """
     keys = {r["url"]: near_copy.key(r["title"] or "", r["input_content"] or "") for r in rows}
-    db.execute(
-        "UPDATE jobs SET near_copy_key = k.key FROM unnest(%s::text[], %s::text[]) AS k(url, key) "
-        "WHERE jobs.url = k.url AND jobs.near_copy_key IS DISTINCT FROM k.key",
-        (list(keys), list(keys.values())),
-    )
+    catalog.set_near_copy_keys(keys)
     pairs = {(r["source"], keys[r["url"]]) for r in rows}
     sources, digests = [p[0] for p in pairs], [p[1] for p in pairs]
     twins = {
