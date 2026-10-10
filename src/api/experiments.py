@@ -20,7 +20,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from api import db
-from core import providers, verdict_reads
+from core import catalog, providers, verdict_reads
 from core.store import AI_ELIGIBLE_JOB, CONTENT_LATERAL
 
 Params = dict[str, Any]
@@ -183,7 +183,7 @@ def sample(n: int, seed: str) -> list[dict[str, Any]]:
     order = db.query(
         f"""
         SELECT j.url FROM jobs j
-        WHERE j.active AND {AI_ELIGIBLE_JOB.format(job="j")}
+        WHERE {catalog.IS_AVAILABLE.format(job="j")} AND {AI_ELIGIBLE_JOB.format(job="j")}
         ORDER BY md5(j.url || %(seed)s)
         """,
         {"seed": seed},

@@ -629,13 +629,15 @@ for active rows hold only explained classes.
 costs about 10 seconds where `j.active` costs 0.4, so a reader that scanned
 every active row by the flag is measured on production before it moves.
 
-Every reader of `jobs.active`, and where it stands:
+Every reader of `jobs.active`, and where it stands.
+`tests/test_availability_readers.py` fails on a new `j.active` outside the
+files listed there:
 
 | Reader | Meaning | Stands |
 |---|---|---|
 | `core/catalog.py`: `retire_unlisted`, `retire_switched_off`, the upsert's change test, `correct_posting`, `availability_shadow` | feed state, written and compared | stays |
 | `api/routers/analytics.py` source inventory | the owning feed's own flag, per source | stays |
-| `tasks/comp.py`, `tasks/content.py`, `tasks/verify.py` (three sweeps), `tasks/locations.py`, `tasks/application.py` (three), `api/experiments.py` | which postings get work | moves |
+| `tasks/comp.py`, `tasks/content.py`, `tasks/verify.py` (three sweeps), `tasks/locations.py`, `tasks/application.py` (three), `api/experiments.py` | which postings get work | moved |
 | `api/board/eligibility.py` `STRUCTURAL`, `tasks/board.py` `demote_closed`, `api/routers/filters.py` preset gates | which postings a board may show | moves |
 | `api/routers/job_board.py`, `job_detail.py`, `public_job_lists.py` (`active` in the response), `api/board/column_filters.py` ("Listed by source"), `api/posting_path.py` | what a person is told | moves |
 

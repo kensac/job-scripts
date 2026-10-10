@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 from api import db, user_settings
 from api.locations import LocationExtract, Place, store
+from core import catalog
 from core.batch import BatchResult, BatchSpec, structured_response_spec
 from core.shapes import LOCATIONS_TASK
 from tasks.derive import Derivation, Row
@@ -56,7 +57,7 @@ _CANDIDATES = f"""
     WITH raw AS (
         SELECT DISTINCT btrim(loc) AS text
         FROM jobs j, unnest(j.locations) AS loc
-        WHERE j.active AND btrim(loc) <> ''
+        WHERE {catalog.IS_AVAILABLE.format(job="j")} AND btrim(loc) <> ''
         UNION
 {user_settings.CRITERIA_LOCATIONS_SQL}    )
     SELECT r.text FROM raw r
