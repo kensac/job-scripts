@@ -608,6 +608,63 @@ def record_parse_failures(board_id: int, model: str | None):
         raise
 
 
+# Who belongs on the board after this run, as (job_id, sort_at). A reuse run
+# projects every candidate; a filter run projects what its latest verdict for
+# this prompt and model admits.
+_REUSE_MEMBERS = """
+SELECT * FROM unnest(%(ids)s::bigint[], %(sort)s::timestamptz[]) AS c(job_id, sort_at)
+"""
+_VERDICT_MEMBERS = """
+WITH candidate AS (
+  SELECT * FROM unnest(%(ids)s::bigint[], %(sort)s::timestamptz[]) AS c(job_id, sort_at)
+), latest AS (
+  SELECT DISTINCT ON (j.id) j.id AS job_id, q.status
+  FROM candidate c JOIN jobs j ON j.id = c.job_id
+  LEFT JOIN ai_queries q ON q.url = j.url AND q.check_type = 'custom'
+    AND q.prompt_hash = %(hash)s AND q.model = %(model)s
+    AND q.status IN ('passed', 'rejected', 'failed')
+  ORDER BY j.id, q.id DESC NULLS LAST
+)
+SELECT c.job_id, c.sort_at FROM candidate c LEFT JOIN latest l USING (job_id)
+WHERE l.status = 'passed' OR (NOT %(fail_closed)s AND l.status IS DISTINCT FROM 'rejected')
+"""
+# Bring the board's rows to `target`, writing only what differs: delete the
+# members that left, update the ones whose sort moved, insert the ones that
+# joined. Deleting and reinserting every row cost 78k inserts and
+# 78k deletes for a 1,332-row table (pg_stat_user_tables, 2026-10-10), almost
+# all of them rewriting a row with itself. One statement, so every part reads
+# the rows as they were before it; the three sets are disjoint by job_id.
+# projected_at is set on insert only, so it is when the posting joined; the
+# run's own time is managed_boards.projection_updated_at.
+_WRITE_MEMBERS = """
+WITH target AS MATERIALIZED ({target}),
+gone AS (
+  DELETE FROM managed_board_jobs m
+  WHERE m.managed_board_id = %(board)s
+    AND NOT EXISTS (SELECT 1 FROM target t WHERE t.job_id = m.job_id)
+  RETURNING 1
+), moved AS (
+  UPDATE managed_board_jobs m
+  SET sort_at = t.sort_at
+  FROM target t
+  WHERE m.managed_board_id = %(board)s AND m.job_id = t.job_id
+    AND m.sort_at IS DISTINCT FROM t.sort_at
+  RETURNING 1
+), joined AS (
+  INSERT INTO managed_board_jobs (managed_board_id, job_id, sort_at)
+  SELECT %(board)s, t.job_id, t.sort_at
+  FROM target t
+  WHERE NOT EXISTS (
+    SELECT 1 FROM managed_board_jobs m
+    WHERE m.managed_board_id = %(board)s AND m.job_id = t.job_id
+  )
+  ORDER BY t.sort_at DESC, t.job_id DESC
+  RETURNING 1
+)
+SELECT (SELECT count(*) FROM target) AS n
+"""
+
+
 def replace_projection(
     task_id: int, payload: dict[str, Any], jobs: list[dict[str, Any]] | None = None
 ) -> int:
@@ -644,57 +701,23 @@ def replace_projection(
         )
         if board is None:
             raise RuntimeError("managed board configuration changed during its run")
-        db.execute("DELETE FROM managed_board_jobs WHERE managed_board_id = %s", (board.id,))
-        if payload.get("execution_mode") == "sponsor_filter_reuse":
-            result = db.query_one_as(
-                _Count,
-                """
-                WITH candidate AS (
-                  SELECT * FROM unnest(%(ids)s::bigint[], %(sort)s::timestamptz[]) AS c(job_id, sort_at)
-                ), inserted AS (
-                  INSERT INTO managed_board_jobs (managed_board_id, job_id, sort_at)
-                  SELECT %(board)s, job_id, sort_at
-                  FROM candidate ORDER BY sort_at DESC, job_id DESC RETURNING 1
-                ) SELECT count(*) AS n FROM inserted
-                """,
-                {
-                    "ids": ids,
-                    "sort": sort_at,
-                    "board": board.id,
-                },
-            )
-        else:
-            result = db.query_one_as(
-                _Count,
-                """
-            WITH candidate AS (
-              SELECT * FROM unnest(%(ids)s::bigint[], %(sort)s::timestamptz[]) AS c(job_id, sort_at)
-            ), latest AS (
-              SELECT DISTINCT ON (j.id) j.id AS job_id, q.status
-              FROM candidate c JOIN jobs j ON j.id = c.job_id
-              LEFT JOIN ai_queries q ON q.url = j.url AND q.check_type = 'custom'
-                AND q.prompt_hash = %(hash)s AND q.model = %(model)s
-                AND q.status IN ('passed', 'rejected', 'failed')
-              ORDER BY j.id, q.id DESC NULLS LAST
-            ), inserted AS (
-              INSERT INTO managed_board_jobs (managed_board_id, job_id, sort_at)
-              SELECT %(board)s, c.job_id, c.sort_at
-              FROM candidate c LEFT JOIN latest l USING (job_id)
-              WHERE l.status = 'passed' OR (NOT %(fail_closed)s AND l.status IS DISTINCT FROM 'rejected')
-              ORDER BY c.sort_at DESC, c.job_id DESC
-              RETURNING 1
-            ) SELECT count(*) AS n FROM inserted
-                """,
-                {
-                    "ids": ids,
-                    "sort": sort_at,
-                    "hash": payload["prompt_hash"],
-                    "model": payload["requested_model"],
-                    "board": board.id,
-                    "revision": payload["revision"],
-                    "fail_closed": payload["fail_closed"],
-                },
-            )
+        target = (
+            _REUSE_MEMBERS
+            if payload.get("execution_mode") == "sponsor_filter_reuse"
+            else _VERDICT_MEMBERS
+        )
+        result = db.query_one_as(
+            _Count,
+            _WRITE_MEMBERS.format(target=target),
+            {
+                "ids": ids,
+                "sort": sort_at,
+                "hash": payload["prompt_hash"],
+                "model": payload["requested_model"],
+                "board": board.id,
+                "fail_closed": payload["fail_closed"],
+            },
+        )
         db.execute(
             "UPDATE managed_boards SET projection_updated_at = now(), "
             "public_revision = CASE WHEN published THEN COALESCE(public_revision, 0) + 1 "

@@ -55,6 +55,18 @@ that replaces every row would have reported, and is still correct while such a
 writer runs beside this one. A person with no rows reads as never computed.
 `tests/test_board_visible_diff.py` pins all of it, including that writer.
 
+**A managed board rebuild writes the same way.**
+`managed_board_runs.replace_projection` brings `managed_board_jobs` to the
+run's answer in one statement: delete the members that left, update the ones
+whose sort moved, insert the ones that joined. It runs inside the
+transaction that holds the board row `FOR UPDATE` under the revision check, so
+two rebuilds of one board never interleave and a public list reader sees the
+old board until the new one commits. Deleting and reinserting every row cost
+78k of each on a 1,332-row table by 2026-10-10. `projected_at` is when the
+posting joined; the rebuild's own time is `managed_boards.projection_updated_at`.
+`tests/test_managed_board_projection_diff.py` keeps the old writer as the
+oracle and checks a reader during an open rebuild.
+
 `FAST` enumerates the three authorized ID sets first: computed membership,
 uploads, and acted-on rows. `UNION` deduplicates overlaps before joining jobs
 and the current user's private state. Keep this set-first shape: an OR over
