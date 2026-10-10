@@ -140,8 +140,8 @@ async def test_a_chunk_publishes_its_passes_before_the_parent_finishes(monkeypat
     # The parent is still waiting (nothing finalized it); the board has the row.
     assert db.query_one("SELECT status FROM tasks WHERE id = %s", (parent,))["status"] == "waiting"
     on_board = db.query_one(
-        "SELECT 1 AS x FROM user_jobs uj JOIN jobs j ON j.id = uj.job_id "
-        "WHERE uj.user_id = %s AND j.url = %s",
+        "SELECT 1 AS x FROM user_job_working_set ws JOIN jobs j ON j.id = ws.job_id "
+        "WHERE ws.user_id = %s AND j.url = %s",
         (uid, url),
     )
     assert on_board is not None

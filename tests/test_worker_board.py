@@ -48,43 +48,36 @@ def _working_set_row(user_id: int, job_id: int):
 # ---------------------------------------------------------------------------
 
 
-def test_materialize_passing_recreates_a_deleted_row(user_headers):
+def _legacy_row(user_id: int, job_id: int) -> None:
+    """An all-default user_jobs row as materialize_passing wrote one before
+    2026-10-10, with the working-set pair the split backfill gave it."""
+    db.execute("INSERT INTO user_jobs (user_id, job_id) VALUES (%s, %s)", (user_id, job_id))
+    db.execute(
+        "INSERT INTO user_job_working_set (user_id, job_id) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+        (user_id, job_id),
+    )
+
+
+def test_materialize_passing_writes_the_working_set_and_no_person_row(user_headers):
     user_id = _user_id()
-    url = "https://jobs.example.com/board-1"
-    job_id = _make_passing_job(user_id, url)
+    job_id = _make_passing_job(user_id, "https://jobs.example.com/board-1")
 
     assert tasks_board.materialize_passing(user_id) == 1
-    assert _board_row(user_id, job_id) is not None
     assert _working_set_row(user_id, job_id) is not None
-
-    db.execute("DELETE FROM user_jobs WHERE user_id = %s AND job_id = %s", (user_id, job_id))
-    assert _board_row(user_id, job_id) is None
-
-    assert tasks_board.materialize_passing(user_id) == 1
-    assert _board_row(user_id, job_id) is not None
-    assert _working_set_row(user_id, job_id) is not None
+    assert _board_row(user_id, job_id) is None, "user_jobs holds only what a person did"
 
 
-def test_materialize_passing_rerun_is_idempotent_in_both_relations(user_headers):
+def test_materialize_passing_rejoins_a_removed_pair_and_reruns_idempotently(user_headers):
     user_id = _user_id()
-    job_id = _make_passing_job(user_id, "https://jobs.example.com/dual-write-idempotent")
+    job_id = _make_passing_job(user_id, "https://jobs.example.com/rejoin")
 
     assert tasks_board.materialize_passing(user_id) == 1
     assert tasks_board.materialize_passing(user_id) == 0
-    assert (
-        db.query_one(
-            "SELECT count(*) AS n FROM user_jobs WHERE user_id = %s AND job_id = %s",
-            (user_id, job_id),
-        )["n"]
-        == 1
+    db.execute(
+        "DELETE FROM user_job_working_set WHERE user_id = %s AND job_id = %s", (user_id, job_id)
     )
-    assert (
-        db.query_one(
-            "SELECT count(*) AS n FROM user_job_working_set WHERE user_id = %s AND job_id = %s",
-            (user_id, job_id),
-        )["n"]
-        == 1
-    )
+    assert tasks_board.materialize_passing(user_id) == 1
+    assert _working_set_row(user_id, job_id) is not None
 
 
 def test_materialize_passing_adds_scope_without_changing_existing_person_state(user_headers):
@@ -93,74 +86,18 @@ def test_materialize_passing_adds_scope_without_changing_existing_person_state(u
     db.execute(
         """
         INSERT INTO user_jobs
-            (user_id, job_id, status, notes, person_touched_at, created_at, updated_at)
-        VALUES (%s, %s, 'Interview', 'Keep this',
+            (user_id, job_id, status, notes, hidden, person_touched_at, created_at, updated_at)
+        VALUES (%s, %s, 'Interview', 'Keep this', true,
                 '2026-09-01T12:00:00Z', '2026-08-01T12:00:00Z', '2026-09-02T12:00:00Z')
         """,
         (user_id, job_id),
     )
     before = _board_row(user_id, job_id)
 
-    assert tasks_board.materialize_passing(user_id) == 0
+    assert tasks_board.materialize_passing(user_id) == 1
 
     assert _working_set_row(user_id, job_id) is not None
     assert _board_row(user_id, job_id) == before
-
-
-def test_materialize_passing_adds_missing_legacy_row_and_returns_one(user_headers):
-    user_id = _user_id()
-    job_id = _make_passing_job(user_id, "https://jobs.example.com/working-set-first")
-    db.execute(
-        "INSERT INTO user_job_working_set (user_id, job_id) VALUES (%s, %s)",
-        (user_id, job_id),
-    )
-
-    assert tasks_board.materialize_passing(user_id) == 1
-
-    assert _board_row(user_id, job_id) is not None
-    assert _working_set_row(user_id, job_id) is not None
-
-
-def test_materialize_passing_rolls_back_legacy_write_when_working_set_write_fails(
-    user_headers,
-):
-    user_id = _user_id()
-    job_id = _make_passing_job(user_id, "https://jobs.example.com/dual-write-rollback")
-    db.execute(
-        """
-        CREATE FUNCTION test_refuse_working_set_insert() RETURNS trigger
-        LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'refuse working set insert'; END $$
-        """
-    )
-    db.execute(
-        "CREATE TRIGGER test_refuse_working_set_insert BEFORE INSERT ON user_job_working_set "
-        "FOR EACH ROW EXECUTE FUNCTION test_refuse_working_set_insert()"
-    )
-    try:
-        with pytest.raises(errors.RaiseException, match="refuse working set insert"):
-            tasks_board.materialize_passing(user_id)
-    finally:
-        db.execute("DROP TRIGGER test_refuse_working_set_insert ON user_job_working_set")
-        db.execute("DROP FUNCTION test_refuse_working_set_insert()")
-
-    assert _board_row(user_id, job_id) is None
-    assert _working_set_row(user_id, job_id) is None
-
-
-def test_materialize_passing_leaves_hidden_row_alone(user_headers):
-    user_id = _user_id()
-    url = "https://jobs.example.com/board-2"
-    job_id = _make_passing_job(user_id, url)
-
-    tasks_board.materialize_passing(user_id)
-    db.execute(
-        "UPDATE user_jobs SET hidden = true WHERE user_id = %s AND job_id = %s", (user_id, job_id)
-    )
-
-    assert tasks_board.materialize_passing(user_id) == 0
-    row = _board_row(user_id, job_id)
-    assert row is not None
-    assert row["hidden"] is True
 
 
 # ---------------------------------------------------------------------------
@@ -172,7 +109,7 @@ def test_demote_closed_removes_untouched_row_when_closed_now_rejected(user_heade
     user_id = _user_id()
     url = "https://jobs.example.com/board-3"
     job_id = _make_passing_job(user_id, url)
-    tasks_board.materialize_passing(user_id)
+    _legacy_row(user_id, job_id)
 
     add_ai_result(url, "rejected", "now closed", "closed")
 
@@ -191,13 +128,13 @@ def test_demote_closed_removes_scope_but_leaves_explicit_noop_person_state(clien
 
     add_ai_result(url, "rejected", "now closed", "closed")
 
-    assert tasks_board.demote_closed() == 0
+    assert tasks_board.demote_closed() == 1, "the working-set pair goes"
     person_row = _board_row(user_id, job_id)
     assert person_row is not None and person_row["person_touched_at"] is not None
     assert _working_set_row(user_id, job_id) is None
 
 
-def test_demote_closed_removes_working_set_only_without_counting_legacy(user_headers):
+def test_demote_closed_removes_and_counts_a_working_set_only_pair(user_headers):
     user_id = _user_id()
     url = "https://jobs.example.com/board-working-only"
     job_id = _make_passing_job(user_id, url)
@@ -207,7 +144,7 @@ def test_demote_closed_removes_working_set_only_without_counting_legacy(user_hea
     )
     add_ai_result(url, "rejected", "now closed", "closed")
 
-    assert tasks_board.demote_closed() == 0
+    assert tasks_board.demote_closed() == 1
     assert _board_row(user_id, job_id) is None
     assert _working_set_row(user_id, job_id) is None
 
@@ -215,7 +152,7 @@ def test_demote_closed_removes_working_set_only_without_counting_legacy(user_hea
 def test_demote_closed_removes_both_relations_when_source_marks_inactive(user_headers):
     user_id = _user_id()
     job_id = _make_passing_job(user_id, "https://jobs.example.com/board-inactive")
-    tasks_board.materialize_passing(user_id)
+    _legacy_row(user_id, job_id)
     db.execute("UPDATE jobs SET active = false WHERE id = %s", (job_id,))
 
     assert tasks_board.demote_closed() == 1
@@ -227,7 +164,7 @@ def test_demote_closed_leaves_untouched_row_when_still_open(user_headers):
     user_id = _user_id()
     url = "https://jobs.example.com/board-5"
     job_id = _make_passing_job(user_id, url)
-    tasks_board.materialize_passing(user_id)
+    _legacy_row(user_id, job_id)
 
     assert tasks_board.demote_closed() == 0
     assert _board_row(user_id, job_id) is not None
@@ -238,7 +175,7 @@ def test_demote_closed_retry_is_idempotent(user_headers):
     user_id = _user_id()
     url = "https://jobs.example.com/board-demote-retry"
     job_id = _make_passing_job(user_id, url)
-    tasks_board.materialize_passing(user_id)
+    _legacy_row(user_id, job_id)
     add_ai_result(url, "rejected", "now closed", "closed")
 
     assert tasks_board.demote_closed() == 1
@@ -251,7 +188,7 @@ def test_demote_closed_rolls_back_legacy_delete_when_working_set_delete_fails(us
     user_id = _user_id()
     url = "https://jobs.example.com/board-demote-rollback"
     job_id = _make_passing_job(user_id, url)
-    tasks_board.materialize_passing(user_id)
+    _legacy_row(user_id, job_id)
     add_ai_result(url, "rejected", "now closed", "closed")
     db.execute(
         """
@@ -279,14 +216,13 @@ def test_demote_closed_rolls_back_legacy_delete_when_working_set_delete_fails(us
 # ---------------------------------------------------------------------------
 
 
-def test_an_untouched_board_row_is_the_working_set_and_not_what_a_person_sees(user_headers):
-    """The two meanings that share user_jobs, pinned apart.
+def test_the_working_set_is_scope_and_not_what_a_person_sees(user_headers):
+    """The two meanings that once shared user_jobs, pinned apart.
 
-    An untouched row carries scope: it makes the posting worth paying to check
-    (core/store.py ON_A_BOARD) and it is where the re-verification sweep finds
-    candidates. It does NOT make the posting visible, because visibility.FULL
-    admits an untouched row only through its structural branch, which never
-    references user_jobs.
+    A working-set pair carries scope: it makes the posting worth paying to
+    check (core/store.py ON_A_BOARD) and it is where the re-verification
+    sweep finds candidates. It does NOT make the posting visible, because
+    visibility.FULL admits a picked posting through its structural branch.
 
     Reading the one as the other is how a board question got answered wrongly
     on 2026-09-10: deleting the row was said to remove the posting from the
@@ -302,13 +238,15 @@ def test_an_untouched_board_row_is_the_working_set_and_not_what_a_person_sees(us
     assert _board_row(user_id, job_id) is None
 
     tasks_board.materialize_passing(user_id)
-    assert _board_row(user_id, job_id) is not None
-    assert job_id in visibility.member_ids(user_id), "the row changed nothing about seeing it"
+    assert _working_set_row(user_id, job_id) is not None
+    assert job_id in visibility.member_ids(user_id), "the pair changed nothing about seeing it"
 
-    # And taking the row away does not take the posting away either.
-    db.execute("DELETE FROM user_jobs WHERE user_id = %s AND job_id = %s", (user_id, job_id))
+    # And taking the pair away does not take the posting away either.
+    db.execute(
+        "DELETE FROM user_job_working_set WHERE user_id = %s AND job_id = %s", (user_id, job_id)
+    )
     assert job_id in visibility.member_ids(user_id), (
-        "an untouched board row is not what makes a posting visible; if this fails, "
+        "a working-set pair is not what makes a posting visible; if this fails, "
         "the two meanings have been merged and the comments in board.py and store.py lie"
     )
 
