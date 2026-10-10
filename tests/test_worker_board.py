@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from api import db
+from core import catalog
 from core.store import add_ai_result
 from tasks import board as tasks_board
 
@@ -257,6 +258,8 @@ def test_demote_closed_reads_availability_not_the_feed_flag(user_headers, f):
     # sheet_import is a switched-off source: its flag says active, it is not.
     imported = f.make_job(url="https://jobs.example.com/board-imported", source="sheet_import")
     _picked(user_id, imported)
+    # What the hourly reconcile stores (catalog.reconcile_available).
+    catalog.reconcile_available()
 
     assert tasks_board.demote_closed() == 1
     assert _working_set_row(user_id, listed) is not None

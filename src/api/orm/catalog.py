@@ -81,6 +81,13 @@ class Job(Base):
     # against the posting url, applied uniformly across boards. Job rows serve
     # it as `closed_verdict` ('open' | 'closed' | NULL for never checked).
     active: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
+    # catalog.AVAILABLE, stored: whether some switched-on source lists it,
+    # from source_observations. NULL is cannot tell (no source has observed
+    # it). Written by catalog.observe and set_active for the rows they touch,
+    # and reconciled over the whole catalog every hour (switches and the
+    # pattern setting change it without an observation). Readers use
+    # catalog.IS_AVAILABLE rather than this column directly.
+    available: Mapped[bool | None] = mapped_column(Boolean)
     date_posted: Mapped[datetime.datetime | None]
     uploaded_by: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id"))
     extraction_status: Mapped[str | None] = mapped_column(Text)

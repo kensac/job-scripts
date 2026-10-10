@@ -119,3 +119,17 @@ def test_near_copy_keys_lock_in_url_order():
     catalog.upsert_postings([_posting(FIRST, "v1")], "board-a")
     _contend("jobs", lambda: catalog.set_near_copy_keys({LAST: "twin", FIRST: "twin"}))
     assert {r["near_copy_key"] for r in db.query("SELECT near_copy_key FROM jobs")} == {"twin"}
+
+
+def test_refreshing_stored_availability_locks_in_url_order():
+    catalog.upsert_postings([_posting(LAST, "v1")], "board-a")
+    catalog.upsert_postings([_posting(FIRST, "v1")], "board-a")
+    ids = [r["id"] for r in db.query("SELECT id FROM jobs ORDER BY id DESC")]
+    db.execute(
+        "INSERT INTO source_observations (job_id, source, kind) "
+        "SELECT unnest(%s::bigint[]), 'board-a', 'appeared'",
+        (ids,),
+    )
+    # Ids in insertion order put LAST first, the order a scan meets them.
+    _contend("jobs", lambda: catalog.refresh_available(ids))
+    assert db.query_one("SELECT count(*) AS n FROM jobs WHERE available IS NOT NULL")["n"] == 2
