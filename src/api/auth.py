@@ -7,7 +7,8 @@ from dataclasses import dataclass
 
 from fastapi import Header, HTTPException
 
-from api import db, metrics
+from api import db, metrics, params
+from core.env import env_list
 
 logger = logging.getLogger(__name__)
 
@@ -17,11 +18,7 @@ SERVICE_TOKEN = os.environ.get("JOBTRACKER_SERVICE_TOKEN", "")
 # asks "is this person an admin" calls `is_admin`. Two callers had hard-coded
 # 'infra-admins' and ignored this variable, so a deployment that renamed the
 # group got admin routes for one set and signup and alert mail for another.
-ADMIN_GROUPS = frozenset(
-    g.strip()
-    for g in os.environ.get("JOBTRACKER_ADMIN_GROUPS", "infra-admins").split(",")
-    if g.strip()
-)
+ADMIN_GROUPS = frozenset(env_list("JOBTRACKER_ADMIN_GROUPS", "infra-admins"))
 
 
 def is_admin(groups: list[str] | None) -> bool:
@@ -59,7 +56,7 @@ def require_user(
         )
     if not x_user_sub:
         raise HTTPException(401, detail={"code": "UNAUTHORIZED", "message": "missing user subject"})
-    groups = [g.strip() for g in x_user_groups.split(",") if g.strip()]
+    groups = params.csv(x_user_groups)
     existing = db.query_one("SELECT id FROM users WHERE sub = %s", (x_user_sub,))
     if existing is None and not db.get_config("signups_enabled", True):
         if not is_admin(groups) and "jobtracker-users-internal" not in groups:

@@ -7,7 +7,7 @@ import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
-from api import db, pagination, params
+from api import db, pagination, scoping
 from api.auth import AuthedUser
 from api.review_decision_storage import URL_MATCH
 from api.review_gate_reads import ReviewDecisions, read_decisions
@@ -48,7 +48,7 @@ def selection(
                 clauses.append(f"d.{key}=%({key})s")
             values[key] = value
             filters[key] = [value]
-    users = [int(value) for value in params.csv(user) if value.isdigit()]
+    users = scoping.user_ids(user)
     if users:
         clauses.append("d.user_id=ANY(%(users)s)")
         values["users"] = users

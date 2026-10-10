@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass, field
 from typing import Any, TypeVar
 
@@ -10,6 +9,7 @@ from pydantic import BaseModel
 
 from core import providers, routing
 from core.batch import prompt_cache_key
+from core.env import env_list
 from core.providers.spec import Model, StructuredOutput
 
 PROVIDERS = (*providers.PROVIDERS, "openai_compatible")
@@ -33,16 +33,10 @@ MODEL_CATALOG: dict[str, list[dict[str, str]]] = {
     for name, p in providers.PROVIDERS.items()
 } | {"openai_compatible": []}
 
-OWNER_KEY_MODELS = {
-    m.strip()
-    # gpt-6-luna is in the default because the system's own tasks run on it
-    # (core/shapes.py), and a managed board bootstrapped on it refuses its own
-    # runs with MODEL_NOT_ALLOWED when a budgeted sponsor's allowlist omits it.
-    for m in os.environ.get(
-        "JOBTRACKER_OWNER_KEY_MODELS", "gpt-5-nano,gpt-5-mini,gpt-6-luna"
-    ).split(",")
-    if m.strip()
-}
+# gpt-6-luna is in the default because the system's own tasks run on it
+# (core/shapes.py), and a managed board bootstrapped on it refuses its own
+# runs with MODEL_NOT_ALLOWED when a budgeted sponsor's allowlist omits it.
+OWNER_KEY_MODELS = set(env_list("JOBTRACKER_OWNER_KEY_MODELS", "gpt-5-nano,gpt-5-mini,gpt-6-luna"))
 
 
 def server_key(provider: str) -> str:

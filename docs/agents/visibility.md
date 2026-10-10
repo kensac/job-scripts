@@ -309,6 +309,13 @@ from the response and keeps no parallel list; a new value is one backend entry.
 `filters: {status: [...]}` with what was applied, empty when nothing was, so a
 client can tell "lists accepted" from an older build by the key's presence.
 
+A comma list has two parsers and no others: `api.params.csv` for query
+parameters and headers, `core.env.env_list` for environment variables (in
+core so core can use it). User ids go through `scoping.user_ids`, which keeps
+plain non-negative integers and drops the rest. `tests/test_comma_lists.py`
+fails on a module that splits its own; one admin lookup's copy had drifted to
+accept negative ids.
+
 **A view is a name that returns a page to a state.** `saved_views` holds, per
 user and per page, the filters, the sort order across columns, the columns and
 the search a person wants back; several per page, one default, ordered. The

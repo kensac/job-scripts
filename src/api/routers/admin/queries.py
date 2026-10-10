@@ -69,7 +69,7 @@ def _where(
         # shared checks belong to nobody and fall out of any user's scope.
         clauses.append(scoping.filters_of())
         params["user_ids"] = user_ids
-    wanted_sources = [s.strip() for s in (sources or "").split(",") if s.strip()]
+    wanted_sources = params_.csv(sources)
     if wanted_sources:
         # ai_queries is keyed by url; source lives on the job. Subquery instead
         # of a join keeps this composable with the existing count/list queries.
@@ -527,7 +527,7 @@ def list_jobs(
     paging = pagination.Page.from_params(page, page_size, maximum=500)
     sub = ["url IS NOT NULL"]
     params: dict = {}
-    wanted_sources = [s.strip() for s in (sources or "").split(",") if s.strip()]
+    wanted_sources = params_.csv(sources)
     if wanted_sources:
         # Same shape as _where(): ai_queries is keyed by url and source lives on
         # the job, so a subquery keeps this composable with the count and page
