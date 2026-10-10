@@ -9,25 +9,21 @@ from __future__ import annotations
 
 import datetime
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from api import oauth
 from api.auth import AuthedUser, require_user
 from api.models import Ok
-from api.problem import AI_REFUSALS
+from api.problem import AI_REFUSALS, refuse
 
 router = APIRouter(prefix="/user/gmail")
 
 
 def require_connect_access(user: AuthedUser = Depends(require_user)) -> AuthedUser:
     if not oauth.connect_allowed(user.groups):
-        raise HTTPException(
-            403,
-            detail={
-                "code": "GMAIL_CONNECT_DISABLED",
-                "message": "mailbox connection is not enabled for your groups",
-            },
+        raise refuse(
+            403, "GMAIL_CONNECT_DISABLED", "mailbox connection is not enabled for your groups"
         )
     return user
 
@@ -75,9 +71,7 @@ def authorize(
     try:
         url = oauth.authorization_url(user_id=user.id, redirect_uri=body.redirect_uri)
     except oauth.StateInvalid as exc:
-        raise HTTPException(
-            400, detail={"code": "INVALID_REDIRECT_URI", "message": str(exc)}
-        ) from exc
+        raise refuse(400, "INVALID_REDIRECT_URI", str(exc)) from exc
     return AuthorizationUrl(authorization_url=url)
 
 
@@ -88,11 +82,11 @@ def callback(
     try:
         oauth.exchange_code(user_id=user.id, code=body.code, state=body.state)
     except oauth.StateInvalid as exc:
-        raise HTTPException(400, detail={"code": "INVALID_STATE", "message": str(exc)}) from exc
+        raise refuse(400, "INVALID_STATE", str(exc)) from exc
     except oauth.ScopeDeclined as exc:
-        raise HTTPException(400, detail={"code": "SCOPE_DECLINED", "message": str(exc)}) from exc
+        raise refuse(400, "SCOPE_DECLINED", str(exc)) from exc
     except oauth.ProviderError as exc:
-        raise HTTPException(502, detail={"code": "PROVIDER_ERROR", "message": str(exc)}) from exc
+        raise refuse(502, "PROVIDER_ERROR", str(exc)) from exc
     return GmailStatus(available=True, **oauth.status(user.id))
 
 

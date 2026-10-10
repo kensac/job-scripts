@@ -6,12 +6,13 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, JsonValue
 
 from api import db, scoping
 from api.auth import AuthedUser
 from api.config import CONFIG_KEYS
+from api.problem import refuse
 from api.routers.admin.shared import require_admin
 from core.review_gate import ReviewGateScope
 
@@ -174,17 +175,11 @@ def put_config(
 ) -> TunableWritten:
     spec = _CONFIG_KEYS.get(key)
     if spec is None:
-        raise HTTPException(
-            400,
-            detail={"code": "UNKNOWN_KEY", "message": f"key must be one of {sorted(_CONFIG_KEYS)}"},
-        )
+        raise refuse(400, "UNKNOWN_KEY", f"key must be one of {sorted(_CONFIG_KEYS)}")
     try:
         value = spec.validate(body.value)
     except ValueError as exc:
-        raise HTTPException(
-            400,
-            detail={"code": "INVALID_VALUE", "message": f"{key}: {exc}"},
-        ) from exc
+        raise refuse(400, "INVALID_VALUE", f"{key}: {exc}") from exc
     with db.transaction():
         # Lock the key even before its first row exists. Concurrent saves
         # must record the actual predecessor, not the same stale old value.

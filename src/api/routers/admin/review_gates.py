@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
 from api import db, pagination, scoping
 from api.auth import AuthedUser
+from api.problem import refuse
 from api.review_decision_storage import URL_MATCH
 from api.review_gate_reads import ReviewDecisions, read_decisions
 from api.routers.admin.shared import require_admin
@@ -100,12 +101,10 @@ def decisions(
             or window_end - window_start > datetime.timedelta(days=90)
         )
     ):
-        raise HTTPException(
+        raise refuse(
             400,
-            detail={
-                "code": "INVALID_WINDOW",
-                "message": "Supply both timezone-aware bounds, increasing and at most 90 days apart.",
-            },
+            "INVALID_WINDOW",
+            "Supply both timezone-aware bounds, increasing and at most 90 days apart.",
         )
     if window_start is not None and window_end is not None:
         where += " AND d.created_at >= %(start)s AND d.created_at < %(end)s"

@@ -17,11 +17,10 @@ forget it is how the hole the docstring below describes was opened.
 
 from __future__ import annotations
 
-from fastapi import HTTPException
-
 from api import db
 from api.auth import AuthedUser
 from api.board import visibility
+from api.problem import refuse
 
 
 def _visible_job(user: AuthedUser, job_id: int, columns: str) -> dict | None:
@@ -49,5 +48,5 @@ def require_visible_job(user: AuthedUser, job_id: int, columns: str) -> dict:
     if not job:
         # 404, not 403: whether a job exists is itself information the caller
         # is not entitled to.
-        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown job"})
+        raise refuse(404, "NOT_FOUND", "unknown job")
     return job

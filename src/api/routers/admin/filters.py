@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import datetime
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from api import db
 from api.auth import AuthedUser
 from api.models import Ok
+from api.problem import refuse
 from api.routers.admin.shared import require_admin
 
 router = APIRouter()
@@ -88,23 +89,18 @@ def admin_run_filter(
     from api import filter_runs
 
     if not db.query_one("SELECT 1 FROM users WHERE id = %s", (body.user_id,)):
-        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown user"})
+        raise refuse(404, "NOT_FOUND", "unknown user")
     if body.filter_id is not None and not db.query_one(
         "SELECT 1 FROM user_filters WHERE id = %s AND user_id = %s",
         (body.filter_id, body.user_id),
     ):
-        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown filter"})
+        raise refuse(404, "NOT_FOUND", "unknown filter")
     result = filter_runs.enqueue(
         body.user_id, body.filter_id, policy="interactive", ignore_budget=body.ignore_budget
     )
     if result.conflict:
-        raise HTTPException(
-            409,
-            detail={
-                "code": "IN_PROGRESS",
-                "message": "this run is already in progress",
-                "task_id": result.conflict.id,
-            },
+        raise refuse(
+            409, "IN_PROGRESS", "this run is already in progress", task_id=result.conflict.id
         )
     # Not a conflict, so admission queued one and named it.
     assert result.task_id is not None
@@ -114,11 +110,9 @@ def admin_run_filter(
 @router.post("/filter-presets")
 def create_preset(body: PresetBody, user: AuthedUser = Depends(require_admin)) -> FilterPreset:
     if not body.name or not body.prompt:
-        raise HTTPException(
-            400, detail={"code": "MISSING_FIELDS", "message": "name and prompt are required"}
-        )
+        raise refuse(400, "MISSING_FIELDS", "name and prompt are required")
     if db.query_one("SELECT id FROM filter_presets WHERE name = %s", (body.name,)):
-        raise HTTPException(409, detail={"code": "DUPLICATE_NAME", "message": "preset name exists"})
+        raise refuse(409, "DUPLICATE_NAME", "preset name exists")
     row = db.query_one_as(
         FilterPreset,
         f"""
@@ -144,7 +138,7 @@ def patch_preset(
 ) -> FilterPreset:
     fields = body.model_dump(exclude_unset=True)
     if not fields:
-        raise HTTPException(400, detail={"code": "EMPTY_PATCH", "message": "no fields to update"})
+        raise refuse(400, "EMPTY_PATCH", "no fields to update")
     cols = ", ".join(f"{k} = %({k})s" for k in fields)
     row = db.query_one_as(
         FilterPreset,
@@ -153,7 +147,7 @@ def patch_preset(
         {"pid": preset_id, **fields},
     )
     if not row:
-        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown preset"})
+        raise refuse(404, "NOT_FOUND", "unknown preset")
     return row
 
 

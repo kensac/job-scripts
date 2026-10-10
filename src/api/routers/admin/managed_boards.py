@@ -5,13 +5,14 @@ from __future__ import annotations
 import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from psycopg.errors import UniqueViolation
 from pydantic import BaseModel, ConfigDict, Field
 
 from api import db, managed_board_runs
 from api.auth import AuthedUser
 from api.models import Criteria
+from api.problem import refuse
 from api.routers.admin.shared import require_admin
 from api.updates import NonNullUpdate
 from core import providers
@@ -157,46 +158,33 @@ class ManagedBoardPatch(BaseModel):
 
 def _validate_ambiguity(value: str) -> None:
     if value not in ON_AMBIGUOUS_VALUES:
-        raise HTTPException(
+        raise refuse(
             400,
-            detail={
-                "code": "INVALID_ON_AMBIGUOUS",
-                "message": "on_ambiguous must be 'keep' or 'filter'; filter excludes ambiguity",
-            },
+            "INVALID_ON_AMBIGUOUS",
+            "on_ambiguous must be 'keep' or 'filter'; filter excludes ambiguity",
         )
 
 
 def _validate_model(value: str) -> None:
     if value not in providers.MODELS:
-        raise HTTPException(
-            400, detail={"code": "UNKNOWN_MODEL", "message": "unknown requested model"}
-        )
+        raise refuse(400, "UNKNOWN_MODEL", "unknown requested model")
 
 
 def _validate_execution_mode(value: str) -> None:
     if value not in {"managed_filter", "sponsor_filter_reuse"}:
-        raise HTTPException(
-            400,
-            detail={"code": "INVALID_EXECUTION_MODE", "message": "unknown execution mode"},
-        )
+        raise refuse(400, "INVALID_EXECUTION_MODE", "unknown execution mode")
 
 
 def _validate_title_gate(execution_mode: str, title_gate: TitleGateConfig | None) -> None:
     if title_gate is not None and execution_mode != "managed_filter":
-        raise HTTPException(
-            400,
-            detail={
-                "code": "TITLE_GATE_UNSUPPORTED",
-                "message": "title gates apply only to managed_filter boards",
-            },
+        raise refuse(
+            400, "TITLE_GATE_UNSUPPORTED", "title gates apply only to managed_filter boards"
         )
 
 
 def _validate_sources(sources: list[str]) -> list[str]:
     if len(sources) != len(set(sources)):
-        raise HTTPException(
-            400, detail={"code": "DUPLICATE_SOURCE", "message": "sources must be unique"}
-        )
+        raise refuse(400, "DUPLICATE_SOURCE", "sources must be unique")
     ordered = sorted(sources)
     if not ordered:
         return ordered
@@ -206,10 +194,7 @@ def _validate_sources(sources: list[str]) -> list[str]:
     }
     unknown = [source for source in ordered if source not in known]
     if unknown:
-        raise HTTPException(
-            400,
-            detail={"code": "UNKNOWN_SOURCE", "message": f"unknown sources: {unknown}"},
-        )
+        raise refuse(400, "UNKNOWN_SOURCE", f"unknown sources: {unknown}")
     return ordered
 
 
@@ -272,13 +257,7 @@ def bootstrap_managed_boards(
                     and board.revision == 1
                 )
                 if not matches:
-                    raise HTTPException(
-                        409,
-                        detail={
-                            "code": "BOOTSTRAP_DRIFT",
-                            "message": f"{slug} differs from bootstrap v2",
-                        },
-                    )
+                    raise refuse(409, "BOOTSTRAP_DRIFT", f"{slug} differs from bootstrap v2")
                 boards.append(board)
                 continue
             row = db.query_one_as(
@@ -316,7 +295,7 @@ def bootstrap_managed_boards(
 def get_managed_board(board_id: int, user: AuthedUser = Depends(require_admin)) -> ManagedBoard:
     board = _get(board_id)
     if board is None:
-        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown managed board"})
+        raise refuse(404, "NOT_FOUND", "unknown managed board")
     return board
 
 
@@ -328,10 +307,7 @@ def run_managed_board(
         return managed_board_runs.admit(board_id)
     except managed_board_runs.RunRefusal as exc:
         status = {"NOT_FOUND": 404, "STORAGE_UNAVAILABLE": 503}.get(exc.code, 409)
-        raise HTTPException(
-            status,
-            detail={"code": exc.code, "message": exc.message, "task_id": exc.task_id},
-        ) from exc
+        raise refuse(status, exc.code, exc.message, task_id=exc.task_id) from exc
 
 
 @router.get("/managed-boards/{board_id}/runs/latest")
@@ -339,7 +315,7 @@ def latest_managed_board_run(
     board_id: int, user: AuthedUser = Depends(require_admin)
 ) -> ManagedBoardLatestRun:
     if _get(board_id) is None:
-        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown managed board"})
+        raise refuse(404, "NOT_FOUND", "unknown managed board")
     return ManagedBoardLatestRun(run=managed_board_runs.latest(board_id))
 
 
@@ -348,7 +324,7 @@ def managed_board_cost(
     board_id: int, user: AuthedUser = Depends(require_admin)
 ) -> managed_board_runs.ManagedBoardCost:
     if _get(board_id) is None:
-        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown managed board"})
+        raise refuse(404, "NOT_FOUND", "unknown managed board")
     return managed_board_runs.cost(board_id)
 
 
@@ -368,9 +344,7 @@ def create_managed_board(
                 db.query_one_as(_Id, "SELECT id FROM users WHERE id = %s", (sponsor_user_id,))
                 is None
             ):
-                raise HTTPException(
-                    400, detail={"code": "UNKNOWN_SPONSOR", "message": "unknown sponsor"}
-                )
+                raise refuse(400, "UNKNOWN_SPONSOR", "unknown sponsor")
             row = db.query_one_as(
                 _Id,
                 "INSERT INTO managed_boards "
@@ -403,9 +377,7 @@ def create_managed_board(
             board = _get(row.id)
             assert board is not None
     except UniqueViolation as exc:
-        raise HTTPException(
-            409, detail={"code": "DUPLICATE_SLUG", "message": "managed board slug exists"}
-        ) from exc
+        raise refuse(409, "DUPLICATE_SLUG", "managed board slug exists") from exc
     return board
 
 
@@ -416,7 +388,7 @@ def patch_managed_board(
     fields = body.model_dump(exclude_unset=True)
     fields.pop("expected_revision")
     if not fields:
-        raise HTTPException(400, detail={"code": "EMPTY_PATCH", "message": "no fields to update"})
+        raise refuse(400, "EMPTY_PATCH", "no fields to update")
     if "on_ambiguous" in fields:
         _validate_ambiguity(fields["on_ambiguous"])
     if "requested_model" in fields:
@@ -427,17 +399,13 @@ def patch_managed_board(
     with db.transaction():
         existing = _get(board_id, lock=True)
         if existing is None:
-            raise HTTPException(
-                404, detail={"code": "NOT_FOUND", "message": "unknown managed board"}
-            )
+            raise refuse(404, "NOT_FOUND", "unknown managed board")
         if existing.revision != body.expected_revision:
-            raise HTTPException(
+            raise refuse(
                 409,
-                detail={
-                    "code": "STALE_REVISION",
-                    "message": "managed board changed; reload it before saving",
-                    "current_revision": existing.revision,
-                },
+                "STALE_REVISION",
+                "managed board changed; reload it before saving",
+                current_revision=existing.revision,
             )
         _validate_title_gate(
             fields.get("execution_mode", existing.execution_mode),
@@ -454,13 +422,7 @@ def patch_managed_board(
                 (fields["slug"], board_id),
             )
             if duplicate is not None:
-                raise HTTPException(
-                    409,
-                    detail={
-                        "code": "DUPLICATE_SLUG",
-                        "message": "managed board slug exists",
-                    },
-                )
+                raise refuse(409, "DUPLICATE_SLUG", "managed board slug exists")
         sources = _validate_sources(requested_sources) if requested_sources is not None else None
         if sources is not None:
             db.execute("DELETE FROM managed_board_sources WHERE managed_board_id = %s", (board_id,))
@@ -477,10 +439,7 @@ def patch_managed_board(
                 (board_id,),
             )
             if source_count is None or source_count.n == 0:
-                raise HTTPException(
-                    400,
-                    detail={"code": "NO_SOURCES", "message": "a published board needs a source"},
-                )
+                raise refuse(400, "NO_SOURCES", "a published board needs a source")
         prompt = fields.get("prompt", existing.prompt)
         on_ambiguous = fields.get("on_ambiguous", existing.on_ambiguous)
         fields["criteria"] = (

@@ -5,8 +5,9 @@ import json
 from decimal import Decimal
 from typing import Literal
 
-from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field
+
+from api.problem import refuse
 
 
 class ColumnFilter(BaseModel):
@@ -134,4 +135,4 @@ def compile_filters(raw: str | None) -> tuple[list[ColumnFilter], list[str], dic
             params[name] = value
         return rules, clauses, params
     except (ValueError, ArithmeticError) as error:
-        raise HTTPException(status_code=422, detail=str(error)) from error
+        raise refuse(422, "INVALID_COLUMN_FILTER", str(error)) from error

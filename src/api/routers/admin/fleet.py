@@ -7,7 +7,7 @@ import datetime
 from dataclasses import dataclass
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
 from api import db, events, health, queue, scoping, task_admission, telemetry
@@ -18,6 +18,7 @@ from api.board.person_state import (
     USER_JOB_SPLIT_DEDUPE_PREFIX,
     USER_JOB_SPLIT_VERSION,
 )
+from api.problem import refuse
 from api.routers.admin.shared import SUMMARY_MAX_HOURS, require_admin
 from api.task_admission import TaskProgress
 from core import pricing
@@ -74,12 +75,8 @@ def admit_user_job_split(user: AuthedUser = Depends(require_admin)) -> BackfillA
             {"fresh": health.WORKER_FRESH, "release": telemetry.RELEASE, "kind": kind},
         )
         if eligible is None:
-            raise HTTPException(
-                503,
-                detail={
-                    "code": "NO_ELIGIBLE_WORKER",
-                    "message": "no current-release worker can run the user job split",
-                },
+            raise refuse(
+                503, "NO_ELIGIBLE_WORKER", "no current-release worker can run the user job split"
             )
         generation = int(existing.payload.get("generation", 0) if existing else 0) + 1
         if existing:
@@ -273,18 +270,9 @@ def cancel_tasks(
     (awaiting_batch) is cancellable too - it holds no worker, so nothing
     notices otherwise and it would sit until its batches landed."""
     if body.ids is None and body.kind is None and body.source is None and body.status is None:
-        raise HTTPException(
-            400,
-            detail={"code": "NO_SELECTION", "message": "give ids, a kind, a source, or a status"},
-        )
+        raise refuse(400, "NO_SELECTION", "give ids, a kind, a source, or a status")
     if body.status is not None and body.status not in CANCELLABLE:
-        raise HTTPException(
-            400,
-            detail={
-                "code": "NOT_CANCELLABLE",
-                "message": f"status must be one of {', '.join(CANCELLABLE)}",
-            },
-        )
+        raise refuse(400, "NOT_CANCELLABLE", f"status must be one of {', '.join(CANCELLABLE)}")
     clauses = ["status = ANY(%(cancellable)s)"]
     params: dict[str, Any] = {"cancellable": list(CANCELLABLE)}
     for key, value in (("id", body.ids), ("kind", body.kind), ("status", body.status)):
@@ -617,7 +605,7 @@ def batch_jobs(
         (provider_batch_id,),
     )
     if not batch:
-        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown batch"})
+        raise refuse(404, "NOT_FOUND", "unknown batch")
     limit = max(1, min(limit, 500))
     offset = max(0, offset)
     total = db.query_one(

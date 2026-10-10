@@ -74,6 +74,14 @@ values; negative text conditions do not include empty values. Private fields
 such as notes are scoped to the current user's joined row. The field mapping
 and parameterized compiler live in `api/board/column_filters.py`.
 
+**A refusal is `{detail: {code, message, ...}}`, built by `api.problem.refuse`.**
+`code` is what a client branches on and stays stable; `message` is for a
+person and may be reworded. Extra keys (a `task_id`, the `in_flight` run) ride
+beside them as keyword arguments. Nothing outside `api/problem.py` constructs
+an `HTTPException`; `tests/test_refusals_declared.py` fails on one, because a
+bare `HTTPException` can carry a string and the client then shows a status
+instead of the reason.
+
 **The client, its types, and any test fixture can each drift from the server
 independently.** Verify shapes against the server source, not against your
 expectation or your own fixture.

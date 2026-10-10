@@ -6,12 +6,13 @@ from __future__ import annotations
 import datetime
 import time
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
 from api import db, hosts, scoping, task_admission
 from api import params as params_
 from api.auth import AuthedUser
+from api.problem import refuse
 from api.routers.admin.shared import SUMMARY_MAX_HOURS, require_admin
 
 router = APIRouter()
@@ -100,9 +101,7 @@ def resolve_source_request(
     request_id: int, body: ResolveSourceRequest, user: AuthedUser = Depends(require_admin)
 ) -> SourceRequestResolved:
     if body.action not in ("added", "dismissed"):
-        raise HTTPException(
-            400, detail={"code": "INVALID_ACTION", "message": "action must be added or dismissed"}
-        )
+        raise refuse(400, "INVALID_ACTION", "action must be added or dismissed")
     row = db.query_one_as(
         SourceRequestResolved,
         "UPDATE source_requests SET status = %s, resolution_note = %s, resolved_at = now() "
@@ -110,7 +109,7 @@ def resolve_source_request(
         (body.action, body.note[:2000] or None, request_id),
     )
     if not row:
-        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown request"})
+        raise refuse(404, "NOT_FOUND", "unknown request")
     return row
 
 
@@ -249,9 +248,7 @@ def trigger_ingest(body: IngestBody, user: AuthedUser = Depends(require_admin)) 
     wanted = list(dict.fromkeys(body.sources)) if body.sources else sorted(active)
     unknown = [s for s in wanted if s not in active]
     if unknown:
-        raise HTTPException(
-            400, detail={"code": "UNKNOWN_SOURCE", "message": f"unknown or inactive: {unknown}"}
-        )
+        raise refuse(400, "UNKNOWN_SOURCE", f"unknown or inactive: {unknown}")
     cycle = f"manual-{user.id}-{int(time.time())}"
     task_ids: list[SourceTask] = []
     in_flight: list[SourceTask] = []
@@ -264,13 +261,11 @@ def trigger_ingest(body: IngestBody, user: AuthedUser = Depends(require_admin)) 
             task_ids.append(SourceTask(source=name, task_id=admission.task_id))
     in_flight.sort(key=lambda row: row.source)
     if in_flight and not task_ids:
-        raise HTTPException(
+        raise refuse(
             409,
-            detail={
-                "code": "IN_PROGRESS",
-                "message": "every board named is already being pulled",
-                "in_flight": [row.model_dump() for row in in_flight],
-            },
+            "IN_PROGRESS",
+            "every board named is already being pulled",
+            in_flight=[row.model_dump() for row in in_flight],
         )
     return IngestQueued(tasks=task_ids, in_flight=in_flight)
 
@@ -300,9 +295,7 @@ def upsert_source_group(
         known = {r["name"] for r in db.query("SELECT name FROM sources")}
         unknown = [m for m in body.members if m not in known]
         if unknown:
-            raise HTTPException(
-                400, detail={"code": "UNKNOWN_SOURCE", "message": f"unknown sources: {unknown}"}
-            )
+            raise refuse(400, "UNKNOWN_SOURCE", f"unknown sources: {unknown}")
     row = db.query_one_as(
         SourceBundle,
         """
@@ -336,7 +329,7 @@ class BundleDeleted(BaseModel):
 def delete_source_group(name: str, user: AuthedUser = Depends(require_admin)) -> BundleDeleted:
     row = db.query_one("DELETE FROM source_groups WHERE name = %s RETURNING name", (name,))
     if not row:
-        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown group"})
+        raise refuse(404, "NOT_FOUND", "unknown group")
     return BundleDeleted(ok=True, deleted=name)
 
 

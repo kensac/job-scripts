@@ -72,3 +72,24 @@ def test_no_refusal_set_declares_a_status_nothing_raises():
             named |= set(value)
     unraised = sorted(named - _statuses_raised())
     assert not unraised, f"api.problem declares {unraised}, which nothing in src/ raises"
+
+
+def test_every_refusal_is_built_by_refuse():
+    """A refusal is `refuse(status, code, message, **extra)`, so `detail`
+    always holds `code` and `message`. A bare `HTTPException` can carry a
+    string or a dict missing either key, and the frontend then shows the
+    status instead of the reason; one site did, with `detail=str(error)`."""
+    import ast
+
+    found = []
+    for path in _SRC.rglob("*.py"):
+        rel = path.relative_to(_SRC).as_posix()
+        if rel == "api/problem.py":
+            continue
+        for node in ast.walk(ast.parse(path.read_text())):
+            if isinstance(node, ast.Call) and "HTTPException" in (
+                getattr(node.func, "id", None),
+                getattr(node.func, "attr", None),
+            ):
+                found.append(f"{rel}:{node.lineno}")
+    assert not found, f"build these with api.problem.refuse: {found}"

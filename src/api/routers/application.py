@@ -15,7 +15,7 @@ import io
 import json
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, Response
 from pydantic import BaseModel, Field
 
 from api import ai, budget, db, task_admission
@@ -405,13 +405,11 @@ def request_drafts(
         {"resume_id": body.resume_id, "keys": body.keys, "refresh": body.refresh},
     )
     if admission.conflict:
-        raise HTTPException(
+        raise refuse(
             409,
-            detail={
-                "code": "IN_PROGRESS",
-                "message": "drafts for this job are already being written",
-                "task_id": admission.conflict.id,
-            },
+            "IN_PROGRESS",
+            "drafts for this job are already being written",
+            task_id=admission.conflict.id,
         )
     return DraftsQueued(task_id=admission.task_id)
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import datetime
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from api import db, events
@@ -60,7 +60,7 @@ class Deleted(BaseModel):
 def _patch_fields(body: UserJobPatch) -> dict:
     fields = body.model_dump(exclude_unset=True)
     if not fields:
-        raise HTTPException(400, detail={"code": "EMPTY_PATCH", "message": "no fields to update"})
+        raise refuse(400, "EMPTY_PATCH", "no fields to update")
     return fields
 
 

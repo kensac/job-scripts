@@ -7,14 +7,15 @@ because the queue and the ingest summaries agree on it and neither owns it.
 
 from __future__ import annotations
 
-from fastapi import Depends, HTTPException
+from fastapi import Depends
 
 from api.auth import AuthedUser, is_admin, require_user
+from api.problem import refuse
 
 
 def require_admin(user: AuthedUser = Depends(require_user)) -> AuthedUser:
     if not is_admin(user.groups):
-        raise HTTPException(403, detail={"code": "FORBIDDEN", "message": "admin group required"})
+        raise refuse(403, "FORBIDDEN", "admin group required")
     return user
 
 

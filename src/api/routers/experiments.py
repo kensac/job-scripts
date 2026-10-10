@@ -6,12 +6,13 @@ from __future__ import annotations
 import datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from api import db, events
 from api import experiments as exp
 from api.auth import AuthedUser
+from api.problem import refuse
 from api.routers.admin import require_admin
 
 router = APIRouter(prefix="/admin")
@@ -141,33 +142,19 @@ def create_experiment(
     body: ExperimentCreate, user: AuthedUser = Depends(require_admin)
 ) -> ExperimentQueued:
     if body.purpose not in exp.steps():
-        raise HTTPException(
-            400,
-            detail={"code": "UNKNOWN_STEP", "message": f"measurable steps: {sorted(exp.steps())}"},
-        )
+        raise refuse(400, "UNKNOWN_STEP", f"measurable steps: {sorted(exp.steps())}")
     if body.purpose == "filter" and not body.filter_id:
-        raise HTTPException(
-            400,
-            detail={
-                "code": "FILTER_REQUIRED",
-                "message": "an experiment on filter needs filter_id",
-            },
-        )
+        raise refuse(400, "FILTER_REQUIRED", "an experiment on filter needs filter_id")
     refused = {
         exp.arm_name(a.model, a.effort): why
         for a in body.arms
         if (why := exp.arm_ok(a.model, a.effort))
     }
     if len(refused) == len(body.arms):
-        raise HTTPException(
-            400, detail={"code": "NO_ARM", "message": "no arm can run", "arms": refused}
-        )
+        raise refuse(400, "NO_ARM", "no arm can run", arms=refused)
     names = {exp.arm_name(a.model, a.effort) for a in body.arms}
     if body.reference and body.reference not in names:
-        raise HTTPException(
-            400,
-            detail={"code": "BAD_REFERENCE", "message": "reference must name one of the arms"},
-        )
+        raise refuse(400, "BAD_REFERENCE", "reference must name one of the arms")
     params: dict[str, Any] = {
         "sample": body.sample,
         "seed": body.seed,
@@ -199,13 +186,11 @@ def rescore_experiment(experiment_id: int, user: AuthedUser = Depends(require_ad
     scoring query, and nothing should have to be re-bought to fix that."""
     row = db.query_one("SELECT id FROM ai_experiments WHERE id = %s", (experiment_id,))
     if not row:
-        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown experiment"})
+        raise refuse(404, "NOT_FOUND", "unknown experiment")
     if not db.query_one(
         "SELECT 1 FROM ai_experiment_results WHERE experiment_id = %s LIMIT 1", (experiment_id,)
     ):
-        raise HTTPException(
-            409, detail={"code": "NO_RESULTS", "message": "nothing collected yet to score"}
-        )
+        raise refuse(409, "NO_RESULTS", "nothing collected yet to score")
     summary = exp.summarise(experiment_id)
     db.execute(
         "UPDATE ai_experiments SET summary = %s, status = 'done', error = NULL, "
@@ -223,7 +208,7 @@ def get_experiment(
         Experiment, f"SELECT {_COLS} FROM ai_experiments WHERE id = %s", (experiment_id,)
     )
     if not row:
-        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown experiment"})
+        raise refuse(404, "NOT_FOUND", "unknown experiment")
     results = db.query_as(
         ArmResult,
         "SELECT arm, url, output, usage, cost_usd, error FROM ai_experiment_results "

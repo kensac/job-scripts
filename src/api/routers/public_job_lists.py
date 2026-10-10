@@ -10,11 +10,12 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Literal
 
-from fastapi import APIRouter, Header, HTTPException, Query, Response
+from fastapi import APIRouter, Header, Query, Response
 from pydantic import BaseModel
 
 from api import db
 from api.params import csv
+from api.problem import refuse
 from api.routers.job_board import ATS_SQL, AtsName, Openness
 from core import verdict_reads
 
@@ -195,9 +196,7 @@ def _decode_cursor(
             value = Decimal(raw_value)
         return value, parsed["job_id"]
     except (TypeError, ValueError, KeyError, InvalidOperation, json.JSONDecodeError) as exc:
-        raise HTTPException(
-            400, detail={"code": "INVALID_CURSOR", "message": "invalid job list cursor"}
-        ) from exc
+        raise refuse(400, "INVALID_CURSOR", "invalid job list cursor") from exc
 
 
 _INDEX_SQL = """
@@ -298,12 +297,8 @@ def get_public_job_list(
 ) -> PublicJobList | Response:
     wanted_terms = csv(terms)
     if min_comp is not None and (comp_currency is None or comp_period is None):
-        raise HTTPException(
-            422,
-            detail={
-                "code": "COMP_UNITS_REQUIRED",
-                "message": "a compensation minimum requires currency and period",
-            },
+        raise refuse(
+            422, "COMP_UNITS_REQUIRED", "a compensation minimum requires currency and period"
         )
     expression = _SORT_EXPRESSIONS[sort]
     cursor_value, cursor_id = _decode_cursor(cursor, sort, dir) if cursor else (None, None)
@@ -357,10 +352,8 @@ def get_public_job_list(
         db.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
         board = db.query_one_as(_BoardRow, _BOARD_SQL, (slug,))
         if board is None:
-            raise HTTPException(
-                404,
-                detail={"code": "NOT_FOUND", "message": "unknown job list"},
-                headers={"Cache-Control": "no-store"},
+            raise refuse(
+                404, "NOT_FOUND", "unknown job list", headers={"Cache-Control": "no-store"}
             )
         params["board_id"] = board.id
         count = db.query_one(
@@ -435,11 +428,7 @@ def get_public_job(slug: str, job_id: int, response: Response) -> PublicJobDetai
     """
     row = db.query_one_as(_DetailRow, detail_sql, (slug, job_id))
     if row is None:
-        raise HTTPException(
-            404,
-            detail={"code": "NOT_FOUND", "message": "unknown job"},
-            headers={"Cache-Control": "no-store"},
-        )
+        raise refuse(404, "NOT_FOUND", "unknown job", headers={"Cache-Control": "no-store"})
     response.headers["Cache-Control"] = "public, max-age=0, must-revalidate"
     return PublicJobDetail(
         job=_card(row), content=row.content, content_fetched_at=row.content_fetched_at

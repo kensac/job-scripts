@@ -5,11 +5,12 @@ from __future__ import annotations
 import datetime
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from api import db
 from api.auth import AuthedUser, require_user
+from api.problem import refuse
 from api.task_admission import TaskProgress
 
 router = APIRouter()
@@ -45,5 +46,5 @@ def get_task(task_id: int, user: AuthedUser = Depends(require_user)) -> TaskStat
         (task_id, user.id),
     )
     if not row:
-        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown task"})
+        raise refuse(404, "NOT_FOUND", "unknown task")
     return row

@@ -6,13 +6,14 @@ from __future__ import annotations
 import datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
 from api import db, pagination, scoping, task_admission
 from api import params as params_
 from api.auth import AuthedUser
 from api.locations import LocationExtract, Place, store
+from api.problem import refuse
 from api.reports import ReportKind, report_kinds
 from api.routers.admin.shared import require_admin
 from core import verdict_reads
@@ -260,10 +261,7 @@ def resolve_report(
     report_id: int, body: ResolveReport, user: AuthedUser = Depends(require_admin)
 ) -> ReportResolved:
     if body.action not in ("resolved", "dismissed"):
-        raise HTTPException(
-            400,
-            detail={"code": "INVALID_ACTION", "message": "action must be resolved or dismissed"},
-        )
+        raise refuse(400, "INVALID_ACTION", "action must be resolved or dismissed")
     row = db.query_one_as(
         ReportResolved,
         "UPDATE reports SET status = %s, resolution_note = %s, resolved_at = now() "
@@ -271,7 +269,7 @@ def resolve_report(
         (body.action, body.note[:2000] or None, report_id),
     )
     if not row:
-        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown report"})
+        raise refuse(404, "NOT_FOUND", "unknown report")
     return row
 
 
@@ -302,7 +300,7 @@ def patch_catalog_job(
 ) -> CorrectedJob:
     fields = body.model_dump(exclude_unset=True)
     if not fields:
-        raise HTTPException(400, detail={"code": "EMPTY_PATCH", "message": "no fields to update"})
+        raise refuse(400, "EMPTY_PATCH", "no fields to update")
     cols = ", ".join(f"{k} = %({k})s" for k in fields)
     row = db.query_one_as(
         CorrectedJob,
@@ -311,7 +309,7 @@ def patch_catalog_job(
         {"jid": job_id, **fields},
     )
     if not row:
-        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown job"})
+        raise refuse(404, "NOT_FOUND", "unknown job")
     return row
 
 
@@ -346,7 +344,7 @@ def close_posting(
 
     job = db.query_one("SELECT url, company, title FROM jobs WHERE id = %s", (job_id,))
     if not job:
-        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown job"})
+        raise refuse(404, "NOT_FOUND", "unknown job")
     reason = f"closed by admin {user.email}" + (
         f": {body.reason.strip()}" if body.reason.strip() else ""
     )
@@ -370,20 +368,18 @@ class ReparseQueued(BaseModel):
 def reparse_job(job_id: int, user: AuthedUser = Depends(require_admin)) -> ReparseQueued:
     job = db.query_one("SELECT id FROM jobs WHERE id = %s", (job_id,))
     if not job:
-        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown job"})
+        raise refuse(404, "NOT_FOUND", "unknown job")
     admission = task_admission.enqueue(
         "extract_upload",
         {"job_id": job_id},
         {"user_id": user.id, "force": True},
     )
     if admission.conflict:
-        raise HTTPException(
+        raise refuse(
             409,
-            detail={
-                "code": "IN_PROGRESS",
-                "message": "this posting is already being parsed",
-                "task_id": admission.conflict.id,
-            },
+            "IN_PROGRESS",
+            "this posting is already being parsed",
+            task_id=admission.conflict.id,
         )
     # Not a conflict, so admission queued one and named it.
     assert admission.task_id is not None

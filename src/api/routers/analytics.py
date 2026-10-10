@@ -29,11 +29,12 @@ import datetime
 import decimal
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
 from api import db, signals
 from api.auth import AuthedUser
+from api.problem import refuse
 from api.rates import DEFAULT_MIN_SAMPLE, Rate
 from api.rates import rate as _rate
 from api.routers.admin import require_admin
@@ -749,7 +750,7 @@ def source_detail(
 ) -> BoardAnalyticsDetail:
     row = next((r for r in _collect(min_sample) if r.source == source), None)
     if row is None:
-        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown source"})
+        raise refuse(404, "NOT_FOUND", "unknown source")
     return BoardAnalyticsDetail(
         row=row,
         overlap_partners=db.query_as(OverlapPartner, _OVERLAP_PARTNERS_SQL, {"source": source}),
