@@ -47,6 +47,25 @@ host's own deploy. The registry in `src/tasks/__init__.py` is what the worker
 can do, and the claim reads it; the kind allow and exclude lists narrow from
 there.
 
+**Eligible tasks are claimed by age, and a scheduled pull counts as one of
+its source's intervals younger.** The order is `api.worker.CLAIM_ORDER`:
+`created_at`, plus `sources.ingest_interval_hours` when the payload names a
+host, then `id`. Only the scheduler's pulls name a host (it is what `api.hosts`
+paces on), and they are the one kind enqueued hundreds at a time; every other
+kind is at most one pending task per key. In plain id order a burst of pulls
+held everything enqueued after it: on 2026-10-10 a `poll_batches` waited 95
+minutes behind 240 pulls and 115 board recomputes. The shift is derived, not
+tuned. A pull that has waited its source's interval has missed one pull, and
+the scheduler makes no second one while it is pending, so the delay never
+stacks. It also bounds the wait: a pull created at T is claimed before any task
+created after T plus its interval, so a backlog of short kinds cannot starve
+ingest. A pull a person asked for carries no host and keeps its place by age.
+The order reads a `sources` row through a scalar subquery so the claim's
+`FOR UPDATE` locks only the task row. It sorts every eligible pending row
+instead of stopping at the first in index order; on production with 316
+pending that cost 4 to 8 ms against 1 to 2 ms, both reading only
+`idx_tasks_status`.
+
 **Process alive and handler progressing are different facts.** A liveness
 signal decoupled from the work cannot observe the work stopping; a liveness
 signal coupled to the work stops when the work stops. Neither alone is
