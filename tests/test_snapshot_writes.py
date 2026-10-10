@@ -42,7 +42,6 @@ def test_new_requests_are_stored_only_as_verified_bundle_members(f, objects):
     assert [row["custom_id"] for row in stored] == ["a", "b"]
     assert len({row["snapshot_ref"]["key"] for row in stored}) == 1
     for row, spec in zip(stored, SPECS, strict=True):
-        assert row["snapshot"] is None
         ref = BundleMemberRef.parse(row["snapshot_ref"])
         assert ref.member == spec.custom_id
         expected = {
@@ -132,7 +131,7 @@ async def test_storage_outage_submits_nothing_and_recovers(f, objects, monkeypat
     assert retry(task_id, objects) == "pending"
     await worker.run_once()
     assert submitted == [SPECS]
-    assert all(row["snapshot"] is None for row in rows(task_id))
+    assert all(row["snapshot_ref"]["version"] == 3 for row in rows(task_id))
 
 
 def test_profile_requests_are_bundle_members_like_every_other_kind(f, objects):
@@ -143,5 +142,4 @@ def test_profile_requests_are_bundle_members_like_every_other_kind(f, objects):
     batch_results.snapshot_specs(task_id, [spec])
     stored = rows(task_id)
     assert len(stored) == 1
-    assert stored[0]["snapshot"] is None
     assert BundleMemberRef.parse(stored[0]["snapshot_ref"]).member == stored[0]["custom_id"]

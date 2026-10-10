@@ -810,7 +810,8 @@ rule quietly does not apply. A hot path that needs care gets a solution, such
 as proving a stored request by its digest instead of reading it. It never gets an exempt population. On 2026-10-10
 every one of 1,580,979 rows was a version 3 member with nothing inline, so
 readers accept nothing else and the tools that converted the other shapes were
-removed. The `snapshot` column is empty and no reader names it.
+removed. 35d943a012cd dropped the `snapshot` column after a validated check
+proved it empty, and `snapshot_ref` is NOT NULL.
 
 **A new request is written to object storage before its row exists, and the row
 holds only the reference.** `batch_results.snapshot_specs` puts every request
