@@ -25,15 +25,14 @@ def private_upload(user_headers):
     """A job user A uploaded privately - not in any shared source."""
     uid = _uid(user_headers)
     row = db.query_one(
-        "INSERT INTO jobs (url, raw_url, company, title, source, active, uploaded_by) "
-        "VALUES (%s, %s, %s, %s, %s, TRUE, %s) RETURNING id",
+        "INSERT INTO jobs (url, raw_url, company, title, source, active) "
+        "VALUES (%s, %s, %s, %s, %s, TRUE) RETURNING id",
         (
             "https://private.test/secret-role",
             "https://private.test/secret-role",
             "SecretCo",
             "Staff Engineer",
             "upload",
-            uid,
         ),
     )
     assert row is not None

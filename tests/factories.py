@@ -68,12 +68,12 @@ def make_job(
     url = url or f"https://jobs.test/{_next('j')}"
     row = db.query_one(
         """
-        INSERT INTO jobs (url, raw_url, source, company, title, active, uploaded_by)
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        INSERT INTO jobs (url, raw_url, source, company, title, active)
+        VALUES (%s, %s, %s, %s, %s, %s)
         ON CONFLICT (url) DO UPDATE SET active = EXCLUDED.active
         RETURNING id
         """,
-        (url, url, source, company, title, active, uploaded_by),
+        (url, url, source, company, title, active),
     )
     assert row is not None
     if comp_min is not None or comp_max is not None:
@@ -93,8 +93,7 @@ def make_comp(url: str, **fields: Any) -> None:
 
 
 def upload(job_id: int, user_id: int, status: str = "done") -> None:
-    """Records job_id as user_id's upload, on both copies while both exist."""
-    db.execute("UPDATE jobs SET uploaded_by = %s WHERE id = %s", (user_id, job_id))
+    """Records job_id as user_id's upload (posting_uploads)."""
     db.execute(
         "INSERT INTO posting_uploads (job_id, uploaded_by, status) VALUES (%s, %s, %s) "
         "ON CONFLICT (job_id) DO UPDATE SET uploaded_by = EXCLUDED.uploaded_by",

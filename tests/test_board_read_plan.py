@@ -24,7 +24,7 @@ def test_small_board_read_does_not_walk_unrelated_catalog(f):
         "SELECT 'https://unrelated.test/'||i, 'https://unrelated.test/'||i, "
         "'unrelated', 'Unrelated', 'Engineer', TRUE FROM generate_series(1,10000) i"
     )
-    for table in ["jobs", "board_visible", "user_jobs"]:
+    for table in ["jobs", "board_visible", "user_jobs", "posting_uploads"]:
         db.execute(f"ANALYZE {table}")
     sql = visibility.FAST.format(columns="j.id", extra="")
     rows = db.query(sql, {"uid": owner})

@@ -242,9 +242,13 @@ def _catalog_rows() -> dict[str, dict]:
         r["url"]: r
         for r in db.query(
             "SELECT url, raw_url, company, title, locations, terms, source, active, "
-            "date_posted, extraction_status FROM jobs"
+            "date_posted FROM jobs"
         )
     }
+
+
+def _catalog_rows_ids() -> dict[str, int]:
+    return {r["url"]: r["id"] for r in db.query("SELECT id, url FROM jobs")}
 
 
 def test_a_repull_that_changes_nothing_leaves_every_catalog_row_untouched():
@@ -316,17 +320,19 @@ def test_a_changed_posting_rewrites_its_row_and_only_its_row():
     assert rows[dated.url]["company"] == "Rocket Lab"
 
 
-def test_a_feed_listing_an_uploaded_posting_takes_it_over_even_when_nothing_else_differs():
+def test_a_feed_listing_an_uploaded_posting_takes_it_over_even_when_nothing_else_differs(f):
     from core import catalog
 
     post = _posting("Software Engineer")
     catalog.upsert_postings([post], "upload")
-    db.execute("UPDATE jobs SET extraction_status = 'pending' WHERE url = %s", (post.url,))
+    job_id = _catalog_rows_ids()[post.url]
+    f.upload(job_id, f.make_user(), status="pending")
 
     catalog.upsert_postings([post], "rocketlab")
 
-    row = _catalog_rows()[post.url]
-    assert (row["source"], row["extraction_status"]) == ("rocketlab", "done")
+    assert _catalog_rows()[post.url]["source"] == "rocketlab"
+    status = db.query_one("SELECT status FROM posting_uploads WHERE job_id = %s", (job_id,))
+    assert status == {"status": "done"}
 
 
 def test_a_return_rewrites_the_row_and_records_the_event_once():
