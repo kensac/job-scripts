@@ -17,4 +17,4 @@ async def test_paid_parse_failure_preserves_usage(f, finish, content):
         budget.record_parse_failures(uid, "owner", "filter", "deepseek-v4-flash"),
     ):
         raise error.value
-    assert db.query_one("SELECT total_tokens FROM api_usage")["total_tokens"] == 10
+    assert db.query_one("SELECT total_tokens FROM model_calls")["total_tokens"] == 10

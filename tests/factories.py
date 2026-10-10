@@ -311,6 +311,20 @@ def make_batch_result(
     from core.batch import BatchResult
 
     batch_id = batch_id or f"batch-{task_id}"
+    # The batch row its submission would have written, with the payer the
+    # submitting task names, so the checkpoint books the paid result to the
+    # ledger as it does in production.
+    db.execute(
+        "INSERT INTO ai_batches (provider_batch_id, task_id, purpose, model, payer, payer_id) "
+        "SELECT %(bid)s, t.id, CASE WHEN t.kind LIKE 'application%%' THEN 'application' "
+        "     WHEN t.kind LIKE 'run_managed_board%%' THEN 'managed_board' "
+        "     WHEN t.kind LIKE 'run_filter%%' THEN 'filter' ELSE t.kind END, %(model)s, "
+        "CASE WHEN t.payload ? 'user_id' THEN 'user' "
+        "     WHEN t.payload ? 'managed_board_id' THEN 'managed_board' ELSE 'fleet' END, "
+        "COALESCE((t.payload->>'user_id')::bigint, (t.payload->>'managed_board_id')::bigint) "
+        "FROM tasks t WHERE t.id = %(task)s ON CONFLICT (provider_batch_id) DO NOTHING",
+        {"bid": batch_id, "model": model, "task": task_id},
+    )
     batch_results.snapshot_specs(task_id, [spec])
     batch_results.checkpoint(
         task_id,

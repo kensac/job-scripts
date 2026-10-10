@@ -130,6 +130,12 @@ def _scenario(f, n: int, poison: str | None = None) -> tuple[int, Ledger, list[B
     results.append(
         BatchResult("https://chunk.test/unknown", usage=_usage(99), model=MODEL, batch_id="batch-0")
     )
+    for batch_id in ("batch-0", "batch-1"):
+        db.execute(
+            "INSERT INTO ai_batches (provider_batch_id, task_id, purpose, model, payer, payer_id) "
+            "VALUES (%s, %s, 'filter', %s, 'user', %s)",
+            (batch_id, task, MODEL, user),
+        )
     batch_results.snapshot_specs(task, specs)
     batch_results.checkpoint(task, results, [])
     collected = batch_results.unconsumed(task)
@@ -219,7 +225,9 @@ async def test_chunked_collection_leaves_the_per_result_state(f, monkeypatch, ch
     outcomes = batch_results.outcome_counts(task)
     assert outcomes == {"written": 7, "failed": 6, "unknown_request": 1}
     assert len(expected["ai_queries"]) == 12  # one result was consumed before the run
-    assert len(expected["api_usage"]) == 11  # two carried no usage; one was a stranger
+    # Booked with the receipts, before collection: every paid result, the
+    # stranger included, since it was billed; the two without usage were not.
+    assert len(expected["model_calls"]) == 12
     actual, calls, error, _ = await _run(f, monkeypatch, 13, per_result=False)
     assert error is None
     assert calls == expected_calls
@@ -274,7 +282,7 @@ def _rows(task: int) -> dict:
         ),
         "usage": db.query(
             "SELECT model, prompt_tokens, completion_tokens, cached_tokens, cost_usd "
-            "FROM api_usage ORDER BY id"
+            "FROM model_calls ORDER BY id"
         ),
     }
 

@@ -18,7 +18,6 @@ from core.embeddings import (
     EMBEDDING_INPUT_CHARS,
     EMBEDDING_MODEL,
 )
-from core.pricing import estimate_cost_usd
 from core.store import CONTENT_LATERAL
 from tasks import rescrape
 from tasks.runtime import (
@@ -81,18 +80,15 @@ _CANDIDATES = _candidate_sql(visibility.across_users("j.url"))
 def _store(rows: list[dict[str, Any]]) -> int:
     return db.execute_count(
         """
-        INSERT INTO job_embeddings (url, embedding, model, content_hash,
-                                    content_row_id, input_tokens, cost_usd)
-        SELECT r.url, r.embedding::vector, r.model, r.hash, r.row_id, r.tokens, r.cost
+        INSERT INTO job_embeddings (url, embedding, model, content_hash, content_row_id)
+        SELECT r.url, r.embedding::vector, r.model, r.hash, r.row_id
         FROM jsonb_to_recordset(%s) AS r(
-            url text, embedding text, model text, hash text, row_id bigint,
-            tokens bigint, cost numeric
+            url text, embedding text, model text, hash text, row_id bigint
         )
         ON CONFLICT (url) DO UPDATE SET
             embedding = EXCLUDED.embedding, model = EXCLUDED.model,
             content_hash = EXCLUDED.content_hash,
             content_row_id = EXCLUDED.content_row_id,
-            input_tokens = EXCLUDED.input_tokens, cost_usd = EXCLUDED.cost_usd,
             created_at = now()
         WHERE job_embeddings.content_row_id IS NULL
            OR job_embeddings.content_row_id <= EXCLUDED.content_row_id
@@ -176,16 +172,9 @@ async def handle_embed_postings_batch(task_id: int, payload: dict[str, Any]) -> 
                     ([row["url"] for row in originals],),
                 )
             }
-            # Provider usage is exact for the packed request, recorded by the
-            # fleet hook. Per-posting fields remain approximate equal shares,
-            # as on the live path; the provider does not report individual usage.
-            tokens = (result.usage or {}).get("input_tokens")
-            per_posting = tokens // len(originals) if tokens is not None else None
-            cost = (
-                estimate_cost_usd(result.model, per_posting, 0, batched=True)
-                if per_posting is not None
-                else None
-            )
+            # The packed request's usage is the call ledger's (model_calls),
+            # booked with its receipt. A posting's equal share of it was a
+            # guess nothing read, and it is no longer stored.
             rows = []
             for original, vector in zip(originals, vectors, strict=True):
                 if len(vector) != context["dimensions"] or any(
@@ -202,8 +191,6 @@ async def handle_embed_postings_batch(task_id: int, payload: dict[str, Any]) -> 
                         "model": result.model,
                         "hash": original["content_hash"],
                         "row_id": original["content_row_id"],
-                        "tokens": per_posting,
-                        "cost": cost,
                     }
                 )
             written = _store(rows) if rows else 0

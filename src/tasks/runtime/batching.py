@@ -20,7 +20,6 @@ from api.ai.batch_results import consume_result as consume_result
 from api.ai.batch_results import snapshot_specs as snapshot_specs
 from api.model_calls import FLEET, Payer
 from api.task_config import configured_model, configured_shape
-from core import pricing
 from core.batch import BatchEventCounts, BatchResult
 from core.routing import Choice, TaskShape, resolve
 from tasks.runtime.lifecycle import claim_guard
@@ -121,11 +120,11 @@ def batch_event_hook(
     *,
     payer: Payer = FLEET,
 ):
-    """Register provider progress and atomically record fleet usage.
+    """Register provider progress and who pays for the batch.
 
-    The batch row records who pays, so the receipt checkpoint can write each
-    item to the call ledger. A person's or a board's batch is booked per
-    receipt by its consumer, so the hook must not book it against the fleet.
+    The batch row records the payer, so the receipt checkpoint can write each
+    item to the call ledger (api.model_calls) with it. Cost is the ledger's,
+    one row per request: nothing here totals or prices a batch.
     """
 
     resumed_ids = set(pending_batch_ids(task_id))
@@ -134,66 +133,6 @@ def batch_event_hook(
     def record_event(batch_id: str, status: str, counts: BatchEventCounts) -> None:
         persisted = metadata.get(batch_id, {})
         event_model = persisted.get("model") if batch_id in resumed_ids else model
-        if "input_tokens" in counts or "output_tokens" in counts:
-            # Keep request boundaries: pricing tiers apply to individual prompts.
-            inp = counts.get("input_tokens", 0)
-            out = counts.get("output_tokens", 0)
-            cached = counts.get("cached_tokens", 0)
-            cache_write = counts.get("cache_write_tokens")
-            usage = counts.get("request_usage")
-            est = pricing.estimate_usage_cost_usd(
-                event_model,
-                inp,
-                out,
-                cached_tokens=cached,
-                cache_write_tokens=cache_write,
-                batched=True,
-                requests=usage,
-            )
-            cost = round(float(est), 6) if est is not None else None
-            # Provider totals are snapshots. Recollecting unchanged input and
-            # output totals must not append another ledger entry, even when a
-            # mixed-version rollout discovers cache-write metadata later.
-            # An earlier audit found 92 ordinary two-attempt resumes and no
-            # three-attempt recollections, but the boundary remains required.
-            written = db.execute_count(
-                "UPDATE ai_batches SET input_tokens = %s, output_tokens = %s, "
-                "cache_write_tokens = %s, "
-                "est_cost_usd = %s, updated_at = now() "
-                "WHERE provider_batch_id = %s "
-                "AND (input_tokens, output_tokens) IS DISTINCT FROM (%s, %s)",
-                (inp, out, cache_write, cost, batch_id, inp, out),
-            )
-            if not written:
-                # Cache-write metadata may be newly available after an older
-                # image recorded the same provider totals. Enrich that row
-                # without changing its historical cost or charging the fleet
-                # a second time.
-                db.execute(
-                    "UPDATE ai_batches SET cache_write_tokens = %s, updated_at = now() "
-                    "WHERE provider_batch_id = %s "
-                    "AND (input_tokens, output_tokens) IS NOT DISTINCT FROM (%s, %s) "
-                    "AND cache_write_tokens IS NULL AND %s::bigint IS NOT NULL",
-                    (cache_write, batch_id, inp, out, cache_write),
-                )
-                return
-            # The same numbers into the spend ledger. Every batched caller
-            # passes through here and already names a purpose, so a new AI
-            # caller shows up in analytics without anyone wiring it - the hook
-            # cannot be used without a purpose, and that is all the grouping
-            # needs.
-            if payer == FLEET:
-                budget.record_fleet_usage(
-                    purpose,
-                    event_model,
-                    inp,
-                    out,
-                    batched=True,
-                    cached_tokens=cached,
-                    cache_write_tokens=cache_write,
-                    request_usage=usage,
-                )
-            return
         db.execute(
             """
             INSERT INTO ai_batches (provider_batch_id, task_id, purpose, model,

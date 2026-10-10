@@ -113,7 +113,7 @@ async def test_personal_key_live_behavior_is_preserved(f, monkeypatch, scheduled
     )
     await handler(task_id, payload)
     assert db.query_one("SELECT draft FROM application_answers")["draft"] == "Personal answer"
-    assert db.query_one("SELECT key_source,batched FROM api_usage") == {
+    assert db.query_one("SELECT key_source,batched FROM model_calls") == {
         "key_source": "byo",
         "batched": False,
     }
@@ -142,7 +142,7 @@ async def test_paid_application_batch_collects_before_current_configuration(f, m
     monkeypatch.setattr(application, "load_config", no_config)
     await application.handle_application_sweep(task_id, {"user_id": uid})
     assert db.query_one("SELECT draft FROM application_answers")["draft"] == "Paid answer"
-    assert db.query_one("SELECT key_source,batched FROM api_usage") == {
+    assert db.query_one("SELECT key_source,batched FROM model_calls") == {
         "key_source": "owner",
         "batched": True,
     }

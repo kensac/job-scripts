@@ -58,7 +58,7 @@ async def test_resume_prices_persisted_model_without_resolving_current_configura
     )
     assert results[0].model == model
     assert provenance.model == model
-    ledger = db.query("SELECT model, cost_usd FROM api_usage")
+    ledger = db.query("SELECT model, cost_usd FROM model_calls")
     assert len(ledger) == 1
     assert ledger[0]["model"] == model
     expected = pricing.estimate_cost_usd(model, 1000, 100, batched=True)
@@ -91,7 +91,7 @@ async def test_filter_collects_paid_results_without_current_key_or_content(f, mo
         "input_content": None,
         "reason": "fits",
     }
-    usage = db.query_one("SELECT model, batched FROM api_usage WHERE user_id = %s", (uid,))
+    usage = db.query_one("SELECT model, batched FROM model_calls WHERE user_id = %s", (uid,))
     assert usage == {"model": "gpt-5-mini", "batched": True}
 
 
@@ -123,4 +123,6 @@ async def test_application_collects_paid_drafts_after_resume_removed_and_auto_dr
         "draft": "Already paid for.",
         "model": "gpt-5-mini",
     }
-    assert db.query_one("SELECT count(*) AS n FROM api_usage WHERE user_id = %s", (uid,))["n"] == 1
+    assert (
+        db.query_one("SELECT count(*) AS n FROM model_calls WHERE user_id = %s", (uid,))["n"] == 1
+    )

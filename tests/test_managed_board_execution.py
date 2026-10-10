@@ -159,7 +159,7 @@ async def test_handler_attributes_usage_and_atomically_replaces_projection(f, mo
     monkeypatch.setattr(managed_task, "execute_live", fake_execute)
     await managed_task.handle_run_managed_board(task_id, payload)
 
-    assert db.query_one("SELECT managed_board_id, user_id, total_tokens FROM api_usage") == {
+    assert db.query_one("SELECT managed_board_id, user_id, total_tokens FROM model_calls") == {
         "managed_board_id": board["id"],
         "user_id": None,
         "total_tokens": 12,
@@ -252,11 +252,9 @@ async def test_new_execution_contract_uses_batch_only_and_prices_batch(f, monkey
     )
     await managed_task.handle_run_managed_board_batch(task_id, payload)
 
-    usage = db.query_one("SELECT managed_board_id, batched, total_tokens, cost_usd FROM api_usage")
-    assert usage["managed_board_id"] == board["id"]
-    assert usage["batched"] is True
-    assert usage["total_tokens"] == 12
-    assert usage["cost_usd"] == Decimal("0.000002")
+    # A batched result's call is booked by the receipt checkpoint
+    # (test_model_calls); the consumer's booking adds no second row.
+    assert db.query_one("SELECT count(*) AS n FROM model_calls")["n"] == 0
     assert pricing.estimate_cost_usd(
         "gpt-5.6-luna", 10, 2, batched=True
     ) < pricing.estimate_cost_usd("gpt-5.6-luna", 10, 2, batched=False)
@@ -370,7 +368,7 @@ async def test_sponsor_filter_reuse_projects_only_exact_machine_results_without_
     assert db.query_one("SELECT job_id FROM managed_board_jobs") == {
         "job_id": included_id,
     }
-    assert db.query_one("SELECT count(*) AS n FROM api_usage")["n"] == 0
+    assert db.query_one("SELECT count(*) AS n FROM model_calls")["n"] == 0
     cost = client.get(f"/v1/admin/managed-boards/{board['id']}/cost", headers=admin_headers)
     assert cost.json()["calls"] == 0 and cost.json()["total_tokens"] == 0
 
