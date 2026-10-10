@@ -12,6 +12,8 @@ import datetime
 import pytest
 
 from api import db
+from api.mail import match as mail_match
+from api.mail import pipeline as mail_pipeline
 from tests.conftest import _auth_headers
 
 
@@ -420,21 +422,18 @@ def test_one_user_cannot_resolve_anothers_proposal(client, me, f):
 
 
 def test_one_user_cannot_resolve_anothers_action(client, me, f):
-    """_resolve_action binds on action_items.user_id."""
+    """An ask is found through the asker's own applications."""
     headers, _uid = me
     other = f.make_user()
-    mid = _msg(other, "<other-action@x>", "rejection", "Acme")
+    mid = _msg(other, "<other-action@x>", "offer", "Acme")
     app_id = _app(other, "Acme")
-    event_id = _event(mid)
-    row = db.query_one(
-        "INSERT INTO action_items (user_id, application_id, event_id, kind, due_at) "
-        "VALUES (%s, %s, %s, 'reply_needed', now()) RETURNING id",
-        (other, app_id, event_id),
-    )
-    assert row is not None
+    event_id = _event(mid, "offer")
+    mail_match.record(mid, mail_match.Match(app_id, mail_match.ATS_COMPANY, "high", "test"))
+    # The ask exists, for its owner: the refusal below is about the caller.
+    assert mail_pipeline.action_item(other, event_id) is not None
 
     resp = client.post(
-        f"/v1/user/resolve/action:{row['id']}",
+        f"/v1/user/resolve/action:{event_id}",
         json={"choice": "mark_done"},
         headers=headers,
     )

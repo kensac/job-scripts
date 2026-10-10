@@ -191,15 +191,13 @@ _EVENT_TO_STAGE = {
 }
 
 # Events that create something the user has to do, and what it is called.
-# recruiter_outreach is here deliberately even though it belongs to no
-# application: an approach you never answer is still a decision you made, and
-# it should be visible rather than lost because it had no job to attach to.
+# An ask belongs to an application. A recruiter approach is attached to none
+# (match.UNATTACHABLE_KINDS), so it asks nothing here.
 _EVENT_TO_ACTION = {
     "assessment_invite": "complete_assessment",
     "interview_invite": "schedule_interview",
     "info_request": "send_information",
     "offer": "respond_to_offer",
-    "recruiter_outreach": "reply_to_recruiter",
 }
 
 # A later event that settles an earlier ask. This is what makes the system
@@ -210,7 +208,6 @@ _RESOLVING_EVENTS = {
     "schedule_interview": ("interview_scheduled", "rejection", "position_closed"),
     "send_information": ("acknowledgement", "interview_invite", "rejection", "position_closed"),
     "respond_to_offer": ("rejection",),
-    "reply_to_recruiter": (),
 }
 
 
@@ -259,24 +256,9 @@ def settles_on(kind: str) -> list[str]:
     So this is a property of the KIND, not of the item's age, and it is the
     honest thing to expose. A caller that sees an empty list knows the item is
     unresolved by construction rather than by neglect, and must not render it
-    as a live obligation. `reply_to_recruiter` is deliberately in that
-    category too - an approach you never answered is a decision worth seeing,
-    not a task waiting on a reply that will never be observable.
+    as a live obligation.
     """
     return list(_RESOLVING_EVENTS.get(kind, ()))
-
-
-def with_settling(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Tags each action item with what could ever close it.
-
-    An unresolved item means two different things and a caller cannot tell
-    them apart from resolved_at alone: an assessment invite from last week is
-    awaiting an event that may still arrive, while an offer from 2020 was
-    never going to be closed by anything, because no email says "you
-    accepted". An empty `settles_on` says the second, and such an item must
-    not be rendered as a live obligation.
-    """
-    return [{**row, "settles_on": settles_on(row["kind"])} for row in rows]
 
 
 def proposals_for(user_id: int) -> list[Proposal]:
@@ -328,8 +310,8 @@ def proposals_for(user_id: int) -> list[Proposal]:
           AND (uj.user_id IS NULL OR uj.status = ANY(%(unresolved)s))
           AND e.kind = ANY(%(kinds)s)
           AND NOT EXISTS (
-              SELECT 1 FROM suggestion_responses sr
-              WHERE sr.application_id = a.id AND sr.event_id = e.id
+              SELECT 1 FROM event_answers ea
+              WHERE ea.event_id = e.id AND ea.question = %(status)s
           )
         ORDER BY a.id, e.kind, e.id DESC
         """,
@@ -337,6 +319,7 @@ def proposals_for(user_id: int) -> list[Proposal]:
             "user": user_id,
             "unresolved": list(UNRESOLVED_BOARD_STATUSES),
             "kinds": sorted(STATUS_FROM_EVENT),
+            "status": STATUS_QUESTION,
         },
     )
     return [
@@ -394,11 +377,7 @@ def answer_proposal(
         return None
 
     status = STATUS_FROM_EVENT[event["kind"]]
-    db.execute(
-        "INSERT INTO suggestion_responses (user_id, application_id, event_id, "
-        "suggested_status, response) VALUES (%s, %s, %s, %s, %s)",
-        (user_id, application_id, event_id, status, response),
-    )
+    answer(user_id, event_id, STATUS_QUESTION, response)
     updated = 0
     if response == ACCEPTED and app["job_id"] is not None:
         # The COUNT, not the fact that the statement ran. `applications.job_id`
@@ -542,73 +521,146 @@ def state_of(application_id: int) -> ApplicationState:
     )
 
 
-def sync_action_items(application_id: int) -> dict[str, int]:
-    """Open what the events ask for; close what later events have settled.
+# What a person answered about an event, in `event_answers`, which is
+# append-only: the newest answer to a question about an event is the one in
+# force, so reopening an ask is an answer, not an erasure.
+STATUS_QUESTION = "status"
+ACTION_QUESTION = "action"
+DONE = "done"
+REOPENED = "reopened"
 
-    Idempotent, because it runs on every recomputation. Opening is guarded by
-    the event id so re-running cannot duplicate; closing is driven by a later
-    event rather than by a timer, which is the difference between a system
-    that maintains itself and a second inbox to maintain.
-    """
-    events = events_for(application_id)
-    row = db.query_one("SELECT user_id FROM applications WHERE id = %s", (application_id,))
-    if row is None:
-        return {"opened": 0, "resolved": 0}
-    user_id = row["user_id"]
 
-    opened = 0
-    for event in events:
-        kind = _EVENT_TO_ACTION.get(event.kind)
-        if not kind:
-            continue
-        existing = db.query_one(
-            "SELECT id FROM action_items WHERE event_id = %s AND kind = %s",
-            (event.id, kind),
-        )
-        if existing:
-            continue
-        db.execute(
-            """
-            INSERT INTO action_items (user_id, application_id, event_id, kind, due_at)
-            VALUES (%s, %s, %s, %s, %s)
-            """,
-            (user_id, application_id, event.id, kind, event.deadline_at),
-        )
-        opened += 1
-
-    resolved = 0
-    open_items = db.query(
-        "SELECT ai.id, ai.kind, ai.event_id FROM action_items ai "
-        "WHERE ai.application_id = %s AND ai.resolved_at IS NULL",
-        (application_id,),
+def answer(
+    user_id: int, event_id: int, question: str, response: str, note: str | None = None
+) -> None:
+    db.execute(
+        "INSERT INTO event_answers (event_id, question, answer, actor_user_id, note) "
+        "VALUES (%s, %s, %s, %s, %s)",
+        (event_id, question, response, user_id, note),
     )
-    # An item whose event no longer reaches this application is stranded: the
-    # message was detached or rematched, so nothing will ever resolve it and it
-    # stays open forever asking for something about an application it is not
-    # part of. Matches are append-only, so the event did not disappear - it
-    # moved, and the item has to follow.
-    live_events = {e.id for e in events}
-    for item in open_items:
-        if item["event_id"] is not None and item["event_id"] not in live_events:
-            db.execute(
-                "UPDATE action_items SET resolved_at = now(), resolution = %s WHERE id = %s",
-                ("the message this asked about is no longer part of this application", item["id"]),
-            )
-            resolved += 1
-    open_items = [i for i in open_items if i["event_id"] in live_events or i["event_id"] is None]
-    for item in open_items:
-        settling = _RESOLVING_EVENTS.get(item["kind"], ())
-        later = [e for e in events if e.kind in settling and e.id > (item["event_id"] or 0)]
-        if not later:
-            continue
-        by = min(later, key=lambda e: e.id)
-        db.execute(
-            "UPDATE action_items SET resolved_at = now(), resolution = %s, "
-            "resolved_by_event_id = %s WHERE id = %s",
-            (f"superseded by {by.kind}", by.id, item["id"]),
+
+
+def latest_answers(question: str, event_ids: list[int]) -> dict[int, dict[str, Any]]:
+    return {
+        row["event_id"]: row
+        for row in db.query(
+            "SELECT DISTINCT ON (event_id) event_id, answer, note, actor_user_id, created_at "
+            "FROM event_answers WHERE question = %s AND event_id = ANY(%s) "
+            "ORDER BY event_id, id DESC",
+            (question, event_ids),
         )
-        resolved += 1
-    return {"opened": opened, "resolved": resolved}
+    }
+
+
+class ActionItem(BaseModel):
+    """An ask a message made, derived when read and never stored.
+
+    Its id is the event's id: one event asks one thing. Open until a later
+    event on the same application settles it or the person marks it done; a
+    reopen is a later answer. It used to be a table kept in step by a sweep
+    over every application, which left a row behind when its message moved
+    (217 of them, closed as "no longer part of this application"); an ask
+    read from the current rows moves with the message instead."""
+
+    id: int
+    user_id: int
+    application_id: int
+    event_id: int
+    kind: str
+    due_at: datetime.datetime | None
+    resolved_at: datetime.datetime | None
+    resolution: str | None
+    resolved_by_event_id: int | None
+    created_at: datetime.datetime
+    settles_on: list[str]
+    message_id: int
+    subject: str | None
+    from_email: str | None
+    sent_at: datetime.datetime | None
+
+
+def action_items(
+    user_id: int, application_id: int | None = None, *, open_only: bool = False
+) -> list[ActionItem]:
+    """The asks on a person's applications, or on one of them."""
+    rows = db.query(
+        f"""
+        WITH cm AS ({current_match("application_id")}),
+        ce AS ({current_event("id", "kind", "deadline_at", "created_at")})
+        SELECT cm.application_id, e.id, e.kind, e.deadline_at, e.created_at,
+               m.id AS message_id, m.subject, m.from_email, m.sent_at
+        FROM cm
+        JOIN ce e ON e.message_id = cm.message_id
+        JOIN email_messages m ON m.id = cm.message_id
+        JOIN applications a ON a.id = cm.application_id
+        WHERE a.user_id = %(user)s
+          AND (%(app)s::bigint IS NULL OR a.id = %(app)s)
+        ORDER BY cm.application_id, e.id
+        """,
+        {"user": user_id, "app": application_id},
+    )
+    asks = [r for r in rows if r["kind"] in _EVENT_TO_ACTION]
+    answers = latest_answers(ACTION_QUESTION, [r["id"] for r in asks])
+    by_app: dict[int, list[dict[str, Any]]] = {}
+    for row in rows:
+        by_app.setdefault(row["application_id"], []).append(row)
+    items = []
+    for ask in asks:
+        kind = _EVENT_TO_ACTION[ask["kind"]]
+        settling = _RESOLVING_EVENTS.get(kind, ())
+        later = [
+            e
+            for e in by_app[ask["application_id"]]
+            if e["kind"] in settling and e["id"] > ask["id"]
+        ]
+        settled = min(later, key=lambda e: e["id"]) if later else None
+        done = answers.get(ask["id"])
+        if done is not None and done["answer"] != DONE:
+            done = None
+        if settled is not None:
+            resolved_at, resolution = settled["created_at"], f"superseded by {settled['kind']}"
+        elif done is not None:
+            resolved_at, resolution = done["created_at"], done["note"] or "marked done"
+        else:
+            resolved_at, resolution = None, None
+        if open_only and resolved_at is not None:
+            continue
+        items.append(
+            ActionItem(
+                id=ask["id"],
+                user_id=user_id,
+                application_id=ask["application_id"],
+                event_id=ask["id"],
+                kind=kind,
+                due_at=ask["deadline_at"],
+                resolved_at=resolved_at,
+                resolution=resolution,
+                resolved_by_event_id=settled["id"] if settled else None,
+                created_at=ask["created_at"],
+                settles_on=list(settling),
+                message_id=ask["message_id"],
+                subject=ask["subject"],
+                from_email=ask["from_email"],
+                sent_at=ask["sent_at"],
+            )
+        )
+    items.sort(key=lambda i: (i.due_at is None, i.due_at or i.created_at, i.id))
+    return items
+
+
+def action_item(user_id: int, event_id: int) -> ActionItem | None:
+    """The ask an event makes, if it makes one on this person's application."""
+    row = db.query_one(
+        f"""
+        SELECT cm.application_id FROM email_events e
+        JOIN ({current_match("application_id")}) cm ON cm.message_id = e.message_id
+        WHERE e.id = %s
+        """,
+        (event_id,),
+    )
+    if row is None or row["application_id"] is None:
+        return None
+    return next((i for i in action_items(user_id, row["application_id"]) if i.id == event_id), None)
 
 
 # A non-ATS sender domain that has produced this many DISTINCT company names is

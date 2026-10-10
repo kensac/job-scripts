@@ -7,6 +7,7 @@ import datetime
 import itertools
 
 from api import db
+from api.mail import pipeline as mail_pipeline
 
 _seq = itertools.count(1)
 
@@ -632,12 +633,15 @@ def test_another_users_suggestion_cannot_be_answered(client, user_headers, other
     assert resp.status_code == 404
 
 
-def _action(uid, app_id, kind="respond_to_offer", event_id=None):
-    return db.query_one(
-        "INSERT INTO action_items (user_id, application_id, event_id, kind) "
-        "VALUES (%s,%s,%s,%s) RETURNING id",
-        (uid, app_id, event_id, kind),
-    )["id"]
+_ASKED_BY = {"respond_to_offer": "offer", "complete_assessment": "assessment_invite"}
+
+
+def _action(uid, app_id, kind="respond_to_offer"):
+    """An ask: a message whose current event asks it, on the application.
+    Its id is the event's."""
+    mid = _mail(uid, kind=_ASKED_BY[kind], company="Acme")
+    _match(mid, app_id)
+    return db.query_one("SELECT id FROM email_events WHERE message_id = %s", (mid,))["id"]
 
 
 def test_an_action_nothing_can_close_is_closeable_by_the_person(client, user_headers):
@@ -653,47 +657,32 @@ def test_an_action_nothing_can_close_is_closeable_by_the_person(client, user_hea
         f"/v1/user/actions/{action}/resolve", headers=user_headers, json={"note": "signed"}
     )
     assert resp.status_code == 200
-    row = db.query_one("SELECT resolved_at, resolution FROM action_items WHERE id = %s", (action,))
-    assert row["resolved_at"] is not None
-    assert row["resolution"] == "signed"
+    item = mail_pipeline.action_item(uid, action)
+    assert item is not None and item.resolved_at is not None
+    assert item.resolution == "signed"
 
 
-def test_recomputing_does_not_reopen_what_the_person_closed(client, user_headers):
-    """sync_action_items runs on every pass. A manual resolution that the next
-    recomputation undoes is not a resolution."""
-    from api.mail.pipeline import sync_action_items
-
+def test_a_closed_ask_stays_closed_and_reopens_only_by_answer(client, user_headers):
+    """Nothing recomputes an ask any more, so nothing can undo a person's
+    answer except another answer."""
     uid = db.query_one("SELECT id FROM users WHERE email = %s", ("user@example.com",))["id"]
     app_id = _app(uid, company="Acme", title="Engineer")
-    mid = _mail(uid, kind="offer", company="Acme")
-    _match(mid, app_id)
-    sync_action_items(app_id)
-
-    action = db.query_one("SELECT id FROM action_items WHERE application_id = %s", (app_id,))["id"]
+    action = _action(uid, app_id)
     client.post(f"/v1/user/actions/{action}/resolve", headers=user_headers, json={})
-    sync_action_items(app_id)
-
-    assert (
-        db.query_one(
-            "SELECT count(*) AS n FROM action_items WHERE application_id = %s AND resolved_at IS NULL",
-            (app_id,),
-        )["n"]
-        == 0
-    )
+    assert mail_pipeline.action_items(uid, app_id, open_only=True) == []
+    resp = client.post(f"/v1/user/actions/{action}/reopen", headers=user_headers, json={})
+    assert resp.status_code == 200
+    assert [i.id for i in mail_pipeline.action_items(uid, app_id, open_only=True)] == [action]
 
 
 def test_reopening_is_refused_when_an_email_settled_it(client, user_headers):
     """That is a fact about the mail rather than a decision the person made,
-    and reopening it would only have it close again on the next pass."""
+    and reopening it would change nothing: the event still settles it."""
     uid = db.query_one("SELECT id FROM users WHERE email = %s", ("user@example.com",))["id"]
     app_id = _app(uid, company="Acme", title="Engineer")
-    mid = _mail(uid, kind="acknowledgement", company="Acme")
-    settling = db.query_one("SELECT id FROM email_events WHERE message_id = %s", (mid,))["id"]
     action = _action(uid, app_id, kind="complete_assessment")
-    db.execute(
-        "UPDATE action_items SET resolved_at = now(), resolved_by_event_id = %s WHERE id = %s",
-        (settling, action),
-    )
+    later = _mail(uid, kind="acknowledgement", company="Acme")
+    _match(later, app_id)
     resp = client.post(f"/v1/user/actions/{action}/reopen", headers=user_headers, json={})
     assert resp.status_code == 409
 

@@ -8,6 +8,7 @@ from typing import Any
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    CheckConstraint,
     ForeignKey,
     Identity,
     Index,
@@ -245,3 +246,36 @@ class UserOAuthToken(Base):
     invalid_reason: Mapped[str | None] = mapped_column(Text)
     connected_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
     updated_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+
+
+class EventAnswer(Base):
+    """What a person answered about an event: whether the board should take
+    the status it implies (`status`), or whether the ask it makes is done
+    (`action`). Append-only; the newest answer to a question about an event
+    is the one in force, so a reopen is an answer and the closing one stays
+    readable. The asks and proposals themselves are derived at read time
+    (api/mail/pipeline.py); this is the only fact they need stored."""
+
+    __tablename__ = "event_answers"
+    __table_args__ = (
+        Index("idx_event_answers_event", "event_id", "question", text("id DESC")),
+        CheckConstraint("question IN ('status', 'action')", name="ck_event_answers_question"),
+        CheckConstraint(
+            "answer IN ('accepted', 'dismissed', 'done', 'reopened')",
+            name="ck_event_answers_answer",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
+    event_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("email_events.id", ondelete="CASCADE")
+    )
+    question: Mapped[str] = mapped_column(Text)
+    answer: Mapped[str] = mapped_column(Text)
+    actor_user_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="SET NULL")
+    )
+    note: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=_now
+    )

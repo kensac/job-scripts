@@ -142,7 +142,10 @@ def test_no_open_action_item_has_a_future_deadline(client, dev_headers):
     """The real corpus is ~99% historical and has zero future deadlines. A
     notifier built against tidy future-dated fixtures would look useful and be
     wrong on every real row."""
-    rows = db.query("SELECT due_at FROM action_items WHERE resolved_at IS NULL")
+    from api.mail import pipeline as mail_pipeline
+
+    user = db.query_one("SELECT id FROM users WHERE sub = 'dev-user'")
+    rows = [{"due_at": i.due_at} for i in mail_pipeline.action_items(user["id"], open_only=True)]
     assert rows
     assert all(
         r["due_at"] is None

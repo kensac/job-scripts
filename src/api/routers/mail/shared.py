@@ -58,12 +58,12 @@ class Reverted(BaseModel):
 
 
 def _resync_applications(message_id: int) -> list[int]:
-    """Resync every application this message feeds, and say which they were.
+    """Every application this message feeds, which a changed kind changes.
 
     A changed kind can change what an application is waiting for, and it can
     change an application the person is not currently looking at - so the ids
-    come back rather than an `ok`. Both the correction and the revert need
-    this, which is why it is one function.
+    come back rather than an `ok`. Its asks are read from the events, so
+    nothing needs recomputing.
     """
     affected = [
         r["application_id"]
@@ -75,8 +75,6 @@ def _resync_applications(message_id: int) -> list[int]:
             (message_id,),
         )
     ]
-    for application_id in affected:
-        mail_pipeline.sync_action_items(application_id)
     return affected
 
 

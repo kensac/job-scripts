@@ -98,9 +98,9 @@ def test_answering_a_suggestion_refuses_an_event_from_elsewhere(mine, f):
     )
     assert resp.status_code == 404, resp.text
     assert (
-        db.query_one(
-            "SELECT count(*) AS c FROM suggestion_responses WHERE application_id = %s", (my_app,)
-        )["c"]
+        db.query_one("SELECT count(*) AS c FROM event_answers WHERE event_id = %s", (their_event,))[
+            "c"
+        ]
         == 0
     )
 

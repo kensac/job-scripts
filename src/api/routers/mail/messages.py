@@ -19,7 +19,6 @@ from pydantic import BaseModel
 from api import db
 from api.auth import AuthedUser, require_user
 from api.mail import match as mail_match
-from api.mail import pipeline as mail_pipeline
 from api.mail.current import current_event, current_match
 from api.mail.store import owned_message
 from api.problem import refuse
@@ -387,7 +386,6 @@ def assign_message(
             ),
             actor_user_id=user.id,
         )
-    mail_pipeline.sync_action_items(application_id)
     return MessageAssigned(ok=True, application_id=application_id, messages_assigned=len(targets))
 
 

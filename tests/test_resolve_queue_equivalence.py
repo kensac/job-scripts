@@ -90,7 +90,7 @@ def world(f):
     # Unmatched with candidates and no thread: assign moves only itself.
     _msg(me, 15, ["rejection"], company="Globex", sent=at(1))
     # Rematched: first Globex, now the live application.
-    m4, m4_events = _msg(me, 4, ["offer"], sent=at(8))
+    m4, _ = _msg(me, 4, ["offer"], sent=at(8))
     _match(m4, globex)
     _match(m4, live)
     # Refused after a match: neither queued nor evidence.
@@ -104,9 +104,9 @@ def world(f):
     m7, m7_events = _msg(me, 7, ["position_closed"], company="Globex", sent=at(6))
     _match(m7, globex)
     db.execute(
-        "INSERT INTO suggestion_responses (user_id, application_id, event_id, "
-        "suggested_status, response) VALUES (%s, %s, %s, 'No Longer Available', 'dismissed')",
-        (me, globex, m7_events[0]),
+        "INSERT INTO event_answers (event_id, question, answer, actor_user_id) "
+        "VALUES (%s, 'status', 'dismissed', %s)",
+        (m7_events[0], me),
     )
     # Nobody's company, no sent_at.
     _msg(me, 8, ["acknowledgement"], company="Nobody Corp")
@@ -126,11 +126,6 @@ def world(f):
     _msg(other, 13, ["rejection"], sent=at(11))
     # Unmatched, refusal-only, newest of all.
     _msg(me, 14, ["assessment_invite"], company="Hooli", sent=at(12))
-    db.execute(
-        "INSERT INTO action_items (user_id, application_id, event_id, kind, due_at) "
-        "VALUES (%s, %s, %s, 'respond_to_offer', %s), (%s, NULL, NULL, 'reply_to_recruiter', NULL)",
-        (me, live, m4_events[0], at(30), me),
-    )
     return me
 
 
@@ -152,7 +147,7 @@ def test_the_fixture_reaches_every_kind_and_tie(world):
         "unmatched_message": 4,
         "unconfirmed_match": 6,
         "status_proposal": 4,
-        "action_item": 2,
+        "action_item": 1,
     }
     sent = [(i["kind"], (i["message"] or {}).get("sent_at")) for i in body["items"]]
     tied = {s for _, s in sent if s and sum(1 for _, t in sent if t == s) > 1}

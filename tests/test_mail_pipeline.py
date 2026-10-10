@@ -130,17 +130,21 @@ def test_only_the_newest_match_counts(f):
     assert mail_pipeline.state_of(second).stage == "offer"
 
 
-def test_an_assessment_opens_an_action_item(f):
+def _asks(uid, app):
+    return mail_pipeline.action_items(uid, app)
+
+
+def test_an_assessment_asks_for_an_action(f):
     uid = f.make_user()
     app = _app(uid)
     mid = _message(uid, "<oa@x>")
-    _event(mid, "assessment_invite", deadline=datetime.datetime(2026, 9, 9, tzinfo=datetime.UTC))
+    event = _event(
+        mid, "assessment_invite", deadline=datetime.datetime(2026, 9, 9, tzinfo=datetime.UTC)
+    )
     _match(mid, app)
-    assert mail_pipeline.sync_action_items(app)["opened"] == 1
-    item = db.query_one("SELECT * FROM action_items WHERE application_id = %s", (app,))
-    assert item is not None
-    assert item["kind"] == "complete_assessment"
-    assert item["due_at"] is not None
+    [item] = _asks(uid, app)
+    assert item.id == event and item.kind == "complete_assessment"
+    assert item.due_at is not None and item.resolved_at is None
 
 
 def test_a_later_event_resolves_it_without_the_user_touching_anything(f):
@@ -151,29 +155,14 @@ def test_a_later_event_resolves_it_without_the_user_touching_anything(f):
     oa = _message(uid, "<oa2@x>")
     _event(oa, "assessment_invite")
     _match(oa, app)
-    mail_pipeline.sync_action_items(app)
+    assert _asks(uid, app)[0].resolved_at is None
 
     done = _message(uid, "<done@x>")
-    _event(done, "acknowledgement")
+    ack = _event(done, "acknowledgement")
     _match(done, app)
-    assert mail_pipeline.sync_action_items(app)["resolved"] == 1
-
-    item = db.query_one("SELECT * FROM action_items WHERE application_id = %s", (app,))
-    assert item is not None
-    assert item["resolved_at"] is not None
-    assert item["resolved_by_event_id"] is not None
-
-
-def test_syncing_twice_opens_nothing_new(f):
-    """It runs on every recomputation, so duplicating would fill the list with
-    the same task repeatedly."""
-    uid = f.make_user()
-    app = _app(uid)
-    mid = _message(uid, "<idem@x>")
-    _event(mid, "interview_invite")
-    _match(mid, app)
-    assert mail_pipeline.sync_action_items(app)["opened"] == 1
-    assert mail_pipeline.sync_action_items(app)["opened"] == 0
+    [item] = _asks(uid, app)
+    assert item.resolved_at is not None
+    assert item.resolved_by_event_id == ack
 
 
 def test_an_earlier_event_does_not_resolve_a_later_ask(f):
@@ -187,45 +176,38 @@ def test_an_earlier_event_does_not_resolve_a_later_ask(f):
     oa = _message(uid, "<late-oa@x>")
     _event(oa, "assessment_invite")
     _match(oa, app)
-
-    mail_pipeline.sync_action_items(app)
-    assert mail_pipeline.sync_action_items(app)["resolved"] == 0
+    assert [i.resolved_at for i in _asks(uid, app)] == [None]
 
 
-def test_detaching_a_message_closes_the_action_it_asked_for(f):
-    """An item whose event no longer reaches the application is stranded:
-    nothing will ever resolve it, and it stays open forever asking for
-    something about an application it is not part of."""
-    from api.mail import match as mail_match
-    from api.mail.pipeline import sync_action_items
-
+def test_an_ask_moves_with_its_message(f):
+    """The ask is read from the message's current match, so a detached
+    message takes its ask with it: no item is left behind asking about an
+    application it is not part of (217 were, when asks were stored)."""
     uid = f.make_user()
-    app = db.query_one(
-        "INSERT INTO applications (user_id, company_name, title, source_provenance) "
-        "VALUES (%s,'Acme','Engineer','tracker') RETURNING id",
-        (uid,),
-    )["id"]
-    msg = db.query_one(
-        "INSERT INTO email_messages (user_id, provider_message_id, source, subject) "
-        "VALUES (%s,'strand-1','takeout','Assessment') RETURNING id",
-        (uid,),
-    )["id"]
-    db.execute(
-        "INSERT INTO email_events (message_id, kind, confidence) VALUES (%s,'assessment_invite','high')",
-        (msg,),
-    )
-    mail_match.record(msg, mail_match.Match(app, "ats_company", "medium", "test"))
+    app = _app(uid)
+    mid = _message(uid, "<strand@x>")
+    _event(mid, "assessment_invite")
+    _match(mid, app)
+    assert len(_asks(uid, app)) == 1
+    _match(mid, None)
+    assert _asks(uid, app) == []
 
-    assert sync_action_items(app)["opened"] == 1
 
-    mail_match.record(msg, mail_match.Match(None, "detached", "none", "wrong application"))
-    result = sync_action_items(app)
-    assert result["resolved"] == 1
-    row = db.query_one(
-        "SELECT resolved_at, resolution FROM action_items WHERE application_id = %s", (app,)
-    )
-    assert row["resolved_at"] is not None
-    assert "no longer part of this application" in row["resolution"]
+def test_a_person_closes_and_reopens_an_ask_by_appending(f):
+    uid = f.make_user()
+    app = _app(uid)
+    mid = _message(uid, "<offer@x>")
+    event = _event(mid, "offer")
+    _match(mid, app)
+    mail_pipeline.answer(uid, event, mail_pipeline.ACTION_QUESTION, mail_pipeline.DONE, "signed")
+    [item] = _asks(uid, app)
+    assert item.resolved_at is not None and item.resolution == "signed"
+    mail_pipeline.answer(uid, event, mail_pipeline.ACTION_QUESTION, mail_pipeline.REOPENED)
+    assert _asks(uid, app)[0].resolved_at is None
+    assert (
+        db.query_one("SELECT count(*) AS n FROM event_answers WHERE event_id = %s", (event,))["n"]
+        == 2
+    ), "the closing answer stays readable under the reopen"
 
 
 def test_withdrawn_is_the_one_stage_only_the_person_can_assert(f):
