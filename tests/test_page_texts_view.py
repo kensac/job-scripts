@@ -7,7 +7,7 @@ import re
 
 from api import db
 from core import page_fetches, store
-from core.store import add_ai_result
+from tests.factories import legacy_answer
 
 SRC = pathlib.Path(__file__).resolve().parents[1] / "src"
 
@@ -26,8 +26,8 @@ PAGE = "Posting text. " * 40
 def test_page_text_is_fetched_text_never_an_answer_copy_or_a_filter_input():
     fetched = page_fetches.record("https://x/a", "passed", "scraped", PAGE)
     page_fetches.record("https://x/a", "failed", "fetch returned nothing")
-    add_ai_result("https://x/b", "passed", check_type="closed", input_content=PAGE)
-    add_ai_result("https://x/c", "passed", check_type="custom", input_content="Acme\n" + PAGE)
+    legacy_answer("https://x/b", "passed", check_type="closed", input_content=PAGE)
+    legacy_answer("https://x/c", "passed", check_type="custom", input_content="Acme\n" + PAGE)
 
     rows = db.query("SELECT id, url FROM page_texts ORDER BY url")
     assert rows == [{"id": fetched, "url": "https://x/a"}]
@@ -36,7 +36,7 @@ def test_page_text_is_fetched_text_never_an_answer_copy_or_a_filter_input():
 def test_the_sweeps_and_the_filters_read_the_same_text():
     """CONTENT_LATERAL read a custom filter's wrapped input as the page when it
     was the only text, while get_contents did not. Both now read page_texts."""
-    add_ai_result("https://x/c", "passed", check_type="custom", input_content="Acme\n" + PAGE)
+    legacy_answer("https://x/c", "passed", check_type="custom", input_content="Acme\n" + PAGE)
     lateral = db.query(
         "SELECT q.input_content FROM (SELECT 'https://x/c' AS url) j "
         + store.CONTENT_LATERAL.format(url="j.url", columns="input_content")

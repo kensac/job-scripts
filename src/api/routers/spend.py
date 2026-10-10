@@ -383,7 +383,8 @@ def _verdict_breakdowns(
     list[VerdictDaySpend],
 ]:
     """Totals, batching and the check type, model and day cuts of the verdict
-    log, from ONE scan of ai_queries grouped by every dimension they cut by.
+    log, from ONE scan of its answers (ledger_rows, which shows each call's
+    usage on the first answer naming it) grouped by every dimension they cut by.
 
     Each used to be its own full scan: five of the eight scans /admin/spend
     ran, which took about 97 s between them on a loaded production host on
@@ -427,7 +428,7 @@ def _verdict_breakdowns(
                    WHERE COALESCE(total_tokens, 0) = 0
                      AND status IN ('passed', 'rejected')
                ) AS joint_call_rows
-        FROM ai_queries WHERE {_WINDOW} AND model IS NOT NULL
+        FROM ledger_rows WHERE {_WINDOW} AND model IS NOT NULL
         GROUP BY 1, 2, 3
         """,
         params,
@@ -478,7 +479,7 @@ def spend(
         f"""
         WITH scoped AS (
             SELECT id, url, check_type, status, cost_usd
-            FROM ai_queries WHERE {_WINDOW} AND model IS NOT NULL
+            FROM ledger_rows WHERE {_WINDOW} AND model IS NOT NULL
         ),
         superseded AS (
             SELECT s.id, s.cost_usd FROM scoped s
@@ -539,7 +540,7 @@ def spend(
                COUNT(*) FILTER (WHERE a.cost_usd IS NULL) AS unpriced_calls,
                COALESCE(SUM(a.cost_usd), 0) AS cost_usd,
                COALESCE(SUM(a.total_tokens), 0) AS total_tokens
-        FROM ai_queries a
+        FROM ledger_rows a
         LEFT JOIN jobs j ON j.url = a.url
         WHERE a.{_WINDOW} AND a.model IS NOT NULL
         GROUP BY 1, 2 ORDER BY 6 DESC

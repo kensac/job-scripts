@@ -8,15 +8,15 @@ from typing import Any
 from api import db
 from core.answers import VERIFY_INPUT_CHARS
 from core.filters import build_custom_input
-from core.store import add_ai_result
 from tasks import answer_links
+from tests.factories import legacy_answer
 
 PAGE = "a posting body that is long enough to be a page " * 10
 
 
 def _answer(url: str, check_type: str, copy: str, **columns: Any) -> int:
     """An answer as older writers stored it: a copy and no pointers."""
-    return add_ai_result(url, "passed", "", check_type, input_content=copy, **columns)
+    return legacy_answer(url, "passed", "", check_type, input_content=copy, **columns)
 
 
 def _run(f) -> dict:
@@ -148,14 +148,14 @@ def test_a_copy_whose_header_its_columns_do_not_rebuild_is_left_alone(f):
 
 def test_each_answer_finds_its_call(f):
     url = "https://links.test/calls"
-    batched = add_ai_result(url, "passed", "", "closed", batch_id="b-1", total_tokens=110)
-    sibling = add_ai_result(url, "passed", "", "clearance", batch_id="b-1", total_tokens=0)
+    batched = legacy_answer(url, "passed", "", "closed", batch_id="b-1", total_tokens=110)
+    sibling = legacy_answer(url, "passed", "", "clearance", batch_id="b-1", total_tokens=0)
     item = _call(provider_batch_id="b-1", custom_id=url, batched=True)
-    copied = add_ai_result(
+    copied = legacy_answer(
         url, "passed", "", "custom", model="gpt-5-nano", total_tokens=110, duration_ms=900
     )
     copied_call = _call(source="verdict", source_id=copied)
-    booked = add_ai_result(
+    booked = legacy_answer(
         url,
         "passed",
         "",
@@ -169,7 +169,7 @@ def test_each_answer_finds_its_call(f):
     # Two answers and two calls with the same numbers in the same minute:
     # nothing says which paid which, so neither is linked.
     twins = [
-        add_ai_result(
+        legacy_answer(
             url,
             "passed",
             "",

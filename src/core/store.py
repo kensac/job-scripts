@@ -8,7 +8,7 @@ from typing import Any, LiteralString, NamedTuple, cast
 
 from psycopg import Connection
 
-from core import pricing, query_instructions, verdict_reads
+from core import query_instructions, verdict_reads
 from core.pool import connection
 
 logger = logging.getLogger(__name__)
@@ -36,17 +36,8 @@ _INSERT_COLUMNS = [
     "company",
     "job_title",
     "instructions_id",
-    "input_content",
     "parsed_json",
-    "prompt_tokens",
-    "completion_tokens",
-    "total_tokens",
-    "cached_tokens",
-    "cache_write_tokens",
-    "reasoning_tokens",
-    "duration_ms",
     "error",
-    "cost_usd",
     "worker",
     "batch_id",
     "request_sha256",
@@ -111,11 +102,6 @@ def ai_result_row(
     status: str,
     reason: str | None = "",
     check_type: str = "",
-    prompt_tokens: int | None = None,
-    completion_tokens: int | None = None,
-    total_tokens: int | None = None,
-    cached_tokens: int | None = None,
-    reasoning_tokens: int | None = None,
     model: str | None = None,
     reasoning_effort: str | None = None,
     filter_name: str | None = None,
@@ -123,13 +109,10 @@ def ai_result_row(
     company: str | None = None,
     job_title: str | None = None,
     instructions: str | None = None,
-    input_content: str | None = None,
     parsed_json: str | None = None,
-    duration_ms: int | None = None,
     error: str | None = None,
     config_name: str | None = None,
     batch_id: str | None = None,
-    cache_write_tokens: int | None = None,
     request_sha256: str | None = None,
     page_fetch_id: int | None = None,
     model_call_id: int | None = None,
@@ -163,31 +146,12 @@ def ai_result_row(
         "company": company,
         "job_title": job_title,
         "instructions": instructions,
-        "input_content": input_content,
         "parsed_json": parsed_json,
-        "prompt_tokens": prompt_tokens,
-        "completion_tokens": completion_tokens,
-        "total_tokens": total_tokens,
-        "cached_tokens": cached_tokens,
-        "cache_write_tokens": cache_write_tokens,
-        "reasoning_tokens": reasoning_tokens,
-        "duration_ms": duration_ms,
         "error": error,
-        # Priced at write time, not read time: the rate table changes, and a
-        # verdict's cost is what it cost when it ran. batch_id is the only
-        # signal that this went through the half-price Batch API.
-        "cost_usd": (
-            pricing.estimate_cost_usd(
-                model,
-                prompt_tokens,
-                completion_tokens,
-                cached_tokens=cached_tokens,
-                cache_write_tokens=cache_write_tokens,
-                batched=batch_id is not None,
-            )
-            if prompt_tokens is not None and completion_tokens is not None
-            else None
-        ),
+        # What the answer was asked and what its call cost are not stored
+        # here: page_fetch_id names the fetch it read (core.answer_inputs
+        # rebuilds the input) and model_call_id the call, which model_calls
+        # priced once when it was made. ledger_rows reads both.
         "worker": WORKER,
         "batch_id": batch_id,
         "request_sha256": request_sha256,

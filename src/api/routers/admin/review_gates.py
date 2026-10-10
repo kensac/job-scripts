@@ -181,7 +181,7 @@ def report(
           GROUP BY t.prompt_hash, j.id
         ), reviews AS (
           -- Every paid review, failed ones included: a failure was paid for.
-          SELECT q.prompt_hash, q.url, q.cost_usd FROM ai_queries q
+          SELECT q.prompt_hash, q.url, q.cost_usd FROM ledger_rows q
           WHERE q.check_type = 'custom' AND q.status IN ('passed', 'rejected', 'failed')
             AND q.prompt_hash IN (SELECT prompt_hash FROM targets)
             AND q.created_at >= %(start)s AND q.created_at < %(end)s

@@ -834,7 +834,6 @@ async def handle_verify_new(task_id: int, payload: dict[str, Any]) -> None:
                         company=job["company"],
                         job_title=job["title"],
                         instructions=res.request.instructions if res.request else None,
-                        input_text=res.request.input if res.request else None,
                         page_fetch_id=job.get("page_fetch_id"),
                         filter_name=f"managed-board:{board['board_id']}",
                         prompt_hash=board["prompt_hash"],

@@ -111,10 +111,9 @@ def make_verdict(
     reason: str = "",
 ) -> None:
     """Append a verdict. Latest row per (url, check_type) wins, so calling this
-    twice is how a test expresses "the verdict changed"."""
-    from core.store import add_ai_result
-
-    add_ai_result(
+    twice is how a test expresses "the verdict changed". `content` is a copy
+    of its input as older writers stored it."""
+    legacy_answer(
         url,
         status,
         reason,
@@ -122,6 +121,90 @@ def make_verdict(
         prompt_hash=prompt_hash,
         input_content=content,
         model="gpt-5-nano",
+    )
+
+
+# The copies older writers stored on an answer, which no writer stores now.
+_COPIES = (
+    "input_content",
+    "prompt_tokens",
+    "completion_tokens",
+    "total_tokens",
+    "cached_tokens",
+    "cache_write_tokens",
+    "reasoning_tokens",
+    "duration_ms",
+    "cost_usd",
+)
+
+
+def legacy_answer(url: str, status: str, reason: str = "", check_type: str = "", **columns) -> int:
+    """An answer as writers stored it before they pointed at its fetch and
+    call: with copies of its input and its call's usage, priced as they
+    priced it."""
+    from core import pricing
+    from core.store import add_ai_result
+
+    copies = {k: columns.pop(k) for k in _COPIES if k in columns}
+    answer_id = add_ai_result(url, status, reason, check_type, **columns)
+    if "cost_usd" not in copies and copies.get("prompt_tokens") is not None:
+        copies["cost_usd"] = pricing.estimate_cost_usd(
+            columns.get("model"),
+            copies["prompt_tokens"],
+            copies.get("completion_tokens"),
+            cached_tokens=copies.get("cached_tokens"),
+            cache_write_tokens=copies.get("cache_write_tokens"),
+            batched=columns.get("batch_id") is not None,
+        )
+    if copies:
+        db.execute(
+            f"UPDATE ai_queries SET {', '.join(f'{k} = %({k})s' for k in copies)} "
+            "WHERE id = %(id)s",
+            {**copies, "id": answer_id},
+        )
+    return answer_id
+
+
+def paid_answer(
+    url: str,
+    status: str = "passed",
+    *,
+    check_type: str,
+    model: str | None,
+    usage: dict[str, int],
+    batch_id: str | None = None,
+    **columns,
+) -> int:
+    """An answer and the call that paid for it, as the writers record them: a
+    batch item through the ledger's writer, which the answer finds on insert
+    by (batch_id, url), or a live call the answer names. Empty usage is a
+    sibling answer of a call already recorded."""
+    from api import model_calls
+    from core.store import add_ai_result
+
+    call = model_calls.Call(
+        "verify",
+        model,
+        model_calls.FLEET,
+        "server",
+        usage,
+        provider_batch_id=batch_id,
+        custom_id=url if batch_id else None,
+    )
+    call_id = None
+    if batch_id:
+        model_calls.record([call])
+    else:
+        call_id = model_calls.record_live(call)
+    return add_ai_result(
+        url,
+        status,
+        "",
+        check_type,
+        model=model,
+        batch_id=batch_id,
+        model_call_id=call_id,
+        **columns,
     )
 
 
