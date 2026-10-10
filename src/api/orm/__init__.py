@@ -12,8 +12,6 @@ takes a model by name, and those names are re-exported here, so
 from api.orm.ai import (
     AiBatch,
     AiBatchError,
-    AiExperiment,
-    AiExperimentResult,
     AiInstructionText,
     AiQuery,
     ApiUsage,
@@ -89,8 +87,6 @@ __all__ = [
     "ActionItem",
     "AiBatch",
     "AiBatchError",
-    "AiExperiment",
-    "AiExperimentResult",
     "AiInstructionText",
     "AiQuery",
     "ApiUsage",
