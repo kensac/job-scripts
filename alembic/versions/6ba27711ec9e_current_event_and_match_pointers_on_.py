@@ -6,7 +6,7 @@ email_messages held 78 MB of heap and 69,280 rows on 2026-10-10, and every
 value is NULL at build time, so the SHARE lock lasts well under a second.
 
 Revision ID: 6ba27711ec9e
-Revises: 3c0273da3222
+Revises: acbc00862b2b
 Create Date: 2026-10-10 00:53:45.230437
 
 """
@@ -18,7 +18,7 @@ import sqlalchemy as sa
 
 
 revision: str = "6ba27711ec9e"
-down_revision: Union[str, Sequence[str], None] = "3c0273da3222"
+down_revision: Union[str, Sequence[str], None] = "acbc00862b2b"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
