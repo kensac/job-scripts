@@ -20,6 +20,7 @@ from typing import Any, Protocol
 from pydantic import BaseModel
 
 from api import db
+from api.mail.current import current_event, current_match
 from core.fetching import ats
 
 logger = logging.getLogger(__name__)
@@ -303,14 +304,12 @@ def proposals_for(user_id: int) -> list[Proposal]:
     """
     rows = db.query_as(
         ProposedFrom,
-        """
+        f"""
         WITH current_match AS (
-            SELECT DISTINCT ON (message_id) message_id, application_id
-            FROM application_matches ORDER BY message_id, id DESC
+            {current_match("application_id")}
         ),
         current_event AS (
-            SELECT DISTINCT ON (message_id) message_id, id, kind, detail
-            FROM email_events ORDER BY message_id, id DESC
+            {current_event("id", "kind", "detail")}
         )
         SELECT DISTINCT ON (a.id, e.kind)
                a.id AS application_id, a.company_name, a.title, a.job_id,
@@ -380,10 +379,9 @@ def answer_proposal(
     if app is None:
         return None
     event = db.query_one(
-        """
+        f"""
         WITH current_match AS (
-            SELECT DISTINCT ON (message_id) message_id, application_id
-            FROM application_matches ORDER BY message_id, id DESC
+            {current_match("application_id")}
         )
         SELECT e.id, e.kind
         FROM email_events e
@@ -460,7 +458,7 @@ def stage_for(events: Sequence[Staged], board_status: str | None = None) -> str:
 def events_for(application_id: int) -> list[ApplicationEvent]:
     """Events reaching this application through its matched messages.
 
-    DISTINCT ON (message_id), not (message_id, kind). A message is ONE thing -
+    Newest event per message, not per (message, kind). A message is ONE thing -
     the classifier emits exactly one kind for it - so a correction from
     "rejection" to "interview_invite" has to RETRACT the rejection, and keying
     per kind would leave it live forever. Newest row per message wins.
@@ -471,15 +469,12 @@ def events_for(application_id: int) -> list[ApplicationEvent]:
     """
     return db.query_as(
         ApplicationEvent,
-        """
+        f"""
         WITH current_match AS (
-            SELECT DISTINCT ON (message_id) message_id, application_id
-            FROM application_matches ORDER BY message_id, id DESC
+            {current_match("application_id")}
         ),
         current_event AS (
-            SELECT DISTINCT ON (message_id) message_id, kind, id, occurred_at, deadline_at,
-                   deadline_inferred
-            FROM email_events ORDER BY message_id, id DESC
+            {current_event("kind", "id", "occurred_at", "deadline_at", "deadline_inferred")}
         )
         SELECT e.id, e.kind, e.occurred_at, e.deadline_at, e.deadline_inferred,
                m.id AS message_id, m.sent_at, m.subject
@@ -507,15 +502,12 @@ def events_by_application(user_id: int) -> dict[int, list[ApplicationEvent]]:
     here and another kind there.
     """
     rows = db.query(
-        """
+        f"""
         WITH current_match AS (
-            SELECT DISTINCT ON (message_id) message_id, application_id
-            FROM application_matches ORDER BY message_id, id DESC
+            {current_match("application_id")}
         ),
         current_event AS (
-            SELECT DISTINCT ON (message_id) message_id, kind, id, occurred_at, deadline_at,
-                   deadline_inferred
-            FROM email_events ORDER BY message_id, id DESC
+            {current_event("kind", "id", "occurred_at", "deadline_at", "deadline_inferred")}
         )
         SELECT cm.application_id, e.id, e.kind, e.occurred_at, e.deadline_at,
                e.deadline_inferred, m.id AS message_id, m.sent_at, m.subject

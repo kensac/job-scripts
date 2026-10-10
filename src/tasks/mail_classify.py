@@ -23,6 +23,7 @@ from pydantic import BaseModel
 
 from api import db
 from api.ai.batch_results import progress_counts
+from api.mail.current import current_event
 from api.task_config import configured_shape
 from core.shapes import BACKFILL_TASK, ONGOING_TASK
 from tasks.runtime import consume_result, has_batch_work, run_batched, set_progress
@@ -440,8 +441,7 @@ def _heal_self_sent(identities: list[str]) -> int:
     rows = db.query(
         f"""
         WITH latest AS (
-            SELECT DISTINCT ON (message_id) message_id, kind, detail
-            FROM email_events ORDER BY message_id, id DESC
+            {current_event("kind", "detail")}
         )
         SELECT m.id FROM email_messages m JOIN latest l ON l.message_id = m.id
         WHERE {_SELF_SENT}
@@ -528,7 +528,7 @@ async def handle_classify_mail(task_id: int, payload: dict[str, Any]) -> None:
     # backfill discovered on the bill. A list cannot grow on its own.
     #
     # Events are append-only and the latest per message wins
-    # (mail_pipeline's DISTINCT ON ... ORDER BY id DESC), so a corrected event
+    # (api.mail.current.current_event), so a corrected event
     # supersedes the old one. Nothing is deleted and nothing is migrated.
     # Once per run rather than per message: the derivation is an aggregate over
     # the whole mailbox and the answer is the same for every row in the sweep.

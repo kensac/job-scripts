@@ -25,6 +25,7 @@ from typing import Any
 
 from api import db
 from api.mail import match as mail_match
+from api.mail.current import current_event, current_match
 from api.mail.pipeline import sync_action_items
 from tasks.runtime import set_progress
 
@@ -123,14 +124,12 @@ def _unmatched_applied_messages(user_id: int) -> list[dict[str, Any]]:
     `events_for` implements.
     """
     return db.query(
-        """
+        f"""
         WITH current_event AS (
-            SELECT DISTINCT ON (message_id) message_id, kind, detail
-            FROM email_events ORDER BY message_id, id DESC
+            {current_event("kind", "detail")}
         ),
         current_match AS (
-            SELECT DISTINCT ON (message_id) message_id, application_id
-            FROM application_matches ORDER BY message_id, id DESC
+            {current_match("application_id")}
         )
         SELECT m.id, m.provider_thread_id, m.sent_at,
                e.detail->>'company' AS company,
@@ -338,9 +337,8 @@ def recompute_derived_floors(user_id: int) -> int:
 
     earliest_attached: dict[int, Any] = {}
     for row in db.query(
-        """
-        WITH cm AS (SELECT DISTINCT ON (message_id) message_id, application_id
-                    FROM application_matches ORDER BY message_id, id DESC)
+        f"""
+        WITH cm AS ({current_match("application_id")})
         SELECT cm.application_id AS app_id, min(m.sent_at) AS earliest
         FROM cm JOIN email_messages m ON m.id = cm.message_id
         WHERE cm.application_id IS NOT NULL AND m.user_id = %s AND m.sent_at IS NOT NULL
@@ -398,14 +396,12 @@ def match_pending(
     later re-run be measured against this one.
     """
     rows = db.query(
-        """
+        f"""
         WITH current_event AS (
-            SELECT DISTINCT ON (message_id) message_id, kind, detail, created_at
-            FROM email_events ORDER BY message_id, id DESC
+            {current_event("kind", "detail", "created_at")}
         ),
         current_match AS (
-            SELECT DISTINCT ON (message_id) message_id, application_id, created_at
-            FROM application_matches ORDER BY message_id, id DESC
+            {current_match("application_id", "created_at")}
         )
         SELECT m.id, m.body_text, m.sent_at, e.kind,
                e.detail->>'company' AS company, e.detail->>'role_title' AS title
@@ -488,14 +484,12 @@ def detach_unattachable(user_id: int) -> int:
     not selected again.
     """
     rows = db.query(
-        """
+        f"""
         WITH current_event AS (
-            SELECT DISTINCT ON (message_id) message_id, kind
-            FROM email_events ORDER BY message_id, id DESC
+            {current_event("kind")}
         ),
         current_match AS (
-            SELECT DISTINCT ON (message_id) message_id, application_id
-            FROM application_matches ORDER BY message_id, id DESC
+            {current_match("application_id")}
         )
         SELECT m.id, e.kind FROM email_messages m
         JOIN current_event e ON e.message_id = m.id

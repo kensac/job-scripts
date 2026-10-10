@@ -18,6 +18,7 @@ from pydantic import BaseModel
 from api import db
 from api.mail import match as mail_match
 from api.mail import pipeline as mail_pipeline
+from api.mail.current import current_event
 from api.resolve.choice_policy import by_company, choices_for_message, thread_size
 from api.resolve.contracts import PICKER_APPLICATIONS, ResolveChoice
 from core.answers import EVENT_KINDS
@@ -420,10 +421,9 @@ def _evidence_for(message_ids: list[int]) -> dict[int, Evidence]:
     if not message_ids:
         return {}
     rows = db.query(
-        """
+        f"""
         WITH current_event AS (
-            SELECT DISTINCT ON (message_id) message_id, kind, confidence, detail, model
-            FROM email_events ORDER BY message_id, id DESC
+            {current_event("kind", "confidence", "detail", "model")}
         )
         SELECT m.id, m.from_email, m.subject, m.sent_at, m.body_text,
                e.kind, e.confidence, e.detail, e.model

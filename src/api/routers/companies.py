@@ -35,6 +35,7 @@ from api import db, rates, signals
 from api import params as params_
 from api.auth import AuthedUser
 from api.mail import pipeline as mail_pipeline
+from api.mail.current import current_event
 from api.rates import Rate
 from api.routers.admin import require_admin
 
@@ -165,7 +166,7 @@ _OUTCOME_KINDS = (
     "position_closed",
 )
 
-_RESPONSE_SQL = """
+_RESPONSE_SQL = f"""
 WITH scoped AS (
     SELECT a.id, lower(btrim(a.company_name)) AS company_key,
            a.applied_at, a.source_provenance
@@ -189,8 +190,7 @@ WITH scoped AS (
       )
 ),
 latest_event AS (
-    SELECT DISTINCT ON (message_id) message_id, kind
-    FROM email_events ORDER BY message_id, id DESC
+    {current_event("kind")}
 ),
 per_app AS (
     SELECT s.id, s.company_key, s.applied_at, s.source_provenance,
