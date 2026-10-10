@@ -47,7 +47,9 @@ async def handle_fetch_missing_content(task_id: int, payload: dict[str, Any]) ->
           -- result is recorded as a closed verdict, not a content row, so
           -- the window above never saw it: 40 gone postings were re-fetched
           -- and re-verdicted every hour, 743 rows in a day (2026-09-06).
-          AND NOT {verdict_reads.has_verdict("j.url", "closed", "rejected")}
+          -- The latest closed answer decides, as on the board: a posting
+          -- rejected once and open since still has a page.
+          AND {verdict_reads.latest_status("j.url", "closed")} IS DISTINCT FROM 'rejected'
         ORDER BY j.date_posted DESC NULLS LAST
         LIMIT %s
         """,

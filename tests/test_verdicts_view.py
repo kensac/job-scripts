@@ -112,11 +112,11 @@ def test_latest_is_the_highest_id_and_has_verdict_is_any():
     add_ai_result("https://x/a", "passed", check_type="closed")
     row = db.query_one(
         f"SELECT {verdict_reads.closed_verdict('%(url)s')} AS shown, "
-        f"{verdict_reads.has_verdict('%(url)s', 'closed', 'rejected')} AS ever_rejected, "
+        f"{verdict_reads.has_verdict('%(url)s', 'closed')} AS any_closed, "
         f"{verdict_reads.has_verdict('%(url)s', 'clearance')} AS any_clearance",
         {"url": "https://x/a"},
     )
-    assert row == {"shown": "open", "ever_rejected": True, "any_clearance": False}
+    assert row == {"shown": "open", "any_closed": True, "any_clearance": False}
     latest = verdict_reads.read_latest("https://x/a", "closed")
     assert latest is not None and latest.status == "passed"
     assert verdict_reads.read_latest("https://x/a", "clearance") is None
