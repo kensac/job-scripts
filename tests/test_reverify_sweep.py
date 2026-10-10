@@ -52,6 +52,13 @@ def _age_closed_verdict(url: str, days: int) -> None:
     )
 
 
+def _machine_row(uid: int, job_id: int) -> None:
+    """What materialize_passing writes for a passing posting: an empty board
+    row and the working-set pair the sweep reads."""
+    db.execute("INSERT INTO user_jobs (user_id, job_id) VALUES (%s, %s)", (uid, job_id))
+    db.execute("INSERT INTO user_job_working_set (user_id, job_id) VALUES (%s, %s)", (uid, job_id))
+
+
 def _relist(job_id: int, source: str) -> None:
     db.execute(
         "INSERT INTO job_listing_events (job_id, source, listed) VALUES (%s, %s, true)",
@@ -75,13 +82,14 @@ async def test_the_sweep_takes_stale_board_rows_and_postings_a_feed_put_back(f, 
 
     stale_id, stale_url = f.make_ready_job(source=source)
     _age_closed_verdict(stale_url, 30)
-    f.make_board_row(uid, stale_id, status=None)
+    _machine_row(uid, stale_id)
 
     fresh_id, fresh_url = f.make_ready_job(source=source)
-    f.make_board_row(uid, fresh_id, status=None)
+    _machine_row(uid, fresh_id)
 
     touched_id, touched_url = f.make_ready_job(source=source)
     _age_closed_verdict(touched_url, 30)
+    _machine_row(uid, touched_id)
     f.make_board_row(uid, touched_id, status="Applied")
 
     # Closed, so it has no board row at all, and its feed has since listed it.
@@ -95,6 +103,31 @@ async def test_the_sweep_takes_stale_board_rows_and_postings_a_feed_put_back(f, 
     assert _urls(taken) == {stale_url, relisted_url}
     assert fresh_url not in _urls(taken), "a verdict inside the window is not stale"
     assert touched_url not in _urls(taken), "a row the person set is theirs, not the sweep's"
+
+
+@pytest.mark.asyncio
+async def test_the_stale_branch_reads_the_working_set_not_legacy_rows(f, taken):
+    """Phase 2b: an all-default user_jobs row is working-set membership, and
+    the split backfill copies each into user_job_working_set. So a pair the
+    working set holds is swept even when its user_jobs row is gone, and a
+    bare user_jobs row the working set does not hold is not."""
+    source = f.make_source("ws-src")
+    uid = f.make_user()
+    f.subscribe(uid, source)
+
+    picked_id, picked_url = f.make_ready_job(source=source)
+    _age_closed_verdict(picked_url, 30)
+    db.execute(
+        "INSERT INTO user_job_working_set (user_id, job_id) VALUES (%s, %s)", (uid, picked_id)
+    )
+
+    bare_id, bare_url = f.make_ready_job(source=source)
+    _age_closed_verdict(bare_url, 30)
+    f.make_board_row(uid, bare_id, status=None)
+
+    task_id = f.make_task("reverify_open", {}, status="running")
+    await tasks_verify.handle_reverify_open(task_id, {})
+    assert _urls(taken) == {picked_url}
 
 
 @pytest.mark.asyncio
@@ -166,7 +199,7 @@ async def test_the_per_cycle_cap_bounds_the_stale_branch_and_not_the_relistings(
     for _ in range(3):
         job_id, url = f.make_ready_job(source=source)
         _age_closed_verdict(url, 30)
-        f.make_board_row(uid, job_id, status=None)
+        _machine_row(uid, job_id)
         stale_urls.add(url)
 
     relisted_id, relisted_url = f.make_ready_job(source=source, closed="rejected")
@@ -214,7 +247,7 @@ async def test_more_candidates_than_a_chunk_are_sharded_without_loss(
     for _ in range(5):
         job_id, url = f.make_ready_job(source=source)
         _age_closed_verdict(url, 30)
-        f.make_board_row(uid, job_id, status=None)
+        _machine_row(uid, job_id)
         expected.add(url)
 
     task_id = f.make_task("reverify_open", {}, status="running")
@@ -258,13 +291,44 @@ async def test_a_splitter_resuming_a_parked_batch_selects_no_new_candidates(f, t
     f.subscribe(uid, source)
     job_id, url = f.make_ready_job(source=source)
     _age_closed_verdict(url, 30)
-    f.make_board_row(uid, job_id, status=None)
+    _machine_row(uid, job_id)
 
     task_id = f.make_task("reverify_open", {"batch_ids": ["batch_parked"]}, status="running")
     await tasks_verify.handle_reverify_open(task_id, {})
 
     assert taken == [{"rows": [], "parent_id": None, "force": False}]
     assert _urls(taken) == set(), "the stale posting waits for the batch in flight"
+
+
+_STALE = (
+    "COALESCE((SELECT MAX(q.created_at) FROM ai_queries q WHERE q.url = j.url"
+    " AND q.check_type = 'closed'), '-infinity') < now() - make_interval(days => %(days)s)"
+)
+
+
+@pytest.mark.corpus
+def test_the_working_set_stale_branch_equals_the_legacy_one_on_the_corpus():
+    """Every corpus machine row was written by materialize_passing, which
+    writes the working-set pair beside it, as the split backfill does for
+    legacy rows. So the legacy stale branch (the reference) and the cutover
+    select the same postings here; on production the same comparison is the
+    PR's shadow SQL. Run without the per-cycle cap, which only truncates."""
+    from api.board.person_state import UNTOUCHED
+
+    days = {"days": int(db.get_config("reverify_days"))}
+    legacy = db.query(
+        f"SELECT DISTINCT j.url FROM user_jobs uj JOIN jobs j ON j.id = uj.job_id "
+        f"WHERE {UNTOUCHED} AND {_STALE}",
+        days,
+    )
+    cutover = db.query(
+        f"SELECT DISTINCT j.url FROM user_job_working_set ws JOIN jobs j ON j.id = ws.job_id "
+        f"WHERE NOT EXISTS (SELECT 1 FROM user_jobs uj WHERE uj.user_id = ws.user_id "
+        f"AND uj.job_id = ws.job_id AND NOT ({UNTOUCHED})) AND {_STALE}",
+        days,
+    )
+    assert legacy, "the corpus must hold stale machine rows or this compares nothing"
+    assert {r["url"] for r in cutover} == {r["url"] for r in legacy}
 
 
 # ---------------------------------------------------------------------------
