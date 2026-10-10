@@ -1,7 +1,7 @@
 """drop ai_experiments and ai_experiment_results
 
 Revision ID: 93a3d7d0c92f
-Revises: 3c0273da3222
+Revises: 6ba27711ec9e
 Create Date: 2026-10-10
 
 The contract half of removing the admin experiments path. The release before
@@ -23,7 +23,7 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision: str = "93a3d7d0c92f"
-down_revision: Union[str, None] = "3c0273da3222"
+down_revision: Union[str, None] = "6ba27711ec9e"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
