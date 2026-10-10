@@ -784,14 +784,10 @@ receipt was never written stays unreferenced and is reused by the retry, since
 objects are content-addressed. Every reader of receipt vectors goes through
 `batch_results.response_payload` (`unconsumed`, `payload_recovery.retry`).
 
-New objects are version 2 uncompressed JSON. The reader also accepts version 1
-gzip objects, which 501 receipts still referenced on 2026-10-10.
-`rewrite_receipt_vectors_v1` (`tasks/receipt_vector_format.py`), queued every
-cycle until a run starts with none left, reads each such object, writes it
-again as version 2 with `put_verified` outside any transaction, and swaps the
-reference only if the row still holds the one it read. An unavailable object
-is counted and left for the next run. Once none are left, the gzip reader is
-removed. Both formats verify the canonical JSON byte size and SHA-256.
+Objects are version 2 uncompressed JSON, and the reader verifies the canonical
+JSON byte size and SHA-256. Version 1 (gzip) is not read: on 2026-10-10 the
+last 501 receipts that named one were rewritten as version 2 and none remain.
+Do not write another format beside it without a reader for it first.
 
 Replay reads only unconsumed receipts, so missing historical vectors cannot
 reopen acknowledged work. A required external input raises `PayloadUnavailable`
