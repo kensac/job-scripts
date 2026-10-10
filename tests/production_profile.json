@@ -143,137 +143,138 @@
    "columns": {
     "batch_id": {
      "kind": "key",
-     "null_rate": 0.818713
+     "null_rate": 0.057636
+    },
+    "cache_write_tokens": {
+     "kind": "numeric",
+     "null_rate": 0.449688,
+     "quantiles": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      796.0,
+      1534.0,
+      133616.0
+     ]
     },
     "cached_tokens": {
-     "kind": "categorical",
-     "null_rate": 0.408706,
-     "values": {
-      "0": 0.958585,
-      "1024": 0.000342,
-      "1152": 0.034837,
-      "1280": 0.000649,
-      "1408": 0.000955,
-      "1536": 0.000811,
-      "1664": 0.001045,
-      "1792": 0.000829,
-      "1920": 0.000342,
-      "2048": 0.00036,
-      "2176": 0.000162,
-      "2304": 0.000108,
-      "2432": 0.000108,
-      "2560": 0.000234,
-      "2688": 0.00027,
-      "2816": 7.2e-05,
-      "2944": 0.000216,
-      "3072": 1.8e-05,
-      "3200": 1.8e-05,
-      "3456": 1.8e-05,
-      "3584": 1.8e-05
-     }
+     "kind": "numeric",
+     "null_rate": 0.200971,
+     "quantiles": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      1256.0,
+      1256.0,
+      134785.0
+     ]
     },
     "check_type": {
      "kind": "categorical",
      "null_rate": 0.0,
      "values": {
-      "clearance": 0.278176,
-      "closed": 0.309442,
-      "content": 0.157769,
-      "custom": 0.238171,
-      "extraction": 0.016443
+      "clearance": 0.242467,
+      "closed": 0.248258,
+      "custom": 0.508474,
+      "extraction": 0.000801
      }
     },
     "company": {
      "binary": false,
      "charclasses": [
+      "",
       " -9Aa",
       " -A",
       " -Aa",
-      " -a",
       " 9Aa",
       " A",
       " Aa",
-      "-9Aa",
+      " a",
       "-A",
       "-Aa",
-      "-a",
-      "9",
       "9A",
       "9Aa",
+      "9a",
       "A",
-      "Aa",
-      "a"
+      "Aa"
      ],
      "kind": "text",
      "lengths": [
-      2,
+      0,
       3,
       7,
-      14,
-      19,
-      34,
-      96
+      10,
+      16,
+      25,
+      62
      ],
-     "null_rate": 0.176194
+     "null_rate": 0.000898
     },
     "completion_tokens": {
      "kind": "numeric",
-     "null_rate": 0.175139,
+     "null_rate": 0.100941,
      "quantiles": [
       0.0,
       0.0,
-      135.0,
-      251.0,
-      549.0,
-      1863.0,
-      4680.0
+      14.0,
+      46.0,
+      83.0,
+      412.0,
+      5819.0
      ]
     },
     "config_name": {
      "kind": "categorical",
-     "null_rate": 0.265494,
+     "null_rate": 0.009733,
      "values": {
-      "airtable1": 0.01297,
-      "airtable2": 0.006848,
-      "airtable3": 0.001262,
-      "airtable4": 0.019035,
-      "airtable5": 0.150219,
-      "content-backfill": 0.00016,
-      "content-cache": 0.125192,
-      "filter-batch": 0.053623,
-      "fulltime": 0.370745,
-      "fulltime_dixon": 0.003163,
-      "fulltime_ouckah": 0.001393,
-      "fulltime_ouckah_2027": 0.001001,
-      "ingest": 0.000725,
-      "manual": 2.9e-05,
-      "reverify": 0.036343,
-      "speedyapply_ng": 0.050576,
-      "verify-batch": 0.166715
+      "admin": 8e-06,
+      "airtable1": 0.000469,
+      "airtable2": 0.000248,
+      "airtable3": 4.6e-05,
+      "airtable4": 0.000688,
+      "airtable5": 0.005431,
+      "content-backfill": 0.000799,
+      "explain": 1e-06,
+      "filter-batch": 0.452044,
+      "filter-prepare": 8.4e-05,
+      "filter-run": 0.019867,
+      "fulltime": 0.013404,
+      "fulltime_dixon": 0.000114,
+      "fulltime_ouckah": 5e-05,
+      "fulltime_ouckah_2027": 3.6e-05,
+      "ingest": 0.002783,
+      "manual": 5e-06,
+      "reverify": 0.038499,
+      "reverify-unchanged": 0.000459,
+      "speedyapply_ng": 0.001828,
+      "verify-batch": 0.461898,
+      "verify-near-copy": 0.001238
      }
     },
     "cost_usd": {
      "kind": "numeric",
-     "null_rate": 0.174861,
+     "null_rate": 0.006609,
      "quantiles": [
       0.0,
       0.0,
-      8.4e-05,
-      0.000133,
-      0.000257,
-      0.000618,
-      0.002485
+      4.6e-05,
+      7.7e-05,
+      0.000109,
+      0.00023,
+      0.026898
      ]
     },
     "created_at": {
      "age_days": [
-      0.028,
-      0.41,
-      1.631,
-      6.952,
-      81.006,
-      82.026,
-      86.929
+      0.003,
+      7.177,
+      14.916,
+      17.111,
+      24.835,
+      38.298,
+      123.072
      ],
      "kind": "timestamp",
      "naive_rate": 0.0,
@@ -281,42 +282,64 @@
     },
     "duration_ms": {
      "kind": "numeric",
-     "null_rate": 0.362894,
+     "null_rate": 0.94941,
      "quantiles": [
-      781.0,
-      1180.0,
-      1734.0,
-      2569.0,
-      4763.0,
-      11344.0,
+      675.0,
+      1397.0,
+      2174.0,
+      3959.0,
+      6287.0,
+      9419.0,
       224744.0
      ]
     },
     "error": {
      "binary": false,
-     "charclasses": [],
+     "charclasses": [
+      " a"
+     ],
      "kind": "text",
-     "lengths": [],
-     "null_rate": 0.999968
+     "lengths": [
+      11,
+      11,
+      11,
+      11,
+      11,
+      11,
+      11
+     ],
+     "null_rate": 0.999501
     },
     "filter_name": {
      "kind": "categorical",
-     "null_rate": 0.761829,
+     "null_rate": 0.491526,
      "values": {
-      "default": 0.173289,
-      "empty": 0.020045,
-      "general": 0.010515,
-      "pay_tier": 0.041074,
-      "pay_tier_150": 0.044564,
-      "pay_tier_200": 0.1434,
-      "pay_tier_200_resume_match": 0.090157,
-      "pay_tier_and_new_york": 0.000761,
-      "resume_match": 0.048054,
-      "resume_match_new_grad": 0.036823,
-      "top_tier": 0.044116,
-      "user1:Pay: $200k+ total comp (new grad)": 0.142908,
-      "user1:default": 0.022729,
-      "user1:pay_tier_200_resume_match": 0.181566
+      "default": 0.003956,
+      "empty": 0.000458,
+      "general": 0.00024,
+      "managed-board:1": 0.149897,
+      "managed-board:2": 0.207849,
+      "managed-board:4": 0.037096,
+      "managed-board:6": 0.129665,
+      "pay_tier": 0.000938,
+      "pay_tier_150": 0.001017,
+      "pay_tier_200": 0.003274,
+      "pay_tier_200_resume_match": 0.002058,
+      "pay_tier_and_new_york": 1.7e-05,
+      "resume_match": 0.001097,
+      "resume_match_new_grad": 0.000841,
+      "top_tier": 0.001007,
+      "user1:Pay: $200k+ total comp (new grad)": 0.003263,
+      "user1:ab-filter": 0.000204,
+      "user1:ab-keep": 0.000204,
+      "user1:default": 0.000519,
+      "user1:ibe-coverage-run": 0.00212,
+      "user1:pay_tier_200_resume_match": 0.428112,
+      "user54792:Embedded Software Engineer": 5.3e-05,
+      "user54792:Embedded Systems or Robotics": 0.00562,
+      "user54792:Embedded or robotics, new grad, $80k+": 0.001896,
+      "user54792:New grad / entry level only": 0.01036,
+      "user54792:US or remote only": 0.008238
      }
     },
     "id": {
@@ -330,26 +353,22 @@
       0,
       0,
       0,
-      4048,
-      5521,
-      8638,
-      85551
+      2873,
+      5363,
+      8285,
+      472755
      ],
-     "null_rate": 0.017093
+     "null_rate": 0.006576
     },
     "instructions": {
      "binary": false,
      "kind": "text",
-     "lengths": [
-      0,
-      0,
-      0,
-      508,
-      1550,
-      4859,
-      4859
-     ],
-     "null_rate": 0.176844
+     "lengths": [],
+     "null_rate": 1.0
+    },
+    "instructions_id": {
+     "kind": "key",
+     "null_rate": 0.006673
     },
     "job_title": {
      "binary": false,
@@ -362,7 +381,6 @@
       " 9Aa",
       " A",
       " Aa",
-      " a",
       "-Aa",
       "A",
       "Aa"
@@ -370,57 +388,59 @@
      "kind": "text",
      "lengths": [
       3,
-      15,
+      14,
       22,
       31,
-      43,
-      66,
-      127
+      45,
+      69,
+      134
      ],
-     "null_rate": 0.176194
+     "null_rate": 0.000898
     },
     "model": {
      "kind": "categorical",
-     "null_rate": 0.174861,
+     "null_rate": 0.006468,
      "values": {
-      "gpt-5-nano": 0.998786,
-      "gpt-5.6-luna": 0.001214
+      "claude-haiku-4-5": 1e-06,
+      "gpt-5-nano": 0.354707,
+      "gpt-5.6-luna": 0.18405,
+      "gpt-6-luna": 0.461242
      }
     },
     "parsed_json": {
      "binary": false,
      "kind": "text",
      "lengths": [
-      18,
-      23,
-      61,
-      103,
-      123,
-      178,
-      258
+      22,
+      22,
+      22,
+      22,
+      110,
+      302,
+      372
      ],
-     "null_rate": 0.177121
+     "null_rate": 0.008084
     },
     "prompt_hash": {
      "kind": "key",
-     "null_rate": 0.761829
+     "null_rate": 0.491526
     },
     "prompt_tokens": {
      "kind": "numeric",
-     "null_rate": 0.175139,
+     "null_rate": 0.100941,
      "quantiles": [
       0.0,
       0.0,
-      958.0,
-      1256.0,
-      1651.0,
-      2476.0,
-      24565.0
+      889.0,
+      1489.0,
+      1966.0,
+      2636.0,
+      134875.0
      ]
     },
     "reason": {
      "kind": "partitioned",
-     "null_rate": 0.0,
+     "null_rate": 0.45657,
      "on": "check_type",
      "parts": {
       "clearance": {
@@ -428,23 +448,24 @@
        "charclasses": [
         "",
         " -9Aa",
+        " -9a",
+        " -A",
         " -Aa",
         " -a",
         " 9Aa",
         " Aa",
         " a",
-        "-A",
-        "a"
+        "-A"
        ],
        "kind": "text",
        "lengths": [
         0,
         0,
-        6,
-        8,
-        19,
-        116,
-        199
+        0,
+        15,
+        94,
+        134,
+        187
        ],
        "null_rate": 0.0
       },
@@ -453,57 +474,50 @@
        "charclasses": [
         "",
         " -9Aa",
+        " -9a",
+        " -A",
         " -Aa",
         " -a",
         " 9Aa",
         " Aa",
         " a",
-        "-A",
-        "a"
+        "-A"
        ],
        "kind": "text",
        "lengths": [
         0,
         0,
-        6,
-        8,
-        19,
-        116,
-        199
+        0,
+        15,
+        94,
+        134,
+        187
        ],
        "null_rate": 0.0
-      },
-      "content": {
-       "kind": "categorical",
-       "null_rate": 0.0,
-       "values": {
-        "ats text": 0.060453,
-        "content cached": 0.417967,
-        "scraped": 0.521581
-       }
       },
       "custom": {
        "binary": false,
        "charclasses": [
         "",
         " -9Aa",
+        " -9a",
+        " -A",
         " -Aa",
         " -a",
         " 9Aa",
         " Aa",
         " a",
-        "-A",
-        "a"
+        "-A"
        ],
        "kind": "text",
        "lengths": [
         0,
         0,
-        6,
-        8,
-        19,
-        116,
-        199
+        0,
+        15,
+        94,
+        134,
+        187
        ],
        "null_rate": 0.0
       },
@@ -518,79 +532,63 @@
     },
     "reasoning_effort": {
      "kind": "categorical",
-     "null_rate": 0.408674,
+     "null_rate": 0.524372,
      "values": {
-      "low": 0.435754,
-      "medium": 0.564246
+      "high": 0.402454,
+      "low": 0.553903,
+      "medium": 0.043643
      }
     },
     "reasoning_tokens": {
-     "kind": "categorical",
-     "null_rate": 0.408706,
-     "values": {
-      "0": 0.000667,
-      "1024": 0.017337,
-      "1088": 0.015697,
-      "1152": 0.014832,
-      "1216": 0.012003,
-      "128": 0.128354,
-      "1280": 0.010849,
-      "1344": 0.009516,
-      "1408": 0.008849,
-      "1472": 0.00775,
-      "1536": 0.007065,
-      "1600": 0.005623,
-      "1664": 0.005695,
-      "1728": 0.004415,
-      "1792": 0.004037,
-      "1856": 0.003965,
-      "192": 0.076396,
-      "1920": 0.00319,
-      "196": 1.8e-05,
-      "1984": 0.002631,
-      "2048": 0.002631,
-      "2112": 0.002018,
-      "2176": 0.001784,
-      "2240": 0.001388,
-      "2304": 0.001586,
-      "2368": 0.001189,
-      "2432": 0.000252,
-      "256": 0.053959,
-      "320": 0.065186,
-      "384": 0.072431,
-      "448": 0.069223,
-      "512": 0.056319,
-      "576": 0.044227,
-      "63": 1.8e-05,
-      "64": 0.15427,
-      "640": 0.031683,
-      "704": 0.026294,
-      "768": 0.021356,
-      "832": 0.019626,
-      "896": 0.018869,
-      "960": 0.016797
-     }
+     "kind": "numeric",
+     "null_rate": 0.200971,
+     "quantiles": [
+      0.0,
+      0.0,
+      0.0,
+      25.0,
+      50.0,
+      256.0,
+      3619.0
+     ]
+    },
+    "request_sha256": {
+     "binary": false,
+     "charclasses": [
+      "9a"
+     ],
+     "kind": "text",
+     "lengths": [
+      64,
+      64,
+      64,
+      64,
+      64,
+      64,
+      64
+     ],
+     "null_rate": 0.898857
     },
     "status": {
      "kind": "categorical",
      "null_rate": 0.0,
      "values": {
-      "failed": 0.01672,
-      "passed": 0.682641,
-      "rejected": 0.300639
+      "failed": 0.00232,
+      "passed": 0.459316,
+      "rejected": 0.538363
      }
     },
     "total_tokens": {
      "kind": "numeric",
-     "null_rate": 0.175139,
+     "null_rate": 0.100941,
      "quantiles": [
       0.0,
       0.0,
-      1169.0,
-      1553.0,
-      2141.0,
-      4182.0,
-      26633.0
+      966.0,
+      1600.0,
+      2087.0,
+      2769.0,
+      137785.0
      ]
     },
     "url": {
@@ -600,22 +598,23 @@
     "worker": {
      "binary": false,
      "charclasses": [
+      "-9a",
       "a"
      ],
      "kind": "text",
      "lengths": [
       3,
-      3,
       7,
       7,
-      7,
-      7,
-      7
+      9,
+      9,
+      12,
+      12
      ],
-     "null_rate": 0.510273
+     "null_rate": 0.0247
     }
    },
-   "rows": 93840,
+   "rows": 1925229,
    "sampled": 4000
   },
   "app_config": {
@@ -2157,6 +2156,110 @@
     }
    },
    "rows": 52878,
+   "sampled": 4000
+  },
+  "page_fetches": {
+   "columns": {
+    "content": {
+     "binary": false,
+     "charclasses": [
+      " -9",
+      " -9Aa",
+      " -Aa",
+      " 9Aa",
+      " Aa"
+     ],
+     "kind": "text",
+     "lengths": [
+      39,
+      200,
+      200,
+      200,
+      200,
+      200,
+      200
+     ],
+     "null_rate": 0.041903
+    },
+    "created_at": {
+     "age_days": [
+      16.054,
+      18.035,
+      25.133,
+      26.958,
+      28.137,
+      45.186,
+      118.145
+     ],
+     "kind": "timestamp",
+     "naive_rate": 0.0,
+     "null_rate": 0.0
+    },
+    "id": {
+     "kind": "key",
+     "null_rate": 0.0
+    },
+    "method": {
+     "kind": "categorical",
+     "null_rate": 0.0,
+     "values": {
+      "ats text": 0.717113,
+      "fetch returned nothing": 0.041903,
+      "listing text": 0.203774,
+      "scraped": 0.012584,
+      "static": 0.005744,
+      "unknown": 0.006692,
+      "verification": 0.012191
+     }
+    },
+    "status": {
+     "kind": "categorical",
+     "null_rate": 0.0,
+     "values": {
+      "failed": 0.041903,
+      "passed": 0.958097
+     }
+    },
+    "url": {
+     "binary": false,
+     "charclasses": [
+      "-9Aa",
+      "-9a",
+      "-Aa",
+      "-a"
+     ],
+     "kind": "text",
+     "lengths": [
+      40,
+      53,
+      58,
+      75,
+      89,
+      125,
+      200
+     ],
+     "null_rate": 0.0
+    },
+    "worker": {
+     "binary": false,
+     "charclasses": [
+      "-9a",
+      "a"
+     ],
+     "kind": "text",
+     "lengths": [
+      3,
+      3,
+      7,
+      9,
+      9,
+      12,
+      12
+     ],
+     "null_rate": 0.012546
+    }
+   },
+   "rows": 924644,
    "sampled": 4000
   },
   "reports": {

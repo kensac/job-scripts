@@ -122,6 +122,7 @@ ANONYMISE = {
     # so the same host keeps the same pseudonym and "which worker holds this"
     # still means something.
     "ai_queries.worker": "'worker-' || substr(md5(worker), 1, 6)",
+    "page_fetches.worker": "'worker-' || substr(md5(worker), 1, 6)",
     "tasks.worker": "'worker-' || substr(md5(worker), 1, 6)",
     "worker_status.name": "'worker-' || substr(md5(name), 1, 6)",
 }
@@ -150,8 +151,12 @@ COPIED_VERBATIM = {
     "user_settings.column_layout": "the dev API renders the board from it",
 }
 
-# input_content is ~80% of the database and almost no test needs page text.
-FAST_SKIP = {"ai_queries": ["input_content", "instructions", "parsed_json"]}
+# Page text (page_fetches.content, and the copies on answers in
+# ai_queries.input_content) is most of the database and almost no test needs it.
+FAST_SKIP = {
+    "ai_queries": ["input_content", "instructions", "parsed_json"],
+    "page_fetches": ["content"],
+}
 
 
 def _check_the_two_lists_agree() -> None:
