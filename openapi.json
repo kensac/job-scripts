@@ -2275,22 +2275,6 @@
             }
           },
           {
-            "name": "cursor",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Cursor"
-            }
-          },
-          {
             "name": "sort",
             "in": "query",
             "required": false,
@@ -34100,17 +34084,6 @@
             "type": "array",
             "title": "Filter Fields"
           },
-          "next_cursor": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Next Cursor"
-          },
           "has_more": {
             "type": "boolean",
             "title": "Has More"
@@ -34173,7 +34146,6 @@
           "filters",
           "column_filters",
           "filter_fields",
-          "next_cursor",
           "has_more",
           "offset",
           "total",

@@ -257,7 +257,6 @@ class Board(BaseModel):
     filters: dict[str, list[str]]
     column_filters: list[column_filters_.ColumnFilter]
     filter_fields: list[column_filters_.FilterField]
-    next_cursor: int | None
     has_more: bool
     offset: int
     total: int | None
@@ -323,7 +322,6 @@ def job_options(user: AuthedUser = Depends(require_user)) -> BoardOptions:
 def list_jobs(
     limit: int = 200,
     offset: int = 0,
-    cursor: int | None = None,
     # Empty means "whatever the configured default is", so a caller that does
     # not care gets the same order the page opens on rather than a second
     # opinion baked into a signature.
@@ -343,11 +341,7 @@ def list_jobs(
 ) -> Board:
     limit = max(1, min(limit, 1000))
     offset = max(0, offset)
-    sorts = (
-        [{"key": "id", "dir": "desc"}]
-        if cursor is not None
-        else (sorting.parse(sort, dir, _SORTABLE, "added_at") if sort else default_sort())
-    )
+    sorts = sorting.parse(sort, dir, _SORTABLE, "added_at") if sort else default_sort()
     extra = []
     params: dict = {"uid": user.id, "limit": limit + 1, "offset": offset}
     column_rules, column_clauses, column_params = column_filters_.compile_filters(column_filters)
@@ -397,28 +391,20 @@ def list_jobs(
 
     filter_sql = "\n".join(extra)
     total = None
-    if cursor is not None:
-        # Legacy cursor mode: fixed newest-first by id.
-        order = "AND j.id < %(cursor)s\nORDER BY j.id DESC LIMIT %(limit)s"
-        params["cursor"] = cursor
-    else:
-        order = (
-            f"ORDER BY {sorting.clause(sorts, _SORTABLE)}, j.id DESC "
-            "LIMIT %(limit)s OFFSET %(offset)s"
-        )
+    order = (
+        f"ORDER BY {sorting.clause(sorts, _SORTABLE)}, j.id DESC LIMIT %(limit)s OFFSET %(offset)s"
+    )
     # One pass, not two: the total rides on the page as a window count over
     # the same filtered set, so a sort with with_total costs one board read
     # rather than the count query and then the page query.
-    count_on_page = with_total and cursor is None
-    columns = _JOB_ROW + (", COUNT(*) OVER () AS total_rows" if count_on_page else "")
+    columns = _JOB_ROW + (", COUNT(*) OVER () AS total_rows" if with_total else "")
     sql = visibility.FAST.format(columns=columns, extra=f"{filter_sql}\n{order}")
     rows = db.query_as(BoardRow, sql, params)
     if with_total:
-        if count_on_page and rows:
+        if rows:
             total = rows[0].total_rows
         else:
-            # Cursor position is pagination, not a filter. Count the full
-            # selection in cursor mode and when an offset page has no rows.
+            # An offset past the end returns no row to carry the window count.
             row = db.query_one(
                 visibility.FAST.format(columns="COUNT(*) AS c", extra=filter_sql), params
             )
@@ -430,7 +416,6 @@ def list_jobs(
         filters=params_.applied(status=wanted, source=wanted_sources, ats=wanted_ats),
         column_filters=column_rules,
         filter_fields=column_filters_.fields(),
-        next_cursor=rows[-1].job_id if cursor is not None and has_more and rows else None,
         has_more=has_more,
         offset=offset,
         total=total,

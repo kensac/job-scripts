@@ -19,7 +19,7 @@ from core.embeddings import (
     EMBEDDING_MODEL,
 )
 from core.pricing import estimate_cost_usd
-from core.store import AI_ELIGIBLE_JOB, CONTENT_LATERAL
+from core.store import CONTENT_LATERAL
 from tasks import rescrape
 from tasks.runtime import (
     batch_event_hook,
@@ -42,13 +42,9 @@ logger = logging.getLogger(__name__)
 # Postings never embedded, plus postings whose page has been scraped again
 # since they were. Same shape as the requirements sweep, for the same reason.
 #
-# The legacy scope below is the subscribed working set, not actual visibility.
-# It remains available as a reversible rollout option. The default scope uses
-# the personal similarity reader's membership, including ownership exceptions.
-#
-# The legacy LEFT JOIN preserves orphan URLs: historically a fifth of the
-# corpus had no job row. New visible-only purchases exclude these because no
-# similarity route can address them. Existing vectors and paid receipts remain.
+# The scope is the personal similarity reader's membership, including
+# ownership exceptions. A url with no job row is excluded because no
+# similarity route can address it.
 #
 # The first stage projects only the current content ID and compares it with
 # stored provenance before returning text for capped survivors. This limits
@@ -58,13 +54,6 @@ logger = logging.getLogger(__name__)
 # `stored_hash` rides along so the handler can tell a re-scrape that changed the
 # page from one that did not. An identical re-scrape refreshes the id and pays
 # for nothing.
-_LEGACY_SCOPE = f"""
-    SELECT DISTINCT a.url FROM ledger_rows a
-    LEFT JOIN jobs j ON j.url = a.url
-    WHERE j.url IS NULL OR {AI_ELIGIBLE_JOB.format(job="j")}
-"""
-
-
 def _candidate_sql(scope: str) -> str:
     return f"""
     WITH current_row AS (
@@ -86,8 +75,7 @@ def _candidate_sql(scope: str) -> str:
 """
 
 
-_CANDIDATES = _candidate_sql(_LEGACY_SCOPE)
-_VISIBLE_CANDIDATES = _candidate_sql(visibility.across_users("j.url"))
+_CANDIDATES = _candidate_sql(visibility.across_users("j.url"))
 
 
 def _store(rows: list[dict[str, Any]]) -> int:
@@ -132,12 +120,7 @@ async def handle_embed_postings_batch(task_id: int, payload: dict[str, Any]) -> 
             set_progress(task_id, 0, 0, f"embedding task {earlier['id']} is still in flight")
             return
         candidates = rescrape.drop_unchanged(
-            db.query(
-                _VISIBLE_CANDIDATES
-                if db.get_config("embedding_visible_only", True)
-                else _CANDIDATES,
-                {"cap": db.get_config("embed_postings_per_cycle")},
-            ),
+            db.query(_CANDIDATES, {"cap": db.get_config("embed_postings_per_cycle")}),
             table="job_embeddings",
             limit=EMBEDDING_INPUT_CHARS,
         )
