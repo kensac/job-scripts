@@ -19,6 +19,7 @@ def no_paid_calls(monkeypatch):
 
     monkeypatch.setattr(ai, "parse", forbidden)
     monkeypatch.setattr(batch, "submit_batches", forbidden)
+    monkeypatch.setattr(batch, "run_responses_batch", forbidden)
 
 
 def test_report_1000_decision_workload(client, admin_headers, monkeypatch, request, no_paid_calls):

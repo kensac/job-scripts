@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import io
 import json
 import logging
@@ -57,6 +58,7 @@ BATCH_TOKEN_BUDGET = 1_800_000
 # than anything on our side.
 BATCH_WAVE_CONCURRENCY = int(os.environ.get("JOBTRACKER_BATCH_WAVE_CONCURRENCY", "4"))
 BATCH_CHARS_PER_TOKEN = 4
+BATCH_POLL_INTERVAL = 30.0
 
 
 def completion_window_seconds() -> int:
@@ -300,6 +302,23 @@ def _emit(on_event: BatchEventHook, batch: Batch) -> None:
         logger.exception("batch event hook failed")
 
 
+async def _wait_for_batch(
+    client: AsyncOpenAI, batch_id: str, on_event: BatchEventHook = None
+) -> Batch:
+    while True:
+        batch = await client.batches.retrieve(batch_id)
+        counts = getattr(batch, "request_counts", None)
+        logger.info(
+            f"Batch {batch_id}: status={batch.status} "
+            f"({getattr(counts, 'completed', '?')}/{getattr(counts, 'total', '?')} done, "
+            f"{getattr(counts, 'failed', '?')} failed)"
+        )
+        _emit(on_event, batch)
+        if batch.status in _TERMINAL_STATES:
+            return batch
+        await asyncio.sleep(BATCH_POLL_INTERVAL)
+
+
 async def _collect_batch(
     client: AsyncOpenAI,
     batch: Batch,
@@ -458,6 +477,29 @@ async def _submit_chunk(
     return batch.id
 
 
+async def _run_chunk(
+    client: AsyncOpenAI,
+    specs: list[BatchSpec],
+    model: str,
+    reasoning_effort: str,
+    max_output_tokens: int,
+    on_event: BatchEventHook = None,
+) -> dict[str, BatchResult]:
+    """Submit-and-wait, retained for callers that genuinely need a result in
+    hand. The scheduled paths use submit_batches + collect_finished_batches
+    instead so they do not hold a worker while the provider queues."""
+    results: dict[str, BatchResult] = {
+        spec.custom_id: BatchResult(spec.custom_id) for spec in specs
+    }
+    batch_id = await _submit_chunk(
+        client, specs, model, reasoning_effort, max_output_tokens, on_event
+    )
+    batch = await _wait_for_batch(client, batch_id, on_event)
+    collected = await _collect_batch(client, batch, results)
+    _emit_usage(on_event, batch.id, batch.status, collected)
+    return collected
+
+
 async def submit_batches(
     specs: list[BatchSpec],
     model: str,
@@ -538,6 +580,61 @@ async def batch_progress(batch_ids: list[str]) -> dict[str, BatchProgress]:
 
 def is_terminal(state: str) -> bool:
     return state in _TERMINAL_STATES
+
+
+async def run_responses_batch(
+    specs: list[BatchSpec],
+    model: str,
+    reasoning_effort: str,
+    max_output_tokens: int,
+    on_event: BatchEventHook = None,
+) -> dict[str, BatchResult]:
+    reason = batch_capabilities.unavailable_reason(model)
+    if reason:
+        raise ValueError(f"BATCH_UNSUPPORTED: {model}: {reason}")
+    client = _client()
+    if not client:
+        return {spec.custom_id: BatchResult(spec.custom_id, error="no api key") for spec in specs}
+    if not specs:
+        return {}
+
+    chunks = _chunk_specs(specs, max_output_tokens)
+    logger.info(
+        f"Running {len(specs)} batch requests in {len(chunks)} wave(s) "
+        f"(<= {BATCH_TOKEN_BUDGET:,} tokens each)"
+    )
+
+    # Waves used to run one after another. Each is an independent OpenAI batch
+    # that spends most of its life waiting, so serialising them made total time
+    # the SUM of every wave's queue time: a 37-wave backfill at ~42 min a wave
+    # is ~26 hours of mostly idle waiting, holding a worker slot throughout.
+    # Running a bounded number concurrently collapses that to roughly the
+    # slowest few waves.
+    sem = asyncio.Semaphore(max(1, BATCH_WAVE_CONCURRENCY))
+
+    async def run_wave(index: int, chunk: list[BatchSpec]) -> dict[str, BatchResult]:
+        async with sem:
+            logger.info(f"Batch wave {index}/{len(chunks)}: {len(chunk)} requests")
+            return await _run_chunk(
+                client, chunk, model, reasoning_effort, max_output_tokens, on_event
+            )
+
+    waves = await asyncio.gather(
+        *(run_wave(i, c) for i, c in enumerate(chunks, start=1)),
+        return_exceptions=True,
+    )
+
+    results: dict[str, BatchResult] = {}
+    for index, wave in enumerate(waves, start=1):
+        if isinstance(wave, BaseException):
+            # One wave failing must not discard the ones that succeeded and
+            # were already paid for. The unanswered specs simply get no
+            # verdict, which the next sweep picks up - the same idempotency
+            # the serial version relied on, just without losing siblings.
+            logger.warning(f"Batch wave {index}/{len(chunks)} failed: {wave}")
+            continue
+        results.update(wave)
+    return results
 
 
 async def collect_finished_batches(
