@@ -117,3 +117,52 @@ def test_ingest_records_the_pull_under_its_task(monkeypatch, f):
     progress = db.query_one("SELECT progress FROM tasks WHERE id = %s", (task_id,))["progress"]
     assert progress["observed"] == {"appeared": 1}
     assert progress["complete"] is True
+
+
+def _available(url: str, enforced: bool = True) -> bool | None:
+    sql = catalog.AVAILABLE.format(job="j")
+    row = db.query_one(
+        f"SELECT {sql} AS a FROM jobs j WHERE j.url = %(url)s", {"url": url, "enforced": enforced}
+    )
+    return row["a"]
+
+
+def test_availability_is_read_from_the_latest_observation_of_switched_on_sources(f):
+    f.make_source("board")
+    f.make_source("feed")
+    f.make_source("off", active=False)
+    _pull("board", [_posting(A)], {A}, "unlisted")
+    assert _available(A) is True
+    _pull("board", [], set(), "unlisted")
+    assert _available(A) is False, "a complete authoritative pull left it out"
+    # An aggregator that stops listing it keeps it available: absence there
+    # says nothing about whether it closed.
+    _pull("feed", [_posting(A)], {A}, "not_listed")
+    _pull("feed", [], set(), "not_listed")
+    assert _available(A) is True
+    # Listed only by a switched-off source: not available.
+    _pull("off", [_posting(B)], {B}, "unlisted")
+    assert _available(B) is False
+    # Filtered admits only while patterns are not enforced.
+    _pull("board", [_posting(A, "Senior")], set(), "unlisted")
+    db.execute("UPDATE sources SET active = false WHERE name = 'feed'")
+    assert _available(A, enforced=True) is False
+    assert _available(A, enforced=False) is True
+
+
+def test_a_job_no_source_has_observed_is_cannot_tell(f):
+    f.make_job(url=A)
+    assert _available(A) is None
+
+
+def test_the_shadow_counts_each_disagreement_once(f):
+    f.make_source("board")
+    _pull("board", [_posting(A), _posting(B)], {A, B}, "unlisted")
+    # The legacy flag says closed where the observations say listed.
+    db.execute("UPDATE jobs SET active = false WHERE url = %s", (B,))
+    cells = ingest._summarise(catalog.availability_shadow(patterns_enforced=True))
+    assert {k: v["n"] for k, v in cells.items()} == {
+        "legacy=True projected=True": 1,
+        "legacy=False projected=True": 1,
+    }
+    assert cells["legacy=False projected=True"]["sources"] == {"board": 1}

@@ -288,16 +288,35 @@ async def handle_retire_switched_off(task_id: int, payload: dict[str, Any]) -> N
     """Retires the postings of every switched-off source (catalog.retire_switched_off)."""
     from core import catalog
 
-    retired = await asyncio.to_thread(
-        catalog.retire_switched_off, bool(db.get_config("source_title_patterns_enabled"))
-    )
+    enforced = bool(db.get_config("source_title_patterns_enabled"))
+    retired = await asyncio.to_thread(catalog.retire_switched_off, enforced)
     for source, n in retired.items():
         metrics.INGEST_JOBS.labels(source, "retired").inc(n)
     total = sum(retired.values())
+    # Right after the legacy rule has run, so jobs.active is as current as it
+    # gets. Phase 3's shadow comparison (docs/agents/architecture-migration.md);
+    # it goes when the readers of jobs.active move.
+    shadow = _summarise(await asyncio.to_thread(catalog.availability_shadow, enforced))
     set_progress(
         task_id,
         total,
         total,
         f"retired {total} postings of {len(retired)} switched-off sources",
-        extra={"retired": total, "sources": len(retired)},
+        extra={"retired": total, "sources": len(retired), "availability_shadow": shadow},
     )
+
+
+def _summarise(rows: list[dict]) -> dict[str, dict]:
+    """One cell per (legacy, projected): its count, the ten owning sources
+    holding most of it, and a few job ids to open."""
+    cells: dict[str, dict] = {}
+    for r in sorted(rows, key=lambda r: -r["n"]):
+        cell = cells.setdefault(
+            f"legacy={r['legacy']} projected={r['projected']}",
+            {"n": 0, "sources": {}, "examples": []},
+        )
+        cell["n"] += r["n"]
+        if len(cell["sources"]) < 10:
+            cell["sources"][r["source"]] = r["n"]
+        cell["examples"] = (cell["examples"] + r["examples"])[:5]
+    return cells

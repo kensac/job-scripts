@@ -494,6 +494,29 @@ selection gates on; a reader that wants "a source says this is open" moves,
 and a reader that wants the feed's own flag stays. Measured differences are
 explained before any reader moves.
 
+The projection has one definition, `catalog.AVAILABLE`. The hourly
+`retire_switched_off` task runs the shadow right after the legacy rule, so
+`jobs.active` is as current as it gets, and leaves it on its own row:
+`progress->'availability_shadow'` holds one cell per (legacy, projected) with
+its count, the ten owning sources holding most of it and a few job ids. Read
+the cells across at least one full ingest cycle after the dual write is
+deployed (a source on a 24-hour interval has not been observed before then,
+so its rows read `projected=None` until it has):
+
+```sql
+SELECT id, finished_at, progress->'availability_shadow'
+FROM tasks WHERE kind = 'retire_switched_off' AND status = 'done'
+ORDER BY id DESC LIMIT 24;
+```
+
+Disagreements expected by design, each to be confirmed by count rather than
+assumed: `projected=None` for uploads and for every switched-off source's
+rows (nothing pulls them, so nothing observes them); `legacy=False
+projected=True` where an aggregator still lists a posting its owning board
+dropped: `retire_unlisted` clears the flag on every pull of the board and the
+aggregator's next upsert sets it again, so the legacy value flips with
+whichever pulled last while the projection holds still.
+
 **Never in a loop:** any write to the production database, and any migration
 that can refuse to apply ([migrations.md](migrations.md)). Neither of these is
 covered by the standing instruction above, because neither is gated by CI.
