@@ -329,7 +329,16 @@ SUBSCRIBED_SOURCE = """
 # So this branch is scope, deliberately. A posting somebody tracks keeps being
 # checked even after nobody subscribes to the source that found it, which is
 # the point: it is their job now, not the board's.
-ON_A_BOARD = "EXISTS (SELECT 1 FROM user_jobs uj WHERE uj.job_id = {job}.id)"
+#
+# Scope is the working set (postings a person's filters picked) plus person
+# state (postings a person acted on). A legacy all-default user_jobs row is
+# working-set membership (phase 2b), and the split backfill copies every one
+# into user_job_working_set, so the user_jobs arm carries only what a person
+# did once those rows are converted.
+ON_A_BOARD = (
+    "(EXISTS (SELECT 1 FROM user_job_working_set ws WHERE ws.job_id = {job}.id)"
+    " OR EXISTS (SELECT 1 FROM user_jobs uj WHERE uj.job_id = {job}.id))"
+)
 
 AI_ELIGIBLE_JOB = (
     """
