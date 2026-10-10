@@ -182,6 +182,24 @@ class Task(Base):
     finished_at: Mapped[datetime.datetime | None]
 
 
+class RunConfig(Base):
+    """One stored copy of the settings a run executes, which tasks point at.
+
+    A filter chunk copied its filter and a board run copied its board's
+    settings into every payload: 8 distinct filter copies over 17,733 chunks
+    and 22 distinct board copies over 950 runs (2026-10-10). Interned by
+    digest in api.run_configs, so one setting is one row however many runs
+    use it.
+    """
+
+    __tablename__ = "run_configs"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
+    digest: Mapped[bytes] = mapped_column(BYTEA, unique=True)
+    kind: Mapped[str] = mapped_column(Text)
+    body: Mapped[dict] = mapped_column(JSONB)
+
+
 class TaskModelOverride(Base):
     """The model a person chose for a task, append-only.
 

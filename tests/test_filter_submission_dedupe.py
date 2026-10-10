@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from api import ai, db
+from api import ai, db, run_configs
 from core.store import add_ai_result
 from tests.factories import make_task
 
@@ -62,6 +62,20 @@ def test_other_users_revisions_and_models_do_not_supply_a_decision():
         "https://posting", "passed", None, "custom", prompt_hash="criteria", model="gpt-5.6-luna"
     )
     assert _blocked(_chunk()) == set()
+
+
+def test_a_chunk_naming_its_filter_by_config_id_owns_its_work():
+    def chunk(prompt_hash):
+        config_id = run_configs.intern(run_configs.FILTER, {"prompt_hash": prompt_hash})
+        payload = {"user_id": 7, "config_id": config_id, "jobs": [{"url": "https://posting"}]}
+        return make_task("run_filter_batch_chunk", payload, status="running")
+
+    chunk("other")
+    probe = _chunk()
+    assert _blocked(probe) == set()
+    db.execute("UPDATE tasks SET status='done' WHERE id=%s", (probe,))
+    chunk("criteria")
+    assert _blocked(_chunk()) == {"https://posting"}
 
 
 def test_failed_task_with_paid_batches_still_owns_its_work():

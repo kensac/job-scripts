@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from api import ai, db, task_jobs
+from api import ai, db, run_configs, task_jobs
 from core.payload_objects import PayloadStore, PayloadUnavailable
 from core.store import add_ai_result
 from tasks import filters
@@ -253,6 +253,10 @@ async def test_a_split_writes_each_batch_chunk_list_as_a_verified_object(
         read.extend(task_jobs.run_jobs(payload, objects))
     assert read == jobs
     assert in_flight_urls(uid) == {job["url"] for job in jobs}
+    # Both chunks point at one stored copy of the filter they copied.
+    assert {child["payload"]["config_id"] for child in children} == {
+        run_configs.intern(run_configs.FILTER, children[0]["payload"]["filter"])
+    }
 
 
 @pytest.mark.asyncio
