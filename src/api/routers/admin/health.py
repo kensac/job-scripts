@@ -174,12 +174,10 @@ class FailureBreakdown(BaseModel):
     items: list[FailedCheck]
 
 
-# Failed model calls and failed page fetches, one row each. A fetch still
-# stored in ai_queries is read through page_fetches only, so it counts once
-# while fetches move to their own table.
+# Failed model calls and failed page fetches, one row each.
 _FAILURES = """
     SELECT id, created_at, url, check_type, company, job_title, worker, error, reason
-    FROM ai_queries WHERE status = 'failed' AND check_type IS DISTINCT FROM 'content'
+    FROM ai_queries WHERE status = 'failed'
     UNION ALL
     SELECT id, created_at, url, 'content', NULL, NULL, worker, NULL, method
     FROM page_fetches WHERE status = 'failed'

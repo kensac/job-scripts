@@ -421,7 +421,7 @@ def get_public_job(slug: str, job_id: int, response: Response) -> PublicJobDetai
     JOIN managed_boards b ON b.id = mj.managed_board_id AND b.published
     LEFT JOIN LATERAL (
         SELECT q.input_content, q.created_at FROM page_texts q
-        WHERE q.url = j.url AND NOT q.on_verdict
+        WHERE q.url = j.url
         ORDER BY q.id DESC LIMIT 1
     ) content ON TRUE
     WHERE b.slug = %s AND mj.job_id = %s

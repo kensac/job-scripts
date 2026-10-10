@@ -173,10 +173,11 @@ class JobProfile(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
     url: Mapped[str] = mapped_column(Text)
-    # The page fetch the profile was read from. No foreign key while page
-    # fetches move out of ai_queries (PageFetchRow): the key pointed there
-    # with ON DELETE CASCADE, so moving a fetch would have deleted the
-    # profiles read from it.
+    # The page text the profile was read from: a page fetch, or for 3,502 of
+    # 84,052 profiles (2026-10-10) a copy older verification wrote on its
+    # answer in ai_queries. No foreign key, like content_row_id on
+    # job_requirements and job_embeddings: it names a row in either table, and
+    # a profile whose row is not a url's newest fetch reads as superseded.
     content_row_id: Mapped[int] = mapped_column(BigInteger)
     content_hash: Mapped[str] = mapped_column(Text)
     classifier_version: Mapped[str] = mapped_column(Text)
@@ -192,26 +193,26 @@ class JobProfile(Base):
     classified_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
 
 
-class PageFetchRow(Base):
+class PageFetch(Base):
     """One fetch of a posting's page: what came back and how it was read.
 
-    A fact, appended and never updated. Readers use the page_fetches view,
-    which also holds the fetches still stored in ai_queries (check_type
-    'content') until they are moved here, and page_texts for the text alone.
+    A fact, appended and never updated, written only by core.page_fetches.
+    page_texts is the view of the fetches that brought text back.
 
-    Ids come from ai_queries' sequence, so a fetch keeps its id when it moves
-    and every content_row_id that names it stays true.
+    Ids come from ai_queries' sequence: the fetches stored there before
+    2026-10-10 kept their ids when they moved, so every content_row_id that
+    names one stays true.
     """
 
-    __tablename__ = "page_fetch_rows"
+    __tablename__ = "page_fetches"
     __table_args__ = (
-        CheckConstraint("status IN ('passed', 'failed')", name="ck_page_fetch_rows_status"),
-        Index("idx_page_fetch_rows_url_id", "url", text("id DESC")),
-        Index("idx_page_fetch_rows_created_at", "created_at"),
+        CheckConstraint("status IN ('passed', 'failed')", name="ck_page_fetches_status"),
+        Index("idx_page_fetches_url_id", "url", text("id DESC")),
+        Index("idx_page_fetches_created_at", "created_at"),
         # The admin ledger's filter options skip-scan distinct values through
         # ledger_rows, as they do on ai_queries (routers/admin/queries.py).
-        Index("idx_page_fetch_rows_status", "status"),
-        Index("idx_page_fetch_rows_worker_recent", "worker", "created_at"),
+        Index("idx_page_fetches_status", "status"),
+        Index("idx_page_fetches_worker_recent", "worker", "created_at"),
     )
 
     id: Mapped[int] = mapped_column(
@@ -222,8 +223,9 @@ class PageFetchRow(Base):
     # what parks a posting (api.ai.verdicts.fetch_parked_sql).
     status: Mapped[str] = mapped_column(Text)
     # How the text was read: 'ats text', 'listing text', 'static', 'scraped',
-    # or why it was not. Moved rows add two: 'verification' (text older
-    # verification kept only on its answer) and 'unknown' (no recorded origin).
+    # or why it was not. Rows moved from ai_queries add two: 'verification'
+    # (text older verification kept only on its answer, with that answer's id)
+    # and 'unknown' (no recorded origin).
     method: Mapped[str] = mapped_column(Text)
     content: Mapped[str | None] = mapped_column(Text)
     worker: Mapped[str | None] = mapped_column(Text)

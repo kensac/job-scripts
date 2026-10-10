@@ -43,7 +43,7 @@ class TestSchema:
 class TestCandidateSelection:
     def test_excludes_urls_with_no_job_row(self, f):
         # No similarity route can address a url without a job row.
-        f.make_verdict("https://orphan.test/1", "content", "passed", content=CONTENT)
+        f.make_fetch("https://orphan.test/1", content=CONTENT)
         urls = [r["url"] for r in db.query(_CANDIDATES, {"cap": 100})]
         assert "https://orphan.test/1" not in urls
 
@@ -55,7 +55,7 @@ class TestCandidateSelection:
         assert url not in [r["url"] for r in db.query(_CANDIDATES, {"cap": 100})]
 
     def test_skips_pages_too_short_to_be_a_posting(self, f):
-        f.make_verdict("https://stub.test/1", "content", "passed", content="404")
+        f.make_fetch("https://stub.test/1", content="404")
         assert "https://stub.test/1" not in [r["url"] for r in db.query(_CANDIDATES, {"cap": 100})]
 
 
@@ -193,8 +193,7 @@ class TestUnchangedRescrapes:
         _, url = f.make_ready_job(content="a posting long enough to embed " * 20)
         f.make_embedding(url)
         row = db.query_one(
-            "SELECT id, input_content FROM ai_queries WHERE url = %s "
-            "AND input_content IS NOT NULL ORDER BY id DESC LIMIT 1",
+            "SELECT id, input_content FROM page_texts WHERE url = %s ORDER BY id DESC LIMIT 1",
             (url,),
         )
         assert row is not None

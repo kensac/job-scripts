@@ -114,7 +114,7 @@ def job_profile_report(user: AuthedUser = Depends(require_admin)) -> JobProfileR
           count(*) FILTER (WHERE NOT EXISTS (
             SELECT 1 FROM page_texts q WHERE q.id = p.content_row_id
               AND q.id = (SELECT q2.id FROM page_texts q2 WHERE q2.url = p.url
-                AND NOT q2.on_verdict ORDER BY q2.id DESC LIMIT 1)
+                ORDER BY q2.id DESC LIMIT 1)
           )) AS superseded_observations
         FROM job_profiles p WHERE classifier_version = %s AND model = %s
         """,

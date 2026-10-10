@@ -194,7 +194,7 @@ class TestCandidateSelection:
         """The whole reason this is url-keyed. A quarter of the corpus is
         postings whose job row is gone and whose page can never be re-scraped;
         a job-keyed sweep would silently skip them."""
-        f.make_verdict("https://orphan.test/1", "content", "passed", content=CONTENT)
+        f.make_fetch("https://orphan.test/1", content=CONTENT)
         assert "https://orphan.test/1" in _candidates()
 
     def test_skips_urls_already_extracted(self, f):
@@ -204,12 +204,12 @@ class TestCandidateSelection:
         assert url not in _candidates()
 
     def test_skips_pages_too_short_to_be_a_posting(self, f):
-        f.make_verdict("https://stub.test/1", "content", "passed", content="404")
+        f.make_fetch("https://stub.test/1", content="404")
         assert "https://stub.test/1" not in _candidates()
 
     def test_prefers_the_raw_content_row_over_a_checks_copy(self, f):
         url = "https://prefer.test/1"
-        f.make_verdict(url, "content", "passed", content="RAW PAGE " * 40)
+        f.make_fetch(url, content="RAW PAGE " * 40)
         f.make_verdict(url, "closed", "passed", content="CHECK COPY " * 40)
         row = db.query(_CANDIDATES, {"cap": 100})
         picked = next(r for r in row if r["url"] == url)
@@ -217,7 +217,7 @@ class TestCandidateSelection:
 
     def test_respects_the_cap(self, f):
         for i in range(4):
-            f.make_verdict(f"https://capped.test/{i}", "content", "passed", content=CONTENT)
+            f.make_fetch(f"https://capped.test/{i}", content=CONTENT)
         assert len(_candidates(cap=2)) == 2
 
 
@@ -340,9 +340,8 @@ class TestRescrapedPages:
 
     def _current_row(self, url: str) -> int:
         row = db.query_one(
-            "SELECT id FROM ai_queries WHERE url = %s AND input_content IS NOT NULL "
-            "AND length(input_content) > 200 "
-            "ORDER BY (check_type = 'content') DESC, id DESC LIMIT 1",
+            "SELECT id FROM page_texts WHERE url = %s AND length(input_content) > 200 "
+            "ORDER BY id DESC LIMIT 1",
             (url,),
         )
         assert row is not None
@@ -353,7 +352,7 @@ class TestRescrapedPages:
         self._extracted(f, url, self._current_row(url))
         assert url not in _candidates()
         # The page is scraped again with different text.
-        f.make_verdict(url, "content", "passed", content="a DIFFERENT description " * 20)
+        f.make_fetch(url, content="a DIFFERENT description " * 20)
         assert url in _candidates()
 
     def test_an_unchanged_rescrape_is_not_paid_for_again(self, f):
@@ -372,7 +371,7 @@ class TestRescrapedPages:
             row["content_row_id"],
         )
         # Same text arrives again under a new row id.
-        f.make_verdict(url, "content", "passed", content=CONTENT)
+        f.make_fetch(url, content=CONTENT)
         candidates = db.query(_CANDIDATES, {"cap": 10})
         assert url in [r["url"] for r in candidates], "the newer row makes it a candidate"
         assert url not in [
@@ -396,7 +395,7 @@ class TestRescrapedPages:
             hashlib.sha256(row["input_content"][:REQUIREMENTS_INPUT_CHARS].encode()).hexdigest(),
             row["content_row_id"],
         )
-        f.make_verdict(url, "content", "passed", content=CONTENT)
+        f.make_fetch(url, content=CONTENT)
         rescrape.drop_unchanged(
             db.query(_CANDIDATES, {"cap": 10}),
             table="job_requirements",

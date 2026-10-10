@@ -15,8 +15,7 @@ import pytest
 
 from api import db, health
 from api.ai import verdicts
-from core import batch
-from core.store import add_ai_result
+from core import batch, page_fetches
 
 ERROR_LINE = (
     '{"custom_id": "u1", "error": {"code": "invalid_request", '
@@ -118,8 +117,8 @@ def test_a_paced_host_defers_once_its_hour_is_used(client, admin_headers):
     assert r.status_code == 200, r.text
     assert r.json()["value"] == {"www.tesla.com": 2}
     assert verdicts.host_paced("https://www.tesla.com/careers/1") is False
-    add_ai_result("https://www.tesla.com/careers/1", "passed", "scraped", "content")
-    add_ai_result("https://www.tesla.com/careers/2", "failed", "fetch returned nothing", "content")
+    page_fetches.record("https://www.tesla.com/careers/1", "passed", "scraped")
+    page_fetches.record("https://www.tesla.com/careers/2", "failed", "fetch returned nothing")
     assert verdicts.host_paced("https://www.tesla.com/careers/3") is True
     # Another host is not paced, and a host absent from the map never is.
     assert verdicts.host_paced("https://jobs.example.com/1") is False
@@ -142,7 +141,7 @@ async def test_a_deferred_fetch_writes_nothing_so_the_next_cycle_retries(monkeyp
         "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
         (db.jsonb({"slow.example.com": 1}),),
     )
-    add_ai_result("https://slow.example.com/1", "passed", "scraped", "content")
+    page_fetches.record("https://slow.example.com/1", "passed", "scraped")
     fetched: list[str] = []
 
     async def fetch_page(url):

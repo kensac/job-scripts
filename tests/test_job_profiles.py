@@ -85,7 +85,7 @@ async def test_superseded_content_receipt_is_not_written(f, monkeypatch):
     task_id = f.make_task("classify_job_profiles", {}, status="running")
 
     async def fake_run(task_id, shape, specs, **kwargs):
-        f.make_verdict(url, "content", "passed", content="replacement page " * 30)
+        f.make_fetch(url, content="replacement page " * 30)
         return (
             [make_batch_result(task_id, specs[0], text=_answer(), model=JOB_PROFILE_MODEL)],
             SimpleNamespace(model=JOB_PROFILE_MODEL),

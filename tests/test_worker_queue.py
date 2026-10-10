@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from api import ai, db, fetching, worker
+from core import page_fetches
 from core.store import add_ai_result
 from tasks import content as tasks_content
 from tasks import runtime as tasks_runtime
@@ -588,7 +589,7 @@ async def test_chunked_run_all_filters_lifecycle(set_config, monkeypatch, user_h
             (url, f"co{i}"),
         )
         content = "REJECT_ME content" if url in rejected_urls else "great job content"
-        add_ai_result(url, "passed", "content cached", "content", input_content=content)
+        page_fetches.record(url, "passed", "scraped", content)
         add_ai_result(url, "passed", "not closed", "closed")
 
     parent_id = tasks_runtime.enqueue("run_all_filters", {"user_id": user_id})
@@ -780,14 +781,11 @@ def test_worker_status_report_upserts():
 async def test_verify_new_records_both_verdicts(monkeypatch):
     from api import db
     from core import batch as core_batch
-    from core.store import add_ai_result
 
     db.execute(
         "INSERT INTO jobs (url, source, company, title) VALUES ('https://v.test/1', 's', 'Acme', 'SWE')"
     )
-    add_ai_result(
-        "https://v.test/1", "passed", "content cached", "content", input_content="J" * 500
-    )
+    page_fetches.record("https://v.test/1", "passed", "scraped", "J" * 500)
 
     async def fake_batch(specs, model, effort, max_out, on_event=None):
         assert effort == "low"
@@ -829,14 +827,11 @@ async def test_batched_verdicts_record_their_reason(monkeypatch):
     say which of the two it explained."""
     from api import db
     from core import batch as core_batch
-    from core.store import add_ai_result
 
     db.execute(
         "INSERT INTO jobs (url, source, company, title) VALUES ('https://r.test/1', 's', 'Acme', 'SWE')"
     )
-    add_ai_result(
-        "https://r.test/1", "passed", "content cached", "content", input_content="J" * 500
-    )
+    page_fetches.record("https://r.test/1", "passed", "scraped", "J" * 500)
 
     async def fake_batch(specs, model, effort, max_out, on_event=None):
         return {
@@ -974,14 +969,7 @@ async def test_content_backfill_caches_pages_and_skips_covered_jobs(monkeypatch)
     # A posting its board reported gone has a closed verdict and no content
     # row; it was re-fetched every hour for two days before this line.
     add_ai_result("https://bf.test/gone", "rejected", "ATS reports posting gone", "closed")
-    add_ai_result(
-        "https://bf.test/has",
-        "passed",
-        "content cached",
-        "content",
-        input_content="X" * 500,
-        config_name="content-cache",
-    )
+    page_fetches.record("https://bf.test/has", "passed", "scraped", "X" * 500)
 
     scraped = []
 
@@ -1246,7 +1234,7 @@ async def test_verify_new_defers_to_a_verdict_settled_after_it_submitted(monkeyp
     db.execute(
         "INSERT INTO jobs (url, source, company, title) VALUES (%s, 's', 'Acme', 'SWE')", (url,)
     )
-    add_ai_result(url, "passed", "content cached", "content", input_content="J" * 500)
+    page_fetches.record(url, "passed", "scraped", "J" * 500)
 
     async def fake_batch(specs, model, effort, max_out, on_event=None):
         # Both checks were missing at submission, so both were asked for.

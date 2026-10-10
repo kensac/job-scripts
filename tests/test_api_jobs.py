@@ -5,6 +5,7 @@ import os
 
 from api import db
 from api.routers.job_board import NOT_APPLIED
+from core import page_fetches
 from core.store import add_ai_result
 
 SERVICE_TOKEN = os.environ["JOBTRACKER_SERVICE_TOKEN"]
@@ -412,9 +413,7 @@ def test_status_changes_append_history(client, user_headers):
 def test_job_detail_returns_content_verdicts_history(client, user_headers):
     uid = _uid(user_headers)
     jid = _insert_job("src-d", "https://x.test/d1", company="Acme", title="SWE")
-    add_ai_result(
-        "https://x.test/d1", "passed", "content cached", "content", input_content="THE JOB TEXT"
-    )
+    page_fetches.record("https://x.test/d1", "passed", "scraped", "THE JOB TEXT")
     add_ai_result("https://x.test/d1", "passed", "job open", "closed")
     db.execute(
         "INSERT INTO user_filters (user_id, name, prompt, prompt_hash) VALUES (%s, 'f1', 'p', 'hash1')",

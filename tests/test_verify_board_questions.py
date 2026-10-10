@@ -93,9 +93,9 @@ async def test_a_posting_no_board_admits_keeps_the_plain_request(f, submitted):
     await _sweep(f)
 
     [spec] = submitted
-    content = db.query_one(
-        "SELECT input_content FROM ai_queries WHERE url = %s AND check_type = 'content'", (url,)
-    )["input_content"]
+    content = db.query_one("SELECT input_content FROM page_texts WHERE url = %s", (url,))[
+        "input_content"
+    ]
     plain = verify._verification_spec(url, content)
     assert (spec.instructions, spec.input, spec.schema) == (
         plain.instructions,
@@ -183,7 +183,7 @@ async def test_collection_writes_the_board_verdict_the_board_run_then_reuses(
 
     rows = db.query(
         "SELECT check_type, status, prompt_hash, filter_name, total_tokens, request_sha256 "
-        "FROM ai_queries WHERE url = %s AND check_type <> 'content' ORDER BY id",
+        "FROM ai_queries WHERE url = %s ORDER BY id",
         (url,),
     )
     assert [(r["check_type"], r["status"]) for r in rows] == [
@@ -211,7 +211,7 @@ async def test_a_different_answering_model_writes_no_board_verdict(f, submitted,
         r["check_type"]
         for r in db.query("SELECT check_type FROM ai_queries WHERE url = %s", (url,))
     }
-    assert checks == {"content", "closed", "clearance"}
+    assert checks == {"closed", "clearance"}
 
 
 def test_the_joint_request_asks_for_reasons_only_on_a_flagged_axis():
