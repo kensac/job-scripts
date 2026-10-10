@@ -9,7 +9,7 @@ import re
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass, replace
-from typing import ClassVar, TypeGuard
+from typing import Any, ClassVar, TypeGuard
 from urllib.parse import parse_qs, unquote, urlparse
 
 import ftfy
@@ -181,9 +181,19 @@ class AtsResolver(ABC):
         """Collapse URL variants of one posting onto a single clickable URL."""
         return None
 
-    def get(self, url: str) -> requests.Response | None:
+    def get(self, url: str, **kwargs: Any) -> requests.Response | None:
+        return self._send(_session.get, url, **kwargs)
+
+    def post(self, url: str, **kwargs: Any) -> requests.Response | None:
+        return self._send(_session.post, url, **kwargs)
+
+    def _send(
+        self, send: Callable[..., requests.Response], url: str, **kwargs: Any
+    ) -> requests.Response | None:
+        """The answer, or None when there was none to read: a resolver
+        reads None as ERROR, never as the posting's closure."""
         try:
-            return _session.get(url)
+            return send(url, **kwargs)
         except requests.RequestException as exc:
             logger.debug(f"[{self.name}] request failed {url}: {exc}")
             return None
@@ -622,15 +632,15 @@ class Goldman(AtsResolver):
         match = self._ROLE.search(url)
         if not match:
             return UNSUPPORTED
-        try:
-            resp = _session.post(
-                "https://api-higher.gs.com/gateway/api/v1/graphql",
-                json={"query": self._QUERY, "variables": {"id": match.group(1)}},
-            )
-        except requests.RequestException as exc:
-            logger.debug(f"[{self.name}] request failed {url}: {exc}")
-            return AtsResult(Status.ERROR, source=self.name)
-        if resp.status_code != 200:
+        resp = self.post(
+            "https://api-higher.gs.com/gateway/api/v1/graphql",
+            json={"query": self._QUERY, "variables": {"id": match.group(1)}},
+        )
+        # Not from_response: the gateway answers a missing role 200 with
+        # INTERNAL_ERROR (a made-up id, 2026-10-10) and a wrong path 401, so a
+        # status here is about the endpoint, never the role, and a 404 read as
+        # GONE would close every Goldman posting the day the path moved.
+        if resp is None or resp.status_code != 200:
             return AtsResult(Status.ERROR, source=self.name)
         role = (resp.json().get("data") or {}).get("role") or {}
         # Every role listed on 2026-10-05 read POSTED. The schema also has
@@ -675,13 +685,11 @@ class Ibm(AtsResolver):
         match = self._JOB.search(url)
         if not match:
             return UNSUPPORTED
-        try:
-            resp = _session.get(
-                f"https://ibmglobal.avature.net/en_US/careers/JobDetail?jobId={match.group(1)}",
-                allow_redirects=False,
-            )
-        except requests.RequestException as exc:
-            logger.debug(f"[{self.name}] request failed {url}: {exc}")
+        resp = self.get(
+            f"https://ibmglobal.avature.net/en_US/careers/JobDetail?jobId={match.group(1)}",
+            allow_redirects=False,
+        )
+        if resp is None:
             return AtsResult(Status.ERROR, source=self.name)
         location = urlparse(resp.headers.get("location") or "").path
         if resp.status_code in (301, 302) and location.endswith("/careers/Error"):
