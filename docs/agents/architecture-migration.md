@@ -683,9 +683,12 @@ the one before it is running on every worker.
    `jobs.active`, the ORM attribute) with an empty allow-list. Production
    `pg_stat_statements` is read for statements naming `jobs.active` across a
    full day after step 2 is on every worker, and the count must be zero.
-4. **Drop it** in a later release, after no image that names it is left on
-   the fleet (migrations.md). `job_listing_events` is dropped in the same
-   release, once nothing reads it.
+4. **Freeze it, do not drop it.** Data is never deleted ("Always retain all
+   data" in [engineering-standards.md](engineering-standards.md)), so the
+   column keeps the last value each feed wrote, and `job_listing_events`
+   keeps the history from before `source_observations` began. Both stop
+   changing after step 2. Dropping either would delete data, which is
+   Kanishk's decision, not part of this plan.
 
 **Never in a loop:** any write to the production database, and any migration
 that can refuse to apply ([migrations.md](migrations.md)). Neither of these is
