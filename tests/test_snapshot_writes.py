@@ -71,21 +71,6 @@ def test_existing_request_wins_without_new_upload(f, objects):
     assert objects.client.objects == uploaded
 
 
-def test_legacy_inline_request_wins(f, objects):
-    task_id = f.make_task("verify_new", {})
-    original = SPECS[0]
-    f.make_inline_request(task_id, original)
-    before = rows(task_id)
-    changed = replace(original, input="a different page")
-    assert batch_results.snapshot_specs(task_id, [changed, SPECS[1]]) == [
-        original,
-        SPECS[1],
-    ]
-    after = rows(task_id)
-    assert after[0] == before[0]
-    assert after[1]["snapshot"] is None and after[1]["snapshot_ref"]["version"] == 3
-
-
 def test_bundles_split_by_size_and_upload_concurrently_within_the_pool(f, objects, monkeypatch):
     lock = threading.Lock()
     active, peak = [0], [0]

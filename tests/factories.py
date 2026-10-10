@@ -11,7 +11,6 @@ against, because the behaviour under test is mostly SQL.
 
 from __future__ import annotations
 
-import dataclasses
 import io
 import itertools
 from typing import Any
@@ -307,19 +306,6 @@ def make_batch_result(
         result
         for result in batch_results.unconsumed(task_id)
         if result.batch_id == batch_id and result.custom_id == spec.custom_id
-    )
-
-
-def make_inline_request(task_id: int, spec) -> None:
-    """A request snapshot as written before snapshots went to object storage."""
-    snapshot = dataclasses.asdict(spec)
-    if spec.endpoint == "/v1/responses":
-        snapshot.pop("endpoint")
-    if spec.inputs is None:
-        snapshot.pop("inputs")
-    db.execute(
-        "INSERT INTO batch_requests (task_id, custom_id, snapshot) VALUES (%s,%s,%s)",
-        (task_id, spec.custom_id, db.jsonb(snapshot)),
     )
 
 

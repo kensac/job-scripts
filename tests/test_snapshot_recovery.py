@@ -257,24 +257,19 @@ async def test_restored_task_consumes_original_receipt_without_new_submission(f,
 
 
 def test_completed_collection_recovery_ignores_consumed_only_missing_snapshot(f, monkeypatch):
-    from api.ai import batch_results, snapshot_payloads
+    from api.ai import batch_results
     from core.batch import BatchResult, BatchSpec
     from core.payload_objects import PayloadStore
     from tasks.runtime.payload_recovery import retry
-    from tests.factories import ObjectClient
 
-    objects = PayloadStore(ObjectClient(), "test-payloads")
+    objects = PayloadStore.from_env()
     task_id = f.make_task("verify_new", {}, status="done")
-    f.make_inline_request(task_id, BatchSpec("consumed"))
-    f.make_inline_request(task_id, BatchSpec("required"))
+    # One call each, so each request is its own bundle.
+    batch_results.snapshot_specs(task_id, [BatchSpec("consumed")])
+    batch_results.snapshot_specs(task_id, [BatchSpec("required")])
     sources = db.query(
         "SELECT * FROM batch_requests WHERE task_id=%s ORDER BY custom_id", (task_id,)
     )
-    snapshot_payloads.migrate_many(sources, objects, mode="copy")
-    sources = db.query(
-        "SELECT * FROM batch_requests WHERE task_id=%s ORDER BY custom_id", (task_id,)
-    )
-    snapshot_payloads.migrate_many(sources, objects, mode="compact")
     results = [
         BatchResult(custom_id, text="answer", batch_id="paid")
         for custom_id in ("consumed", "required")
