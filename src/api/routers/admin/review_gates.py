@@ -13,7 +13,7 @@ import datetime
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, JsonValue
 
-from api import db, scoping
+from api import db, model_calls, scoping
 from api.auth import AuthedUser
 from api.routers.admin.shared import require_admin
 from core import screening
@@ -130,6 +130,15 @@ class GateReport(BaseModel):
     )
 
 
+# Every paid review in the report's range, failed ones included (a failure
+# was paid for), each with its call's cost (model_calls.answers_with_usage).
+_REVIEWS = model_calls.answers_with_usage(
+    "q.check_type = 'custom' AND q.status IN ('passed', 'rejected', 'failed') "
+    "AND q.prompt_hash IN (SELECT prompt_hash FROM targets) "
+    "AND q.created_at >= %(start)s AND q.created_at < %(end)s"
+)
+
+
 @router.get("/review-gates/report")
 def report(
     days: int = Query(7, ge=1, le=90),
@@ -181,10 +190,7 @@ def report(
           GROUP BY t.prompt_hash, j.id
         ), reviews AS (
           -- Every paid review, failed ones included: a failure was paid for.
-          SELECT q.prompt_hash, q.url, q.cost_usd FROM ledger_rows q
-          WHERE q.check_type = 'custom' AND q.status IN ('passed', 'rejected', 'failed')
-            AND q.prompt_hash IN (SELECT prompt_hash FROM targets)
-            AND q.created_at >= %(start)s AND q.created_at < %(end)s
+          SELECT r.prompt_hash, r.url, r.cost_usd FROM {_REVIEWS} r
         ), mean AS (
           SELECT prompt_hash, avg(cost_usd)::float AS cost, count(*) AS n FROM reviews
           GROUP BY prompt_hash HAVING count(*) FILTER (WHERE cost_usd IS NULL) = 0

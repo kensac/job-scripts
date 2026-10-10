@@ -238,3 +238,48 @@ BATCH_TOTALS = """
         FROM model_calls m WHERE m.provider_batch_id = b.provider_batch_id
     ) totals ON true
 """
+
+
+_USAGE_COLUMNS = (
+    "prompt_tokens",
+    "completion_tokens",
+    "total_tokens",
+    "cached_tokens",
+    "cache_write_tokens",
+    "reasoning_tokens",
+    "cost_usd",
+)
+
+
+def answers_with_usage(scope: str) -> str:
+    """The answers `scope` selects (a predicate over ai_queries `q`), each with
+    its call's usage, as a subquery to alias: the first answer naming a call
+    carries the call's numbers and its siblings zeros, how the writers stored
+    them, and an answer naming no call its own stored numbers.
+
+    For readers that aggregate a window. ledger_rows gives each row the same
+    values through lookups in its select list, which suits a page of rows and
+    not a sum over a month: measured on production on 2026-10-10, the 30-day
+    spend cuts took 6.6 s on ai_queries and 11 min 51 s through those
+    lookups. Here the call is one join and the first answer per call one
+    aggregate, which idx_ai_queries_model_call serves as an index-only scan.
+    The aggregate spans every answer, not only the scope: a custom answer
+    whose closed sibling falls outside the scope is still a sibling.
+    """
+    usage = ",\n".join(
+        f"CASE WHEN q.model_call_id IS NULL THEN q.{c} WHEN q.id = c.first_id THEN m.{c} "
+        f"ELSE {'m.cost_usd * 0' if c == 'cost_usd' else '0'} END AS {c}"
+        for c in _USAGE_COLUMNS
+    )
+    return f"""(
+        SELECT q.id, q.created_at, q.config_name, q.url, q.check_type, q.status, q.model,
+               q.prompt_hash, q.filter_name, q.batch_id,
+               {usage}
+        FROM ai_queries q
+        LEFT JOIN model_calls m ON m.id = q.model_call_id
+        LEFT JOIN (
+            SELECT model_call_id, min(id) AS first_id FROM ai_queries
+            WHERE model_call_id IS NOT NULL GROUP BY model_call_id
+        ) c ON c.model_call_id = q.model_call_id
+        WHERE {scope}
+    )"""
