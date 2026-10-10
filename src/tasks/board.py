@@ -20,7 +20,6 @@ from typing import Any
 from api import db, metrics
 from api.board import criteria
 from api.board import eligibility as board_eligibility
-from api.board.person_state import UNTOUCHED
 from core import verdict_reads
 
 logger = logging.getLogger(__name__)
@@ -33,8 +32,8 @@ logger = logging.getLogger(__name__)
 # visibility.FULL admits a picked posting through its structural branch.
 #
 # user_jobs holds only what a person did (phase 2b). Machine rows were written
-# there too until 2026-10-10; a legacy all-default row is working-set
-# membership, and the split backfill copied each into the working set.
+# there too until 2026-10-10; they were working-set membership, copied into
+# the working set and then removed from user_jobs.
 def materialize_passing(user_id: int) -> int:
     """Every job currently passing ALL of the user's enabled filters (and the
     structural gates) joins the person's working set. Returns how many joined.
@@ -183,12 +182,7 @@ def demote_closed() -> int:
         f"""
             WITH demotable AS MATERIALIZED (
                 SELECT membership.user_id, membership.job_id
-                FROM (
-                    SELECT user_id, job_id FROM user_job_working_set
-                    UNION
-                    SELECT uj.user_id, uj.job_id FROM user_jobs uj
-                    WHERE uj.person_touched_at IS NULL AND {UNTOUCHED}
-                ) membership
+                FROM user_job_working_set membership
                 JOIN jobs j ON j.id = membership.job_id
                 WHERE (
                 -- A posting that vanished from its source feed is gone even
@@ -206,15 +200,6 @@ def demote_closed() -> int:
                 USING demotable
                 WHERE working.user_id = demotable.user_id
                   AND working.job_id = demotable.job_id
-                RETURNING 1
-            ),
-            legacy_delete AS (
-                DELETE FROM user_jobs uj
-                USING demotable
-                WHERE uj.user_id = demotable.user_id
-                  AND uj.job_id = demotable.job_id
-                  AND uj.person_touched_at IS NULL
-                  AND {UNTOUCHED}
                 RETURNING 1
             )
             SELECT COUNT(*) AS demoted FROM working_set_delete

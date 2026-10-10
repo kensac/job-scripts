@@ -32,7 +32,6 @@ from api.routers.admin import (
     review_gates,
     sources,
     user_job_populations,
-    working_set_shadow,
 )
 from api.routers.admin.shared import require_admin
 
@@ -48,7 +47,6 @@ router.include_router(health.router)
 router.include_router(job_profiles.router)
 router.include_router(managed_boards.router)
 router.include_router(user_job_populations.router)
-router.include_router(working_set_shadow.router)
 router.include_router(config.router)
 router.include_router(queries.router)
 router.include_router(review_gates.router)

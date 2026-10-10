@@ -29,7 +29,6 @@ from api import (
     queue,
     telemetry,
 )
-from api.board import user_job_split
 from api.mail import match as mail_match
 from api.queue import enqueue
 from core.env import env_list
@@ -276,14 +275,6 @@ def schedule_ingest_cycle() -> None:
         "AND status IN ('pending', 'running', 'done') LIMIT 1"
     ):
         enqueue("backfill_model_calls", {"cycle": cycle}, dedupe_key=f"model-call-backfill:{cycle}")
-    # The legacy user_jobs split (tasks.user_job_backfill) runs until one run
-    # completes; admission returns a live run instead of queueing a second,
-    # and continues a failed one from its checkpoint.
-    if not user_job_split.completed():
-        try:
-            user_job_split.admit()
-        except user_job_split.NoEligibleWorker:
-            logger.info("user job split not admitted: no current-release worker may claim it")
     # listings.pattern is emptied (tasks.listing_patterns), one run at a
     # time, until a run starts with none left. Asked of tasks rather than
     # listings: whether any row is left is a scan of the table.
