@@ -85,7 +85,6 @@ LINKS = {
     ("ai_batches", "task_id"): ("tasks", "id"),
     ("tasks", "parent_id"): ("tasks", "id"),
     ("user_sources", "source"): ("sources", "name"),
-    ("action_items", "resolved_by_event_id"): ("email_events", "id"),
 }
 
 # Half of every parent draw comes from a small hot slice of that parent.

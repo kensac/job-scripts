@@ -26,7 +26,6 @@ from api.orm.apply import (
     ApplicationForm,
     ApplicationReport,
     ExtensionRecipe,
-    SuggestionResponse,
     UserResume,
 )
 from api.orm.base import Base
@@ -54,7 +53,6 @@ from api.orm.catalog import (
     UserSource,
 )
 from api.orm.mail import (
-    ActionItem,
     Application,
     ApplicationMatch,
     EmailEvent,
@@ -78,7 +76,6 @@ from api.orm.platform import (
 )
 
 __all__ = [
-    "ActionItem",
     "AiBatch",
     "AiBatchError",
     "AiInstructionText",
@@ -122,7 +119,6 @@ __all__ = [
     "Source",
     "SourceGroup",
     "SourceRequest",
-    "SuggestionResponse",
     "Task",
     "TaskModelOverride",
     "User",
