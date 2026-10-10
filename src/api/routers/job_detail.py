@@ -12,7 +12,7 @@ from api import db, signals
 from api.auth import AuthedUser, require_user
 from api.board.access import require_visible_job
 from api.mail import applications
-from core import verdict_reads
+from core import catalog, verdict_reads
 from core.comp import CompBasis, CompPeriod
 
 router = APIRouter()
@@ -114,7 +114,7 @@ def job_detail(job_id: int, user: AuthedUser = Depends(require_user)) -> JobDeta
         user,
         job_id,
         "j.id, j.url, j.raw_url, j.company, j.title, j.locations, j.terms, j.source, "
-        "j.active, j.date_posted, j.comp_min, j.comp_max, j.comp_text, j.comp_currency, "
+        f"{catalog.IS_AVAILABLE.format(job='j')} AS active, j.date_posted, j.comp_min, j.comp_max, j.comp_text, j.comp_currency, "
         "j.comp_period, j.comp_basis, "
         "j.created_at, "
         f"{verdict_reads.closed_verdict('j.url')} AS closed_verdict",

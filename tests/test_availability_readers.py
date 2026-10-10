@@ -27,12 +27,7 @@ _FEED_STATE = {
 
 # Readers whose meaning is availability and that have not moved yet. Each
 # entry leaves with the change that moves it.
-_NOT_YET_MOVED = {
-    "api/board/column_filters.py",
-    "api/routers/job_board.py",
-    "api/routers/job_detail.py",
-    "api/routers/public_job_lists.py",
-}
+_NOT_YET_MOVED: set[str] = set()
 
 
 def _readers() -> set[str]:

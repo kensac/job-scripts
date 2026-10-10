@@ -13,7 +13,7 @@ from api.board import column_filters as column_filters_
 from api.board import visibility
 from api.mail import applications
 from api.reports import ReportKind, report_kinds
-from core import verdict_reads
+from core import catalog, verdict_reads
 from core.comp import CompBasis, CompPeriod
 
 router = APIRouter()
@@ -84,7 +84,7 @@ ATS_SQL = (
 _JOB_ROW = f"""
     j.id AS job_id, j.company, j.title, j.locations, j.terms, j.source,
     ({ATS_SQL}) AS ats,
-    j.url, j.raw_url, j.active, j.date_posted, j.created_at AS added_at,
+    j.url, j.raw_url, {catalog.IS_AVAILABLE.format(job="j")} AS active, j.date_posted, j.created_at AS added_at,
     j.extraction_status, j.comp_min, j.comp_max, j.comp_text, j.comp_currency,
     j.comp_period, j.comp_basis,
     {verdict_reads.closed_verdict("j.url")} AS closed_verdict,

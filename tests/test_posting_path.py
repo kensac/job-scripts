@@ -180,3 +180,24 @@ def test_the_admin_route_requires_an_admin(client, user_headers, admin_headers, 
     )
     resp = client.get("/v1/admin/jobs/path", params={"url": url}, headers=admin_headers)
     assert resp.status_code == 200 and resp.json()["url"] == url
+
+
+def test_the_catalog_step_reads_availability_not_the_feed_flag(f):
+    """A posting another source still lists is available whatever the feed
+    flag says; a sheet_import posting is not, whatever its flag says."""
+    source = f.make_source("path-listing-src")
+    listed_id, listed_url = f.make_ready_job(source=source, active=False)
+    db.execute(
+        "INSERT INTO source_observations (job_id, source, kind) VALUES (%s, %s, 'appeared')",
+        (listed_id, source),
+    )
+    _, imported_url = f.make_ready_job(source="sheet_import")
+
+    def catalog_failures(url):
+        path = posting_path.for_admin(url)
+        assert path is not None
+        return [s for s in path.steps if s.stage == "catalog" and s.outcome == "failed"]
+
+    assert catalog_failures(listed_url) == []
+    [step] = catalog_failures(imported_url)
+    assert step.label == "No switched-on source lists it"
