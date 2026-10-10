@@ -20,7 +20,7 @@ verification_targets AS (
     SELECT us.source, COALESCE(settings.criteria, '{{}}'::jsonb) AS criteria,
            NULL::jsonb AS title_gate, filter.prompt_hash
     FROM users u
-    JOIN user_sources us ON us.user_id = u.id
+    JOIN user_source_set us ON us.user_id = u.id
     JOIN user_filters filter ON filter.user_id = u.id AND filter.enabled
     {user_settings.join("settings", "u.id")}
     WHERE {user_settings.has_own_key_sql("u.id")}

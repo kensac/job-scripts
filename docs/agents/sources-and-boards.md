@@ -44,9 +44,22 @@ format is a way of selecting rows for that flag and the interval through
 **Who reads which source is written in one place.** A person's picks
 (`user_sources`), a managed board's sources (`managed_board_sources`) and a
 bundle's members (`source_groups.members`) are written only by
-`api/source_selection.py`; `tests/test_source_selection_owner.py` fails on an
-insert, update or delete against them anywhere else. Deleting a source takes
-it out of all three through `forget_source`.
+`api/source_selection.py`, and so are the bundles a person follows
+(`user_source_groups`). `tests/test_source_selection_owner.py` fails on an
+insert, update or delete against them anywhere else, and on a read of
+`user_sources`. Deleting a source takes it out of every selection through
+`forget_source`.
+
+**Joining a bundle is following it.** A person's sources are their one-by-one
+picks plus every active member of every bundle they follow, so a member added
+to a bundle later reaches them (Kanishk, 2026-10-10). Read them through the
+view `user_source_set`, or, in a predicate over postings,
+`core.store.PERSON_SOURCE` / `SUBSCRIBED_SOURCE`, which read the two parts as
+two IN lists: the union's distinct count is a planner guess of 200, and the
+plan it picks walked the jobs index once per source, about three times
+slower. Leaving one board of a followed bundle leaves the bundle and keeps
+the rest as picks; a deleted bundle leaves its followers what it reached; a
+whole-set save (PUT) ends every follow.
 
 The list shape (`GET /admin/sources`) carries everything but `title_pattern`;
 one row (`GET /admin/sources/{name}`) carries it. At 1,732 sources the pattern
