@@ -21,7 +21,7 @@ from api import db, user_settings
 from api.ai import verdicts
 from api.board import criteria as board_criteria
 from api.mail import applications
-from core import verdict_reads
+from core import catalog, verdict_reads
 from core.screening import Recipe, TitleGateConfig, screen
 from core.volume_gate import VolumeGate
 
@@ -91,8 +91,9 @@ def _origin(config_name: str | None) -> str:
 
 def _job(where: str, value: Any) -> dict[str, Any] | None:
     return db.query_one(
-        "SELECT id, url, title, company, source, active, uploaded_by, near_copy_key, "
-        f"date_posted, created_at FROM jobs WHERE {where} = %s",
+        "SELECT j.id, j.url, j.title, j.company, j.source, "
+        f"{catalog.IS_AVAILABLE.format(job='j')} AS active, j.uploaded_by, j.near_copy_key, "
+        f"j.date_posted, j.created_at FROM jobs j WHERE j.{where} = %s",
         (value,),
     )
 
@@ -143,17 +144,22 @@ def _catalog_steps(job: dict[str, Any]) -> list[PathStep]:
             )
         )
     if not job["active"]:
+        # When the latest source said so; job_listing_events holds what came
+        # before source_observations began.
         event = db.query_one(
-            "SELECT at FROM job_listing_events WHERE job_id = %s AND NOT listed "
-            "ORDER BY at DESC LIMIT 1",
-            (job["id"],),
+            "SELECT max(at) AS at FROM ("
+            " (SELECT at FROM source_observations WHERE job_id = %(id)s ORDER BY id DESC LIMIT 1)"
+            " UNION ALL"
+            " (SELECT at FROM job_listing_events WHERE job_id = %(id)s AND NOT listed"
+            "  ORDER BY at DESC LIMIT 1)) e",
+            {"id": job["id"]},
         )
         steps.append(
             PathStep(
                 stage="catalog",
                 outcome="failed",
-                label="No longer listed by its board",
-                detail="Inactive postings are not read, judged or shown",
+                label="No switched-on source lists it",
+                detail="Postings no longer available are not read, judged or shown",
                 basis="recorded",
                 at=event["at"] if event else None,
             )
