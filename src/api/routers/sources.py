@@ -17,8 +17,8 @@ router = APIRouter()
 
 class SourceGroup(BaseModel):
     """A bundle of boards a person can take in one press. `subscribed` is
-    computed per caller rather than stored: the bundle is theirs only while
-    they hold every board in it."""
+    true while the caller follows it, or holds every board in it that is
+    switched on."""
 
     name: str
     members: list[str]
@@ -32,16 +32,21 @@ class SourceGroupList(BaseModel):
 
 @router.get("/source-groups")
 def list_source_groups(user: AuthedUser = Depends(require_user)) -> SourceGroupList:
-    enabled = {
-        r["source"]
-        for r in db.query("SELECT source FROM user_sources WHERE user_id = %s", (user.id,))
-    }
+    enabled = set(source_selection.held(user.id))
+    following = source_selection.followed(user.id)
     groups = db.query(
-        "SELECT name, members, description FROM source_groups WHERE active ORDER BY name"
+        """
+        SELECT g.name, g.members, g.description,
+               ARRAY(SELECT s.name FROM unnest(g.members) AS m(name)
+                     JOIN sources s ON s.name = m.name AND s.active) AS offered
+        FROM source_groups g WHERE g.active ORDER BY g.name
+        """
     )
     for g in groups:
-        members = g["members"] or []
-        g["subscribed"] = bool(members) and set(members).issubset(enabled)
+        offered = g.pop("offered")
+        g["subscribed"] = g["name"] in following or (
+            bool(offered) and set(offered).issubset(enabled)
+        )
     return SourceGroupList(groups=[SourceGroup(**g) for g in groups])
 
 
@@ -65,26 +70,11 @@ def apply_source_group(
 ) -> GroupApplied:
     if body.mode not in ("replace", "add"):
         raise refuse(400, "INVALID_MODE", "mode must be replace or add")
-    group = db.query_one(
-        "SELECT members FROM source_groups WHERE name = %s AND active", (body.name,)
-    )
-    if not group:
+    if not db.query_one("SELECT 1 FROM source_groups WHERE name = %s AND active", (body.name,)):
         raise refuse(404, "NOT_FOUND", "unknown group")
-    members = [
-        r["name"]
-        for r in db.query(
-            "SELECT name FROM sources WHERE active AND name = ANY(%s)",
-            (group["members"] or [],),
-        )
-    ]
-    source_selection.join_group(user.id, members, only=body.mode == "replace")
+    source_selection.join_group(user.id, body.name, only=body.mode == "replace")
     visibility.request_refresh(user.id)
-    enabled = [
-        r["source"]
-        for r in db.query(
-            "SELECT source FROM user_sources WHERE user_id = %s ORDER BY source", (user.id,)
-        )
-    ]
+    enabled = source_selection.held(user.id)
     return GroupApplied(ok=True, enabled=enabled, mode=body.mode)
 
 
@@ -178,7 +168,7 @@ def list_sources(user: AuthedUser = Depends(require_user)) -> SourceList:
                us.user_id IS NOT NULL AS enabled,
                COALESCE(b.groups, '{}') AS groups
         FROM sources s
-        LEFT JOIN user_sources us ON us.source = s.name AND us.user_id = %s
+        LEFT JOIN user_source_set us ON us.source = s.name AND us.user_id = %s
         -- Membership aggregated once over the bundles and joined. Matched per
         -- row with s.name = ANY(g.members), it was a subplan run 4,040 times
         -- and 5.2 s on production (EXPLAIN ANALYZE, 2026-10-04); this shape
@@ -232,10 +222,7 @@ def _check_names(user_id: int, names: set[str], adding: set[str]) -> None:
     unknown = sorted(n for n in names if n not in known)
     if unknown:
         raise refuse(400, "UNKNOWN_SOURCE", f"unknown sources: {unknown}")
-    held = {
-        r["source"]
-        for r in db.query("SELECT source FROM user_sources WHERE user_id = %s", (user_id,))
-    }
+    held = set(source_selection.held(user_id))
     off = sorted(n for n in adding if not known[n] and n not in held)
     if off:
         raise refuse(400, "SOURCE_INACTIVE", f"switched off, cannot subscribe: {off}")
@@ -250,12 +237,7 @@ def patch_sources(body: SourcesPatch, user: AuthedUser = Depends(require_user)) 
     board, refuses the write whole rather than applying half."""
     _check_names(user.id, set(body.add) | set(body.remove), set(body.add))
     added, removed = source_selection.change(user.id, body.add, body.remove)
-    enabled = [
-        r["source"]
-        for r in db.query(
-            "SELECT source FROM user_sources WHERE user_id = %s ORDER BY source", (user.id,)
-        )
-    ]
+    enabled = source_selection.held(user.id)
     visibility.request_refresh(user.id)
     return SourcesPatched(
         ok=True,

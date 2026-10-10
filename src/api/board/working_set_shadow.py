@@ -136,13 +136,13 @@ def report() -> ShadowReport:
         ),
         old_scheduled AS MATERIALIZED (
             SELECT id AS user_id FROM users u
-            WHERE EXISTS (SELECT 1 FROM user_sources s WHERE s.user_id = u.id)
+            WHERE EXISTS (SELECT 1 FROM user_source_set s WHERE s.user_id = u.id)
                OR EXISTS (SELECT 1 FROM legacy_pairs p WHERE p.user_id = u.id)
                OR EXISTS (SELECT 1 FROM jobs j WHERE j.uploaded_by = u.id)
         ),
         proposed_scheduled AS MATERIALIZED (
             SELECT id AS user_id FROM users u
-            WHERE EXISTS (SELECT 1 FROM user_sources s WHERE s.user_id = u.id)
+            WHERE EXISTS (SELECT 1 FROM user_source_set s WHERE s.user_id = u.id)
                OR EXISTS (SELECT 1 FROM proposed_pairs p WHERE p.user_id = u.id)
                OR EXISTS (SELECT 1 FROM jobs j WHERE j.uploaded_by = u.id)
         ),
@@ -174,7 +174,7 @@ def report() -> ShadowReport:
             FROM old_stale_pairs s
             UNION ALL
             SELECT 'scheduled_users', NULL, user_id::text,
-                   NOT EXISTS (SELECT 1 FROM user_sources s WHERE s.user_id = u.user_id)
+                   NOT EXISTS (SELECT 1 FROM user_source_set s WHERE s.user_id = u.user_id)
                    AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.uploaded_by = u.user_id)
                    AND EXISTS (SELECT 1 FROM unknown_pairs x WHERE x.user_id = u.user_id)
             FROM old_scheduled u

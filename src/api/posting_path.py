@@ -557,7 +557,7 @@ def _filters(
     settings = user_settings.criteria(user_id)
     subscribed = job["uploaded_by"] == user_id or bool(
         db.query_one(
-            "SELECT 1 FROM user_sources WHERE user_id = %s AND source = %s",
+            "SELECT 1 FROM user_source_set WHERE user_id = %s AND source = %s",
             (user_id, job["source"]),
         )
     )

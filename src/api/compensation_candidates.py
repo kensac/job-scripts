@@ -26,7 +26,7 @@ compensation_demand AS MATERIALIZED (
     SELECT j.id FROM latest_filter verdict
     JOIN jobs j ON j.url = verdict.url
     JOIN user_filters f ON f.prompt_hash = verdict.prompt_hash AND f.enabled
-    JOIN user_sources s ON s.user_id = f.user_id AND s.source = j.source
+    JOIN user_source_set s ON s.user_id = f.user_id AND s.source = j.source
     {user_settings.join("settings", "f.user_id")}
     WHERE verdict.status = 'passed'
     {criteria.json_sql("settings.criteria")}

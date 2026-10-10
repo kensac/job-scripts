@@ -245,7 +245,7 @@ def admin_list_sources(
     # computed per source in a correlated subquery. At 751 sources the
     # per-row form ran five subplans and a lateral per row and took 890 ms
     # on production (EXPLAIN ANALYZE, 2026-09-04); this shape is one pass
-    # over jobs, one over user_sources and one over source_groups. The latest
+    # over jobs, one over the people's sources and one over source_groups. The latest
     # ingest is the exception: an indexed LIMIT 1 per source is cheaper than
     # a pass over every ingest task. The DISTINCT ON it replaced sorted
     # 136,986 tasks in 0.59 s on production (2026-10-04); the probe took
@@ -257,7 +257,7 @@ def admin_list_sources(
             FROM jobs GROUP BY source
         ),
         subscribers AS (
-            SELECT source, COUNT(*) AS subscribers FROM user_sources GROUP BY source
+            SELECT source, COUNT(*) AS subscribers FROM user_source_set GROUP BY source
         ),
         bundles AS (
             SELECT m AS source, array_agg(g.name ORDER BY g.name) AS groups
@@ -419,7 +419,7 @@ def delete_source(
     attached = db.query_one(
         """
         SELECT (SELECT count(*) FROM jobs WHERE source = %(n)s) AS jobs,
-               (SELECT count(*) FROM user_sources WHERE source = %(n)s) AS subscribers,
+               (SELECT count(*) FROM user_source_set WHERE source = %(n)s) AS subscribers,
                (SELECT count(*) FROM user_jobs uj JOIN jobs j ON j.id = uj.job_id
                 WHERE j.source = %(n)s) AS board_rows,
                (SELECT count(*) FROM managed_board_sources

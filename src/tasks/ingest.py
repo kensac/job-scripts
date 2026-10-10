@@ -271,7 +271,7 @@ def schedule_filter_runs(cycle: str) -> None:
     users = db.query(
         f"""
         SELECT DISTINCT u.id FROM users u
-        JOIN user_sources us ON us.user_id = u.id
+        JOIN user_source_set us ON us.user_id = u.id
         JOIN user_filters uf ON uf.user_id = u.id AND uf.enabled
         WHERE {user_settings.has_own_key_sql("u.id")}
            OR u.groups && ARRAY(SELECT group_name FROM group_budgets)::text[]

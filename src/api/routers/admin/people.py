@@ -103,7 +103,7 @@ def list_users(
                (SELECT COUNT(*) FROM user_jobs uj WHERE uj.user_id = u.id) AS board_rows,
                (SELECT COUNT(*) FROM user_filters uf
                 WHERE uf.user_id = u.id AND uf.enabled) AS enabled_filters,
-               (SELECT COUNT(*) FROM user_sources us WHERE us.user_id = u.id) AS sources,
+               (SELECT COUNT(*) FROM user_source_set us WHERE us.user_id = u.id) AS sources,
                COALESCE((SELECT SUM(a.total_tokens) FROM api_usage a
                          WHERE a.user_id = u.id AND a.key_source = 'owner'
                            AND a.created_at > now() - interval '7 days'), 0) AS owner_tokens_week
@@ -328,7 +328,7 @@ def user_detail(user_id: int, user: AuthedUser = Depends(require_admin)) -> User
         sources=[
             r["source"]
             for r in db.query(
-                "SELECT source FROM user_sources WHERE user_id = %s ORDER BY source",
+                "SELECT source FROM user_source_set WHERE user_id = %s ORDER BY source",
                 (user_id,),
             )
         ],

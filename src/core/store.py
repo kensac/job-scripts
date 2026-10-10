@@ -277,11 +277,24 @@ CONTENT_LATERAL = (
 #
 # This is the SCRAPER's question: which boards do we fetch pages for. It is
 # narrower than AI_ELIGIBLE_JOB below and deliberately so; see there.
+#
+# A person's sources are their picks plus the active members of the bundles
+# they follow (api.source_selection). Both predicates read the two as IN lists
+# joined by OR rather than the user_source_set union: the planner guesses 200
+# distinct sources for a union and walks the jobs index once per source,
+# about three times slower on production (2026-10-10, measured in
+# alembic 98ace4b3fc55).
 SUBSCRIBED_SOURCE = """
-    {source} IN (
+    ({source} IN (
         SELECT us.source FROM user_sources us
         JOIN sources s ON s.name = us.source AND s.active
-    )
+    ) OR {source} IN (SELECT f.source FROM user_followed_sources f))
+"""
+
+# One person's sources, for a predicate over postings.
+PERSON_SOURCE = """
+    ({source} IN (SELECT us.source FROM user_sources us WHERE us.user_id = {user})
+     OR {source} IN (SELECT f.source FROM user_followed_sources f WHERE f.user_id = {user}))
 """
 
 
