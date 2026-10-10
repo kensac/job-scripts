@@ -194,37 +194,6 @@ class ApplicationMatch(Base):
     )
 
 
-class ActionItem(Base):
-    __tablename__ = "action_items"
-    __table_args__ = (
-        Index(
-            "idx_action_items_open",
-            "user_id",
-            "due_at",
-            postgresql_where=text("resolved_at IS NULL"),
-        ),
-    )
-
-    id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
-    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"))
-    application_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("applications.id", ondelete="CASCADE")
-    )
-    event_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("email_events.id", ondelete="CASCADE")
-    )
-    kind: Mapped[str] = mapped_column(Text)
-    due_at: Mapped[datetime.datetime | None] = mapped_column(TIMESTAMP(timezone=True))
-    resolved_at: Mapped[datetime.datetime | None] = mapped_column(TIMESTAMP(timezone=True))
-    resolution: Mapped[str | None] = mapped_column(Text)
-    resolved_by_event_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("email_events.id", ondelete="SET NULL")
-    )
-    created_at: Mapped[datetime.datetime] = mapped_column(
-        TIMESTAMP(timezone=True), server_default=_now
-    )
-
-
 class UserOAuthToken(Base):
     """A user's stored OAuth grant for one external provider.
 
