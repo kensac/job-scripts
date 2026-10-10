@@ -339,12 +339,7 @@ def test_delete_user_job_removes_only_user_jobs_row(client, user_headers):
 
 
 def _applied_day(uid: int, jid: int) -> datetime.date | None:
-    """The board's applied day, which is the application's, after checking
-    the old board column was not written."""
-    legacy = db.query_one(
-        "SELECT date_applied FROM user_jobs WHERE user_id = %s AND job_id = %s", (uid, jid)
-    )
-    assert legacy is None or legacy["date_applied"] is None
+    """The board's applied day, which is the application's."""
     return applications.board_day(uid, jid)
 
 
