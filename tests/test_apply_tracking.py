@@ -1,4 +1,7 @@
+import datetime
+
 from api import db
+from api.mail import applications
 
 URL = "https://jobs.ashbyhq.com/ivo-inc/b31e7195-37dd-4631-8648-422cecbb3f83/application?utm_source=Otta"
 
@@ -22,9 +25,9 @@ def test_completed_fill_tracks_once_without_claiming_submission(client, user_hea
     repeat = client.post(f"/v1/user/apply/fills/{fill_id}/track", headers=user_headers)
     assert repeat.json()["job_id"] == job_id
     row = db.query_one(
-        "SELECT status, date_applied, person_touched_at FROM user_jobs WHERE job_id=%s", (job_id,)
+        "SELECT user_id, status, person_touched_at FROM user_jobs WHERE job_id=%s", (job_id,)
     )
-    assert row["status"] is None and row["date_applied"] is None
+    assert row["status"] is None and applications.board_day(row["user_id"], job_id) is None
     assert row["person_touched_at"] is not None
     assert db.query_one("SELECT count(*) AS n FROM tasks WHERE kind='extract_upload'")["n"] == 1
     assert (
@@ -38,9 +41,10 @@ def test_context_and_repeated_fill_preserve_existing_application(client, user_he
     uid = db.query_one("SELECT id FROM users WHERE email='user@example.com'")["id"]
     f.make_board_row(uid, job_id, status="Application Submitted")
     db.execute(
-        "UPDATE user_jobs SET date_applied='2026-09-01', notes='keep this' WHERE user_id=%s AND job_id=%s",
+        "UPDATE user_jobs SET notes='keep this' WHERE user_id=%s AND job_id=%s",
         (uid, job_id),
     )
+    applications.from_board(uid, job_id, datetime.date(2026, 9, 1), set_date=True)
     context = client.get("/v1/user/apply/context", headers=user_headers, params={"url": URL}).json()
     assert context["job"]["status"] == "Application Submitted"
     assert context["job"]["date_applied"] == "2026-09-01"
@@ -50,10 +54,11 @@ def test_context_and_repeated_fill_preserve_existing_application(client, user_he
         == 200
     )
     row = db.query_one(
-        "SELECT status, date_applied::text AS date, notes FROM user_jobs WHERE user_id=%s AND job_id=%s",
+        "SELECT status, notes FROM user_jobs WHERE user_id=%s AND job_id=%s",
         (uid, job_id),
     )
-    assert row == {"status": "Application Submitted", "date": "2026-09-01", "notes": "keep this"}
+    assert row == {"status": "Application Submitted", "notes": "keep this"}
+    assert applications.board_day(uid, job_id) == datetime.date(2026, 9, 1)
 
 
 def test_tracking_rejects_another_users_fill(client, user_headers, other_user_headers):

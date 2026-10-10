@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from api import db
 from api.auth import AuthedUser, require_user
 from api.board import populations, visibility
+from api.mail import applications
 from api.mail.current import current_event, current_match
 
 router = APIRouter()
@@ -22,7 +23,7 @@ router = APIRouter()
 # because 1,753 untouched rows carried postings the filters had since
 # rejected or the person's expiry had aged out.
 _BOARD = visibility.FAST.format(
-    columns="j.id, j.source, uj.status, uj.date_applied, uj.hidden",
+    columns=f"j.id, j.source, uj.status, {applications.applied_on('uj')} AS date_applied, uj.hidden",
     extra="",
 )
 
@@ -112,8 +113,9 @@ def stats(user: AuthedUser = Depends(require_user)) -> Stats:
     )
     over_time = db.query_as(
         AppliedWeek,
-        "SELECT date_trunc('week', date_applied)::date AS week, COUNT(*) AS applied "
-        "FROM user_jobs WHERE user_id = %s AND date_applied IS NOT NULL "
+        f"SELECT date_trunc('week', d.day)::date AS week, COUNT(*) AS applied "
+        f"FROM (SELECT {applications.applied_on('uj')} AS day FROM user_jobs uj "
+        "WHERE uj.user_id = %s) d WHERE d.day IS NOT NULL "
         "GROUP BY week ORDER BY week",
         (user.id,),
     )
@@ -123,9 +125,9 @@ def stats(user: AuthedUser = Depends(require_user)) -> Stats:
         SELECT counts.visible, counts.acted_on, legacy.*
         FROM (SELECT {populations.per_user_counts("%(uid)s")}) counts,
              (SELECT COUNT(*) AS tracked,
-                     COUNT(*) FILTER (WHERE date_applied IS NOT NULL) AS applied,
-                     COUNT(*) FILTER (WHERE hidden) AS hidden
-              FROM user_jobs WHERE user_id = %(uid)s) legacy
+                     COUNT(*) FILTER (WHERE {applications.applied_on("uj")} IS NOT NULL) AS applied,
+                     COUNT(*) FILTER (WHERE uj.hidden) AS hidden
+              FROM user_jobs uj WHERE uj.user_id = %(uid)s) legacy
         """,
         params,
     )

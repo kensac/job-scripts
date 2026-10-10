@@ -263,7 +263,9 @@ def seed() -> dict[str, int]:
 
     # Through the one writer, which is idempotent per posting, so a second
     # seed finds the application the first made.
-    application_id = applications.from_board(user_id, job_ids[0], _days_ago(40).date())
+    application_id = applications.from_board(
+        user_id, job_ids[0], _days_ago(40).date(), set_date=False
+    )
     counts["applications"] += 1
     # The acknowledgement and the interview invite, so the application has an
     # open ask derived from its mail, with no deadline, like every real one.

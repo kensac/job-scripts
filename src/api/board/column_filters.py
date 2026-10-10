@@ -7,6 +7,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from api.mail import applications
 from api.problem import refuse
 
 
@@ -51,7 +52,7 @@ _FIELDS: dict[str, tuple[str, FilterKind, str]] = {
     "comp_min": ("Posted pay minimum", "number", "j.comp_min"),
     "comp_max": ("Posted pay maximum", "number", "j.comp_max"),
     "date_posted": ("Posted date (UTC)", "date", "(j.date_posted AT TIME ZONE 'UTC')::date"),
-    "date_applied": ("Applied date", "date", "uj.date_applied"),
+    "date_applied": ("Applied date", "date", applications.applied_on("uj")),
     "added_at": ("Added date (UTC)", "date", "(j.created_at AT TIME ZONE 'UTC')::date"),
     "active": ("Listed by source", "boolean", "j.active"),
 }

@@ -18,6 +18,7 @@ from pydantic import BaseModel
 
 from api import db
 from api.auth import AuthedUser, require_user
+from api.mail import applications
 from api.mail import match as mail_match
 from api.mail.current import current_event, current_match
 from api.mail.store import owned_message
@@ -313,27 +314,12 @@ def assign_message(
             raise refuse(404, "NOT_FOUND", "application not found")
     elif body.job_id is not None:
         job = db.query_one(
-            "SELECT j.id, j.company, j.title, uj.date_applied FROM jobs j "
-            "JOIN user_jobs uj ON uj.job_id = j.id AND uj.user_id = %s WHERE j.id = %s",
+            "SELECT 1 FROM user_jobs WHERE user_id = %s AND job_id = %s",
             (user.id, body.job_id),
         )
         if job is None:
             raise refuse(404, "NOT_FOUND", "job not on your board")
-        existing = db.query_one(
-            "SELECT id FROM applications WHERE user_id = %s AND job_id = %s",
-            (user.id, body.job_id),
-        )
-        if existing:
-            application_id = existing["id"]
-        else:
-            created = db.query_one(
-                "INSERT INTO applications (user_id, job_id, company_name, title, "
-                "source_provenance, applied_at) VALUES (%s, %s, %s, %s, 'tracker', %s) "
-                "RETURNING id",
-                (user.id, job["id"], job["company"], job["title"], job["date_applied"]),
-            )
-            assert created is not None
-            application_id = created["id"]
+        application_id = applications.from_board(user.id, body.job_id, None, set_date=False)
     elif body.company_name:
         created = db.query_one(
             "INSERT INTO applications (user_id, job_id, company_name, title, "
