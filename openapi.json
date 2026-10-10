@@ -33863,7 +33863,7 @@
           "by_model"
         ],
         "title": "BoardSpend",
-        "description": "What this board's postings cost to check, as billed at the time.\n\n`window` is in the response because /admin/spend defaults to 30 days and\nthis takes no window at all, so a reader comparing the two was comparing a\nlifetime against a month with nothing saying so. All-time is right here:\nwhether a board earned its keep is a question about its whole life.\n\nNot split per check_type: verify_new books one batched call against the\n`closed` row and writes the clearance verdict from the same response, so a\nsplit would read as though clearance were free on some paths.\n`priced_coverage` keeps \"this cost nothing\" apart from \"we do not know what\nthis cost\"."
+        "description": "What this board's postings cost to check, as billed at the time.\n\n`window` is in the response because /admin/spend defaults to 30 days and\nthis takes no window at all, so a reader comparing the two was comparing a\nlifetime against a month with nothing saying so. All-time is right here:\nwhether a board earned its keep is a question about its whole life.\n\nNot split per check_type: verify_new books one batched call against the\n`closed` row and writes the clearance verdict from the same response, so a\nsplit would read as though clearance were free on some paths.\n`priced_coverage` keeps \"this cost nothing\" apart from \"we do not know what\nthis cost\". `calls` are paid provider requests: a page fetch is not one."
       },
       "BoardStatusCount": {
         "properties": {
@@ -43108,7 +43108,7 @@
           "cost_usd"
         ],
         "title": "ModelSpend",
-        "description": "`model` is null for the scrape-only checks, which record an attempt\nrather than a judgement and carry neither a model nor a cost."
+        "description": "`model` is null only for a paid call whose model was never recorded."
       },
       "ModelTotals": {
         "properties": {
