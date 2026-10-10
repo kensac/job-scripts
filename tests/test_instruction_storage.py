@@ -45,86 +45,6 @@ def test_null_empty_and_whitespace_instruction_values_remain_distinct():
     assert len({r["reference"] for r in rows[1:]}) == 3
 
 
-def test_copy_compact_restore_preserves_metadata_cache_and_admin_response(client, admin_headers):
-    from api.ai.migrate_query_instructions import migrate_chunk
-
-    query_id = store.add_ai_result(
-        "https://example.test/history",
-        "passed",
-        check_type="custom",
-        prompt_hash="filter-key",
-        instructions="Exact historical instructions",
-        input_content="Original cached content",
-        model="original-model",
-        prompt_tokens=10,
-        completion_tokens=2,
-    )
-    db.execute(
-        "UPDATE ai_queries SET instructions=%s,instructions_id=NULL WHERE id=%s",
-        ("Exact historical instructions", query_id),
-    )
-    original = db.query_one("SELECT * FROM ai_queries WHERE id=%s", (query_id,))
-    before = client.get(f"/v1/admin/queries/{query_id}", headers=admin_headers).json()
-    copied = migrate_chunk(mode="copy", after=0, through=query_id, limit=1)
-    assert copied["copied"] == 1
-    assert migrate_chunk(mode="copy", after=0, through=query_id, limit=1)["copied"] == 0
-    assert migrate_chunk(mode="verify", after=0, through=query_id, limit=1)["verified"] == 1
-    assert (
-        migrate_chunk(
-            mode="compact",
-            after=0,
-            through=query_id,
-            limit=1,
-            backup_complete=True,
-            readers_compatible=True,
-        )["compacted"]
-        == 1
-    )
-    compacted = db.query_one("SELECT * FROM ai_queries WHERE id=%s", (query_id,))
-    assert compacted["instructions"] is None
-    assert {k: v for k, v in compacted.items() if k not in ("instructions", "instructions_id")} == {
-        k: v for k, v in original.items() if k not in ("instructions", "instructions_id")
-    }
-    assert store.decided_custom_urls(["https://example.test/history"], "filter-key") == {
-        "https://example.test/history"
-    }
-    assert store.get_content("https://example.test/history") is None
-    assert client.get(f"/v1/admin/queries/{query_id}", headers=admin_headers).json() == before
-    responses = client.get(
-        "/v1/admin/jobs/responses",
-        params={"url": "https://example.test/history"},
-        headers=admin_headers,
-    )
-    assert responses.status_code == 200
-    assert responses.json()["rows"] == [before]
-    assert migrate_chunk(mode="restore", after=0, through=query_id, limit=1)["restored"] == 1
-    restored = db.query_one("SELECT * FROM ai_queries WHERE id=%s", (query_id,))
-    assert restored["instructions"] == original["instructions"]
-    assert restored["instructions_id"] == compacted["instructions_id"]
-
-
-def test_bad_reference_rolls_back_whole_chunk():
-    import pytest
-
-    from api.ai.migrate_query_instructions import migrate_chunk
-    from core.query_instructions import InstructionUnavailable
-
-    first = store.add_ai_result("https://example.test/first", "passed", instructions="first")
-    second = store.add_ai_result("https://example.test/second", "passed", instructions="second")
-    db.execute(
-        "UPDATE ai_queries SET instructions=%s,instructions_id=NULL WHERE id=%s", ("first", first)
-    )
-    db.execute("UPDATE ai_queries SET instructions='changed inline' WHERE id=%s", (second,))
-    with pytest.raises(InstructionUnavailable):
-        migrate_chunk(mode="copy", after=0, through=second, limit=2)
-    assert (
-        db.query_one("SELECT instructions_id FROM ai_queries WHERE id=%s", (first,))[
-            "instructions_id"
-        ]
-        is None
-    )
-
-
 def test_concurrent_writers_share_exact_text():
     from concurrent.futures import ThreadPoolExecutor
     from threading import Barrier
@@ -153,17 +73,27 @@ def test_missing_reference_never_becomes_legacy_null():
     with pytest.raises(InstructionUnavailable):
         hydrate([{"instructions": None, "instructions_id": -1}])
     assert hydrate([{"instructions": None, "instructions_id": None}]) == [{"instructions": None}]
+    # An inline value is not a shape any writer produces; it is never read.
+    assert hydrate([{"instructions": "stale", "instructions_id": None}]) == [{"instructions": None}]
 
 
-def test_compaction_requires_explicit_gates(monkeypatch):
-    import pytest
-
-    from api.ai.migrate_query_instructions import main
-
-    monkeypatch.setattr("sys.argv", ["migration", "compact", "--through", "1", "--limit", "1"])
-    with pytest.raises(SystemExit) as error:
-        main()
-    assert error.value.code == 2
+def test_admin_query_routes_return_the_referenced_text(client, admin_headers):
+    query_id = store.add_ai_result(
+        "https://example.test/history",
+        "passed",
+        check_type="custom",
+        prompt_hash="filter-key",
+        instructions="Exact historical instructions",
+        input_content="Original cached content",
+    )
+    detail = client.get(f"/v1/admin/queries/{query_id}", headers=admin_headers).json()
+    assert detail["instructions"] == "Exact historical instructions"
+    responses = client.get(
+        "/v1/admin/jobs/responses",
+        params={"url": "https://example.test/history"},
+        headers=admin_headers,
+    )
+    assert responses.json()["rows"] == [detail]
 
 
 def test_dictionary_corruption_is_explicit():
@@ -185,65 +115,6 @@ def test_dictionary_corruption_is_explicit():
     )
     with pytest.raises(InstructionUnavailable):
         store.decided_custom_urls(["https://example.test/corrupt"], "key")
-
-
-def test_service_compaction_requires_backup_and_reader_confirmations():
-    import pytest
-
-    from api.ai.migrate_query_instructions import migrate_chunk
-    from core.query_instructions import InstructionUnavailable
-
-    query_id = store.add_ai_result("https://example.test/gates", "passed", instructions="retain")
-    db.execute("UPDATE ai_queries SET instructions=%s WHERE id=%s", ("retain", query_id))
-    with pytest.raises(InstructionUnavailable):
-        migrate_chunk(mode="compact", after=0, through=query_id, limit=1)
-    assert (
-        db.query_one("SELECT instructions FROM ai_queries WHERE id=%s", (query_id,))["instructions"]
-        == "retain"
-    )
-
-
-def test_compaction_holds_dictionary_content_lock_through_validation(monkeypatch):
-    from concurrent.futures import ThreadPoolExecutor
-
-    from psycopg.errors import LockNotAvailable
-
-    from api.ai import migrate_query_instructions as migration
-    from core.pool import connection
-
-    query_id = store.add_ai_result("https://example.test/locked", "passed", instructions="original")
-    reference = db.query_one("SELECT instructions_id FROM ai_queries WHERE id=%s", (query_id,))[
-        "instructions_id"
-    ]
-    db.execute("UPDATE ai_queries SET instructions=%s WHERE id=%s", ("original", query_id))
-    original_hash = migration.hashlib.sha256
-
-    def attempt_dictionary_change():
-        try:
-            with connection() as conn, conn.transaction():
-                conn.execute("SET LOCAL lock_timeout='100ms'")
-                conn.execute(
-                    "UPDATE ai_instruction_texts SET instructions=instructions WHERE id=%s",
-                    (reference,),
-                )
-        except LockNotAvailable:
-            return "blocked"
-        return "unprotected"
-
-    def inspect_lock(value):
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            assert executor.submit(attempt_dictionary_change).result(timeout=5) == "blocked"
-        return original_hash(value)
-
-    monkeypatch.setattr(migration.hashlib, "sha256", inspect_lock)
-    migration.migrate_chunk(
-        mode="compact",
-        after=0,
-        through=query_id,
-        limit=1,
-        backup_complete=True,
-        readers_compatible=True,
-    )
 
 
 def test_the_verdict_cache_check_answers_from_the_row_without_reading_page_text(monkeypatch):

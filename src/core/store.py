@@ -35,7 +35,6 @@ _INSERT_COLUMNS = [
     "prompt_hash",
     "company",
     "job_title",
-    "instructions",
     "instructions_id",
     "input_content",
     "parsed_json",
@@ -92,13 +91,7 @@ def _interned(conn: Connection[dict[str, Any]], rows: list[dict[str, Any]]) -> l
         text = row["instructions"]
         if text is not None and text not in ids:
             ids[text] = query_instructions.intern(conn, text)
-        interned.append(
-            {
-                **row,
-                "instructions_id": ids[text] if text is not None else None,
-                "instructions": None,
-            }
-        )
+        interned.append({**row, "instructions_id": ids[text] if text is not None else None})
     return interned
 
 
@@ -222,11 +215,11 @@ def decided_custom_urls(urls: list[str], prompt_hash: str, model: str | None = N
     with connection() as conn:
         sql = verdict_reads.latest_per(
             "url",
-            "url, CASE WHEN instructions IS NULL THEN instructions_id END AS instructions_id",
+            "url, instructions_id",
             f"url = ANY(%s) AND check_type = 'custom' AND prompt_hash = %s{clause}",
         )
         rows = conn.execute(cast("LiteralString", sql), params).fetchall()
-    query_instructions.hydrate([{"instructions": None, **row} for row in rows])
+    query_instructions.hydrate(rows)
     return {row["url"] for row in rows}
 
 

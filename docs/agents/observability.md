@@ -908,31 +908,20 @@ this rule exists to avoid.
 
 `core.query_instructions` stores exact instruction strings separately from
 verdict `prompt_hash` and the prompt-reporting catalog. NULL and empty strings
-remain distinct. New writes store only a shared reference; cached page content
-and accounting columns are unchanged. Deploy the compatible-reader release
-throughout the fleet before enabling these writes. Historical inline rows remain
-readable and require the separate bounded migration below.
-Query detail and custom-result readers hydrate a missing inline value and fail
-explicitly if referenced content is missing or its digest is wrong.
+remain distinct. A row holds only `instructions_id`, a reference into
+`ai_instruction_texts`; cached page content and accounting columns are
+unchanged. On 2026-10-10 none of 2,826,328 rows held inline text, so
+`hydrate` never reads the inline `instructions` column and no query names it.
+The column is empty and is dropped once the `verdicts` and `ledger_rows` views
+stop selecting it. Query detail and custom-result readers hydrate through the
+reference and fail explicitly if referenced content is missing or its digest
+is wrong. Keep dictionary rows permanently while referenced.
 
 The custom-verdict cache check (`store.decided_custom_urls`) answers which of
 a run's urls have a decided verdict and returns nothing else, so it selects
 only each url's latest row's instruction reference, in one statement for the
-whole list. It never reads the page text or inline instructions: the filter
-sweeps asked it once per candidate, 1.32M times in 36 hours (2026-10-03). A
-latest row held by reference is still hydrated, so a missing or corrupt
-dictionary entry fails the whole check, as it fails every other reader. A
-caller that needs the verdict row's fields reads them in its own query.
-
-Use `python -m api.ai.migrate_query_instructions MODE --through ID --after ID
---limit N` with a fixed maximum query ID and saved cursors. `copy` retains inline
-text; a separate `verify` pass reports unreferenced values. Only after an
-independent backup and fleet-wide compatible readers, `compact` with
-`--backup-complete --readers-compatible` removes verified inline duplicates.
-`restore` fills inline values again and keeps references. Each bounded chunk is
-atomic, locks result rows and referenced dictionary content in ID order for
-writes, and leaves the cursor before failed work. The service also enforces the
-backup and compatible-reader confirmations, so direct calls cannot bypass the
-CLI checks. Keep dictionary rows permanently while referenced. Before reverting to
-old readers, restore and verify inline text. Logical bytes removed do not prove
-that PostgreSQL relation files or filesystem use decreased.
+whole list. It never reads the page text: the filter sweeps asked it once per
+candidate, 1.32M times in 36 hours (2026-10-03). A latest row's reference is
+still hydrated, so a missing or corrupt dictionary entry fails the whole check,
+as it fails every other reader. A caller that needs the verdict row's fields
+reads them in its own query.

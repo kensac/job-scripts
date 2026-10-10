@@ -336,9 +336,10 @@ _QUERIES_FILTERABLE = [
 
 # Every column of ai_queries, named once. Two routes returned the whole row
 # through SELECT *, which cannot be typed and drifts from whatever reads it.
+# The instructions come from instructions_id through query_instructions.hydrate.
 _ROW_COLS = (
     "id, created_at, config_name, url, check_type, status, reason, model, "
-    "reasoning_effort, filter_name, prompt_hash, company, job_title, instructions, "
+    "reasoning_effort, filter_name, prompt_hash, company, job_title, "
     "input_content, parsed_json, prompt_tokens, completion_tokens, total_tokens, "
     "cached_tokens, cache_write_tokens, reasoning_tokens, duration_ms, error, cost_usd, worker, batch_id"
 )
