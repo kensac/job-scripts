@@ -93,44 +93,67 @@ def _store(result: BatchResult, context: dict[str, Any], parsed: CompExtract) ->
         comp_currency = (parsed.currency or "").strip().upper()[:3] or None
         basis = (parsed.basis or "").strip().lower()
         comp_basis = basis if basis in COMP_BASES else None
-    # The write re-reads the current page row in the same statement, so a page
-    # fetched after the currency check leaves the answer unwritten.
-    written = db.execute_count(
-        "UPDATE jobs j SET comp_min = %s, comp_max = %s, comp_text = %s, "
-        "comp_period = %s, comp_currency = %s, comp_basis = %s, "
-        "comp_extracted = TRUE, comp_content_row_id = %s "
-        "FROM (VALUES (%s::text)) AS page(url) "
-        + CONTENT_LATERAL.format(url="page.url", columns="id")
-        + " WHERE j.id = %s AND j.url = page.url AND q.id = %s",
-        (
-            comp_min,
-            comp_max,
-            comp_text,
-            comp_period,
-            comp_currency,
-            comp_basis,
-            context["content_row_id"],
-            result.custom_id,
-            context["job_id"],
-            context["content_row_id"],
-        ),
-    )
+    values = {
+        "url": result.custom_id,
+        "min": comp_min,
+        "max": comp_max,
+        "text": comp_text,
+        "period": comp_period,
+        "currency": comp_currency,
+        "basis": comp_basis,
+        "model": result.model,
+        "row": context["content_row_id"],
+        "chars": COMP_INPUT_CHARS,
+    }
+    # The guard is in the statement: it reads the current page row again, so
+    # a page fetched after the currency check leaves the answer unwritten. The
+    # hash is of the text the model read, so an unchanged re-fetch can be told
+    # from a changed one.
+    written = db.execute_count(_STORE, values)
     # The 2026-09-05 audit found unconditional progress accounting could
     # report done == total even when every line failed. Count writes, not
     # parsed or collected responses; failed lines retain prior values and the
     # selection predicates govern their retry.
-    if written:
-        return "written"
-    if db.query_one("SELECT id FROM jobs WHERE id = %s", (context["job_id"],)):
+    if not written:
         return "superseded"
-    return "missing_subject"
+    # Readers still read the copy on jobs until they move to job_comp.
+    db.execute(
+        "UPDATE jobs SET comp_min = %(min)s, comp_max = %(max)s, comp_text = %(text)s, "
+        "comp_period = %(period)s, comp_currency = %(currency)s, comp_basis = %(basis)s, "
+        "comp_extracted = TRUE, comp_content_row_id = %(row)s "
+        "WHERE id = %(job_id)s AND url = %(url)s",
+        {**values, "job_id": context["job_id"]},
+    )
+    return "written"
+
+
+_STORE = (
+    """
+    INSERT INTO job_comp (url, comp_min, comp_max, comp_text, comp_period, comp_currency,
+                          comp_basis, model, content_hash, content_row_id)
+    SELECT page.url, %(min)s, %(max)s, %(text)s, %(period)s, %(currency)s, %(basis)s,
+           %(model)s,
+           encode(sha256(convert_to(left(q.input_content, %(chars)s), 'UTF8')), 'hex'), q.id
+    FROM (VALUES (%(url)s::text)) AS page(url)
+    """
+    + CONTENT_LATERAL.format(url="page.url", columns="id, input_content")
+    + """
+    WHERE q.id = %(row)s
+    ON CONFLICT (url) DO UPDATE SET
+        comp_min = EXCLUDED.comp_min, comp_max = EXCLUDED.comp_max,
+        comp_text = EXCLUDED.comp_text, comp_period = EXCLUDED.comp_period,
+        comp_currency = EXCLUDED.comp_currency, comp_basis = EXCLUDED.comp_basis,
+        model = EXCLUDED.model, content_hash = EXCLUDED.content_hash,
+        content_row_id = EXCLUDED.content_row_id, extracted_at = now()
+    """
+)
 
 
 PAY = Derivation(
     kind="extract_comp",
     purpose=COMP_TASK.purpose,
     noun="comp",
-    table="jobs",
+    table="job_comp",
     per_cycle_key="comp_extract_per_cycle",
     select=_select,
     requests=_requests,
