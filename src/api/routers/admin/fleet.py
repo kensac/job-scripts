@@ -9,7 +9,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
-from api import db, health, queue, scoping, task_admission
+from api import db, health, model_calls, queue, scoping, task_admission
 from api import params as params_
 from api.auth import AuthedUser
 from api.problem import refuse
@@ -244,10 +244,12 @@ def list_batches(
         f"""
         SELECT b.id, b.provider_batch_id, b.task_id, b.purpose, b.model,
                b.requests, b.completed, b.failed_count, b.status,
-               b.est_tokens, b.input_tokens, b.output_tokens, b.cache_write_tokens, b.est_cost_usd,
+               b.est_tokens, totals.input_tokens, totals.output_tokens,
+               totals.cache_write_tokens, totals.est_cost_usd,
                b.submitted_at, b.updated_at, b.completed_at,
                t.kind AS task_kind, t.status AS task_status
         FROM ai_batches b LEFT JOIN tasks t ON t.id = b.task_id
+        {model_calls.BATCH_TOTALS}
         WHERE (b.status NOT IN ('completed', 'failed', 'expired', 'cancelled')
            OR b.submitted_at > now() - make_interval(hours => %(hours)s))
           {"AND " + scoping.task("t") if ids else ""}
@@ -420,12 +422,12 @@ def queue_summary(hours: int = 6, user: AuthedUser = Depends(require_admin)) -> 
     )
 
 
-# Every column of ai_batches, named once, for the drill-down that read
-# SELECT * to get at one of them.
+# A batch's columns and its totals from the call ledger, named once, for the
+# drill-down that read SELECT * to get at one of them.
 _BATCH_COLS = (
-    "id, provider_batch_id, task_id, purpose, model, requests, completed, failed_count, "
-    "status, submitted_at, updated_at, completed_at, est_tokens, input_tokens, "
-    "output_tokens, cache_write_tokens, est_cost_usd"
+    "b.id, b.provider_batch_id, b.task_id, b.purpose, b.model, b.requests, b.completed, "
+    "b.failed_count, b.status, b.submitted_at, b.updated_at, b.completed_at, b.est_tokens, "
+    "totals.input_tokens, totals.output_tokens, totals.cache_write_tokens, totals.est_cost_usd"
 )
 
 
@@ -491,7 +493,8 @@ def batch_jobs(
     requests and the drill-down rendered every one of them."""
     batch = db.query_one_as(
         BatchRecord,
-        f"SELECT {_BATCH_COLS} FROM ai_batches WHERE provider_batch_id = %s",
+        f"SELECT {_BATCH_COLS} FROM ai_batches b {model_calls.BATCH_TOTALS} "
+        "WHERE b.provider_batch_id = %s",
         (provider_batch_id,),
     )
     if not batch:

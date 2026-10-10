@@ -1,12 +1,12 @@
 """The call ledger: one row per paid provider request, from one writer."""
 
 import pathlib
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
 from api import budget, db, model_calls
 from api.ai import batch_results
 from api.model_calls import FLEET, Payer
-from core import batch
+from core import batch, pricing
 from tasks import runtime
 
 MODEL = "gpt-5-mini"
@@ -31,7 +31,6 @@ def _collect(f, payer: Payer) -> tuple[int, list]:
     ]
     # A request the provider failed and did not bill.
     results.append(batch.BatchResult("item-failed", error="server_error", batch_id="b-1"))
-    batch._emit_usage(hook, "b-1", "completed", {r.custom_id: r for r in results})
     batch_results.checkpoint(task_id, results, [])
     return task_id, results
 
@@ -51,7 +50,7 @@ def _calls() -> list[dict]:
     return db.query("SELECT * FROM model_calls ORDER BY custom_id")
 
 
-def test_each_collected_item_is_one_call_equal_to_its_batch(f):
+def test_each_collected_item_is_one_call_priced_on_its_own(f):
     user = f.make_user()
     task_id, results = _collect(f, Payer(user_id=user))
     calls = _calls()
@@ -60,17 +59,20 @@ def test_each_collected_item_is_one_call_equal_to_its_batch(f):
         (user, None, "owner")
     }
     assert {(c["purpose"], c["model"], c["task_id"]) for c in calls} == {("filter", MODEL, task_id)}
-    batch_row = db.query_one("SELECT * FROM ai_batches WHERE provider_batch_id = 'b-1'")
-    assert sum(c["prompt_tokens"] for c in calls) == batch_row["input_tokens"]
-    assert sum(c["completion_tokens"] for c in calls) == batch_row["output_tokens"]
-    # The batch total cannot say how many tokens were cache writes once one
-    # item omits them (test_batch_accounting); each billed item can.
-    assert batch_row["cache_write_tokens"] is None
+    # Each request priced on its own tokens, at the batch rate: a tiered
+    # model's tier is chosen per request, never from a batch's sum.
+    for i, call in enumerate(calls):
+        u = _usage(i)
+        assert call["cost_usd"] == pricing.estimate_cost_usd(
+            MODEL,
+            u["input_tokens"],
+            u["output_tokens"],
+            cached_tokens=200,
+            cache_write_tokens=100,
+            batched=True,
+        ).quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
     assert [c["cache_write_tokens"] for c in calls] == [100, 100, 100]
-    # Each call is rounded to the micro-dollar the column holds, the batch
-    # once, so the two may differ by at most a micro-dollar per call.
-    total = sum(c["cost_usd"] for c in calls)
-    assert abs(total - batch_row["est_cost_usd"]) <= Decimal("0.000001") * len(calls)
+    assert [c["reasoning_tokens"] for c in calls] == [20, 20, 20]
 
     batch_results.checkpoint(task_id, results, [])
     assert len(_calls()) == 3, "a replayed receipt is not a second call"
@@ -134,8 +136,9 @@ def test_live_calls_are_recorded_and_batched_bookings_are_not(f):
         ("explain", "byo", None)
     ]
     assert calls[0]["reasoning_tokens"] == 10
-    live = db.query_one("SELECT cost_usd FROM api_usage WHERE purpose = 'explain'")
-    assert calls[0]["cost_usd"] == live["cost_usd"]
+    assert calls[0]["cost_usd"] == pricing.estimate_cost_usd(
+        MODEL, 500, 40, cached_tokens=0, cache_write_tokens=None
+    )
 
 
 def test_a_call_with_no_tokens_is_not_a_row(f):

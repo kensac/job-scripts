@@ -120,7 +120,6 @@ def test_manual_admission_supersedes_sweep_before_either_completes(f):
     )
     assert row["draft"] == "Requested"
     assert len(row["turns"]) == 1
-    assert db.query_one("SELECT count(*) AS n FROM api_usage WHERE user_id=%s", (uid,))["n"] == 2
 
 
 def test_legacy_result_is_accounted_without_guessing_answer_generation(f):
@@ -143,7 +142,6 @@ def test_legacy_result_is_accounted_without_guessing_answer_generation(f):
         db.query_one("SELECT draft FROM application_answers WHERE user_id=%s", (uid,))["draft"]
         is None
     )
-    assert db.query_one("SELECT count(*) AS n FROM api_usage WHERE user_id=%s", (uid,))["n"] == 1
     assert (
         db.query_one("SELECT payload FROM tasks WHERE id=%s", (tid,))["payload"]["draft_results"][
             key
@@ -184,7 +182,7 @@ async def test_refinement_preserves_concurrent_edit_and_cached_usage(f, monkeypa
         db.query_one("SELECT draft FROM application_answers WHERE user_id=%s", (uid,))["draft"]
         == "Keep my edit"
     )
-    usage = db.query("SELECT cached_tokens,total_tokens FROM api_usage WHERE user_id=%s", (uid,))
+    usage = db.query("SELECT cached_tokens,total_tokens FROM model_calls WHERE user_id=%s", (uid,))
     assert usage == [{"cached_tokens": 400, "total_tokens": 1100}]
 
 
@@ -346,7 +344,8 @@ async def test_application_receipt_rolls_back_usage_and_answer_until_acknowledge
     monkeypatch.setattr(db, "execute", fail_ack)
     with pytest.raises(RuntimeError, match="ack failed"):
         await handler(tid, payload)
-    assert db.query_one("SELECT count(*) AS n FROM api_usage")["n"] == 0
+    # The call was booked with its receipt, before any consumer saw it.
+    assert db.query_one("SELECT count(*) AS n FROM model_calls")["n"] == 1
     assert db.query_one("SELECT draft FROM application_answers")["draft"] is None
     assert db.query_one("SELECT consumed_at FROM batch_result_receipts")["consumed_at"] is None
     monkeypatch.setattr(db, "execute", execute)
@@ -354,7 +353,7 @@ async def test_application_receipt_rolls_back_usage_and_answer_until_acknowledge
         await handler(tid, payload)
     row = db.query_one("SELECT draft,turns FROM application_answers")
     assert row["draft"] == "Paid answer" and len(row["turns"]) == 1
-    assert db.query_one("SELECT count(*) AS n FROM api_usage")["n"] == 1
+    assert db.query_one("SELECT count(*) AS n FROM model_calls")["n"] == 1
     assert db.query_one("SELECT outcome FROM batch_result_receipts")["outcome"] == "written"
     assert "1 written" in application_writes.outcome_note(tid)
 

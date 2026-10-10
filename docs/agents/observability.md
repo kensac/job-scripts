@@ -153,14 +153,9 @@ output presentation must not force existing criteria to be judged again.
 Application drafts share request construction and result persistence in
 `tasks.application.draft_rows`.
 
-For these user-charged paths, `api.ai.batch_usage` normalises provider usage and
-`api.budget.record_tokens` writes the user ledger with explicit batch pricing
-and cached-token counts, including consumed calls that produced no valid answer.
 The batch event hook takes the `payer` (`api.model_calls.Payer`): a user's or a
-board's batch passes it, which keeps the hook from booking the same call to the
-fleet and records the payer on `ai_batches` at submission. Historical user ledger
-rows have no request or batch linkage; do not infer their transport from
-timestamps or rewrite their prices on read.
+board's batch passes it, and the hook records it on `ai_batches` at submission.
+The hook records progress only; it neither totals nor prices a batch.
 
 **Every paid call is one row in `model_calls`, written by
 `api.model_calls.record`.** A batch item is written by the receipt checkpoint
@@ -169,17 +164,19 @@ writes nothing for an item has not left it unbooked; a batch whose payer was
 never recorded writes nothing, and the task collecting it records its payer.
 Live calls are written by `budget.record_tokens` and
 `budget.record_managed_board_tokens` when not batched, and the admin re-check
-by its route. `tests/test_model_calls.py` holds its rows equal to their batch
-and fails on a second writer.
+by its route; a consumer's booking of a batched result only counts its tokens.
+Each request is priced on its own tokens, so a tiered model's tier is chosen
+per request. `tests/test_model_calls.py` holds that and fails on a second
+writer.
 
 **Spend and budget read `model_calls`, never `api_usage`.** The weekly user
 budget, the fleet ceiling, /admin/spend's ledger and call list, a person's
 usage, the admin's view of a person, and a board's cost all do. A count of
 calls is `SUM(requests)`: a backfilled batch that kept no per-request record
-is one row standing for its requests. `tests/test_ledger_readers.py` holds each
-reader to the number it gave on `api_usage` for calls both tables recorded;
-the fleet differs only in counting requests rather than batches. `api_usage`
-is still written until the contract step removes it.
+is one row standing for its requests. A batch's token totals and cost are a sum
+over its calls (`model_calls.BATCH_TOTALS`), not columns of `ai_batches`.
+Nothing writes `api_usage`, the totals on `ai_batches` or the cost shares on
+`job_embeddings`; the next release drops them.
 
 On resume, `collect_pending` attaches model provenance from each `ai_batches`
 row. `run_batched` resolves routing only for new submissions; absent persisted
@@ -347,7 +344,7 @@ running the same seed and arm on main and on the branch with different
 `--label`s and scoring both together:
 `python -m api.run_experiment score ../exp/verify-main ../exp/verify-branch`.
 Put the summary in the PR. Spend from this path is in the run's files and the
-provider's account, not in `api_usage`, because the tool does not write the
+provider's account, not in `model_calls`, because the tool does not write the
 database.
 
 ## Application answers

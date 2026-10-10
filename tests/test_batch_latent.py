@@ -9,7 +9,6 @@ than anything in this code.
 from __future__ import annotations
 
 from api import db
-from tasks.runtime import batch_event_hook
 
 
 def _park(kind: str, hours: float = 0.5) -> int:
@@ -92,56 +91,6 @@ class TestVerifyNewDoesNotOverlapItself:
         )
         self._schedule()
         assert len(self._verify_tasks()) == 1
-
-
-class TestUsageIsRecordedOncePerBatch:
-    """The hook reports a batch's TOTALS every time it is collected, and the
-    write was additive - so a second collection doubled both the batch row and
-    the spend ledger. Reachable by a task that collects, fails, is requeued,
-    and reattaches to the same batch.
-    """
-
-    def _collect(self, batch_id="b1", inp=1000, out=100):
-        hook = batch_event_hook(1, "comp", "gpt-5-nano")
-        hook(batch_id, "submitted", {"requests": 1, "completed": 0, "failed": 0})
-        hook(batch_id, "completed", {"input_tokens": inp, "output_tokens": out})
-
-    def _batch(self, batch_id="b1"):
-        return db.query_one(
-            "SELECT input_tokens, output_tokens, est_cost_usd FROM ai_batches "
-            "WHERE provider_batch_id = %s",
-            (batch_id,),
-        )
-
-    def _ledger(self):
-        return db.query("SELECT * FROM api_usage WHERE user_id IS NULL AND purpose = 'comp'")
-
-    def test_one_collection_records_the_totals(self):
-        self._collect()
-        row = self._batch()
-        assert row is not None
-        assert (row["input_tokens"], row["output_tokens"]) == (1000, 100)
-        assert len(self._ledger()) == 1
-
-    def test_collecting_the_same_batch_again_does_not_double_it(self):
-        self._collect()
-        self._collect()
-        row = self._batch()
-        assert row is not None
-        assert (row["input_tokens"], row["output_tokens"]) == (1000, 100)
-
-    def test_collecting_again_does_not_add_a_second_ledger_row(self):
-        """The worse half: /admin/spend reads api_usage, so a duplicate row is
-        money reported that was never spent."""
-        self._collect()
-        self._collect()
-        assert len(self._ledger()) == 1
-
-    def test_two_different_batches_are_both_recorded(self):
-        """The fix must not deduplicate across batches - each is its own spend."""
-        self._collect("b1")
-        self._collect("b2")
-        assert len(self._ledger()) == 2
 
 
 class TestAStalledSweepIsVisible:

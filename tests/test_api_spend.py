@@ -212,30 +212,6 @@ def test_a_new_caller_needs_no_wiring_to_show_up(client, admin_headers):
     assert "a_purpose_that_did_not_exist" in {r["purpose"] for r in body["by_purpose"]}
 
 
-def test_fleet_work_is_charged_to_nobody(client, admin_headers):
-    """Catalog-wide extraction belongs to no user. Attributing it to whichever
-    admin is user 1 would make per-user spend a fiction."""
-    from api import budget, db
-
-    budget.record_fleet_usage("requirements", "gpt-5-mini", 1000, 100)
-    row = db.query_one("SELECT user_id, batched FROM api_usage WHERE purpose = 'requirements'")
-    assert row["user_id"] is None
-    assert row["batched"] is True
-
-
-def test_batched_fleet_work_is_priced_at_the_batch_rate(client, admin_headers):
-    """A batch is half price. Recording it at the sync rate would overstate the
-    largest line item in the system by 2x."""
-    from api import budget, db
-    from core import pricing
-
-    budget.record_fleet_usage("comp", "gpt-5-nano", 1_000_000, 100_000, batched=True)
-    row = db.query_one("SELECT cost_usd FROM api_usage WHERE purpose = 'comp'")
-    expected = pricing.estimate_cost_usd("gpt-5-nano", 1_000_000, 100_000, batched=True)
-    assert row["cost_usd"] == expected
-    assert expected < pricing.estimate_cost_usd("gpt-5-nano", 1_000_000, 100_000, batched=False)
-
-
 def test_an_unpriced_model_is_counted_but_not_costed(client, admin_headers):
     """None means nobody looked the rate up, never zero. A model we cannot
     price must show as calls with an unpriced count, not as free work."""

@@ -295,13 +295,6 @@ def schedule_ingest_cycle() -> None:
         "AND status IN ('pending', 'running') LIMIT 1"
     ):
         enqueue("move_page_fetches", {"cycle": cycle}, dedupe_key=f"page-fetch-move:{cycle}")
-    # The call ledger's backfill (tasks.model_call_backfill) runs until one
-    # run finishes; a run cut short is queued again and resumes by predicate.
-    if not db.query_one(
-        "SELECT 1 FROM tasks WHERE kind = 'backfill_model_calls' "
-        "AND status IN ('pending', 'running', 'done') LIMIT 1"
-    ):
-        enqueue("backfill_model_calls", {"cycle": cycle}, dedupe_key=f"model-call-backfill:{cycle}")
     # listings.pattern is emptied (tasks.listing_patterns), one run at a
     # time, until a run starts with none left. Asked of tasks rather than
     # listings: whether any row is left is a scan of the table.

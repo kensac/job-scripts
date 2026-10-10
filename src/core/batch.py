@@ -14,7 +14,7 @@ from openai.lib._pydantic import to_strict_json_schema
 from openai.types import Batch
 from pydantic import BaseModel
 
-from core import batch_capabilities, pricing, providers, store
+from core import batch_capabilities, providers, store
 
 
 class BatchEventCounts(TypedDict, total=False):
@@ -22,11 +22,6 @@ class BatchEventCounts(TypedDict, total=False):
     completed: int
     failed: int
     est_tokens: int
-    input_tokens: int
-    output_tokens: int
-    cached_tokens: int
-    cache_write_tokens: int | None
-    request_usage: list[pricing.RequestTokens]
 
 
 BatchEventHook = Callable[[str, str, BatchEventCounts], None] | None
@@ -228,60 +223,6 @@ def _extract_output_text(body: dict) -> str | None:
                 if content.get("type") == "output_text":
                     return content.get("text")
     return None
-
-
-def _emit_usage(
-    on_event: BatchEventHook,
-    batch_id: str,
-    status: str,
-    results: dict[str, BatchResult],
-) -> None:
-    if on_event is None:
-        return
-    input_tokens = output_tokens = cached_tokens = 0
-    cache_write_tokens = 0
-    saw_usage = False
-    cache_write_known = True
-    request_usage: list[pricing.RequestTokens] = []
-    for r in results.values():
-        if not r.usage:
-            cache_write_known = False
-            continue
-        saw_usage = True
-        input_tokens += r.usage.get("input_tokens", 0) or 0
-        output_tokens += r.usage.get("output_tokens", 0) or 0
-        cached = (r.usage.get("input_tokens_details") or {}).get("cached_tokens", 0) or 0
-        details = r.usage.get("input_tokens_details") or {}
-        write = details.get("cache_write_tokens") if "cache_write_tokens" in details else None
-        if write is None:
-            cache_write_known = False
-        else:
-            cache_write_tokens += write
-        cached_tokens += cached
-        request_usage.append(
-            {
-                "input_tokens": r.usage.get("input_tokens", 0) or 0,
-                "output_tokens": r.usage.get("output_tokens", 0) or 0,
-                "cached_tokens": cached,
-                "cache_write_tokens": write,
-            }
-        )
-    try:
-        on_event(
-            batch_id,
-            status,
-            {
-                "input_tokens": input_tokens,
-                "output_tokens": output_tokens,
-                "cached_tokens": cached_tokens,
-                "cache_write_tokens": cache_write_tokens
-                if saw_usage and cache_write_known
-                else None,
-                "request_usage": request_usage,
-            },
-        )
-    except Exception:
-        logger.exception("batch event hook failed")
 
 
 def _emit(on_event: BatchEventHook, batch: Batch) -> None:
@@ -495,9 +436,7 @@ async def _run_chunk(
         client, specs, model, reasoning_effort, max_output_tokens, on_event
     )
     batch = await _wait_for_batch(client, batch_id, on_event)
-    collected = await _collect_batch(client, batch, results)
-    _emit_usage(on_event, batch.id, batch.status, collected)
-    return collected
+    return await _collect_batch(client, batch, results)
 
 
 async def submit_batches(
@@ -671,12 +610,6 @@ async def collect_finished_batches(
             continue
         collected: dict[str, BatchResult] = {}
         await _collect_batch(client, batch, collected, create_missing=True)
-        _emit_usage(
-            on_event,
-            batch.id,
-            batch.status,
-            collected,
-        )
         results.extend(collected.values())
     return results, unfinished
 
