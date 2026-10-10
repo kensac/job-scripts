@@ -138,15 +138,8 @@ class AiInstructionText(Base):
 
 
 class AiPrompt(Base):
-    """One row per distinct instruction text, whatever sends it.
-
-    Production carries 21 distinct prompts across 68,735 ai_queries rows, so
-    the text is affordable here in a way it is not per-row: 32 KB against the
-    75 MB the same text costs stored beside every request that used it.
-
-    Not a resolution key. Changing a filter's prompt is meant to fork its
-    verdict log; changing an extraction prompt must not invalidate the catalog.
-    """
+    """Nothing reads or writes this. It stays modelled until the release that
+    drops it, because images that still write it may be running."""
 
     __tablename__ = "ai_prompts"
     __table_args__ = (Index("idx_ai_prompts_purpose", "purpose", "last_seen_at"),)
@@ -163,12 +156,7 @@ class AiPrompt(Base):
 
 
 class AiPromptSample(Base):
-    """A bounded sample of what a prompt version actually produced.
-
-    Bounded because a sample is what answers "what changed", and the
-    destination tables already hold the current answer - what they do not hold
-    is the previous one, which is the half a prompt-change review needs.
-    """
+    """Nothing reads or writes this; dropped with ai_prompts."""
 
     __tablename__ = "ai_prompt_samples"
     __table_args__ = (Index("idx_ai_prompt_samples_prompt", "prompt_id", "id"),)
@@ -206,6 +194,7 @@ class AiBatch(Base):
     failed_count: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
     status: Mapped[str] = mapped_column(Text, server_default=text("'submitted'"))
     est_tokens: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
+    # Nothing reads or writes this; dropped with ai_prompts.
     prompt_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("ai_prompts.id"))
     input_tokens: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
     output_tokens: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))

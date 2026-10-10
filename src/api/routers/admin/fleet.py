@@ -547,15 +547,11 @@ def queue_summary(hours: int = 6, user: AuthedUser = Depends(require_admin)) -> 
 _BATCH_COLS = (
     "id, provider_batch_id, task_id, purpose, model, requests, completed, failed_count, "
     "status, submitted_at, updated_at, completed_at, est_tokens, input_tokens, "
-    "output_tokens, cache_write_tokens, est_cost_usd, prompt_id"
+    "output_tokens, cache_write_tokens, est_cost_usd"
 )
 
 
 class BatchRecord(BaseModel):
-    """A batch as stored. `prompt_id` is the prompt version it was submitted
-    under, which is what makes a batch's answers attributable to a prompt
-    rather than to a model alone."""
-
     id: int
     provider_batch_id: str
     task_id: int | None
@@ -573,7 +569,6 @@ class BatchRecord(BaseModel):
     output_tokens: int
     cache_write_tokens: int | None
     est_cost_usd: float | None
-    prompt_id: int | None
 
 
 class BatchedCheck(BaseModel):

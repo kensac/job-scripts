@@ -1,5 +1,5 @@
 """Provider batches: submitting one, parking the task on it, collecting it,
-and recording what it cost and what it was asked.
+and recording what it cost.
 
 A batch lives provider-side while it queues, so a worker polling one does no
 work. The park in here is what frees the slot, and the batch ids in the task
@@ -21,7 +21,6 @@ from api.ai.batch_results import snapshot_specs as snapshot_specs
 from api.task_config import configured_model, configured_shape
 from core import pricing
 from core.batch import BatchEventCounts, BatchResult
-from core.prompts import PROMPT_SAMPLE_SIZE, prompt_hash
 from core.routing import Choice, TaskShape, resolve
 from tasks.runtime.lifecycle import claim_guard
 
@@ -107,7 +106,7 @@ def _batch_metadata(task_id: int, batch_ids: list[str]) -> dict[str, dict]:
     return {
         row["provider_batch_id"]: row
         for row in db.query(
-            "SELECT provider_batch_id, model, prompt_id FROM ai_batches "
+            "SELECT provider_batch_id, model FROM ai_batches "
             "WHERE task_id = %s AND provider_batch_id = ANY(%s)",
             (task_id, batch_ids),
         )
@@ -118,7 +117,6 @@ def batch_event_hook(
     task_id: int,
     purpose: str,
     model: str | None,
-    prompt_id: int | None = None,
     *,
     charged_to_user: bool = False,
 ):
@@ -134,7 +132,6 @@ def batch_event_hook(
     def record_event(batch_id: str, status: str, counts: BatchEventCounts) -> None:
         persisted = metadata.get(batch_id, {})
         event_model = persisted.get("model") if batch_id in resumed_ids else model
-        event_prompt_id = persisted.get("prompt_id") if batch_id in resumed_ids else prompt_id
         if "input_tokens" in counts or "output_tokens" in counts:
             # Keep request boundaries: pricing tiers apply to individual prompts.
             inp = counts.get("input_tokens", 0)
@@ -198,11 +195,9 @@ def batch_event_hook(
         db.execute(
             """
             INSERT INTO ai_batches (provider_batch_id, task_id, purpose, model,
-                                    requests, completed, failed_count, status, est_tokens,
-                                    prompt_id)
+                                    requests, completed, failed_count, status, est_tokens)
             VALUES (%(bid)s, %(tid)s, %(purpose)s, %(model)s,
-                    %(requests)s, %(completed)s, %(failed)s, %(status)s, %(est)s,
-                    %(prompt_id)s)
+                    %(requests)s, %(completed)s, %(failed)s, %(status)s, %(est)s)
             ON CONFLICT (provider_batch_id) DO UPDATE SET
                 requests = GREATEST(ai_batches.requests, EXCLUDED.requests),
                 completed = EXCLUDED.completed,
@@ -224,7 +219,6 @@ def batch_event_hook(
                 "failed": counts.get("failed", 0),
                 "status": status,
                 "est": counts.get("est_tokens", 0),
-                "prompt_id": event_prompt_id,
             },
         )
         _record_batch_ids(task_id, [batch_id])
@@ -235,71 +229,6 @@ def batch_event_hook(
         events.publish_task(task_id)
 
     return on_event
-
-
-def _record_prompt(purpose: str, instructions: str) -> int | None:
-    """One row per distinct instruction text, and its id.
-
-    Upsert rather than insert: the same prompt runs every cycle, and the row
-    that matters is the first sighting plus the fact that it is still in use.
-    Returns None rather than raising if the write fails - provenance is
-    reporting, and losing it must never take down a sweep that is otherwise
-    ready to spend money correctly.
-    """
-    try:
-        row = db.query_one(
-            """
-            INSERT INTO ai_prompts (prompt_hash, purpose, instructions, batches)
-            VALUES (%(hash)s, %(purpose)s, %(instructions)s, 1)
-            ON CONFLICT (prompt_hash) DO UPDATE
-                SET last_seen_at = now(), batches = ai_prompts.batches + 1
-            RETURNING id
-            """,
-            {
-                "hash": prompt_hash(instructions),
-                "purpose": purpose,
-                "instructions": instructions,
-            },
-        )
-        return row["id"] if row else None
-    except Exception:
-        logger.warning(f"could not record prompt for {purpose}", exc_info=True)
-        return None
-
-
-def _record_prompt_samples(prompt_id: int | None, results: list[BatchResult]) -> None:
-    """Up to PROMPT_SAMPLE_SIZE outputs per prompt version, never more.
-
-    The cap is per prompt rather than per sweep, so a prompt running hourly for
-    a year holds 100 rows and not 8,760. Counting first and inserting the
-    remainder is a race between two workers finishing batches at once, and the
-    race is harmless: the loser overshoots the cap by a few rows, which costs
-    bytes rather than correctness. A unique constraint would turn that into a
-    failed sweep.
-
-    Errored lines are sampled too, with their error instead of an output. A
-    prompt change that starts producing unparseable JSON is exactly the change
-    worth seeing, and it leaves no output to record.
-    """
-    if prompt_id is None or not results:
-        return
-    try:
-        held = db.query_one(
-            "SELECT COUNT(*) AS n FROM ai_prompt_samples WHERE prompt_id = %s", (prompt_id,)
-        )
-        room = PROMPT_SAMPLE_SIZE - ((held or {}).get("n") or 0)
-        if room <= 0:
-            return
-        rows = [(prompt_id, res.custom_id, res.text, res.error) for res in results[:room]]
-        if rows:
-            with db.pool.connection() as conn:
-                conn.cursor().executemany(
-                    "INSERT INTO ai_prompt_samples (prompt_id, custom_id, output, error) "
-                    "VALUES (%s, %s, %s, %s)",
-                    rows,
-                )
-    except Exception:
-        logger.warning("could not record prompt samples", exc_info=True)
 
 
 async def run_batched(
@@ -343,13 +272,7 @@ async def run_batched(
         per_call = chosen.est_cost_usd or Decimal(0)
         budget.check_fleet_budget(per_call * len(specs))
     logger.info(f"Task {task_id}: {purpose} on {chosen.model} - {chosen.reason}")
-    # Every spec in a sweep carries the same instructions - they are module
-    # constants - so the first is the prompt for the batch. Recorded before
-    # submitting, so a sweep that dies mid-flight still says what it asked.
-    prompt_id = _record_prompt(purpose, specs[0].instructions) if specs else None
-    hook = batch_event_hook(
-        task_id, purpose, chosen.model, prompt_id=prompt_id, charged_to_user=charged_to_user
-    )
+    hook = batch_event_hook(task_id, purpose, chosen.model, charged_to_user=charged_to_user)
     results = await submit_or_collect(
         task_id,
         specs,
@@ -362,7 +285,6 @@ async def run_batched(
         shape.max_output_tokens,
         hook,
     )
-    _record_prompt_samples(prompt_id, results)
     return results, chosen
 
 
@@ -448,14 +370,6 @@ async def collect_pending(task_id: int, hook) -> list[BatchResult]:
                 metadata.get(result.batch_id, {}).get("model") if result.batch_id else None
             )
         batch_results.checkpoint(task_id, results, unfinished)
-        samples: dict[int, list[BatchResult]] = {}
-        for result in results:
-            if result.batch_id and (
-                prompt_id := metadata.get(result.batch_id, {}).get("prompt_id")
-            ):
-                samples.setdefault(prompt_id, []).append(result)
-        for prompt_id, sampled in samples.items():
-            _record_prompt_samples(prompt_id, sampled)
     return batch_results.unconsumed(task_id)
 
 
