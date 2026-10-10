@@ -161,13 +161,7 @@ async def test_handler_attributes_usage_and_atomically_replaces_projection(f, mo
         "user_id": None,
         "total_tokens": 12,
     }
-    assert db.query_one(
-        "SELECT job_id, projection_revision, resolved_model FROM managed_board_jobs"
-    ) == {
-        "job_id": job_id,
-        "projection_revision": board["revision"],
-        "resolved_model": "gpt-5.6-luna",
-    }
+    assert db.query_one("SELECT job_id FROM managed_board_jobs") == {"job_id": job_id}
 
 
 @pytest.mark.asyncio
@@ -388,9 +382,8 @@ async def test_sponsor_filter_reuse_projects_only_exact_machine_results_without_
         lambda *args, **kwargs: pytest.fail("reuse mode must not make model calls"),
     )
     await managed_task.handle_run_managed_board(queued.json()["task_id"], payload)
-    assert db.query_one("SELECT job_id, resolved_model FROM managed_board_jobs") == {
+    assert db.query_one("SELECT job_id FROM managed_board_jobs") == {
         "job_id": included_id,
-        "resolved_model": "gpt-5.6-luna",
     }
     assert db.query_one("SELECT count(*) AS n FROM api_usage")["n"] == 0
     cost = client.get(f"/v1/admin/managed-boards/{board['id']}/cost", headers=admin_headers)
@@ -409,8 +402,7 @@ def test_projection_revision_cas_preserves_previous_projection(f):
     )
     assert board is not None
     db.execute(
-        "INSERT INTO managed_board_jobs (managed_board_id, job_id, sort_at, projection_revision) "
-        "VALUES (%s, %s, now(), 1)",
+        "INSERT INTO managed_board_jobs (managed_board_id, job_id, sort_at) VALUES (%s, %s, now())",
         (board["id"], old_job),
     )
     db.execute("UPDATE managed_boards SET revision = 2 WHERE id = %s", (board["id"],))

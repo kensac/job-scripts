@@ -638,9 +638,8 @@ def replace_projection(
                 WITH candidate AS (
                   SELECT * FROM unnest(%(ids)s::bigint[], %(sort)s::timestamptz[]) AS c(job_id, sort_at)
                 ), inserted AS (
-                  INSERT INTO managed_board_jobs
-                    (managed_board_id, job_id, sort_at, projection_revision, resolved_model)
-                  SELECT %(board)s, job_id, sort_at, %(revision)s, %(model)s
+                  INSERT INTO managed_board_jobs (managed_board_id, job_id, sort_at)
+                  SELECT %(board)s, job_id, sort_at
                   FROM candidate ORDER BY sort_at DESC, job_id DESC RETURNING 1
                 ) SELECT count(*) AS n FROM inserted
                 """,
@@ -648,8 +647,6 @@ def replace_projection(
                     "ids": ids,
                     "sort": sort_at,
                     "board": board.id,
-                    "revision": payload["revision"],
-                    "model": payload["requested_model"],
                 },
             )
         else:
@@ -666,9 +663,8 @@ def replace_projection(
                 AND q.status IN ('passed', 'rejected', 'failed')
               ORDER BY j.id, q.id DESC NULLS LAST
             ), inserted AS (
-              INSERT INTO managed_board_jobs
-                (managed_board_id, job_id, sort_at, projection_revision, resolved_model)
-              SELECT %(board)s, c.job_id, c.sort_at, %(revision)s, %(model)s
+              INSERT INTO managed_board_jobs (managed_board_id, job_id, sort_at)
+              SELECT %(board)s, c.job_id, c.sort_at
               FROM candidate c LEFT JOIN latest l USING (job_id)
               WHERE l.status = 'passed' OR (NOT %(fail_closed)s AND l.status IS DISTINCT FROM 'rejected')
               ORDER BY c.sort_at DESC, c.job_id DESC
