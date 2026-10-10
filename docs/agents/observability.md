@@ -710,6 +710,17 @@ managed batch payload carries its whole job list (up to 1.9 MB), so every
 rewritten payload, for counters with no reader. Per-result observations go in a
 row keyed by what they observe, or are derived when read.
 
+**A run's settings are stored once, and its payload points at them.** A filter
+chunk and a managed board run carry `config_id`, a row of `run_configs`
+interned by digest through `api.run_configs.intern`, instead of a copy of the
+filter or the board's settings. Measured 2026-10-10: 8 distinct filter copies
+over 17,733 chunks (81 MB of payload text) and 22 distinct board copies over
+950 runs (88 MB, almost all the `sources` list). What changes per run (the
+revision, the resolved model, the reservation, `urls`) stays in the payload.
+Handlers read the settings through `api.run_configs.filter_of` and
+`with_board_settings`, which also accept a payload that still holds the old
+copy; `tasks.board.submission_exclusions` is the one SQL reader.
+
 ## Historical embedding receipt payloads
 
 `api.ai.receipt_payloads` copies only vector arrays from consumed receipts of

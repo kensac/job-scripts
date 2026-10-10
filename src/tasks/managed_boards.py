@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from api import ai, db
+from api import ai, db, run_configs
 from api import managed_board_runs as runs
 from api.model_calls import Payer
 from core import providers, routing
@@ -23,6 +23,7 @@ class _Content:
 
 async def handle_run_managed_board(task_id: int, payload: dict[str, Any]) -> None:
     """Receive only pre-cutover live work and projection-only reuse work."""
+    payload = run_configs.with_board_settings(payload)
     if payload.get("execution_mode") == "sponsor_filter_reuse":
         all_jobs = runs.run_jobs(payload)
         set_progress(task_id, 0, len(all_jobs), "projecting stored filter outcomes")
@@ -39,6 +40,7 @@ async def handle_run_managed_board(task_id: int, payload: dict[str, Any]) -> Non
 
 async def handle_run_managed_board_batch(task_id: int, payload: dict[str, Any]) -> None:
     """Receive only versioned managed-filter work admitted after the cutover."""
+    payload = run_configs.with_board_settings(payload)
     if payload.get("execution_mode") != "managed_filter":
         raise ValueError("managed board batch task must use managed_filter execution")
     await _handle_managed_filter(task_id, payload, legacy_live=False)
