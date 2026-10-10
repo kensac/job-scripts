@@ -15,6 +15,7 @@ from tasks.application import handle_application_draft, handle_application_sweep
 from tasks.batches import handle_poll_batches
 from tasks.board import handle_recompute_board
 from tasks.comp import PAY
+from tasks.comp_copy import handle_copy_job_comp
 from tasks.content import handle_fetch_missing_content
 from tasks.derive import Derivation
 from tasks.digests import handle_send_digests
@@ -78,6 +79,7 @@ HANDLERS = {
     "run_managed_board_batch": handle_run_managed_board_batch,
     "backfill_mail_pointers": handle_backfill_mail_pointers,
     "merge_olm_twins": handle_merge_olm_twins,
+    "copy_job_comp": handle_copy_job_comp,
     **{d.kind: d.handle for d in DERIVATIONS},
 }
 
