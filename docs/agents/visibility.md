@@ -140,7 +140,7 @@ each surfacing only as a refusal.
 `run_filter` (or `run_all_filters`) task for any person; with
 `ignore_budget: true` the task, and the chunks it splits into, load their
 entitlement with the weekly cap lifted for that run alone, the spend still
-recorded in `api_usage`. Only an admin can queue it (the person's own run
+recorded in `model_calls`. Only an admin can queue it (the person's own run
 endpoints never set the flag), and the same flag on a task row written by
 hand works the same way. Raising `group_budgets.weekly_token_budget` for a
 run and putting it back is not the tool for this.

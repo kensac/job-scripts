@@ -85,7 +85,7 @@ def test_live_usage_is_recorded_once_with_cache_even_without_usable_output(
             result = client.post(path, json=body, headers=user_headers)
             assert result.status_code == (200 if usable else 502), result.text
     rows = db.query(
-        "SELECT user_id, key_source, purpose, cached_tokens, total_tokens, batched, cost_usd FROM api_usage"
+        "SELECT user_id, key_source, purpose, cached_tokens, total_tokens, batched, cost_usd FROM model_calls"
     )
     assert rows == [
         {

@@ -111,11 +111,10 @@ async def test_packed_resume_and_replay_without_key_preserve_vectors(f, monkeypa
     task_id, _originals = _receipt(f)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     await embeddings.handle_embed_postings_batch(task_id, {})
-    rows = db.query("SELECT url,created_at,input_tokens FROM job_embeddings ORDER BY url")
+    rows = db.query("SELECT url,created_at FROM job_embeddings ORDER BY url")
     assert len(rows) == 2
-    assert [row["input_tokens"] for row in rows] == [50, 50]
     await embeddings.handle_embed_postings_batch(task_id, {})
-    assert db.query("SELECT url,created_at,input_tokens FROM job_embeddings ORDER BY url") == rows
+    assert db.query("SELECT url,created_at FROM job_embeddings ORDER BY url") == rows
     assert batch_results.progress_counts(task_id) == (1, 1)
 
 
@@ -188,20 +187,6 @@ def test_responses_snapshots_and_receipts_retain_legacy_shape(f):
 def test_embedding_input_limit_applies_across_packed_requests(monkeypatch):
     monkeypatch.setattr(batch, "BATCH_MAX_REQUESTS", 3)
     assert [len(chunk) for chunk in batch._chunk_specs([_spec(), _spec()], 0)] == [1, 1]
-
-
-@pytest.mark.asyncio
-async def test_missing_provider_usage_remains_unknown(f):
-    task_id, _ = _receipt(f)
-    db.execute(
-        "UPDATE batch_result_receipts SET response=response || '{\"usage\":null}'::jsonb WHERE task_id=%s",
-        (task_id,),
-    )
-    await embeddings.handle_embed_postings_batch(task_id, {})
-    assert db.query("SELECT input_tokens,cost_usd FROM job_embeddings") == [
-        {"input_tokens": None, "cost_usd": None},
-        {"input_tokens": None, "cost_usd": None},
-    ]
 
 
 @pytest.mark.asyncio

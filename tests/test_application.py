@@ -335,7 +335,7 @@ class TestDrafting:
         )
         # Booked to the person, under the task's own purpose.
         usage = db.query_one(
-            "SELECT purpose, sum(total_tokens) AS t FROM api_usage WHERE user_id = %s GROUP BY 1",
+            "SELECT purpose, sum(total_tokens) AS t FROM model_calls WHERE user_id = %s GROUP BY 1",
             (uid,),
         )
         assert (usage["purpose"], usage["t"]) == ("application", 120)

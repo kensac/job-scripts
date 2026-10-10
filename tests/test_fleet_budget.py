@@ -177,20 +177,30 @@ class TestFilterWorkIsNotFleetWork:
     same work, reporting $1.6134 of filter spend where $0.5813 was real.
     """
 
-    def _fire(self, purpose, **kw):
+    def _fire(self, purpose, batch_id="b-usage", tokens=1000, **kw):
+        """A batch submitted and collected: its one item reaches the ledger."""
+        from api.ai import batch_results
+        from core.batch import BatchResult
         from tasks.runtime import batch_event_hook
 
-        hook = batch_event_hook(1, purpose, "gpt-5-nano", **kw)
-        hook("b-usage", "submitted", {"requests": 1, "completed": 0, "failed": 0})
-        hook("b-usage", "completed", {"input_tokens": 1000, "output_tokens": 100})
+        task_id = db.query_one(
+            "INSERT INTO tasks (kind, payload, status) VALUES ('run_filter_batch_chunk', "
+            "'{}'::jsonb, 'running') RETURNING id"
+        )["id"]
+        hook = batch_event_hook(task_id, purpose, "gpt-5-nano", **kw)
+        hook(batch_id, "submitted", {"requests": 1, "completed": 0, "failed": 0})
+        usage = {"input_tokens": tokens, "output_tokens": 100, "total_tokens": tokens + 100}
+        batch_results.checkpoint(
+            task_id, [BatchResult("item", text="{}", usage=usage, batch_id=batch_id)], []
+        )
 
     def _fleet_rows(self, purpose):
         return db.query(
-            "SELECT * FROM api_usage WHERE user_id IS NULL AND purpose = %s", (purpose,)
+            "SELECT * FROM model_calls WHERE user_id IS NULL AND purpose = %s", (purpose,)
         )
 
-    def test_work_charged_to_a_user_is_not_charged_to_the_fleet_as_well(self):
-        self._fire("filter", payer=Payer(user_id=1))
+    def test_work_charged_to_a_user_is_not_charged_to_the_fleet_as_well(self, f):
+        self._fire("filter", payer=Payer(user_id=f.make_user()))
         assert self._fleet_rows("filter") == []
 
     def test_fleet_work_still_books_against_the_fleet(self):
@@ -199,26 +209,24 @@ class TestFilterWorkIsNotFleetWork:
         self._fire("comp")
         assert len(self._fleet_rows("comp")) == 1
 
-    def test_the_batch_row_is_written_either_way(self):
-        """Only the ledger entry is suppressed. ai_batches is the record of
-        what the provider did and is not about who pays."""
-        self._fire("filter", payer=Payer(user_id=1))
-        row = db.query_one("SELECT input_tokens FROM ai_batches WHERE provider_batch_id='b-usage'")
-        assert row is not None and row["input_tokens"] == 1000
+    def test_the_batch_row_records_who_pays(self, f):
+        user = f.make_user()
+        self._fire("filter", payer=Payer(user_id=user))
+        row = db.query_one(
+            "SELECT payer, payer_id FROM ai_batches WHERE provider_batch_id = 'b-usage'"
+        )
+        assert row == {"payer": "user", "payer_id": user}
 
-    def test_a_users_filter_run_cannot_consume_the_fleet_ceiling(self, set_config, monkeypatch):
+    def test_a_users_filter_run_cannot_consume_the_fleet_ceiling(self, f, set_config):
         """The control shipped in the spend-ceiling change read this double
         booking as fleet spend, so one person's filters could stop every
         scheduled sweep - which is what its own test said must not happen."""
         set_config("fleet_weekly_cycles", 1)
+        user = f.make_user()
         # Enough to breach several times over, so the assertion is about the
-        # user_id predicate and not about a magnitude that happens to fit.
+        # payer and not about a magnitude that happens to fit.
         for i in range(60):
-            from tasks.runtime import batch_event_hook
-
-            hook = batch_event_hook(1, "filter", "gpt-5-nano", payer=Payer(user_id=1))
-            hook(f"b{i}", "submitted", {"requests": 1, "completed": 0, "failed": 0})
-            hook(f"b{i}", "completed", {"input_tokens": 200_000_000, "output_tokens": 0})
+            self._fire("filter", batch_id=f"b{i}", tokens=200_000_000, payer=Payer(user_id=user))
         budget.check_fleet_budget()
 
 

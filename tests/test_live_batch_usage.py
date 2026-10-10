@@ -88,7 +88,7 @@ async def test_every_consumed_result_records_transport_and_cached_usage(
         await application.draft_rows(
             task_id, uid, [{**job, "job_id": job_id, "key": "why", "question": "Why us?"}]
         )
-    ledger = db.query("SELECT * FROM api_usage WHERE user_id = %s", (uid,))
+    ledger = db.query("SELECT * FROM model_calls WHERE user_id = %s", (uid,))
     assert len(ledger) == 1
     row = ledger[0]
     assert row["batched"] is batched

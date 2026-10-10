@@ -130,7 +130,8 @@ def test_refinement_uses_saved_feedback_and_bills_a_superseded_result(
     assert len(calls) == 1 and "Use the backend project" in calls[0]
     assert fill_answers.read(user_id, fill_id)["fields"][0]["review_value"] == "Newer manual edit"
     assert (
-        db.query_one("SELECT count(*) AS n FROM api_usage WHERE user_id = %s", (user_id,))["n"] == 1
+        db.query_one("SELECT count(*) AS n FROM model_calls WHERE user_id = %s", (user_id,))["n"]
+        == 1
     )
     assert client.post("/v1/user/apply/suggest", headers=user_headers, json=body).status_code == 409
     assert len(calls) == 1

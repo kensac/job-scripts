@@ -60,9 +60,8 @@ class TestCandidateSelection:
 
 
 class TestStore:
-    def test_round_trip_and_price(self, f):
+    def test_round_trip(self, f):
         _, url = f.make_ready_job(content=CONTENT)
-        cost = estimate_cost_usd(EMBEDDING_MODEL, 1132, 0)
         _store(
             [
                 {
@@ -71,20 +70,14 @@ class TestStore:
                     "model": EMBEDDING_MODEL,
                     "hash": "abc",
                     "row_id": 1,
-                    "tokens": 1132,
-                    "cost": cost,
                 }
             ]
         )
         row = db.query_one("SELECT * FROM job_embeddings WHERE url = %s", (url,))
         assert row is not None
         assert row["model"] == EMBEDDING_MODEL
-        assert row["input_tokens"] == 1132
-        # Priced at call time through core.pricing, like every other AI spend,
-        # and stored at a precision that actually holds the figure: at (12, 6)
-        # this assertion fails, because $0.0000226 rounds to $0.000023.
-        assert cost is not None
-        assert row["cost_usd"] == cost
+        # The call's cost is the ledger's (model_calls), not a share on the row.
+        assert row["cost_usd"] is None
 
     def test_re_embedding_replaces_rather_than_raising(self, f):
         _, url = f.make_ready_job(content=CONTENT)
@@ -97,8 +90,6 @@ class TestStore:
                         "model": EMBEDDING_MODEL,
                         "hash": h,
                         "row_id": 1,
-                        "tokens": 1,
-                        "cost": None,
                     }
                 ]
             )
@@ -116,8 +107,6 @@ class TestStore:
                         "model": EMBEDDING_MODEL,
                         "hash": "h",
                         "row_id": 1,
-                        "tokens": 1,
-                        "cost": None,
                     }
                 ]
             )
