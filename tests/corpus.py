@@ -39,6 +39,7 @@ from pathlib import Path
 from typing import Any
 
 from api import db
+from api.mail import current as mail_current
 from core.disposable_db import require_disposable_dsn
 
 PROFILE_PATH = Path(__file__).resolve().parent / "production_profile.json"
@@ -708,6 +709,16 @@ def build(*, target_jobs: int = TARGET_JOBS) -> dict[str, int]:
         written[table] = int(count["c"]) if count else 0
 
     _materialise_boards()
+    # The mail logs were drawn row by row, not appended through their writers,
+    # so each message's current pointers are set here to what the writers
+    # would have left: the newest row of each log. Assigned, not GREATEST, in
+    # case the generator drew a value for the columns themselves.
+    db.execute(
+        f"""
+        UPDATE email_messages m SET current_event_id = n.event_id, current_match_id = n.match_id
+        FROM ({mail_current.NEWEST_IDS}) n WHERE m.id = n.message_id
+        """
+    )
     db.execute(
         "INSERT INTO app_config (key, value) VALUES ('testdb_corpus_seed', %s) "
         "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",

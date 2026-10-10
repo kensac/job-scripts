@@ -17,6 +17,7 @@ import pytest
 from api import db
 from api.mail import match as mail_match
 from tasks import mail_match as match_task
+from tests import mail_log
 from tests.conftest import _auth_headers
 
 SENT = datetime.datetime(2026, 1, 1, tzinfo=datetime.UTC)
@@ -39,7 +40,7 @@ def _msg(uid: int, mid: str, kind: str, company: str | None) -> int:
         (uid, mid, SENT),
     )
     assert row is not None
-    db.execute(
+    mail_log.execute(
         "INSERT INTO email_events (message_id, kind, confidence, detail, model) "
         "VALUES (%s, %s, 'high', %s, 'gpt-5-nano')",
         (row["id"], kind, db.jsonb({"company": company})),
@@ -60,7 +61,7 @@ def _app(uid: int, company: str = "Acme", job_id: int | None = None) -> int:
 def _attach(message_id: int, application_id: int, method: str = "ats_company") -> int:
     """An attachment as the MATCHER writes one: no actor, which is the state
     every one of the 4,674 in production is in."""
-    row = db.query_one(
+    row = mail_log.query_one(
         "INSERT INTO application_matches (message_id, application_id, method, confidence, "
         "rationale) VALUES (%s, %s, %s, 'medium', 'single application at Acme') RETURNING id",
         (message_id, application_id, method),

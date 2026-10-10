@@ -17,6 +17,7 @@ from core import pricing, providers, shapes
 from core.mail.importer import ImportedMessage
 from core.routing import resolve
 from tasks import HANDLERS, mail_classify
+from tests import mail_log
 from tests.factories import make_task
 
 
@@ -644,7 +645,7 @@ async def test_repairing_a_self_sent_message_corrects_it_without_a_model(monkeyp
     row = db.query_one("SELECT id FROM email_messages WHERE user_id = %s", (uid,))
     assert row is not None
     mid = row["id"]
-    db.execute(
+    mail_log.execute(
         "INSERT INTO email_events (message_id, kind, confidence, model) "
         "VALUES (%s, 'offer', 'high', 'gpt-5-mini')",
         (mid,),

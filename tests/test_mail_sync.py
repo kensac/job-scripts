@@ -15,6 +15,7 @@ from api import db, oauth
 from api.mail import store as mail_store
 from core.mail.importer import ImportedMessage
 from tasks import mail_sync
+from tests import mail_log
 
 
 def _connect(user_id: int, *, invalid: bool = False) -> None:
@@ -214,7 +215,7 @@ async def test_resync_does_not_requeue_already_classified_mail(monkeypatch, f):
     await mail_sync.handle_sync_gmail(1, {"user_id": uid})
 
     message_id = db.query_one("SELECT id FROM email_messages WHERE user_id = %s", (uid,))["id"]
-    db.execute(
+    mail_log.execute(
         "INSERT INTO email_events (message_id, kind, confidence, model) VALUES (%s,%s,%s,%s)",
         (message_id, "rejection", 0.9, "test"),
     )

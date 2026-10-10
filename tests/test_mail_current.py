@@ -14,6 +14,7 @@ import re
 
 from api import db
 from api.mail.current import current_event, current_match
+from tests import mail_log
 
 _SRC = pathlib.Path(__file__).resolve().parent.parent / "src"
 _OWNER = _SRC / "api" / "mail" / "current.py"
@@ -74,14 +75,14 @@ def _fill(f) -> None:
             (user, f"<m{n}@x>"),
         )["id"]
         for i, kind in enumerate(kinds):
-            db.execute(
+            mail_log.execute(
                 "INSERT INTO email_events (message_id, kind, confidence, detail, model, "
                 "occurred_at, deadline_inferred) "
                 "VALUES (%s, %s, %s, %s, %s, now(), %s)",
                 (mid, kind, f"c{i}", db.jsonb({"company": f"co{i}"}), f"m{i}", i % 2 == 1),
             )
         for app, method, actor in matches:
-            db.execute(
+            mail_log.execute(
                 "INSERT INTO application_matches (message_id, application_id, method, "
                 "confidence, rationale, actor_user_id) VALUES (%s, %s, %s, 'high', 'why', %s)",
                 (mid, app, method, actor),

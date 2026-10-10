@@ -11,6 +11,7 @@ from __future__ import annotations
 from api import db
 from core.identity import MAX_IDENTITIES, AddressCount, derive_identities
 from tasks.mail_classify import _SELF_SENT, _heal_self_sent, identities_for
+from tests import mail_log
 
 
 class TestDerivingTheIdentitySet:
@@ -138,7 +139,7 @@ class TestHealing:
             (f.make_user(), f"h{kind}{from_email}", from_email),
         )
         assert row is not None
-        db.execute(
+        mail_log.execute(
             "INSERT INTO email_events (message_id, kind, confidence, detail, model) "
             "VALUES (%s, %s, 'high', '{}'::jsonb, 'gpt-5.6-luna')",
             (row["id"], kind),

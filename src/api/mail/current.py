@@ -45,19 +45,17 @@ def stale_pointers() -> int:
     return int(row["n"]) if row else 0
 
 
-def _newest(table: str, columns: tuple[str, ...]) -> str:
-    return (
-        f"SELECT DISTINCT ON (message_id) {', '.join(('message_id', *columns))} "
-        f"FROM {table} ORDER BY message_id, id DESC"
-    )
+def _through(pointer: str, table: str, columns: tuple[str, ...]) -> str:
+    listed = ", ".join(("p.id AS message_id", *(f"r.{c}" for c in columns)))
+    return f"SELECT {listed} FROM email_messages p JOIN {table} r ON r.id = p.{pointer}"
 
 
 def current_event(*columns: str) -> str:
     """The newest `email_events` row per message: `message_id` and `columns`."""
-    return _newest("email_events", columns)
+    return _through("current_event_id", "email_events", columns)
 
 
 def current_match(*columns: str) -> str:
     """The newest `application_matches` row per message: `message_id` and
     `columns`. A null `application_id` is a recorded outcome, not an absence."""
-    return _newest("application_matches", columns)
+    return _through("current_match_id", "application_matches", columns)

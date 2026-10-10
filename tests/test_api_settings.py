@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from tests import mail_log
+
 # ---------------------------------------------------------------------------
 # PUT /v1/user/settings - ai_model / ai_params validation
 # ---------------------------------------------------------------------------
@@ -198,11 +200,11 @@ def _apply_event(f, user_id: int, job_id: int, kind: str) -> None:
         (user_id, f"fn-{job_id}"),
     )
     assert msg is not None
-    db.execute(
+    mail_log.execute(
         "INSERT INTO email_events (message_id, kind, confidence) VALUES (%s, %s, 'high')",
         (msg["id"], kind),
     )
-    db.execute(
+    mail_log.execute(
         "INSERT INTO application_matches (message_id, application_id, method, confidence) "
         "VALUES (%s, %s, 'ats_company', 'high')",
         (msg["id"], app["id"]),
@@ -257,11 +259,11 @@ def test_a_stage_reached_then_superseded_still_counts(client, user_headers, f):
         "subject, sent_at) VALUES (%s, 'fn-later', 'takeout', 'a@b.com', 's', now()) RETURNING id",
         (uid,),
     )
-    db.execute(
+    mail_log.execute(
         "INSERT INTO email_events (message_id, kind, confidence) VALUES (%s, 'rejection', 'high')",
         (msg["id"],),
     )
-    db.execute(
+    mail_log.execute(
         "INSERT INTO application_matches (message_id, application_id, method, confidence) "
         "VALUES (%s, %s, 'ats_company', 'high')",
         (msg["id"], app["id"]),
@@ -290,7 +292,7 @@ def test_a_corrected_kind_and_a_moved_message_reach_no_stage(client, user_header
     msg = db.query_one(
         "SELECT id FROM email_messages WHERE provider_message_id = %s", (f"fn-{job_id}",)
     )
-    db.execute(
+    mail_log.execute(
         "INSERT INTO email_events (message_id, kind, confidence) VALUES (%s, 'rejection', 'high')",
         (msg["id"],),
     )
@@ -299,12 +301,12 @@ def test_a_corrected_kind_and_a_moved_message_reach_no_stage(client, user_header
         "subject, sent_at) VALUES (%s, 'fn-moved', 'takeout', 'a@b.com', 's', now()) RETURNING id",
         (uid,),
     )
-    db.execute(
+    mail_log.execute(
         "INSERT INTO email_events (message_id, kind, confidence) VALUES (%s, 'assessment_invite', 'high')",
         (moved["id"],),
     )
     for application_id in (app["id"], None):
-        db.execute(
+        mail_log.execute(
             "INSERT INTO application_matches (message_id, application_id, method, confidence) "
             "VALUES (%s, %s, 'ats_company', 'high')",
             (moved["id"], application_id),

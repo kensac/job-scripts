@@ -16,6 +16,7 @@ from api.routers.companies import (
     _response_block,
     _ResponseRow,
 )
+from tests import mail_log
 
 OUTCOMES = list(_OUTCOME_KINDS)
 
@@ -42,11 +43,11 @@ def _reply(uid: int, app_id: int, kind: str, *, domain: str, day: int) -> None:
         ),
     )
     assert msg is not None
-    db.execute(
+    mail_log.execute(
         "INSERT INTO email_events (message_id, kind, confidence) VALUES (%s, %s, 'high')",
         (msg["id"], kind),
     )
-    db.execute(
+    mail_log.execute(
         "INSERT INTO application_matches (message_id, application_id, method, confidence) "
         "VALUES (%s, %s, 'company_name', 'high')",
         (msg["id"], app_id),
