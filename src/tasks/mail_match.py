@@ -18,6 +18,7 @@ so the wrong order poisons the matcher permanently and silently.
 
 from __future__ import annotations
 
+import datetime
 import logging
 from collections.abc import Callable
 from functools import partial
@@ -387,6 +388,7 @@ def match_pending(
     user_id: int,
     *,
     limit: int | None = None,
+    since: datetime.datetime | None = None,
     progress: Callable[[int, int], None] | None = None,
 ) -> dict[str, int]:
     """Run the tiers over every job-related message with no match recorded.
@@ -434,18 +436,28 @@ def match_pending(
           -- created after their verdict was written. Or the message was
           -- reclassified, so a different rule now applies, which is what
           -- leaves a recruiter approach holding a stale `unmatched`.
+          --
+          -- "Since we last looked" is the later of the verdict and the start
+          -- of the last finished sweep, not the verdict alone. `record` does
+          -- not append a verdict identical to the standing one, so the
+          -- verdict's timestamp never moves for a message that keeps coming
+          -- back `unmatched`: every application newer than it re-selected the
+          -- message on every run, forever. Measured on production for the 14
+          -- days to 2026-10-10: 245 runs, 200.5 worker-hours, each deciding
+          -- the same 4,852 messages again, and 244 of them changed nothing.
           AND (
               cm.message_id IS NULL
-              OR e.created_at > cm.created_at
+              OR e.created_at > GREATEST(cm.created_at, %(since)s::timestamptz)
               OR EXISTS (
                   SELECT 1 FROM applications a
-                  WHERE a.user_id = %(user)s AND a.created_at > cm.created_at
+                  WHERE a.user_id = %(user)s
+                    AND a.created_at > GREATEST(cm.created_at, %(since)s::timestamptz)
               )
           )
         ORDER BY m.sent_at NULLS LAST, m.id
         """
         + ("LIMIT %(limit)s" if limit else ""),
-        {"user": user_id, "limit": limit},
+        {"user": user_id, "limit": limit, "since": since},
     )
     counts: dict[str, int] = {}
     for index, row in enumerate(rows):
@@ -515,6 +527,88 @@ def detach_unattachable(user_id: int) -> int:
     return len(rows)
 
 
+def last_sweep_start(user_id: int | None = None) -> datetime.datetime | None:
+    """When the newest finished sweep that covered this user (or, with no
+    user, everybody) started. None when there has never been one.
+
+    Its start, not its finish: anything written while it ran may have landed
+    after it read, so it counts as new to the next sweep. A run with a
+    `limit` decided only part of the mail and does not count."""
+    row = db.query_one(
+        """
+        SELECT started_at FROM tasks
+        WHERE kind = 'match_mail' AND status = 'done' AND started_at IS NOT NULL
+          AND payload->>'limit' IS NULL
+          AND (payload->>'user_id' IS NULL OR payload->>'user_id' = %(user)s::text)
+        ORDER BY id DESC LIMIT 1
+        """,
+        {"user": user_id},
+    )
+    return row["started_at"] if row else None
+
+
+# What a sweep reads that can change its answer: a new application (a
+# candidate that was missing), a new event (a reclassified message), a new
+# match (a person's decision, or a sweep's own), and a board row moving into
+# an applied status (a tracker application to seed). Nothing else does, so a
+# sweep after none of these would decide everything exactly as the last one.
+_CHANGED_SINCE = """
+SELECT EXISTS (
+           SELECT 1 FROM applications
+           WHERE created_at > %(since)s AND (%(user)s::bigint IS NULL OR user_id = %(user)s))
+    OR EXISTS (
+           SELECT 1 FROM email_events e JOIN email_messages m ON m.id = e.message_id
+           WHERE e.created_at > %(since)s AND (%(user)s::bigint IS NULL OR m.user_id = %(user)s))
+    OR EXISTS (
+           SELECT 1 FROM application_matches am JOIN email_messages m ON m.id = am.message_id
+           WHERE am.created_at > %(since)s AND (%(user)s::bigint IS NULL OR m.user_id = %(user)s))
+    OR EXISTS (
+           SELECT 1 FROM user_jobs
+           WHERE updated_at > %(since)s AND status = ANY(%(statuses)s)
+             AND (%(user)s::bigint IS NULL OR user_id = %(user)s))
+    AS changed
+"""
+
+
+def changed_since(since: datetime.datetime | None, user_id: int | None = None) -> bool:
+    if since is None:
+        return True
+    row = db.query_one(
+        _CHANGED_SINCE,
+        {"since": since, "user": user_id, "statuses": list(APPLIED_STATUSES)},
+    )
+    return bool(row and row["changed"])
+
+
+def _applications_touched(user_id: int, since: datetime.datetime | None) -> list[int]:
+    """The applications whose action items can have moved since `since`: one
+    created since, or one that a message matched or classified since is or
+    was attached to. The old attachment is included because a rematch strands
+    the item it left behind, and that item has to be closed."""
+    return [
+        r["id"]
+        for r in db.query(
+            """
+            SELECT id FROM applications
+            WHERE user_id = %(user)s
+              AND (%(since)s::timestamptz IS NULL
+                   OR created_at > %(since)s
+                   OR id IN (
+                       SELECT am.application_id FROM application_matches am
+                       WHERE am.message_id IN (
+                           SELECT message_id FROM application_matches
+                           WHERE created_at > %(since)s
+                           UNION
+                           SELECT message_id FROM email_events WHERE created_at > %(since)s
+                       )
+                   ))
+            ORDER BY id
+            """,
+            {"user": user_id, "since": since},
+        )
+    ]
+
+
 def _step_progress(
     task_id: int, index: int, users: int, user_id: int, what: str, done: int, total: int
 ) -> None:
@@ -571,9 +665,15 @@ async def handle_match_mail(task_id: int, payload: dict[str, Any]) -> None:
         "opened": 0,
         "resolved": 0,
     }
+    skipped = 0
     for index, user_id in enumerate(user_ids):
         set_progress(task_id, index, len(user_ids), f"matching user {user_id}")
         step = partial(_step_progress, task_id, index, len(user_ids), user_id)
+        # A partial run decides against everything, as it always did.
+        since = None if limit else last_sweep_start(user_id)
+        if not changed_since(since, user_id):
+            skipped += 1
+            continue
         totals["tracked"] += seed_from_tracker(user_id)
         totals["detached"] += detach_unattachable(user_id)
         # Before matching, so a floor lowered now releases its messages in the
@@ -582,6 +682,7 @@ async def handle_match_mail(task_id: int, payload: dict[str, Any]) -> None:
         counts = match_pending(
             user_id,
             limit=int(limit) if limit else None,
+            since=since,
             progress=partial(step, "messages"),
         )
         totals["swept"] += sum(counts.values())
@@ -596,11 +697,11 @@ async def handle_match_mail(task_id: int, payload: dict[str, Any]) -> None:
         )
         created, _ = seed_from_mail(user_id)
         totals["derived"] += created
-        apps = db.query("SELECT id FROM applications WHERE user_id = %s", (user_id,))
-        for done, app in enumerate(apps):
+        apps = _applications_touched(user_id, since)
+        for done, app_id in enumerate(apps):
             if done % PROGRESS_EVERY == 0:
                 step("applications", done, len(apps))
-            result = sync_action_items(app["id"])
+            result = sync_action_items(app_id)
             totals["opened"] += result["opened"]
             totals["resolved"] += result["resolved"]
 
@@ -611,6 +712,7 @@ async def handle_match_mail(task_id: int, payload: dict[str, Any]) -> None:
         f"{totals['detached']} detached, "
         f"{totals['floors_lowered']} floors lowered, "
         f"{totals['opened']} items opened, {totals['resolved']} resolved"
+        + (f", {skipped} unchanged since the last sweep" if skipped else "")
     )
     logger.info(f"Task {task_id}: {summary}")
     set_progress(task_id, len(user_ids), len(user_ids), summary)

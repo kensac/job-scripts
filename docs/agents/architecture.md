@@ -34,6 +34,18 @@ every column and not a database view, because a CTE referenced twice is
 materialized whole and a view referenced twice is computed twice: the module
 docstring has the production measurements.
 
+**A matcher sweep starts from what changed since the last finished sweep.**
+`tasks/mail_match.last_sweep_start` is the cutoff: the start of the newest
+finished `match_mail` that covered the user and had no `limit`. The worker
+enqueues a sweep only when `changed_since` finds a new application, event or
+match, or a board row moved into an applied status. A sweep skips a user with
+none of these, decides again only messages whose verdict or the cutoff is
+older than a new application or event, and resyncs action items only for the
+applications those changes touch. The verdict timestamp alone is not a
+cutoff, because `match.record` does not append a verdict that repeats the
+standing one. Before this, 245 runs in the 14 days to 2026-10-10 took 200.5
+worker-hours deciding the same 4,852 messages, and 244 of them wrote nothing.
+
 **A request reads the current event and current match once.** "Latest row per
 message" is a pass over every row of both tables, so a surface that needs it
 for several derivations takes it in one statement and derives the rest from

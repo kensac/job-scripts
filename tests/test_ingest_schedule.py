@@ -91,6 +91,37 @@ def test_requirements_extraction_runs_only_when_switched_on(f):
     assert db.query_one("SELECT 1 FROM tasks WHERE kind = 'extract_requirements'")
 
 
+def test_mail_matching_is_scheduled_only_after_a_change(f):
+    from api import worker
+
+    def queued() -> int:
+        row = db.query_one(
+            "SELECT count(*) AS n FROM tasks WHERE kind = 'match_mail' AND status = 'pending'"
+        )
+        assert row is not None
+        return row["n"]
+
+    # Never swept: the first sweep runs.
+    worker.schedule_ingest_cycle()
+    assert queued() == 1
+    # The dedupe key is the cycle's; cleared so only the change check decides.
+    db.execute(
+        "UPDATE tasks SET status = 'done', started_at = now(), dedupe_key = NULL "
+        "WHERE kind = 'match_mail'"
+    )
+    worker.schedule_ingest_cycle()
+    assert queued() == 0, "nothing changed since the last sweep"
+
+    uid = f.make_user()
+    db.execute(
+        "INSERT INTO applications (user_id, company_name, source_provenance) "
+        "VALUES (%s, 'Acme', 'tracker')",
+        (uid,),
+    )
+    worker.schedule_ingest_cycle()
+    assert queued() == 1
+
+
 def test_mail_classification_is_not_scheduled_when_switched_off(f):
     from api import worker
 
