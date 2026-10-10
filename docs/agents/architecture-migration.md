@@ -561,7 +561,19 @@ removed by `b64dadabb22d` when `job_listing_events` arrived.
 source's latest observation of it is `appeared`, `reappeared` or
 `not_listed`, or `filtered` while enforcement is off. A job with
 observations and none of those is unavailable. A job no source has observed
-is `cannot tell`, never a default.
+is `cannot tell`, never a default. Two more rules, decided 2026-10-10:
+
+- `sheet_import` is a switched-off source. It has no `sources` row and
+  nothing pulls it, so its rows are unavailable unless a switched-on source
+  lists them. A person who touched one keeps it through their own state.
+- An administrator's correction (`catalog.set_active`, the admin PATCH) is
+  an observation under the source `admin`, which no `sources` row has. While
+  it is the job's latest observation it decides; a source saying something
+  new about the job ends it. `jobs.active` reopened on the next pull whatever
+  the correction said; this holds it until a source's answer changes.
+
+Enforcement is read from `app_config` inside the SQL, so `AVAILABLE` takes no
+parameter and drops into a query of either placeholder style.
 
 **History is not invented.** The first pull of each source after the dual
 write lands records `appeared` for everything it lists: that row's `at` is
@@ -601,6 +613,31 @@ projected=True` where an aggregator still lists a posting its owning board
 dropped: `retire_unlisted` clears the flag on every pull of the board and the
 aggregator's next upsert sets it again, so the legacy value flips with
 whichever pulled last while the projection holds still.
+
+### Readers move before every source is observed
+
+Decided 2026-10-10: readers take availability from `catalog.IS_AVAILABLE`,
+which is `AVAILABLE` where it can tell and `jobs.active` where it cannot. The
+fallback shrinks as each source's first pull after the dual write lands. On
+2026-10-10, against `jobs.active` over the whole catalog, it differed on
+4,472 rows (all `sheet_import`, now unavailable) and 124 the other way (a
+JSON feed's inactive record against another source that lists the posting).
+A later change drops the fallback once the shadow's `projected=None` cells
+for active rows hold only explained classes.
+
+`IS_AVAILABLE` is a correlated subquery per row. Over the whole catalog it
+costs about 10 seconds where `j.active` costs 0.4, so a reader that scanned
+every active row by the flag is measured on production before it moves.
+
+Every reader of `jobs.active`, and where it stands:
+
+| Reader | Meaning | Stands |
+|---|---|---|
+| `core/catalog.py`: `retire_unlisted`, `retire_switched_off`, the upsert's change test, `correct_posting`, `availability_shadow` | feed state, written and compared | stays |
+| `api/routers/analytics.py` source inventory | the owning feed's own flag, per source | stays |
+| `tasks/comp.py`, `tasks/content.py`, `tasks/verify.py` (three sweeps), `tasks/locations.py`, `tasks/application.py` (three), `api/experiments.py` | which postings get work | moves |
+| `api/board/eligibility.py` `STRUCTURAL`, `tasks/board.py` `demote_closed`, `api/routers/filters.py` preset gates | which postings a board may show | moves |
+| `api/routers/job_board.py`, `job_detail.py`, `public_job_lists.py` (`active` in the response), `api/board/column_filters.py` ("Listed by source"), `api/posting_path.py` | what a person is told | moves |
 
 **Never in a loop:** any write to the production database, and any migration
 that can refuse to apply ([migrations.md](migrations.md)). Neither of these is
