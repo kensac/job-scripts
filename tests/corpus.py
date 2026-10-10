@@ -73,11 +73,12 @@ SEED = 294
 # That is the "conditional vacuity" failure docs/agents/testing.md names.
 LINKS = {
     ("ai_queries", "url"): ("jobs", "url"),
+    ("page_fetches", "url"): ("jobs", "url"),
     ("job_skills", "url"): ("jobs", "url"),
     ("job_requirements", "url"): ("jobs", "url"),
     ("job_embeddings", "url"): ("jobs", "url"),
-    ("job_requirements", "content_row_id"): ("ai_queries", "id"),
-    ("job_embeddings", "content_row_id"): ("ai_queries", "id"),
+    ("job_requirements", "content_row_id"): ("page_fetches", "id"),
+    ("job_embeddings", "content_row_id"): ("page_fetches", "id"),
     # Verdicts are keyed to a filter by the HASH of its prompt, not by its id.
     # Drawn from anywhere else, no custom verdict would ever match an enabled
     # filter and every user's board would be permanently empty.
