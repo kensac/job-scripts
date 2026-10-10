@@ -13,7 +13,7 @@ from urllib.parse import parse_qs, urlparse
 
 import pytest
 
-from core.fetching import boards
+from core.fetching import boards, client
 
 NOW = datetime.datetime(2026, 9, 4, 12, tzinfo=datetime.UTC)
 
@@ -570,12 +570,12 @@ def test_unknown_urls_fall_through_to_the_sheet_era_fetcher(monkeypatch):
 
 def test_workable_paces_its_requests(monkeypatch):
     slept = []
-    monkeypatch.setattr(boards.time, "sleep", lambda s: slept.append(round(s, 1)))
+    monkeypatch.setattr(client.time, "sleep", lambda s: slept.append(round(s, 1)))
     monkeypatch.setattr(
         boards._session, "post", lambda url, json, **kw: _Resp({"total": 0, "results": []})
     )
-    boards._last_call.clear()
-    boards.set_pace({"apply.workable.com": 6})
+    client._last_call.clear()
+    client.set_pace({"apply.workable.com": 6})
     boards.fetch_listings("https://apply.workable.com/api/v3/accounts/a/jobs", "A")
     boards.fetch_listings("https://apply.workable.com/api/v3/accounts/b/jobs", "B")
     # The first call goes straight out; the second waits out the six seconds.
@@ -606,10 +606,10 @@ def test_a_nul_byte_in_a_posting_is_dropped_before_it_reaches_jsonb():
 
 def test_an_unpaced_host_is_not_slowed(monkeypatch):
     slept = []
-    monkeypatch.setattr(boards.time, "sleep", slept.append)
-    boards.set_pace({})
-    boards._pace("apply.workable.com")
-    boards._pace("apply.workable.com")
+    monkeypatch.setattr(client.time, "sleep", slept.append)
+    client.set_pace({})
+    client.pace("https://apply.workable.com/api/v3/accounts/a/jobs")
+    client.pace("https://apply.workable.com/api/v3/accounts/a/jobs")
     assert slept == []
 
 
@@ -1979,11 +1979,11 @@ def test_every_eightfold_tenant_shares_one_pace(monkeypatch):
     """One WAF fronts tenants on different domains, so two tenants' pages wait
     on each other as one host's would."""
     slept = []
-    monkeypatch.setattr(boards.time, "sleep", lambda s: slept.append(round(s, 1)))
+    monkeypatch.setattr(client.time, "sleep", lambda s: slept.append(round(s, 1)))
     monkeypatch.setattr(boards._session, "get", _pcsx_board([], []))
-    monkeypatch.setattr(boards, "_PACE_SECONDS", {})
-    monkeypatch.setattr(boards, "_last_call", {})
-    boards.set_pace({"eightfold.ai": 1})
+    monkeypatch.setattr(client, "_PACE_SECONDS", {})
+    monkeypatch.setattr(client, "_last_call", {})
+    client.set_pace({"eightfold.ai": 1})
     boards.fetch_listings("https://jobs.northropgrumman.com/api/pcsx/search?domain=ngc.com", "N")
     boards.fetch_listings("https://caci.eightfold.ai/api/pcsx/search?domain=caci.com", "C")
     assert slept and 0.0 < slept[-1] <= 1.0
