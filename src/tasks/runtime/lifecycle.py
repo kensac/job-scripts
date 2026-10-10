@@ -99,7 +99,7 @@ def finish(task_id: int, status: str, error: str | None = None) -> None:
         """,
         {
             "status": status,
-            "error": error[:500] if error else None,
+            "error": error,
             "tid": task_id,
             **owned_params,
         },
@@ -115,7 +115,7 @@ def fail_unavailable_payload(task_id: int, error: str) -> None:
         "payload=COALESCE(payload,'{}'::jsonb) || "
         '\'{"payload_recovery":{"reason":"payload_unavailable"}}\'::jsonb '
         f"WHERE id=%(tid)s AND status='running'{owned}",
-        {"tid": task_id, "error": error[:500], **owned_params},
+        {"tid": task_id, "error": error, **owned_params},
     )
     events.publish_task(task_id)
 

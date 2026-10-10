@@ -102,10 +102,9 @@ def has_verdict(url: str, check: str) -> str:
 # smaller slice than the filters admit. Written down here so it is a
 # decision and not an oversight.
 #
-# A retention policy on ai_queries (none exists; it is the largest table and
-# the decision is open) must keep the latest verdict per (url, check_type),
-# or a posting whose verdicts age out silently reads as unverified here and
-# drops out of both extractors, then re-enters them at cost once re-verified.
+# ai_queries is never pruned (docs/agents/engineering-standards.md, "Always
+# retain all data"); this reads the latest verdict per (url, check_type) and
+# relies on it being there.
 def verified_open(url: str) -> str:
     return (
         f"{latest_status(url, 'closed')} = 'passed' "

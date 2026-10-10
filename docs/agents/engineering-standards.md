@@ -31,6 +31,29 @@ is taking off `jobs`, and fails once a listed file stops writing.
 When the same logic exists in several places and one has drifted, delete the
 duplication. Do not fix the copy.
 
+## Always retain all data
+
+**Stored data is never deleted, truncated or capped because of age, count or
+size.** No row ages out, no table keeps its last N rows, no text is cut to N
+characters before it is saved, no payload is dropped after a while. The scale
+here does not call for retention, and data that is gone cannot be measured.
+
+What the rule does not cover:
+
+- A bound on a request or a read: a request field's `max_length`, a page's
+  `limit`, the slice of stored text sent as model input. These refuse or
+  shorten what crosses a boundary; the stored value stays whole.
+- A delete a person asks for (their filter, their resume, their grant), and
+  a delete an administrator makes.
+- Rebuilding a derived projection (`board_visible`, `user_job_working_set`,
+  `managed_board_jobs`, a `job_skills` re-derive), which removes no fact.
+- Removing an exact duplicate (`mail_olm_twins`).
+
+**Because nothing is deleted, existence is not currency.** A reader that
+means "true now" says so with a predicate on the row's own timestamps, never
+by assuming an old row is gone. `catalog.LISTED_NOW` is the worked example
+for `listings`.
+
 ## Constants
 
 **Magic numbers are a shortcut. Derive the constant or name where the value

@@ -203,7 +203,7 @@ def create_resume(body: ResumeCreate, user: AuthedUser = Depends(require_user)) 
                 updated_at = now()
         RETURNING {_RESUME_COLS}
         """,
-        (user.id, body.name.strip(), text[:MAX_RESUME_CHARS], body.filename, data),
+        (user.id, body.name.strip(), text, body.filename, data),
     )
     assert row is not None  # an upsert with RETURNING always yields its row
     return row

@@ -185,11 +185,9 @@ def detect() -> DetectionRun:
                     f"{name} raised {type(exc).__name__}: {str(exc)[:200]}. "
                     "Every alert it owns is unobserved until it runs again."
                 ),
-                "detail": {"error": str(exc)[:1000]},
+                "detail": {"error": str(exc)},
             }
-            outcomes.append(
-                DetectorOutcome(name, (finding,), error=f"{type(exc).__name__}: {str(exc)[:1000]}")
-            )
+            outcomes.append(DetectorOutcome(name, (finding,), error=f"{type(exc).__name__}: {exc}"))
     return DetectionRun(tuple(outcomes))
 
 

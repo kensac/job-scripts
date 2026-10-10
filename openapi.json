@@ -43848,7 +43848,7 @@
           "samples"
         ],
         "title": "PatternPreview",
-        "description": "What a candidate pattern would admit, against every title this board\nhas listed. `would_add` is screened titles it lets in, `would_drop` is\ncatalog titles it turns away. Nothing is written."
+        "description": "What a candidate pattern would admit, against every title this board\nhas listed. `would_add` is screened titles it lets in, `would_drop` is\ncatalog titles it turns away, both among the titles the board lists now.\nNothing is written."
       },
       "PatternPreviewBody": {
         "properties": {
