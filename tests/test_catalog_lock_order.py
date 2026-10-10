@@ -98,3 +98,17 @@ def test_retiring_unlisted_jobs_locks_in_url_order():
     catalog.upsert_postings([_posting(FIRST, "v1")], "board-a")
     _contend("jobs", lambda: catalog.retire_unlisted("board-a", []))
     assert db.query("SELECT url FROM jobs WHERE active") == []
+
+
+def test_observing_locks_in_url_order():
+    """An observation's foreign key share-locks its job row, which conflicts
+    with retire_unlisted's FOR UPDATE."""
+    catalog.upsert_postings([_posting(LAST, "v1")], "board-a")
+    catalog.upsert_postings([_posting(FIRST, "v1")], "board-a")
+    _contend(
+        "jobs",
+        lambda: catalog.observe(
+            "board-a", None, [_posting(LAST, "v1"), _posting(FIRST, "v1")], {FIRST, LAST}, None
+        ),
+    )
+    assert db.query_one("SELECT count(*) AS n FROM source_observations")["n"] == 2

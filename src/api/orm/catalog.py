@@ -286,6 +286,51 @@ class JobListingEvent(Base):
     at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
 
 
+class SourceObservation(Base):
+    """What one source said about one posting, when it changed. Phase 3 of
+    docs/agents/architecture-migration.md.
+
+    One url is one job; each source that lists it observes it separately, so
+    a posting carried by a company board and an aggregator has a history per
+    source. Written by catalog.observe after every pull, only where the
+    source's latest row for the job says something else. Never updated,
+    never deleted: availability is a projection over the latest row per
+    (job, source) and can always be recomputed from here.
+
+    `job_listing_events` is not this. It logs flips of jobs.active, so a
+    second source listing an already active posting leaves no row there,
+    and its false rows do not say whether the board dropped the posting,
+    the pattern stopped admitting it, or the source was switched off.
+    """
+
+    __tablename__ = "source_observations"
+    __table_args__ = (
+        CheckConstraint(
+            "kind IN ('appeared', 'reappeared', 'filtered', 'unlisted', 'not_listed')",
+            name="ck_source_observations_kind",
+        ),
+        # The pull's change check: the latest row per job of one source.
+        Index("idx_source_observations_by_source", "source", "job_id", text("id DESC")),
+        # Availability: the latest row per source of one job.
+        Index("idx_source_observations_by_job", "job_id", "source", text("id DESC")),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
+    job_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("jobs.id", ondelete="CASCADE"))
+    source: Mapped[str] = mapped_column(Text)
+    # appeared: first listed and admitted by this source. reappeared: listed
+    # and admitted again after any other kind. filtered: listed, and the
+    # source's title pattern does not admit it. unlisted: the source says it
+    # is no longer listed, by leaving it out of a complete pull of a board
+    # that lists every open posting (boards.AUTHORITATIVE) or by its own
+    # record's inactive flag. not_listed: left out of an aggregator's pull,
+    # which says nothing about whether it closed.
+    kind: Mapped[str] = mapped_column(Text)
+    # The ingest_source task whose pull said so. Tasks are never pruned.
+    run_id: Mapped[int | None] = mapped_column(BigInteger)
+    at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+
+
 class Listing(Base):
     """Every posting a board returned on its last pull, kept by the title
     pattern or not, with the text the listing call carried and the raw record

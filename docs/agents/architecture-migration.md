@@ -61,7 +61,7 @@ real only relocates the problem.
 | 0 | The layering is enforced | An import contract fails CI on a new upward edge |
 | 1 | Check types are a registry | **Done.** A new posting check is a `POSTING_CHECKS` registration; dispatch does not grow a purpose ladder |
 | 2 | A board row and the working set are told apart | Named and pinned apart (2a). Moving the sweeps' scope off `user_jobs` (2b): product meanings chosen 2026-10-10, each read moves with a cutover comparison |
-| 3 | Catalog observations are facts | A re-listing is an appended row, not a mutated column |
+| 3 | Catalog observations are facts | A re-listing is an appended row, not a mutated column. **Dual write in progress**; see below |
 | 4 | ~~Derivations are content addressed~~ | **Dropped 2026-09-10.** Measured; see below |
 | 5 | Files move to the shape | **Done.** `tasks` is a sibling of `api` and `core`; domain seams, not directory names, own the remaining moves |
 | 6 | The long files are split | **Done for the named multi-job modules.** `resolve.py` is a 160-line router, `health.py` an 85-line aggregator, and `jobs.py` a 22-line ordered aggregator |
@@ -166,7 +166,7 @@ still hold.
 and invisible in CI. Phase 2b and phase 3 are the named cases: one changes the
 population the sweeps pay for, and the other decides what a source observation
 means. Bring the parallel cutover's numbers first, then merge. Phase 2b's
-product meanings are chosen (below); phase 3's are not.
+product meanings are chosen (below), and so are phase 3's (2026-10-10, below).
 
 Phase 2 decides who sees what. Its failure mode is two definitions silently
 agreeing in the tests and disagreeing in production, which is the state the
@@ -276,28 +276,85 @@ with proof of equality or a measured, explained difference, stop writing
 machine rows into `user_jobs`, convert the legacy rows, and delete the
 compatibility code.
 
-## Phase 3 needs source semantics before tables
+## Phase 3: what a source observation means
 
-`jobs.active` is not an observation log. The current writers do not retain an
-initial active observation, an explicit inactive observation, a run identity,
-or a reason that distinguishes absence from rejection. One URL also cannot
-represent a posting observed through more than one source. Therefore a backfill
-cannot reconstruct complete catalog history and must count unknown state as
-`cannot tell`.
+Kanishk decided the product semantics on 2026-10-10. Each is here with its
+reason, because the tables encode them.
 
-The target remains additive: ingest runs, source postings, append-only listing
-observations and source-to-job links feed a rebuildable availability
-projection. Before that projection can replace `jobs.active`, the product must
-choose canonical job identity, any-source availability for disabled sources,
-the meaning of title-pattern rejection, aggregator absence TTLs, retention and
-whether deletion is permitted for source facts. Do not encode defaults for
-those choices in a migration.
+1. **A job is its url.** `jobs.url` stays the canonical identity, because
+   every row, verdict and link already keys on it and `ats.canonicalize`
+   exists to make one spelling per posting. Each source's listing of a
+   posting is its own observation pointing at the job, so one url carried by
+   a company board and an aggregator is one job with two histories.
+2. **A posting listed only by switched-off sources is not available.** This
+   keeps `catalog.retire_switched_off`: retired unless a switched-on source
+   lists it and would admit it. A switched-off source is never pulled, so
+   nothing it says can be refreshed.
+3. **Still listed but no longer admitted by the title pattern is `filtered`,
+   never a closure.** `retire_unlisted` cannot tell the two apart today, and
+   4,554 of 6,306 active company-board rows on 2026-09-04 were pattern misses.
+   The observation records whether the pattern matched; whether enforcement
+   is on is applied when availability is read, so flipping
+   `source_title_patterns_enabled` does not rewrite history.
+4. **Aggregator absence never means closed.** It is recorded as `not_listed`,
+   "not listed since" its `at`, and leaves the posting available. Only the
+   closed check says closed. A complete pull of a board in
+   `boards.AUTHORITATIVE` records absence as `unlisted`, and whether that
+   retires the job stays today's rule (it does). A pull that cannot show it
+   saw everything (`PartialPull`, or an empty pull) records no absence.
+5. **Changes only, kept forever.** A row is written when a source says
+   something other than its latest row for that job, never per pull, and
+   nothing prunes the table. At 74,000 postings an hour a row per pull would
+   be millions a day saying nothing changed.
 
-Availability for disabled sources has an interim rule over today's tables: a
-switched-off source's posting is retired unless a switched-on source lists it
-and would admit it (`catalog.retire_switched_off`,
-[sources-and-boards.md](sources-and-boards.md)). The projection should
-reproduce that rule or replace it deliberately.
+One case the decisions did not name: a feed whose own record carries an
+inactive flag (the JSON listings feed). Today that writes `jobs.active =
+false`. It is recorded as `unlisted`, because the source itself says the
+posting is no longer listed, which is not the same as being left out of an
+aggregator's pull.
+
+### The tables
+
+`source_observations` is the fact: `(job_id, source, kind, run_id, at)`,
+kinds `appeared`, `reappeared`, `filtered`, `unlisted`, `not_listed`, written
+only by `catalog.observe` after each pull. `run_id` is the `ingest_source`
+task whose pull said so; tasks are never pruned, and the task's progress
+carries the pull's counts and whether it was `complete`, so the run is
+already a row and does not get a second table.
+
+`job_listing_events` was the candidate to extend and is not this. It logs
+flips of `jobs.active`, attributed to the source that caused the flip: a
+second source listing an already active posting writes nothing there, and its
+false rows do not say whether the board dropped the posting, the pattern
+stopped admitting it, or the source was switched off. Adding kinds to it
+would put two kinds of record in one table, which is what phase 8 is
+removing elsewhere. It stays as it is, and keeps serving the re-verification
+edge, until that reader moves to the projection.
+
+`jobs.relisted_at`, the named example of overwritten state, was already
+removed by `b64dadabb22d` when `job_listing_events` arrived.
+
+**Availability is a projection**: a job is available when some switched-on
+source's latest observation of it is `appeared`, `reappeared` or
+`not_listed`, or `filtered` while enforcement is off. A job with
+observations and none of those is unavailable. A job no source has observed
+is `cannot tell`, never a default.
+
+**History is not invented.** The first pull of each source after the dual
+write lands records `appeared` for everything it lists: that row's `at` is
+when the log began watching, not when the posting was first listed.
+`job_listing_events` keeps the earlier history and is not copied. Its true
+rows are certain returns; its false rows cannot be split into unlisted,
+filtered or switched off, and count as `cannot tell`.
+
+### Cutover
+
+Dual write first, then a shadow comparison of the projection against
+`jobs.active` over at least one full ingest cycle, then readers move where
+the meanings match. `jobs.active` is feed state that every sweep and
+selection gates on; a reader that wants "a source says this is open" moves,
+and a reader that wants the feed's own flag stays. Measured differences are
+explained before any reader moves.
 
 **Never in a loop:** any write to the production database, and any migration
 that can refuse to apply ([migrations.md](migrations.md)). Neither of these is

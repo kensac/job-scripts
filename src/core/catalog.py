@@ -4,6 +4,7 @@ import datetime
 import logging
 import random
 import time
+from collections import Counter
 from typing import TYPE_CHECKING, LiteralString
 
 from psycopg import errors
@@ -132,6 +133,84 @@ def retire_switched_off(patterns_enforced: bool) -> dict[str, int]:
             {"enforced": patterns_enforced},
         ).fetchall()
     return {r["source"]: r["n"] for r in rows}
+
+
+_ADMITTED = frozenset({"appeared", "reappeared"})
+
+
+def observe(
+    source: str,
+    run_id: int | None,
+    postings: list[JobPosting],
+    kept: set[str],
+    absence: str | None,
+) -> dict[str, int]:
+    """Appends to source_observations what this pull says about each catalog
+    row that differs from the source's latest observation of it, and nothing
+    for a row it says the same about. Call after upsert_postings, so a row
+    this pull created has an id.
+
+    `postings` is everything the board listed, admitted or not, and `kept`
+    the urls its title pattern matched, whatever the enforcement switch says:
+    the switch is applied when availability is read, so turning it over does
+    not rewrite history. A listed posting whose record carries the feed's
+    inactive flag is unlisted. `absence` is the kind a listed-before row the
+    pull left out becomes: 'unlisted' after a complete pull of an
+    authoritative board, 'not_listed' after an aggregator's, None when the
+    pull cannot show it saw everything (partial or empty), which records no
+    absence. A posting no catalog row holds has nothing to point at and is
+    skipped; listings keeps it. Returns the count per kind."""
+    by_url = {p.url: p for p in postings if p.url}
+    with pool.connection() as conn:
+        latest = {
+            r["job_id"]: r["kind"]
+            for r in conn.execute(
+                "SELECT DISTINCT ON (job_id) job_id, kind FROM source_observations "
+                "WHERE source = %s ORDER BY job_id, id DESC",
+                (source,),
+            ).fetchall()
+        }
+        listed = conn.execute(
+            "SELECT id, url FROM jobs WHERE url = ANY(%s)", (list(by_url),)
+        ).fetchall()
+        rows: list[tuple[str, int, str]] = []
+        for job in listed:
+            posting = by_url[job["url"]]
+            was = latest.pop(job["id"], None)
+            if not posting.active:
+                now = "unlisted"
+            elif job["url"] not in kept:
+                now = "filtered"
+            elif was is None:
+                now = "appeared"
+            elif was in _ADMITTED:
+                continue
+            else:
+                now = "reappeared"
+            if now != was:
+                rows.append((job["url"], job["id"], now))
+        if absence:
+            gone = [
+                job_id for job_id, was in latest.items() if was in _ADMITTED or was == "filtered"
+            ]
+            if gone:
+                rows += [
+                    (r["url"], r["id"], absence)
+                    for r in conn.execute(
+                        "SELECT id, url FROM jobs WHERE id = ANY(%s)", (gone,)
+                    ).fetchall()
+                ]
+    # The foreign key share-locks each job row, so the inserts take them in
+    # url order (_LOCK_ORDER), in one transaction of their own.
+    rows.sort(key=lambda r: r[0])
+    if rows:
+        with pool.connection() as conn, conn.cursor() as cur:
+            cur.executemany(
+                "INSERT INTO source_observations (job_id, source, kind, run_id) "
+                "VALUES (%s, %s, %s, %s)",
+                [(job_id, source, kind, run_id) for _, job_id, kind in rows],
+            )
+    return dict(Counter(kind for _, _, kind in rows))
 
 
 _BATCH = 500
