@@ -90,12 +90,11 @@ def data_health(user: AuthedUser = Depends(require_admin)) -> DataHealth:
             ContentMix,
             """
             SELECT j.source,
-                   COUNT(*) FILTER (WHERE q.reason = 'ats text') AS ats_text,
-                   COUNT(*) FILTER (WHERE q.reason = 'scraped') AS scraped,
+                   COUNT(*) FILTER (WHERE q.method = 'ats text') AS ats_text,
+                   COUNT(*) FILTER (WHERE q.method = 'scraped') AS scraped,
                    COUNT(*) AS total
-            FROM ai_queries q JOIN jobs j ON j.url = q.url
-            WHERE q.check_type = 'content'
-              AND q.created_at > now() - interval '7 days'
+            FROM page_fetches q JOIN jobs j ON j.url = q.url
+            WHERE q.created_at > now() - interval '7 days'
             GROUP BY j.source ORDER BY total DESC
             """,
         ),
@@ -175,6 +174,18 @@ class FailureBreakdown(BaseModel):
     items: list[FailedCheck]
 
 
+# Failed model calls and failed page fetches, one row each. A fetch still
+# stored in ai_queries is read through page_fetches only, so it counts once
+# while fetches move to their own table.
+_FAILURES = """
+    SELECT id, created_at, url, check_type, company, job_title, worker, error, reason
+    FROM ai_queries WHERE status = 'failed' AND check_type IS DISTINCT FROM 'content'
+    UNION ALL
+    SELECT id, created_at, url, 'content', NULL, NULL, worker, NULL, method
+    FROM page_fetches WHERE status = 'failed'
+"""
+
+
 @router.get("/failures")
 def failure_breakdown(
     hours: int = 24,
@@ -194,9 +205,10 @@ def failure_breakdown(
                substring(url from '//([^/]+)') AS host,
                check_type, COUNT(*) AS failures,
                MAX(created_at) AS last_failure
-        FROM ai_queries
-        WHERE status = 'failed'
-          AND created_at > now() - make_interval(hours => %(hours)s)
+        FROM ("""
+        + _FAILURES
+        + """) f
+        WHERE created_at > now() - make_interval(hours => %(hours)s)
           AND (%(worker)s::text IS NULL OR COALESCE(worker, 'unknown') = %(worker)s)
           AND (%(host)s::text IS NULL OR substring(url from '//([^/]+)') = %(host)s)
         GROUP BY 1, 2, 3 ORDER BY failures DESC LIMIT 100
@@ -210,9 +222,10 @@ def failure_breakdown(
             """
             SELECT id, created_at, url, check_type, company, job_title,
                    COALESCE(worker, 'unknown') AS worker, left(error, 300) AS error, reason
-            FROM ai_queries
-            WHERE status = 'failed'
-              AND created_at > now() - make_interval(hours => %(hours)s)
+            FROM ("""
+            + _FAILURES
+            + """) f
+            WHERE created_at > now() - make_interval(hours => %(hours)s)
               AND (%(worker)s::text IS NULL OR COALESCE(worker, 'unknown') = %(worker)s)
               AND (%(host)s::text IS NULL OR substring(url from '//([^/]+)') = %(host)s)
             ORDER BY id DESC LIMIT 200

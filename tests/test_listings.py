@@ -179,7 +179,7 @@ def test_every_listing_is_stored_with_its_text_and_the_text_becomes_the_content(
     # The kept posting's content came from the listing, not a page fetch.
     assert fetched == []
     content = db.query_one(
-        "SELECT input_content, reason FROM ai_queries WHERE url = %s AND check_type = 'content'",
+        "SELECT content AS input_content, method AS reason FROM page_fetches WHERE url = %s",
         (kept.url,),
     )
     assert content is not None and content["input_content"] == kept.description

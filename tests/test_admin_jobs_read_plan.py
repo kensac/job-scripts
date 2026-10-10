@@ -20,7 +20,7 @@ def test_recent_postings_page_does_not_aggregate_unselected_history(monkeypatch)
     reads = []
 
     def record(sql, params=None):
-        if "ai_queries" in sql:
+        if "ledger_rows" in sql:
             reads.append((sql, params))
         return original(sql, params)
 
@@ -38,7 +38,7 @@ def test_recent_postings_page_does_not_aggregate_unselected_history(monkeypatch)
     examined = sum(
         (node["Actual Rows"] + node.get("Rows Removed by Filter", 0)) * node["Actual Loops"]
         for node in _nodes(plan)
-        if node.get("Relation Name") == "ai_queries"
+        if node.get("Relation Name") in ("ai_queries", "page_fetch_rows")
     )
     # Exact totals may scan the URL index. Loading five rows must not also
     # aggregate the history of all ten thousand postings.

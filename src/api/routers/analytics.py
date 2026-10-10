@@ -148,7 +148,7 @@ SELECT j.source AS source, a.model,
        count(a.cost_usd) AS priced_calls,
        sum(coalesce(a.total_tokens, 0)) AS total_tokens,
        sum(a.cost_usd) AS cost_usd
-FROM ai_queries a
+FROM ledger_rows a
 JOIN jobs j ON j.url = a.url
 GROUP BY j.source, a.model
 """

@@ -180,9 +180,11 @@ class JobProfile(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
     url: Mapped[str] = mapped_column(Text)
-    content_row_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("ai_queries.id", ondelete="CASCADE")
-    )
+    # The page fetch the profile was read from. No foreign key while page
+    # fetches move out of ai_queries (PageFetchRow): the key pointed there
+    # with ON DELETE CASCADE, so moving a fetch would have deleted the
+    # profiles read from it.
+    content_row_id: Mapped[int] = mapped_column(BigInteger)
     content_hash: Mapped[str] = mapped_column(Text)
     classifier_version: Mapped[str] = mapped_column(Text)
     model: Mapped[str] = mapped_column(Text)
@@ -195,6 +197,43 @@ class JobProfile(Base):
     company_selectivity: Mapped[str] = mapped_column(Text)
     role_selectivity: Mapped[str] = mapped_column(Text)
     classified_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+
+
+class PageFetchRow(Base):
+    """One fetch of a posting's page: what came back and how it was read.
+
+    A fact, appended and never updated. Readers use the page_fetches view,
+    which also holds the fetches still stored in ai_queries (check_type
+    'content') until they are moved here, and page_texts for the text alone.
+
+    Ids come from ai_queries' sequence, so a fetch keeps its id when it moves
+    and every content_row_id that names it stays true.
+    """
+
+    __tablename__ = "page_fetch_rows"
+    __table_args__ = (
+        CheckConstraint("status IN ('passed', 'failed')", name="ck_page_fetch_rows_status"),
+        Index("idx_page_fetch_rows_url_id", "url", text("id DESC")),
+        Index("idx_page_fetch_rows_created_at", "created_at"),
+        # The admin ledger's filter options skip-scan distinct values through
+        # ledger_rows, as they do on ai_queries (routers/admin/queries.py).
+        Index("idx_page_fetch_rows_status", "status"),
+        Index("idx_page_fetch_rows_worker_recent", "worker", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger, primary_key=True, server_default=text("nextval('ai_queries_id_seq')")
+    )
+    url: Mapped[str] = mapped_column(Text)
+    # passed: text came back. failed: nothing usable did; the run of these is
+    # what parks a posting (api.ai.verdicts.fetch_parked_sql).
+    status: Mapped[str] = mapped_column(Text)
+    # How the text was read: 'ats text', 'listing text', 'static', 'scraped',
+    # or why it was not.
+    method: Mapped[str] = mapped_column(Text)
+    content: Mapped[str | None] = mapped_column(Text)
+    worker: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
 
 
 class JobSkill(Base):

@@ -53,7 +53,7 @@ _INSERT_COLUMNS = [
     "request_sha256",
 ]
 
-_WORKER = os.environ.get("JOBTRACKER_WORKER_NAME") or socket.gethostname()
+WORKER = os.environ.get("JOBTRACKER_WORKER_NAME") or socket.gethostname()
 
 _INSERT_AI_RESULT = _as_query(
     f"INSERT INTO ai_queries ({', '.join(_INSERT_COLUMNS)}) "
@@ -179,7 +179,7 @@ def ai_result_row(
             if prompt_tokens is not None and completion_tokens is not None
             else None
         ),
-        "worker": _WORKER,
+        "worker": WORKER,
         "batch_id": batch_id,
         "request_sha256": request_sha256,
     }

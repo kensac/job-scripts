@@ -13,8 +13,8 @@ from typing import Any
 
 from api import db, filter_runs, hosts, metrics, queue, telemetry
 from api.ai import verdicts
+from core import page_fetches
 from core.fetching.hosts import pace_key
-from core.store import add_ai_result
 from tasks.board import content_ready_urls
 from tasks.runtime import Deferred, cancelled, set_progress
 
@@ -190,14 +190,7 @@ async def handle_ingest_source(task_id: int, payload: dict[str, Any]) -> None:
             # same shape the ATS resolver would have fetched it. Storing it
             # is one insert; fetching it again is the request that gets a
             # worker blocked.
-            add_ai_result(
-                p.url,
-                "passed",
-                "listing text",
-                "content",
-                input_content=p.description,
-                config_name="content-cache",
-            )
+            page_fetches.record(p.url, "passed", "listing text", p.description)
             cached += 1
             metrics.INGEST_JOBS.labels(source["name"], "cached").inc()
             continue

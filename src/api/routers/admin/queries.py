@@ -44,8 +44,8 @@ _LIST_COLS = (
     "filter_name, prompt_hash, "
     # Correlated lookups rather than a join: ai_queries and jobs share several
     # column names, so joining would make every existing filter ambiguous.
-    "(SELECT j.id FROM jobs j WHERE j.url = ai_queries.url) AS job_id, "
-    "(SELECT j.source FROM jobs j WHERE j.url = ai_queries.url) AS source"
+    "(SELECT j.id FROM jobs j WHERE j.url = ledger_rows.url) AS job_id, "
+    "(SELECT j.source FROM jobs j WHERE j.url = ledger_rows.url) AS source"
 )
 
 
@@ -159,7 +159,7 @@ def _distinct(col: str, recent: bool = False) -> list[str]:
     btree does; the final ORDER BY does not lean on recursion order.
     """
     window = (
-        f"AND EXISTS (SELECT 1 FROM ai_queries r WHERE r.{col} = v.x "
+        f"AND EXISTS (SELECT 1 FROM ledger_rows r WHERE r.{col} = v.x "
         "AND r.created_at > now() - interval '30 days')"
         if recent
         else ""
@@ -169,9 +169,9 @@ def _distinct(col: str, recent: bool = False) -> list[str]:
         for r in db.query(
             f"""
             WITH RECURSIVE v(x) AS (
-                SELECT min({col}) FROM ai_queries
+                SELECT min({col}) FROM ledger_rows
                 UNION ALL
-                SELECT (SELECT min({col}) FROM ai_queries WHERE {col} > v.x)
+                SELECT (SELECT min({col}) FROM ledger_rows WHERE {col} > v.x)
                 FROM v WHERE v.x IS NOT NULL
             )
             SELECT x FROM v WHERE x IS NOT NULL {window} ORDER BY x
@@ -294,12 +294,12 @@ def list_queries(
             },
         ) from None
     paging = pagination.Page.from_params(page, page_size, maximum=500)
-    total_row = db.query_one(f"SELECT COUNT(*) AS c FROM ai_queries {where}", params)
+    total_row = db.query_one(f"SELECT COUNT(*) AS c FROM ledger_rows {where}", params)
     sortable = {key: key for key in _SORTABLE}
     sorts = sorting.parse(sort, dir, sortable, "id")
     rows = db.query_as(
         QueryListing,
-        f"SELECT {_LIST_COLS} FROM ai_queries {where} "
+        f"SELECT {_LIST_COLS} FROM ledger_rows {where} "
         f"ORDER BY {sorting.clause(sorts, sortable, _NOT_NULL)}, id DESC LIMIT %(limit)s OFFSET %(offset)s",
         {**params, "limit": paging.size, "offset": paging.offset},
     )
@@ -389,7 +389,7 @@ class QueryRecord(BaseModel):
 @router.get("/queries/{query_id}")
 def get_query(query_id: int, user: AuthedUser = Depends(require_admin)) -> QueryRecord:
     row = db.query_one(
-        f"SELECT {_ROW_COLS}, instructions_id FROM ai_queries WHERE id = %s", (query_id,)
+        f"SELECT {_ROW_COLS}, instructions_id FROM ledger_rows WHERE id = %s", (query_id,)
     )
     if not row:
         raise HTTPException(404, detail={"code": "NOT_FOUND", "message": "unknown query"})
@@ -409,8 +409,10 @@ def delete_queries(
     body: DeleteQueries, user: AuthedUser = Depends(require_admin)
 ) -> QueriesDeleted:
     with db.pool.connection() as conn:
-        result = conn.execute("DELETE FROM ai_queries WHERE id = ANY(%s)", (body.ids,))
-        deleted = result.rowcount
+        deleted = conn.execute("DELETE FROM ai_queries WHERE id = ANY(%s)", (body.ids,)).rowcount
+        deleted += conn.execute(
+            "DELETE FROM page_fetch_rows WHERE id = ANY(%s)", (body.ids,)
+        ).rowcount
     return QueriesDeleted(deleted=deleted)
 
 
@@ -489,9 +491,9 @@ _POSTING_TOTALS = """
 _RECENT_POSTINGS = f"""
     WITH selected AS MATERIALIZED (
         SELECT q.url, q.created_at
-        FROM ai_queries q
+        FROM ledger_rows q
         WHERE q.url IS NOT NULL AND q.id = (
-            SELECT n.id FROM ai_queries n WHERE n.url = q.url
+            SELECT n.id FROM ledger_rows n WHERE n.url = q.url
             ORDER BY n.created_at DESC, n.id DESC LIMIT 1
         )
         ORDER BY q.created_at DESC, q.url
@@ -500,14 +502,14 @@ _RECENT_POSTINGS = f"""
     SELECT selected.url, totals.*, streak.failures AS content_failures
     FROM selected
     CROSS JOIN LATERAL (
-        SELECT {_POSTING_TOTALS} FROM ai_queries WHERE url = selected.url
+        SELECT {_POSTING_TOTALS} FROM ledger_rows WHERE url = selected.url
     ) totals
     CROSS JOIN LATERAL ({verdicts.FETCH_STREAK.format(url="selected.url")}) streak
     ORDER BY selected.created_at DESC, selected.url
 """
 
 
-_URL_STREAK = verdicts.FETCH_STREAK.format(url="ai_queries.url")
+_URL_STREAK = verdicts.FETCH_STREAK.format(url="ledger_rows.url")
 
 
 @router.get("/jobs")
@@ -553,8 +555,8 @@ def list_jobs(
     base = f"""
         SELECT url, {_POSTING_TOTALS},
             (SELECT streak.failures FROM ({_URL_STREAK}) streak) AS content_failures
-        FROM ai_queries
-        WHERE url IN (SELECT url FROM ai_queries WHERE {" AND ".join(sub)})
+        FROM ledger_rows
+        WHERE url IN (SELECT url FROM ledger_rows WHERE {" AND ".join(sub)})
         GROUP BY url
         {having}
     """
@@ -567,7 +569,7 @@ def list_jobs(
         # The id tiebreaker selects one row when a URL has equal timestamps;
         # every check still contributes to that URL's reported totals.
         total_row = db.query_one(
-            "SELECT COUNT(DISTINCT url) AS c FROM ai_queries WHERE url IS NOT NULL"
+            "SELECT COUNT(DISTINCT url) AS c FROM ledger_rows WHERE url IS NOT NULL"
         )
         rows = db.query(_RECENT_POSTINGS, page_params)
     else:
@@ -619,7 +621,7 @@ def job_responses(url: str, user: AuthedUser = Depends(require_admin)) -> QueryR
             QueryRecord.model_validate(row)
             for row in query_instructions.hydrate(
                 db.query(
-                    f"SELECT {_ROW_COLS}, instructions_id FROM ai_queries WHERE url = %s ORDER BY id ASC",
+                    f"SELECT {_ROW_COLS}, instructions_id FROM ledger_rows WHERE url = %s ORDER BY id ASC",
                     (url,),
                 )
             )
@@ -663,7 +665,7 @@ def job_timeline(url: str, user: AuthedUser = Depends(require_admin)) -> Posting
             TimelineEntry,
             "SELECT id, created_at, config_name, check_type, status, reason, model, "
             "total_tokens, duration_ms, error "
-            "FROM ai_queries WHERE url = %s ORDER BY id ASC",
+            "FROM ledger_rows WHERE url = %s ORDER BY id ASC",
             (url,),
         ),
         decisions=read_decisions(
@@ -837,7 +839,7 @@ def _compute_stats() -> LedgerStats:
                SUM(completion_tokens) FILTER (WHERE batch_id IS NOT NULL) AS batched_completion_tokens,
                SUM(cached_tokens) FILTER (WHERE batch_id IS NOT NULL) AS batched_cached_tokens,
                SUM(cost_usd) AS cost_usd
-        FROM ai_queries GROUP BY 1, 2, 3, 4
+        FROM ledger_rows GROUP BY 1, 2, 3, 4
         """
     )
 

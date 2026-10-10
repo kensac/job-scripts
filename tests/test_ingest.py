@@ -145,7 +145,7 @@ def test_a_posting_whose_fetch_failed_today_is_not_fetched_again_this_hour(monke
     # Both attempts that ran and found nothing left a row, so the next hour
     # skips them too.
     rows = db.query(
-        "SELECT url FROM ai_queries WHERE check_type = 'content' AND status = 'failed' "
+        "SELECT url FROM page_fetches WHERE status = 'failed' "
         "AND created_at > now() - interval '1 minute'"
     )
     assert sorted(r["url"] for r in rows) == sorted([stale.url, new.url])

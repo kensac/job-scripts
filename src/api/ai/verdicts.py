@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 from api import ai, db, metrics, telemetry
 from api.ai import AIConfig
-from core import pricing
+from core import page_fetches, pricing
 from core.fetching.hosts import hostname
 from core.store import add_ai_result, add_ai_results, ai_result_row
 
@@ -258,8 +258,7 @@ def host_paced(url: str) -> bool:
     if not per_hour:
         return False
     row = db.query_one(
-        "SELECT COUNT(*) AS n FROM ai_queries WHERE check_type = 'content' "
-        "AND created_at > now() - interval '1 hour' "
+        "SELECT COUNT(*) AS n FROM page_fetches WHERE created_at > now() - interval '1 hour' "
         "AND (url LIKE %(https)s OR url LIKE %(http)s)",
         {"https": f"https://{host}/%", "http": f"http://{host}/%"},
     )
@@ -277,14 +276,13 @@ def host_paced(url: str) -> bool:
 # The run of empty fetches since the url's last successful one. The failed
 # content rows refresh_content writes are the only memory of an attempt, so
 # the run is read off them rather than kept as state that could disagree.
-# It walks idx_ai_queries_url_check, a few dozen rows a url at most.
+# It walks each arm's url index, a few dozen rows a url at most.
 FETCH_STREAK = """
     SELECT count(*) AS failures, max(f.created_at) AS last_failed
-    FROM ai_queries f
-    WHERE f.url = {url} AND f.check_type = 'content' AND f.status = 'failed'
-      AND f.id > COALESCE((SELECT max(p.id) FROM ai_queries p
-                           WHERE p.url = {url} AND p.check_type = 'content'
-                             AND p.status = 'passed'), 0)
+    FROM page_fetches f
+    WHERE f.url = {url} AND f.status = 'failed'
+      AND f.id > COALESCE((SELECT max(p.id) FROM page_fetches p
+                           WHERE p.url = {url} AND p.status = 'passed'), 0)
 """
 
 
@@ -351,7 +349,6 @@ async def refresh_content(
     budget would throttle the fast case behind the slow one."""
     from api import fetching
     from core.fetching import ats
-    from core.store import add_ai_result
 
     ats_url = url
     listings_url = None
@@ -390,14 +387,7 @@ async def refresh_content(
         )
         return None, "ats_gone"
     if ats_res.ok and ats_res.text and not fetching.looks_blocked(ats_res.text):
-        add_ai_result(
-            url,
-            "passed",
-            "ats text",
-            "content",
-            input_content=ats_res.text,
-            config_name="content-cache",
-        )
+        page_fetches.record(url, "passed", "ats text", ats_res.text)
         if ats_res.posted:
             # Only where the board's listing left it empty: a date the listing
             # stated is the same fact from the same board, and never worse.
@@ -425,14 +415,7 @@ async def refresh_content(
     if db.get_config("fetch_engine") == "static_first" and listings_url is None:
         static = await fetching.fetch_static(url, int(db.get_config("static_fetch_min_chars")))
         if static:
-            add_ai_result(
-                url,
-                "passed",
-                "static",
-                "content",
-                input_content=static,
-                config_name="content-cache",
-            )
+            page_fetches.record(url, "passed", "static", static)
             return static, None
     if scrape_sem is not None:
         async with scrape_sem:
@@ -449,9 +432,7 @@ async def refresh_content(
         # posting from a careers index, and a URL cannot.
         if redirected:
             logger.info(f"{url} landed elsewhere; letting the check judge the page")
-        add_ai_result(
-            url, "passed", "scraped", "content", input_content=content, config_name="content-cache"
-        )
+        page_fetches.record(url, "passed", "scraped", content)
     else:
         # A fetch that came back with nothing (blocked, timed out, empty) left
         # no record, so every hourly ingest and every backfill tried it again:
@@ -461,9 +442,7 @@ async def refresh_content(
         # before retrying, and the run of them decides how long and whether
         # to stop (fetch_parked_sql). No input_content, so nothing downstream reads it as
         # a page; extraction_failing counts it, which it could never do before.
-        add_ai_result(
-            url, "failed", "fetch returned nothing", "content", config_name="content-cache"
-        )
+        page_fetches.record(url, "failed", "fetch returned nothing")
         telemetry.capture(
             "fetch_failed",
             properties={"url": url, "fetch_host": hostname(url), "context": context},

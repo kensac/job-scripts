@@ -71,8 +71,8 @@ async def test_refresh_content_serves_static_first_and_falls_back_to_the_browser
     assert content and content.startswith("Software Engineer") and closure is None
     assert fetched == []
     row = db.query_one(
-        "SELECT reason FROM ai_queries WHERE url = 'https://jobs.example.com/a' "
-        "AND check_type = 'content' ORDER BY id DESC LIMIT 1"
+        "SELECT method AS reason FROM page_fetches WHERE url = 'https://jobs.example.com/a' "
+        "ORDER BY id DESC LIMIT 1"
     )
     assert row is not None and row["reason"] == "static"
 
@@ -82,8 +82,8 @@ async def test_refresh_content_serves_static_first_and_falls_back_to_the_browser
         content and content.startswith("browser text") and fetched == ["https://jobs.example.com/b"]
     )
     row = db.query_one(
-        "SELECT reason FROM ai_queries WHERE url = 'https://jobs.example.com/b' "
-        "AND check_type = 'content' ORDER BY id DESC LIMIT 1"
+        "SELECT method AS reason FROM page_fetches WHERE url = 'https://jobs.example.com/b' "
+        "ORDER BY id DESC LIMIT 1"
     )
     assert row is not None and row["reason"] == "scraped"
 

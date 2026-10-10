@@ -302,15 +302,14 @@ def _detect_boards() -> list[dict[str, Any]]:
                END AS ats,
                COUNT(*) FILTER (WHERE created_at > now() - interval '24 hours') AS recent_total,
                COUNT(*) FILTER (WHERE created_at > now() - interval '24 hours'
-                                AND reason IN ('ats text', 'listing text')) AS recent_ats,
+                                AND method IN ('ats text', 'listing text')) AS recent_ats,
                COUNT(*) FILTER (WHERE created_at BETWEEN now() - interval '8 days'
                                 AND now() - interval '24 hours') AS base_total,
                COUNT(*) FILTER (WHERE created_at BETWEEN now() - interval '8 days'
                                 AND now() - interval '24 hours'
-                                AND reason IN ('ats text', 'listing text')) AS base_ats
-        FROM ai_queries
-        WHERE check_type = 'content'
-          AND reason IN ('ats text', 'listing text', 'scraped', 'static')
+                                AND method IN ('ats text', 'listing text')) AS base_ats
+        FROM page_fetches
+        WHERE method IN ('ats text', 'listing text', 'scraped', 'static')
           AND created_at > now() - interval '8 days'
         GROUP BY 1
         HAVING CASE
