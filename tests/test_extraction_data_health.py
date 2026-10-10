@@ -27,8 +27,9 @@ def test_negative_experience_is_unknown_without_reordering_the_valid_bound(low, 
 
 @pytest.mark.asyncio
 async def test_existing_negative_years_are_reextracted_even_when_the_page_hash_matches(
-    f, monkeypatch
+    f, monkeypatch, set_config
 ):
+    set_config("requirements_extraction_enabled", True)
     content = "This position requires five years of experience. " * 20
     _, url = f.make_ready_job(content=content)
     f.make_requirements(
@@ -47,9 +48,9 @@ async def test_existing_negative_years_are_reextracted_even_when_the_page_hash_m
             for spec in specs
         ], SimpleNamespace(model="test-model")
 
-    monkeypatch.setattr(requirements, "run_batched", answer)
+    monkeypatch.setattr("tasks.derive.run_batched", answer)
     task_id = f.make_task("extract_requirements", status="running")
-    await requirements.handle_extract_requirements(task_id, {})
+    await requirements.REQUIREMENTS.handle(task_id, {})
     row = db.query_one("SELECT yoe_min, yoe_max FROM job_requirements WHERE url = %s", (url,))
     assert row == {"yoe_min": 5, "yoe_max": None}
     assert (
@@ -60,8 +61,9 @@ async def test_existing_negative_years_are_reextracted_even_when_the_page_hash_m
     async def must_not_repeat(*args, **kwargs):
         pytest.fail("A repaired unchanged posting must not be extracted again")
 
-    monkeypatch.setattr(requirements, "run_batched", must_not_repeat)
-    await requirements.handle_extract_requirements(
+    monkeypatch.setattr("tasks.derive.run_batched", must_not_repeat)
+    db.execute("UPDATE tasks SET status = 'done' WHERE status <> 'done'")
+    await requirements.REQUIREMENTS.handle(
         f.make_task("extract_requirements", status="running"), {}
     )
 
@@ -96,9 +98,9 @@ async def test_legacy_annual_compensation_is_repaired_from_the_cached_posting_on
             for spec in specs
         ], SimpleNamespace(model="test-model")
 
-    monkeypatch.setattr(comp, "run_batched", answer)
+    monkeypatch.setattr("tasks.derive.run_batched", answer)
     task_id = f.make_task("extract_comp", status="running")
-    await comp.handle_extract_comp(task_id, {})
+    await comp.PAY.handle(task_id, {})
     row = db.query_one(
         "SELECT comp_min, comp_max, comp_period, comp_currency, comp_extracted FROM jobs WHERE id = %s",
         (job_id,),
@@ -114,8 +116,9 @@ async def test_legacy_annual_compensation_is_repaired_from_the_cached_posting_on
     async def must_not_repeat(*args, **kwargs):
         pytest.fail("A repaired compensation record must not be extracted again")
 
-    monkeypatch.setattr(comp, "run_batched", must_not_repeat)
-    await comp.handle_extract_comp(f.make_task("extract_comp", status="running"), {})
+    monkeypatch.setattr("tasks.derive.run_batched", must_not_repeat)
+    db.execute("UPDATE tasks SET status = 'done' WHERE status <> 'done'")
+    await comp.PAY.handle(f.make_task("extract_comp", status="running"), {})
 
 
 @pytest.mark.asyncio
@@ -134,9 +137,9 @@ async def test_a_nonfinite_compensation_answer_does_not_mark_extraction_complete
             for spec in specs
         ], SimpleNamespace(model="test-model")
 
-    monkeypatch.setattr(comp, "run_batched", answer)
+    monkeypatch.setattr("tasks.derive.run_batched", answer)
     task_id = f.make_task("extract_comp", status="running")
-    await comp.handle_extract_comp(task_id, {})
+    await comp.PAY.handle(task_id, {})
     row = db.query_one("SELECT comp_extracted FROM jobs WHERE id = %s", (job_id,))
     assert row["comp_extracted"] is False
     assert (

@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 from api import db
-from api.ai import batch_results
-from api.task_config import configured_shape
 from core import skills as skills_lib
 from core import verdict_reads
+from core.batch import BatchResult, BatchSpec, structured_response_spec
 from core.requirements import (
     CLEARANCE_LEVELS,
     DEGREE_LEVELS,
@@ -24,15 +22,7 @@ from core.requirements import (
 )
 from core.shapes import REQUIREMENTS_TASK
 from core.store import AI_ELIGIBLE_JOB, CONTENT_LATERAL
-from tasks import rescrape
-from tasks.runtime import (
-    consume_result,
-    has_batch_work,
-    run_batched,
-    set_progress,
-)
-
-logger = logging.getLogger(__name__)
+from tasks.derive import Derivation, Row
 
 # Postings never extracted, plus postings whose page has been scraped again
 # since they were.
@@ -197,20 +187,12 @@ def _store(
             )
 
 
-async def handle_extract_requirements(task_id: int, payload: dict[str, Any]) -> None:
-    from core.batch import structured_response_spec
+def _select(cap: int, payload: dict[str, Any]) -> list[Row]:
+    return db.query(_CANDIDATES, {"cap": cap})
 
-    resumed = has_batch_work(task_id)
-    rows = (
-        []
-        if resumed
-        else db.query(_CANDIDATES, {"cap": configured_shape(REQUIREMENTS_TASK).per_cycle})
-    )
-    rows = rescrape.drop_unchanged(rows, table="job_requirements", limit=REQUIREMENTS_INPUT_CHARS)
-    if not rows and not resumed:
-        set_progress(task_id, 0, 0, "nothing to extract")
-        return
-    specs = [
+
+def _requests(rows: list[Row]) -> list[BatchSpec]:
+    return [
         structured_response_spec(
             r["url"],
             REQUIREMENTS_INSTRUCTIONS,
@@ -220,33 +202,34 @@ async def handle_extract_requirements(task_id: int, payload: dict[str, Any]) -> 
         )
         for r in rows
     ]
-    set_progress(task_id, 0, len(specs), "requirements batch")
-    results, _ = await run_batched(task_id, REQUIREMENTS_TASK, specs)
-    done = 0
-    for res in results:
-        url = res.custom_id
-        with consume_result(task_id, res) as receipt:
-            if not receipt.pending:
-                continue
-            context = res.request.context if res.request else None
-            if not context or not context.get("content_hash") or not context.get("content_row_id"):
-                receipt.outcome = "unknown_request"
-                continue
-            if not rescrape.content_is_current(url, context["content_row_id"]):
-                receipt.outcome = "superseded"
-                continue
-            if res.error or not res.text:
-                receipt.outcome = "failed"
-                continue
-            try:
-                parsed = RequirementsExtract.model_validate_json(res.text)
-            except ValueError:
-                logger.warning("requirements parse failed for %s", url)
-                receipt.outcome = "failed"
-                continue
-            _store(url, parsed, context["content_hash"], context["content_row_id"], res.model)
-            receipt.outcome = "written"
-            done += 1
-        if done % 200 == 0:
-            set_progress(task_id, *batch_results.progress_counts(task_id), "requirements extracted")
-    set_progress(task_id, *batch_results.progress_counts(task_id), "requirements extracted")
+
+
+def _store_result(result: BatchResult, context: dict[str, Any], parsed: RequirementsExtract) -> str:
+    _store(
+        result.custom_id, parsed, context["content_hash"], context["content_row_id"], result.model
+    )
+    return "written"
+
+
+# Off by config (requirements_extraction_enabled): the extraction has one
+# consumer, the market table, and measured on 2026-09-07 its deployed arm
+# named a seniority for 5 of 92 postings the reference named one for and
+# shared a third of the skills. Kanishk chose to stop paying for it rather
+# than pay more for it.
+REQUIREMENTS = Derivation(
+    kind="extract_requirements",
+    purpose=REQUIREMENTS_TASK.purpose,
+    noun="requirements",
+    table="job_requirements",
+    per_cycle_key="requirements_extract_per_cycle",
+    select=_select,
+    requests=_requests,
+    store=_store_result,
+    input_chars=REQUIREMENTS_INPUT_CHARS,
+    recipe=None,
+    shape=REQUIREMENTS_TASK,
+    answer=RequirementsExtract,
+    context_keys=("content_hash", "content_row_id"),
+    skip_unchanged=True,
+    switch="requirements_extraction_enabled",
+)

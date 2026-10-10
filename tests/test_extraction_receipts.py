@@ -56,7 +56,7 @@ async def test_saved_extraction_result_collects_without_new_candidates(
             "INSERT INTO page_fetches (url, status, method, content) VALUES (%s, 'passed', 'scraped', %s)",
             (url, "Completely changed posting, no old requirements apply. " * 30),
         )
-    module = comp if family == "comp" else requirements
+    module = comp.PAY if family == "comp" else requirements.REQUIREMENTS
     called = []
 
     async def collect(tid, shape, specs):
@@ -64,8 +64,8 @@ async def test_saved_extraction_result_collects_without_new_candidates(
         called.append(tid)
         return [result], SimpleNamespace(model="submitted-model")
 
-    monkeypatch.setattr(module, "run_batched", collect)
-    await getattr(module, f"handle_extract_{family}")(task_id, {})
+    monkeypatch.setattr("tasks.derive.run_batched", collect)
+    await module.handle(task_id, {})
     assert called == [task_id]
     if family == "comp":
         row = db.query_one("SELECT comp_extracted, comp_min FROM jobs WHERE id = %s", (job_id,))
@@ -82,8 +82,8 @@ async def test_saved_extraction_result_collects_without_new_candidates(
         )
         assert row == expected
 
-    monkeypatch.setattr(module, "run_batched", runtime.run_batched)
-    await getattr(module, f"handle_extract_{family}")(task_id, {})
+    monkeypatch.setattr("tasks.derive.run_batched", runtime.run_batched)
+    await module.handle(task_id, {})
     progress = db.query_one("SELECT progress FROM tasks WHERE id=%s", (task_id,))["progress"]
     assert progress["done"] == (0 if changed else 1)
     assert progress["total"] == 1

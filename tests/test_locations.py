@@ -152,11 +152,11 @@ async def test_the_sweep_classifies_every_unseen_string_once(
             SimpleNamespace(model="gpt-5-nano"),
         )
 
-    monkeypatch.setattr(locations, "run_batched", fake_run_batched)
+    monkeypatch.setattr("tasks.derive.run_batched", fake_run_batched)
     task = db.query_one(
         "INSERT INTO tasks (kind, payload, status) VALUES ('classify_locations', '{}', 'running') RETURNING id"
     )
-    await locations.handle_classify_locations(task["id"], {})
+    await locations.LOCATIONS.handle(task["id"], {})
     assert sorted(asked) == ["Bengaluru", "India"]
     rows = {r["text"]: r for r in db.query("SELECT * FROM locations ORDER BY text")}
     assert rows["Bengaluru"]["city"] == "Bengaluru" and rows["Bengaluru"]["country"] == "IN"
@@ -280,11 +280,11 @@ async def test_a_reclassify_cycle_re_asks_every_model_row_and_keeps_hand_correct
             SimpleNamespace(model="gpt-5-nano"),
         )
 
-    monkeypatch.setattr(locations, "run_batched", fake_run_batched)
+    monkeypatch.setattr("tasks.derive.run_batched", fake_run_batched)
     task = db.query_one(
         "INSERT INTO tasks (kind, payload, status) VALUES ('classify_locations', '{}', 'running') RETURNING id"
     )
-    await locations.handle_classify_locations(task["id"], {"reclassify": True})
+    await locations.LOCATIONS.handle(task["id"], {"reclassify": True})
     assert asked == ["Golden"]
     row = db.query_one("SELECT country, region, city, places FROM locations WHERE text = 'Golden'")
     assert (row["country"], row["region"], row["city"]) == ("US", "CO", "Golden")

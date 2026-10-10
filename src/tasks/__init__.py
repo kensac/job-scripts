@@ -14,10 +14,11 @@ from __future__ import annotations
 from tasks.application import handle_application_draft, handle_application_sweep
 from tasks.batches import handle_poll_batches
 from tasks.board import handle_recompute_board
-from tasks.comp import handle_extract_comp
+from tasks.comp import PAY
 from tasks.content import handle_fetch_missing_content
+from tasks.derive import Derivation
 from tasks.digests import handle_send_digests
-from tasks.embeddings import handle_embed_postings_batch
+from tasks.embeddings import EMBEDDINGS
 from tasks.filters import (
     handle_run_all_filters,
     handle_run_filter,
@@ -26,8 +27,8 @@ from tasks.filters import (
 )
 from tasks.health import handle_data_health
 from tasks.ingest import handle_ingest_source, handle_retire_switched_off
-from tasks.job_profiles import handle_classify_job_profiles
-from tasks.locations import handle_classify_locations
+from tasks.job_profiles import PROFILES
+from tasks.locations import LOCATIONS
 from tasks.mail_classify import handle_classify_mail
 from tasks.mail_match import handle_match_mail
 from tasks.mail_olm_twins import handle_merge_olm_twins
@@ -38,13 +39,17 @@ from tasks.mail_sync import (
     handle_sync_gmail,
 )
 from tasks.managed_boards import handle_run_managed_board, handle_run_managed_board_batch
-from tasks.requirements import handle_extract_requirements
+from tasks.requirements import REQUIREMENTS
 from tasks.uploads import handle_extract_upload
 from tasks.verify import (
     handle_reverify_chunk,
     handle_reverify_open,
     handle_verify_new,
 )
+
+# Every derived fact, switched on or off. The worker schedules each one and
+# dispatches its kind to the shared sweep (tasks.derive).
+DERIVATIONS: tuple[Derivation, ...] = (PAY, REQUIREMENTS, PROFILES, EMBEDDINGS, LOCATIONS)
 
 HANDLERS = {
     "extract_upload": lambda task_id, payload: handle_extract_upload(payload),
@@ -61,11 +66,7 @@ HANDLERS = {
     "retire_switched_off": handle_retire_switched_off,
     "reverify_open": handle_reverify_open,
     "reverify_chunk": handle_reverify_chunk,
-    "extract_comp": handle_extract_comp,
-    "extract_requirements": handle_extract_requirements,
-    "classify_locations": handle_classify_locations,
     "recompute_board": handle_recompute_board,
-    "embed_postings_batch": handle_embed_postings_batch,
     "send_digests": handle_send_digests,
     "data_health": handle_data_health,
     "poll_batches": handle_poll_batches,
@@ -75,9 +76,9 @@ HANDLERS = {
     "application_sweep": handle_application_sweep,
     "run_managed_board": handle_run_managed_board,
     "run_managed_board_batch": handle_run_managed_board_batch,
-    "classify_job_profiles": handle_classify_job_profiles,
     "backfill_mail_pointers": handle_backfill_mail_pointers,
     "merge_olm_twins": handle_merge_olm_twins,
+    **{d.kind: d.handle for d in DERIVATIONS},
 }
 
-__all__ = ["HANDLERS"]
+__all__ = ["DERIVATIONS", "HANDLERS"]

@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 from api import compensation_candidates, db
-from api.ai import batch_results
-from api.task_config import configured_shape
 from core import verdict_reads
+from core.batch import BatchResult, BatchSpec, structured_response_spec
 from core.comp import (
     COMP_BASES,
     COMP_INPUT_CHARS,
@@ -19,15 +17,7 @@ from core.comp import (
 )
 from core.shapes import COMP_TASK
 from core.store import CONTENT_LATERAL
-from tasks import rescrape
-from tasks.runtime import (
-    consume_result,
-    has_batch_work,
-    run_batched,
-    set_progress,
-)
-
-logger = logging.getLogger(__name__)
+from tasks.derive import Derivation, Row
 
 
 def _annualize(value: float | None, period: str) -> int | None:
@@ -50,18 +40,12 @@ def _annualize(value: float | None, period: str) -> int | None:
     return annual
 
 
-async def handle_extract_comp(task_id: int, payload: dict[str, Any]) -> None:
-    from core.batch import structured_response_spec
-
-    resumed = has_batch_work(task_id)
+def _select(cap: int, payload: dict[str, Any]) -> list[Row]:
     cte, eligible = compensation_candidates.selection(
         bool(db.get_config("compensation_demand_gate_enabled"))
     )
-    rows = (
-        []
-        if resumed
-        else db.query(
-            f"""
+    return db.query(
+        f"""
         {cte}
         SELECT j.id, j.url, q.input_content, q.id AS content_row_id
         FROM jobs j
@@ -75,13 +59,12 @@ async def handle_extract_comp(task_id: int, payload: dict[str, Any]) -> None:
         ORDER BY j.id DESC
         LIMIT %(cap)s
         """,
-            {"cap": configured_shape(COMP_TASK).per_cycle},
-        )
+        {"cap": cap},
     )
-    if not rows and not resumed:
-        set_progress(task_id, 0, 0, "nothing to extract")
-        return
-    specs = [
+
+
+def _requests(rows: list[Row]) -> list[BatchSpec]:
+    return [
         structured_response_spec(
             r["url"],
             COMP_INSTRUCTIONS,
@@ -91,81 +74,70 @@ async def handle_extract_comp(task_id: int, payload: dict[str, Any]) -> None:
         )
         for r in rows
     ]
-    set_progress(task_id, 0, len(specs), "comp batch submitted (half price)")
-    results, _ = await run_batched(task_id, COMP_TASK, specs)
-    done = 0
-    for res in results:
-        url = res.custom_id
-        with consume_result(task_id, res) as receipt:
-            if not receipt.pending:
-                continue
-            context = res.request.context if res.request else None
-            if not context or not context.get("job_id") or not context.get("content_row_id"):
-                receipt.outcome = "unknown_request"
-                continue
-            if not rescrape.content_is_current(url, context["content_row_id"]):
-                receipt.outcome = "superseded"
-                continue
-            job_id = context["job_id"]
-            comp_min = comp_max = None
-            comp_text = comp_period = comp_currency = comp_basis = None
-            parsed_ok = False
-            written = 0
-            if res.text and not res.error:
-                try:
-                    parsed = CompExtract.model_validate_json(res.text)
-                    if parsed.has_comp:
-                        period = (parsed.period or "").strip().lower()
-                        comp_min = _annualize(parsed.comp_min, period)
-                        comp_max = _annualize(parsed.comp_max, period) or comp_min
-                        if comp_min and comp_max and comp_min > comp_max:
-                            comp_min, comp_max = comp_max, comp_min
-                        comp_text = parsed.display or None
-                        # Kept so the annual figure can be re-derived, and so the
-                        # UI can say what it is looking at. A yearly number with no
-                        # period or currency beside it cannot be audited.
-                        comp_period = period if period in COMP_PERIODS else None
-                        comp_currency = (parsed.currency or "").strip().upper()[:3] or None
-                        basis = (parsed.basis or "").strip().lower()
-                        comp_basis = basis if basis in COMP_BASES else None
-                    parsed_ok = True
-                except ValueError:
-                    logger.warning(f"comp parse failed for {url}")
-            if parsed_ok:
-                written = db.execute_count(
-                    "UPDATE jobs j SET comp_min = %s, comp_max = %s, comp_text = %s, "
-                    "comp_period = %s, comp_currency = %s, comp_basis = %s, "
-                    "comp_extracted = TRUE, comp_content_row_id = %s "
-                    "FROM (VALUES (%s::text)) AS page(url) "
-                    + CONTENT_LATERAL.format(url="page.url", columns="id")
-                    + " WHERE j.id = %s AND j.url = page.url AND q.id = %s",
-                    (
-                        comp_min,
-                        comp_max,
-                        comp_text,
-                        comp_period,
-                        comp_currency,
-                        comp_basis,
-                        context["content_row_id"],
-                        url,
-                        job_id,
-                        context["content_row_id"],
-                    ),
-                )
-            # The 2026-09-05 audit found unconditional progress accounting
-            # could report done == total even when every line failed. Count
-            # writes, not parsed or collected responses; failed lines retain
-            # prior values and the selection predicates govern their retry.
-            receipt.outcome = (
-                "written"
-                if parsed_ok and written
-                else "failed"
-                if not parsed_ok
-                else "superseded"
-                if db.query_one("SELECT id FROM jobs WHERE id = %s", (job_id,))
-                else "missing_subject"
-            )
-            done += int(parsed_ok and bool(written))
-        if done % 200 == 0:
-            set_progress(task_id, *batch_results.progress_counts(task_id), "comp extracted")
-    set_progress(task_id, *batch_results.progress_counts(task_id), "comp extracted")
+
+
+def _store(result: BatchResult, context: dict[str, Any], parsed: CompExtract) -> str:
+    comp_min = comp_max = None
+    comp_text = comp_period = comp_currency = comp_basis = None
+    if parsed.has_comp:
+        period = (parsed.period or "").strip().lower()
+        comp_min = _annualize(parsed.comp_min, period)
+        comp_max = _annualize(parsed.comp_max, period) or comp_min
+        if comp_min and comp_max and comp_min > comp_max:
+            comp_min, comp_max = comp_max, comp_min
+        comp_text = parsed.display or None
+        # Kept so the annual figure can be re-derived, and so the UI can say
+        # what it is looking at. A yearly number with no period or currency
+        # beside it cannot be audited.
+        comp_period = period if period in COMP_PERIODS else None
+        comp_currency = (parsed.currency or "").strip().upper()[:3] or None
+        basis = (parsed.basis or "").strip().lower()
+        comp_basis = basis if basis in COMP_BASES else None
+    # The write re-reads the current page row in the same statement, so a page
+    # fetched after the currency check leaves the answer unwritten.
+    written = db.execute_count(
+        "UPDATE jobs j SET comp_min = %s, comp_max = %s, comp_text = %s, "
+        "comp_period = %s, comp_currency = %s, comp_basis = %s, "
+        "comp_extracted = TRUE, comp_content_row_id = %s "
+        "FROM (VALUES (%s::text)) AS page(url) "
+        + CONTENT_LATERAL.format(url="page.url", columns="id")
+        + " WHERE j.id = %s AND j.url = page.url AND q.id = %s",
+        (
+            comp_min,
+            comp_max,
+            comp_text,
+            comp_period,
+            comp_currency,
+            comp_basis,
+            context["content_row_id"],
+            result.custom_id,
+            context["job_id"],
+            context["content_row_id"],
+        ),
+    )
+    # The 2026-09-05 audit found unconditional progress accounting could
+    # report done == total even when every line failed. Count writes, not
+    # parsed or collected responses; failed lines retain prior values and the
+    # selection predicates govern their retry.
+    if written:
+        return "written"
+    if db.query_one("SELECT id FROM jobs WHERE id = %s", (context["job_id"],)):
+        return "superseded"
+    return "missing_subject"
+
+
+PAY = Derivation(
+    kind="extract_comp",
+    purpose=COMP_TASK.purpose,
+    noun="comp",
+    table="jobs",
+    per_cycle_key="comp_extract_per_cycle",
+    select=_select,
+    requests=_requests,
+    store=_store,
+    input_chars=COMP_INPUT_CHARS,
+    recipe=None,
+    shape=COMP_TASK,
+    answer=CompExtract,
+    context_keys=("job_id", "content_row_id"),
+)
