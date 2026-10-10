@@ -17,6 +17,11 @@ UNTOUCHED = """
     AND NOT uj.hidden
 """
 
+# A row a person acted on: stamped by a person write, or carrying a value only
+# a person sets. A legacy all-default unstamped row is working-set membership
+# (phase 2b), not this.
+PERSON_STATE = f"(uj.person_touched_at IS NOT NULL OR NOT ({UNTOUCHED}))"
+
 USER_JOB_SPLIT_VERSION = 1
 USER_JOB_SPLIT_CHECKPOINT = "user_job_split_v1"
 USER_JOB_SPLIT_DEDUPE_PREFIX = "user-job-split:v1"

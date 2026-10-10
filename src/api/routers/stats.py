@@ -8,7 +8,7 @@ from pydantic import BaseModel
 
 from api import db
 from api.auth import AuthedUser, require_user
-from api.board import visibility
+from api.board import populations, visibility
 
 router = APIRouter()
 
@@ -54,9 +54,16 @@ class AppliedWeek(BaseModel):
 
 
 class Totals(BaseModel):
-    """The bookkeeping rows, deliberately not the board. Counted from
-    user_jobs, so `tracked` includes rows whose posting has since left."""
+    """`visible` is the postings the person can see (the board, less what
+    they hid) and `acted_on` the postings they acted on (person state). Those
+    are the two populations this page names (phase 2b).
 
+    `tracked`, `applied` and `hidden` are the old user_jobs counts, kept until
+    the frontend reads the new ones: `tracked` counts every user_jobs row,
+    including machine rows for postings that have since left the board."""
+
+    visible: int
+    acted_on: int
     tracked: int
     applied: int
     hidden: int
@@ -111,13 +118,15 @@ def stats(user: AuthedUser = Depends(require_user)) -> Stats:
     )
     totals = db.query_one_as(
         Totals,
-        """
-        SELECT COUNT(*) AS tracked,
-               COUNT(*) FILTER (WHERE date_applied IS NOT NULL) AS applied,
-               COUNT(*) FILTER (WHERE hidden) AS hidden
-        FROM user_jobs WHERE user_id = %s
+        f"""
+        SELECT counts.visible, counts.acted_on, legacy.*
+        FROM (SELECT {populations.per_user_counts("%(uid)s")}) counts,
+             (SELECT COUNT(*) AS tracked,
+                     COUNT(*) FILTER (WHERE date_applied IS NOT NULL) AS applied,
+                     COUNT(*) FILTER (WHERE hidden) AS hidden
+              FROM user_jobs WHERE user_id = %(uid)s) legacy
         """,
-        (user.id,),
+        params,
     )
     # An aggregate with no GROUP BY returns its row even for a person with
     # nothing tracked.

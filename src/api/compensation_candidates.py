@@ -2,7 +2,7 @@
 
 from api import user_settings
 from api.board import criteria
-from api.board.person_state import UNTOUCHED
+from api.board.person_state import PERSON_STATE
 from core import verdict_reads
 from core.store import AI_ELIGIBLE_JOB
 
@@ -21,7 +21,7 @@ compensation_demand AS MATERIALIZED (
     SELECT id FROM jobs WHERE uploaded_by IS NOT NULL
     UNION
     SELECT uj.job_id FROM user_jobs uj
-    WHERE uj.person_touched_at IS NOT NULL OR NOT ({UNTOUCHED})
+    WHERE {PERSON_STATE}
     UNION
     SELECT j.id FROM latest_filter verdict
     JOIN jobs j ON j.url = verdict.url
