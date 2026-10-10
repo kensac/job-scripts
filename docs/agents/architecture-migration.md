@@ -115,13 +115,19 @@ reader:
      admin ledger, board spend and the derivation scopes, so their numbers do
      not move while rows do). Ids come from `ai_queries_id_seq`, so a moved
      fetch keeps its id and every `content_row_id` stays true.
-   - Next: a resumable task moves the old fetch rows, deleting and inserting
-     in one statement so each is in exactly one place. It also brings the
-     text copies on answers (11,142 urls) over as fetches with method
-     `verification`, and relabels fetches with no recorded origin. Then
+   - Moving: `move_page_fetches` (`tasks/page_fetch_move.py`), queued every
+     cycle, one at a time, moves the old fetch rows, deleting and inserting
+     in one statement so each is in exactly one place, and labels the ones
+     with no recorded origin `unknown`. For a url whose only text is a copy
+     on an answer, it inserts the copies a reader picks (the newest, and the
+     newest longer than `MIN_CONTENT_CHARS`) as fetches with method
+     `verification` and the answer's id, so no reader's text changes and a
+     derivation read from that copy still names a fetch. The other copies
+     stay copies: no derivation whose hash matches a reader's text names one.
+   - Next, once ai_queries holds no fetch and no url's text is only a copy:
      `on_verdict` is always false and is removed, the views drop their
-     ai_queries arms, the table takes the name `page_fetches`, and
-     `job_profiles.content_row_id` gets its foreign key back, to the table.
+     ai_queries arms, the table takes the name `page_fetches`, and the move
+     task is deleted.
    - Then: an answer points at the fetch it judged, and the copies of page
      text on answers are cleared.
 4. Call usage as one ledger that other tables point at instead of copying

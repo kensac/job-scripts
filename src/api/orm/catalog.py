@@ -229,7 +229,8 @@ class PageFetchRow(Base):
     # what parks a posting (api.ai.verdicts.fetch_parked_sql).
     status: Mapped[str] = mapped_column(Text)
     # How the text was read: 'ats text', 'listing text', 'static', 'scraped',
-    # or why it was not.
+    # or why it was not. Moved rows add two: 'verification' (text older
+    # verification kept only on its answer) and 'unknown' (no recorded origin).
     method: Mapped[str] = mapped_column(Text)
     content: Mapped[str | None] = mapped_column(Text)
     worker: Mapped[str | None] = mapped_column(Text)
