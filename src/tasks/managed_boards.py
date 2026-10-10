@@ -103,14 +103,7 @@ async def _handle_managed_filter(
         prompt_hash=payload["prompt_hash"],
     )
     content_ids = [
-        job["content_query_id"]
-        for job in all_jobs
-        if job.get("content_query_id") is not None
-        and (
-            not payload.get("title_gate")
-            or payload["title_gate"]["mode"] == "shadow"
-            or job.get("title_gate_keep", True)
-        )
+        job["content_query_id"] for job in all_jobs if job.get("content_query_id") is not None
     ]
     # Keyed by the job's content_query_id, which is None for a job with no
     # content: that lookup misses and the job is checked on an empty page.
@@ -123,11 +116,7 @@ async def _handle_managed_filter(
         )
     }
     jobs = [
-        {**job, "content": frozen_contents.get(job.get("content_query_id"), "")}
-        for job in all_jobs
-        if not payload.get("title_gate")
-        or payload["title_gate"]["mode"] == "shadow"
-        or job.get("title_gate_keep", True)
+        {**job, "content": frozen_contents.get(job.get("content_query_id"), "")} for job in all_jobs
     ]
 
     def complete() -> None:
