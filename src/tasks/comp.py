@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from api import compensation_candidates, db
-from core import verdict_reads
+from core import catalog, verdict_reads
 from core.batch import BatchResult, BatchSpec, structured_response_spec
 from core.comp import (
     COMP_BASES,
@@ -53,7 +53,7 @@ def _select(cap: int, payload: dict[str, Any]) -> list[Row]:
         WHERE (NOT j.comp_extracted
                OR (j.comp_content_row_id IS NOT NULL AND j.comp_content_row_id <> q.id)
                OR (j.comp_period IS NULL AND (j.comp_min IS NOT NULL OR j.comp_max IS NOT NULL)))
-          AND j.active
+          AND {catalog.IS_AVAILABLE.format(job="j")}
           AND {eligible}
           AND {verdict_reads.verified_open("j.url")}
         ORDER BY j.id DESC
