@@ -15,7 +15,7 @@ from api.board import visibility
 from api.config import group_access_allowed
 from api.models import FilterCreate, FilterPatch, ImprovePromptRequest, Ok
 from api.problem import AI_REFUSALS, refuse
-from core import verdict_reads
+from core import catalog, verdict_reads
 from core.filters import ON_AMBIGUOUS_VALUES, compute_filter_hash
 
 router = APIRouter()
@@ -421,7 +421,7 @@ def run_all_filters(user: AuthedUser = Depends(require_user)) -> RunQueued:
 _LATEST_GATES = verdict_reads.latest_per(
     "j.id, v.check_type",
     "j.id AS job_id, j.url AS url, v.check_type, v.status",
-    "j.active AND v.check_type IN ('closed', 'clearance')",
+    catalog.IS_AVAILABLE.format(job="j") + " AND v.check_type IN ('closed', 'clearance')",
     join="JOIN jobs j ON j.url = v.url",
 )
 

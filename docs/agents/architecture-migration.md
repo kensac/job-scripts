@@ -629,7 +629,10 @@ for active rows hold only explained classes.
 2.0 s to 6.5 s and a board recompute from 27 s to 38 s, at 992 recomputes a
 day, about three hours of database time a day (production, 2026-10-10).
 `IS_AVAILABLE` now reads `COALESCE(j.available, j.active)`, which costs
-what `j.active` did. `AVAILABLE` stays the one definition, and three writers
+what `j.active` did. Measured on production after the first reconcile
+(2026-10-10, 21:00 UTC): user 1's board recompute ran in 25.7 and 28.0 s
+against 26.0 and 26.8 s on the flag, and the preset eligible count in 1.9 s
+either way. `AVAILABLE` stays the one definition, and three writers
 store it:
 
 - `catalog.observe` refreshes the rows its observations changed, after they
@@ -659,8 +662,39 @@ files listed there:
 | `api/routers/analytics.py` source inventory | the owning feed's own flag, per source | stays |
 | `tasks/comp.py`, `tasks/content.py`, `tasks/verify.py` (three sweeps), `tasks/locations.py`, `tasks/application.py` (three), `api/experiments.py` | which postings get work | moved |
 | `api/board/eligibility.py` `STRUCTURAL` (board recompute, materialize, managed board runs), `tasks/board.py` `demote_closed` | which postings a board may show | moved |
-| `api/routers/filters.py` preset coverage gates | how many postings a preset would show | stays on `jobs.active`, the one deliberate exception (decided 2026-10-10): with availability computed per row, each of its two counts took 7.0 s instead of 4.3 s on a request a person waits for, and the counts differ on 111 of 198,319 postings. Stored availability removes that cost, so this is open to decide again |
+| `api/routers/filters.py` preset coverage gates | how many postings a preset would show | moved, once availability was stored |
 | `api/routers/job_board.py`, `job_detail.py`, `public_job_lists.py` (`active` in the response), `api/board/column_filters.py` ("Listed by source"), `api/posting_path.py` | what a person is told | moved |
+
+### Contract: retiring jobs.active
+
+Planned 2026-10-10. Each step is its own release, and each starts only after
+the one before it is running on every worker.
+
+1. **Readers read the column alone.** Once the shadow's `projected=None` cells
+   for active rows hold only explained classes, `IS_AVAILABLE` becomes
+   `j.available`, with NULL read as not available, and the board recompute is
+   measured against its 27 s baseline. Two readers still read feed state, and
+   each moves to observations: the source inventory in
+   `api/routers/analytics.py` counts each source's latest observations, and
+   the re-listing branch in `tasks/verify.py` keys on a `reappeared`
+   observation newer than the last closed check, not on `job_listing_events`.
+   `posting_path` stops reading `job_listing_events` too.
+2. **Nothing writes it.** `upsert_postings` stops setting `active` and drops it
+   from its change test. `retire_unlisted` and `retire_switched_off` go:
+   observe records `unlisted`, and the reconcile covers switches. The
+   `job_listing_events` inserts go with them. The shadow goes, because there
+   is nothing left to compare. `set_active` writes only its observation.
+3. **Prove nothing reads it.** The guard in `tests/test_availability_readers.py`
+   widens to every spelling of the column (`active` selected from `jobs`,
+   `jobs.active`, the ORM attribute) with an empty allow-list. Production
+   `pg_stat_statements` is read for statements naming `jobs.active` across a
+   full day after step 2 is on every worker, and the count must be zero.
+4. **Freeze it, do not drop it.** Data is never deleted ("Always retain all
+   data" in [engineering-standards.md](engineering-standards.md)), so the
+   column keeps the last value each feed wrote, and `job_listing_events`
+   keeps the history from before `source_observations` began. Both stop
+   changing after step 2. Dropping either would delete data, which is
+   Kanishk's decision, not part of this plan.
 
 **Never in a loop:** any write to the production database, and any migration
 that can refuse to apply ([migrations.md](migrations.md)). Neither of these is
