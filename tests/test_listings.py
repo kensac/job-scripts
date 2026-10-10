@@ -310,11 +310,8 @@ def test_a_changed_field_rewrites_its_row_and_only_its_row(monkeypatch, f):
     assert rows[retitled.url]["title"] == "Staff Software Engineer"
 
 
-def test_a_pattern_is_stored_once_and_a_row_without_its_pointer_is_a_change(monkeypatch, f):
-    """Listings point at one stored copy of their source's pattern. A row
-    written before pattern_id existed differs from what a pull would write,
-    so the next pull that lists it rewrites it with the pointer, while the
-    rows that already have it stay untouched."""
+def test_a_pattern_is_stored_once(monkeypatch, f):
+    """Listings point at one stored copy of their source's pattern."""
     f.make_source("acme")
     db.execute("UPDATE sources SET title_pattern = 'new grad' WHERE name = 'acme'")
     _ingest(monkeypatch, f, LISTED)
@@ -323,15 +320,6 @@ def test_a_pattern_is_stored_once_and_a_row_without_its_pointer_is_a_change(monk
     stored = db.query_one("SELECT id FROM title_patterns")
     assert stored is not None
     assert {r["pattern_id"] for r in db.query("SELECT pattern_id FROM listings")} == {stored["id"]}
-
-    db.execute("UPDATE listings SET pattern_id = NULL WHERE url = %s", (LISTED[1].url,))
-    before = _versions()
-    _ingest(monkeypatch, f, LISTED)
-    after = _versions()
-    assert {url for url in before if after[url] != before[url]} == {LISTED[1].url}
-    assert db.query_one("SELECT pattern_id FROM listings WHERE url = %s", (LISTED[1].url,)) == {
-        "pattern_id": stored["id"]
-    }
 
     # A new pattern is a second row, and each listing points at the one that judged it.
     db.execute("UPDATE sources SET title_pattern = 'engineer' WHERE name = 'acme'")

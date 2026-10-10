@@ -8,6 +8,7 @@ import pytest
 import requests
 
 from api import db, health, queue, worker
+from core import catalog
 from core.fetching import boards
 from tasks import ingest
 
@@ -149,8 +150,9 @@ def test_a_board_that_never_listed_anything_is_surfaced_once_for_the_set(f):
         _pull(name, "done", 50, fetched=0, kept=0)
     f.make_job(source="has_jobs")
     db.execute(
-        "INSERT INTO listings (url, source, pattern, kept) "
-        "VALUES ('https://jobs.test/x', 'once_listed', '', false)"
+        "INSERT INTO listings (url, source, pattern_id, kept) "
+        "VALUES ('https://jobs.test/x', 'once_listed', %s, false)",
+        (catalog.title_pattern_id(""),),
     )
 
     found = [a for a in health._detect_boards() if a["kind"] == "sources_never_produced"]

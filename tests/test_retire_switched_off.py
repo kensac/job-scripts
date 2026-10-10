@@ -11,8 +11,8 @@ from tasks import ingest
 
 def _listed(url: str, source: str, *, kept: bool) -> None:
     db.execute(
-        "INSERT INTO listings (url, source, pattern, kept) VALUES (%s, %s, '', %s)",
-        (url, source, kept),
+        "INSERT INTO listings (url, source, pattern_id, kept) VALUES (%s, %s, %s, %s)",
+        (url, source, catalog.title_pattern_id(""), kept),
     )
 
 
