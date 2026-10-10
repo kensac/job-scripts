@@ -331,6 +331,21 @@ class SourceObservation(Base):
     at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
 
 
+class TitlePattern(Base):
+    """Each distinct source title pattern, stored once. A listing points at
+    the pattern that judged its kept flag instead of carrying a copy: 1,060,806
+    listings rows held 4 distinct patterns, 492 MB of the table's 863 MB
+    (2026-10-10). Keyed by the SHA-256 of the text because a btree entry
+    cannot hold a long pattern; core.catalog.title_pattern_id accepts a digest
+    match only when the text is equal. Never updated or deleted."""
+
+    __tablename__ = "title_patterns"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
+    digest: Mapped[bytes] = mapped_column(LargeBinary, unique=True)
+    pattern: Mapped[str] = mapped_column(Text)
+
+
 class Listing(Base):
     """Every posting a board returned on its last pull, kept by the title
     pattern or not, with the text the listing call carried and the raw record
@@ -370,7 +385,12 @@ class Listing(Base):
     title: Mapped[str] = mapped_column(Text, server_default=text("''"))
     locations: Mapped[list[str]] = mapped_column(ARRAY(Text), server_default=text("'{}'"))
     date_posted: Mapped[datetime.datetime | None]
-    pattern: Mapped[str] = mapped_column(Text)
+    # The copy title_patterns replaces. Written alongside pattern_id until the
+    # readers have moved, then emptied and dropped (migrations.md).
+    pattern: Mapped[str | None] = mapped_column(Text)
+    pattern_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("title_patterns.id", name="fk_listings_pattern")
+    )
     kept: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     description: Mapped[str] = mapped_column(Text, server_default=text("''"))
     raw: Mapped[dict] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))

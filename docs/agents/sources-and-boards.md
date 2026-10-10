@@ -261,6 +261,18 @@ interval, so a row is never deleted sooner than `screened_retention_days`
 after its last listing, and at most the interval later. A listed row is never
 deleted, because its pull refreshes it before the delete runs.
 
+**A listing points at the pattern that judged it; it does not copy it.**
+`title_patterns` holds each distinct pattern text once, keyed by the SHA-256
+of the text (a btree entry cannot hold a long pattern), and
+`listings.pattern_id` points at the one whose match set `kept`.
+`catalog.title_pattern_id` is the only writer: it inserts on a new digest and
+accepts a digest match only when the text is equal. Rows are never updated or
+deleted, so a pointer cannot outlive its text. The upsert's change check
+compares `pattern_id`. The copy this replaces was 492 MB of the table's 863 MB
+of row data for 4 distinct values (1,060,806 rows, 2026-10-10).
+`listings.pattern` is still written beside the pointer until every reader has
+moved; then it is emptied and dropped (migrations.md).
+
 A candidate pattern is judged against this table (`pattern-preview`) before it
 replaces the live one. A posting a wider pattern admits arrives in `jobs` on
 the next pull, and ingest stores the carried text as the posting's content

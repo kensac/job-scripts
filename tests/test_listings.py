@@ -265,6 +265,44 @@ def test_a_changed_field_rewrites_its_row_and_only_its_row(monkeypatch, f):
     assert rows[retitled.url]["title"] == "Staff Software Engineer"
 
 
+def test_a_pattern_is_stored_once_and_a_row_without_its_pointer_is_a_change(monkeypatch, f):
+    """Listings point at one stored copy of their source's pattern. A row
+    written before pattern_id existed differs from what a pull would write,
+    so the next pull that lists it rewrites it with the pointer, while the
+    rows that already have it stay untouched."""
+    f.make_source("acme")
+    db.execute("UPDATE sources SET title_pattern = 'new grad' WHERE name = 'acme'")
+    _ingest(monkeypatch, f, LISTED)
+    _ingest(monkeypatch, f, LISTED)
+    assert db.query("SELECT pattern FROM title_patterns") == [{"pattern": "new grad"}]
+    stored = db.query_one("SELECT id FROM title_patterns")
+    assert stored is not None
+    assert {r["pattern_id"] for r in db.query("SELECT pattern_id FROM listings")} == {stored["id"]}
+
+    db.execute("UPDATE listings SET pattern_id = NULL WHERE url = %s", (LISTED[1].url,))
+    before = _versions()
+    _ingest(monkeypatch, f, LISTED)
+    after = _versions()
+    assert {url for url in before if after[url] != before[url]} == {LISTED[1].url}
+    assert db.query_one("SELECT pattern_id FROM listings WHERE url = %s", (LISTED[1].url,)) == {
+        "pattern_id": stored["id"]
+    }
+
+    # A new pattern is a second row, and each listing points at the one that judged it.
+    db.execute("UPDATE sources SET title_pattern = 'engineer' WHERE name = 'acme'")
+    _ingest(monkeypatch, f, LISTED)
+    assert {r["pattern"] for r in db.query("SELECT pattern FROM title_patterns")} == {
+        "new grad",
+        "engineer",
+    }
+    assert {
+        r["pattern"]
+        for r in db.query(
+            "SELECT t.pattern FROM listings l JOIN title_patterns t ON t.id = l.pattern_id"
+        )
+    } == {"engineer"}
+
+
 def test_an_update_keeps_long_text_it_did_not_change_where_it_already_is(monkeypatch, f):
     """Postgres reuses a TOASTed value only when the new row carries the old
     row's own pointer. A value arriving through EXCLUDED is a fresh copy and
