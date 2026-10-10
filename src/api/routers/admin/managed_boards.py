@@ -17,7 +17,7 @@ from api.routers.admin.shared import require_admin
 from api.updates import NonNullUpdate
 from core import providers
 from core.filters import ON_AMBIGUOUS_VALUES, compute_filter_hash
-from core.managed_board_title_gate import TitleGateConfig
+from core.screening import TitleGateConfig
 
 router = APIRouter()
 

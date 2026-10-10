@@ -2,11 +2,16 @@
 
 from api import db
 from api.board import criteria
-from core.managed_board_title_gate import sql_for_json
-from core.review_gate import OCCUPATION_SQL_PATTERN, TECHNICAL_SQL_PATTERN, VolumeGate
+from core import screening
+from core.review_gate import VolumeGate
 from core.store import AI_ELIGIBLE_JOB
 
-_TITLE_SQL, PARAMS = sql_for_json("target.title_gate")
+# A board's enforced title gate.
+_TITLE_SQL = (
+    "AND (COALESCE(target.title_gate->>'mode', 'shadow') <> 'enforce' OR NOT "
+    + screening.skips_sql("target.title_gate->>'recipe'")
+    + ")"
+)
 
 TARGETS = """
 verification_targets AS (
@@ -32,8 +37,8 @@ TITLE_KEY = "lower(regexp_replace(j.title, '\\s+', ' ', 'g'))"
 # A target in the volume gate's scopes does not read a posting from a source
 # that boards and filters do not keep, or whose source and title have been
 # judged often with no keep (bar a fixed sample of urls for both), or whose
-# title names an occupation and no technical word. core.review_gate.VolumeGate
-# says why.
+# title the occupation_words_v1 screen skips. core.review_gate.VolumeGate says
+# why.
 _VOLUME_SKIP = (
     """
         AND NOT (target.prompt_hash = ANY(%(volume_gate_scopes)s::text[]) AND (
@@ -42,9 +47,9 @@ _VOLUME_SKIP = (
     + TITLE_KEY
     + """ = ANY(%(volume_gate_title_keys)s::text[]))
              AND abs(hashtext(j.url)) %% 100 >= %(volume_gate_audit_percent)s)
-            OR (%(volume_gate_titles)s
-                AND j.title !~* %(volume_gate_technical)s
-                AND j.title ~* %(volume_gate_occupations)s)))
+            OR (%(volume_gate_titles)s AND """
+    + screening.skips_sql("'occupation_words_v1'")
+    + """)))
 """
 )
 
@@ -123,7 +128,5 @@ def params() -> dict[str, object]:
         "volume_gate_title_keys": unproductive_titles(gate),
         "volume_gate_audit_percent": gate.audit_percent,
         "volume_gate_titles": gate.occupation_titles,
-        "volume_gate_technical": TECHNICAL_SQL_PATTERN,
-        "volume_gate_occupations": OCCUPATION_SQL_PATTERN,
-        **PARAMS,
+        **screening.PARAMS,
     }

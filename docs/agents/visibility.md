@@ -148,11 +148,18 @@ rejected on clearance, citizenship or ITAR. A viewer of a published list can
 take those rows back out with `hide_restricted=true`, which drops a posting
 whose latest clearance verdict is a rejection and keeps one with no verdict.
 
-**A board's title gate is the cheap rung before the model.** A recipe in
-`core/managed_board_title_gate.py` decides from title and source alone, in
-Python for the run and in SQL for verification reach; a test holds the two
-spellings equal per recipe, since a recipe the SQL `CASE` does not name falls
-to `ELSE FALSE`. A new recipe ships in `shadow` mode: the board's first run
+**Every title screen is a named recipe in `core/screening.py`.** A recipe
+decides from title and source alone. It is an ordered rule list that `screen`
+reads in Python and `skips_sql` writes as SQL, so the two spellings come from
+one source, and `tests/test_screening.py` holds them equal on every recipe. A
+recipe is never edited in place: the same test pins a digest of each, and a
+different rule is a new name, measured before anything enforces it. The board
+title gates, the filter review gate's title stage and the verification volume
+gate's occupation list are separate recipes there, kept separate because each
+was measured against its own consumers; widening one to another's list is a
+measured change of its own.
+
+**A board's title gate is the cheap rung before the model.** A new recipe ships in `shadow` mode: the board's first run
 judges every candidate and its `title_gate_report` lists what the gate would
 have dropped, which is the recall measurement. Only then is it set to
 `enforce`. Measured on Tech Internships 2026-10-05, `internship_v1` skips
@@ -205,8 +212,7 @@ those targets `verification_candidates.REACHABLE` skips a posting whose (source,
 title) was judged `title_min_judged` (50) times in `window_days` with no keep by
 any board or filter, except a fixed `audit_percent` sample of urls so a title
 that starts producing keeps comes back by itself, and a posting whose title
-names an occupation in `core.review_gate.OCCUPATION_WORDS` and no technical
-word. Both dropped no keep on three held-out splits. A posting someone tracks is
+the `occupation_words_v1` screen skips. Both dropped no keep on three held-out splits. A posting someone tracks is
 always read. A new or edited prompt is not covered until its hash is added,
 because both rules were measured against these prompts' keeps.
 

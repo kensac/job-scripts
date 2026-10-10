@@ -13,7 +13,7 @@ from core.job_profile import (
     build_job_profile_input,
 )
 from core.payload_objects import PayloadStore, PayloadUnavailable
-from core.review_gate import ReviewGatePolicy, profile_rejection, title_rejection
+from core.review_gate import ReviewGatePolicy, profile_rejection
 from tasks import filter_execution, job_profiles
 from tasks.runtime import consume_result
 from tests.factories import make_batch_result
@@ -38,41 +38,6 @@ def configure(title="enforce", shared="off"):
         "ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value",
         (db.jsonb(policy.model_dump(mode="json")),),
     )
-
-
-@pytest.mark.parametrize(
-    "title",
-    [
-        "Registered Nurse (RN) - ICU",
-        "Retail Sales Associate - Part Time",
-        "Delivery Driver (123) - Main Street",
-        "JANITORIAL CLEANER",
-        "Phlebotomist II",
-    ],
-)
-def test_explicit_unrelated_occupations_reject(title):
-    assert title_rejection(title) is not None
-
-
-@pytest.mark.parametrize(
-    "title",
-    [
-        "",
-        "Analyst",
-        "Operations Associate",
-        "Program Manager",
-        "Technician",
-        "Device Driver Software Engineer",
-        "Data Engineer - Retail Sales Associate Tools",
-        "Product Manager - Nurse Platform",
-        "Research Scientist",
-        "ML Infrastructure Intern",
-        "Finance Data Analyst",
-        "Registered Nurse - Clinical Systems Analyst",
-    ],
-)
-def test_ambiguous_or_technical_titles_abstain(title):
-    assert title_rejection(title) is None
 
 
 def test_profiles_reject_only_explicit_nontechnical_families():

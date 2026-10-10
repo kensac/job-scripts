@@ -19,12 +19,11 @@ from api.task_jobs import run_jobs
 from core import providers, routing, verdict_reads
 from core.batch import BATCH_CHARS_PER_TOKEN
 from core.filters import build_custom_decision_instructions, build_custom_input
-from core.managed_board_title_gate import TitleGateConfig
-from core.managed_board_title_gate import evaluate as evaluate_title_gate
 from core.payload_objects import PayloadStore, PayloadUnavailable
 from core.pool import in_transaction
 from core.providers import StructuredOutput
 from core.routing import NoEligibleModel, TaskShape, resolve
+from core.screening import Screen, TitleGateConfig, screen
 
 # What one verdict is expected to cost in output tokens, for the pre-run
 # budget reservation. An ESTIMATE, never a cap: it was passed to the model as
@@ -296,7 +295,6 @@ def verification_questions(
     """
     from api.review_gate import load_policy
     from core.filters import custom_criteria_instructions
-    from core.review_gate import title_rejection
     from core.store import decided_custom_urls
 
     urls = [job["url"] for job in jobs]
@@ -328,20 +326,25 @@ def verification_questions(
         )
         title_gate = TitleGateConfig.model_validate(board.title_gate) if board.title_gate else None
         scope = policy.scopes.get(board.prompt_hash)
-        review_titles = bool(scope and scope.title_recipe and policy.title_mode == "enforce")
+        review_recipe = scope.title_recipe if scope and policy.title_mode == "enforce" else None
         admitted = {
-            r["url"]: r["title"] or ""
+            r["url"]
             for r in rows
-            if title_gate is None
-            or title_gate.mode == "shadow"
-            or evaluate_title_gate(title_gate, title=r["title"] or "", source=r["source"]).keep
+            if (
+                title_gate is None
+                or title_gate.mode == "shadow"
+                or not screen(title_gate.recipe, title=r["title"], source=r["source"]).skip
+            )
+            and not (
+                review_recipe and screen(review_recipe, title=r["title"], source=r["source"]).skip
+            )
         }
         decided = decided_custom_urls(
             sorted(admitted), board.prompt_hash, model=board.requested_model
         )
         criteria = custom_criteria_instructions(board.prompt, board.on_ambiguous)
-        for url, title in admitted.items():
-            if url in decided or (review_titles and title_rejection(title)):
+        for url in admitted:
+            if url in decided:
                 continue
             questions.setdefault(url, []).append(
                 BoardQuestion(board.id, board.prompt_hash, criteria, board.requested_model)
@@ -447,7 +450,9 @@ def _plan(board_id: int) -> _Plan:
         candidates = _candidates(board)
         title_gate = TitleGateConfig.model_validate(board.title_gate) if board.title_gate else None
     decisions = [
-        evaluate_title_gate(title_gate, title=candidate.title, source=candidate.source)
+        screen(title_gate.recipe, title=candidate.title, source=candidate.source)
+        if title_gate
+        else Screen(False, "disabled")
         for candidate in candidates
     ]
     if board.execution_mode != "sponsor_filter_reuse":
@@ -456,7 +461,7 @@ def _plan(board_id: int) -> _Plan:
             [
                 candidate
                 for candidate, decision in zip(candidates, decisions, strict=True)
-                if title_gate is None or title_gate.mode == "shadow" or decision.keep
+                if title_gate is None or title_gate.mode == "shadow" or not decision.skip
             ],
         )
         _refuse_over_budget(sponsor.id, cap, reserved)
@@ -469,7 +474,7 @@ def _plan(board_id: int) -> _Plan:
             "source": candidate.source,
             "sort_at": candidate.sort_at.isoformat(),
             "content_query_id": candidate.content_query_id,
-            "title_gate_keep": decision.keep,
+            "title_gate_keep": not decision.skip,
             "title_gate_reason": decision.reason,
         }
         for candidate, decision in zip(candidates, decisions, strict=True)
