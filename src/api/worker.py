@@ -29,6 +29,7 @@ from api import (
     queue,
     telemetry,
 )
+from api.board import user_job_split
 from api.mail import match as mail_match
 from api.queue import enqueue
 from core.env import env_list
@@ -268,6 +269,14 @@ def schedule_ingest_cycle() -> None:
         "AND status IN ('pending', 'running') LIMIT 1"
     ):
         enqueue("move_page_fetches", {"cycle": cycle}, dedupe_key=f"page-fetch-move:{cycle}")
+    # The legacy user_jobs split (tasks.user_job_backfill) runs until one run
+    # completes; admission returns a live run instead of queueing a second,
+    # and continues a failed one from its checkpoint.
+    if not user_job_split.completed():
+        try:
+            user_job_split.admit()
+        except user_job_split.NoEligibleWorker:
+            logger.info("user job split not admitted: no current-release worker may claim it")
     # Board membership for every person who can have one, every
     # board_refresh_minutes, so new verdicts reach a board without anyone
     # touching a preference. Bucketed like the ingest cycle; a person's own

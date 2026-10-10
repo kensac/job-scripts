@@ -4,20 +4,15 @@ the provider batches a task is parked on."""
 from __future__ import annotations
 
 import datetime
-from dataclasses import dataclass
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
-from api import db, events, health, queue, scoping, task_admission, telemetry
+from api import db, events, health, scoping, task_admission
 from api import params as params_
 from api.auth import AuthedUser
-from api.board.person_state import (
-    USER_JOB_SPLIT_CHECKPOINT,
-    USER_JOB_SPLIT_DEDUPE_PREFIX,
-    USER_JOB_SPLIT_VERSION,
-)
+from api.board import user_job_split
 from api.problem import refuse
 from api.routers.admin.shared import SUMMARY_MAX_HOURS, require_admin
 from api.task_admission import TaskProgress
@@ -25,91 +20,21 @@ from core import pricing
 
 router = APIRouter()
 
-_USER_JOB_SPLIT_LOCK = 8_552_021
-
 
 class BackfillAdmission(BaseModel):
     task_id: int
     status: str
 
 
-@dataclass(frozen=True)
-class _ExistingSplit:
-    id: int
-    status: str
-    payload: dict[str, Any]
-
-
-@dataclass(frozen=True)
-class _SplitBoundary:
-    legacy_before: datetime.datetime
-    total: int
-
-
-@dataclass(frozen=True)
-class _EligibleWorker:
-    name: str
-
-
 @router.post("/tasks/backfill-user-job-split")
 def admit_user_job_split(user: AuthedUser = Depends(require_admin)) -> BackfillAdmission:
-    kind = "backfill_user_job_split"
-    with db.transaction():
-        db.execute("SELECT pg_advisory_xact_lock(%s)", (_USER_JOB_SPLIT_LOCK,))
-        existing = db.query_one_as(
-            _ExistingSplit,
-            "SELECT id, status, payload FROM tasks WHERE kind = %s "
-            "ORDER BY id DESC LIMIT 1 FOR UPDATE",
-            (kind,),
-        )
-        if existing and existing.status not in ("failed", "cancelled"):
-            return BackfillAdmission(task_id=existing.id, status=existing.status)
-        eligible = db.query_one_as(
-            _EligibleWorker,
-            "SELECT name FROM worker_status "
-            "WHERE last_seen > now() - %(fresh)s::interval "
-            "AND release IS NOT DISTINCT FROM %(release)s "
-            "AND (cardinality(kinds) = 0 OR %(kind)s = ANY(kinds)) "
-            "AND NOT (%(kind)s = ANY(excluded_kinds)) "
-            "ORDER BY name LIMIT 1",
-            {"fresh": health.WORKER_FRESH, "release": telemetry.RELEASE, "kind": kind},
-        )
-        if eligible is None:
-            raise refuse(
-                503, "NO_ELIGIBLE_WORKER", "no current-release worker can run the user job split"
-            )
-        generation = int(existing.payload.get("generation", 0) if existing else 0) + 1
-        if existing:
-            legacy_before = existing.payload["legacy_before"]
-            total = existing.payload["total"]
-        else:
-            boundary = db.query_one_as(
-                _SplitBoundary,
-                "WITH boundary AS (SELECT now() AS legacy_before) "
-                "SELECT legacy_before, "
-                "(SELECT count(*) FROM user_jobs WHERE created_at < legacy_before) AS total "
-                "FROM boundary",
-            )
-            assert boundary is not None
-            legacy_before = boundary.legacy_before.isoformat()
-            total = boundary.total
-        task_id = queue.enqueue(
-            kind,
-            {
-                "version": USER_JOB_SPLIT_VERSION,
-                "generation": generation,
-                "legacy_before": legacy_before,
-                "total": total,
-                **(
-                    {USER_JOB_SPLIT_CHECKPOINT: existing.payload[USER_JOB_SPLIT_CHECKPOINT]}
-                    if existing and USER_JOB_SPLIT_CHECKPOINT in existing.payload
-                    else {}
-                ),
-            },
-            dedupe_key=f"{USER_JOB_SPLIT_DEDUPE_PREFIX}:g{generation}",
-        )
-        assert task_id is not None
-    return BackfillAdmission(task_id=task_id, status="pending")
+    try:
+        admitted = user_job_split.admit()
+    except user_job_split.NoEligibleWorker as exc:
+        raise refuse(
+            503, "NO_ELIGIBLE_WORKER", "no current-release worker can run the user job split"
+        ) from exc
+    return BackfillAdmission(task_id=admitted.task_id, status=admitted.status)
 
 
 class QueuedTask(BaseModel):

@@ -371,6 +371,12 @@ a measurement asks for it.
 Phase 2 still brings its numbers before it merges: it decides what gets paid
 for.
 
+The split backfill (`tasks/user_job_backfill.py`) is admitted by
+`api.board.user_job_split.admit`, from the admin route and from the scheduler,
+which admits it every cycle until one run is `done`. A live run is returned
+rather than duplicated, and a failed or cancelled one continues from its
+checkpoint with its original cutoff.
+
 `GET /admin/working-set-shadow` is the read-only cutover report. Run it after
 the split backfill and at least one complete filter cycle. It compares legacy
 and proposed pair membership, AI eligibility, the full stale re-verification
