@@ -40,8 +40,8 @@ def test_extension_suggestions_receive_posting_and_personal_style(
     )
     # Seed through the same raw-content cache read by the application drafts.
     db.execute(
-        "INSERT INTO ai_queries (url, check_type, status, input_content) "
-        "VALUES (%s, 'extract', 'passed', %s)",
+        "INSERT INTO page_fetches (url, status, method, content) "
+        "VALUES (%s, 'passed', 'scraped', %s)",
         ("https://example.test/motivation", "Build reliable clinic scheduling software."),
     )
     response = client.post(
