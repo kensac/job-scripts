@@ -355,9 +355,10 @@ def assign_message(
     # mail by normalised subject and sender was measured and is unsafe: "thank
     # you for applying!" from myworkday.com is 49 messages from 49 DIFFERENT
     # employers, and merging those would attach 49 unrelated applications to
-    # one. The correct signal is the References/In-Reply-To chain, which this
-    # importer discards - `headers` is empty on all 67k rows - so until that is
-    # fixed, threadless mail is assigned one message at a time.
+    # one. The correct signal is the References/In-Reply-To chain. Takeout
+    # stores it (`headers` on all 38,190 Takeout rows, 2026-10-10) and takes
+    # its thread id from it; .olm stores none (28,451 rows), so threadless mail
+    # is assigned one message at a time.
     targets = [message_id]
     if body.whole_thread:
         siblings = db.query(
