@@ -150,6 +150,12 @@ pass for the wrong reason. State the value the test depends on, even when it
 matches the default. Especially then, because the default can change under a
 test that never mentioned it.
 
+**A test that depends on a value derived from a url names its urls.** The
+factories number urls from one counter for the whole session, so a factory
+url depends on which tests ran before. A test of the volume gate's 5% audit
+sample (`abs(hashtext(url)) % 100`) drew none of its 60 postings in about 8%
+of starting points and failed only inside larger runs.
+
 ## Diagnosing a failure
 
 Reproduce before fixing. An intermittent failure needs a deterministic
