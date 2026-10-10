@@ -18,7 +18,6 @@ from tasks.comp import handle_extract_comp
 from tasks.content import handle_fetch_missing_content
 from tasks.digests import handle_send_digests
 from tasks.embeddings import handle_embed_postings_batch
-from tasks.experiments import handle_run_experiment
 from tasks.filters import (
     handle_run_all_filters,
     handle_run_filter,
@@ -74,7 +73,6 @@ HANDLERS = {
     "fetch_missing_content": handle_fetch_missing_content,
     "application_draft": handle_application_draft,
     "application_sweep": handle_application_sweep,
-    "run_experiment": handle_run_experiment,
     "backfill_user_job_split": handle_backfill_user_job_split,
     "run_managed_board": handle_run_managed_board,
     "run_managed_board_batch": handle_run_managed_board_batch,

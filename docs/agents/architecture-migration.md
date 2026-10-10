@@ -170,7 +170,6 @@ each by its own code:
 | `batch_result_receipts.response.usage` | one row per batch item | `batch_results.checkpoint` | nothing reads it as money |
 | `review_gate_outcomes.recorded_cost_usd`, `usage` | copied from `ai_queries` | `review_gate_records.record_outcome` | review gate pages |
 | `job_embeddings.input_tokens`, `cost_usd` | a packed request split per posting | `tasks.embeddings` | nothing |
-| `ai_experiment_results.cost_usd`, `usage` | one row per arm and url | `tasks.experiments` | the experiment summary |
 
 The same verify call was a fleet row in `api_usage` with the batch's totals,
 the same totals on `ai_batches`, a receipt, and a `closed` verdict holding
@@ -232,8 +231,9 @@ they came to disagree.
   The weekly user budget is `SUM(total_tokens)` over the person's calls on
   the owner key in seven days, and the fleet ceiling the same over calls with
   no user (managed boards included, as today).
-- `ai_experiment_results` points at its call if experiments stay (stream I
-  decides whether they do).
+- `ai_experiment_results` is not carried. Experiments run from
+  `api.run_experiment` and keep their answers in files, and the table is
+  dropped.
 
 **Where a row is written.** Batch items in `batch_results.checkpoint`, the
 one place every collected result passes through, from the receipt and the
@@ -866,11 +866,10 @@ call that service. `tasks/locations.py` owns only candidate selection, request
 construction, batch lifecycle and result consumption.
 
 The experiment edge is closed. Request construction, arm validation, sampling
-and scoring live in `api/experiments.py`, which both the router and the task
-handler call. The extraction answer schemas and instructions that experiments
-also need live beside their vocabularies in `core`, rather than making the
-service reach through the handlers. `tasks/experiments.py` now owns only task
-lifecycle, batch submission and result collection.
+and scoring live in `api/experiments.py`, which `api.run_experiment` calls.
+The extraction answer schemas and instructions that experiments also need
+live beside their vocabularies in `core`, rather than making the service
+reach through the handlers.
 
 The four drafting helpers this list used to name are gone.
 `api/apply/drafting.py` holds `resume_text`, `writing_style`, `instructions`,

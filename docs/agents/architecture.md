@@ -177,8 +177,8 @@ fresh copy:
   event publication have one service owner.
 - **Experiment semantics**: `api/experiments.py`. Its explicit, immutable
   `ExperimentStep` declarations own request construction, comparison
-  projection and deployed-result loading. Experiments are opt-in; this is not
-  a universal derivation registry.
+  projection and deployed-result loading; `api.run_experiment` is its only
+  caller. Experiments are opt-in; this is not a universal derivation registry.
 - **Structured batch transport**: `core/batch.py`. Response-model name and
   strict JSON schema are derived together by `structured_response_spec`.
   Prompts, inputs, context, output limits, model choice and persistence remain
