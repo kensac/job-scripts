@@ -12,6 +12,7 @@ from typing import Any
 
 from api import db
 from api.ai import verdicts
+from core import verdict_reads
 from core.store import MIN_CONTENT_CHARS, SUBSCRIBED_SOURCE
 from tasks.board import fetch_retry_interval
 from tasks.runtime import SCRAPE_CONCURRENCY, AdaptiveLimiter, cancelled, set_progress
@@ -46,9 +47,7 @@ async def handle_fetch_missing_content(task_id: int, payload: dict[str, Any]) ->
           -- result is recorded as a closed verdict, not a content row, so
           -- the window above never saw it: 40 gone postings were re-fetched
           -- and re-verdicted every hour, 743 rows in a day (2026-09-06).
-          AND NOT EXISTS (
-            SELECT 1 FROM verdicts q WHERE q.url = j.url
-              AND q.check_type = 'closed' AND q.status = 'rejected')
+          AND NOT {verdict_reads.has_verdict("j.url", "closed", "rejected")}
         ORDER BY j.date_posted DESC NULLS LAST
         LIMIT %s
         """,

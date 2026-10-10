@@ -12,7 +12,7 @@ from api import ai, db, managed_board_runs, metrics
 from api.ai import verdicts
 from api.ai.batch_results import progress_counts
 from api.task_config import configured_model, configured_shape
-from core import near_copy
+from core import near_copy, verdict_reads
 from core.answers import (
     VERIFICATION_REQUEST,
     FilterDecision,
@@ -401,9 +401,7 @@ async def handle_reverify_open(task_id: int, payload: dict[str, Any]) -> None:
         rows = db.query(
             f"""
             SELECT j.url, j.company, j.title FROM jobs j
-            WHERE j.active AND {AI_ELIGIBLE_JOB.format(job="j")} AND EXISTS (
-                SELECT 1 FROM verdicts q WHERE q.url = j.url
-                  AND q.check_type = 'closed' AND q.status = 'passed')
+            WHERE j.active AND {AI_ELIGIBLE_JOB.format(job="j")} AND {verdict_reads.has_verdict("j.url", "closed", "passed")}
             ORDER BY j.id
             """
         )
@@ -524,10 +522,8 @@ def _reuse_near_copies(task_id: int, rows: list[dict[str, Any]]) -> list[dict[st
             "SELECT DISTINCT ON (j.source, j.near_copy_key) j.source, j.near_copy_key, j.url "
             "FROM jobs j WHERE (j.source, j.near_copy_key) IN "
             "(SELECT * FROM unnest(%s::text[], %s::text[])) AND NOT (j.url = ANY(%s::text[])) "
-            "AND EXISTS (SELECT 1 FROM verdicts c WHERE c.url = j.url "
-            "AND c.check_type = 'closed') "
-            "AND EXISTS (SELECT 1 FROM verdicts c WHERE c.url = j.url "
-            "AND c.check_type = 'clearance') "
+            f"AND {verdict_reads.has_verdict('j.url', 'closed')} "
+            f"AND {verdict_reads.has_verdict('j.url', 'clearance')} "
             "ORDER BY j.source, j.near_copy_key, j.id DESC",
             (sources, digests, list(keys)),
         )
@@ -639,27 +635,19 @@ async def handle_verify_new(task_id: int, payload: dict[str, Any]) -> None:
             f"""
             WITH {verification_candidates.TARGETS}, candidates AS (
             SELECT j.url, j.source, j.company, j.title, q.input_content,
-                   NOT EXISTS (
-                       SELECT 1 FROM verdicts c WHERE c.url = j.url
-                         AND c.check_type = 'closed') AS needs_closed,
-                   NOT EXISTS (
-                       SELECT 1 FROM verdicts c WHERE c.url = j.url
-                         AND c.check_type = 'clearance') AS needs_clearance
+                   NOT {verdict_reads.has_verdict("j.url", "closed")} AS needs_closed,
+                   NOT {verdict_reads.has_verdict("j.url", "clearance")} AS needs_clearance
             FROM jobs j
             {CONTENT_LATERAL.format(url="j.url", columns="input_content")}
             WHERE j.active AND {verification_candidates.REACHABLE}
               AND NOT (j.url = ANY(%(in_flight)s::text[])) AND (
-                NOT EXISTS (
-                    SELECT 1 FROM verdicts c WHERE c.url = j.url
-                      AND c.check_type = 'closed')
+                NOT {verdict_reads.has_verdict("j.url", "closed")}
                 -- Short-circuited pipelines (and any upstream verdict that later
                 -- flips to passing) leave downstream checks MISSING, not false;
                 -- a job invisible for want of a clearance verdict never heals
                 -- unless the sweep looks for holes in every check, not just the
                 -- first one.
-                OR NOT EXISTS (
-                    SELECT 1 FROM verdicts c WHERE c.url = j.url
-                      AND c.check_type = 'clearance')
+                OR NOT {verdict_reads.has_verdict("j.url", "clearance")}
             )
             -- Freshest first, as the content sweep already selects. The cap
             -- makes this a priority queue, and `j.id` is ingest order, so a

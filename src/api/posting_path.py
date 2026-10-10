@@ -20,6 +20,7 @@ from pydantic import BaseModel
 from api import db
 from api.ai import verdicts
 from api.board import criteria as board_criteria
+from core import verdict_reads
 from core.managed_board_title_gate import TitleGateConfig
 from core.managed_board_title_gate import evaluate as evaluate_title_gate
 from core.review_gate import OCCUPATION_SQL_PATTERN, TECHNICAL_SQL_PATTERN, VolumeGate
@@ -96,20 +97,11 @@ def _job(where: str, value: Any) -> dict[str, Any] | None:
     )
 
 
-def _latest(url: str, check: str) -> dict[str, Any] | None:
+def _latest(url: str, check: str) -> verdict_reads.LatestVerdict | None:
     key = (url, check)
     if key not in _LATEST.get():
-        _LATEST.get()[key] = _read_latest(url, check)
+        _LATEST.get()[key] = verdict_reads.read_latest(url, check)
     return _LATEST.get()[key]
-
-
-def _read_latest(url: str, check: str) -> dict[str, Any] | None:
-    return db.query_one(
-        "SELECT status, reason, config_name, model, created_at FROM verdicts "
-        "WHERE url = %s AND check_type = %s "
-        "ORDER BY id DESC LIMIT 1",
-        (url, check),
-    )
 
 
 def _twin(job: dict[str, Any]) -> str | None:
@@ -222,19 +214,19 @@ def _verification_steps(job: dict[str, Any]) -> list[PathStep]:
         verdict = _latest(job["url"], check)
         if verdict is None:
             continue
-        origin = _origin(verdict["config_name"])
-        if verdict["config_name"] == "verify-near-copy":
+        origin = _origin(verdict.config_name)
+        if verdict.config_name == "verify-near-copy":
             twin = twin or _twin(job)
             if twin:
                 origin = f"{origin} ({twin})"
         steps.append(
             PathStep(
                 stage="verification",
-                outcome="failed" if verdict["status"] == "rejected" else "passed",
-                label=flagged if verdict["status"] == "rejected" else clear,
-                detail="; ".join(part for part in (verdict["reason"], origin) if part),
+                outcome="failed" if verdict.status == "rejected" else "passed",
+                label=flagged if verdict.status == "rejected" else clear,
+                detail="; ".join(part for part in (verdict.reason, origin) if part),
                 basis="recorded",
-                at=verdict["created_at"],
+                at=verdict.created_at,
                 check=check,
             )
         )
@@ -387,7 +379,7 @@ def _structural_step(job: dict[str, Any], bypass: bool) -> PathStep:
             label="Waiting for verification",
             basis="recorded",
         )
-    if closed["status"] == "rejected":
+    if closed.status == "rejected":
         return PathStep(
             stage="structural",
             outcome="failed",
@@ -408,7 +400,7 @@ def _structural_step(job: dict[str, Any], bypass: bool) -> PathStep:
             label="Waiting for the clearance check",
             basis="recorded",
         )
-    if clearance["status"] == "rejected":
+    if clearance.status == "rejected":
         return PathStep(
             stage="structural",
             outcome="failed",
@@ -457,13 +449,8 @@ def _review_step(job: dict[str, Any], where: str, value: int) -> PathStep | None
 def _verdict_step(
     job: dict[str, Any], prompt_hash: str, model: str | None, filter_id: int | None
 ) -> PathStep:
-    clause = " AND model = %s" if model else ""
-    params: tuple = (job["url"], prompt_hash, model) if model else (job["url"], prompt_hash)
-    row = db.query_one(
-        "SELECT status, reason, config_name, model, created_at FROM verdicts WHERE url = %s "
-        f"AND check_type = 'custom' AND prompt_hash = %s{clause} "
-        "ORDER BY id DESC LIMIT 1",
-        params,
+    row = verdict_reads.read_latest(
+        job["url"], "custom", prompt_hash=prompt_hash, model=model or None
     )
     if row is None:
         return PathStep(
@@ -475,16 +462,16 @@ def _verdict_step(
             prompt_hash=prompt_hash,
             filter_id=filter_id,
         )
-    origin = _origin(row["config_name"])
-    if row["config_name"] == "verify-near-copy" and (twin := _twin(job)):
+    origin = _origin(row.config_name)
+    if row.config_name == "verify-near-copy" and (twin := _twin(job)):
         origin = f"{origin} ({twin})"
     return PathStep(
         stage="verdict",
-        outcome="passed" if row["status"] == "passed" else "failed",
-        label="Kept" if row["status"] == "passed" else "Rejected",
-        detail="; ".join(part for part in (row["reason"], origin, row["model"]) if part),
+        outcome="passed" if row.status == "passed" else "failed",
+        label="Kept" if row.status == "passed" else "Rejected",
+        detail="; ".join(part for part in (row.reason, origin, row.model) if part),
         basis="recorded",
-        at=row["created_at"],
+        at=row.created_at,
         check="custom",
         prompt_hash=prompt_hash,
         filter_id=filter_id,

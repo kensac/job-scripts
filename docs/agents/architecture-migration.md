@@ -138,6 +138,14 @@ A failed attempt is a call, not a verdict, so readers that count calls
 `tests/test_verdicts_view.py` fails when a new reader restates which rows
 are answers instead of reading the view.
 
+How an answer is read is `core/verdict_reads.py`'s: the latest answer to a
+check for a posting (`latest`, `latest_status`, `read_latest`), what a closed
+answer shows a person (`closed_verdict`), whether any answer exists
+(`has_verdict`), and verified-open (`verified_open`). The same test fails
+when a module outside it writes a latest-answer shape (`ORDER BY id DESC`
+over the view, or an `EXISTS` on one posting's answers); its allow-list
+names each exception and why.
+
 ## What may be done unattended
 
 A merge reaches six hosts on Renovate's cadence with nobody watching

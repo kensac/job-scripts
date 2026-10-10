@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from api import db
 from api.params import csv
 from api.routers.job_board import ATS_SQL, AtsName, Openness
+from core import verdict_reads
 
 router = APIRouter(prefix="/public/job-lists", tags=["public-job-lists"])
 PublicSort = Literal["posted", "added", "company", "title", "comp"]
@@ -238,10 +239,7 @@ GROUP BY b.id
 _CARD_COLUMNS = f"""
 mj.job_id, {{sort_expression}} AS sort_value, j.company, j.title, j.locations, j.terms,
 j.source, ({ATS_SQL}) AS ats, j.date_posted, j.created_at AS added_at, j.active,
-(SELECT CASE q.status WHEN 'passed' THEN 'open' WHEN 'rejected' THEN 'closed' END
- FROM verdicts q
- WHERE q.url = j.url AND q.check_type = 'closed'
- ORDER BY q.id DESC LIMIT 1) AS closed_verdict,
+{verdict_reads.closed_verdict("j.url")} AS closed_verdict,
 j.comp_min, j.comp_max, j.comp_currency, j.comp_period, j.comp_basis, j.comp_text, j.url
 """
 
@@ -339,9 +337,7 @@ def get_public_job_list(
         # A board may admit postings the clearance gate rejected (citizenship,
         # clearance, ITAR); a viewer can drop them. No verdict yet is not a rejection.
         filters.append(
-            "AND (SELECT q.status FROM verdicts q WHERE q.url = j.url "
-            "AND q.check_type = 'clearance' "
-            "ORDER BY q.id DESC LIMIT 1) IS DISTINCT FROM 'rejected'"
+            f"AND {verdict_reads.latest_status('j.url', 'clearance')} IS DISTINCT FROM 'rejected'"
         )
     selection = " ".join(filters)
     if cursor:

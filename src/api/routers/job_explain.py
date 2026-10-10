@@ -13,6 +13,7 @@ from api.auth import AuthedUser, require_user
 from api.board.access import require_visible_job
 from api.problem import AI_REFUSALS
 from api.reports import request_recheck
+from core import verdict_reads
 
 router = APIRouter()
 
@@ -162,11 +163,7 @@ async def explain_check(
     rejected, reason = verdict_of(parsed)
     status: Verdict = "rejected" if rejected else "passed"
     if spec:
-        standing = db.query_one(
-            "SELECT status FROM verdicts WHERE url = %s AND check_type = %s "
-            "ORDER BY id DESC LIMIT 1",
-            (job["url"], spec.name),
-        )
-        if not standing or standing["status"] != status:
+        standing = verdict_reads.read_latest(job["url"], spec.name)
+        if not standing or standing.status != status:
             request_recheck(job)
     return Explained(check=body.check, status=status, reason=reason)
