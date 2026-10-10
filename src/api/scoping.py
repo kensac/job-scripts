@@ -29,7 +29,7 @@ from api import params as params_
 def user_ids(value: str | None) -> list[int]:
     """The ids in `user=1,2`; anything that is not an integer is ignored
     rather than refused, the same way an unknown sort key is."""
-    return [int(v) for v in params_.csv(value) if v.isdigit()]
+    return [int(v) for v in params_.csv(value) if v.isdecimal()]
 
 
 def echo(ids: list[int]) -> list[str]:

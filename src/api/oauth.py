@@ -25,6 +25,7 @@ from psycopg import Connection
 from api import crypto, db
 from api.config import ALL_GROUPS as ALL_GROUPS
 from api.config import group_access_allowed
+from core.env import env_list
 
 logger = logging.getLogger(__name__)
 
@@ -144,8 +145,7 @@ def _client_secret() -> str:
 
 
 def redirect_uris() -> list[str]:
-    raw = os.environ.get("GMAIL_OAUTH_REDIRECT_URIS", "")
-    return [u.strip() for u in raw.split(",") if u.strip()] or list(_REGISTERED_REDIRECT_URIS)
+    return env_list("GMAIL_OAUTH_REDIRECT_URIS") or list(_REGISTERED_REDIRECT_URIS)
 
 
 def connect_allowed(groups: list[str]) -> bool:

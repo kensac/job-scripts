@@ -30,6 +30,7 @@ from api import (
     telemetry,
 )
 from api.queue import enqueue
+from core.env import env_list
 from core.fetching.hosts import pace_key
 from core.payload_objects import PayloadUnavailable
 from tasks import HANDLERS
@@ -85,10 +86,6 @@ BATCH_POLL_MINUTES = int(os.environ.get("JOBTRACKER_BATCH_POLL_MINUTES", "1"))
 # and the denylist then subtracts, so the result is what both agree on. Order
 # of evaluation cannot change the answer, which is the property that makes it
 # safe to set both without reasoning about which wins.
-def _env_list(name: str) -> list[str]:
-    return [k.strip() for k in os.environ.get(name, "").split(",") if k.strip()]
-
-
 def _kinds_clause(kinds: list[str], exclude: list[str]) -> str:
     """The WHERE fragment that narrows what this worker will claim."""
     clause = "AND kind = ANY(%(kinds)s)" if kinds else ""
@@ -97,8 +94,8 @@ def _kinds_clause(kinds: list[str], exclude: list[str]) -> str:
     return clause
 
 
-WORKER_KINDS = _env_list("JOBTRACKER_WORKER_KINDS")
-EXCLUDE_KINDS = _env_list("JOBTRACKER_WORKER_EXCLUDE_KINDS")
+WORKER_KINDS = env_list("JOBTRACKER_WORKER_KINDS")
+EXCLUDE_KINDS = env_list("JOBTRACKER_WORKER_EXCLUDE_KINDS")
 
 
 # Stamped on every claimed task so the admin UI can attribute work (and

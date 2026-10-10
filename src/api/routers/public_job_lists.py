@@ -143,7 +143,7 @@ def _etag(parts: list[str]) -> str:
 
 
 def _not_modified(if_none_match: str | None, etag: str) -> Response | None:
-    if if_none_match is not None and etag in {part.strip() for part in if_none_match.split(",")}:
+    if etag in csv(if_none_match):
         return Response(
             status_code=304,
             headers={"ETag": etag, "Cache-Control": "public, max-age=0, must-revalidate"},

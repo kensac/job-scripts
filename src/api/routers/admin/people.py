@@ -10,7 +10,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from api import db, sorting
+from api import db, scoping, sorting
 from api.auth import AuthedUser
 from api.models import Ok
 from api.problem import PROVIDER_REFUSALS
@@ -92,7 +92,7 @@ def list_users(
     # was walking up to 40 pages to build that map. Ids that are not integers
     # are ignored rather than refused, so a malformed selection returns what
     # it can.
-    wanted = [int(x) for x in (ids or "").split(",") if x.strip().lstrip("-").isdigit()]
+    wanted = scoping.user_ids(ids)
     scope = "WHERE u.id = ANY(%(ids)s)" if ids is not None else ""
     rows = db.query_as(
         UserLedgerRow,

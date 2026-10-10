@@ -11,6 +11,8 @@ from typing import Any
 
 import requests
 
+from core.env import env_list
+
 _COSTS_URL = "https://api.openai.com/v1/organization/costs"
 # The API caps each page at 180 daily buckets; a year needs pagination.
 _PAGE_BUCKETS = 180
@@ -78,13 +80,7 @@ def fetch_costs(days: int) -> dict:
     """
     now = datetime.now(UTC)
     end = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    projects = sorted(
-        {
-            p.strip()
-            for p in os.environ.get("OPENAI_BILLING_PROJECT_IDS", "").split(",")
-            if p.strip()
-        }
-    )
+    projects = sorted(set(env_list("OPENAI_BILLING_PROJECT_IDS")))
     report = {
         "provider": "openai",
         "basis": "provider_reported_cost",

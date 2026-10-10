@@ -14,7 +14,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 READS = re.compile(
-    r"""(?:environ(?:\.get)?\s*[\[(]|getenv\(|_env_list\(|_required_env\(|api_key_env=)"""
+    r"""(?:environ(?:\.get)?\s*[\[(]|getenv\(|env_list\(|_required_env\(|api_key_env=)"""
     r"""\s*["']([A-Z][A-Z0-9_]*)["']"""
 )
 # Set by the code for its own children, or the operating system's, not config.
