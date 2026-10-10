@@ -12,29 +12,12 @@ from pydantic import BaseModel, Field
 from api import db, health, queue, scoping, task_admission
 from api import params as params_
 from api.auth import AuthedUser
-from api.board import user_job_split
 from api.problem import refuse
 from api.routers.admin.shared import SUMMARY_MAX_HOURS, require_admin
 from api.task_admission import TaskProgress
 from core import pricing
 
 router = APIRouter()
-
-
-class BackfillAdmission(BaseModel):
-    task_id: int
-    status: str
-
-
-@router.post("/tasks/backfill-user-job-split")
-def admit_user_job_split(user: AuthedUser = Depends(require_admin)) -> BackfillAdmission:
-    try:
-        admitted = user_job_split.admit()
-    except user_job_split.NoEligibleWorker as exc:
-        raise refuse(
-            503, "NO_ELIGIBLE_WORKER", "no current-release worker can run the user job split"
-        ) from exc
-    return BackfillAdmission(task_id=admitted.task_id, status=admitted.status)
 
 
 class QueuedTask(BaseModel):

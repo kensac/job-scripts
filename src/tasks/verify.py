@@ -11,6 +11,7 @@ from typing import Any
 from api import ai, db, managed_board_runs, metrics
 from api.ai import verdicts
 from api.ai.batch_results import progress_counts
+from api.board.person_state import UNTOUCHED
 from api.task_config import configured_model, configured_shape
 from core import near_copy, routing, verdict_reads
 from core.answers import (
@@ -30,7 +31,7 @@ from core.store import (
     ai_result_row,
     decided_custom_urls,
 )
-from tasks.board import UNTOUCHED, demote_closed
+from tasks.board import demote_closed
 from tasks.runtime import (
     SCRAPE_CONCURRENCY,
     AdaptiveLimiter,
