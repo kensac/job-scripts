@@ -132,6 +132,12 @@ def test_filter_scope_options_are_named_scoped_and_revision_bound(client, admin_
     assert {s["revision"] for s in body["scopes"]} == {3, None}
     assert all(s["active"] is False and s["prompt_hash"] == "shared-hash" for s in body["scopes"])
     assert "private prompt" not in response.text
-    assert body["title_recipes"] == ["nontechnical_occupations_v1"]
-    assert body["profile_recipes"] == ["nontechnical_families_v1"]
+    assert body["title_recipes"] == [
+        "internship_v1",
+        "new_grad_v1",
+        "aero_major_v1",
+        "nontechnical_occupations_v1",
+        "occupation_words_v1",
+    ]
+    assert body["profile_recipes"] == []
     assert body["filters"] == {"user": [str(first)]}

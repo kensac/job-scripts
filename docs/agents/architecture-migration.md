@@ -134,7 +134,7 @@ reader:
    cost into themselves. See "The ledger of paid model calls" below.
 
 A failed attempt is a call, not a verdict, so readers that count calls
-(spend, review gate outcomes) stay on `ai_queries` until step 4.
+(spend) stay on `ai_queries` until step 4.
 `tests/test_verdicts_view.py` fails when a new reader restates which rows
 are answers instead of reading the view.
 
@@ -170,7 +170,7 @@ each by its own code:
 | `api_usage` | one row per user or board request; one row per whole batch for the fleet | the three writers in `api.budget` | the weekly user budget, the fleet ceiling, /admin/spend ledger and calls, per-user spend |
 | `ai_batches` token totals and `est_cost_usd` | one row per provider batch | `batch_event_hook` | fleet and task model screens |
 | `batch_result_receipts.response.usage` | one row per batch item | `batch_results.checkpoint` | nothing reads it as money |
-| `review_gate_outcomes.recorded_cost_usd`, `usage` | copied from `ai_queries` | `review_gate_records.record_outcome` | review gate pages |
+| `review_gate_outcomes.recorded_cost_usd`, `usage` | copied from `ai_queries` | nothing since 2026-10 (title screens write no rows); the table is dropped | nothing |
 | `job_embeddings.input_tokens`, `cost_usd` | a packed request split per posting | `tasks.embeddings` | nothing |
 
 The same verify call was a fleet row in `api_usage` with the batch's totals,
@@ -225,8 +225,6 @@ they came to disagree.
   zero-token guess `joint_call_rows` makes today. A verdict no call produced
   (`reverify-unchanged`, `verify-near-copy`, ingest, manual) has none, which
   says so. Its token and cost columns are then cleared and dropped.
-- `review_gate_outcomes` reads cost through `query_id`; its copied columns
-  are dropped.
 - `ai_batches` keeps the batch lifecycle (status, requests, completed,
   `est_tokens` for chunking). Its totals become a sum over the batch's calls.
 - `api_usage` is replaced, not pointed at: payer is a column of the call.
@@ -311,7 +309,7 @@ it showed.
    the ledger shows the true cost and the response's note says so. A
    difference a test cannot hold equal is measured and named in its PR.
 4. Contract: stop the copies, then drop `api_usage`, the usage columns on
-   `ai_queries`, `review_gate_outcomes` and `job_embeddings`, and the totals
+   `ai_queries` and `job_embeddings`, and the totals
    on `ai_batches`, each with the empty-then-drop sequence (migrations.md).
 
 ## What may be done unattended

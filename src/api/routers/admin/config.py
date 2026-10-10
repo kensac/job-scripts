@@ -14,7 +14,7 @@ from api.auth import AuthedUser
 from api.config import CONFIG_KEYS
 from api.problem import refuse
 from api.routers.admin.shared import require_admin
-from core.review_gate import ReviewGateScope
+from core import screening
 
 router = APIRouter()
 
@@ -118,6 +118,8 @@ class FilterScopeOption(BaseModel):
 class FilterScopeOptions(BaseModel):
     scopes: list[FilterScopeOption]
     title_recipes: list[str]
+    # Always empty: the profile gate is gone. Kept until the scope picker
+    # stops reading it.
     profile_recipes: list[str]
     filters: dict[str, list[str]]
     filterable: list[str]
@@ -141,21 +143,10 @@ def filter_scopes(
         f"WHERE {predicate} ORDER BY kind, name, id",
         {"user_ids": ids},
     )
-    # The model's vocabulary is the writer's validation contract, not a
-    # separately maintained list for the scope picker.
-    properties = ReviewGateScope.model_json_schema()["properties"]
-
-    def recipes(field: str) -> list[str]:
-        return [
-            value
-            for choice in properties[field]["anyOf"]
-            for value in ([choice["const"]] if "const" in choice else choice.get("enum", []))
-        ]
-
     return FilterScopeOptions(
         scopes=scopes,
-        title_recipes=recipes("title_recipe"),
-        profile_recipes=recipes("profile_recipe"),
+        title_recipes=list(screening.RECIPES),
+        profile_recipes=[],
         filters={"user": scoping.echo(ids)},
         filterable=["user"],
     )

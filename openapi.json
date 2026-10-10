@@ -3282,29 +3282,6 @@
             }
           },
           {
-            "name": "page",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "default": 1,
-              "title": "Page"
-            }
-          },
-          {
-            "name": "page_size",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "maximum": 100,
-              "minimum": 1,
-              "default": 25,
-              "title": "Page Size"
-            }
-          },
-          {
             "name": "x-service-token",
             "in": "header",
             "required": false,
@@ -20918,193 +20895,6 @@
         "operationId": "decisions_v1_admin_review_gates_decisions_get",
         "parameters": [
           {
-            "name": "url",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Url"
-            }
-          },
-          {
-            "name": "prompt_hash",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Prompt Hash"
-            }
-          },
-          {
-            "name": "stage",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Stage"
-            }
-          },
-          {
-            "name": "mode",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Mode"
-            }
-          },
-          {
-            "name": "action",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Action"
-            }
-          },
-          {
-            "name": "user",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "User"
-            }
-          },
-          {
-            "name": "managed_board_id",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Managed Board Id"
-            }
-          },
-          {
-            "name": "filter_id",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Filter Id"
-            }
-          },
-          {
-            "name": "page",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "default": 1,
-              "title": "Page"
-            }
-          },
-          {
-            "name": "page_size",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "maximum": 100,
-              "minimum": 1,
-              "default": 25,
-              "title": "Page Size"
-            }
-          },
-          {
-            "name": "window_start",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "format": "date-time"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Window Start"
-            }
-          },
-          {
-            "name": "window_end",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "format": "date-time"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Window End"
-            }
-          },
-          {
             "name": "x-service-token",
             "in": "header",
             "required": false,
@@ -32968,7 +32758,7 @@
           "basis": {
             "type": "string",
             "title": "Basis",
-            "default": "Skipped decisions times mean recorded cost per reviewed decision, including retries, in the same decision window, prompt revision, planned model and transport. A workload-dependent estimate, not billed savings or a controlled counterfactual."
+            "default": "Screened postings times the mean recorded cost of a review under the same prompt in the same window. A workload-dependent estimate, not billed savings."
           }
         },
         "type": "object",
@@ -38970,15 +38760,18 @@
           },
           "agreed_reject": {
             "type": "integer",
-            "title": "Agreed Reject"
+            "title": "Agreed Reject",
+            "default": 0
           },
           "false_reject": {
             "type": "integer",
-            "title": "False Reject"
+            "title": "False Reject",
+            "default": 0
           },
           "unresolved": {
             "type": "integer",
-            "title": "Unresolved"
+            "title": "Unresolved",
+            "default": 0
           }
         },
         "type": "object",
@@ -38992,10 +38785,7 @@
           "unpriced_outcomes",
           "without_recorded_outcome",
           "known_cost_usd",
-          "actual_cost_usd",
-          "agreed_reject",
-          "false_reject",
-          "unresolved"
+          "actual_cost_usd"
         ],
         "title": "GateFunnelRow"
       },
@@ -39023,12 +38813,12 @@
           "population": {
             "type": "string",
             "title": "Population",
-            "default": "Review decisions made during the window, not unique postings or provider calls."
+            "default": "Skip: postings first seen in the window from a screened board's or filter's sources whose title its screen skips, one per prompt. Review: model calls under a screened prompt in the window."
           },
           "coverage": {
             "type": "string",
             "title": "Coverage",
-            "default": "Durable decisions only; earlier task-only history is unavailable."
+            "default": "Derived when read from today's title_screens; a screen changed during the window is applied as it stands now."
           },
           "first_recorded_at": {
             "anyOf": [
@@ -39078,7 +38868,7 @@
           "actual_cost_basis": {
             "type": "string",
             "title": "Actual Cost Basis",
-            "default": "Stored costs of linked review outcomes for this decision cohort, including retries. Not total platform spend or the provider invoice. Missing outcomes are not free reviews."
+            "default": "Stored costs of the window's review calls under screened prompts, retries included. Not total platform spend or the provider invoice."
           }
         },
         "type": "object",
@@ -39087,7 +38877,6 @@
           "window_start",
           "window_end",
           "days",
-          "first_recorded_at",
           "rows",
           "filters",
           "avoided_cost"
@@ -42777,18 +42566,6 @@
               }
             ],
             "title": "Finished At"
-          },
-          "title_gate_report": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Title Gate Report"
           }
         },
         "type": "object",
@@ -42802,8 +42579,7 @@
           "reserved_tokens",
           "created_at",
           "started_at",
-          "finished_at",
-          "title_gate_report"
+          "finished_at"
         ],
         "title": "ManagedBoardRun"
       },
@@ -51007,23 +50783,28 @@
               "$ref": "#/components/schemas/ReviewDecision"
             },
             "type": "array",
-            "title": "Rows"
+            "title": "Rows",
+            "default": []
           },
           "page": {
             "type": "integer",
-            "title": "Page"
+            "title": "Page",
+            "default": 1
           },
           "page_size": {
             "type": "integer",
-            "title": "Page Size"
+            "title": "Page Size",
+            "default": 25
           },
           "total": {
             "type": "integer",
-            "title": "Total"
+            "title": "Total",
+            "default": 0
           },
           "has_more": {
             "type": "boolean",
-            "title": "Has More"
+            "title": "Has More",
+            "default": false
           },
           "filters": {
             "additionalProperties": {
@@ -51033,32 +50814,26 @@
               "type": "array"
             },
             "type": "object",
-            "title": "Filters"
+            "title": "Filters",
+            "default": {}
           },
           "filterable": {
             "items": {
               "type": "string"
             },
             "type": "array",
-            "title": "Filterable"
+            "title": "Filterable",
+            "default": []
           },
           "coverage": {
             "type": "string",
             "title": "Coverage",
-            "default": "Durable decisions only. Earlier task-only history is not reconstructed."
+            "default": "Per-run review decisions are no longer stored. The posting's path shows each board's and filter's title screen, evaluated now."
           }
         },
         "type": "object",
-        "required": [
-          "rows",
-          "page",
-          "page_size",
-          "total",
-          "has_more",
-          "filters",
-          "filterable"
-        ],
-        "title": "ReviewDecisions"
+        "title": "ReviewDecisions",
+        "description": "Always empty. The shape stays until the decision history panels that\nread it are removed from the job drawers."
       },
       "ReviewOutcome": {
         "properties": {
@@ -54885,12 +54660,9 @@
           },
           "mode": {
             "type": "string",
-            "enum": [
-              "shadow",
-              "enforce"
-            ],
+            "const": "enforce",
             "title": "Mode",
-            "default": "shadow"
+            "default": "enforce"
           }
         },
         "additionalProperties": false,
@@ -54899,7 +54671,7 @@
           "recipe"
         ],
         "title": "TitleGateConfig",
-        "description": "A managed board's title gate (`managed_boards.title_gate`)."
+        "description": "A managed board's title gate (`managed_boards.title_gate`).\n\nA gate that is set is enforced. A shadow mode used to judge every\ncandidate anyway and report what the gate would drop; that is a query over\nthe board's verdicts and `screen`, so a recipe is measured that way before\na board names it."
       },
       "Totals": {
         "properties": {

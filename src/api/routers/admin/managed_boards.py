@@ -26,10 +26,6 @@ _BOOTSTRAP_CRITERIA = Criteria(
     max_age_days=7,
     included_locations=["United States", "Canada", "Remote"],
 )
-_BOOTSTRAP_TITLE_GATES = {
-    "software-engineering-internships": TitleGateConfig(recipe="internship_v1", mode="shadow"),
-    "software-engineering-new-grad": TitleGateConfig(recipe="new_grad_v1", mode="shadow"),
-}
 _BOOTSTRAP_DEFINITIONS = (
     (
         "software-engineering-internships",
@@ -233,7 +229,6 @@ def bootstrap_managed_boards(
             execution_mode = (
                 "sponsor_filter_reuse" if slug == "kanishks-job-list" else "managed_filter"
             )
-            title_gate = _BOOTSTRAP_TITLE_GATES.get(slug)
             board = db.query_one_as(
                 ManagedBoard,
                 f"SELECT {_BOARD_COLS} FROM managed_boards b WHERE b.slug = %s FOR UPDATE",
@@ -251,7 +246,7 @@ def bootstrap_managed_boards(
                     and board.on_ambiguous == "filter"
                     and board.fail_closed is True
                     and board.criteria.model_dump(mode="json") == criteria_json
-                    and board.title_gate == title_gate
+                    and board.title_gate is None
                     and board.sources == sources
                     and board.published is False
                     and board.revision == 1
@@ -264,8 +259,8 @@ def bootstrap_managed_boards(
                 _Id,
                 "INSERT INTO managed_boards "
                 "(slug, name, description, sponsor_user_id, prompt, prompt_hash, requested_model, execution_mode, "
-                "on_ambiguous, fail_closed, criteria, title_gate) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'filter', true, %s, %s) RETURNING id",
+                "on_ambiguous, fail_closed, criteria) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'filter', true, %s) RETURNING id",
                 (
                     slug,
                     name,
@@ -276,7 +271,6 @@ def bootstrap_managed_boards(
                     _BOOTSTRAP_MODEL,
                     execution_mode,
                     db.jsonb(criteria_json),
-                    db.jsonb(title_gate.model_dump(mode="json")) if title_gate else None,
                 ),
             )
             assert row is not None

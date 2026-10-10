@@ -11,10 +11,9 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from api import budget, db, events, queue, task_jobs
+from api import budget, db, events, task_jobs
 from api.board import criteria as board_criteria
 from api.board import eligibility
-from api.review_gate import load_policy
 from api.task_admission import ACTIVE_STATUSES, TaskProgress
 from api.task_jobs import run_jobs
 from core import providers, routing, verdict_reads
@@ -24,7 +23,7 @@ from core.payload_objects import PayloadStore, PayloadUnavailable
 from core.pool import in_transaction
 from core.providers import StructuredOutput
 from core.routing import NoEligibleModel, TaskShape, resolve
-from core.screening import Screen, TitleGateConfig, screen
+from core.screening import Recipe, TitleGateConfig, screen
 
 # What one verdict is expected to cost in output tokens, for the pre-run
 # budget reservation. An ESTIMATE, never a cap: it was passed to the model as
@@ -51,7 +50,7 @@ LATEST_SQL = (
     "SELECT id, status, progress, error, (payload->>'revision')::bigint AS snapshot_revision, "
     "payload->>'requested_model' AS requested_model, "
     "(payload->>'reserved_tokens')::bigint AS reserved_tokens, "
-    "created_at, started_at, finished_at, payload->'title_gate_report' AS title_gate_report "
+    "created_at, started_at, finished_at "
     f"FROM tasks WHERE {_KINDS_SQL} AND {_BOARD_SQL} = %s ORDER BY id DESC LIMIT 1"
 )
 ACTIVE_SQL = (
@@ -83,7 +82,6 @@ class ManagedBoardRun(BaseModel):
     created_at: datetime.datetime
     started_at: datetime.datetime | None
     finished_at: datetime.datetime | None
-    title_gate_report: dict[str, Any] | None
 
 
 class ManagedBoardCost(BaseModel):
@@ -177,12 +175,6 @@ class _Count:
     n: int
 
 
-@dataclass(frozen=True)
-class _Verdict:
-    job_id: int
-    status: str | None
-
-
 def _board(board_id: int, *, lock: bool = False) -> _Board | None:
     suffix = " FOR UPDATE" if lock else ""
     return db.query_one_as(
@@ -272,6 +264,23 @@ def _reuse_candidates(sponsor_id: int, resolved_model: str) -> list[_Candidate]:
     )
 
 
+def board_screens(
+    title_gate: dict[str, Any] | None, prompt_hash: str, screens: dict[str, Recipe]
+) -> list[Recipe]:
+    """Every title screen a board's candidates pass: its own gate, then the
+    one `title_screens` names for its prompt."""
+    recipes: list[Recipe] = (
+        [TitleGateConfig.model_validate(title_gate).recipe] if title_gate else []
+    )
+    if recipe := screens.get(prompt_hash):
+        recipes.append(recipe)
+    return recipes
+
+
+def screened(recipes: list[Recipe], title: str | None, source: str | None) -> bool:
+    return any(screen(recipe, title=title, source=source).skip for recipe in recipes)
+
+
 @dataclass(frozen=True)
 class BoardQuestion:
     board_id: int
@@ -287,7 +296,7 @@ def verification_questions(
 
     A board is asked here only where its own run would buy an answer: the
     posting is from one of its sources, inside its criteria, through its
-    enforced title gate and title review gate, and has no verdict under its
+    title screens, and has no verdict under its
     prompt and model yet. It must also run on the verification model and
     effort, since a verdict is keyed by model and the effort is part of the
     question. Closed and clearance are not checked: verification is what
@@ -300,7 +309,7 @@ def verification_questions(
     urls = [job["url"] for job in jobs]
     if not urls:
         return {}
-    policy = load_policy()
+    screens = db.get_config("title_screens")
     questions: dict[str, list[BoardQuestion]] = {}
     for row in db.query(
         "SELECT id FROM managed_boards WHERE published AND execution_mode = 'managed_filter' "
@@ -324,21 +333,8 @@ def verification_questions(
                 **board_criteria.params({"criteria": board.criteria}),
             },
         )
-        title_gate = TitleGateConfig.model_validate(board.title_gate) if board.title_gate else None
-        scope = policy.scopes.get(board.prompt_hash)
-        review_recipe = scope.title_recipe if scope and policy.title_mode == "enforce" else None
-        admitted = {
-            r["url"]
-            for r in rows
-            if (
-                title_gate is None
-                or title_gate.mode == "shadow"
-                or not screen(title_gate.recipe, title=r["title"], source=r["source"]).skip
-            )
-            and not (
-                review_recipe and screen(review_recipe, title=r["title"], source=r["source"]).skip
-            )
-        }
+        recipes = board_screens(board.title_gate, board.prompt_hash, screens)
+        admitted = {r["url"] for r in rows if not screened(recipes, r["title"], r["source"])}
         decided = decided_custom_urls(
             sorted(admitted), board.prompt_hash, model=board.requested_model
         )
@@ -417,7 +413,7 @@ def _plan(board_id: int) -> _Plan:
     reasoning_effort: object | None = None
     cap: int | None = None
     reserved = 0
-    recipe = None
+    recipes: list[Recipe] = []
     if board.execution_mode == "sponsor_filter_reuse":
         try:
             _entitlement, config = budget.load_config(sponsor.id, ignore_budget=True)
@@ -427,7 +423,6 @@ def _plan(board_id: int) -> _Plan:
             ) from exc
         resolved_model = config.model
         candidates = _reuse_candidates(sponsor.id, resolved_model)
-        title_gate = None
     else:
         owner, cap = _allowance(sponsor)
         provider = providers.provider_of(board.requested_model)
@@ -448,30 +443,12 @@ def _plan(board_id: int) -> _Plan:
                 "requested model cannot execute managed-board batches",
             ) from exc
         reasoning_effort = choice.params.get("reasoning_effort")
-        # Screened postings never enter the run: they have no verdict, and the
-        # projection shows only what the run holds.
-        recipe = load_policy().title_recipes().get(board.prompt_hash)
-        candidates = [
-            candidate
-            for candidate in _candidates(board)
-            if not (recipe and screen(recipe, title=candidate.title, source=candidate.source).skip)
-        ]
-        title_gate = TitleGateConfig.model_validate(board.title_gate) if board.title_gate else None
-    decisions = [
-        screen(title_gate.recipe, title=candidate.title, source=candidate.source)
-        if title_gate
-        else Screen(False, "disabled")
-        for candidate in candidates
-    ]
-    if board.execution_mode != "sponsor_filter_reuse":
-        reserved = _reservation(
-            board,
-            [
-                candidate
-                for candidate, decision in zip(candidates, decisions, strict=True)
-                if title_gate is None or title_gate.mode == "shadow" or not decision.skip
-            ],
-        )
+        # A screened posting never enters the run: it gets no verdict, and the
+        # projection shows only what the run holds. Kept in the run's list, it
+        # was carried, partitioned and recorded as a skip on every run.
+        recipes = board_screens(board.title_gate, board.prompt_hash, db.get_config("title_screens"))
+        candidates = [c for c in _candidates(board) if not screened(recipes, c.title, c.source)]
+        reserved = _reservation(board, candidates)
         _refuse_over_budget(sponsor.id, cap, reserved)
     jobs = [
         {
@@ -482,10 +459,8 @@ def _plan(board_id: int) -> _Plan:
             "source": candidate.source,
             "sort_at": candidate.sort_at.isoformat(),
             "content_query_id": candidate.content_query_id,
-            "title_gate_keep": not decision.skip,
-            "title_gate_reason": decision.reason,
         }
-        for candidate, decision in zip(candidates, decisions, strict=True)
+        for candidate in candidates
     ]
     payload = {
         "managed_board_id": board.id,
@@ -500,8 +475,7 @@ def _plan(board_id: int) -> _Plan:
         "bypass_sponsorship_filter": board.bypass_sponsorship_filter,
         "sources": board.sources,
         "criteria": board.criteria,
-        "title_gate": title_gate.model_dump(mode="json") if title_gate else None,
-        "title_recipe": recipe,
+        "title_screens": recipes,
         "published": board.published,
         "reserved_tokens": reserved,
         "candidate_count": len(jobs),
@@ -665,31 +639,15 @@ SELECT (SELECT count(*) FROM target) AS n
 """
 
 
-def replace_projection(
-    task_id: int, payload: dict[str, Any], jobs: list[dict[str, Any]] | None = None
-) -> int:
-    from api.review_gate_records import exclusions
-
+def replace_projection(payload: dict[str, Any], jobs: list[dict[str, Any]] | None = None) -> int:
     all_jobs = run_jobs(payload) if jobs is None else jobs
-    # Exclusions belong to this immutable run, not the shared verdict cache.
-    # Reading the persisted plan also covers resume after partial collection.
-    gate = db.query_one("SELECT payload->'review_gate' AS plan FROM tasks WHERE id=%s", (task_id,))
-    plan = gate["plan"] if gate and gate["plan"] else {}
-    skipped = (
-        plan.get("skipped", {})
-        if plan.get("version") == "review-gate-v1"
-        and plan.get("prompt_hash") == payload["prompt_hash"]
-        else {}
-    )
-    durable = exclusions(task_id, payload["prompt_hash"])
-    if durable is not None:
-        skipped = durable
+    # A run planned before screened postings left the list carries them with
+    # title_gate_keep false under an enforced gate (until such runs drain).
     config = payload.get("title_gate")
     jobs = [
         job
         for job in all_jobs
-        if job.get("url") not in skipped
-        and (not config or config["mode"] == "shadow" or job["title_gate_keep"])
+        if not config or config["mode"] == "shadow" or job.get("title_gate_keep", True)
     ]
     ids = [job["id"] for job in jobs]
     sort_at = [job["sort_at"] for job in jobs]
@@ -724,49 +682,4 @@ def replace_projection(
             "ELSE public_revision END WHERE id = %s AND revision = %s",
             (board.id, payload["revision"]),
         )
-        if config:
-            verdicts = db.query_as(
-                _Verdict,
-                """
-                WITH candidate AS (SELECT unnest(%(ids)s::bigint[]) AS job_id)
-                SELECT c.job_id, q.status
-                FROM candidate c JOIN jobs j ON j.id = c.job_id
-                LEFT JOIN LATERAL (
-                  SELECT status FROM ai_queries
-                  WHERE url = j.url AND check_type = 'custom'
-                    AND prompt_hash = %(hash)s AND model = %(model)s
-                    AND status IN ('passed', 'rejected', 'failed')
-                  ORDER BY id DESC LIMIT 1
-                ) q ON true
-                """,
-                {
-                    "ids": [job["id"] for job in all_jobs],
-                    "hash": payload["prompt_hash"],
-                    "model": payload["requested_model"],
-                },
-            )
-            statuses = {row.job_id: row.status for row in verdicts}
-            skipped = [job for job in all_jobs if not job["title_gate_keep"]]
-            disagreements = [job for job in skipped if statuses.get(job["id"]) == "passed"]
-            undecided = [
-                job for job in skipped if statuses.get(job["id"]) not in {"passed", "rejected"}
-            ]
-            report = {
-                "recipe": config["recipe"],
-                "mode": config["mode"],
-                "candidate_count": len(all_jobs),
-                "would_skip_count": len(skipped),
-                "disagreement_count": len(disagreements),
-                "undecided_count": len(undecided),
-                "disagreement_examples": [
-                    {
-                        "job_id": job["id"],
-                        "company": job["company"],
-                        "title": job["title"],
-                        "reason": job["title_gate_reason"],
-                    }
-                    for job in disagreements[:20]
-                ],
-            }
-            queue.merge_payload(task_id, {"title_gate_report": report})
     return result.n if result else 0

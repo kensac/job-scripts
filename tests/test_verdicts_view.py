@@ -19,11 +19,9 @@ SRC = pathlib.Path(__file__).resolve().parents[1] / "src"
 
 # Readers that keep the predicate on purpose, because they read calls rather
 # than answers: spend prices every call in a window and counts the decided
-# ones as a share of it; a review gate outcome records whether its call wrote
-# an answer. The ORM's index predicates describe ai_queries itself.
+# ones as a share of it. The ORM's index predicates describe ai_queries itself.
 _CALL_READERS = {
     "api/routers/spend.py",
-    "api/review_gate_records.py",
     "api/orm/ai.py",
 }
 _DECIDED = re.compile(r"status IN \('passed', ?'rejected'\)")

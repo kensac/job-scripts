@@ -41,7 +41,6 @@ async def run_check[T: BaseModel](
     filter_name: str | None = None,
     prompt_hash: str | None = None,
     context: str = "worker",
-    on_record: Callable[[int], None] | None = None,
 ) -> tuple[T | None, dict[str, int | None]]:
     """Runs one structured check, records a complete verdict row + metrics.
 
@@ -77,8 +76,7 @@ async def run_check[T: BaseModel](
                 usage=exc.usage if isinstance(exc, ai.PaidParseError) else {},
                 error=str(exc),
                 **common,
-            ),
-            on_record,
+            )
         )
         telemetry.capture(
             "ai_call_failed",
@@ -105,8 +103,7 @@ async def run_check[T: BaseModel](
             usage=usage,
             duration_ms=duration_ms,
             **common,
-        ),
-        on_record,
+        )
     )
     return parsed, usage
 
@@ -224,11 +221,9 @@ class Verdict:
             )
 
 
-def record_ai_verdict(verdict: Verdict, on_record: Callable[[int], None] | None = None) -> int:
+def record_ai_verdict(verdict: Verdict) -> int:
     with db.transaction():
         (query_id,) = add_ai_results([verdict.row()])
-        if on_record is not None:
-            on_record(query_id)
     verdict.count()
     return query_id
 

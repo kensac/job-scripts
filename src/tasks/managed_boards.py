@@ -26,7 +26,7 @@ async def handle_run_managed_board(task_id: int, payload: dict[str, Any]) -> Non
     if payload.get("execution_mode") == "sponsor_filter_reuse":
         all_jobs = runs.run_jobs(payload)
         set_progress(task_id, 0, len(all_jobs), "projecting stored filter outcomes")
-        runs.replace_projection(task_id, payload, all_jobs)
+        runs.replace_projection(payload, all_jobs)
         set_progress(task_id, len(all_jobs), len(all_jobs), "projected")
         return
     if (
@@ -101,7 +101,7 @@ async def _handle_managed_filter(
         and (
             not payload.get("title_gate")
             or payload["title_gate"]["mode"] == "shadow"
-            or job["title_gate_keep"]
+            or job.get("title_gate_keep", True)
         )
     ]
     # Keyed by the job's content_query_id, which is None for a job with no
@@ -119,12 +119,12 @@ async def _handle_managed_filter(
         for job in all_jobs
         if not payload.get("title_gate")
         or payload["title_gate"]["mode"] == "shadow"
-        or job["title_gate_keep"]
+        or job.get("title_gate_keep", True)
     ]
 
     def complete() -> None:
         if not pending_batch_ids(task_id):
-            runs.replace_projection(task_id, payload, all_jobs)
+            runs.replace_projection(payload, all_jobs)
 
     hooks = ExecutionHooks(
         verdict_label=f"managed-board:{board_id}",

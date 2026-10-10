@@ -134,7 +134,7 @@ RECIPES: dict[str, tuple[tuple[_Rule, ...], Screen]] = {
         (_keep("aero_major_title_signal", title=_AERO_MAJOR_SIGNAL),),
         Screen(True, "no_aero_major_title_signal"),
     ),
-    # The filter review gate's conservative list: explicit occupations only.
+    # Explicit occupations only, for filters and boards in title_screens.
     "nontechnical_occupations_v1": (
         (
             _keep("technical_title", title=_TECHNICAL),
@@ -166,7 +166,7 @@ RECIPES: dict[str, tuple[tuple[_Rule, ...], Screen]] = {
         ),
         Screen(False, "no_listed_occupation"),
     ),
-    # The verification volume gate's list (core.review_gate.VolumeGate).
+    # The verification volume gate's list (core.volume_gate.VolumeGate).
     "occupation_words_v1": (
         (
             _keep("technical_title", title=_TECHNICAL),
@@ -235,9 +235,16 @@ def digest(recipe: str) -> str:
 
 
 class TitleGateConfig(BaseModel):
-    """A managed board's title gate (`managed_boards.title_gate`)."""
+    """A managed board's title gate (`managed_boards.title_gate`).
+
+    A gate that is set is enforced. A shadow mode used to judge every
+    candidate anyway and report what the gate would drop; that is a query over
+    the board's verdicts and `screen`, so a recipe is measured that way before
+    a board names it.
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     recipe: BoardRecipe
-    mode: Literal["shadow", "enforce"] = "shadow"
+    # Stored rows carry the key; "enforce" is the only value left.
+    mode: Literal["enforce"] = "enforce"

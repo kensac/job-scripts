@@ -148,8 +148,8 @@ direct database edits have no recorded actor and are not reconstructed.
 `GET /admin/config/filter-scopes` serves current personal filter and managed
 filter names, exact prompt hashes, current activity and managed revisions.
 It excludes sponsor-reuse boards because they do not own an independent
-filter. Recipes are served from the validated review-gate vocabulary. Scope
-opt-in is still an exact prompt hash, so multiple named filters may share it
+filter. Recipes are every name in `core.screening.RECIPES`. Scope
+opt-in (`title_screens`) is still an exact prompt hash, so multiple named filters may share it
 and a prompt edit does not silently opt the new revision in. Show unmatched
 saved hashes rather than deleting them. These controls and their history are
 administrator-only; personal surfaces explain decisions without exposing

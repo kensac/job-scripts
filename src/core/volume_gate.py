@@ -1,55 +1,8 @@
-"""Reject-only shortcuts for explicitly opted-in filter revisions."""
+"""What verification does not read, per opted-in board and filter."""
 
 from __future__ import annotations
 
-from typing import Literal
-
 from pydantic import BaseModel, ConfigDict, Field
-
-from core.job_profile import JobProfileAnswer
-from core.screening import _TECHNICAL, Recipe
-
-Mode = Literal["off", "shadow", "enforce"]
-
-
-class ReviewGateScope(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    # A prose edit changes its hash and deliberately removes the opt-in.
-    title_recipe: Literal["nontechnical_occupations_v1"] | None = None
-    profile_recipe: Literal["nontechnical_families_v1"] | None = None
-
-
-class ReviewGatePolicy(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    title_mode: Mode = "off"
-    profile_mode: Mode = "off"
-    scopes: dict[str, ReviewGateScope] = Field(default_factory=dict)
-    lookup_timeout_ms: int = Field(default=1000, gt=0, le=5000)
-
-    def title_recipes(self) -> dict[str, Recipe]:
-        """The screen each enforced prompt hash applies before any review.
-
-        A posting it skips is left out of that prompt's candidates, every run,
-        for as long as its title, this recipe and the scope stay as they are;
-        switching the stage off returns it on the next run.
-        """
-        if self.title_mode != "enforce":
-            return {}
-        return {h: s.title_recipe for h, s in self.scopes.items() if s.title_recipe}
-
-
-def profile_rejection(profile: JobProfileAnswer, title: str = "") -> str | None:
-    # No inferred seniority, experience, prestige or compensation shortcuts.
-    # Any technical/unknown track may conceal relevant adjacent responsibilities.
-    if not title.strip() or _TECHNICAL.search(title):
-        return None
-    if profile.primary_role_family not in {"sales", "marketing", "finance", "legal", "people"}:
-        return None
-    if profile.role_tracks != ["other"]:
-        return None
-    return "nontechnical_family:" + profile.primary_role_family
 
 
 class VolumeGate(BaseModel):
