@@ -375,7 +375,7 @@ async def _reverify_jobs(
 
 
 async def handle_reverify_open(task_id: int, payload: dict[str, Any]) -> None:
-    """Splitter: find every stale untouched board row, shard the re-checks
+    """Splitter: find every stale working-set pair, shard the re-checks
     across the fleet, demote closed rows when the last chunk lands.
 
     full=true re-checks EVERY active job currently believed open, ignoring
@@ -404,9 +404,13 @@ async def handle_reverify_open(task_id: int, payload: dict[str, Any]) -> None:
         rows = db.query(
             f"""
             SELECT url, company, title FROM (
-                SELECT DISTINCT j.url, j.company, j.title FROM user_jobs uj
-                JOIN jobs j ON j.id = uj.job_id
-                WHERE {UNTOUCHED}
+                SELECT DISTINCT j.url, j.company, j.title FROM user_job_working_set ws
+                JOIN jobs j ON j.id = ws.job_id
+                -- A pair the person acted on is theirs, not the sweep's.
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM user_jobs uj
+                    WHERE uj.user_id = ws.user_id AND uj.job_id = ws.job_id
+                      AND NOT ({UNTOUCHED}))
                   AND COALESCE((SELECT MAX(q.created_at) FROM ai_queries q
                                 WHERE q.url = j.url AND q.check_type = 'closed'),
                                '-infinity') < now() - make_interval(days => %(days)s)
