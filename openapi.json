@@ -56033,7 +56033,8 @@
         "required": [
           "recipe"
         ],
-        "title": "TitleGateConfig"
+        "title": "TitleGateConfig",
+        "description": "A managed board's title gate (`managed_boards.title_gate`)."
       },
       "Totals": {
         "properties": {
