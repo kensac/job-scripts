@@ -125,10 +125,6 @@ reader:
      84,052 profiles, 6,610 of 59,645 requirements, 6,749 of 217,212
      embeddings, 52 of 48,239 comp rows). Such a row is not a url's newest
      fetch, so it does not name the url's current text.
-   - For the release that renamed the table, a view `page_fetch_rows` over
-     `page_fetches` and an always-false `page_texts.on_verdict` serve the
-     images still running during the roll. No code names either; the next
-     release drops both.
    - An answer points at the fetch it judged (`ai_queries.page_fetch_id`)
      and the call that paid for it (`model_call_id`). A writer carries the
      fetch with its text: `store.Page` from `get_contents` and
