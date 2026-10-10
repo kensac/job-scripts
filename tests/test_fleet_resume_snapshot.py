@@ -34,8 +34,8 @@ async def test_location_resume_uses_original_text_when_no_candidates_remain(monk
         assert specs == []
         return [result], SimpleNamespace(model="original-model")
 
-    monkeypatch.setattr(locations, "run_batched", collect)
-    await locations.handle_classify_locations(task, {})
+    monkeypatch.setattr("tasks.derive.run_batched", collect)
+    await locations.LOCATIONS.handle(task, {})
     row = db.query_one("SELECT country, model FROM locations WHERE text = 'Oslo, Norway'")
     assert row == {"country": "NO", "model": "original-model"}
 

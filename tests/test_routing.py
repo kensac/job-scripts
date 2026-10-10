@@ -308,15 +308,16 @@ def test_every_batched_call_site_goes_through_the_standard_caller():
     # to happen earlier than run_batched performs it. Folding it in would make
     # a resumed chunk re-read the catalog to reach a batch it already has.
     #
-    # embeddings.py is not a Responses call: it packs inputs for the
-    # embeddings endpoint, has no TaskShape, no reasoning effort and no output
-    # cap, so run_batched has nothing to resolve for it. Its spend still lands
+    # derive.py submits embeddings, which are not a Responses call: they pack
+    # inputs for the embeddings endpoint, with no TaskShape, no reasoning
+    # effort and no output cap, so run_batched has nothing to resolve for
+    # them. Every other derivation goes through run_batched. Their spend lands
     # in the ledger through the same batch_event_hook under purpose
     # "embedding" (2026-09-09).
     #
     # The runtime is where submit_or_collect lives, so it is not in the sweep
     # below: the glob reads the handler modules and the runtime is a package.
-    KNOWN = {"filters.py", "verify.py", "embeddings.py"}
+    KNOWN = {"filters.py", "verify.py", "derive.py"}
     root = pathlib.Path(__file__).resolve().parent.parent / "src" / "tasks"
     assert root.is_dir(), root
     offenders = [

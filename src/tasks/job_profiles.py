@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import hashlib
-import logging
 from typing import Any
 
 from api import db, job_profile_derivation
-from api.ai import batch_results
-from api.task_config import configured_shape
+from core.batch import BatchResult, BatchSpec
 from core.job_profile import (
     CLASSIFIER_VERSION,
     JOB_PROFILE_INPUT_CHARS,
@@ -17,10 +15,7 @@ from core.job_profile import (
     job_profile_spec,
 )
 from core.shapes import JOB_PROFILE_TASK
-from tasks import rescrape
-from tasks.runtime import consume_result, has_batch_work, run_batched, set_progress
-
-logger = logging.getLogger(__name__)
+from tasks.derive import Derivation, Row
 
 
 def _content_hash(content: str) -> str:
@@ -56,17 +51,8 @@ def _store(url: str, context: dict[str, Any], answer: JobProfileAnswer, model: s
     )
 
 
-async def handle_classify_job_profiles(task_id: int, payload: dict[str, Any]) -> None:
-    resumed = has_batch_work(task_id)
-    if not resumed and not db.get_config("job_profile_collection_enabled"):
-        set_progress(task_id, 0, 0, "profile collection paused")
-        return
-    rows = (
-        []
-        if resumed
-        else job_profile_derivation.candidates(configured_shape(JOB_PROFILE_TASK).per_cycle)
-    )
-    specs = [
+def _requests(rows: list[Row]) -> list[BatchSpec]:
+    return [
         job_profile_spec(
             row["url"],
             row["content_row_id"],
@@ -76,41 +62,34 @@ async def handle_classify_job_profiles(task_id: int, payload: dict[str, Any]) ->
         )
         for row in rows
     ]
-    if not specs and not resumed:
-        set_progress(task_id, 0, 0, "nothing to classify")
-        return
-    # Selection can outlive an admin changing the switch. Check again at
-    # handoff; paid work bypasses both gates so collection remains reachable.
-    if not resumed and not db.get_config("job_profile_collection_enabled"):
-        set_progress(task_id, 0, 0, "profile collection paused")
-        return
-    set_progress(task_id, 0, len(specs), "job profile batch")
-    results, chosen = await run_batched(
-        task_id, JOB_PROFILE_TASK, specs, allow_configured_override=False
-    )
-    if chosen.model is not None and chosen.model != JOB_PROFILE_MODEL:
-        raise RuntimeError("job profile task resolved an unsupported model")
-    for result in results:
-        with consume_result(task_id, result) as receipt:
-            if not receipt.pending:
-                continue
-            context = result.request.context if result.request else None
-            if not context or context.get("classifier_version") != CLASSIFIER_VERSION:
-                receipt.outcome = "unknown_request"
-                continue
-            if not rescrape.content_is_current(context["url"], context["content_row_id"]):
-                receipt.outcome = "superseded"
-                continue
-            if result.error or not result.text:
-                receipt.outcome = "provider_error"
-                continue
-            try:
-                answer = JobProfileAnswer.model_validate_json(result.text)
-            except ValueError:
-                logger.warning("job profile parse failed for %s", context["url"])
-                receipt.outcome = "malformed"
-                continue
-            _store(context["url"], context, answer, result.model or JOB_PROFILE_MODEL)
-            receipt.outcome = "written"
-    done, total = batch_results.progress_counts(task_id)
-    set_progress(task_id, done, total, "job profiles classified")
+
+
+def _store_result(result: BatchResult, context: dict[str, Any], answer: JobProfileAnswer) -> str:
+    if context.get("classifier_version") != CLASSIFIER_VERSION:
+        return "unknown_request"
+    _store(context["url"], context, answer, result.model or JOB_PROFILE_MODEL)
+    return "written"
+
+
+# Off by config (job_profile_collection_enabled). Pausing keeps the stored
+# profiles and lets paid batches collect their receipts. A new profile is
+# keyed by (content_row_id, classifier_version, model), so the recipe version
+# is part of the staleness rule: bumping it re-derives every profile.
+PROFILES = Derivation(
+    kind="classify_job_profiles",
+    purpose=JOB_PROFILE_TASK.purpose,
+    noun="job profile",
+    table="job_profiles",
+    per_cycle_key="job_profiles_per_cycle",
+    select=lambda cap, payload: job_profile_derivation.candidates(cap),
+    requests=_requests,
+    store=_store_result,
+    input_chars=JOB_PROFILE_INPUT_CHARS,
+    recipe=CLASSIFIER_VERSION,
+    shape=JOB_PROFILE_TASK,
+    model=JOB_PROFILE_MODEL,
+    answer=JobProfileAnswer,
+    context_keys=("url", "content_row_id", "classifier_version"),
+    switch="job_profile_collection_enabled",
+    has_work=job_profile_derivation.has_work,
+)

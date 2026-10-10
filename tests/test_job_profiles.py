@@ -59,8 +59,8 @@ async def test_shadow_task_uses_exact_content_and_is_idempotent(f, monkeypatch):
             SimpleNamespace(model=JOB_PROFILE_MODEL),
         )
 
-    monkeypatch.setattr(job_profiles, "run_batched", fake_run)
-    await job_profiles.handle_classify_job_profiles(task_id, {})
+    monkeypatch.setattr("tasks.derive.run_batched", fake_run)
+    await job_profiles.PROFILES.handle(task_id, {})
     assert len(asked) == 1
     content_id = int(asked[0].custom_id)
     row = db.query_one("SELECT * FROM job_profiles")
@@ -71,7 +71,8 @@ async def test_shadow_task_uses_exact_content_and_is_idempotent(f, monkeypatch):
 
     second = f.make_task("classify_job_profiles", {}, status="running")
     asked.clear()
-    await job_profiles.handle_classify_job_profiles(second, {})
+    db.execute("UPDATE tasks SET status = 'done' WHERE status <> 'done'")
+    await job_profiles.PROFILES.handle(second, {})
     assert asked == []
     assert db.query_one("SELECT count(*) AS n FROM job_profiles")["n"] == 1
 
@@ -91,8 +92,8 @@ async def test_superseded_content_receipt_is_not_written(f, monkeypatch):
             SimpleNamespace(model=JOB_PROFILE_MODEL),
         )
 
-    monkeypatch.setattr(job_profiles, "run_batched", fake_run)
-    await job_profiles.handle_classify_job_profiles(task_id, {})
+    monkeypatch.setattr("tasks.derive.run_batched", fake_run)
+    await job_profiles.PROFILES.handle(task_id, {})
     assert db.query_one("SELECT count(*) AS n FROM job_profiles")["n"] == 0
     assert db.query_one("SELECT outcome FROM batch_result_receipts")["outcome"] == "superseded"
 
@@ -182,11 +183,11 @@ async def test_disabled_profile_collection_stops_already_queued_unpaid_task(f, m
     async def no_submit(*args, **kwargs):
         pytest.fail("paused profile collection must not submit unpaid work")
 
-    monkeypatch.setattr(job_profiles, "run_batched", no_submit)
-    await job_profiles.handle_classify_job_profiles(task_id, {})
+    monkeypatch.setattr("tasks.derive.run_batched", no_submit)
+    await job_profiles.PROFILES.handle(task_id, {})
     assert (
         db.query_one("SELECT progress FROM tasks WHERE id=%s", (task_id,))["progress"]["label"]
-        == "profile collection paused"
+        == "job profile paused"
     )
 
 
@@ -212,10 +213,10 @@ async def test_paused_collection_still_saves_paid_receipts_once(f, monkeypatch):
         pytest.fail("paid collection must not select new work")
 
     monkeypatch.setattr(job_profiles.job_profile_derivation, "candidates", no_selection)
-    await job_profiles.handle_classify_job_profiles(task_id, {})
+    await job_profiles.PROFILES.handle(task_id, {})
     assert db.query_one("SELECT url FROM job_profiles")["url"] == url
     assert db.query_one("SELECT outcome FROM batch_result_receipts")["outcome"] == "written"
-    await job_profiles.handle_classify_job_profiles(task_id, {})
+    await job_profiles.PROFILES.handle(task_id, {})
     assert db.query_one("SELECT count(*) AS n FROM job_profiles")["n"] == 1
 
 
@@ -237,5 +238,5 @@ async def test_pause_during_selection_prevents_submission(f, monkeypatch):
         pytest.fail("a pause during preparation must prevent submission")
 
     monkeypatch.setattr(job_profiles.job_profile_derivation, "candidates", select_then_pause)
-    monkeypatch.setattr(job_profiles, "run_batched", no_submit)
-    await job_profiles.handle_classify_job_profiles(task_id, {})
+    monkeypatch.setattr("tasks.derive.run_batched", no_submit)
+    await job_profiles.PROFILES.handle(task_id, {})

@@ -39,17 +39,18 @@ async def test_comp_extracts_only_from_verified_open_postings(client, user_heade
         asked.extend(s.custom_id for s in specs)
         return _refused(f, task_id, specs), SimpleNamespace(model="gpt-5-nano")
 
-    monkeypatch.setattr(comp, "run_batched", fake)
+    monkeypatch.setattr("tasks.derive.run_batched", fake)
     task = f.make_task("extract_comp", status="running")
-    await comp.handle_extract_comp(task, {})
+    await comp.PAY.handle(task, {})
     assert asked == [open_url]
     assert not (set(asked) & others)
 
 
 @pytest.mark.asyncio
 async def test_requirements_extracts_only_from_verified_open_postings(
-    client, user_headers, f, monkeypatch
+    client, user_headers, f, monkeypatch, set_config
 ):
+    set_config("requirements_extraction_enabled", True)
     open_url, others = _jobs(f)
     asked = []
 
@@ -57,8 +58,8 @@ async def test_requirements_extracts_only_from_verified_open_postings(
         asked.extend(s.custom_id for s in specs)
         return _refused(f, task_id, specs), SimpleNamespace(model="gpt-5-nano")
 
-    monkeypatch.setattr(requirements, "run_batched", fake)
+    monkeypatch.setattr("tasks.derive.run_batched", fake)
     task = f.make_task("extract_requirements", status="running")
-    await requirements.handle_extract_requirements(task, {})
+    await requirements.REQUIREMENTS.handle(task, {})
     assert asked == [open_url]
     assert not (set(asked) & others)

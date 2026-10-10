@@ -110,10 +110,10 @@ def _receipt(f):
 async def test_packed_resume_and_replay_without_key_preserve_vectors(f, monkeypatch):
     task_id, _originals = _receipt(f)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    await embeddings.handle_embed_postings_batch(task_id, {})
+    await embeddings.EMBEDDINGS.handle(task_id, {})
     rows = db.query("SELECT url,created_at FROM job_embeddings ORDER BY url")
     assert len(rows) == 2
-    await embeddings.handle_embed_postings_batch(task_id, {})
+    await embeddings.EMBEDDINGS.handle(task_id, {})
     assert db.query("SELECT url,created_at FROM job_embeddings ORDER BY url") == rows
     assert batch_results.progress_counts(task_id) == (1, 1)
 
@@ -122,7 +122,7 @@ async def test_packed_resume_and_replay_without_key_preserve_vectors(f, monkeypa
 async def test_packed_result_keeps_current_sibling_when_one_page_changes(f):
     task_id, originals = _receipt(f)
     f.make_fetch(originals[0]["url"], content="a changed detailed posting " * 30)
-    await embeddings.handle_embed_postings_batch(task_id, {})
+    await embeddings.EMBEDDINGS.handle(task_id, {})
     assert [row["url"] for row in db.query("SELECT url FROM job_embeddings")] == [
         originals[1]["url"]
     ]
@@ -139,7 +139,7 @@ async def test_packed_write_and_receipt_rollback_together(f, monkeypatch):
 
     monkeypatch.setattr(embeddings, "_store", crash)
     with pytest.raises(RuntimeError, match="before acknowledgement"):
-        await embeddings.handle_embed_postings_batch(task_id, {})
+        await embeddings.EMBEDDINGS.handle(task_id, {})
     assert db.query_one("SELECT count(*) AS n FROM job_embeddings")["n"] == 0
     assert len(batch_results.unconsumed(task_id)) == 1
 
@@ -162,10 +162,10 @@ async def test_submission_parks_packed_requests_and_respects_existing_work(f, mo
 
     monkeypatch.setattr(batch, "submit_responses_batches", submit)
     with pytest.raises(runtime.AwaitingBatch):
-        await embeddings.handle_embed_postings_batch(task_id, {})
+        await embeddings.EMBEDDINGS.handle(task_id, {})
     assert [len(spec.inputs) for spec in submitted] == [100, 1]
     later = f.make_task("embed_postings_batch", {}, status="running")
-    await embeddings.handle_embed_postings_batch(later, {})
+    await embeddings.EMBEDDINGS.handle(later, {})
     assert len(submitted) == 2
 
 
@@ -201,7 +201,7 @@ async def test_rejected_packed_request_is_acknowledged_without_live_fallback(f, 
         raise AssertionError("unexpected provider retry")
 
     monkeypatch.setattr(batch, "submit_responses_batches", no_submit)
-    await embeddings.handle_embed_postings_batch(task_id, {})
+    await embeddings.EMBEDDINGS.handle(task_id, {})
     assert batch_results.outcome_counts(task_id) == {"failed": 1}
     assert db.query_one("SELECT count(*) AS n FROM job_embeddings")["n"] == 0
 
@@ -252,7 +252,7 @@ async def test_malformed_provider_vectors_are_acknowledged_without_database_fail
     for result in results.values():
         result.model = None if malformed == "missing_model" else EMBEDDING_MODEL
     batch_results.checkpoint(task_id, list(results.values()), [])
-    await embeddings.handle_embed_postings_batch(task_id, {})
+    await embeddings.EMBEDDINGS.handle(task_id, {})
     assert db.query_one("SELECT count(*) AS n FROM job_embeddings")["n"] == 0
     assert batch_results.unconsumed(task_id) == []
     expected = {

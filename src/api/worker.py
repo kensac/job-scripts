@@ -23,7 +23,6 @@ from api import (
     db,
     events,
     hosts,
-    job_profile_derivation,
     managed_board_runs,
     metrics,
     queue,
@@ -35,7 +34,7 @@ from api.queue import enqueue
 from core.env import env_list
 from core.fetching.hosts import pace_key
 from core.payload_objects import PayloadUnavailable
-from tasks import HANDLERS
+from tasks import DERIVATIONS, HANDLERS
 from tasks.runtime import (
     CHUNK_KINDS,
     AwaitingBatch,
@@ -397,53 +396,10 @@ def schedule_ingest_cycle() -> None:
     # then a sync that stops running also stops noticing it cannot run - the
     # alarm wired to the thing it is alarming about.
     enqueue("probe_credentials", {"cycle": cycle}, dedupe_key=f"credprobe:{cycle}")
-    # Hourly, but only when the previous pass has finished. Each run is capped
-    # at comp_extract_per_cycle jobs and then waits on the Batch API, which can
-    # take hours - enqueuing unconditionally every hour would stack passes up
-    # until all three workers were doing nothing else. The dedupe key stops two
-    # tasks per cycle; this stops overlap ACROSS cycles.
-    if not db.query_one(
-        "SELECT 1 FROM tasks WHERE kind = 'extract_comp' "
-        "AND status IN ('pending', 'running', 'waiting', 'awaiting_batch') LIMIT 1"
-    ):
-        enqueue("extract_comp", {"cycle": cycle}, dedupe_key=f"comp:{cycle}")
-    # Same non-overlap guard, and for the same reason: a capped pass that then
-    # parks on the Batch API for hours would otherwise stack a new pass on top
-    # of itself every cycle. Kept separate from the comp check so one pass
-    # waiting on a slow batch does not block the other from ever starting.
-    # Off unless switched on: the extraction has one consumer, the market
-    # table, and measured on 2026-09-07 its deployed arm named a seniority
-    # for 5 of 92 postings the reference named one for and shared a third
-    # of the skills. Kanishk chose to stop paying for it rather than pay
-    # more for it; the switch is a config row so that can change without a
-    # deploy.
-    if db.get_config("requirements_extraction_enabled") and not db.query_one(
-        "SELECT 1 FROM tasks WHERE kind = 'extract_requirements' "
-        "AND status IN ('pending', 'running', 'waiting', 'awaiting_batch') LIMIT 1"
-    ):
-        enqueue("extract_requirements", {"cycle": cycle}, dedupe_key=f"requirements:{cycle}")
-    if not db.query_one(
-        "SELECT 1 FROM tasks WHERE kind = 'classify_locations' "
-        "AND status IN ('pending', 'running', 'waiting', 'awaiting_batch') LIMIT 1"
-    ):
-        enqueue("classify_locations", {"cycle": cycle}, dedupe_key=f"locations:{cycle}")
-    if (
-        db.get_config("job_profile_collection_enabled")
-        and job_profile_derivation.has_work()
-        and not db.query_one(
-            "SELECT 1 FROM tasks WHERE kind = 'classify_job_profiles' "
-            "AND status IN ('pending', 'running', 'waiting', 'awaiting_batch') LIMIT 1"
-        )
-    ):
-        enqueue(
-            "classify_job_profiles",
-            {"cycle": cycle},
-            dedupe_key=f"job-profile:{cycle}",
-        )
-    # The cycle key bounds queued work; the handler refuses fresh submission
-    # while an earlier embedding batch is active. The new kind keeps older
-    # images from claiming paid snapshots with the former live handler.
-    enqueue("embed_postings_batch", {"cycle": cycle}, dedupe_key=f"embed-batch:{cycle}")
+    # Every derived fact (pay, requirements, job profiles, embeddings,
+    # locations): one pass each, only when switched on and none is in flight.
+    for derivation in DERIVATIONS:
+        derivation.schedule(cycle)
     enqueue("send_digests", {"cycle": day}, dedupe_key=f"digest:{day}")
     enqueue("data_health", {"cycle": cycle}, dedupe_key=f"health:{cycle}")
     # Polling gets its OWN bucket, far finer than the ingest cycle. Sharing the

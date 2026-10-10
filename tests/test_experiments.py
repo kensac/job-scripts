@@ -74,8 +74,8 @@ async def test_task_and_experiment_inputs_share_the_derivation_cap(f, monkeypatc
 
     if family == "comp":
         f.make_ready_job(content=content)
-        monkeypatch.setattr(task_comp, "run_batched", capture)
-        await task_comp.handle_extract_comp(f.make_task("extract_comp", status="running"), {})
+        monkeypatch.setattr("tasks.derive.run_batched", capture)
+        await task_comp.PAY.handle(f.make_task("extract_comp", status="running"), {})
     else:
         f.make_ready_job(content=content, closed="", clearance="")
         monkeypatch.setattr(task_verify, "run_batched", capture)
