@@ -9,8 +9,6 @@ took the task.
 
 from __future__ import annotations
 
-from contextlib import nullcontext
-
 import psycopg
 import pytest
 
@@ -223,7 +221,7 @@ async def test_live_execution_reads_cache_and_content_once_for_n_candidates(f, m
         verdict_label="live-cache",
         key_source="owner",
         payer=Payer(user_id=1),
-        record_failure=lambda _model: nullcontext(),
+        purpose="filter",
         record_usage=lambda usage, model, batched: None,
         budget_exceeded=lambda: False,
         cancelled=lambda: False,

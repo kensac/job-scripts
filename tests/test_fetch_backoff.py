@@ -12,7 +12,6 @@ decides when to stop.
 from __future__ import annotations
 
 import asyncio
-from contextlib import nullcontext
 
 import pytest
 
@@ -198,7 +197,7 @@ async def test_filter_preparation_does_not_fetch_a_given_up_posting(f):
         f.make_task("run_filter_batch_chunk"),
         jobs,
         cancelled=lambda: False,
-        refresh_content=refresh,
+        refresh_page=refresh,
     )
 
     assert fetched == ["https://b.test/prep-new"]
@@ -215,12 +214,12 @@ async def test_a_live_filter_run_does_not_fetch_a_given_up_posting(f, monkeypatc
         fetched.append(url)
         return None, None
 
-    monkeypatch.setattr(filter_execution.verdicts, "refresh_content", refresh)
+    monkeypatch.setattr(filter_execution.verdicts, "refresh_page", refresh)
     hooks = filter_execution.ExecutionHooks(
         verdict_label="managed:test",
         key_source="owner",
         payer=Payer(user_id=1),
-        record_failure=lambda _model: nullcontext(),
+        purpose="filter",
         record_usage=lambda usage, model, batched: None,
         budget_exceeded=lambda: False,
         cancelled=lambda: False,

@@ -126,6 +126,14 @@ class AiQuery(Base):
     # Re-verification reuses an answer whose question is unchanged instead of
     # buying it again (tasks/verify.py).
     request_sha256: Mapped[str | None] = mapped_column(Text)
+    # The page fetch an answer judged, and the paid call that produced it
+    # (siblings from one answer name the same call). No foreign keys, like
+    # content_row_id: an admin may delete a fetch or a ledger row, and a
+    # person's removal deletes their calls. NULL on an answer no fetch or no
+    # call produced (near-copy reuse, ATS gone, manual), and on older answers
+    # until tasks.answer_links fills them.
+    page_fetch_id: Mapped[int | None] = mapped_column(BigInteger)
+    model_call_id: Mapped[int | None] = mapped_column(BigInteger)
 
 
 class AiInstructionText(Base):
@@ -301,6 +309,10 @@ class ModelCall(Base):
     reasoning_tokens: Mapped[int | None] = mapped_column(BigInteger)
     # NULL: the model has no published price, never a free call.
     cost_usd: Mapped[Decimal | None] = mapped_column(Numeric(12, 6))
+    # Wall time of a live call. NULL for batch items, which have none of
+    # their own, and for calls recorded before 2026-10-10 except those copied
+    # from their verdict by tasks.answer_links.
+    duration_ms: Mapped[int | None] = mapped_column(BigInteger)
     # 'call': written when the call was made. The others are the backfill and
     # name the table it came from: a verdict, a batch receipt, a batch's
     # totals, or a row of the old usage ledger; source_id is that row's id.

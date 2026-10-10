@@ -4,7 +4,7 @@ import logging
 import os
 import socket
 from collections.abc import Callable
-from typing import Any, LiteralString, cast
+from typing import Any, LiteralString, NamedTuple, cast
 
 from psycopg import Connection
 
@@ -50,13 +50,24 @@ _INSERT_COLUMNS = [
     "worker",
     "batch_id",
     "request_sha256",
+    "page_fetch_id",
+    "model_call_id",
 ]
 
 WORKER = os.environ.get("JOBTRACKER_WORKER_NAME") or socket.gethostname()
 
+# A batch item's call is in model_calls before any consumer writes an answer
+# from it (api.ai.batch_results.checkpoint records it with the receipt), keyed
+# by the batch and the item's custom_id, which is the answer's url. So every
+# batched answer finds its call here, whichever consumer writes it. A live
+# answer's call is recorded by its writer and passed in.
+_VALUES = {
+    "model_call_id": "COALESCE(%(model_call_id)s::bigint, (SELECT m.id FROM model_calls m "
+    "WHERE m.provider_batch_id = %(batch_id)s AND m.custom_id = %(url)s))",
+}
 _INSERT_AI_RESULT = _as_query(
     f"INSERT INTO ai_queries ({', '.join(_INSERT_COLUMNS)}) "
-    f"VALUES ({', '.join(f'%({c})s' for c in _INSERT_COLUMNS)}) RETURNING id"
+    f"VALUES ({', '.join(_VALUES.get(c, f'%({c})s') for c in _INSERT_COLUMNS)}) RETURNING id"
 )
 
 
@@ -120,6 +131,8 @@ def ai_result_row(
     batch_id: str | None = None,
     cache_write_tokens: int | None = None,
     request_sha256: str | None = None,
+    page_fetch_id: int | None = None,
+    model_call_id: int | None = None,
 ) -> dict[str, Any]:
     if check_type == "content":
         # No view reads a fetch stored here; it would be lost.
@@ -178,6 +191,8 @@ def ai_result_row(
         "worker": WORKER,
         "batch_id": batch_id,
         "request_sha256": request_sha256,
+        "page_fetch_id": page_fetch_id,
+        "model_call_id": model_call_id,
     }
     return row
 
@@ -361,17 +376,25 @@ AI_ELIGIBLE_JOB = (
 )
 
 
-def get_contents(urls: list[str]) -> dict[str, str]:
-    """Newest raw cached content per URL, with the same eligibility as get_content."""
+class Page(NamedTuple):
+    """Page text and the fetch it came from, which an answer judging the text
+    points at (ai_queries.page_fetch_id)."""
+
+    fetch_id: int
+    text: str
+
+
+def get_contents(urls: list[str]) -> dict[str, Page]:
+    """Newest page text per URL, with the same eligibility as get_content."""
     if not urls:
         return {}
     with connection() as conn:
         rows = conn.execute(
-            "SELECT DISTINCT ON (url) url, input_content FROM page_texts "
+            "SELECT DISTINCT ON (url) url, id, input_content FROM page_texts "
             "WHERE url = ANY(%s) ORDER BY url, id DESC",
             (urls,),
         ).fetchall()
-    return {row["url"]: row["input_content"] for row in rows}
+    return {row["url"]: Page(row["id"], row["input_content"]) for row in rows}
 
 
 def get_content(url: str) -> str | None:

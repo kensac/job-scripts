@@ -15,6 +15,7 @@ import pytest
 from pydantic import BaseModel, Field
 
 from api import db
+from core.store import Page
 
 
 class HiringManagerNamedResponse(BaseModel):
@@ -47,7 +48,7 @@ def _stub_model(monkeypatch, spec):
     monkeypatch.setattr("core.routing.server_key", lambda provider: "sk-test")
 
     async def fake_refresh(url, **kw):
-        return "A posting body long enough to check.", None
+        return Page(1, "A posting body long enough to check."), None
 
     seen: list[str] = []
 
@@ -56,7 +57,7 @@ def _stub_model(monkeypatch, spec):
         usage = {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
         return response_model(names_a_manager=True, reason="names Ada"), usage
 
-    monkeypatch.setattr(verdicts, "refresh_content", fake_refresh)
+    monkeypatch.setattr(verdicts, "refresh_page", fake_refresh)
     monkeypatch.setattr(ai, "parse", fake_parse)
     return seen
 

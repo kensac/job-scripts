@@ -55,8 +55,9 @@ async def explain_check(
     posting (at most one per posting per day) instead of replacing it."""
     import dataclasses
 
-    from api import budget
+    from api import budget, model_calls
     from api.ai import verdicts as _verdicts
+    from core.answer_inputs import LIVE_CHECK_INPUT_CHARS
     from core.answers import FilterVerdict
     from core.checks import POSTING_CHECKS
     from core.filters import build_custom_instructions
@@ -65,7 +66,7 @@ async def explain_check(
     # make this caller's model an authority on a posting everyone sees: that
     # is what recording shared checks under explain:<check> is for, below.
     job = require_visible_job(user, job_id, "j.id, j.url, j.company, j.title")
-    fresh, closure_signal = await _verdicts.refresh_content(
+    fresh, closure_signal = await _verdicts.refresh_page(
         job["url"], company=job["company"], job_title=job["title"], context="explain"
     )
     if fresh is None:
@@ -83,7 +84,6 @@ async def explain_check(
                 closure_signal=closure_signal,
             )
         raise refuse(409, "NO_CONTENT", "could not fetch this posting just now")
-    content_row = {"input_content": fresh}
     cfg = ai_access.require_config(user)
     cfg = dataclasses.replace(cfg, params={**cfg.params, "reasoning_effort": "medium"})
 
@@ -122,27 +122,21 @@ async def explain_check(
             f"check must be one of {', '.join(POSTING_CHECKS)}, or filter:<id>",
         )
 
-    with budget.record_parse_failures(user.id, cfg.key_source, "explain", cfg.model):
-        parsed, usage = await _verdicts.run_check(
-            cfg,
-            url=job["url"],
-            check_type=check,
-            instructions=instructions,
-            input_text=content_row["input_content"][:60000],
-            response_model=model_cls,
-            verdict_of=verdict_of,
-            company=job["company"],
-            job_title=job["title"],
-            filter_name=filter_name,
-            prompt_hash=prompt_hash,
-            context="explain",
-        )
-    budget.record_tokens(
-        user.id,
-        cfg.key_source,
-        "explain",
-        cfg.model,
-        usage,
+    parsed, _usage = await _verdicts.run_check(
+        cfg,
+        url=job["url"],
+        check_type=check,
+        instructions=instructions,
+        input_text=fresh.text[:LIVE_CHECK_INPUT_CHARS],
+        response_model=model_cls,
+        verdict_of=verdict_of,
+        booking=budget.Booking(model_calls.Payer(user_id=user.id), cfg.key_source, "explain"),
+        page_fetch_id=fresh.fetch_id,
+        company=job["company"],
+        job_title=job["title"],
+        filter_name=filter_name,
+        prompt_hash=prompt_hash,
+        context="explain",
     )
     if parsed is None:
         # run_check records the 'failed' row and returns None when the model

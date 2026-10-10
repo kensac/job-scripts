@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
-from api import ai, db, model_calls, user_settings
+from api import ai, budget, db, model_calls, user_settings
 from api.auth import AuthedUser
 from api.problem import PROVIDER_REFUSALS, UNAVAILABLE_REFUSALS, refuse
 from api.routers.admin.shared import require_admin
@@ -102,6 +102,7 @@ async def run_single_check(
     re-derives from it immediately. No downstream re-run needed, since
     visibility is a read-time predicate rather than stored derived state."""
     from api.ai import verdicts as _verdicts
+    from core.answer_inputs import LIVE_CHECK_INPUT_CHARS
     from core.answers import FilterVerdict
     from core.checks import POSTING_CHECKS
     from core.filters import build_custom_instructions
@@ -159,7 +160,7 @@ async def run_single_check(
         )
     # Re-fetch: a recheck against cached text cannot discover that a posting
     # has since closed, which is usually the whole reason for asking.
-    fresh, closure_signal = await _verdicts.refresh_content(
+    fresh, closure_signal = await _verdicts.refresh_page(
         job["url"], company=job["company"], job_title=job["title"], context="manual"
     )
     if fresh is None:
@@ -178,7 +179,6 @@ async def run_single_check(
                 closure_signal=closure_signal,
             )
         raise refuse(409, "NO_CONTENT", "could not fetch this posting just now")
-    content = {"input_content": fresh}
     allowed = _recheck_models(user)
     if body.model is not None:
         if body.model not in allowed:
@@ -208,28 +208,22 @@ async def run_single_check(
 
     # The re-check runs on the server's key for the admin who asked, and
     # until the call ledger it was booked nowhere but its verdict row.
-    def booked(usage) -> model_calls.Call:
-        return model_calls.Call("manual", model, model_calls.Payer(user_id=user.id), "owner", usage)
-
-    try:
-        parsed, usage = await _verdicts.run_check(
-            cfg,
-            url=job["url"],
-            check_type=check,
-            instructions=instructions,
-            input_text=content["input_content"][:60000],
-            response_model=model_cls,
-            verdict_of=verdict_of,
-            company=job["company"],
-            job_title=job["title"],
-            filter_name=filter_name,
-            prompt_hash=prompt_hash,
-            context="manual",
-        )
-    except ai.PaidParseError as exc:
-        model_calls.record([booked(exc.usage)])
-        raise
-    model_calls.record([booked(usage)])
+    parsed, usage = await _verdicts.run_check(
+        cfg,
+        url=job["url"],
+        check_type=check,
+        instructions=instructions,
+        input_text=fresh.text[:LIVE_CHECK_INPUT_CHARS],
+        response_model=model_cls,
+        verdict_of=verdict_of,
+        booking=budget.Booking(model_calls.Payer(user_id=user.id), "owner", "manual"),
+        page_fetch_id=fresh.fetch_id,
+        company=job["company"],
+        job_title=job["title"],
+        filter_name=filter_name,
+        prompt_hash=prompt_hash,
+        context="manual",
+    )
     if parsed is None:
         raise refuse(502, "NO_VERDICT", "the model returned no usable answer; try again")
     rejected, reason = verdict_of(parsed)
