@@ -41,6 +41,7 @@ from tasks.mail_sync import (
 from tasks.managed_boards import handle_run_managed_board, handle_run_managed_board_batch
 from tasks.model_call_backfill import handle_backfill_model_calls
 from tasks.page_fetch_move import handle_move_page_fetches
+from tasks.receipt_vector_format import handle_rewrite_receipt_vectors_v1
 from tasks.requirements import handle_extract_requirements
 from tasks.uploads import handle_extract_upload
 from tasks.user_job_backfill import handle_backfill_user_job_split
@@ -84,6 +85,7 @@ HANDLERS = {
     "move_page_fetches": handle_move_page_fetches,
     "backfill_model_calls": handle_backfill_model_calls,
     "drop_listing_pattern_copies": handle_drop_listing_pattern_copies,
+    "rewrite_receipt_vectors_v1": handle_rewrite_receipt_vectors_v1,
     "backfill_mail_pointers": handle_backfill_mail_pointers,
     "merge_olm_twins": handle_merge_olm_twins,
 }
