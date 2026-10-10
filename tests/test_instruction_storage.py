@@ -1,11 +1,12 @@
 from api import db
 from core import store
 from core.query_instructions import hydrate
+from tests.factories import legacy_answer
 
 
 def test_identical_instructions_share_storage_without_changing_verdict_identity():
     ids = [
-        store.add_ai_result(
+        legacy_answer(
             f"https://example.test/{index}",
             "passed",
             check_type="custom",
@@ -78,7 +79,7 @@ def test_missing_reference_never_becomes_legacy_null():
 
 
 def test_admin_query_routes_return_the_referenced_text(client, admin_headers):
-    query_id = store.add_ai_result(
+    query_id = legacy_answer(
         "https://example.test/history",
         "passed",
         check_type="custom",
@@ -124,7 +125,7 @@ def test_the_verdict_cache_check_answers_from_the_row_without_reading_page_text(
     import psycopg
 
     long_text = "Posting text.\n" * 400
-    store.add_ai_result(
+    legacy_answer(
         "https://example.test/cached",
         "passed",
         check_type="custom",
@@ -133,7 +134,7 @@ def test_the_verdict_cache_check_answers_from_the_row_without_reading_page_text(
         instructions="Exact instructions.",
         input_content=long_text,
     )
-    store.add_ai_result(
+    legacy_answer(
         "https://example.test/undecided",
         "failed",
         check_type="custom",

@@ -15,7 +15,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
-from api import budget, db, grouped, scoping
+from api import budget, db, grouped, model_calls, scoping
 from api import params as params_
 from api.auth import AuthedUser
 from api.routers.admin import require_admin
@@ -33,6 +33,8 @@ router = APIRouter()
 INTERACTIVE_CONTEXTS = ("explain", "manual")
 
 _WINDOW = "created_at >= now() - make_interval(days => %(days)s)"
+# The window's answers, each with its call's usage (model_calls.answers_with_usage).
+_ANSWERS = model_calls.answers_with_usage(f"q.{_WINDOW} AND q.model IS NOT NULL")
 
 
 class LedgerBucket(BaseModel):
@@ -383,7 +385,8 @@ def _verdict_breakdowns(
     list[VerdictDaySpend],
 ]:
     """Totals, batching and the check type, model and day cuts of the verdict
-    log, from ONE scan of ai_queries grouped by every dimension they cut by.
+    log, from ONE scan of its answers (each with its call's usage on the
+    first answer naming it) grouped by every dimension they cut by.
 
     Each used to be its own full scan: five of the eight scans /admin/spend
     ran, which took about 97 s between them on a loaded production host on
@@ -427,7 +430,7 @@ def _verdict_breakdowns(
                    WHERE COALESCE(total_tokens, 0) = 0
                      AND status IN ('passed', 'rejected')
                ) AS joint_call_rows
-        FROM ai_queries WHERE {_WINDOW} AND model IS NOT NULL
+        FROM {_ANSWERS} a
         GROUP BY 1, 2, 3
         """,
         params,
@@ -478,7 +481,7 @@ def spend(
         f"""
         WITH scoped AS (
             SELECT id, url, check_type, status, cost_usd
-            FROM ai_queries WHERE {_WINDOW} AND model IS NOT NULL
+            FROM {_ANSWERS} a
         ),
         superseded AS (
             SELECT s.id, s.cost_usd FROM scoped s
@@ -539,9 +542,8 @@ def spend(
                COUNT(*) FILTER (WHERE a.cost_usd IS NULL) AS unpriced_calls,
                COALESCE(SUM(a.cost_usd), 0) AS cost_usd,
                COALESCE(SUM(a.total_tokens), 0) AS total_tokens
-        FROM ai_queries a
+        FROM {_ANSWERS} a
         LEFT JOIN jobs j ON j.url = a.url
-        WHERE a.{_WINDOW} AND a.model IS NOT NULL
         GROUP BY 1, 2 ORDER BY 6 DESC
         """,
         params,

@@ -46,7 +46,7 @@ async def test_joint_verification_allocates_cost_once_and_survives_replay(f, mon
         else:
             verify._record_reverify_results(task, [result])
     rows = db.query(
-        "SELECT check_type, cost_usd, total_tokens FROM ai_queries WHERE url=%s ORDER BY id",
+        "SELECT check_type, cost_usd, total_tokens FROM ledger_rows WHERE url=%s ORDER BY id",
         (url,),
     )
     assert rows == [
@@ -69,4 +69,6 @@ def test_missing_usage_is_not_a_shared_call(f):
             model="gpt-5-nano",
         )
     )
-    assert db.query_one("SELECT cost_usd FROM ai_queries WHERE id=%s", (query,))["cost_usd"] is None
+    assert (
+        db.query_one("SELECT cost_usd FROM ledger_rows WHERE id=%s", (query,))["cost_usd"] is None
+    )

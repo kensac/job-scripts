@@ -6,6 +6,7 @@ from api import db
 from api.worker import enqueue
 from core.store import Page, add_ai_result
 from tasks import runtime as tasks_runtime
+from tests.factories import paid_answer
 
 SERVICE_TOKEN = os.environ["JOBTRACKER_SERVICE_TOKEN"]
 
@@ -218,7 +219,6 @@ def test_queries_filter_by_source(client, admin_headers):
 
 
 def test_batch_jobs_drilldown_reports_per_job_cost(client, admin_headers):
-    from core.store import add_ai_result
 
     db.execute(
         "INSERT INTO ai_batches (provider_batch_id, purpose, model, requests, status) "
@@ -227,14 +227,12 @@ def test_batch_jobs_drilldown_reports_per_job_cost(client, admin_headers):
     db.execute(
         "INSERT INTO jobs (url, source, company, title) VALUES ('https://b.test/1','s','Acme','SWE')"
     )
-    add_ai_result(
+    paid_answer(
         "https://b.test/1",
         "passed",
-        "job open",
-        "closed",
-        prompt_tokens=1000,
-        completion_tokens=100,
-        total_tokens=1100,
+        check_type="closed",
+        model=None,
+        usage={"prompt_tokens": 1000, "completion_tokens": 100, "total_tokens": 1100},
         batch_id="batch_x1",
     )
     resp = client.get("/v1/admin/batches/batch_x1/jobs", headers=admin_headers)

@@ -510,7 +510,7 @@ def batch_jobs(
                q.prompt_tokens, q.completion_tokens, q.total_tokens, q.cached_tokens,
                q.cache_write_tokens,
                q.created_at, j.source, j.id AS job_id
-        FROM ai_queries q LEFT JOIN jobs j ON j.url = q.url
+        FROM ledger_rows q LEFT JOIN jobs j ON j.url = q.url
         WHERE q.batch_id = %s ORDER BY q.id LIMIT %s OFFSET %s
         """,
         (provider_batch_id, limit, offset),

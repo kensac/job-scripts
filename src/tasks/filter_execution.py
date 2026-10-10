@@ -370,7 +370,6 @@ def _plan(
         company=job["company"],
         job_title=job["title"],
         instructions=result.request.instructions if result.request else None,
-        input_text=result.request.input if result.request else None,
         page_fetch_id=context.get("page_fetch_id"),
         filter_name=hooks.verdict_label,
         prompt_hash=stored.prompt_hash,

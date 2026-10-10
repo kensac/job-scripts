@@ -1,12 +1,12 @@
 from api import db
-from core import store
 from core.query_instructions import hydrate
+from tests.factories import legacy_answer
 
 
 def test_new_results_store_only_exact_shared_instruction_text():
     values = [None, "", "Same rules\n", "Same rules\n", "Same rules \n", "café"]
     ids = [
-        store.add_ai_result(
+        legacy_answer(
             f"https://example.test/reference-only/{index}",
             "passed",
             instructions=value,

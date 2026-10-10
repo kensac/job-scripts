@@ -12,9 +12,11 @@ A pointer is set only where it is exact:
   byte for byte, the nearest at or before the answer, else the nearest
   after. Where no fetch holds the text, the text the answer saw becomes a
   fetch first (method 'verification', the answer's id and time, as the move
-  out of ai_queries did), so no text is lost when the copy is cleared. Only
-  under a newer fetch: an answer newer than every fetch of its url keeps its
-  copy, because storing its text would change the page every reader sees.
+  out of ai_queries did), so no text is lost when the copy is cleared. Where
+  that answer is newer than every fetch of its url, its text becomes the
+  url's current page, which it is: the newest text the system saw (1,948
+  `fulltime` answers from 2026-06 on 851 urls, 54 of them active postings,
+  measured 2026-10-10; decided the same day).
 - call: a batched answer's item, `(batch_id, url) = (provider_batch_id,
   custom_id)`; a live one copied from its verdict (`source_id`); or a live
   call booked apart from its verdict, matched on model, tokens and the minute
@@ -34,7 +36,6 @@ from typing import Any
 
 from api import db
 from core import answer_inputs
-from core.store import MIN_CONTENT_CHARS
 from tasks.runtime import cancelled, set_progress
 
 logger = logging.getLogger(__name__)
@@ -54,15 +55,6 @@ _REBUILDS = (
     "f.url = q.url AND f.content IS NOT NULL "
     f"AND {answer_inputs.sql('q', 'f.content')} = q.input_content"
 )
-# A fetch of the url newer than the answer, as each reader of a url's current
-# page picks one: the newest text (store.get_content) and the newest longer
-# than MIN_CONTENT_CHARS (store.CONTENT_LATERAL). An id below both is never
-# the one either picks.
-_UNDER_NEWER = (
-    "q.id < (SELECT max(f.id) FROM page_fetches f WHERE f.url = q.url AND f.content <> '') "
-    "AND q.id < (SELECT max(f.id) FROM page_fetches f WHERE f.url = q.url "
-    f"AND length(f.content) > {MIN_CONTENT_CHARS})"
-)
 
 # The text an answer saw that no fetch of its url holds, stored as a fetch.
 # One per distinct text, under the first answer that saw it; ON CONFLICT
@@ -75,7 +67,6 @@ _STORE_UNHELD = f"""
     WHERE {_RANGE} AND {_UNLINKED_COPY}
       AND {answer_inputs.header_matches("q")} AND {answer_inputs.seen("q")} <> ''
       AND NOT EXISTS (SELECT 1 FROM page_fetches f WHERE {_REBUILDS})
-      AND {_UNDER_NEWER}
     ORDER BY q.url, md5({answer_inputs.seen("q")}), q.id
     ON CONFLICT (id) DO NOTHING
 """

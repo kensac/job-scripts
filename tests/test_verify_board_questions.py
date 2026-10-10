@@ -182,8 +182,9 @@ async def test_collection_writes_the_board_verdict_the_board_run_then_reuses(
     await _collect(f, monkeypatch, spec, model=spec.context["model"])
 
     rows = db.query(
-        "SELECT check_type, status, prompt_hash, filter_name, total_tokens, request_sha256 "
-        "FROM ai_queries WHERE url = %s ORDER BY id",
+        "SELECT l.check_type, l.status, l.prompt_hash, l.filter_name, l.total_tokens, "
+        "q.request_sha256 FROM ledger_rows l JOIN ai_queries q USING (id) "
+        "WHERE l.url = %s ORDER BY id",
         (url,),
     )
     assert [(r["check_type"], r["status"]) for r in rows] == [
@@ -203,7 +204,8 @@ async def test_collection_writes_the_board_verdict_the_board_run_then_reuses(
     assert [p["page_fetch_id"] for p in pointers] == [fetch] * 3
     [call] = {p["model_call_id"] for p in pointers}
     assert call is not None and pointers[0]["call_tokens"] == 2100
-    assert pointers[2]["rebuilt"] == pointers[2]["copy"] == spec.input
+    assert pointers[2]["rebuilt"] == spec.input
+    assert pointers[2]["copy"] is None, "no copy is stored"
 
 
 @pytest.mark.asyncio
