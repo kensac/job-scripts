@@ -16,7 +16,7 @@ from api.locations import LocationExtract, Place, store
 from api.problem import refuse
 from api.reports import ReportKind, report_kinds
 from api.routers.admin.shared import require_admin
-from core import verdict_reads
+from core import catalog, verdict_reads
 
 router = APIRouter()
 
@@ -301,16 +301,10 @@ def patch_catalog_job(
     fields = body.model_dump(exclude_unset=True)
     if not fields:
         raise refuse(400, "EMPTY_PATCH", "no fields to update")
-    cols = ", ".join(f"{k} = %({k})s" for k in fields)
-    row = db.query_one_as(
-        CorrectedJob,
-        f"UPDATE jobs SET {cols} WHERE id = %(jid)s "
-        "RETURNING id, url, company, title, locations, terms, active",
-        {"jid": job_id, **fields},
-    )
+    row = catalog.correct_posting(job_id, fields)
     if not row:
         raise refuse(404, "NOT_FOUND", "unknown job")
-    return row
+    return CorrectedJob.model_validate(row)
 
 
 class ClosePostingBody(BaseModel):

@@ -5,13 +5,13 @@ import logging
 import random
 import time
 from collections import Counter
-from typing import TYPE_CHECKING, LiteralString
+from typing import TYPE_CHECKING, Literal, LiteralString
 
-from psycopg import errors
+from psycopg import errors, sql
 from psycopg.types.json import Jsonb
 
 from core import listing_payloads
-from core.pool import in_transaction, pool
+from core.pool import in_transaction, pool, statement, transaction
 
 if TYPE_CHECKING:
     from core.fetching.posting import JobPosting
@@ -133,6 +133,100 @@ def retire_switched_off(patterns_enforced: bool) -> dict[str, int]:
             {"enforced": patterns_enforced},
         ).fetchall()
     return {r["source"]: r["n"] for r in rows}
+
+
+# Every write to jobs is in this module; tests/test_catalog_one_writer.py fails
+# on one anywhere else. The writes below are single-row, so they take one row
+# lock and have no order to keep (_LOCK_ORDER is for multi-row writes).
+
+
+def set_active(job_id: int, active: bool) -> bool:
+    """The one write of jobs.active that is not a pull's: an administrator's
+    correction. Pulls write it through upsert_postings, retire_unlisted and
+    retire_switched_off. False when no such job."""
+    with statement() as conn:
+        return (
+            conn.execute(
+                "UPDATE jobs SET active = %s WHERE id = %s RETURNING id", (active, job_id)
+            ).fetchone()
+            is not None
+        )
+
+
+# What an administrator may correct by hand (PATCH /admin/jobs/{id}).
+_CORRECTABLE = ("company", "title", "locations", "terms")
+
+
+def correct_posting(job_id: int, fields: dict) -> dict | None:
+    """Applies an administrator's correction and returns the row as it is
+    left, or None when no such job. `active` goes through set_active."""
+    unknown = set(fields) - {*_CORRECTABLE, "active"}
+    if unknown:
+        raise ValueError(f"not correctable: {sorted(unknown)}")
+    with transaction():
+        if "active" in fields and not set_active(job_id, fields["active"]):
+            return None
+        columns = [c for c in _CORRECTABLE if c in fields]
+        with statement() as conn:
+            if columns:
+                conn.execute(
+                    sql.SQL("UPDATE jobs SET {} WHERE id = %(jid)s").format(
+                        sql.SQL(", ").join(
+                            sql.SQL("{} = {}").format(sql.Identifier(c), sql.Placeholder(c))
+                            for c in columns
+                        )
+                    ),
+                    {"jid": job_id, **{c: fields[c] for c in columns}},
+                )
+            return conn.execute(
+                "SELECT id, url, company, title, locations, terms, active FROM jobs WHERE id = %s",
+                (job_id,),
+            ).fetchone()
+
+
+def fill_date_posted(url: str, posted: datetime.date) -> None:
+    """Only where the board's listing left it empty: a date the listing stated
+    is the same fact from the same board, and never worse."""
+    with statement() as conn:
+        conn.execute(
+            "UPDATE jobs SET date_posted = %s WHERE url = %s AND date_posted IS NULL",
+            (posted, url),
+        )
+
+
+def add_upload(url: str, raw_url: str, user_id: int) -> dict:
+    """A person's own posting. A url the catalog already holds keeps its row;
+    a failed extraction of it goes back to pending. Returns id,
+    extraction_status and uploaded_by, which the caller checks for another
+    person's upload. Joins the caller's transaction."""
+    with statement() as conn:
+        row = conn.execute(
+            "INSERT INTO jobs (url, raw_url, source, uploaded_by, extraction_status) "
+            "VALUES (%s, %s, 'upload', %s, 'pending') "
+            "ON CONFLICT (url) DO UPDATE SET extraction_status = "
+            "CASE WHEN jobs.extraction_status = 'failed' THEN 'pending' ELSE jobs.extraction_status END "
+            "RETURNING id, extraction_status, uploaded_by",
+            (url, raw_url, user_id),
+        ).fetchone()
+    assert row is not None
+    return row
+
+
+def set_extraction_status(job_id: int, status: Literal["pending", "failed"]) -> None:
+    with statement() as conn:
+        conn.execute("UPDATE jobs SET extraction_status = %s WHERE id = %s", (status, job_id))
+
+
+def record_extraction(
+    job_id: int, company: str, title: str, locations: list[str], terms: list[str]
+) -> None:
+    """What the extractor read off the page of an upload or a forced reparse."""
+    with statement() as conn:
+        conn.execute(
+            "UPDATE jobs SET company = %s, title = %s, locations = %s, terms = %s, "
+            "extraction_status = 'done' WHERE id = %s",
+            (company, title, locations, terms, job_id),
+        )
 
 
 _ADMITTED = frozenset({"appeared", "reappeared"})
