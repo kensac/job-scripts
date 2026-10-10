@@ -60,7 +60,7 @@ real only relocates the problem.
 |---|---|---|
 | 0 | The layering is enforced | An import contract fails CI on a new upward edge |
 | 1 | Check types are a registry | **Done.** A new posting check is a `POSTING_CHECKS` registration; dispatch does not grow a purpose ladder |
-| 2 | A board row and the working set are told apart | Named and pinned apart (2a). Moving the sweeps' scope off `user_jobs` (2b) waits for a cutover comparison |
+| 2 | A board row and the working set are told apart | Named and pinned apart (2a). Moving the sweeps' scope off `user_jobs` (2b): product meanings chosen 2026-10-10, each read moves with a cutover comparison |
 | 3 | Catalog observations are facts | A re-listing is an appended row, not a mutated column |
 | 4 | ~~Derivations are content addressed~~ | **Dropped 2026-09-10.** Measured; see below |
 | 5 | Files move to the shape | **Done.** `tasks` is a sibling of `api` and `core`; domain seams, not directory names, own the remaining moves |
@@ -157,8 +157,8 @@ still hold.
 **Still stop and ask:** a change whose failure would be silent in production
 and invisible in CI. Phase 2b and phase 3 are the named cases: one changes the
 population the sweeps pay for, and the other decides what a source observation
-means. Bring the parallel cutover's numbers and the product semantics first,
-then merge.
+means. Bring the parallel cutover's numbers first, then merge. Phase 2b's
+product meanings are chosen (below); phase 3's are not.
 
 Phase 2 decides who sees what. Its failure mode is two definitions silently
 agreeing in the tests and disagreeing in production, which is the state the
@@ -231,27 +231,42 @@ examples and keeps legacy rows with no surviving provenance in
 `legacy_unknown`; those rows are not evidence for either side. The ordinary
 re-verification cap is shown separately and never narrows the comparison.
 
-Digest candidates remain `cannot_tell`: `user_job_working_set` has no admission
-timestamp, so the proposed population cannot be reconstructed. The report's
-old count uses the current non-force digest cutoff, `last_digest_at` or one day
-ago. `cannot_tell` counts working-set rows that lack admission-time
-classification; it is not presented as a proposed candidate count. Choosing
-what a digest announces is a product decision, not something the report infers
-from the legacy row's timestamp.
+The report's digest rows are `cannot_tell` because `user_job_working_set` has
+no admission timestamp. That stops mattering once the digest reads what the
+decision below says it reads.
 
-The storage cutover also needs three product meanings before its schema can be
-the source of truth:
+Kanishk chose the three product meanings the storage cutover needed
+(2026-10-10). They are the rules for every cutover step:
 
-- whether a digest announces newly visible postings or newly admitted working
-  set members;
-- whether analytics report person state, working set and visibility as three
-  populations or preserve one overloaded count;
-- whether an all-default legacy `user_jobs` row with no surviving provenance
-  is working-set-only or person-authored state. It is `cannot tell` in a
-  measurement, not evidence for either answer.
+- **A legacy all-default row with no surviving provenance is working-set
+  membership, not person state.** On 2026-10-09, 2,401 of 3,816 `user_jobs`
+  rows had every person field at its default and `person_touched_at` NULL.
+  Nothing a person wrote survives on them; an empty row is what
+  `materialize_passing` has always inserted, and a person who acted on a row
+  left a status, a note, a date or a hide behind. Kanishk's rule is "my jobs
+  should be ones that I can see": such a row does not keep a posting on a
+  board, `board_visible` does. Before the rows leave `user_jobs`, count how
+  many would leave a person's visible board because no enabled filter admits
+  them, and report it. The backfill already puts them in the working set, so
+  converting them changes no sweep.
+- **The daily digest announces postings that newly became visible to the
+  person**: `board_visible` rows whose `computed_at` (when the posting joined
+  the board, see [visibility.md](visibility.md)) is after the person's last
+  digest. Not newly admitted working-set members: a working-set row is scope
+  for paid sweeps, and a person cannot open a posting they cannot see.
+- **Analytics report three labelled populations**: person state (postings
+  the person acted on), working set (postings the filters picked) and visible
+  (postings the person can see). The person-facing surface shows visible and
+  acted on; the admin surface shows all three. The overloaded `user_jobs`
+  count goes away. A response whose shape changes keeps its old field until
+  the frontend reads the new one.
 
-Until those are chosen, additive schema work may be designed but not merged as
-the production meaning of the row.
+The cutover follows the parallel-cutover rule below, one step a PR: run the
+split backfill, observe a complete filter cycle, read this report on
+production, move each reader (sweep scope, AI eligibility, digest, analytics)
+with proof of equality or a measured, explained difference, stop writing
+machine rows into `user_jobs`, convert the legacy rows, and delete the
+compatibility code.
 
 ## Phase 3 needs source semantics before tables
 
@@ -745,8 +760,8 @@ the routers is that a long module's last job is often somebody else's, and the
 split is the moment that shows.
 
 **`user_jobs` answers two questions.** What a person keeps, and what the
-sweeps carry. Phase 2b, deferred: moving the sweeps' scope changes what gets
-paid for, so it waits for a cutover comparison.
+sweeps carry. Phase 2b: moving the sweeps' scope changes what gets paid for,
+so each read moves with a cutover comparison.
 
 ## Taking phase 7 in the order that pays
 
