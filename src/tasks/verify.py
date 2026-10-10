@@ -27,6 +27,7 @@ from core.shapes import VERIFY_TASK
 from core.store import (
     AI_ELIGIBLE_JOB,
     CONTENT_LATERAL,
+    Page,
     add_ai_results,
     ai_result_row,
     decided_custom_urls,
@@ -89,7 +90,10 @@ def _joint_spec(
         build_custom_input(row["company"], row["title"], content),
         response_model,
         context={
-            **{key: row[key] for key in ("company", "title", "needs_closed", "needs_clearance")},
+            **{
+                key: row[key]
+                for key in ("company", "title", "needs_closed", "needs_clearance", "page_fetch_id")
+            },
             "model": model,
             "effort": effort,
             "verify_question": question_sha256(
@@ -238,6 +242,7 @@ def _record_reverify_results(task_id: int, results: list) -> int:
                         shared_call=shared_call,
                         company=job["company"],
                         job_title=job["title"],
+                        page_fetch_id=job.get("page_fetch_id"),
                         context="reverify",
                         batched=True,
                         batch_id=res.batch_id,
@@ -305,23 +310,23 @@ async def _reverify_jobs(
         done = len(fresh)
     limiter = AdaptiveLimiter()
     scrape_sem = asyncio.Semaphore(SCRAPE_CONCURRENCY)
-    needs_ai: list[tuple] = []
+    needs_ai: list[tuple[str, Page]] = []
 
     async def gather(r: dict[str, Any]) -> None:
-        content, _closure = await verdicts.refresh_content(
+        page, _closure = await verdicts.refresh_page(
             r["url"],
             company=r["company"],
             job_title=r["title"],
             context="reverify",
             scrape_sem=scrape_sem,
         )
-        if not content:
-            # Either refresh_content already recorded the closure (ATS gone,
+        if not page:
+            # Either refresh_page already recorded the closure (ATS gone,
             # or the link bounced to a board index), or the fetch simply
             # failed - which says nothing about the job, so the prior verdict
             # stands and the next cycle retries.
             return
-        needs_ai.append((r["url"], content))
+        needs_ai.append((r["url"], page))
 
     idx = 0
     n_todo = len(rows)
@@ -354,13 +359,16 @@ async def _reverify_jobs(
 
     # A forced sweep is an admin doubting the answers themselves, so it pays.
     if not force:
-        reused = _reuse_unchanged(model, needs_ai, by_url)
-        needs_ai = [(url, content) for url, content in needs_ai if url not in reused]
+        reused = _reuse_unchanged(model, [(url, page.text) for url, page in needs_ai], by_url)
+        needs_ai = [(url, page) for url, page in needs_ai if url not in reused]
     if needs_ai:
         set_progress(task_id, done, total, f"batch of {len(needs_ai)} submitted (half price)")
         if parent_id:
             update_parent_progress(parent_id)
-        specs = [_verification_spec(url, content, by_url[url]) for url, content in needs_ai]
+        specs = [
+            _verification_spec(url, page.text, {**by_url[url], "page_fetch_id": page.fetch_id})
+            for url, page in needs_ai
+        ]
         results = await submit_or_collect(
             task_id,
             specs,
@@ -621,10 +629,11 @@ async def handle_verify_new(task_id: int, payload: dict[str, Any]) -> None:
             f"""
             WITH {verification_candidates.TARGETS}, candidates AS (
             SELECT j.url, j.source, j.company, j.title, q.input_content,
+                   q.id AS page_fetch_id,
                    NOT {verdict_reads.has_verdict("j.url", "closed")} AS needs_closed,
                    NOT {verdict_reads.has_verdict("j.url", "clearance")} AS needs_clearance
             FROM jobs j
-            {CONTENT_LATERAL.format(url="j.url", columns="input_content")}
+            {CONTENT_LATERAL.format(url="j.url", columns="id, input_content")}
             WHERE j.active AND {verification_candidates.REACHABLE}
               AND NOT (j.url = ANY(%(in_flight)s::text[])) AND (
                 NOT {verdict_reads.has_verdict("j.url", "closed")}
@@ -676,7 +685,16 @@ async def handle_verify_new(task_id: int, payload: dict[str, Any]) -> None:
             else _verification_spec(
                 r["url"],
                 r["input_content"],
-                {key: r[key] for key in ("company", "title", "needs_closed", "needs_clearance")},
+                {
+                    key: r[key]
+                    for key in (
+                        "company",
+                        "title",
+                        "needs_closed",
+                        "needs_clearance",
+                        "page_fetch_id",
+                    )
+                },
             )
             for r in rows
         ]
@@ -748,6 +766,7 @@ async def handle_verify_new(task_id: int, payload: dict[str, Any]) -> None:
                             model=res.model,
                             company=job["company"],
                             job_title=job["title"],
+                            page_fetch_id=job.get("page_fetch_id"),
                             context="verify-batch",
                             usage=usage,
                             shared_call=written,
@@ -777,6 +796,7 @@ async def handle_verify_new(task_id: int, payload: dict[str, Any]) -> None:
                         job_title=job["title"],
                         instructions=res.request.instructions if res.request else None,
                         input_text=res.request.input if res.request else None,
+                        page_fetch_id=job.get("page_fetch_id"),
                         filter_name=f"managed-board:{board['board_id']}",
                         prompt_hash=board["prompt_hash"],
                         context="verify-batch",

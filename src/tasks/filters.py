@@ -68,9 +68,7 @@ def _personal_hooks(
         verdict_label=f"user{user_id}:{flt['name']}",
         key_source=key_source,
         payer=Payer(user_id=user_id),
-        record_failure=lambda model: budget.record_parse_failures(
-            user_id, key_source, "filter", model
-        ),
+        purpose="filter",
         record_usage=lambda usage, model, batched: budget.record_tokens(
             user_id,
             "owner" if batched else key_source,
@@ -227,7 +225,7 @@ async def handle_run_filter_batch_chunk(task_id: int, payload: dict[str, Any]) -
                 task_id,
                 jobs,
                 cancelled=lambda: cancelled(task_id),
-                refresh_content=verdicts.refresh_content,
+                refresh_page=verdicts.refresh_page,
             )
             if cancelled(task_id) or (parent_id and parent_cancelled(parent_id)):
                 return

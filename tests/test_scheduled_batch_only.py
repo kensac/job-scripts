@@ -3,6 +3,7 @@ from types import SimpleNamespace
 import pytest
 
 from api import ai, db
+from core.store import Page
 from tasks import filters
 from tests.factories import filter_config
 
@@ -68,7 +69,7 @@ async def test_legacy_scheduled_children_reject_changed_unsupported_config(
 
     monkeypatch.setattr(filters, "_process_jobs", no_op)
     monkeypatch.setattr(filters, "submit_or_collect", forbidden)
-    monkeypatch.setattr(filters.verdicts, "refresh_content", forbidden)
+    monkeypatch.setattr(filters.verdicts, "refresh_page", forbidden)
     tid = f.make_task(kind, payload, status="running")
     handler = (
         filters.handle_run_filter_chunk
@@ -91,8 +92,8 @@ async def test_scheduled_chunk_fetches_then_batches(setup, f, monkeypatch):
 
     async def fetch(url, **kwargs):
         calls.append(url)
-        f.make_fetch(url, content="fetched posting " * 30)
-        return "fetched posting " * 30, None
+        text = "fetched posting " * 30
+        return Page(f.make_fetch(url, content=text), text), None
 
     async def submit(tid, specs, *args):
         assert len(specs) == 1
@@ -103,16 +104,22 @@ async def test_scheduled_chunk_fetches_then_batches(setup, f, monkeypatch):
                 specs[0],
                 model=cfg.model,
                 text='{"should_filter": false, "reason": "matches"}',
+                usage={"input_tokens": 100, "output_tokens": 5, "total_tokens": 105},
                 error=None,
             )
         ]
 
-    monkeypatch.setattr(filters.verdicts, "refresh_content", fetch)
+    monkeypatch.setattr(filters.verdicts, "refresh_page", fetch)
     monkeypatch.setattr(filters, "submit_or_collect", submit)
     tid = f.make_task("run_filter_batch_chunk", payload, status="running")
     await filters.handle_run_filter_batch_chunk(tid, payload)
     assert calls == [job["url"]]
     assert db.query_one("SELECT count(*) AS n FROM ai_queries WHERE check_type='custom'")["n"] == 1
+    [answer] = f.answer_pointers(job["url"])
+    fetch = db.query_one("SELECT id FROM page_texts WHERE url = %s", (job["url"],))["id"]
+    assert answer["page_fetch_id"] == fetch
+    assert answer["rebuilt"] == answer["copy"], "the input rebuilds from the fetch it names"
+    assert answer["model_call_id"] is not None
 
 
 @pytest.mark.asyncio
@@ -123,7 +130,7 @@ async def test_recent_failed_fetch_is_not_repeated_by_scheduled_chunk(setup, f, 
     async def forbidden(*args, **kwargs):
         pytest.fail("recent failed fetch or missing content must not make a request")
 
-    monkeypatch.setattr(filters.verdicts, "refresh_content", forbidden)
+    monkeypatch.setattr(filters.verdicts, "refresh_page", forbidden)
     monkeypatch.setattr(filters, "submit_or_collect", forbidden)
     tid = f.make_task("run_filter_batch_chunk", payload, status="running")
     await filters.handle_run_filter_batch_chunk(tid, payload)
@@ -192,7 +199,17 @@ def test_bulk_content_preserves_single_url_raw_content_semantics(f):
     f.make_verdict(urls[3], "custom", content="only wrapped")
     expected = {url: content for url in urls if (content := store.get_content(url)) is not None}
     assert expected == {urls[0]: "old raw", urls[1]: "raw first", urls[2]: "nonempty"}
-    assert store.get_contents(urls) == expected
+    newest = {
+        row["url"]: row["id"]
+        for row in db.query(
+            "SELECT DISTINCT ON (url) url, id FROM page_texts WHERE url = ANY(%s) "
+            "ORDER BY url, id DESC",
+            (urls,),
+        )
+    }
+    assert store.get_contents(urls) == {
+        url: store.Page(newest[url], text) for url, text in expected.items()
+    }
     assert store.get_contents([]) == {}
 
 

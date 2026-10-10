@@ -10,11 +10,11 @@ from typing import Any, TypeVar
 
 from pydantic import BaseModel
 
-from api import ai, db, metrics, telemetry
+from api import ai, budget, db, metrics, telemetry
 from api.ai import AIConfig
 from core import catalog, page_fetches, pricing
 from core.fetching.hosts import hostname
-from core.store import add_ai_result, add_ai_results, ai_result_row
+from core.store import Page, add_ai_result, add_ai_results, ai_result_row
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +36,8 @@ async def run_check[T: BaseModel](
     input_text: str,
     response_model: type[T],
     verdict_of: Callable[[T], tuple[bool, str | None]],
+    booking: budget.Booking,
+    page_fetch_id: int | None,
     company: str = "",
     job_title: str = "",
     filter_name: str | None = None,
@@ -46,6 +48,10 @@ async def run_check[T: BaseModel](
 
     verdict_of maps the parsed response to (rejected, reason). Failures are
     recorded (status 'failed') and re-raised for the caller's retry policy.
+
+    The call is booked here, to `booking`, in the transaction that writes its
+    verdict, so the verdict names it (model_call_id); a caller does not book
+    it again. page_fetch_id is the fetch whose text input_text was built from.
     """
     common: dict[str, Any] = dict(
         url=url,
@@ -60,23 +66,36 @@ async def run_check[T: BaseModel](
         job_title=job_title,
         instructions=instructions,
         input_text=input_text,
+        page_fetch_id=page_fetch_id,
         context=context,
         # ai.parse already emits transport metrics for a live call.
         record_call_metrics=False,
     )
+
+    def record(usage: dict[str, int | None], **outcome: Any) -> None:
+        duration_ms = int((time.monotonic() - start) * 1000)
+        with db.transaction():
+            call_id = budget.book_live(booking, cfg.model, usage, duration_ms)
+            record_ai_verdict(
+                Verdict(
+                    usage=usage,
+                    model_call_id=call_id,
+                    duration_ms=duration_ms,
+                    **common,
+                    **outcome,
+                )
+            )
+
     start = time.monotonic()
     try:
         parsed, usage = await ai.parse(cfg, instructions, input_text, response_model)
     except Exception as exc:
-        record_ai_verdict(
-            Verdict(
-                rejected=None,
-                reason=f"{check_type} check failed: {str(exc)[:100]}",
-                parsed_json=None,
-                usage=exc.usage if isinstance(exc, ai.PaidParseError) else {},
-                error=str(exc),
-                **common,
-            )
+        record(
+            exc.usage if isinstance(exc, ai.PaidParseError) else {},
+            rejected=None,
+            reason=f"{check_type} check failed: {str(exc)[:100]}",
+            parsed_json=None,
+            error=str(exc),
         )
         telemetry.capture(
             "ai_call_failed",
@@ -91,19 +110,14 @@ async def run_check[T: BaseModel](
             },
         )
         raise
-    duration_ms = int((time.monotonic() - start) * 1000)
     rejected, reason = (
         verdict_of(parsed) if parsed is not None else (None, "AI returned no parsed response")
     )
-    record_ai_verdict(
-        Verdict(
-            rejected=rejected,
-            reason=reason,
-            parsed_json=json.dumps(parsed.model_dump()) if parsed is not None else None,
-            usage=usage,
-            duration_ms=duration_ms,
-            **common,
-        )
+    record(
+        usage,
+        rejected=rejected,
+        reason=reason,
+        parsed_json=json.dumps(parsed.model_dump()) if parsed is not None else None,
     )
     return parsed, usage
 
@@ -153,6 +167,10 @@ class Verdict:
     record_call_metrics: bool = True
     shared_call: bool = False
     request_sha256: str | None = None
+    page_fetch_id: int | None = None
+    # A live call's ledger row; a batched verdict finds its own on insert
+    # (core.store).
+    model_call_id: int | None = None
 
     def __post_init__(self) -> None:
         if self.shared_call:
@@ -194,6 +212,8 @@ class Verdict:
             duration_ms=self.duration_ms,
             error=self.error,
             request_sha256=self.request_sha256,
+            page_fetch_id=self.page_fetch_id,
+            model_call_id=self.model_call_id,
         )
 
     def count(self) -> None:
@@ -329,12 +349,25 @@ async def refresh_content(
     context: str = "manual",
     scrape_sem: asyncio.Semaphore | None = None,
 ) -> tuple[str | None, str | None]:
+    """refresh_page, for a caller that keeps no answer pointing at the fetch."""
+    page, closure = await refresh_page(url, company, job_title, context, scrape_sem)
+    return (page.text if page else None), closure
+
+
+async def refresh_page(
+    url: str,
+    company: str = "",
+    job_title: str = "",
+    context: str = "manual",
+    scrape_sem: asyncio.Semaphore | None = None,
+) -> tuple[Page | None, str | None]:
     """Re-fetches a posting and returns fresh text, or None when the posting is
     gone. A 'recheck' that reuses cached text can only ever re-run the model
     over the page as it looked before it closed. It cannot discover a closure,
     which is the one thing a recheck is usually asked to do.
 
-    Returns (content, closure_signal). closure_signal is 'ats_gone' and only
+    Returns (page, closure_signal): the text and the fetch that stored it.
+    closure_signal is 'ats_gone' and only
     that: it is set when the BOARD ITSELF reports the posting deleted, which is
     a fact rather than an inference. A redirect is explicitly not a closure -
     the page comes back and the closed-check judges it.
@@ -382,10 +415,10 @@ async def refresh_content(
         )
         return None, "ats_gone"
     if ats_res.ok and ats_res.text and not fetching.looks_blocked(ats_res.text):
-        page_fetches.record(url, "passed", "ats text", ats_res.text)
+        fetch_id = page_fetches.record(url, "passed", "ats text", ats_res.text)
         if ats_res.posted:
             catalog.fill_date_posted(url, ats_res.posted)
-        return ats_res.text, None
+        return Page(fetch_id, ats_res.text), None
 
     if host_paced(url):
         # Deferred, not failed: no row is written, so the next cycle tries
@@ -405,8 +438,7 @@ async def refresh_content(
     if db.get_config("fetch_engine") == "static_first" and listings_url is None:
         static = await fetching.fetch_static(url, int(db.get_config("static_fetch_min_chars")))
         if static:
-            page_fetches.record(url, "passed", "static", static)
-            return static, None
+            return Page(page_fetches.record(url, "passed", "static", static), static), None
     if scrape_sem is not None:
         async with scrape_sem:
             content, redirected = await fetching.fetch_page(url)
@@ -422,7 +454,7 @@ async def refresh_content(
         # posting from a careers index, and a URL cannot.
         if redirected:
             logger.info(f"{url} landed elsewhere; letting the check judge the page")
-        page_fetches.record(url, "passed", "scraped", content)
+        return Page(page_fetches.record(url, "passed", "scraped", content), content), None
     else:
         # A fetch that came back with nothing (blocked, timed out, empty) left
         # no record, so every hourly ingest and every backfill tried it again:
@@ -437,7 +469,7 @@ async def refresh_content(
             "fetch_failed",
             properties={"url": url, "fetch_host": hostname(url), "context": context},
         )
-    return content, None
+    return None, None
 
 
 def record_manual(

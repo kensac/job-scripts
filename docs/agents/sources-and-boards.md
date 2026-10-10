@@ -183,7 +183,7 @@ and its resolver reads it from the tenant's detail endpoint.
 
 **A board on its employers' own domains is known by its sources, never by a
 URL's shape.** An Eightfold tenant posts on its own host
-(`jobs.northropgrumman.com/careers/job/<id>`), so `refresh_content` looks for
+(`jobs.northropgrumman.com/careers/job/<id>`), so `refresh_page` looks for
 a source whose listings URL is an Eightfold search on the posting's host and
 hands that URL to `ats.resolve`; without one the resolver does not answer.
 A posting host that differs from its listing host (Bayer lists on
@@ -656,7 +656,7 @@ actually puts back.
 
 It belongs to reverify and not to `verify_new`, which judges from the cached
 page copy. For a posting that was closed, that copy is the one that showed it
-closed; only reverify re-fetches (`verdicts.refresh_content`).
+closed; only reverify re-fetches (`verdicts.refresh_page`).
 
 An aggregator row is never retired, so it has no edge and this cannot reach
 it. That is a deliberate hole, not an oversight: those feeds hold a posting
@@ -715,7 +715,7 @@ posting is unfetchable and nothing automatic fetches it again.
 
 Every automatic fetch path asks this before fetching: ingest, the content
 backfill, filter preparation, the live filter run, and reverify. A new
-automatic caller of `refresh_content` asks it too. `refresh_content` itself
+automatic caller of `refresh_page` asks it too. `refresh_page` itself
 never asks, so an admin re-check (`POST /admin/checks/run`), a person's
 explain and a forced reverify still fetch, and one success ends the run.
 
@@ -786,7 +786,7 @@ the public-board audience, even at HTTP 200. Missing flags are not evidence
 of closure. The resolver returns `GONE` before extracting retained text.
 
 Embedded Greenhouse URLs carry a job ID but may omit the board token.
-`refresh_content` resolves that token from the job's configured catalog source
+`refresh_page` resolves that token from the job's configured catalog source
 when it is a Greenhouse API listing URL. The original posting URL remains the
 verdict key and browser fallback. An explicit board's HTTP 404/410 is terminal;
 a hostname-derived guess returning 404 is inconclusive and must not close a

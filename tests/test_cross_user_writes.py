@@ -12,6 +12,7 @@ from api import ai, db
 from api.ai import access as ai_access
 from api.ai import verdicts
 from api.board.eligibility import LATEST_CHECK
+from core.store import Page
 
 SECRET_URL = "https://private.test/secret-role"
 SECRET_TEXT = "the secret posting text"
@@ -61,9 +62,9 @@ def caller_model(monkeypatch):
     monkeypatch.setattr(ai_access, "require_config", lambda user: cfg)
 
     async def fresh(*args, **kwargs):
-        return "a posting body long enough to check " * 5, None
+        return Page(1, "a posting body long enough to check " * 5), None
 
-    monkeypatch.setattr(verdicts, "refresh_content", fresh)
+    monkeypatch.setattr(verdicts, "refresh_page", fresh)
     prompts: list[str] = []
 
     async def parse(cfg, instructions, input_text, response_model):

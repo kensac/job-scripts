@@ -77,7 +77,7 @@ class Ledger:
             verdict_label="chunk-filter",
             key_source="owner",
             payer=Payer(user_id=1),
-            record_failure=lambda _: contextlib.nullcontext(),
+            purpose="filter",
             record_usage=record_usage,
             budget_exceeded=lambda: False,
             cancelled=lambda: False,

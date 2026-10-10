@@ -4,7 +4,7 @@ import os
 
 from api import db
 from api.worker import enqueue
-from core.store import add_ai_result
+from core.store import Page, add_ai_result
 from tasks import runtime as tasks_runtime
 
 SERVICE_TOKEN = os.environ["JOBTRACKER_SERVICE_TOKEN"]
@@ -426,7 +426,7 @@ def test_recheck_refetches_and_reports_gone_without_asking_the_model(
         )
         return None, "redirected_away"
 
-    monkeypatch.setattr(verdicts, "refresh_content", fake_refresh)
+    monkeypatch.setattr(verdicts, "refresh_page", fake_refresh)
     resp = client.post(
         "/v1/admin/checks/run", json={"job_id": jid, "check": "closed"}, headers=admin_headers
     )
@@ -814,7 +814,7 @@ def test_a_recheck_runs_on_the_chosen_model_and_that_choice_becomes_the_default(
     monkeypatch.setattr("core.routing.server_key", lambda provider: "sk-test")
 
     async def fake_refresh(url, **kw):
-        return "A posting body long enough to check.", None
+        return Page(1, "A posting body long enough to check."), None
 
     seen: list[str] = []
 
@@ -827,7 +827,7 @@ def test_a_recheck_runs_on_the_chosen_model_and_that_choice_becomes_the_default(
             ), usage
         return JobClosedResponse(is_closed=False, reason="still open"), usage
 
-    monkeypatch.setattr(verdicts, "refresh_content", fake_refresh)
+    monkeypatch.setattr(verdicts, "refresh_page", fake_refresh)
     monkeypatch.setattr(ai, "parse", fake_parse)
 
     opts = client.get("/v1/admin/checks/options", headers=admin_headers).json()

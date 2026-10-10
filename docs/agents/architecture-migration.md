@@ -129,8 +129,31 @@ reader:
      `page_fetches` and an always-false `page_texts.on_verdict` serve the
      images still running during the roll. No code names either; the next
      release drops both.
-   - Next: an answer points at the fetch it judged, and the copies of page
-     text on answers are cleared.
+   - An answer points at the fetch it judged (`ai_queries.page_fetch_id`)
+     and the call that paid for it (`model_call_id`). A writer carries the
+     fetch with its text: `store.Page` from `get_contents` and
+     `verdicts.refresh_page`, a board run's frozen `content_query_id`, and
+     `page_fetch_id` in a batch request's context for the collector. A
+     batched answer finds its call when it is inserted, by `(batch_id, url)
+     = (provider_batch_id, custom_id)`, because the receipt checkpoint
+     records the call before any consumer writes an answer from it.
+     `run_check` books a live call itself (`budget.book_live`), in the
+     transaction that writes its verdict; its caller does not book it again.
+     An answer no fetch or no call produced (near-copy reuse, an ATS
+     closure, ingest) has neither.
+   - What an answer was asked is `core.answer_inputs.sql` over its fetch:
+     the page, wrapped with the company and title for a custom filter, cut
+     where its code path cut it. `tasks.answer_links`, queued each cycle
+     until a run links nothing, fills both pointers on older answers, only
+     where exact: a fetch whose rebuilt input equals the stored copy byte
+     for byte, and a call by the joins in the ledger section below. Text
+     an answer saw that no fetch holds becomes a fetch first (method
+     `verification`, the answer's id), but only under a newer fetch of the
+     url, so no reader's current page changes; an answer newer than every
+     fetch of its url keeps its copy.
+   - Next: readers read the input and the call's numbers through the
+     pointers, and then the copies (`input_content`, the usage columns,
+     `instructions`) are cleared and dropped.
 4. Call usage as one ledger that other tables point at instead of copying
    cost into themselves. See "The ledger of paid model calls" below.
 
@@ -300,8 +323,10 @@ it showed.
      $30.88, `api_usage`-only calls $2.02.
    - A verdict's call is a join, not a copied id: a batched verdict's is
      `(batch_id, url) = (provider_batch_id, custom_id)`, a backfilled live
-     verdict's is `source_id`. A live verdict written after the cutover gets
-     the call's id when the verdict reader switches.
+     verdict's is `source_id`. `tasks.answer_links` stores it as the
+     verdict's `model_call_id`, with a live call its caller booked apart
+     from its verdict, matched on model, tokens and the minute after only
+     where each side has one candidate.
    - Receipts are deleted with their task, so this runs before they
      expire. The contract step deletes the task with the columns it reads.
 3. Switch reads one page at a time, each with its equality test. Windows

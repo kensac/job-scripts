@@ -1,5 +1,3 @@
-from contextlib import nullcontext
-
 import pytest
 
 from api import ai, db
@@ -7,6 +5,7 @@ from api.ai.batch_results import snapshot_specs
 from api.model_calls import Payer
 from core import batch
 from core.answers import FilterDecision
+from core.store import Page
 from tasks import filter_execution
 
 
@@ -45,7 +44,7 @@ async def test_only_new_managed_requests_receive_cache_control(f):
         verdict_label="filter",
         key_source="owner",
         payer=Payer(user_id=1),
-        record_failure=lambda _: nullcontext(),
+        purpose="filter",
         record_usage=lambda *_: None,
         budget_exceeded=lambda: False,
         cancelled=lambda: False,
@@ -70,7 +69,7 @@ async def test_only_new_managed_requests_receive_cache_control(f):
             snapshot,
             [job],
             hooks,
-            contents={url: "posting"},
+            contents={url: Page(1, "posting")},
             unavailable=0,
             purpose=purpose,
             submit=submit,
