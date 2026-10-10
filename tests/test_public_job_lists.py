@@ -111,9 +111,7 @@ def _job(
     )
     assert job is not None
     db.execute(
-        "INSERT INTO managed_board_jobs "
-        "(managed_board_id, job_id, sort_at, projection_revision, resolved_model) "
-        "VALUES (%s, %s, %s, 1, 'private-model')",
+        "INSERT INTO managed_board_jobs (managed_board_id, job_id, sort_at) VALUES (%s, %s, %s)",
         (board_id, job["id"], sort_at),
     )
     return job["id"]
@@ -165,8 +163,7 @@ def test_public_detail_allowlists_fields_and_paginates_stably(client):
     assert body["jobs"][0]["terms"] == ["full-time"]
     assert body["jobs"][0]["source"] == "public-test"
     assert body["jobs"][0]["ats"] == "greenhouse"
-    for private_value in ("private-raw-url", "private-model"):
-        assert private_value not in serialized
+    assert "private-raw-url" not in serialized
 
     second = client.get(
         "/v1/public/job-lists/engineering", params={"limit": 2, "cursor": body["next_cursor"]}

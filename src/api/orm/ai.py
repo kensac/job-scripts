@@ -137,46 +137,6 @@ class AiInstructionText(Base):
     instructions: Mapped[str] = mapped_column(Text)
 
 
-class AiPrompt(Base):
-    """Nothing reads or writes this. It stays modelled until the release that
-    drops it, because images that still write it may be running."""
-
-    __tablename__ = "ai_prompts"
-    __table_args__ = (Index("idx_ai_prompts_purpose", "purpose", "last_seen_at"),)
-
-    id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
-    prompt_hash: Mapped[str] = mapped_column(Text, unique=True)
-    purpose: Mapped[str] = mapped_column(Text)
-    instructions: Mapped[str] = mapped_column(Text)
-    first_seen_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
-    # Moves every sweep, so a retired prompt shows as one with an old
-    # last_seen_at rather than by being absent.
-    last_seen_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
-    batches: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
-
-
-class AiPromptSample(Base):
-    """Nothing reads or writes this; dropped with ai_prompts."""
-
-    __tablename__ = "ai_prompt_samples"
-    __table_args__ = (Index("idx_ai_prompt_samples_prompt", "prompt_id", "id"),)
-
-    id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
-    prompt_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("ai_prompts.id", ondelete="CASCADE")
-    )
-    # A url, a message id - whatever the caller keyed its specs by. Not a
-    # foreign key: the sample outlives the row it describes, which is most of
-    # its value once a posting is gone.
-    custom_id: Mapped[str] = mapped_column(Text)
-    output: Mapped[str | None] = mapped_column(Text)
-    # Sampled alongside outputs: a prompt edit that starts producing
-    # unparseable JSON is exactly the change worth seeing, and it leaves no
-    # output behind.
-    error: Mapped[str | None] = mapped_column(Text)
-    created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
-
-
 class AiBatch(Base):
     __tablename__ = "ai_batches"
     __table_args__ = (
@@ -199,8 +159,6 @@ class AiBatch(Base):
     failed_count: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
     status: Mapped[str] = mapped_column(Text, server_default=text("'submitted'"))
     est_tokens: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
-    # Nothing reads or writes this; dropped with ai_prompts.
-    prompt_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("ai_prompts.id"))
     input_tokens: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
     output_tokens: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
     cache_write_tokens: Mapped[int | None] = mapped_column(BigInteger)

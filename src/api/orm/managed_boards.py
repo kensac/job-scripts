@@ -100,10 +100,6 @@ class ManagedBoardJob(Base):
     )
     projected_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
     sort_at: Mapped[datetime.datetime]
-    # Nothing reads these two; the next release drops them. Nullable so
-    # this release can stop writing while older images still do.
-    projection_revision: Mapped[int | None] = mapped_column(BigInteger)
-    resolved_model: Mapped[str | None] = mapped_column(Text)
 
 
 Index(
