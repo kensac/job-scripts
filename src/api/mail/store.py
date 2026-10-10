@@ -15,8 +15,10 @@ from __future__ import annotations
 import logging
 from collections.abc import Iterable, Iterator
 from itertools import islice
+from typing import Any
 
 from api import db
+from api.problem import refuse
 from core.mail.importer import ImportedMessage
 from core.mail.prefilter import looks_job_related
 
@@ -119,3 +121,17 @@ def counts(user_id: int) -> dict[str, int]:
         (user_id,),
     )
     return dict(row) if row else {}
+
+
+def owned_message(message_id: int, user_id: int) -> dict[str, Any]:
+    """The caller's own message, or a 404. Another user's message is refused
+    the same way as a missing one, so the answer says nothing about whether
+    the id exists."""
+    row = db.query_one(
+        "SELECT id, subject, from_email, sent_at, body_text, provider_thread_id "
+        "FROM email_messages WHERE id = %s AND user_id = %s",
+        (message_id, user_id),
+    )
+    if row is None:
+        raise refuse(404, "NOT_FOUND", "unknown message")
+    return row

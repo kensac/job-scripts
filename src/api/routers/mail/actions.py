@@ -7,7 +7,7 @@ is the one kind of item nothing else will ever settle.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from api import db
@@ -15,6 +15,7 @@ from api.auth import AuthedUser, require_user
 from api.mail import pipeline as mail_pipeline
 from api.mail.pipeline import Proposal, ProposalAnswered
 from api.models import Ok
+from api.problem import refuse
 from api.routers.mail.shared import Evidence, _evidence_for
 
 router = APIRouter()
@@ -82,13 +83,14 @@ def answer_suggestion(
     told a status had moved that no SELECT could find.
     """
     if body.response not in (mail_pipeline.ACCEPTED, mail_pipeline.DISMISSED):
-        raise HTTPException(
-            status_code=400,
-            detail=f"response must be {mail_pipeline.ACCEPTED} or {mail_pipeline.DISMISSED}",
+        raise refuse(
+            400,
+            "INVALID_RESPONSE",
+            f"response must be {mail_pipeline.ACCEPTED} or {mail_pipeline.DISMISSED}",
         )
     answered = mail_pipeline.answer_proposal(user.id, application_id, event_id, body.response)
     if answered is None:
-        raise HTTPException(status_code=404, detail="no suggestion for that event")
+        raise refuse(404, "NOT_FOUND", "no suggestion for that event")
     return answered
 
 
@@ -120,7 +122,7 @@ def resolve_action(
         (action_id, user.id),
     )
     if row is None:
-        raise HTTPException(status_code=404, detail="action not found")
+        raise refuse(404, "NOT_FOUND", "action not found")
     if row["resolved_at"] is not None:
         return ActionClosed(ok=True, already=True)
     db.execute(
@@ -145,11 +147,12 @@ def reopen_action(
         (action_id, user.id),
     )
     if row is None:
-        raise HTTPException(status_code=404, detail="action not found")
+        raise refuse(404, "NOT_FOUND", "action not found")
     if row["resolved_by_event_id"] is not None:
-        raise HTTPException(
-            status_code=409,
-            detail="a later email settled this; it would close again on the next pass",
+        raise refuse(
+            409,
+            "SETTLED_BY_MAIL",
+            "a later email settled this; it would close again on the next pass",
         )
     db.execute(
         "UPDATE action_items SET resolved_at = NULL, resolution = NULL WHERE id = %s",

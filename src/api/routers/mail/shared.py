@@ -12,13 +12,13 @@ from __future__ import annotations
 import datetime
 from typing import Any
 
-from fastapi import HTTPException
 from pydantic import BaseModel
 
 from api import db
 from api.mail import match as mail_match
 from api.mail import pipeline as mail_pipeline
 from api.mail.current import current_event
+from api.problem import refuse
 from api.resolve.choice_policy import by_company, choices_for_message, thread_size
 from api.resolve.contracts import PICKER_APPLICATIONS, ResolveChoice
 from core.answers import EVENT_KINDS
@@ -91,7 +91,7 @@ def _apply_classification(
     """
     message_id = message["id"]
     if body.kind not in EVENT_KINDS:
-        raise HTTPException(status_code=400, detail=f"kind must be one of {sorted(EVENT_KINDS)}")
+        raise refuse(400, "INVALID_KIND", f"kind must be one of {sorted(EVENT_KINDS)}")
     current = db.query_one(
         "SELECT detail FROM email_events WHERE message_id = %s ORDER BY id DESC LIMIT 1",
         (message_id,),
@@ -130,7 +130,7 @@ def _apply_revert(message_id: int, *, actor_user_id: int) -> Reverted:
         (message_id,),
     )
     if model_answer is None:
-        raise HTTPException(status_code=409, detail="no model classification to restore")
+        raise refuse(409, "NO_MODEL_ANSWER", "no model classification to restore")
     current = db.query_one(
         "SELECT model FROM email_events WHERE message_id = %s ORDER BY id DESC LIMIT 1",
         (message_id,),
