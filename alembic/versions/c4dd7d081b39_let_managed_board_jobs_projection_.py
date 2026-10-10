@@ -1,7 +1,7 @@
 """let managed_board_jobs.projection_revision be null
 
 Revision ID: c4dd7d081b39
-Revises: 95018279350d
+Revises: d4813d05adcc
 Create Date: 2026-10-10 00:16:21.747225
 
 The expand half of dropping managed_board_jobs.projection_revision and
@@ -22,7 +22,7 @@ import sqlalchemy as sa
 
 
 revision: str = 'c4dd7d081b39'
-down_revision: Union[str, None] = '95018279350d'
+down_revision: Union[str, None] = 'd4813d05adcc'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
