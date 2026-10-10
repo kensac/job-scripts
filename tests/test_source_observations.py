@@ -119,15 +119,12 @@ def test_ingest_records_the_pull_under_its_task(monkeypatch, f):
     assert progress["complete"] is True
 
 
-def _available(url: str, enforced: bool = True) -> bool | None:
-    sql = catalog.AVAILABLE.format(job="j")
-    row = db.query_one(
-        f"SELECT {sql} AS a FROM jobs j WHERE j.url = %(url)s", {"url": url, "enforced": enforced}
-    )
-    return row["a"]
+def _available(url: str, definition: str = catalog.AVAILABLE) -> bool | None:
+    sql = definition.format(job="j")
+    return db.query_one(f"SELECT {sql} AS a FROM jobs j WHERE j.url = %s", (url,))["a"]
 
 
-def test_availability_is_read_from_the_latest_observation_of_switched_on_sources(f):
+def test_availability_is_read_from_the_latest_observation_of_switched_on_sources(f, set_config):
     f.make_source("board")
     f.make_source("feed")
     f.make_source("off", active=False)
@@ -143,11 +140,23 @@ def test_availability_is_read_from_the_latest_observation_of_switched_on_sources
     # Listed only by a switched-off source: not available.
     _pull("off", [_posting(B)], {B}, "unlisted")
     assert _available(B) is False
-    # Filtered admits only while patterns are not enforced.
+    # Filtered admits only while patterns are not enforced, read from the
+    # switch where availability is read.
     _pull("board", [_posting(A, "Senior")], set(), "unlisted")
     db.execute("UPDATE sources SET active = false WHERE name = 'feed'")
-    assert _available(A, enforced=True) is False
-    assert _available(A, enforced=False) is True
+    set_config("source_title_patterns_enabled", True)
+    assert _available(A) is False
+    set_config("source_title_patterns_enabled", False)
+    assert _available(A) is True
+
+
+def test_an_unseeded_enforcement_switch_reads_as_its_seeded_default():
+    # PATTERNS_ENFORCED spells the default in SQL; it must be api.config's.
+    from api.config import CONFIG_KEYS
+
+    db.execute("DELETE FROM app_config WHERE key = 'source_title_patterns_enabled'")
+    enforced = db.query_one(f"SELECT {catalog.PATTERNS_ENFORCED} AS e")["e"]
+    assert enforced is CONFIG_KEYS["source_title_patterns_enabled"].default
 
 
 def test_a_job_no_source_has_observed_is_cannot_tell(f):
@@ -155,12 +164,50 @@ def test_a_job_no_source_has_observed_is_cannot_tell(f):
     assert _available(A) is None
 
 
+def test_a_sheet_import_is_available_only_while_a_switched_on_source_lists_it(f):
+    f.make_job(url=A, source="sheet_import")
+    assert _available(A) is False
+    f.make_source("board")
+    _pull("board", [_posting(A)], {A}, "unlisted")
+    assert _available(A) is True
+
+
+def test_readers_fall_back_to_jobs_active_only_where_no_source_has_observed(f):
+    f.make_job(url=A, active=True)
+    f.make_job(url=B, active=False)
+    assert _available(A, catalog.IS_AVAILABLE) is True
+    assert _available(B, catalog.IS_AVAILABLE) is False
+    f.make_source("board")
+    _pull("board", [_posting(B)], {B}, "unlisted")
+    db.execute("UPDATE jobs SET active = false WHERE url = %s", (B,))
+    assert _available(B, catalog.IS_AVAILABLE) is True, "observed: the observation decides"
+
+
+def test_an_administrators_correction_holds_until_a_source_says_something_new(f):
+    f.make_source("board")
+    _pull("board", [_posting(A)], {A}, "unlisted")
+    job_id = db.query_one("SELECT id FROM jobs WHERE url = %s", (A,))["id"]
+    assert catalog.set_active(job_id, False)
+    assert _available(A) is False
+    # The board lists it as before: nothing new, the correction stands.
+    _pull("board", [_posting(A)], {A}, "unlisted")
+    assert _available(A) is False
+    # The board drops it and lists it again: that is news, and it wins.
+    _pull("board", [], set(), "unlisted")
+    _pull("board", [_posting(A)], {A}, "unlisted")
+    assert _available(A) is True
+    assert catalog.set_active(job_id, False)
+    assert catalog.set_active(job_id, True)
+    assert _available(A) is True
+    assert not catalog.set_active(job_id + 999, False)
+
+
 def test_the_shadow_counts_each_disagreement_once(f):
     f.make_source("board")
     _pull("board", [_posting(A), _posting(B)], {A, B}, "unlisted")
     # The legacy flag says closed where the observations say listed.
     db.execute("UPDATE jobs SET active = false WHERE url = %s", (B,))
-    cells = ingest._summarise(catalog.availability_shadow(patterns_enforced=True))
+    cells = ingest._summarise(catalog.availability_shadow())
     assert {k: v["n"] for k, v in cells.items()} == {
         "legacy=True projected=True": 1,
         "legacy=False projected=True": 1,

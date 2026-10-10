@@ -11,7 +11,7 @@ from psycopg import errors, sql
 from psycopg.types.json import Jsonb
 
 from core import listing_payloads
-from core.pool import in_transaction, pool, statement, transaction
+from core.pool import connection, in_transaction, pool, statement, transaction
 
 if TYPE_CHECKING:
     from core.fetching.posting import JobPosting
@@ -143,14 +143,23 @@ def retire_switched_off(patterns_enforced: bool) -> dict[str, int]:
 def set_active(job_id: int, active: bool) -> bool:
     """The one write of jobs.active that is not a pull's: an administrator's
     correction. Pulls write it through upsert_postings, retire_unlisted and
-    retire_switched_off. False when no such job."""
-    with statement() as conn:
-        return (
+    retire_switched_off. Recorded as an observation under CORRECTION_SOURCE
+    too, in the same transaction, because readers take availability from
+    observations (AVAILABLE): the correction holds until a source says
+    something new about the posting. False when no such job."""
+    with transaction(), connection() as conn:
+        if (
             conn.execute(
                 "UPDATE jobs SET active = %s WHERE id = %s RETURNING id", (active, job_id)
             ).fetchone()
-            is not None
+            is None
+        ):
+            return False
+        conn.execute(
+            "INSERT INTO source_observations (job_id, source, kind) VALUES (%s, %s, %s)",
+            (job_id, CORRECTION_SOURCE, "reappeared" if active else "unlisted"),
         )
+        return True
 
 
 # What an administrator may correct by hand (PATCH /admin/jobs/{id}).
@@ -232,32 +241,69 @@ def record_extraction(
 _ADMITTED = frozenset({"appeared", "reappeared"})
 
 
-# Whether job {job} is available, as source_observations say: true when some
-# switched-on source's latest observation of it admits it, false when it has
-# observations and none of them do, NULL (cannot tell) when no source has
-# observed it. not_listed is aggregator absence, which never closes anything;
-# filtered admits only while title patterns are not enforced, the same rule
-# retire_switched_off applies to listings.kept. One definition, for the
-# shadow comparison now and for the readers of jobs.active after cutover.
-AVAILABLE: LiteralString = """(
-    CASE WHEN EXISTS (
-            SELECT 1 FROM (
-                SELECT DISTINCT ON (o.source) o.source, o.kind FROM source_observations o
-                WHERE o.job_id = {job}.id ORDER BY o.source, o.id DESC) latest
-            JOIN sources s ON s.name = latest.source AND s.active
-            WHERE latest.kind IN ('appeared', 'reappeared', 'not_listed')
-               OR (latest.kind = 'filtered' AND NOT %(enforced)s))
-         THEN true
-         WHEN EXISTS (SELECT 1 FROM source_observations o WHERE o.job_id = {job}.id)
-         THEN false
-    END)"""
+# The source an administrator's correction is recorded under (set_active).
+# No sources row has this name, so no pull and no switch reaches it.
+CORRECTION_SOURCE = "admin"
+
+# Whether title patterns are enforced, read where availability is read so that
+# flipping source_title_patterns_enabled never rewrites history. An unseeded
+# row means the seed has not run yet, and reads as the seeded default
+# (api.config), which tests/test_source_observations.py holds equal.
+PATTERNS_ENFORCED: LiteralString = (
+    "(COALESCE((SELECT c.value FROM app_config c"
+    " WHERE c.key = 'source_title_patterns_enabled'), 'true') = 'true')"
+)
+
+# Whether job {job} is available, as source_observations say. In order:
+# - an administrator's correction (CORRECTION_SOURCE) holds while it is the
+#   job's latest observation, so it lasts until a source says something new;
+# - true when some switched-on source's latest observation admits it:
+#   appeared, reappeared, not_listed (aggregator absence never closes), or
+#   filtered while patterns are not enforced (retire_switched_off's rule);
+# - false when it has observations and none of those;
+# - false when it is a sheet_import row: imported once on 2026-08-24, with no
+#   sources row and nothing that pulls it, so it is a switched-off source
+#   (decided 2026-10-10). A person who touched one keeps it through their own
+#   state, which visibility reads separately;
+# - otherwise NULL, cannot tell.
+# Parameter-free, so it drops into SQL of either placeholder style. One
+# definition, for the shadow comparison and, through IS_AVAILABLE, readers.
+AVAILABLE: LiteralString = (
+    """(
+    COALESCE(
+        (SELECT CASE WHEN o.source = '"""
+    + CORRECTION_SOURCE
+    + """' THEN o.kind = 'reappeared' END
+         FROM source_observations o WHERE o.job_id = {job}.id ORDER BY o.id DESC LIMIT 1),
+        CASE WHEN EXISTS (
+                SELECT 1 FROM (
+                    SELECT DISTINCT ON (o.source) o.source, o.kind FROM source_observations o
+                    WHERE o.job_id = {job}.id ORDER BY o.source, o.id DESC) latest
+                JOIN sources s ON s.name = latest.source AND s.active
+                WHERE latest.kind IN ('appeared', 'reappeared', 'not_listed')
+                   OR (latest.kind = 'filtered' AND NOT """
+    + PATTERNS_ENFORCED
+    + """))
+             THEN true
+             WHEN EXISTS (SELECT 1 FROM source_observations o WHERE o.job_id = {job}.id)
+             THEN false
+             WHEN {job}.source = 'sheet_import' THEN false
+        END))"""
+)
+
+# What a reader of availability uses until every switched-on source has been
+# observed: AVAILABLE, and jobs.active where AVAILABLE cannot tell. The
+# fallback shrinks as each source's first pull after the dual write lands,
+# and goes once the shadow's projected=None cells for active rows hold only
+# explained classes (docs/agents/architecture-migration.md, phase 3).
+IS_AVAILABLE: LiteralString = "COALESCE(" + AVAILABLE + ", {job}.active)"
 
 
-def availability_shadow(patterns_enforced: bool) -> list[dict]:
+def availability_shadow() -> list[dict]:
     """jobs.active against AVAILABLE over the whole catalog, in one snapshot:
     a count per (legacy, projected, owning source) with up to three example
-    job ids. Read-only. Run beside retire_switched_off until the readers of
-    jobs.active move, so each cycle leaves one comparison on its task."""
+    job ids. Read-only. Run beside retire_switched_off until the fallback in
+    IS_AVAILABLE goes, so each cycle leaves one comparison on its task."""
     available = AVAILABLE.format(job="j")
     with pool.connection() as conn:
         return conn.execute(
@@ -267,8 +313,7 @@ def availability_shadow(patterns_enforced: bool) -> list[dict]:
             FROM (SELECT j.id, j.source, j.active AS legacy, {available} AS projected
                   FROM jobs j) p
             GROUP BY legacy, projected, source
-            """,
-            {"enforced": patterns_enforced},
+            """
         ).fetchall()
 
 
