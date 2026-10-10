@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Literal, cast
 
-from api import crypto, db
+from api import crypto, db, model_calls
 from api.auth import AuthedUser
 from core import pricing
 
@@ -511,6 +511,23 @@ def record_tokens(
         usage.get("cache_write_tokens", _CACHE_WRITE_UNSET),
         batched=batched,
     )
+    _record_live_call(
+        model_calls.Payer(user_id=user_id), key_source, purpose, model, usage, batched
+    )
+
+
+def _record_live_call(
+    payer: model_calls.Payer,
+    key_source: str,
+    purpose: str,
+    model: str | None,
+    usage: Mapping[str, int | None],
+    batched: bool,
+) -> None:
+    """A live call into the call ledger. A batched one is already there: the
+    receipt checkpoint wrote it before any consumer booked it here."""
+    if not batched:
+        model_calls.record([model_calls.Call(purpose, model, payer, key_source, usage)])
 
 
 def record_managed_board_tokens(
@@ -559,6 +576,14 @@ def record_managed_board_tokens(
             batched,
             cost,
         ),
+    )
+    _record_live_call(
+        model_calls.Payer(managed_board_id=managed_board_id),
+        "owner",
+        purpose,
+        model,
+        usage,
+        batched,
     )
     from api import metrics
 

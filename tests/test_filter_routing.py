@@ -4,6 +4,7 @@ import pytest
 
 from api import ai, db, filter_routing, review_gate_reads
 from api.config import CONFIG_KEYS
+from api.model_calls import Payer
 from core.filter_policy import ProfilePolicy, RoutingPolicy, propose
 from core.job_profile import JOB_PROFILE_MODEL, JobProfileAnswer
 from core.profile_rules import ProfileRules
@@ -151,6 +152,7 @@ def hooks():
     return filter_execution.ExecutionHooks(
         verdict_label="test-filter",
         key_source="owner",
+        payer=Payer(user_id=1),
         record_failure=lambda _: nullcontext(),
         record_usage=lambda *_: None,
         budget_exceeded=lambda: False,

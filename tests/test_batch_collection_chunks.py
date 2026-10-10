@@ -30,6 +30,7 @@ from psycopg_pool import ConnectionPool
 import core.pool
 from api import budget, db, review_gate
 from api.ai import batch_results
+from api.model_calls import Payer
 from core.answers import FilterDecision
 from core.batch import BatchResult, structured_response_spec
 from tasks import filter_execution
@@ -75,6 +76,7 @@ class Ledger:
         return filter_execution.ExecutionHooks(
             verdict_label="chunk-filter",
             key_source="owner",
+            payer=Payer(user_id=1),
             record_failure=lambda _: contextlib.nullcontext(),
             record_usage=record_usage,
             budget_exceeded=lambda: False,

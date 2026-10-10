@@ -11,6 +11,7 @@ from decimal import Decimal
 import pytest
 
 from api import budget, db
+from api.model_calls import Payer
 from core.shapes import SHAPES
 
 
@@ -189,7 +190,7 @@ class TestFilterWorkIsNotFleetWork:
         )
 
     def test_work_charged_to_a_user_is_not_charged_to_the_fleet_as_well(self):
-        self._fire("filter", charged_to_user=True)
+        self._fire("filter", payer=Payer(user_id=1))
         assert self._fleet_rows("filter") == []
 
     def test_fleet_work_still_books_against_the_fleet(self):
@@ -201,7 +202,7 @@ class TestFilterWorkIsNotFleetWork:
     def test_the_batch_row_is_written_either_way(self):
         """Only the ledger entry is suppressed. ai_batches is the record of
         what the provider did and is not about who pays."""
-        self._fire("filter", charged_to_user=True)
+        self._fire("filter", payer=Payer(user_id=1))
         row = db.query_one("SELECT input_tokens FROM ai_batches WHERE provider_batch_id='b-usage'")
         assert row is not None and row["input_tokens"] == 1000
 
@@ -215,7 +216,7 @@ class TestFilterWorkIsNotFleetWork:
         for i in range(60):
             from tasks.runtime import batch_event_hook
 
-            hook = batch_event_hook(1, "filter", "gpt-5-nano", charged_to_user=True)
+            hook = batch_event_hook(1, "filter", "gpt-5-nano", payer=Payer(user_id=1))
             hook(f"b{i}", "submitted", {"requests": 1, "completed": 0, "failed": 0})
             hook(f"b{i}", "completed", {"input_tokens": 200_000_000, "output_tokens": 0})
         budget.check_fleet_budget()

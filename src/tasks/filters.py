@@ -9,6 +9,7 @@ from typing import Any
 from api import budget, db, metrics, task_jobs
 from api.ai import verdicts
 from api.budget import load_config
+from api.model_calls import Payer
 from api.task_jobs import run_jobs
 from core.payload_objects import MAX_CONNECTIONS, PayloadStore
 from core.store import decided_custom_urls, get_contents
@@ -65,6 +66,7 @@ def _personal_hooks(
     return ExecutionHooks(
         verdict_label=f"user{user_id}:{flt['name']}",
         key_source=key_source,
+        payer=Payer(user_id=user_id),
         record_failure=lambda model: budget.record_parse_failures(
             user_id, key_source, "filter", model
         ),

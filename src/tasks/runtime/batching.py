@@ -18,6 +18,7 @@ from api import budget, db, events
 from api.ai import batch_results
 from api.ai.batch_results import consume_result as consume_result
 from api.ai.batch_results import snapshot_specs as snapshot_specs
+from api.model_calls import FLEET, Payer
 from api.task_config import configured_model, configured_shape
 from core import pricing
 from core.batch import BatchEventCounts, BatchResult
@@ -118,12 +119,13 @@ def batch_event_hook(
     purpose: str,
     model: str | None,
     *,
-    charged_to_user: bool = False,
+    payer: Payer = FLEET,
 ):
     """Register provider progress and atomically record fleet usage.
 
-    User-charged callers account for individual receipts instead; the hook
-    must not book those same calls against the fleet.
+    The batch row records who pays, so the receipt checkpoint can write each
+    item to the call ledger. A person's or a board's batch is booked per
+    receipt by its consumer, so the hook must not book it against the fleet.
     """
 
     resumed_ids = set(pending_batch_ids(task_id))
@@ -180,7 +182,7 @@ def batch_event_hook(
             # caller shows up in analytics without anyone wiring it - the hook
             # cannot be used without a purpose, and that is all the grouping
             # needs.
-            if not charged_to_user:
+            if payer == FLEET:
                 budget.record_fleet_usage(
                     purpose,
                     event_model,
@@ -195,10 +197,18 @@ def batch_event_hook(
         db.execute(
             """
             INSERT INTO ai_batches (provider_batch_id, task_id, purpose, model,
-                                    requests, completed, failed_count, status, est_tokens)
+                                    requests, completed, failed_count, status, est_tokens,
+                                    payer, payer_id)
             VALUES (%(bid)s, %(tid)s, %(purpose)s, %(model)s,
-                    %(requests)s, %(completed)s, %(failed)s, %(status)s, %(est)s)
+                    %(requests)s, %(completed)s, %(failed)s, %(status)s, %(est)s,
+                    %(payer)s, %(payer_id)s)
             ON CONFLICT (provider_batch_id) DO UPDATE SET
+                -- A batch submitted before payers were recorded takes the
+                -- payer of the task collecting it, which is the task that
+                -- submitted it.
+                payer = COALESCE(ai_batches.payer, EXCLUDED.payer),
+                payer_id = CASE WHEN ai_batches.payer IS NULL THEN EXCLUDED.payer_id
+                                ELSE ai_batches.payer_id END,
                 requests = GREATEST(ai_batches.requests, EXCLUDED.requests),
                 completed = EXCLUDED.completed,
                 failed_count = EXCLUDED.failed_count,
@@ -219,6 +229,8 @@ def batch_event_hook(
                 "failed": counts.get("failed", 0),
                 "status": status,
                 "est": counts.get("est_tokens", 0),
+                "payer": payer.kind,
+                "payer_id": payer.id,
             },
         )
         _record_batch_ids(task_id, [batch_id])
@@ -236,7 +248,7 @@ async def run_batched(
     shape: TaskShape,
     specs: list,
     *,
-    charged_to_user: bool = False,
+    payer: Payer = FLEET,
     allow_configured_override: bool = True,
 ) -> tuple[list[BatchResult], Choice | BatchProvenance]:
     """Submit using current routing, or collect using persisted batch provenance.
@@ -251,7 +263,7 @@ async def run_batched(
         metadata = _batch_metadata(task_id, existing)
         models = {metadata.get(batch_id, {}).get("model") for batch_id in existing}
         provenance = BatchProvenance(next(iter(models)) if len(models) == 1 else None)
-        hook = batch_event_hook(task_id, purpose, None, charged_to_user=charged_to_user)
+        hook = batch_event_hook(task_id, purpose, None, payer=payer)
         results = await collect_pending(task_id, hook)
         return results, provenance
     specs = snapshot_specs(task_id, specs)
@@ -259,7 +271,7 @@ async def run_batched(
     chosen = resolve(
         shape, override=configured_model(purpose) if allow_configured_override else None
     )
-    if not charged_to_user:
+    if payer == FLEET:
         # Only when about to SUBMIT. A resuming task is collecting work the
         # provider has already been paid for, and refusing that would discard
         # it - the ceiling exists to stop new spend, not to strand old.
@@ -272,7 +284,7 @@ async def run_batched(
         per_call = chosen.est_cost_usd or Decimal(0)
         budget.check_fleet_budget(per_call * len(specs))
     logger.info(f"Task {task_id}: {purpose} on {chosen.model} - {chosen.reason}")
-    hook = batch_event_hook(task_id, purpose, chosen.model, charged_to_user=charged_to_user)
+    hook = batch_event_hook(task_id, purpose, chosen.model, payer=payer)
     results = await submit_or_collect(
         task_id,
         specs,

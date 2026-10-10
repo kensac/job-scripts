@@ -44,7 +44,7 @@ def _sweep_task(uid: int) -> int:
 
 
 def _fake_batch(monkeypatch, calls, f):
-    async def fake_run_batched(task_id, shape, specs, *, charged_to_user=False):
+    async def fake_run_batched(task_id, shape, specs, *, payer=None):
         calls.append([s.custom_id for s in specs])
         return [
             f.make_batch_result(

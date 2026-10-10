@@ -3,6 +3,7 @@ from contextlib import nullcontext
 import pytest
 
 from api import ai, db
+from api.model_calls import Payer
 from tasks import filter_execution
 
 
@@ -42,6 +43,7 @@ async def test_identity_neutral_live_adapter_has_no_person_state_effects(f, monk
     hooks = filter_execution.ExecutionHooks(
         verdict_label="managed:test-board",
         key_source="owner",
+        payer=Payer(user_id=1),
         record_failure=lambda _model: nullcontext(),
         record_usage=lambda usage, model, batched: usage_events.append((usage, model, batched)),
         budget_exceeded=lambda: False,
@@ -88,6 +90,7 @@ async def test_frozen_content_never_refetches_or_reads_a_later_page(f, monkeypat
     hooks = filter_execution.ExecutionHooks(
         verdict_label="managed:test",
         key_source="owner",
+        payer=Payer(user_id=1),
         record_failure=lambda _model: nullcontext(),
         record_usage=lambda usage, model, batched: None,
         budget_exceeded=lambda: False,

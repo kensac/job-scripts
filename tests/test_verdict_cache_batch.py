@@ -15,6 +15,7 @@ import psycopg
 import pytest
 
 from api import ai, db
+from api.model_calls import Payer
 from core import query_instructions, store
 from core.filters import compute_filter_hash
 from core.pool import connection
@@ -224,6 +225,7 @@ async def test_live_execution_reads_cache_and_content_once_for_n_candidates(f, m
     hooks = filter_execution.ExecutionHooks(
         verdict_label="live-cache",
         key_source="owner",
+        payer=Payer(user_id=1),
         record_failure=lambda _model: nullcontext(),
         record_usage=lambda usage, model, batched: None,
         budget_exceeded=lambda: False,

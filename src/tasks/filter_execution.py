@@ -12,6 +12,7 @@ from typing import Any
 from api import ai, budget, db, filter_routing, review_gate, review_gate_records
 from api.ai import batch_results, verdicts
 from api.ai.batch_results import progress_counts
+from api.model_calls import Payer
 from core import providers
 from core.answers import FilterDecision, FilterResult
 from core.filters import build_custom_decision_instructions, build_custom_input
@@ -55,6 +56,8 @@ class ExecutionHooks:
 
     verdict_label: str
     key_source: str
+    # Who a batch submitted for this run is charged to.
+    payer: Payer
     record_failure: Callable[[str | None], AbstractContextManager[None]]
     record_usage: Callable[[Mapping[str, int | None], str | None, bool], None]
     budget_exceeded: Callable[[], bool]
@@ -332,7 +335,7 @@ async def execute_batch(
         else f"batch of {len(specs)} submitted (half price)",
     )
 
-    hook = batch_event_hook(task_id, purpose, cfg.model if cfg else None, charged_to_user=True)
+    hook = batch_event_hook(task_id, purpose, cfg.model if cfg else None, payer=hooks.payer)
     if existing:
         logger.info("Task %s: collecting previously submitted results", task_id)
         results = await collect(task_id, hook)

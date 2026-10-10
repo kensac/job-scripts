@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
-from api import ai, db
+from api import ai, db, model_calls
 from api.auth import AuthedUser
 from api.problem import PROVIDER_REFUSALS, UNAVAILABLE_REFUSALS, refuse
 from api.routers.admin.shared import require_admin
@@ -218,20 +218,31 @@ async def run_single_check(
         model=model,
         params={"reasoning_effort": "medium" if body.with_reason else "low"},
     )
-    parsed, usage = await _verdicts.run_check(
-        cfg,
-        url=job["url"],
-        check_type=check,
-        instructions=instructions,
-        input_text=content["input_content"][:60000],
-        response_model=model_cls,
-        verdict_of=verdict_of,
-        company=job["company"],
-        job_title=job["title"],
-        filter_name=filter_name,
-        prompt_hash=prompt_hash,
-        context="manual",
-    )
+
+    # The re-check runs on the server's key for the admin who asked, and
+    # until the call ledger it was booked nowhere but its verdict row.
+    def booked(usage) -> model_calls.Call:
+        return model_calls.Call("manual", model, model_calls.Payer(user_id=user.id), "owner", usage)
+
+    try:
+        parsed, usage = await _verdicts.run_check(
+            cfg,
+            url=job["url"],
+            check_type=check,
+            instructions=instructions,
+            input_text=content["input_content"][:60000],
+            response_model=model_cls,
+            verdict_of=verdict_of,
+            company=job["company"],
+            job_title=job["title"],
+            filter_name=filter_name,
+            prompt_hash=prompt_hash,
+            context="manual",
+        )
+    except ai.PaidParseError as exc:
+        model_calls.record([booked(exc.usage)])
+        raise
+    model_calls.record([booked(usage)])
     if parsed is None:
         raise refuse(502, "NO_VERDICT", "the model returned no usable answer; try again")
     rejected, reason = verdict_of(parsed)
