@@ -209,28 +209,85 @@ def reconcile_chunks() -> None:
         maybe_finalize_parent(r["id"])
 
 
+def _write_progress(
+    task_id: int, progress: dict[str, Any], *, running_only: bool, payload: dict[str, Any] | None
+) -> int:
+    # The heartbeat rides along with progress, so this write has to respect the
+    # claim too: a worker that lost the task would otherwise keep proving the
+    # liveness of the run that replaced it, and the reaper would never see it.
+    owned, owned_params = claim_guard(task_id)
+    merge: LiteralString = "payload = payload || %(payload)s, " if payload else ""
+    running: LiteralString = " AND status = 'running'" if running_only else ""
+    return db.execute_count(
+        # progress_at moves ONLY when the value differs. A handler that reports
+        # the same numbers again has not advanced, and stamping it would make a
+        # stalled handler indistinguishable from a working one - the same
+        # mistake as a timer-driven heartbeat, one column along.
+        f"UPDATE tasks SET {merge}progress = %(progress)s, last_heartbeat = now(), "
+        f"    progress_at = CASE WHEN progress IS DISTINCT FROM %(progress)s "
+        f"                       THEN now() ELSE progress_at END "
+        f"WHERE id = %(tid)s{running}{owned}",
+        {
+            "progress": db.jsonb(progress),
+            "payload": db.jsonb(payload),
+            "tid": task_id,
+            **owned_params,
+        },
+    )
+
+
 def set_progress(
     task_id: int, done: int, total: int, label: str, extra: dict[str, Any] | None = None
 ) -> None:
     # `extra` is for counts a handler wants queryable afterwards (what an
     # ingest fetched, kept, cached, failed to fetch). The label is for a
     # person; the health detectors read the keys.
-    #
-    # The heartbeat rides along with progress, so this write has to respect the
-    # claim too: a worker that lost the task would otherwise keep proving the
-    # liveness of the run that replaced it, and the reaper would never see it.
+    _write_progress(
+        task_id,
+        {"done": done, "total": total, "label": label, **(extra or {})},
+        running_only=False,
+        payload=None,
+    )
+    events.publish_task(task_id)
+
+
+def checkpoint(
+    task_id: int,
+    done: int,
+    total: int,
+    label: str,
+    extra: dict[str, Any] | None = None,
+    *,
+    payload: dict[str, Any] | None = None,
+) -> bool:
+    """set_progress for a handler that resumes from its payload: `payload`
+    keys merge in the same statement as the progress, so a resumed run never
+    reads progress that its checkpoint did not reach. Writes only while the
+    task is running and still ours; False means stop.
+
+    Publishes nothing: a caller checkpoints inside its own transaction, and
+    the publish is an HTTP call that would hold that transaction's locks."""
+    return (
+        _write_progress(
+            task_id,
+            {"done": done, "total": total, "label": label, **(extra or {})},
+            running_only=True,
+            payload=payload,
+        )
+        == 1
+    )
+
+
+def park_waiting(task_id: int, total: int, label: str) -> None:
+    """A parent hands its work to the chunks it enqueued and waits on them;
+    maybe_finalize_parent ends it. Only the run that still holds the claim
+    parks: a worker that lost it would otherwise park the run that replaced it."""
     owned, owned_params = claim_guard(task_id)
     db.execute(
-        # progress_at moves ONLY when the value differs. A handler that reports
-        # the same numbers again has not advanced, and stamping it would make a
-        # stalled handler indistinguishable from a working one - the same
-        # mistake as a timer-driven heartbeat, one column along.
-        f"UPDATE tasks SET progress = %(progress)s, last_heartbeat = now(), "
-        f"    progress_at = CASE WHEN progress IS DISTINCT FROM %(progress)s "
-        f"                       THEN now() ELSE progress_at END "
-        f"WHERE id = %(tid)s{owned}",
+        "UPDATE tasks SET status = 'waiting', progress = %(progress)s "
+        f"WHERE id = %(tid)s AND status = 'running'{owned}",
         {
-            "progress": db.jsonb({"done": done, "total": total, "label": label, **(extra or {})}),
+            "progress": db.jsonb({"done": 0, "total": total, "label": label}),
             "tid": task_id,
             **owned_params,
         },

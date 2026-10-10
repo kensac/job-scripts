@@ -415,6 +415,24 @@ def test_progress_writes_while_the_claim_is_held():
     assert row["progress"]["done"] == 5 and row["progress"]["label"] == "half way"
 
 
+def test_park_waiting_is_refused_once_the_task_has_been_reclaimed():
+    task_id = tasks_runtime.enqueue("run_filter", {})
+    worker._claim_task()
+    _hold_claim(task_id)
+    _reclaim_elsewhere(task_id)
+
+    tasks_runtime.park_waiting(task_id, 10, "2 chunks across the fleet")
+    row = db.query_one("SELECT status, progress FROM tasks WHERE id = %s", (task_id,))
+    assert row["status"] == "running", "must not park the run another worker holds"
+    assert row["progress"] is None
+
+    _hold_claim(task_id, attempts=2)
+    db.execute("UPDATE tasks SET worker = %s WHERE id = %s", (worker.WORKER_NAME, task_id))
+    tasks_runtime.park_waiting(task_id, 10, "2 chunks across the fleet")
+    row = db.query_one("SELECT status, progress FROM tasks WHERE id = %s", (task_id,))
+    assert row["status"] == "waiting" and row["progress"]["total"] == 10
+
+
 def test_lifecycle_writes_are_unrestricted_without_a_claim():
     """Nothing outside the worker loop claims tasks, so a direct call keeps the
     behaviour it had before ownership was enforced."""

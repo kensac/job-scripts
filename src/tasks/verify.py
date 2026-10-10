@@ -8,7 +8,7 @@ import json
 import logging
 from typing import Any
 
-from api import ai, db, events, managed_board_runs, metrics
+from api import ai, db, managed_board_runs, metrics
 from api.ai import verdicts
 from api.ai.batch_results import progress_counts
 from api.task_config import configured_model, configured_shape
@@ -41,6 +41,7 @@ from tasks.runtime import (
     enqueue,
     has_batch_work,
     parent_cancelled,
+    park_waiting,
     run_batched,
     set_progress,
     submit_or_collect,
@@ -468,14 +469,7 @@ async def handle_reverify_open(task_id: int, payload: dict[str, Any]) -> None:
             },
         )
         n_chunks += 1
-    db.execute(
-        "UPDATE tasks SET status = 'waiting', progress = %s WHERE id = %s AND status = 'running'",
-        (
-            db.jsonb({"done": 0, "total": total, "label": f"{n_chunks} chunks across the fleet"}),
-            task_id,
-        ),
-    )
-    events.publish_task(task_id)
+    park_waiting(task_id, total, f"{n_chunks} chunks across the fleet")
 
 
 async def handle_reverify_chunk(task_id: int, payload: dict[str, Any]) -> None:
