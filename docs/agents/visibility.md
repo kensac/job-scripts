@@ -166,10 +166,10 @@ reads in Python and `skips_sql` writes as SQL, so the two spellings come from
 one source, and `tests/test_screening.py` holds them equal on every recipe. A
 recipe is never edited in place: the same test pins a digest of each, and a
 different rule is a new name, measured before anything enforces it. The board
-title gates, the filter review gate's title stage and the verification volume
-gate's occupation list are separate recipes there, kept separate because each
-was measured against its own consumers; widening one to another's list is a
-measured change of its own.
+title gates, the screens `title_screens` names per prompt hash and the
+verification volume gate's occupation list are separate recipes there, kept
+separate because each was measured against its own consumers; widening one to
+another's list is a measured change of its own.
 
 **A posting a screen skips leaves the candidates.** A skip writes no verdict,
 so a screen applied after selection meets the same posting on every run: the
@@ -177,13 +177,14 @@ filter review gate's title stage did until 2026-10-10, and 3,501 of 3,802
 filter batch chunks in the 7 days before read pages only to skip them again.
 Each screen applies where candidates are chosen: `tasks.filters._run_filters`
 per filter, `managed_board_runs._plan` per board run (the run payload records
-`title_recipe`), and `verification_candidates.REACHABLE` per target. It is
+`title_screens`), and `verification_candidates.REACHABLE` per target. It is
 evaluated on every run, so switching it off returns the posting on the next.
 
-**A board's title gate is the cheap rung before the model.** A new recipe ships in `shadow` mode: the board's first run
-judges every candidate and its `title_gate_report` lists what the gate would
-have dropped, which is the recall measurement. Only then is it set to
-`enforce`. Measured on Tech Internships 2026-10-05, `internship_v1` skips
+**A board's title gate is the cheap rung before the model.** A gate that is
+set is enforced; there is no shadow mode. A recipe's recall is measured
+before a board names it, as a query: run `skips_sql` over the postings the
+board has judged and count the keeps it would have dropped. Measured on Tech
+Internships 2026-10-05, `internship_v1` skips
 96.7% of calls and dropped 7 of 1,494 model keeps. `aero_major_v1` would drop
 70 of the Aerospace board's 268 keeps and `new_grad_v1` 59 of Tech New Grad's
 1,068 (2026-10-07), so neither is enforced.
@@ -193,7 +194,7 @@ candidate has passed verification, so verification has always read the posting
 first, and each board then paid to read the same text again. `verify_new` asks
 each published board whose run would buy an answer
 (`managed_board_runs.verification_questions`: its sources, criteria, enforced
-title gate and title review gate admit the posting, it has no verdict under its
+title screens admit the posting, it has no verdict under its
 prompt and model, and it runs on verification's model and effort) inside the
 same request (`core.answers.joint_verification`). The board's verdict is
 written under its own prompt hash, and its run finds it through
@@ -257,7 +258,7 @@ filter" in the order the pipeline decides it: catalog, stored text,
 verification (and where each verdict came from, including the twin a
 near-copy verdict was copied from), then per board or filter: source,
 criteria (each named criterion), the verification volume gate, the title gate,
-the review gate, the closed and clearance gate, the verdict and its origin, and
+the title screen, the closed and clearance gate, the verdict and its origin, and
 membership. A step is `recorded` when a row says what happened and
 `evaluated_now` when the rule leaves no row (criteria, title gates, the volume
 gate, reachability decide by leaving a posting out of a SELECT) and is run
@@ -402,7 +403,7 @@ are not unified because each is a published contract the frontend reads.
 
 | Shape | In | Out | Where |
 |---|---|---|---|
-| Page number | `page`, `page_size` | `page`, `page_size`, `total`, `has_more` | `api.pagination.Page`: admin queries and jobs, catalog reports, review gates, review decisions |
+| Page number | `page`, `page_size` | `page`, `page_size`, `total`, `has_more` | `api.pagination.Page`: admin queries and jobs, catalog reports |
 | Id or keyset cursor | `limit` and `before_id` or `cursor` | `has_more`, and `next_cursor` where there is a cursor | the task queue (`before_id`), `GET /user/jobs` (`cursor` is the last id, legacy), public job lists (opaque keyset on the sort value and id) |
 | Offset cursor | `limit`, `cursor` (an offset as a string) | `has_more`, `next_cursor` | `/admin/companies` only |
 | Limit and offset | `limit`, `offset` | `has_more`, sometimes `total` | `GET /user/jobs` without a cursor, and older admin lists: users, sources, screened postings, batch rows, spend rows, filter insights, the catalog |

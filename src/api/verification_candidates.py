@@ -2,18 +2,17 @@
 
 from api import db, user_settings
 from api.board import criteria
-from api.review_gate import load_policy
 from core import screening
-from core.review_gate import VolumeGate
 from core.store import AI_ELIGIBLE_JOB
+from core.volume_gate import VolumeGate
 
-# A board's enforced title gate, and the screen filter_review_gate applies to
-# the target's prompt: a posting either skips would never be judged for it.
+# A board's title gate, and the screen title_screens names for the target's
+# prompt: a posting either skips is never judged for that target.
 _TITLE_SQL = (
-    "AND (COALESCE(target.title_gate->>'mode', 'shadow') <> 'enforce' OR NOT "
+    "AND NOT "
     + screening.skips_sql("target.title_gate->>'recipe'")
-    + ") AND NOT "
-    + screening.skips_sql("%(review_title_recipes)s::jsonb ->> target.prompt_hash")
+    + " AND NOT "
+    + screening.skips_sql("%(title_screens)s::jsonb ->> target.prompt_hash")
 )
 
 TARGETS = f"""
@@ -40,7 +39,7 @@ TITLE_KEY = "lower(regexp_replace(j.title, '\\s+', ' ', 'g'))"
 # A target in the volume gate's scopes does not read a posting from a source
 # that boards and filters do not keep, or whose source and title have been
 # judged often with no keep (bar a fixed sample of urls for both), or whose
-# title the occupation_words_v1 screen skips. core.review_gate.VolumeGate says
+# title the occupation_words_v1 screen skips. core.volume_gate.VolumeGate says
 # why.
 _VOLUME_SKIP = (
     """
@@ -131,6 +130,6 @@ def params() -> dict[str, object]:
         "volume_gate_title_keys": unproductive_titles(gate),
         "volume_gate_audit_percent": gate.audit_percent,
         "volume_gate_titles": gate.occupation_titles,
-        "review_title_recipes": db.jsonb(load_policy().title_recipes()),
+        "title_screens": db.jsonb(db.get_config("title_screens")),
         **screening.PARAMS,
     }

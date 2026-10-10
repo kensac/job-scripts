@@ -79,7 +79,7 @@ def test_gate_keeps_tracked_job_outside_current_filter_criteria():
     assert _reachable() == {old}
 
 
-def test_gate_applies_only_enforced_managed_title_gate():
+def test_gate_applies_a_managed_title_gate():
     _enable()
     source = f.make_source()
     sponsor = f.make_user()
@@ -102,10 +102,7 @@ def test_gate_applies_only_enforced_managed_title_gate():
     full_time = f.make_job(source=source, title="Software Engineer")
 
     assert _reachable() == {internship}
-    db.execute(
-        "UPDATE managed_boards SET title_gate = %s WHERE id = %s",
-        (db.jsonb({"recipe": "internship_v1", "mode": "shadow"}), board["id"]),
-    )
+    db.execute("UPDATE managed_boards SET title_gate = NULL WHERE id = %s", (board["id"],))
     assert _reachable() == {internship, full_time}
 
 
@@ -247,19 +244,19 @@ def test_a_source_over_the_keep_rate_is_read():
 def test_a_title_the_review_gate_screens_is_not_read_for_its_prompt():
     _enable()
     source = f.make_source()
-    scope = {_scoped_target(source): {"title_recipe": "nontechnical_occupations_v1"}}
+    prompt_hash = _scoped_target(source)
     nurse = f.make_job(source=source, title="Registered Nurse")
     engineer = f.make_job(source=source, title="Software Engineer")
 
-    _review_gate({"title_mode": "enforce", "scopes": scope})
+    _title_screens({prompt_hash: "nontechnical_occupations_v1"})
     assert _reachable() == {engineer}
-    _review_gate({"title_mode": "off", "scopes": scope})
+    _title_screens({})
     assert _reachable() == {nurse, engineer}
 
 
-def _review_gate(value: dict) -> None:
+def _title_screens(value: dict) -> None:
     db.execute(
-        "INSERT INTO app_config (key, value) VALUES ('filter_review_gate', %s) "
+        "INSERT INTO app_config (key, value) VALUES ('title_screens', %s) "
         "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
         (db.jsonb(value),),
     )

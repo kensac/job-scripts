@@ -1,26 +1,13 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends
 
-from api import pagination
 from api.auth import AuthedUser, require_user
 from api.board.access import require_visible_job
-from api.review_decision_storage import URL_MATCH
-from api.review_gate_reads import ReviewDecisions, read_decisions
+from api.routers.admin.review_gates import ReviewDecisions
 
 router = APIRouter()
 
 
 @router.get("/user/jobs/{job_id}/review-decisions")
-def own_review_decisions(
-    job_id: int,
-    page: int = Query(1, ge=1),
-    page_size: int = Query(25, ge=1, le=100),
-    user: AuthedUser = Depends(require_user),
-) -> ReviewDecisions:
-    job = require_visible_job(user, job_id, "j.id,j.url")
-    return read_decisions(
-        f"{URL_MATCH} AND d.user_id=%(uid)s AND d.managed_board_id IS NULL",
-        {"url": job["url"], "uid": user.id},
-        pagination.Page.from_params(page, page_size, maximum=100),
-        {},
-        personal=True,
-    )
+def own_review_decisions(job_id: int, user: AuthedUser = Depends(require_user)) -> ReviewDecisions:
+    require_visible_job(user, job_id, "j.id")
+    return ReviewDecisions()

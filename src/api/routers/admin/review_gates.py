@@ -1,118 +1,81 @@
-"""Decision coverage and funnels, separate from the provider invoice ledger."""
+"""The title-screen funnel, derived from postings, verdicts and `title_screens`.
+
+Nothing records a skip: a screen leaves a posting out of a candidate SELECT
+(core/screening.py), so what it skipped is the screen run over the postings
+again. Per-run decision rows were stored until 2026-10, 93.6% of 9.76M of them
+repeating one already stored, and the derived skip set matched every stored one.
+"""
 
 from __future__ import annotations
 
 import datetime
 
 from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, JsonValue
 
-from api import db, pagination, scoping
+from api import db, scoping
 from api.auth import AuthedUser
-from api.problem import refuse
-from api.review_decision_storage import URL_MATCH
-from api.review_gate_reads import ReviewDecisions, read_decisions
 from api.routers.admin.shared import require_admin
+from core import screening
 
 router = APIRouter()
 
+NOT_STORED = (
+    "Per-run review decisions are no longer stored. The posting's path shows each "
+    "board's and filter's title screen, evaluated now."
+)
 
-def selection(
-    *,
-    url: str | None = None,
-    prompt_hash: str | None = None,
-    stage: str | None = None,
-    mode: str | None = None,
-    action: str | None = None,
-    user: str | None = None,
-    managed_board_id: int | None = None,
-    filter_id: int | None = None,
-    stored: bool = False,
-) -> tuple[str, dict, dict[str, list[str]]]:
-    """WHERE over alias d: DECISIONS, or with `stored` the bare review_gate_decisions row."""
-    clauses, values, filters = [], {}, {}
-    for key, value in {
-        "url": url,
-        "prompt_hash": prompt_hash,
-        "stage": stage,
-        "mode": mode,
-        "action": action,
-    }.items():
-        if value is not None:
-            if key == "url":
-                clauses.append(URL_MATCH)
-            elif stored:
-                clauses.append(
-                    f"d.body_id IN (SELECT id FROM review_gate_decision_bodies WHERE {key}=%({key})s)"
-                )
-            else:
-                clauses.append(f"d.{key}=%({key})s")
-            values[key] = value
-            filters[key] = [value]
-    users = scoping.user_ids(user)
-    if users:
-        clauses.append("d.user_id=ANY(%(users)s)")
-        values["users"] = users
-        filters["user"] = [str(value) for value in users]
-    if managed_board_id is not None:
-        clauses.append("d.managed_board_id=%(managed_board_id)s")
-        values["managed_board_id"] = managed_board_id
-        filters["managed_board_id"] = [str(managed_board_id)]
-    if filter_id is not None:
-        clauses.append("d.filter_id=%(filter_id)s AND d.managed_board_id IS NULL")
-        values["filter_id"] = filter_id
-        filters["filter_id"] = [str(filter_id)]
-    return " AND ".join(clauses) or "TRUE", values, filters
+
+class ReviewOutcome(BaseModel):
+    query_id: int
+    batch_id: str | None
+    model: str | None
+    rejected: bool | None
+    outcome: str
+    recorded_cost_usd: float | None
+    created_at: datetime.datetime
+
+
+class ReviewDecision(BaseModel):
+    id: int
+    task_id: int
+    url: str
+    job_id: int | None
+    user_id: int | None
+    filter_id: int | None
+    managed_board_id: int | None
+    revision: int | None
+    prompt_hash: str
+    stage: str
+    mode: str
+    action: str
+    reason: str | None
+    profile_id: int | None
+    title: str
+    content_hash: str | None
+    policy: dict[str, JsonValue]
+    evidence: dict[str, JsonValue]
+    created_at: datetime.datetime
+    outcomes: list[ReviewOutcome] = []
+
+
+class ReviewDecisions(BaseModel):
+    """Always empty. The shape stays until the decision history panels that
+    read it are removed from the job drawers."""
+
+    rows: list[ReviewDecision] = []
+    page: int = 1
+    page_size: int = 25
+    total: int = 0
+    has_more: bool = False
+    filters: dict[str, list[str]] = {}
+    filterable: list[str] = []
+    coverage: str = NOT_STORED
 
 
 @router.get("/review-gates/decisions")
-def decisions(
-    url: str | None = None,
-    prompt_hash: str | None = None,
-    stage: str | None = None,
-    mode: str | None = None,
-    action: str | None = None,
-    user: str | None = None,
-    managed_board_id: int | None = Query(None, ge=1),
-    filter_id: int | None = Query(None, ge=1),
-    page: int = Query(1, ge=1),
-    page_size: int = Query(25, ge=1, le=100),
-    window_start: datetime.datetime | None = None,
-    window_end: datetime.datetime | None = None,
-    admin: AuthedUser = Depends(require_admin),
-) -> ReviewDecisions:
-    where, values, filters = selection(
-        url=url,
-        prompt_hash=prompt_hash,
-        stage=stage,
-        mode=mode,
-        action=action,
-        user=user,
-        managed_board_id=managed_board_id,
-        filter_id=filter_id,
-    )
-    if (window_start is None) != (window_end is None) or (
-        window_start is not None
-        and window_end is not None
-        and (
-            window_start.tzinfo is None
-            or window_end.tzinfo is None
-            or window_start >= window_end
-            or window_end - window_start > datetime.timedelta(days=90)
-        )
-    ):
-        raise refuse(
-            400,
-            "INVALID_WINDOW",
-            "Supply both timezone-aware bounds, increasing and at most 90 days apart.",
-        )
-    if window_start is not None and window_end is not None:
-        where += " AND d.created_at >= %(start)s AND d.created_at < %(end)s"
-        values.update(start=window_start, end=window_end)
-        filters.update(window_start=[window_start.isoformat()], window_end=[window_end.isoformat()])
-    return read_decisions(
-        where, values, pagination.Page.from_params(page, page_size, maximum=100), filters
-    )
+def decisions(admin: AuthedUser = Depends(require_admin)) -> ReviewDecisions:
+    return ReviewDecisions()
 
 
 class GateFunnelRow(BaseModel):
@@ -126,9 +89,9 @@ class GateFunnelRow(BaseModel):
     without_recorded_outcome: int
     known_cost_usd: float
     actual_cost_usd: float | None
-    agreed_reject: int
-    false_reject: int
-    unresolved: int
+    agreed_reject: int = 0
+    false_reject: int = 0
+    unresolved: int = 0
 
 
 class AvoidedCostEstimate(BaseModel):
@@ -137,9 +100,8 @@ class AvoidedCostEstimate(BaseModel):
     unestimated_decisions: int
     reference_outcomes: int
     basis: str = (
-        "Skipped decisions times mean recorded cost per reviewed decision, including retries, in the same decision window, "
-        "prompt revision, planned model and transport. A workload-dependent estimate, "
-        "not billed savings or a controlled counterfactual."
+        "Screened postings times the mean recorded cost of a review under the same prompt "
+        "in the same window. A workload-dependent estimate, not billed savings."
     )
 
 
@@ -149,17 +111,22 @@ class GateReport(BaseModel):
     window_end: datetime.datetime
     days: int
     population: str = (
-        "Review decisions made during the window, not unique postings or provider calls."
+        "Skip: postings first seen in the window from a screened board's or filter's "
+        "sources whose title its screen skips, one per prompt. Review: model calls under "
+        "a screened prompt in the window."
     )
-    coverage: str = "Durable decisions only; earlier task-only history is unavailable."
-    first_recorded_at: datetime.datetime | None
+    coverage: str = (
+        "Derived when read from today's title_screens; a screen changed during the window "
+        "is applied as it stands now."
+    )
+    first_recorded_at: datetime.datetime | None = None
     rows: list[GateFunnelRow]
     filters: dict[str, list[str]]
     filterable: list[str] = ["prompt_hash", "user", "managed_board_id", "filter_id"]
     avoided_cost: AvoidedCostEstimate
     actual_cost_basis: str = (
-        "Stored costs of linked review outcomes for this decision cohort, including retries. "
-        "Not total platform spend or the provider invoice. Missing outcomes are not free reviews."
+        "Stored costs of the window's review calls under screened prompts, retries included. "
+        "Not total platform spend or the provider invoice."
     )
 
 
@@ -172,104 +139,127 @@ def report(
     filter_id: int | None = Query(None, ge=1),
     admin: AuthedUser = Depends(require_admin),
 ) -> GateReport:
-    return _report(days, prompt_hash, user, managed_board_id, filter_id)
-
-
-def _report(
-    days: int,
-    prompt_hash: str | None,
-    user: str | None,
-    managed_board_id: int | None,
-    filter_id: int | None,
-) -> GateReport:
     end = datetime.datetime.now(datetime.UTC)
     start = end - datetime.timedelta(days=days)
-    # The report reads the stored row, never DECISIONS: url_id and body_id
-    # are NOT NULL under validated foreign keys, so no join can add or drop a
-    # decision, and each body is resolved once rather than once per decision.
-    # Joining all of them to their bodies took 431 s on 7.9M decisions
-    # (2026-10-03); min() over the joined view could not use the created_at
-    # index and took 61.7 s.
-    where, values, filters = selection(
-        prompt_hash=prompt_hash,
-        user=user,
-        managed_board_id=managed_board_id,
-        filter_id=filter_id,
-        stored=True,
+    users = scoping.user_ids(user)
+    filters = {
+        key: values
+        for key, values in {
+            "prompt_hash": [prompt_hash] if prompt_hash else [],
+            "user": scoping.echo(users),
+            "managed_board_id": [str(managed_board_id)] if managed_board_id else [],
+            "filter_id": [str(filter_id)] if filter_id else [],
+        }.items()
+        if values
+    }
+    # A board is in scope unless a filter is named; a filter unless a board is.
+    row = db.query_one(
+        f"""
+        WITH screens AS (
+          SELECT key AS prompt_hash, value #>> '{{}}' AS recipe
+          FROM jsonb_each(%(screens)s::jsonb)
+          WHERE %(hash)s::text IS NULL OR key = %(hash)s
+        ), targets AS (
+          SELECT s.prompt_hash, s.recipe, src.source
+          FROM screens s JOIN managed_boards b ON b.prompt_hash = s.prompt_hash
+          JOIN managed_board_sources src ON src.managed_board_id = b.id
+          WHERE %(filter)s::bigint IS NULL
+            AND (%(board)s::bigint IS NULL OR b.id = %(board)s)
+            AND (cardinality(%(users)s::bigint[]) = 0 OR b.sponsor_user_id = ANY(%(users)s))
+          UNION
+          SELECT s.prompt_hash, s.recipe, us.source
+          FROM screens s JOIN user_filters f ON f.prompt_hash = s.prompt_hash AND f.enabled
+          JOIN user_sources us ON us.user_id = f.user_id
+          WHERE %(board)s::bigint IS NULL
+            AND (%(filter)s::bigint IS NULL OR f.id = %(filter)s)
+            AND (cardinality(%(users)s::bigint[]) = 0 OR f.user_id = ANY(%(users)s))
+        ), skips AS (
+          SELECT t.prompt_hash, j.id
+          FROM jobs j JOIN targets t ON t.source = j.source
+          WHERE j.created_at >= %(start)s AND j.created_at < %(end)s
+            AND {screening.skips_sql("t.recipe")}
+          GROUP BY t.prompt_hash, j.id
+        ), reviews AS (
+          -- Every paid review, failed ones included: a failure was paid for.
+          SELECT q.prompt_hash, q.url, q.cost_usd FROM ai_queries q
+          WHERE q.check_type = 'custom' AND q.status IN ('passed', 'rejected', 'failed')
+            AND q.prompt_hash IN (SELECT prompt_hash FROM targets)
+            AND q.created_at >= %(start)s AND q.created_at < %(end)s
+        ), mean AS (
+          SELECT prompt_hash, avg(cost_usd)::float AS cost, count(*) AS n FROM reviews
+          GROUP BY prompt_hash HAVING count(*) FILTER (WHERE cost_usd IS NULL) = 0
+        ), skipped AS (
+          SELECT prompt_hash, count(*) AS n FROM skips GROUP BY prompt_hash
+        )
+        SELECT
+          (SELECT count(*) FROM skips) AS skip_decisions,
+          (SELECT count(DISTINCT id) FROM skips) AS skip_jobs,
+          (SELECT count(*) FROM reviews) AS reviews,
+          (SELECT count(DISTINCT url) FROM reviews) AS review_jobs,
+          (SELECT count(*) FILTER (WHERE cost_usd IS NULL) FROM reviews) AS unpriced,
+          (SELECT COALESCE(sum(cost_usd), 0)::float FROM reviews) AS cost,
+          (SELECT sum(s.n * m.cost)::float FROM skipped s JOIN mean m USING (prompt_hash))
+            AS avoided,
+          (SELECT COALESCE(sum(s.n) FILTER (WHERE m.cost IS NOT NULL), 0)
+             FROM skipped s LEFT JOIN mean m USING (prompt_hash)) AS estimated,
+          (SELECT COALESCE(sum(s.n) FILTER (WHERE m.cost IS NULL), 0)
+             FROM skipped s LEFT JOIN mean m USING (prompt_hash)) AS unestimated,
+          (SELECT COALESCE(sum(n), 0) FROM mean) AS reference
+        """,
+        {
+            "screens": db.jsonb(db.get_config("title_screens")),
+            "hash": prompt_hash,
+            "board": managed_board_id,
+            "filter": filter_id,
+            "users": users,
+            "start": start,
+            "end": end,
+            **screening.PARAMS,
+        },
     )
-    cohort = (
-        "SELECT d.id,d.body_id,d.url_id FROM review_gate_decisions d "
-        f"WHERE {where} AND d.created_at >= %(start)s AND d.created_at < %(end)s"
-    )
-    # One statement, so coverage, funnel and estimate read one snapshot without
-    # holding a REPEATABLE READ transaction, and the window is scanned once.
-    # Funnel: grouped by (body, URL) before the body is read. Every column is
-    # a count or a numeric sum, so it decomposes exactly, and
-    # review_gate_urls.url is unique, so distinct url_id counts distinct URLs.
-    # Estimate: the mean is over per-decision float costs, as before, so
-    # reviews stay one row per decision; skips need only a count per body.
-    report = db.query_one(
-        f"WITH cohort AS MATERIALIZED ({cohort}), keys AS MATERIALIZED ("
-        "SELECT b.id,b.stage,b.mode,b.action,b.prompt_hash,b.evidence->>'planned_model' model, "
-        "b.evidence->>'transport' transport FROM review_gate_decision_bodies b "
-        "WHERE b.id IN (SELECT body_id FROM cohort)), paid AS ("
-        "SELECT o.decision_id,count(*) n,count(*) FILTER(WHERE o.recorded_cost_usd IS NULL) unknown, "
-        "sum(o.recorded_cost_usd) cost, "
-        "count(*) FILTER(WHERE o.rejected IS TRUE) rejected, "
-        "count(*) FILTER(WHERE o.rejected IS FALSE) passed, "
-        "count(*) FILTER(WHERE o.rejected IS NULL) unresolved "
-        "FROM review_gate_outcomes o JOIN cohort c ON c.id=o.decision_id GROUP BY o.decision_id), "
-        "pairs AS (SELECT c.body_id,c.url_id,count(*) decisions, "
-        "count(*) FILTER(WHERE p.decision_id IS NULL) unpaid,sum(p.n) n,sum(p.unknown) unknown, "
-        "sum(p.cost) cost,sum(p.rejected) rejected,sum(p.passed) passed,sum(p.unresolved) unresolved "
-        "FROM cohort c LEFT JOIN paid p ON p.decision_id=c.id GROUP BY c.body_id,c.url_id), "
-        "funnel AS (SELECT k.stage,k.mode,k.action,sum(x.decisions)::bigint AS decisions, "
-        "count(DISTINCT x.url_id) AS distinct_jobs, "
-        "COALESCE(sum(x.n),0)::bigint recorded_outcomes, "
-        "COALESCE(sum(x.unknown),0)::bigint unpriced_outcomes, "
-        "COALESCE(sum(x.unpaid) FILTER(WHERE k.action='review'),0)::bigint without_recorded_outcome, "
-        "COALESCE(sum(x.cost),0)::float known_cost_usd, "
-        "CASE WHEN COALESCE(sum(x.unknown),0)=0 AND COALESCE(sum(x.unpaid) FILTER(WHERE k.action='review'),0)=0 "
-        "THEN COALESCE(sum(x.cost),0)::float END actual_cost_usd, "
-        "COALESCE(sum(x.rejected) FILTER(WHERE k.mode='shadow' AND k.stage<>'detailed'),0)::bigint agreed_reject, "
-        "COALESCE(sum(x.passed) FILTER(WHERE k.mode='shadow' AND k.stage<>'detailed'),0)::bigint false_reject, "
-        "COALESCE(sum(x.unresolved) FILTER(WHERE k.mode='shadow' AND k.stage<>'detailed'),0)::bigint unresolved "
-        "FROM pairs x JOIN keys k ON k.id=x.body_id GROUP BY k.stage,k.mode,k.action), "
-        "per_decision AS ("
-        "SELECT c.id,k.prompt_hash,k.model,k.transport, "
-        "sum(o.recorded_cost_usd)::float cost,count(o.id) n, "
-        "count(*) FILTER(WHERE o.recorded_cost_usd IS NULL OR o.model IS DISTINCT FROM "
-        "k.model) unknown "
-        "FROM cohort c JOIN keys k ON k.id=c.body_id "
-        "LEFT JOIN review_gate_outcomes o ON o.decision_id=c.id "
-        "WHERE k.action='review' GROUP BY c.id,k.prompt_hash,k.model,k.transport), baseline AS ("
-        "SELECT prompt_hash,model,transport,avg(cost)::float mean_cost,sum(n) n "
-        "FROM per_decision GROUP BY prompt_hash,model,transport "
-        "HAVING sum(unknown)=0), skipped AS ("
-        "SELECT k.prompt_hash,k.model,k.transport,sum(c.n)::bigint n "
-        "FROM (SELECT body_id,count(*) n FROM cohort GROUP BY body_id) c "
-        "JOIN keys k ON k.id=c.body_id WHERE k.action='skip' "
-        "GROUP BY k.prompt_hash,k.model,k.transport), estimate AS ("
-        "SELECT CASE WHEN count(r.mean_cost)>0 THEN sum(s.n*r.mean_cost)::float END estimated_avoided_cost_usd, "
-        "COALESCE(sum(s.n) FILTER(WHERE r.mean_cost IS NOT NULL),0)::bigint estimated_decisions, "
-        "COALESCE(sum(s.n) FILTER(WHERE r.mean_cost IS NULL),0)::bigint unestimated_decisions, "
-        "COALESCE(sum(r.n),0)::bigint reference_outcomes "
-        "FROM skipped s LEFT JOIN baseline r USING(prompt_hash,model,transport)) "
-        # JSON carries each float as its shortest round-trip text, so the
-        # values are the ones a direct column would have returned.
-        f"SELECT (SELECT min(d.created_at) FROM review_gate_decisions d WHERE {where}) AS first, "
-        "(SELECT COALESCE(json_agg(f ORDER BY f.stage,f.mode,f.action),'[]') FROM funnel f) AS rows, "
-        "(SELECT row_to_json(e) FROM estimate e) AS estimate",
-        {**values, "start": start, "end": end},
-    )
-    assert report is not None
+    assert row is not None
+    rows = []
+    if row["skip_decisions"]:
+        rows.append(
+            GateFunnelRow(
+                stage="title",
+                mode="enforce",
+                action="skip",
+                decisions=row["skip_decisions"],
+                distinct_jobs=row["skip_jobs"],
+                recorded_outcomes=0,
+                unpriced_outcomes=0,
+                without_recorded_outcome=0,
+                known_cost_usd=0.0,
+                actual_cost_usd=0.0,
+            )
+        )
+    if row["reviews"]:
+        rows.append(
+            GateFunnelRow(
+                stage="detailed",
+                mode="enforce",
+                action="review",
+                decisions=row["reviews"],
+                distinct_jobs=row["review_jobs"],
+                recorded_outcomes=row["reviews"],
+                unpriced_outcomes=row["unpriced"],
+                without_recorded_outcome=0,
+                known_cost_usd=row["cost"],
+                actual_cost_usd=None if row["unpriced"] else row["cost"],
+            )
+        )
     return GateReport(
         generated_at=end,
         window_start=start,
         window_end=end,
         days=days,
-        first_recorded_at=report["first"],
-        rows=[GateFunnelRow.model_validate(row) for row in report["rows"]],
+        rows=rows,
         filters=filters,
-        avoided_cost=AvoidedCostEstimate.model_validate(report["estimate"]),
+        avoided_cost=AvoidedCostEstimate(
+            estimated_avoided_cost_usd=row["avoided"],
+            estimated_decisions=row["estimated"],
+            unestimated_decisions=row["unestimated"],
+            reference_outcomes=row["reference"],
+        ),
     )

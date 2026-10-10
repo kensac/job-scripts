@@ -151,9 +151,11 @@ async def test_storage_outage_submits_nothing_and_recovers(f, objects, monkeypat
 
 
 def test_profile_requests_are_bundle_members_like_every_other_kind(f, objects):
-    from tests.test_review_gate import proven_job
+    from core.job_profile import job_profile_spec
 
-    _, task_id = proven_job(f)
+    task_id = f.make_task("classify_job_profiles")
+    spec = job_profile_spec("https://jobs.test/p", 1, "Legal Counsel", "posting text", "hash")
+    batch_results.snapshot_specs(task_id, [spec])
     stored = rows(task_id)
     assert len(stored) == 1
     assert stored[0]["snapshot"] is None

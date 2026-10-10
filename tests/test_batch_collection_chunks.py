@@ -28,7 +28,7 @@ from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
 import core.pool
-from api import budget, db, review_gate
+from api import budget, db
 from api.ai import batch_results
 from api.model_calls import Payer
 from core.answers import FilterDecision
@@ -94,20 +94,18 @@ def _scenario(f, n: int, poison: str | None = None) -> tuple[int, Ledger, list[B
         {"url": f"https://chunk.test/{i:04d}", "title": f"Role {i}", "company": "Example"}
         for i in range(n)
     ]
-    _, decisions = review_gate.partition(task, SNAPSHOT.prompt_hash, jobs, {}, model=MODEL)
     specs, results = [], []
     for i, job in enumerate(jobs):
         context = {
             "job": job,
             "filter": SNAPSHOT.__dict__,
-            "review_gate": decisions[job["url"]],
-            "routing": None,
             "reasoning_effort": "low",
         }
         if poison == "python" and i == n // 2:
             context["job"] = {"url": job["url"], "title": job["title"]}  # no company
         if poison == "database" and i == n // 2:
-            context["review_gate"] = {"decision_id": 2**70}  # out of bigint range
+            # PostgreSQL text cannot hold NUL, so the verdict insert fails.
+            context["job"] = {**job, "company": "Exam\x00ple"}
         specs.append(
             structured_response_spec(
                 job["url"],
@@ -222,7 +220,6 @@ async def test_chunked_collection_leaves_the_per_result_state(f, monkeypatch, ch
     assert outcomes == {"written": 7, "failed": 6, "unknown_request": 1}
     assert len(expected["ai_queries"]) == 12  # one result was consumed before the run
     assert len(expected["api_usage"]) == 11  # two carried no usage; one was a stranger
-    assert len(expected["review_gate_outcomes"]) == 12
     actual, calls, error, _ = await _run(f, monkeypatch, 13, per_result=False)
     assert error is None
     assert calls == expected_calls
@@ -279,10 +276,6 @@ def _rows(task: int) -> dict:
             "SELECT model, prompt_tokens, completion_tokens, cached_tokens, cost_usd "
             "FROM api_usage ORDER BY id"
         ),
-        "outcomes": db.query(
-            "SELECT o.decision_id, q.url, o.outcome, o.rejected, o.recorded_cost_usd "
-            "FROM review_gate_outcomes o JOIN ai_queries q ON q.id=o.query_id ORDER BY q.url"
-        ),
     }
 
 
@@ -292,7 +285,7 @@ async def test_a_crash_mid_chunk_replays_exactly_once(f, monkeypatch):
     task, ledger, results = _scenario(f, 13)
     await _collect(task, ledger, results)
     clean = _rows(task)
-    assert len(clean["verdicts"]) == 12 and len(clean["outcomes"]) == 12
+    assert len(clean["verdicts"]) == 12
 
     _reset_to_empty()
     task, ledger, results = _scenario(f, 13)

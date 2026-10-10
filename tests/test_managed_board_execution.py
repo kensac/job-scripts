@@ -58,11 +58,10 @@ def test_run_admission_snapshots_board_candidates_and_refuses_overlap(
     assert payload["inference_transport"] == "batch"
     assert payload["reasoning_effort"] == "low"
     assert payload["sources"] == ["managed-source"]
-    assert payload["title_gate"] == {"recipe": "internship_v1", "mode": "shadow"}
+    assert payload["title_screens"] == []
     jobs = managed_board_runs.run_jobs(payload)
     assert [job["id"] for job in jobs] == [job_id]
     assert jobs[0]["source"] == "managed-source"
-    assert jobs[0]["title_gate_keep"] is False
     assert jobs[0]["content_query_id"] is not None
     assert "content" not in jobs[0]
 
@@ -257,25 +256,6 @@ async def test_new_execution_contract_uses_batch_only_and_prices_batch(f, monkey
         "gpt-5.6-luna", 10, 2, batched=True
     ) < pricing.estimate_cost_usd("gpt-5.6-luna", 10, 2, batched=False)
     assert db.query_one("SELECT job_id FROM managed_board_jobs")["job_id"] == job_id
-    report = db.query_one(
-        "SELECT payload->'title_gate_report' AS report FROM tasks WHERE id = %s", (task_id,)
-    )["report"]
-    assert report == {
-        "recipe": "new_grad_v1",
-        "mode": "shadow",
-        "candidate_count": 1,
-        "would_skip_count": 1,
-        "disagreement_count": 1,
-        "undecided_count": 0,
-        "disagreement_examples": [
-            {
-                "job_id": job_id,
-                "company": "Acme",
-                "title": "Principal Engineer",
-                "reason": "experienced_title_signal",
-            }
-        ],
-    }
 
 
 @pytest.mark.asyncio
@@ -408,7 +388,6 @@ def test_projection_revision_cas_preserves_previous_projection(f):
     db.execute("UPDATE managed_boards SET revision = 2 WHERE id = %s", (board["id"],))
     with pytest.raises(RuntimeError, match="configuration changed"):
         managed_board_runs.replace_projection(
-            0,
             {
                 "managed_board_id": board["id"],
                 "revision": 1,

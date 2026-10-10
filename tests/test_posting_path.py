@@ -102,6 +102,29 @@ def test_an_enforced_title_gate_drop_is_a_skip(f):
     assert consumer.summary.startswith("Title gate internship_v1: dropped")
 
 
+def test_a_title_screen_is_evaluated_now_and_writes_nothing(f, set_config):
+    source = f.make_source("path-src-screen")
+    board = _board(f, source, slug="path-board-screen")
+    _, nurse = f.make_ready_job(source=source, title="Registered Nurse")
+    _, engineer = f.make_ready_job(source=source, title="Software Engineer")
+    set_config("title_screens", {board["prompt_hash"]: "nontechnical_occupations_v1"})
+
+    skipped = _stages(
+        _consumer(posting_path.for_admin(nurse), "managed_board", "path-board-screen")
+    )
+    judged = _stages(
+        _consumer(posting_path.for_admin(engineer), "managed_board", "path-board-screen")
+    )
+
+    assert skipped["review_gate"].outcome == "skipped"
+    assert skipped["review_gate"].basis == "evaluated_now"
+    assert skipped["review_gate"].detail == "clinical_care"
+    assert judged["review_gate"].outcome == "passed"
+    set_config("title_screens", {})
+    after = _stages(_consumer(posting_path.for_admin(nurse), "managed_board", "path-board-screen"))
+    assert "review_gate" not in after
+
+
 def test_a_near_copy_verdict_names_its_twin(f):
     source = f.make_source("path-src-twin")
     twin_id, twin = f.make_ready_job(source=source, title="Store Associate")

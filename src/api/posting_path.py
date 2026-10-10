@@ -2,11 +2,11 @@
 
 Every rule that reads, skips, judges or shows a posting is a stage here, in
 the order the pipeline applies them. A stage is `recorded` when a row says what
-happened (a verdict, a review-gate decision, board membership) and
-`evaluated_now` when the rule leaves no row and is run again for this posting:
-criteria, title gates, the verification volume gate and reachability decide by
-leaving a posting out of a SELECT, so their answer is today's, not the one in
-force when the posting was skipped.
+happened (a verdict, board membership) and `evaluated_now` when the rule
+leaves no row and is run again for this posting: criteria, title screens, the
+verification volume gate and reachability decide by leaving a posting out of a
+SELECT, so their answer is today's, not the one in force when the posting was
+skipped.
 """
 
 from __future__ import annotations
@@ -21,8 +21,8 @@ from api import db, user_settings
 from api.ai import verdicts
 from api.board import criteria as board_criteria
 from core import verdict_reads
-from core.review_gate import VolumeGate
-from core.screening import TitleGateConfig, screen
+from core.screening import Recipe, TitleGateConfig, screen
+from core.volume_gate import VolumeGate
 
 Outcome = Literal["passed", "failed", "skipped", "pending", "info"]
 
@@ -414,33 +414,18 @@ def _structural_step(job: dict[str, Any], bypass: bool) -> PathStep:
     )
 
 
-def _review_step(job: dict[str, Any], where: str, value: int) -> PathStep | None:
-    row = db.query_one(
-        "SELECT b.stage, b.mode, b.action, b.reason, d.created_at "
-        "FROM review_gate_decisions d JOIN review_gate_decision_bodies b ON b.id = d.body_id "
-        "WHERE d.url_id = (SELECT id FROM review_gate_urls WHERE url = %s) "
-        f"AND d.{where} = %s ORDER BY d.id DESC LIMIT 1",
-        (job["url"], value),
-    )
-    if row is None:
+def _screen_step(job: dict[str, Any], prompt_hash: str) -> PathStep | None:
+    """The title screen `title_screens` names for this prompt, if any."""
+    recipe: Recipe | None = db.get_config("title_screens").get(prompt_hash)
+    if recipe is None:
         return None
-    if row["action"] == "skip":
-        return PathStep(
-            stage="review_gate",
-            outcome="skipped",
-            label=f"Skipped before review by the {row['stage']} rule",
-            detail=row["reason"],
-            basis="recorded",
-            at=row["created_at"],
-        )
+    decision = screen(recipe, title=job["title"], source=job["source"])
     return PathStep(
         stage="review_gate",
-        outcome="info",
-        label="Sent to review",
-        detail=f"{row['stage']} stage, {row['mode']} mode"
-        + (f": {row['reason']}" if row["reason"] else ""),
-        basis="recorded",
-        at=row["created_at"],
+        outcome="skipped" if decision.skip else "passed",
+        label=f"Title screen {recipe}: " + ("not judged" if decision.skip else "judged"),
+        detail=decision.reason,
+        basis="evaluated_now",
     )
 
 
@@ -508,23 +493,14 @@ def _managed_board(job: dict[str, Any], board: dict[str, Any], gate: VolumeGate)
             steps.append(
                 PathStep(
                     stage="title_gate",
-                    outcome="passed"
-                    if not decision.skip
-                    else ("skipped" if config.mode == "enforce" else "info"),
-                    label=(
-                        f"Title gate {config.recipe}: "
-                        + ("dropped" if decision.skip else "kept")
-                        + (
-                            " (shadow, not applied)"
-                            if config.mode == "shadow" and decision.skip
-                            else ""
-                        )
-                    ),
+                    outcome="skipped" if decision.skip else "passed",
+                    label=f"Title gate {config.recipe}: "
+                    + ("dropped" if decision.skip else "kept"),
                     detail=decision.reason,
                     basis="evaluated_now",
                 )
             )
-        if review := _review_step(job, "managed_board_id", board["id"]):
+        if review := _screen_step(job, board["prompt_hash"]):
             steps.append(review)
         steps.append(_structural_step(job, board["bypass_sponsorship_filter"]))
         steps.append(_verdict_step(job, board["prompt_hash"], board["requested_model"], None))
@@ -583,7 +559,7 @@ def _filters(
             )
             if volume := _volume_step(job, gate, f["prompt_hash"]):
                 steps.append(volume)
-            if review := _review_step(job, "filter_id", f["id"]):
+            if review := _screen_step(job, f["prompt_hash"]):
                 steps.append(review)
             steps.append(_structural_step(job, bypass))
             # A person's board counts the latest verdict under any model.

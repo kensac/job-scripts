@@ -265,10 +265,9 @@ def test_bootstrap_creates_three_draft_boards_and_is_idempotent(client, admin_he
             "included_locations": ["United States", "Canada", "Remote"],
             "included_terms": [],
         }
-        assert board["title_gate"] == {
-            "recipe": "internship_v1" if "internships" in board["slug"] else "new_grad_v1",
-            "mode": "shadow",
-        }
+        # A gate that is set is enforced; neither starter recipe is measured
+        # well enough to enforce on a new board.
+        assert board["title_gate"] is None
         assert board["sources"] == ["active-a"]
         assert board["published"] is False and board["revision"] == 1
     assert boards[2]["execution_mode"] == "sponsor_filter_reuse"
