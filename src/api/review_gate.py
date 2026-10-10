@@ -10,7 +10,7 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, wait
 from typing import Any
 
-from api import db, review_gate_records
+from api import db, queue, review_gate_records
 from api.ai import batch_results, request_snapshots
 from core.job_profile import (
     CLASSIFIER_VERSION,
@@ -292,8 +292,5 @@ def partition(
         report["would_reject"] = dict(
             Counter(d["stage"] for d in decisions.values() if d["stage"] != "detailed")
         )
-        db.execute(
-            "UPDATE tasks SET payload=jsonb_set(payload,'{review_gate}',%s) WHERE id=%s",
-            (db.jsonb(report), task_id),
-        )
+        queue.merge_payload(task_id, {"review_gate": report})
     return [job for job in jobs if job["url"] not in skipped], decisions

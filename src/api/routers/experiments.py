@@ -9,7 +9,7 @@ from typing import Any
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
-from api import db, events
+from api import db, queue
 from api import experiments as exp
 from api.auth import AuthedUser
 from api.problem import refuse
@@ -168,14 +168,10 @@ def create_experiment(
         (body.purpose, db.jsonb(params), user.id),
     )
     assert row is not None
-    task = db.query_one(
-        "INSERT INTO tasks (kind, payload) VALUES ('run_experiment', %s) RETURNING id",
-        (db.jsonb({"experiment_id": row.id, "user_id": user.id}),),
-    )
-    assert task is not None
-    db.execute("UPDATE ai_experiments SET task_id = %s WHERE id = %s", (task["id"], row.id))
-    events.publish_task(task["id"])
-    return ExperimentQueued(**{**row.model_dump(), "task_id": task["id"]}, refused_arms=refused)
+    task_id = queue.enqueue("run_experiment", {"experiment_id": row.id, "user_id": user.id})
+    assert task_id is not None
+    db.execute("UPDATE ai_experiments SET task_id = %s WHERE id = %s", (task_id, row.id))
+    return ExperimentQueued(**{**row.model_dump(), "task_id": task_id}, refused_arms=refused)
 
 
 @router.post("/experiments/{experiment_id}/rescore")

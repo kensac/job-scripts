@@ -10,12 +10,18 @@ api/health.py measures ingest lateness in multiples of the interval, and
 api/worker.py buckets time by it. Two of them imported inside a function to
 dodge the import cycle that reaching created, which is the shape of a
 dependency pointing the wrong way.
+
+It is also the one place below the handlers that writes a task row: a payload
+merge and an admin cancel. Lifecycle writes (claim, progress, park, finish)
+belong to tasks/runtime and api/worker; tests/test_task_writes_owned.py fails
+on an UPDATE of tasks anywhere else.
 """
 
 from __future__ import annotations
 
 import datetime
-from typing import Any
+from collections.abc import Sequence
+from typing import Any, LiteralString
 
 from api import db, events
 
@@ -37,6 +43,59 @@ def enqueue(kind: str, payload: dict[str, Any], dedupe_key: str | None = None) -
     if row:
         events.publish_task(row["id"])
     return row["id"] if row else None
+
+
+def merge_payload(task_id: int, data: dict[str, Any], drop: Sequence[str] = ()) -> None:
+    """Sets top-level payload keys on a task, removing `drop` first.
+
+    Not claim-guarded, deliberately: these keys record work already done or
+    paid for (submitted request ids, collected results, a gate report), and
+    losing them because the claim moved would orphan that work. Runs on the
+    caller's transaction when there is one."""
+    db.execute(
+        "UPDATE tasks SET payload = (payload - %s::text[]) || %s WHERE id = %s",
+        (list(drop), db.jsonb(data), task_id),
+    )
+
+
+def cancel(
+    cancellable: Sequence[str],
+    *,
+    ids: Sequence[int] | None = None,
+    kind: str | None = None,
+    status: str | None = None,
+    source: str | None = None,
+) -> list[int]:
+    """Cancels every task in a `cancellable` status that matches all the given
+    filters, and returns their ids. A running worker notices on its next
+    cancellation check; its own lifecycle writes need status 'running'."""
+    clauses: list[LiteralString] = ["status = ANY(%(cancellable)s)"]
+    params: dict[str, Any] = {"cancellable": list(cancellable)}
+    if ids is not None:
+        clauses.append("id = ANY(%(id)s)")
+        params["id"] = list(ids)
+    if kind is not None:
+        clauses.append("kind = %(kind)s")
+        params["kind"] = kind
+    if status is not None:
+        clauses.append("status = %(status)s")
+        params["status"] = status
+    if source is not None:
+        clauses.append("payload->>'source' = %(source)s")
+        params["source"] = source
+    rows = db.query(
+        f"""
+        UPDATE tasks SET status = 'cancelled', error = 'cancelled by admin',
+                         finished_at = now()
+        WHERE {" AND ".join(clauses)}
+        RETURNING id
+        """,
+        params,
+    )
+    cancelled = [r["id"] for r in rows]
+    for task_id in cancelled:
+        events.publish_task(task_id)
+    return cancelled
 
 
 # What a pull of a source that is off fails with. The task never asked the

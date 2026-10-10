@@ -2,7 +2,7 @@
 
 import pytest
 
-from api import db, review_decision_storage, review_gate, review_gate_records
+from api import db, queue, review_decision_storage, review_gate, review_gate_records
 from api.review_policy_storage import PolicySnapshotUnavailable
 from tests.test_review_gate import configure
 
@@ -94,19 +94,19 @@ def test_one_reference_row_per_job_commits_with_the_plan_or_not_at_all(f, monkey
     # must exist for every job exactly when the plan does.
     configure()
     task = f.make_task("run_filter_batch_chunk")
-    original = db.execute
+    original = queue.merge_payload
 
-    def plan_write_fails(sql, params=None):
-        if sql.startswith("UPDATE tasks SET payload=jsonb_set(payload,'{review_gate}'"):
+    def plan_write_fails(task_id, data, drop=()):
+        if "review_gate" in data:
             raise RuntimeError("plan write failed")
-        return original(sql, params)
+        return original(task_id, data, drop)
 
-    monkeypatch.setattr(db, "execute", plan_write_fails)
+    monkeypatch.setattr(queue, "merge_payload", plan_write_fails)
     with pytest.raises(RuntimeError, match="plan write failed"):
         review_gate.partition(task, "test-hash", JOBS, CONTENTS)
     for table in ("review_gate_decisions", "review_gate_decision_bodies", "review_gate_urls"):
         assert db.query_one(f"SELECT count(*) n FROM {table}")["n"] == 0
-    monkeypatch.setattr(db, "execute", original)
+    monkeypatch.setattr(queue, "merge_payload", original)
     kept, decisions = review_gate.partition(task, "test-hash", JOBS, CONTENTS)
     stored = db.query_one(
         "SELECT count(*) n FROM review_gate_decisions WHERE task_id=%s AND body_id IS NOT NULL",

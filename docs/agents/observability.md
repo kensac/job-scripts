@@ -27,6 +27,17 @@ Cancellation remains an atomic transition from active states. Claiming and
 retry policy belong to `api.worker`; claim-aware writes and progress updates
 belong to `tasks.runtime.lifecycle`.
 
+**A task row is written only by its owners.** `api.worker` claims, requeues,
+reaps and beats. `tasks.runtime` writes progress (`set_progress`,
+`checkpoint`), parks (`park_waiting`, `park_awaiting_batch`) and finishes, each
+behind the claim. `api.queue` inserts (`enqueue`), merges payload keys
+(`merge_payload`, unguarded on purpose: the keys record paid or finished work)
+and cancels. A handler that restates one of these writes drifts from it: the
+filter batch runner kept its own heartbeat with no claim guard, which vouched
+for the run that replaced it. `tests/test_task_writes_owned.py` fails on an
+`UPDATE tasks` anywhere else, and on an `INSERT INTO tasks` outside the
+admission paths it lists with their reasons.
+
 **A worker claims only kinds its own image has a handler for.** A roll goes
 host by host, so for a minute an old image and a new one share the queue. A
 kind the new image added must wait for a host that can run it, rather than be

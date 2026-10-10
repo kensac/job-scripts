@@ -9,7 +9,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
-from api import db, events, health, scoping, task_admission
+from api import db, health, queue, scoping, task_admission
 from api import params as params_
 from api.auth import AuthedUser
 from api.board import user_job_split
@@ -198,27 +198,9 @@ def cancel_tasks(
         raise refuse(400, "NO_SELECTION", "give ids, a kind, a source, or a status")
     if body.status is not None and body.status not in CANCELLABLE:
         raise refuse(400, "NOT_CANCELLABLE", f"status must be one of {', '.join(CANCELLABLE)}")
-    clauses = ["status = ANY(%(cancellable)s)"]
-    params: dict[str, Any] = {"cancellable": list(CANCELLABLE)}
-    for key, value in (("id", body.ids), ("kind", body.kind), ("status", body.status)):
-        if value is not None:
-            clauses.append(f"{key} = ANY(%({key})s)" if key == "id" else f"{key} = %({key})s")
-            params[key] = value
-    if body.source is not None:
-        clauses.append("payload->>'source' = %(source)s")
-        params["source"] = body.source
-    rows = db.query(
-        f"""
-        UPDATE tasks SET status = 'cancelled', error = 'cancelled by admin',
-                         finished_at = now()
-        WHERE {" AND ".join(clauses)}
-        RETURNING id
-        """,
-        params,
+    cancelled = queue.cancel(
+        CANCELLABLE, ids=body.ids, kind=body.kind, status=body.status, source=body.source
     )
-    cancelled = [r["id"] for r in rows]
-    for task_id in cancelled:
-        events.publish_task(task_id)
     return TasksCancelled(
         cancelled=cancelled,
         skipped=[i for i in (body.ids or []) if i not in cancelled],

@@ -27,7 +27,7 @@ private to one of the three modules and is reached through that module.
 
 from __future__ import annotations
 
-from api.queue import enqueue
+from api.queue import enqueue, merge_payload
 from tasks.runtime.batching import (
     AwaitingBatch,
     BatchProvenance,
@@ -86,6 +86,7 @@ __all__ = [
     "finish",
     "has_batch_work",
     "maybe_finalize_parent",
+    "merge_payload",
     "parent_cancelled",
     "park_awaiting_batch",
     "park_waiting",
