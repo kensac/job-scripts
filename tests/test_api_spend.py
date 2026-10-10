@@ -15,6 +15,33 @@ from core import pricing
 NANO = "gpt-5-nano"
 
 
+def _fleet_call(purpose: str, model: str | None, prompt: int, completion: int) -> None:
+    """One fleet batch item, through the ledger's writer."""
+    import uuid
+
+    from api import model_calls
+
+    model_calls.record(
+        [
+            model_calls.Call(
+                purpose,
+                model,
+                model_calls.FLEET,
+                "server",
+                {
+                    "prompt_tokens": prompt,
+                    "completion_tokens": completion,
+                    "total_tokens": prompt + completion,
+                    "cached_tokens": 0,
+                    "cache_write_tokens": 0,
+                },
+                provider_batch_id="batch",
+                custom_id=uuid.uuid4().hex,
+            )
+        ]
+    )
+
+
 @pytest.fixture
 def spend_rows(f):
     """Three calls with hand-checkable costs:
@@ -166,23 +193,8 @@ def test_every_ai_caller_appears_in_spend_by_its_purpose(client, admin_headers):
     and structurally blind to work that is not about a posting. Mail
     classification was $18.49 of real spend writing no verdict row, so the
     largest line item in the system was invisible."""
-    from api import budget
-
-    budget.record_fleet_usage(
-        "mail_classify",
-        "gpt-5.6-luna",
-        1_000_000,
-        100_000,
-        request_usage=[
-            {
-                "input_tokens": 1_000_000,
-                "output_tokens": 100_000,
-                "cached_tokens": 0,
-                "cache_write_tokens": 0,
-            }
-        ],
-    )
-    budget.record_fleet_usage("comp", "gpt-5-nano", 500_000, 50_000)
+    _fleet_call("mail_classify", "gpt-5.6-luna", 1_000_000, 100_000)
+    _fleet_call("comp", "gpt-5-nano", 500_000, 50_000)
 
     body = client.get("/v1/admin/spend?days=30", headers=admin_headers).json()
     purposes = {r["purpose"]: r for r in body["by_purpose"]}
@@ -195,9 +207,7 @@ def test_every_ai_caller_appears_in_spend_by_its_purpose(client, admin_headers):
 def test_a_new_caller_needs_no_wiring_to_show_up(client, admin_headers):
     """The point of the design: grouping is the purpose the hook already
     requires, so a task nobody has thought about yet still reports."""
-    from api import budget
-
-    budget.record_fleet_usage("a_purpose_that_did_not_exist", "gpt-5-mini", 1000, 100)
+    _fleet_call("a_purpose_that_did_not_exist", "gpt-5-mini", 1000, 100)
     body = client.get("/v1/admin/spend?days=30", headers=admin_headers).json()
     assert "a_purpose_that_did_not_exist" in {r["purpose"] for r in body["by_purpose"]}
 
@@ -229,10 +239,10 @@ def test_batched_fleet_work_is_priced_at_the_batch_rate(client, admin_headers):
 def test_an_unpriced_model_is_counted_but_not_costed(client, admin_headers):
     """None means nobody looked the rate up, never zero. A model we cannot
     price must show as calls with an unpriced count, not as free work."""
-    from api import budget, db
+    from api import db
 
-    budget.record_fleet_usage("comp", "some-unreleased-model", 1000, 100)
-    row = db.query_one("SELECT cost_usd FROM api_usage WHERE model = 'some-unreleased-model'")
+    _fleet_call("comp", "some-unreleased-model", 1000, 100)
+    row = db.query_one("SELECT cost_usd FROM model_calls WHERE model = 'some-unreleased-model'")
     assert row["cost_usd"] is None
     body = client.get("/v1/admin/spend?days=30", headers=admin_headers).json()
     comp = next(r for r in body["by_purpose"] if r["purpose"] == "comp")
@@ -240,14 +250,12 @@ def test_an_unpriced_model_is_counted_but_not_costed(client, admin_headers):
 
 
 def test_a_purpose_can_be_opened_to_its_calls(client, admin_headers):
-    """by_purpose was a dead end by construction: nothing renders api_usage
-    rows, so a purpose's total could be read and never opened. The Responses
+    """by_purpose was a dead end by construction: nothing rendered the usage
+    ledger's rows, so a purpose's total could be read and never opened. The Responses
     page is over ai_queries, which cannot see work that produced no verdict -
     which is most of the bill."""
-    from api import budget
-
-    budget.record_fleet_usage("mail_classify", "gpt-5.6-luna", 1_000_000, 100_000)
-    budget.record_fleet_usage("comp", "gpt-5-nano", 1000, 100)
+    _fleet_call("mail_classify", "gpt-5.6-luna", 1_000_000, 100_000)
+    _fleet_call("comp", "gpt-5-nano", 1000, 100)
 
     body = client.get("/v1/admin/spend/calls?purpose=mail_classify", headers=admin_headers).json()
     assert body["totals"]["calls"] == 1
@@ -259,10 +267,8 @@ def test_unpriced_is_its_own_question_not_a_cheap_one(client, admin_headers):
     """A NULL cost is not a cheap call. It means nobody looked the rate up, and
     the set we cannot price is a different question from the set that was
     inexpensive."""
-    from api import budget
-
-    budget.record_fleet_usage("comp", "some-unreleased-model", 1000, 100)
-    budget.record_fleet_usage("comp", "gpt-5-nano", 1000, 100)
+    _fleet_call("comp", "some-unreleased-model", 1000, 100)
+    _fleet_call("comp", "gpt-5-nano", 1000, 100)
 
     unpriced = client.get(
         "/v1/admin/spend/calls?purpose=comp&unpriced=true", headers=admin_headers
@@ -296,8 +302,9 @@ def test_ledger_breakdowns_reconcile_without_verdicts_and_keep_unknown_price(cli
         ("experiment", "  ", None, f"{following_day}T01:30:00Z"),
     ):
         db.execute(
-            "INSERT INTO api_usage (key_source, purpose, model, cost_usd, created_at) "
-            "VALUES ('server', %s, %s, %s, %s)",
+            "INSERT INTO model_calls (key_source, purpose, model, cost_usd, created_at, payer, "
+            "batched, prompt_tokens, completion_tokens, total_tokens, cached_tokens) "
+            "VALUES ('server', %s, %s, %s, %s, 'fleet', false, 0, 0, 0, 0)",
             (purpose, model, cost, timestamp),
         )
     # The DB session's local day must not change the report's UTC buckets.

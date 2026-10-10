@@ -10,7 +10,7 @@ from typing import Any
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
-from api import db, scoping, sorting, user_settings
+from api import db, model_calls, scoping, sorting, user_settings
 from api.auth import AuthedUser
 from api.board import populations
 from api.models import Ok
@@ -117,7 +117,7 @@ def list_users(
                (SELECT COUNT(*) FROM user_filters uf
                 WHERE uf.user_id = u.id AND uf.enabled) AS enabled_filters,
                (SELECT COUNT(*) FROM user_source_set us WHERE us.user_id = u.id) AS sources,
-               COALESCE((SELECT SUM(a.total_tokens) FROM api_usage a
+               COALESCE((SELECT SUM(a.total_tokens) FROM model_calls a
                          WHERE a.user_id = u.id AND a.key_source = 'owner'
                            AND a.created_at > now() - interval '7 days'), 0) AS owner_tokens_week
         FROM users u {user_settings.join("s", "u.id")}
@@ -185,7 +185,8 @@ class UserBudget(BaseModel):
 
 class SpendDay(BaseModel):
     day: datetime.date
-    key_source: str
+    # Null: the call's record did not say whose key.
+    key_source: str | None
     tokens: int
     calls: int
 
@@ -305,24 +306,8 @@ def user_detail(user_id: int, user: AuthedUser = Depends(require_admin)) -> User
                 (groups,),
             ),
         ),
-        spend_by_day=db.query_as(
-            SpendDay,
-            """
-            SELECT created_at::date AS day, key_source,
-                   SUM(total_tokens) AS tokens, COUNT(*) AS calls
-            FROM api_usage WHERE user_id = %s AND created_at > now() - interval '30 days'
-            GROUP BY 1, 2 ORDER BY 1
-            """,
-            (user_id,),
-        ),
-        spend_by_purpose=db.query_as(
-            SpendPurpose,
-            """
-            SELECT purpose, model, SUM(total_tokens) AS tokens, COUNT(*) AS calls
-            FROM api_usage WHERE user_id = %s GROUP BY 1, 2 ORDER BY 3 DESC
-            """,
-            (user_id,),
-        ),
+        spend_by_day=[SpendDay(**r) for r in model_calls.user_spend_by_day(user_id)],
+        spend_by_purpose=[SpendPurpose(**r) for r in model_calls.user_spend_by_purpose(user_id)],
         board=db.query_as(
             BoardStatusCount,
             """

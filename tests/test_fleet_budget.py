@@ -21,10 +21,10 @@ def _put(client, headers, purpose, **body):
 
 def _spend(usd: str, *, fleet: bool = True, user_id=None):
     db.execute(
-        "INSERT INTO api_usage (user_id, key_source, purpose, model, prompt_tokens, "
-        "completion_tokens, total_tokens, cached_tokens, cost_usd) "
-        "VALUES (%s, 'server', 'comp', 'gpt-5-nano', 1, 1, 2, 0, %s)",
-        (None if fleet else user_id, usd),
+        "INSERT INTO model_calls (user_id, payer, key_source, batched, purpose, model, "
+        "prompt_tokens, completion_tokens, total_tokens, cached_tokens, cost_usd) "
+        "VALUES (%s, %s, 'server', true, 'comp', 'gpt-5-nano', 1, 1, 2, 0, %s)",
+        (None if fleet else user_id, "fleet" if fleet else "user", usd),
     )
 
 

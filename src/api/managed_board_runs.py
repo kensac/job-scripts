@@ -357,7 +357,7 @@ def _usage_position(sponsor_id: int) -> _UsagePosition:
         _UsagePosition,
         """
         SELECT
-          COALESCE((SELECT SUM(a.total_tokens) FROM api_usage a
+          COALESCE((SELECT SUM(a.total_tokens) FROM model_calls a
                     LEFT JOIN managed_boards b ON b.id = a.managed_board_id
                     WHERE a.key_source = 'owner'
                       AND a.created_at >= now() - interval '7 days'
@@ -546,12 +546,14 @@ def latest(board_id: int) -> ManagedBoardRun | None:
 def cost(board_id: int) -> ManagedBoardCost:
     row = db.query_one_as(
         _CostRow,
-        "SELECT count(*) AS calls, COALESCE(sum(total_tokens), 0) AS total_tokens, "
+        "SELECT COALESCE(sum(requests), 0) AS calls, "
+        "COALESCE(sum(total_tokens), 0) AS total_tokens, "
         "COALESCE(sum(cost_usd), 0) AS cost_usd, "
-        "count(*) FILTER (WHERE created_at >= now() - interval '7 days') AS week_calls, "
+        "COALESCE(sum(requests) FILTER (WHERE created_at >= now() - interval '7 days'), 0) "
+        "AS week_calls, "
         "COALESCE(sum(total_tokens) FILTER (WHERE created_at >= now() - interval '7 days'), 0) AS week_tokens, "
         "COALESCE(sum(cost_usd) FILTER (WHERE created_at >= now() - interval '7 days'), 0) AS week_cost_usd "
-        "FROM api_usage WHERE managed_board_id = %s",
+        "FROM model_calls WHERE managed_board_id = %s",
         (board_id,),
     )
     assert row is not None

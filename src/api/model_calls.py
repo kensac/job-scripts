@@ -169,6 +169,46 @@ def record_batch_items(results: Iterable[BatchResult]) -> None:
     record(calls)
 
 
+# --- Readers ------------------------------------------------------------------
+#
+# A row is one request except a backfilled batch that kept no per-request
+# record, which stands for `requests` of them, so a count of calls is
+# SUM(requests), never COUNT(*). key_source is NULL on calls whose record did
+# not say whose key (live filter answers before 2026-09-13).
+
+
+def user_spend_by_day(user_id: int) -> list[dict[str, Any]]:
+    """A person's last 30 days, by day (the session's timezone) and key."""
+    return db.query(
+        """
+        SELECT created_at::date AS day, key_source,
+               SUM(total_tokens) AS tokens, SUM(requests) AS calls,
+               COALESCE(SUM(cost_usd), 0) AS cost_usd,
+               COALESCE(SUM(requests) FILTER (WHERE cost_usd IS NULL), 0) AS unpriced_calls
+        FROM model_calls WHERE user_id = %s AND created_at > now() - interval '30 days'
+        GROUP BY 1, 2 ORDER BY 1
+        """,
+        (user_id,),
+    )
+
+
+def user_spend_by_purpose(user_id: int) -> list[dict[str, Any]]:
+    """A person's calls over all time, by purpose and model."""
+    return db.query(
+        """
+        SELECT purpose, model, SUM(total_tokens) AS tokens, SUM(requests) AS calls,
+               COALESCE(SUM(cost_usd), 0) AS cost_usd,
+               COALESCE(SUM(cached_tokens), 0) AS cached_tokens,
+               SUM(cache_write_tokens) AS cache_write_tokens,
+               COALESCE(SUM(requests) FILTER (WHERE cache_write_tokens IS NULL), 0)
+                   AS cache_write_unknown_calls,
+               COALESCE(SUM(requests) FILTER (WHERE cost_usd IS NULL), 0) AS unpriced_calls
+        FROM model_calls WHERE user_id = %s GROUP BY 1, 2 ORDER BY 3 DESC
+        """,
+        (user_id,),
+    )
+
+
 # --- Backfill -----------------------------------------------------------------
 #
 # Copies the calls made before this table into it, each era from the record

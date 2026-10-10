@@ -24051,7 +24051,7 @@
     "/v1/admin/spend/calls": {
       "get": {
         "summary": "Spend Calls",
-        "description": "Recorded usage rows; null cost means unknown price, not a free call.",
+        "description": "Recorded calls; null cost means unknown price, not a free call.",
         "operationId": "spend_calls_v1_admin_spend_calls_get",
         "parameters": [
           {
@@ -52910,7 +52910,14 @@
             "title": "Day"
           },
           "key_source": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Key Source"
           },
           "tokens": {
@@ -54991,12 +54998,23 @@
             "title": "Model"
           },
           "key_source": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Key Source"
           },
           "batched": {
             "type": "boolean",
             "title": "Batched"
+          },
+          "requests": {
+            "type": "integer",
+            "title": "Requests"
           },
           "prompt_tokens": {
             "type": "integer",
@@ -55056,6 +55074,7 @@
           "model",
           "key_source",
           "batched",
+          "requests",
           "prompt_tokens",
           "completion_tokens",
           "total_tokens",
@@ -56148,7 +56167,14 @@
             "title": "Day"
           },
           "key_source": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Key Source"
           },
           "tokens": {
