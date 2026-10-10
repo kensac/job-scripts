@@ -144,9 +144,9 @@ reader:
      where exact: a fetch whose rebuilt input equals the stored copy byte
      for byte, and a call by the joins in the ledger section below. Text
      an answer saw that no fetch holds becomes a fetch first (method
-     `verification`, the answer's id), but only under a newer fetch of the
-     url, so no reader's current page changes; an answer newer than every
-     fetch of its url keeps its copy.
+     `verification`, the answer's id). Where that answer is newer than every
+     fetch of its url, its text becomes the url's current page, because it is
+     the newest text the system saw; nothing is kept only as a copy.
    - Writers store no copy of the input or the usage. Readers read both
      through `ledger_rows`: an answer with a fetch shows the input rebuilt
      from it, an answer with a call shows the call's numbers on the first
@@ -276,9 +276,14 @@ today writes a verdict and no usage row at all.
 
 **How pages read it.** /admin/spend's ledger, /admin/spend/calls and the
 budget read `model_calls`. The verdict diagnostics (by check type, reach,
-waste) read `ledger_rows`, where an answer's usage is its call's on the
-first answer naming it, so their numbers are the ones the copies gave and a
-call is summed once; "calls" there still counts answers.
+waste) and the review gate's cost read `model_calls.answers_with_usage`,
+where an answer's usage is its call's on the first answer naming it, so
+their numbers are the ones the copies gave and a call is summed once;
+"calls" there still counts answers. It is one join to the call and one
+aggregate for the first answer per call, not `ledger_rows`' per-row lookups,
+which took 11 min 51 s against 6.6 s for the 30-day cuts on production on
+2026-10-10: a sum over a window reads the join, a page of rows reads the
+view.
 `tests/test_ledger_rows_pointers.py` holds the page equal for the same
 answers stored as copies and as pointers. Every page keeps the one-pass shape
 (engineering-standards.md, `tests/test_spend_stats_single_pass.py`), and a

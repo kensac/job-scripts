@@ -101,25 +101,30 @@ def test_text_no_fetch_holds_becomes_a_fetch_before_its_copy_points_at_it(f):
         config_name="filter-batch",
     )
     f.make_fetch(url, content="the page as it is now " * 20)
-    # Newer than every fetch of its url: storing its text would make it the
-    # url's current page, so it keeps its copy.
+    # Newer than every fetch of its url: its text is the newest the system
+    # saw, so it becomes the url's current page.
     newest = _answer("https://links.test/newest", "closed", seen, config_name="reverify")
     f.make_fetch("https://links.test/newest", content="an earlier page " * 20)
     db.execute("UPDATE page_fetches SET id = id - 1000 WHERE url = 'https://links.test/newest'")
 
     progress = _run(f)
 
-    assert _pointer(newest)["page_fetch_id"] is None
+    assert _pointer(newest)["page_fetch_id"] == newest
+    current = db.query_one(
+        "SELECT id FROM page_texts WHERE url = 'https://links.test/newest' ORDER BY id DESC LIMIT 1"
+    )
+    assert current["id"] == newest
     stored = db.query(
         "SELECT id, method, content FROM page_fetches WHERE method = 'verification' ORDER BY id"
     )
     assert [(s["id"], s["content"]) for s in stored] == [
         (closed, seen),
         (custom, "an older custom page " * 20),
+        (newest, seen),
     ], "one fetch per text, under the first answer that saw it, without its header"
     assert _pointer(closed)["page_fetch_id"] == _pointer(clearance)["page_fetch_id"] == closed
     assert _pointer(custom)["page_fetch_id"] == custom
-    assert progress["linked"]["fetches_stored"] == 2
+    assert progress["linked"]["fetches_stored"] == 3
     newest = db.query_one(
         "SELECT input_content FROM page_texts WHERE url = %s ORDER BY id DESC LIMIT 1", (url,)
     )
