@@ -74,6 +74,34 @@ def connection() -> Iterator[Connection[dict[str, Any]]]:
 
 
 @contextmanager
+def statement() -> Iterator[Connection[dict[str, Any]]]:
+    """A connection for exactly one statement: the open transaction's when
+    there is one, otherwise a pooled connection in autocommit.
+
+    One statement is atomic either way, but an implicit transaction costs
+    two extra round trips: BEGIN before it and COMMIT when the pool takes the
+    connection back. On a host far from the database that is most of the
+    cost. Measured from a laptop against production on 2026-10-10: 339 ms a
+    statement in an implicit transaction, 112 ms in autocommit. The worker's
+    housekeeping is made of such statements, and on oci (about 103 ms from
+    the database) it held the worker about 28 s of every minute between tasks.
+
+    Only for one statement. A block that runs several and relies on them
+    committing together uses transaction(), or connection() inside one."""
+    active = _transaction_connection.get()
+    if active is not None:
+        yield active
+        return
+    with pool.connection() as conn:
+        conn.autocommit = True
+        try:
+            yield conn
+        finally:
+            if not conn.closed:
+                conn.autocommit = False
+
+
+@contextmanager
 def transaction() -> Iterator[None]:
     """Keep helper calls and nested board writes on one atomic connection."""
     with connection() as conn, conn.transaction():
