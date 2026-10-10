@@ -20,8 +20,6 @@ import requests
 
 from api import oauth
 from core.mail.importer import (
-    MAX_BODY_CHARS,
-    MAX_HTML_CHARS,
     ImportedMessage,
     clean_text,
     html_to_text,
@@ -111,8 +109,8 @@ def _body(payload: dict[str, Any]) -> tuple[str | None, str | None]:
     markup = "\n".join(html) if html else None
     text = "\n".join(plain) if plain else html_to_text(markup or "")
     return (
-        clean_text(text)[:MAX_BODY_CHARS] or None,
-        markup[:MAX_HTML_CHARS] if markup else None,
+        clean_text(text) or None,
+        markup or None,
     )
 
 

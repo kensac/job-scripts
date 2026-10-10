@@ -373,6 +373,11 @@ class Evidence(BaseModel):
     body_chars: int
 
 
+# What the stored body was capped at until bodies were kept whole, so the
+# evidence response stays the size it was. body_chars still says the length.
+_MENTION_CHARS = 20_000
+
+
 def _mention(body: str | None, needle: str | None) -> Mention | None:
     """The whole message, and WHERE the company is mentioned in it.
 
@@ -385,10 +390,10 @@ def _mention(body: str | None, needle: str | None) -> Mention | None:
     the company does not appear verbatim, which is common: the classifier reads
     it off a signature or a logo as often as out of a sentence.
 
-    The body is already capped at MAX_BODY_CHARS on the way in, so this cannot
-    be unbounded no matter how long the original was.
+    Bounded at _MENTION_CHARS: the body is stored whole, and this goes out once
+    per piece of evidence in a list.
     """
-    text = (body or "").strip()
+    text = (body or "").strip()[:_MENTION_CHARS]
     if not text:
         return None
     term = (needle or "").strip()
