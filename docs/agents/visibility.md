@@ -7,9 +7,10 @@ endpoint keeps to.
 
 `user_jobs` answers two questions and is named for one of them.
 
-An UNTOUCHED row is the working set. It makes the posting worth paying to
-check (`core/store.py` `ON_A_BOARD`) and it is where the re-verification sweep
-finds its candidates. It does not make the posting visible: FULL admits an
+An UNTOUCHED row is the working set, and its own table is
+`user_job_working_set`. Paid scope (`core/store.py` `ON_A_BOARD`) reads that
+table plus person rows, so it does not depend on machine rows staying in
+`user_jobs`. It is also where the re-verification sweep finds its candidates. It does not make the posting visible: FULL admits an
 untouched row only through its structural branch, which never references
 `user_jobs`. Deleting one removes nothing from anybody's board.
 

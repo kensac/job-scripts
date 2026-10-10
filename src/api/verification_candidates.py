@@ -5,7 +5,7 @@ from api.board import criteria
 from api.review_gate import load_policy
 from core import screening
 from core.review_gate import VolumeGate
-from core.store import AI_ELIGIBLE_JOB
+from core.store import AI_ELIGIBLE_JOB, ON_A_BOARD
 
 # A board's enforced title gate, and the screen filter_review_gate applies to
 # the target's prompt: a posting either skips would never be judged for it.
@@ -61,7 +61,7 @@ REACHABLE = f"""
     (NOT %(verification_reachability_gate_enabled)s AND {AI_ELIGIBLE_JOB.format(job="j")})
     OR (%(verification_reachability_gate_enabled)s AND (
     NOT EXISTS (SELECT 1 FROM sources source WHERE source.name = j.source)
-    OR EXISTS (SELECT 1 FROM user_jobs tracked WHERE tracked.job_id = j.id)
+    OR {ON_A_BOARD.format(job="j")}
     OR EXISTS (
         SELECT 1 FROM verification_targets target
         WHERE target.source = j.source
