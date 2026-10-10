@@ -76,8 +76,6 @@ class TestStore:
         row = db.query_one("SELECT * FROM job_embeddings WHERE url = %s", (url,))
         assert row is not None
         assert row["model"] == EMBEDDING_MODEL
-        # The call's cost is the ledger's (model_calls), not a share on the row.
-        assert row["cost_usd"] is None
 
     def test_re_embedding_replaces_rather_than_raising(self, f):
         _, url = f.make_ready_job(content=CONTENT)

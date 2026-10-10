@@ -54,7 +54,7 @@ def test_declared_efforts_do_not_contradict_themselves():
 
 def test_model_names_are_globally_unique():
     """The only key a usage row carries is the model string - neither
-    ai_queries nor api_usage records a provider - so two providers publishing
+    ai_queries nor model_calls records a provider - so two providers publishing
     the same name would silently cross-price. The registry refuses to build
     instead, which is also what stops a second region being added for a model
     without first recording which endpoint served the call."""

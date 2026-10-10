@@ -280,10 +280,10 @@ def make_embedding(url: str, vector: list[float] | None = None, *, seed: float =
         (url,),
     )
     db.execute(
-        "INSERT INTO job_embeddings (url, embedding, model, content_hash, content_row_id, "
-        "input_tokens) VALUES (%s, %s, %s, %s, %s, %s) "
+        "INSERT INTO job_embeddings (url, embedding, model, content_hash, content_row_id) "
+        "VALUES (%s, %s, %s, %s, %s) "
         "ON CONFLICT (url) DO UPDATE SET embedding = EXCLUDED.embedding",
-        (url, str(vector), EMBEDDING_MODEL, "hash", (current or {}).get("id"), 100),
+        (url, str(vector), EMBEDDING_MODEL, "hash", (current or {}).get("id")),
     )
 
 

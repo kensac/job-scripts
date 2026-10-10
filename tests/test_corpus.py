@@ -319,7 +319,7 @@ def test_the_administrative_view_aggregates_over_every_user():
     counted = _one(
         "SELECT count(DISTINCT u.id) FROM users u "
         "LEFT JOIN user_jobs uj ON uj.user_id = u.id "
-        "LEFT JOIN api_usage a ON a.user_id = u.id"
+        "LEFT JOIN model_calls a ON a.user_id = u.id"
     )
     assert counted == users, f"{users - counted} users vanish from a left-joined aggregate"
 

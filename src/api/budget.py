@@ -237,7 +237,7 @@ def fleet_spend_this_week() -> Decimal:
     """Fleet spend since the start of the current week, in UTC.
 
     user_id IS NULL is what makes a call fleet work rather than a person's,
-    managed boards included, as it was when this read api_usage. A call with
+    managed boards included, as the old usage ledger counted it. A call with
     no recorded payer is older than any week this is asked about.
     """
     row = db.query_one(

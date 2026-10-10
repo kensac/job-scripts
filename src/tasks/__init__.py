@@ -41,7 +41,6 @@ from tasks.managed_boards import handle_run_managed_board, handle_run_managed_bo
 from tasks.page_fetch_move import handle_move_page_fetches
 from tasks.requirements import handle_extract_requirements
 from tasks.uploads import handle_extract_upload
-from tasks.usage_copies import handle_clear_usage_copies
 from tasks.verify import (
     handle_reverify_chunk,
     handle_reverify_open,
@@ -81,7 +80,6 @@ HANDLERS = {
     "move_page_fetches": handle_move_page_fetches,
     "backfill_mail_pointers": handle_backfill_mail_pointers,
     "merge_olm_twins": handle_merge_olm_twins,
-    "clear_usage_copies": handle_clear_usage_copies,
 }
 
 __all__ = ["HANDLERS"]

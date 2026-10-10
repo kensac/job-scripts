@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import psycopg
 import pytest
 
 from api import db
@@ -201,17 +200,6 @@ def test_publishing_without_sources_rolls_back_revision(client, admin_headers):
     assert db.query_one(
         "SELECT name, revision FROM managed_boards WHERE id = %s", (board["id"],)
     ) == {"name": "Software Engineering", "revision": 1}
-
-
-def test_api_usage_subject_constraint_accepts_fleet_user_or_board_not_both(client, admin_headers):
-    board = _create(client, admin_headers, sources=[]).json()
-    user_id = board["sponsor_user_id"]
-    base = "INSERT INTO api_usage (user_id, managed_board_id, key_source, purpose) VALUES (%s, %s, 'fleet', 'test')"
-    db.execute(base, (None, None))
-    db.execute(base, (user_id, None))
-    db.execute(base, (None, board["id"]))
-    with pytest.raises(psycopg.errors.CheckViolation):
-        db.execute(base, (user_id, board["id"]))
 
 
 def test_source_delete_reports_and_force_removes_managed_board_membership(client, admin_headers):
