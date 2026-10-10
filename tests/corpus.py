@@ -130,7 +130,10 @@ class _Schema:
         for row in db.query(
             "SELECT table_name, column_name, data_type, udt_name, is_nullable, "
             "is_identity, column_default FROM information_schema.columns "
-            "WHERE table_schema = 'public' ORDER BY table_name, ordinal_position"
+            "WHERE table_schema = 'public' AND table_name IN ("
+            "  SELECT table_name FROM information_schema.tables "
+            "  WHERE table_schema = 'public' AND table_type = 'BASE TABLE') "
+            "ORDER BY table_name, ordinal_position"
         ):
             table = row["table_name"]
             self.columns.setdefault(table, []).append(row)

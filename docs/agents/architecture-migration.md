@@ -66,6 +66,7 @@ real only relocates the problem.
 | 5 | Files move to the shape | **Done.** `tasks` is a sibling of `api` and `core`; domain seams, not directory names, own the remaining moves |
 | 6 | The long files are split | **Done for the named multi-job modules.** `resolve.py` is a 160-line router, `health.py` an 85-line aggregator, and `jobs.py` a 22-line ordered aggregator |
 | 7 | Every operation declares what it returns | **Done 2026-09-11.** 188 of 190 declare a model; the other two serve a file and the schema itself. Guarded, including against a `Decimal` field and a name a generator cannot use |
+| 8 | One kind of record per table | **In progress.** `ai_queries` holds page text, verdicts and call usage; readers move to a name per kind before storage splits. See below |
 
 **The API contract was the invariant, and is now a price.** `openapi.json` is
 canon and `tests/test_openapi_current.py` fails the build when routes and
@@ -86,6 +87,31 @@ Nothing in phases 6 or 7 needs it. They are a module split and a row type,
 both of which stop at this repository's edge. Take the permission when a
 phase can say which operation, which consumer, and why the shape it has now
 makes the work worse.
+
+## Phase 8: one kind of record per table
+
+`ai_queries` holds three kinds of record: page text (`check_type =
+'content'`, 869,276 rows on 2026-10-09), decided answers about a posting
+(about 1.9 million), and the token usage and cost of every call, written on
+the answer rows. Most answer rows also carry a copy of the page text they
+judged; 11,157 urls had text only on an answer row, so page text cannot be
+split off by moving the content rows alone.
+
+The order is readers first, storage second. A reader names the kind it reads
+through a view, so changing the storage behind a kind changes the view and no
+reader:
+
+1. `verdicts`: decided answers. Done.
+2. Page text, the same way, after the 11,157 urls get a content row.
+3. Page text as its own table; an answer points at the page it judged
+   instead of copying it.
+4. Call usage as one ledger that other tables point at instead of copying
+   cost into themselves.
+
+A failed attempt is a call, not a verdict, so readers that count calls
+(spend, review gate outcomes) stay on `ai_queries` until step 4.
+`tests/test_verdicts_view.py` fails when a new reader restates which rows
+are answers instead of reading the view.
 
 ## What may be done unattended
 

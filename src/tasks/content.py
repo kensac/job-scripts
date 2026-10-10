@@ -47,7 +47,7 @@ async def handle_fetch_missing_content(task_id: int, payload: dict[str, Any]) ->
           -- the window above never saw it: 40 gone postings were re-fetched
           -- and re-verdicted every hour, 743 rows in a day (2026-09-06).
           AND NOT EXISTS (
-            SELECT 1 FROM ai_queries q WHERE q.url = j.url
+            SELECT 1 FROM verdicts q WHERE q.url = j.url
               AND q.check_type = 'closed' AND q.status = 'rejected')
         ORDER BY j.date_posted DESC NULLS LAST
         LIMIT %s

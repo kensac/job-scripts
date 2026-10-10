@@ -223,8 +223,8 @@ def decided_custom_urls(urls: list[str], prompt_hash: str, model: str | None = N
         rows = conn.execute(
             "SELECT DISTINCT ON (url) url, "
             "CASE WHEN instructions IS NULL THEN instructions_id END AS instructions_id "
-            "FROM ai_queries WHERE url = ANY(%s) AND check_type = 'custom' "
-            f"AND prompt_hash = %s{clause} AND status IN ('passed', 'rejected') "
+            "FROM verdicts WHERE url = ANY(%s) AND check_type = 'custom' "
+            f"AND prompt_hash = %s{clause} "
             "ORDER BY url, id DESC",
             params,
         ).fetchall()
@@ -365,11 +365,11 @@ AI_ELIGIBLE_JOB = (
 # a posting whose verdicts age out silently reads as unverified here and
 # drops out of both extractors, then re-enters them at cost once re-verified.
 VERIFIED_OPEN = """
-    (SELECT lc.status FROM ai_queries lc
-      WHERE lc.url = {url} AND lc.check_type = 'closed' AND lc.status IN ('passed', 'rejected')
+    (SELECT lc.status FROM verdicts lc
+      WHERE lc.url = {url} AND lc.check_type = 'closed'
       ORDER BY lc.id DESC LIMIT 1) = 'passed'
-    AND (SELECT lc.status FROM ai_queries lc
-      WHERE lc.url = {url} AND lc.check_type = 'clearance' AND lc.status IN ('passed', 'rejected')
+    AND (SELECT lc.status FROM verdicts lc
+      WHERE lc.url = {url} AND lc.check_type = 'clearance'
       ORDER BY lc.id DESC LIMIT 1) = 'passed'
 """
 

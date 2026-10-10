@@ -150,6 +150,18 @@ Per-table storage settings (autovacuum thresholds, fillfactor) live in the
 migration that needs them, with the measurement that chose the value, because
 autogenerate does not see them.
 
+## A table that holds several kinds of record has a view per kind
+
+Readers name the kind through the view (`verdicts` over `ai_queries`), not
+the predicate that picks it out. The view is created in a migration with
+`CREATE OR REPLACE VIEW`, which takes only ACCESS SHARE on the table; a plain
+view is inlined by the planner, so partial indexes whose predicate the view
+implies still serve its readers (checked with EXPLAIN on production for
+`idx_ai_queries_latest_verdict` and `idx_ai_queries_latest_custom`). Define
+the view by what it excludes when the included set is a registry, so a new
+registration is included without a migration. Autogenerate does not see
+views, and the test corpus and sync tools read base tables only.
+
 ## Derived state is not schema
 
 Do not add a column for something derivable from rows you already have. A

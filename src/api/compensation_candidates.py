@@ -7,8 +7,8 @@ from core.store import AI_ELIGIBLE_JOB
 TARGETS = f"""
 latest_filter AS MATERIALIZED (
     SELECT DISTINCT ON (url, prompt_hash) url, prompt_hash, status
-    FROM ai_queries
-    WHERE check_type = 'custom' AND status IN ('passed', 'rejected')
+    FROM verdicts
+    WHERE check_type = 'custom'
       AND prompt_hash = ANY(ARRAY(SELECT prompt_hash FROM user_filters WHERE enabled))
     ORDER BY url, prompt_hash, id DESC
 ),

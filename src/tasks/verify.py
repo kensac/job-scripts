@@ -148,8 +148,8 @@ def _reuse_unchanged(model: str, fetched: list[tuple[str, str]], jobs: dict[str,
     latest: dict[str, dict[str, dict[str, Any]]] = {}
     for row in db.query(
         "SELECT DISTINCT ON (url, check_type) url, check_type, status, reason, request_sha256 "
-        "FROM ai_queries WHERE url = ANY(%s) AND check_type IN ('closed', 'clearance') "
-        "AND status IN ('passed', 'rejected') ORDER BY url, check_type, id DESC",
+        "FROM verdicts WHERE url = ANY(%s) AND check_type IN ('closed', 'clearance') "
+        "ORDER BY url, check_type, id DESC",
         (list(questions),),
     ):
         latest.setdefault(row["url"], {})[row["check_type"]] = row
@@ -182,9 +182,9 @@ def _newer_evidence(result, check: str) -> bool:
         return False
     return bool(
         db.query_one(
-            "SELECT 1 FROM ai_queries q JOIN ai_batches b ON b.provider_batch_id = %s "
+            "SELECT 1 FROM verdicts q JOIN ai_batches b ON b.provider_batch_id = %s "
             "WHERE q.url = %s AND q.check_type = %s "
-            "AND q.status IN ('passed', 'rejected') AND q.created_at > b.submitted_at LIMIT 1",
+            "AND q.created_at > b.submitted_at LIMIT 1",
             (result.batch_id, result.custom_id, check),
         )
     )
@@ -401,7 +401,7 @@ async def handle_reverify_open(task_id: int, payload: dict[str, Any]) -> None:
             f"""
             SELECT j.url, j.company, j.title FROM jobs j
             WHERE j.active AND {AI_ELIGIBLE_JOB.format(job="j")} AND EXISTS (
-                SELECT 1 FROM ai_queries q WHERE q.url = j.url
+                SELECT 1 FROM verdicts q WHERE q.url = j.url
                   AND q.check_type = 'closed' AND q.status = 'passed')
             ORDER BY j.id
             """
@@ -530,10 +530,10 @@ def _reuse_near_copies(task_id: int, rows: list[dict[str, Any]]) -> list[dict[st
             "SELECT DISTINCT ON (j.source, j.near_copy_key) j.source, j.near_copy_key, j.url "
             "FROM jobs j WHERE (j.source, j.near_copy_key) IN "
             "(SELECT * FROM unnest(%s::text[], %s::text[])) AND NOT (j.url = ANY(%s::text[])) "
-            "AND EXISTS (SELECT 1 FROM ai_queries c WHERE c.url = j.url "
-            "AND c.check_type = 'closed' AND c.status IN ('passed', 'rejected')) "
-            "AND EXISTS (SELECT 1 FROM ai_queries c WHERE c.url = j.url "
-            "AND c.check_type = 'clearance' AND c.status IN ('passed', 'rejected')) "
+            "AND EXISTS (SELECT 1 FROM verdicts c WHERE c.url = j.url "
+            "AND c.check_type = 'closed') "
+            "AND EXISTS (SELECT 1 FROM verdicts c WHERE c.url = j.url "
+            "AND c.check_type = 'clearance') "
             "ORDER BY j.source, j.near_copy_key, j.id DESC",
             (sources, digests, list(keys)),
         )
@@ -567,17 +567,17 @@ def _copy_twin_verdicts(reuse: list[tuple[dict[str, Any], str]]) -> None:
         (row["url"], row["check_type"]): row
         for row in db.query(
             "SELECT DISTINCT ON (url, check_type) url, check_type, status, reason "
-            "FROM ai_queries WHERE url = ANY(%s) AND check_type IN ('closed', 'clearance') "
-            "AND status IN ('passed', 'rejected') ORDER BY url, check_type, id DESC",
+            "FROM verdicts WHERE url = ANY(%s) AND check_type IN ('closed', 'clearance') "
+            "ORDER BY url, check_type, id DESC",
             (twin_urls,),
         )
     }
     customs: dict[str, list[dict[str, Any]]] = {}
     for row in db.query(
         "SELECT DISTINCT ON (q.url, q.prompt_hash, q.model) q.url, q.prompt_hash, q.model, "
-        "q.filter_name, q.status, q.reason, q.parsed_json FROM ai_queries q "
+        "q.filter_name, q.status, q.reason, q.parsed_json FROM verdicts q "
         "WHERE q.url = ANY(%s) AND q.check_type = 'custom' "
-        "AND q.status IN ('passed', 'rejected') AND q.prompt_hash IN ("
+        "AND q.prompt_hash IN ("
         "SELECT prompt_hash FROM managed_boards WHERE published "
         "UNION SELECT prompt_hash FROM user_filters WHERE enabled) "
         "ORDER BY q.url, q.prompt_hash, q.model, q.id DESC",
@@ -587,8 +587,8 @@ def _copy_twin_verdicts(reuse: list[tuple[dict[str, Any], str]]) -> None:
     decided = {
         (row["url"], row["prompt_hash"], row["model"])
         for row in db.query(
-            "SELECT DISTINCT url, prompt_hash, model FROM ai_queries WHERE url = ANY(%s) "
-            "AND check_type = 'custom' AND status IN ('passed', 'rejected')",
+            "SELECT DISTINCT url, prompt_hash, model FROM verdicts WHERE url = ANY(%s) "
+            "AND check_type = 'custom'",
             ([job["url"] for job, _ in reuse],),
         )
     }
@@ -646,28 +646,26 @@ async def handle_verify_new(task_id: int, payload: dict[str, Any]) -> None:
             WITH {verification_candidates.TARGETS}, candidates AS (
             SELECT j.url, j.source, j.company, j.title, q.input_content,
                    NOT EXISTS (
-                       SELECT 1 FROM ai_queries c WHERE c.url = j.url
-                         AND c.check_type = 'closed'
-                         AND c.status IN ('passed', 'rejected')) AS needs_closed,
+                       SELECT 1 FROM verdicts c WHERE c.url = j.url
+                         AND c.check_type = 'closed') AS needs_closed,
                    NOT EXISTS (
-                       SELECT 1 FROM ai_queries c WHERE c.url = j.url
-                         AND c.check_type = 'clearance'
-                         AND c.status IN ('passed', 'rejected')) AS needs_clearance
+                       SELECT 1 FROM verdicts c WHERE c.url = j.url
+                         AND c.check_type = 'clearance') AS needs_clearance
             FROM jobs j
             {CONTENT_LATERAL.format(url="j.url", columns="input_content")}
             WHERE j.active AND {verification_candidates.REACHABLE}
               AND NOT (j.url = ANY(%(in_flight)s::text[])) AND (
                 NOT EXISTS (
-                    SELECT 1 FROM ai_queries c WHERE c.url = j.url
-                      AND c.check_type = 'closed' AND c.status IN ('passed', 'rejected'))
+                    SELECT 1 FROM verdicts c WHERE c.url = j.url
+                      AND c.check_type = 'closed')
                 -- Short-circuited pipelines (and any upstream verdict that later
                 -- flips to passing) leave downstream checks MISSING, not false;
                 -- a job invisible for want of a clearance verdict never heals
                 -- unless the sweep looks for holes in every check, not just the
                 -- first one.
                 OR NOT EXISTS (
-                    SELECT 1 FROM ai_queries c WHERE c.url = j.url
-                      AND c.check_type = 'clearance' AND c.status IN ('passed', 'rejected'))
+                    SELECT 1 FROM verdicts c WHERE c.url = j.url
+                      AND c.check_type = 'clearance')
             )
             -- Freshest first, as the content sweep already selects. The cap
             -- makes this a priority queue, and `j.id` is ingest order, so a
@@ -760,8 +758,8 @@ async def handle_verify_new(task_id: int, payload: dict[str, Any]) -> None:
             settled = {
                 row["check_type"]
                 for row in db.query(
-                    "SELECT DISTINCT check_type FROM ai_queries WHERE url = %s "
-                    "AND check_type IN ('closed', 'clearance') AND status IN ('passed', 'rejected')",
+                    "SELECT DISTINCT check_type FROM verdicts WHERE url = %s "
+                    "AND check_type IN ('closed', 'clearance')",
                     (res.custom_id,),
                 )
             }

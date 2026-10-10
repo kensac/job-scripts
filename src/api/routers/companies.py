@@ -283,8 +283,8 @@ _OPEN_SQL = """
 WITH latest AS (
     SELECT DISTINCT ON (j.id) lower(btrim(j.company)) AS company_key,
            a.status, a.created_at
-    FROM ai_queries a JOIN jobs j ON j.url = a.url
-    WHERE a.check_type = 'closed' AND a.status IN ('passed', 'rejected')
+    FROM verdicts a JOIN jobs j ON j.url = a.url
+    WHERE a.check_type = 'closed'
       AND lower(btrim(j.company)) = ANY(%(keys)s)
     ORDER BY j.id, a.id DESC
 )

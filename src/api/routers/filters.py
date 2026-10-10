@@ -445,10 +445,9 @@ def run_all_filters(user: AuthedUser = Depends(require_user)) -> RunQueued:
 _PRESET_COVERAGE_SQL = """
 WITH q AS (
     SELECT j.id AS job_id, j.url AS url, a.check_type, a.status, a.id AS qid
-    FROM ai_queries a
+    FROM verdicts a
     JOIN jobs j ON j.url = a.url
     WHERE j.active AND a.check_type IN ('closed', 'clearance')
-      AND a.status IN ('passed', 'rejected')
 ), latest AS (
     -- Deduping on jobs.id rather than the url text is load-bearing for speed,
     -- not tidiness: the url-keyed version of this pair of queries measured
@@ -463,9 +462,8 @@ WITH q AS (
     GROUP BY job_id HAVING count(*) = 2
 ), judged AS (
     SELECT DISTINCT ON (url, prompt_hash) url, prompt_hash, status
-    FROM ai_queries
+    FROM verdicts
     WHERE check_type = 'custom' AND prompt_hash = ANY(%(hashes)s)
-      AND status IN ('passed', 'rejected')
     ORDER BY url, prompt_hash, id DESC
 )
 SELECT jd.prompt_hash,
@@ -479,10 +477,9 @@ GROUP BY jd.prompt_hash
 _ELIGIBLE_SQL = """
 WITH q AS (
     SELECT j.id AS job_id, a.check_type, a.status, a.id AS qid
-    FROM ai_queries a
+    FROM verdicts a
     JOIN jobs j ON j.url = a.url
     WHERE j.active AND a.check_type IN ('closed', 'clearance')
-      AND a.status IN ('passed', 'rejected')
 ), latest AS (
     SELECT DISTINCT ON (job_id, check_type) job_id, check_type, status
     FROM q ORDER BY job_id, check_type, qid DESC

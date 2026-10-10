@@ -75,9 +75,9 @@ def first_closed_sql(*, one_source: bool = False) -> str:
     return f"""
 WITH q AS (
     SELECT j.source AS source, j.id AS job_id, a.status, a.id AS qid
-    FROM ai_queries a
+    FROM verdicts a
     JOIN jobs j ON j.url = a.url
-    WHERE a.check_type = 'closed' AND a.status IN ('passed', 'rejected') {where}
+    WHERE a.check_type = 'closed' {where}
 ), firsts AS (
     SELECT DISTINCT ON (job_id) source, status FROM q ORDER BY job_id, qid ASC
 )

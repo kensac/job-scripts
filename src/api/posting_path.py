@@ -105,8 +105,8 @@ def _latest(url: str, check: str) -> dict[str, Any] | None:
 
 def _read_latest(url: str, check: str) -> dict[str, Any] | None:
     return db.query_one(
-        "SELECT status, reason, config_name, model, created_at FROM ai_queries "
-        "WHERE url = %s AND check_type = %s AND status IN ('passed', 'rejected') "
+        "SELECT status, reason, config_name, model, created_at FROM verdicts "
+        "WHERE url = %s AND check_type = %s "
         "ORDER BY id DESC LIMIT 1",
         (url, check),
     )
@@ -325,10 +325,10 @@ def _volume_decision(job: dict[str, Any], gate: VolumeGate) -> PathStep | None:
     if gate.title_min_judged:
         title = db.query_one(
             "SELECT count(*) AS judged, count(*) FILTER (WHERE q.status = 'passed') AS kept "
-            "FROM ai_queries q JOIN jobs j ON j.url = q.url WHERE j.source = %(source)s "
+            "FROM verdicts q JOIN jobs j ON j.url = q.url WHERE j.source = %(source)s "
             "AND lower(regexp_replace(j.title, '\\s+', ' ', 'g')) = "
             "lower(regexp_replace(%(title)s, '\\s+', ' ', 'g')) "
-            "AND q.check_type = 'custom' AND q.status IN ('passed', 'rejected') "
+            "AND q.check_type = 'custom' "
             "AND q.created_at >= now() - make_interval(days => %(days)s)",
             {**window, "title": job["title"] or ""},
         )
@@ -342,8 +342,8 @@ def _volume_decision(job: dict[str, Any], gate: VolumeGate) -> PathStep | None:
         source = db.query_one(
             "SELECT count(DISTINCT q.url) AS judged, "
             "count(DISTINCT q.url) FILTER (WHERE q.status = 'passed') AS kept "
-            "FROM ai_queries q JOIN jobs j ON j.url = q.url WHERE j.source = %(source)s "
-            "AND q.check_type = 'custom' AND q.status IN ('passed', 'rejected') "
+            "FROM verdicts q JOIN jobs j ON j.url = q.url WHERE j.source = %(source)s "
+            "AND q.check_type = 'custom' "
             "AND q.created_at >= now() - make_interval(days => %(days)s)",
             window,
         )
@@ -460,9 +460,9 @@ def _verdict_step(
     clause = " AND model = %s" if model else ""
     params: tuple = (job["url"], prompt_hash, model) if model else (job["url"], prompt_hash)
     row = db.query_one(
-        "SELECT status, reason, config_name, model, created_at FROM ai_queries WHERE url = %s "
+        "SELECT status, reason, config_name, model, created_at FROM verdicts WHERE url = %s "
         f"AND check_type = 'custom' AND prompt_hash = %s{clause} "
-        "AND status IN ('passed', 'rejected') ORDER BY id DESC LIMIT 1",
+        "ORDER BY id DESC LIMIT 1",
         params,
     )
     if row is None:

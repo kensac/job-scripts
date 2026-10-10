@@ -77,9 +77,9 @@ GROUP BY source
 _FUNNEL_SQL = """
 WITH q AS (
     SELECT j.source AS source, j.id AS job_id, a.check_type, a.status, a.id AS qid
-    FROM ai_queries a
+    FROM verdicts a
     JOIN jobs j ON j.url = a.url
-    WHERE a.check_type = ANY(%(checks)s) AND a.status IN ('passed', 'rejected')
+    WHERE a.check_type = ANY(%(checks)s)
 ), latest AS (
     SELECT DISTINCT ON (job_id, check_type) source, check_type, status
     FROM q ORDER BY job_id, check_type, qid DESC
@@ -98,9 +98,9 @@ FROM latest GROUP BY source, check_type
 _CUSTOM_SQL = """
 WITH q AS (
     SELECT j.source AS source, j.id AS job_id, a.prompt_hash, a.status, a.id AS qid
-    FROM ai_queries a
+    FROM verdicts a
     JOIN jobs j ON j.url = a.url
-    WHERE a.check_type = 'custom' AND a.status IN ('passed', 'rejected')
+    WHERE a.check_type = 'custom'
       AND a.prompt_hash IS NOT NULL
 ), latest AS (
     SELECT DISTINCT ON (job_id, prompt_hash) source, job_id, status

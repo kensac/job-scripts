@@ -163,8 +163,8 @@ async def explain_check(
     status: Verdict = "rejected" if rejected else "passed"
     if spec:
         standing = db.query_one(
-            "SELECT status FROM ai_queries WHERE url = %s AND check_type = %s "
-            "AND status IN ('passed', 'rejected') ORDER BY id DESC LIMIT 1",
+            "SELECT status FROM verdicts WHERE url = %s AND check_type = %s "
+            "ORDER BY id DESC LIMIT 1",
             (job["url"], spec.name),
         )
         if not standing or standing["status"] != status:

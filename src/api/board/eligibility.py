@@ -21,8 +21,8 @@ SELECT DISTINCT prompt_hash FROM user_filters WHERE user_id = %(uid)s AND enable
 LATEST_CHECK = """
 latest_check AS (
     SELECT DISTINCT ON (url, check_type) url, check_type, status
-    FROM ai_queries
-    WHERE check_type IN ('closed', 'clearance') AND status IN ('passed', 'rejected')
+    FROM verdicts
+    WHERE check_type IN ('closed', 'clearance')
     ORDER BY url, check_type, id DESC
 )
 """

@@ -204,9 +204,8 @@ def _filter_deployed(urls: list[str], params: Params) -> Deployed:
         return {}
     rows = db.query(
         """
-        SELECT DISTINCT ON (url) url, status FROM ai_queries
+        SELECT DISTINCT ON (url) url, status FROM verdicts
         WHERE url = ANY(%s) AND check_type = 'custom' AND prompt_hash = %s
-          AND status IN ('passed', 'rejected')
         ORDER BY url, id DESC
         """,
         (urls, row["prompt_hash"]),
@@ -217,9 +216,8 @@ def _filter_deployed(urls: list[str], params: Params) -> Deployed:
 def _verify_deployed(urls: list[str], params: Params) -> Deployed:
     rows = db.query(
         """
-        SELECT DISTINCT ON (url, check_type) url, check_type, status FROM ai_queries
+        SELECT DISTINCT ON (url, check_type) url, check_type, status FROM verdicts
         WHERE url = ANY(%s) AND check_type IN ('closed', 'clearance')
-          AND status IN ('passed', 'rejected')
         ORDER BY url, check_type, id DESC
         """,
         (urls,),

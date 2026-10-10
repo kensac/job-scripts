@@ -80,9 +80,9 @@ def unproductive_titles(gate: VolumeGate) -> list[str]:
     return sorted(
         f"{row['source']}\x1f{row['title']}"
         for row in db.query(
-            f"SELECT j.source, {TITLE_KEY} AS title FROM ai_queries q "
+            f"SELECT j.source, {TITLE_KEY} AS title FROM verdicts q "
             "JOIN jobs j ON j.url = q.url "
-            "WHERE q.check_type = 'custom' AND q.status IN ('passed', 'rejected') "
+            "WHERE q.check_type = 'custom' "
             "AND q.created_at >= now() - make_interval(days => %s) "
             "GROUP BY 1, 2 HAVING count(*) >= %s AND NOT bool_or(q.status = 'passed')",
             (gate.window_days, gate.title_min_judged),
@@ -101,8 +101,8 @@ def unproductive_sources(gate: VolumeGate) -> list[str]:
     return [
         row["source"]
         for row in db.query(
-            "SELECT j.source FROM ai_queries q JOIN jobs j ON j.url = q.url "
-            "WHERE q.check_type = 'custom' AND q.status IN ('passed', 'rejected') "
+            "SELECT j.source FROM verdicts q JOIN jobs j ON j.url = q.url "
+            "WHERE q.check_type = 'custom' "
             "AND q.created_at >= now() - make_interval(days => %s) "
             "GROUP BY j.source HAVING count(DISTINCT q.url) >= %s "
             "AND count(DISTINCT q.url) FILTER (WHERE q.status = 'passed') "
