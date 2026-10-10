@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import gzip
 import hashlib
 import json
 import os
@@ -41,7 +40,10 @@ class PayloadRef:
     key: str
     sha256: str
     size: int
-    version: int = 1
+    # Version 2 is uncompressed JSON at payloads/v2/. Version 1 (gzip) is no
+    # longer read: its last 501 receipts were rewritten as version 2 on
+    # 2026-10-10.
+    version: int = 2
 
     @classmethod
     def parse(cls, value: Any) -> PayloadRef:
@@ -55,10 +57,8 @@ class PayloadRef:
                 or type(ref.size) is not int
                 or ref.size < 0
                 or type(ref.version) is not int
-                or ref.version not in (1, 2)
-                or ref.key
-                != f"payloads/v{ref.version}/sha256/{ref.sha256}.json"
-                + (".gz" if ref.version == 1 else "")
+                or ref.version != 2
+                or ref.key != f"payloads/v2/sha256/{ref.sha256}.json"
             ):
                 raise ValueError("invalid reference")
             return ref
@@ -218,18 +218,14 @@ class PayloadStore:
             raise PayloadUnavailable("Payload round-trip mismatch")
         return refs
 
-    def _read(self, bucket: str, key: str, size: int, sha256: str, *, gz: bool) -> Any:
+    def _read(self, bucket: str, key: str, size: int, sha256: str) -> Any:
         if bucket != self.bucket:
             raise PayloadUnavailable("Payload reference belongs to a different bucket")
         try:
             response = self.client.get_object(Bucket=bucket, Key=key)
             body = response["Body"]
             try:
-                if gz:
-                    with gzip.GzipFile(fileobj=body) as stream:
-                        raw = stream.read(size + 1)
-                else:
-                    raw = body.read(size + 1)
+                raw = body.read(size + 1)
             finally:
                 body.close()
             if len(raw) != size or hashlib.sha256(raw).hexdigest() != sha256:
@@ -243,7 +239,7 @@ class PayloadStore:
 
     def get(self, ref: PayloadRef) -> Any:
         ref = PayloadRef.parse(asdict(ref))
-        return self._read(ref.bucket, ref.key, ref.size, ref.sha256, gz=ref.version == 1)
+        return self._read(ref.bucket, ref.key, ref.size, ref.sha256)
 
     def get_bundle(self, ref: BundleMemberRef, cache: BundleCache | None = None) -> dict[str, Any]:
         ref = BundleMemberRef.parse(asdict(ref))
@@ -255,7 +251,7 @@ class PayloadStore:
         key = f"payloads/v3/sha256/{sha256}.json"
         members = None if cache is None else cache.get((key, size))
         if members is None:
-            members = self._read(bucket, key, size, sha256, gz=False)
+            members = self._read(bucket, key, size, sha256)
             if not isinstance(members, dict):
                 raise PayloadUnavailable("Payload bundle is not an object")
             if cache is not None:

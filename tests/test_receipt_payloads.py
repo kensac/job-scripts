@@ -1,6 +1,4 @@
-import gzip
-import hashlib
-from dataclasses import replace
+from dataclasses import asdict, replace
 
 import pytest
 
@@ -45,15 +43,11 @@ def test_verified_object_round_trip_and_deterministic_identity(objects):
     assert ref.size == len(objects.client.objects[ref.bucket, ref.key])
 
 
-def test_legacy_gzip_objects_remain_readable(objects):
-    raw = b"[[0.125,-1.25],[0,4]]"
-    digest = hashlib.sha256(raw).hexdigest()
-    ref = PayloadRef(objects.bucket, f"payloads/v1/sha256/{digest}.json.gz", digest, len(raw))
-    objects.client.objects[ref.bucket, ref.key] = gzip.compress(raw, mtime=0)
-    assert objects.get(ref) == [[0.125, -1.25], [0, 4]]
-    objects.client.objects[ref.bucket, ref.key] = gzip.compress(b"[[0.125,-1.26],[0,4]]")
-    with pytest.raises(PayloadUnavailable, match="integrity"):
-        objects.get(ref)
+def test_a_version_1_reference_is_refused(objects):
+    ref = objects.put_verified([[0.5]])
+    v1 = {**asdict(ref), "version": 1, "key": ref.key.replace("/v2/", "/v1/") + ".gz"}
+    with pytest.raises(PayloadUnavailable):
+        PayloadRef.parse(v1)
 
 
 @pytest.mark.parametrize(
