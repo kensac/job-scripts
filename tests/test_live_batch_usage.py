@@ -5,6 +5,7 @@ import pytest
 from api import ai, budget, db
 from core import pricing
 from tasks import application, filters
+from tests.factories import filter_config
 
 MODEL = "gpt-5-mini"
 RAW_USAGE = {
@@ -51,7 +52,12 @@ async def test_every_consumed_result_records_transport_and_cached_usage(
     monkeypatch.setattr(ai, "parse", parsed_live)
     if family == "filter":
         flt = f.make_filter(uid, on_ambiguous="keep")
-        payload = {"user_id": uid, "filter": flt, "jobs": [job], "parent_id": None}
+        payload = {
+            "user_id": uid,
+            "config_id": filter_config(flt),
+            "jobs": [job],
+            "parent_id": None,
+        }
         task_id = f.make_task("run_filter_batch_chunk", payload, status="running")
         monkeypatch.setattr(filters, "load_config", lambda *args: (ent, cfg))
 

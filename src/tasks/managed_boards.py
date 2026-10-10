@@ -23,8 +23,8 @@ class _Content:
 
 async def handle_run_managed_board(task_id: int, payload: dict[str, Any]) -> None:
     """Receive only pre-cutover live work and projection-only reuse work."""
-    payload = run_configs.with_board_settings(payload)
     if payload.get("execution_mode") == "sponsor_filter_reuse":
+        payload = run_configs.with_board_settings(payload)
         all_jobs = runs.run_jobs(payload)
         set_progress(task_id, 0, len(all_jobs), "projecting stored filter outcomes")
         runs.replace_projection(payload, all_jobs)
@@ -40,7 +40,6 @@ async def handle_run_managed_board(task_id: int, payload: dict[str, Any]) -> Non
 
 async def handle_run_managed_board_batch(task_id: int, payload: dict[str, Any]) -> None:
     """Receive only versioned managed-filter work admitted after the cutover."""
-    payload = run_configs.with_board_settings(payload)
     if payload.get("execution_mode") != "managed_filter":
         raise ValueError("managed board batch task must use managed_filter execution")
     await _handle_managed_filter(task_id, payload, legacy_live=False)
@@ -60,6 +59,7 @@ async def _handle_managed_filter(
         or not isinstance(payload.get("reasoning_effort"), str)
     ):
         raise ValueError("managed board task snapshot has an unsupported execution contract")
+    payload = run_configs.with_board_settings(payload)
     if compute_filter_hash(payload["prompt"], payload["on_ambiguous"]) != payload["prompt_hash"]:
         raise ValueError("managed board task snapshot has an invalid prompt hash")
     existing = has_batch_work(task_id) if not legacy_live else False

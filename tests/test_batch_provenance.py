@@ -7,6 +7,7 @@ from core import batch, pricing
 from core.batch import BatchResult, BatchSpec
 from tasks import application, filters, runtime
 from tasks.runtime import batching
+from tests.factories import filter_config
 
 
 def _parked(f, kind, payload, model):
@@ -72,7 +73,7 @@ async def test_filter_collects_paid_results_without_current_key_or_content(f, mo
     job_id = f.make_job()
     job = db.query_one("SELECT id, url, company, title FROM jobs WHERE id = %s", (job_id,))
     flt = f.make_filter(uid, on_ambiguous="keep")
-    payload = {"user_id": uid, "filter": flt, "jobs": [job], "parent_id": None}
+    payload = {"user_id": uid, "config_id": filter_config(flt), "jobs": [job], "parent_id": None}
     task_id = _parked(f, "run_filter_batch_chunk", payload, "gpt-5-mini")
     _collector(monkeypatch, job["url"], '{"should_filter":false,"reason":"fits"}')
 
