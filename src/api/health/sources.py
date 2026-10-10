@@ -113,16 +113,15 @@ def _detect_sources() -> list[dict[str, Any]]:
                                     q.created_at > now() - interval '24 hours'
                        ORDER BY q.id
                    ) AS company_rank
-            FROM ai_queries q JOIN jobs j ON j.url = q.url
+            FROM verdicts q JOIN jobs j ON j.url = q.url
             WHERE q.check_type = ANY(%(posting_checks)s)
-              AND q.status IN ('passed', 'rejected')
               AND q.created_at > now() - interval '8 days'
               AND q.created_at - j.created_at
                   < %(fresh_window)s::interval
               AND NOT EXISTS (
-                SELECT 1 FROM ai_queries p
+                SELECT 1 FROM verdicts p
                 WHERE p.url = q.url AND p.check_type = q.check_type
-                  AND p.id < q.id AND p.status IN ('passed', 'rejected'))
+                  AND p.id < q.id)
         )
         SELECT source, check_type,
                COUNT(*) FILTER (WHERE is_recent) AS recent_total,

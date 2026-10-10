@@ -489,7 +489,7 @@ def rejection_reasons(
 
     rejections = db.query(
         f"""
-        SELECT prompt_hash, url, reason FROM ai_queries
+        SELECT prompt_hash, url, reason FROM verdicts
         WHERE check_type = 'custom' AND status = 'rejected'
           AND prompt_hash IS NOT NULL AND reason IS NOT NULL AND reason <> ''
           AND {_WINDOW}{hash_clause}
@@ -688,7 +688,7 @@ def my_rejection_reasons(
     )
     rejections = db.query(
         f"""
-        SELECT prompt_hash, url, reason FROM ai_queries
+        SELECT prompt_hash, url, reason FROM verdicts
         WHERE check_type = 'custom' AND status = 'rejected'
           AND prompt_hash = ANY(%(hashes)s)
           AND reason IS NOT NULL AND reason <> '' AND {_WINDOW}

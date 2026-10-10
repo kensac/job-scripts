@@ -247,10 +247,9 @@ def _reuse_candidates(sponsor_id: int, resolved_model: str) -> list[_Candidate]:
         {eligibility.LATEST_CHECK},
         latest_custom AS (
           SELECT DISTINCT ON (q.url, q.prompt_hash) q.url, q.prompt_hash, q.status
-          FROM ai_queries q
+          FROM verdicts q
           WHERE q.check_type = 'custom' AND q.model = %(model)s
             AND q.prompt_hash = ANY(ARRAY(SELECT prompt_hash FROM enabled))
-            AND q.status IN ('passed', 'rejected')
           ORDER BY q.url, q.prompt_hash, q.id DESC
         )
         SELECT j.id, j.url, j.company, j.title, j.source,

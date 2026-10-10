@@ -50,8 +50,8 @@ filter_pass AS (
     -- no sort at all: 28 ms, measured on production 2026-09-05.
     SELECT url, COUNT(*) AS passed_count FROM (
         SELECT DISTINCT ON (q.url, q.prompt_hash) q.url, q.status
-        FROM ai_queries q
-        WHERE q.check_type = 'custom' AND q.status IN ('passed', 'rejected')
+        FROM verdicts q
+        WHERE q.check_type = 'custom'
           AND q.prompt_hash = ANY(ARRAY(SELECT prompt_hash FROM enabled_filters))
         ORDER BY q.url, q.prompt_hash, q.id DESC
     ) t WHERE t.status = 'passed' GROUP BY url

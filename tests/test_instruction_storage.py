@@ -287,6 +287,7 @@ def test_the_verdict_cache_check_answers_from_the_row_without_reading_page_text(
     ]
 
     assert answers == [{urls[0]}, {urls[0]}, set(), set()]
-    reads = [s for s in statements if "ai_queries" in s]
+    # The verdicts view has no page text column, so naming it is the guarantee.
+    reads = [s for s in statements if "FROM verdicts" in s]
     assert reads
     assert not [s for s in reads if "*" in s or "input_content" in s]

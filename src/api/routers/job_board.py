@@ -86,8 +86,8 @@ _JOB_ROW = f"""
     j.extraction_status, j.comp_min, j.comp_max, j.comp_text, j.comp_currency,
     j.comp_period, j.comp_basis,
     (SELECT CASE q.status WHEN 'passed' THEN 'open' WHEN 'rejected' THEN 'closed' END
-     FROM ai_queries q
-     WHERE q.url = j.url AND q.check_type = 'closed' AND q.status IN ('passed', 'rejected')
+     FROM verdicts q
+     WHERE q.url = j.url AND q.check_type = 'closed'
      ORDER BY q.id DESC LIMIT 1) AS closed_verdict,
     uj.status, uj.date_applied, uj.notes, uj.size, uj.recruiter,
     uj.connection1, uj.connection2, uj.documents,

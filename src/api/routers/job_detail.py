@@ -116,8 +116,8 @@ def job_detail(job_id: int, user: AuthedUser = Depends(require_user)) -> JobDeta
         "j.comp_period, j.comp_basis, "
         "j.created_at, "
         "(SELECT CASE q.status WHEN 'passed' THEN 'open' WHEN 'rejected' THEN 'closed' END "
-        " FROM ai_queries q WHERE q.url = j.url AND q.check_type = 'closed' "
-        " AND q.status IN ('passed', 'rejected') ORDER BY q.id DESC LIMIT 1) AS closed_verdict",
+        " FROM verdicts q WHERE q.url = j.url AND q.check_type = 'closed' "
+        " ORDER BY q.id DESC LIMIT 1) AS closed_verdict",
     )
     content_row = db.query_one(
         "SELECT input_content, created_at FROM ai_queries "
@@ -129,9 +129,8 @@ def job_detail(job_id: int, user: AuthedUser = Depends(require_user)) -> JobDeta
         CheckVerdict,
         """
         SELECT DISTINCT ON (check_type) check_type, status, reason, model, created_at
-        FROM ai_queries
+        FROM verdicts
         WHERE url = %(url)s AND check_type IN ('closed', 'clearance')
-          AND status IN ('passed', 'rejected')
         ORDER BY check_type, id DESC
         """,
         {"url": job["url"]},
@@ -142,10 +141,9 @@ def job_detail(job_id: int, user: AuthedUser = Depends(require_user)) -> JobDeta
         SELECT f.name, f.enabled, v.status, v.reason, v.model, v.created_at
         FROM user_filters f
         LEFT JOIN LATERAL (
-            SELECT status, reason, model, created_at FROM ai_queries q
+            SELECT status, reason, model, created_at FROM verdicts q
             WHERE q.url = %(url)s AND q.check_type = 'custom'
               AND q.prompt_hash = f.prompt_hash
-              AND q.status IN ('passed', 'rejected')
             ORDER BY q.id DESC LIMIT 1
         ) v ON TRUE
         WHERE f.user_id = %(uid)s ORDER BY f.id

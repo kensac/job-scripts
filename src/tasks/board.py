@@ -66,9 +66,8 @@ def materialize_passing(user_id: int) -> int:
                   AND {board_eligibility.STRUCTURAL.format(criteria=criteria.SQL)}
                   AND (SELECT COUNT(*) FROM enabled) > 0
                   AND (SELECT COUNT(*) FROM enabled e WHERE (
-                        SELECT status FROM ai_queries q WHERE q.url = j.url
+                        SELECT status FROM verdicts q WHERE q.url = j.url
                           AND q.check_type = 'custom' AND q.prompt_hash = e.prompt_hash
-                          AND q.status IN ('passed', 'rejected')
                         ORDER BY q.id DESC LIMIT 1) = 'passed') = (SELECT COUNT(*) FROM enabled)
             ),
             legacy_insert AS (
@@ -141,10 +140,9 @@ def submission_exclusions(
               AND (t.status IN ('pending', 'running', 'waiting', 'awaiting_batch')
                    OR jsonb_array_length(COALESCE(t.payload->'batch_ids', '[]'::jsonb)) > 0)
         )
-        SELECT DISTINCT url FROM ai_queries
+        SELECT DISTINCT url FROM verdicts
         WHERE url = ANY(%(urls)s) AND check_type = 'custom'
           AND prompt_hash = %(hash)s AND model = %(model)s
-          AND status IN ('passed', 'rejected')
         UNION
         SELECT chunk_url.url FROM owners {CHUNK_URLS.format(t="owners")}
         WHERE chunk_url.url = ANY(%(urls)s)
@@ -212,8 +210,8 @@ def demote_closed() -> int:
                 -- forever, because ingest marks them inactive and the sweep
                 -- never looks at them again.
                 NOT j.active
-                OR (SELECT q.status FROM ai_queries q WHERE q.url = j.url
-                    AND q.check_type = 'closed' AND q.status IN ('passed', 'rejected')
+                OR (SELECT q.status FROM verdicts q WHERE q.url = j.url
+                    AND q.check_type = 'closed'
                     ORDER BY q.id DESC LIMIT 1) = 'rejected'
                 )
                 ORDER BY membership.user_id, membership.job_id

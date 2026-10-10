@@ -222,8 +222,8 @@ def list_reports(
         JOIN users u ON u.id = r.user_id
         JOIN jobs j ON j.id = r.job_id
         LEFT JOIN LATERAL (
-            SELECT status FROM ai_queries
-            WHERE url = j.url AND check_type = 'closed' AND status IN ('passed', 'rejected')
+            SELECT status FROM verdicts
+            WHERE url = j.url AND check_type = 'closed'
             ORDER BY id DESC LIMIT 1
         ) c ON TRUE
         {where}
