@@ -429,16 +429,15 @@ uploaded a posting, or of its extraction status, reads `posting_uploads`;
 a predicate takes the non-correlated form `j.id IN (SELECT job_id FROM
 posting_uploads ...)`, which plans as one hashed subplan (the board reads
 measured the same rows and buffers as on the jobs columns, production,
-2026-10-10). `jobs.uploaded_by` and `jobs.extraction_status` are not
-written. `clear_upload_columns` empties the copies uploads left in them,
-every cycle until the migration that proves `uploaded_by` empty drops it. It
-clears a row only where `posting_uploads` holds it and names the same person,
-and counts an uploader it does not as `unmatched`. It never touches
-`extraction_status` on a row with no upload row: the sheet import's `done`
-stamp and the one forced reparse are recorded nowhere else, and all data is
-retained, so that column is frozen with those values rather than dropped. A takeover is found by reading which listed urls are still
-uploads before the upsert, since afterwards their source is the feed's. A
-writer of both tables takes the jobs row first.
+2026-10-10). `jobs.uploaded_by` is dropped, after a task cleared every copy
+whose owner `posting_uploads` named (11, none unmatched) and a migration
+proved it empty. `jobs.extraction_status` is frozen: nothing reads or writes
+it, and it keeps the sheet import's `done` stamp and the one forced reparse,
+which are recorded nowhere else (6,022 rows). All data is retained, so it is
+not dropped; `tests/test_catalog_one_writer.py` fails on a write of it. A
+takeover is found by reading which listed urls are still uploads before the
+upsert, since afterwards their source is the feed's. A writer of both tables
+takes the jobs row first.
 
 ## A company board's pull is the closure signal for its rows
 

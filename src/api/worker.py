@@ -305,15 +305,6 @@ def schedule_ingest_cycle() -> None:
         "AND status IN ('pending', 'running') LIMIT 1"
     ):
         enqueue("backfill_mail_pointers", {"cycle": cycle}, dedupe_key=f"mail-pointers:{cycle}")
-    # The copies uploads left in the jobs columns nothing reads any more
-    # (tasks.posting_uploads), emptied until the migration that drops
-    # uploaded_by. A run with nothing to clear reads the uploads through
-    # an index. One at a time.
-    if not db.query_one(
-        "SELECT 1 FROM tasks WHERE kind = 'clear_upload_columns' "
-        "AND status IN ('pending', 'running') LIMIT 1"
-    ):
-        enqueue("clear_upload_columns", {"cycle": cycle}, dedupe_key=f"upload-columns:{cycle}")
     # The .olm copies of messages Takeout also holds (tasks.mail_olm_twins):
     # one run does all of it in one transaction, so it is offered until one
     # has finished.

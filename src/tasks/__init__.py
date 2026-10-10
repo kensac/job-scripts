@@ -41,7 +41,6 @@ from tasks.mail_sync import (
     handle_sync_gmail,
 )
 from tasks.managed_boards import handle_run_managed_board, handle_run_managed_board_batch
-from tasks.posting_uploads import handle_clear_upload_columns
 from tasks.requirements import REQUIREMENTS
 from tasks.uploads import handle_extract_upload
 from tasks.verify import (
@@ -83,7 +82,6 @@ HANDLERS = {
     "merge_olm_twins": handle_merge_olm_twins,
     "link_answers": handle_link_answers,
     "clear_jobs_pay": handle_clear_jobs_pay,
-    "clear_upload_columns": handle_clear_upload_columns,
     **{d.kind: d.handle for d in DERIVATIONS},
 }
 

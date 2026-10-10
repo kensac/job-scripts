@@ -34,7 +34,6 @@ class Job(Base):
         # from the index alone instead of the heap: 1,110 buffers against
         # 12,882 for a seq scan at 224,541 jobs (test copy, 2026-10-04).
         Index("idx_jobs_source_created", "source", "created_at"),
-        Index("idx_jobs_uploaded_by", "uploaded_by"),
         # company_key, which the admin company page reads per page of names.
         # Off the busiest names it turns each per-page read from a seq scan
         # into a probe: the repost group 98 ms to 10 ms, the open share
@@ -89,7 +88,10 @@ class Job(Base):
     # catalog.IS_AVAILABLE rather than this column directly.
     available: Mapped[bool | None] = mapped_column(Boolean)
     date_posted: Mapped[datetime.datetime | None]
-    uploaded_by: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id"))
+    # Frozen: nothing reads or writes it (posting_uploads holds upload
+    # state). It keeps the done stamp on 6,021 rows the 2026-08-24 sheet
+    # import wrote and on job 11764337 (forced reparse, task 726592), recorded
+    # nowhere else, so it is retained rather than dropped.
     extraction_status: Mapped[str | None] = mapped_column(Text)
     comp_min: Mapped[int | None] = mapped_column(BigInteger)
     comp_max: Mapped[int | None] = mapped_column(BigInteger)
@@ -107,8 +109,8 @@ class PostingUpload(Base):
 
     One row per upload, so the catalog row carries no per-person state. A
     forced reparse of a posting nobody uploaded writes no row: its outcome is
-    its task's. Replaces jobs.uploaded_by and jobs.extraction_status, which
-    stay written until every reader has moved.
+    its task's. Replaced jobs.uploaded_by (dropped) and jobs.extraction_status
+    (frozen).
     """
 
     __tablename__ = "posting_uploads"

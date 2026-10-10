@@ -75,3 +75,18 @@ def test_upload_extraction_states(f):
     catalog.record_extraction(row["id"], "Acme", "Engineer", ["Remote"], ["Summer 2027"])
     again = catalog.add_upload("https://x.test/up", "https://x.test/up", uid)
     assert again["extraction_status"] == "done"
+
+
+# jobs.extraction_status is frozen: it keeps the sheet import's done stamp and
+# one forced reparse, recorded nowhere else, and nothing may change it.
+_FROZEN = re.compile(r"\bextraction_status\s*=(?!=)|\bSET\s+extraction_status\b", re.IGNORECASE)
+
+
+def test_nothing_writes_the_frozen_extraction_status():
+    writes = [
+        f"{path.relative_to(_SRC)}:{text.count(chr(10), 0, m.start()) + 1}"
+        for path in sorted(_SRC.rglob("*.py"))
+        for text in [path.read_text()]
+        for m in _FROZEN.finditer(text)
+    ]
+    assert not writes, "jobs.extraction_status is frozen: " + ", ".join(writes)
