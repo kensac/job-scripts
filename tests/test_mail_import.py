@@ -390,3 +390,28 @@ def test_a_document_with_no_text_becomes_empty_rather_than_markup():
         body='&lt;html&gt;&lt;head&gt;&lt;meta charset="utf-8"&gt;&lt;/head&gt;&lt;/html&gt;'
     )
     assert not (text or "").strip()
+
+
+def test_a_long_body_is_stored_whole(tmp_path):
+    """Always retain all data: the readable text and the markup are kept at
+    any length. They were cut at 20,000 and 320,000 characters, and 374 of
+    69,130 stored messages sat exactly at the text cap on 2026-10-10."""
+    import base64
+
+    from api.mail import gmail
+
+    sentence = "We would like to invite you. "
+    markup = "<html><body><p>" + sentence * 12_000 + "</p></body></html>"
+    text = (
+        "From b@x Mon Sep  1 10:00:00 2026\n"
+        "From: no-reply@ashbyhq.com\nSubject: Interview\n"
+        "Message-ID: <long@x>\nContent-Type: text/html\n\n" + markup + "\n"
+    )
+    (msg,) = read_mbox(_write(tmp_path, "long.mbox", text))
+    assert len(msg.body_text or "") > 300_000
+    assert len(msg.body_html or "") >= len(markup)
+
+    encoded = base64.urlsafe_b64encode((markup * 2).encode()).decode()
+    body_text, body_html = gmail._body({"mimeType": "text/html", "body": {"data": encoded}})
+    assert body_html == markup * 2
+    assert len(body_text or "") > 600_000
