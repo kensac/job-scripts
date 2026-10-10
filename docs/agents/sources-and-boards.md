@@ -41,6 +41,13 @@ board, only not join it. A bundle (`source_groups`) or a
 format is a way of selecting rows for that flag and the interval through
 `POST /admin/sources/switch`, not a second layer of state.
 
+**Who reads which source is written in one place.** A person's picks
+(`user_sources`), a managed board's sources (`managed_board_sources`) and a
+bundle's members (`source_groups.members`) are written only by
+`api/source_selection.py`; `tests/test_source_selection_owner.py` fails on an
+insert, update or delete against them anywhere else. Deleting a source takes
+it out of all three through `forget_source`.
+
 The list shape (`GET /admin/sources`) carries everything but `title_pattern`;
 one row (`GET /admin/sources/{name}`) carries it. At 1,732 sources the pattern
 was more than half of a 1.8 MB body, and only the edit form reads it.

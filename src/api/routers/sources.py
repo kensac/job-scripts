@@ -5,7 +5,7 @@ import datetime
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
-from api import db
+from api import db, source_selection
 from api.auth import AuthedUser, require_user
 from api.board import visibility
 from api.models import SourcesPut
@@ -77,21 +77,7 @@ def apply_source_group(
             (group["members"] or [],),
         )
     ]
-    with db.pool.connection() as conn:
-        if body.mode == "replace":
-            # "Only these" replaces what a person could have chosen. A held
-            # board that is switched off is not on offer, so it is kept, the
-            # same as a save from the page keeps it.
-            conn.execute(
-                "DELETE FROM user_sources WHERE user_id = %s "
-                "AND source IN (SELECT name FROM sources WHERE active)",
-                (user.id,),
-            )
-        for source in members:
-            conn.execute(
-                "INSERT INTO user_sources (user_id, source) VALUES (%s, %s) ON CONFLICT DO NOTHING",
-                (user.id, source),
-            )
+    source_selection.join_group(user.id, members, only=body.mode == "replace")
     visibility.request_refresh(user.id)
     enabled = [
         r["source"]
@@ -263,16 +249,7 @@ def patch_sources(body: SourcesPatch, user: AuthedUser = Depends(require_user)) 
     subscribed; an unknown name, or a new subscription to a switched-off
     board, refuses the write whole rather than applying half."""
     _check_names(user.id, set(body.add) | set(body.remove), set(body.add))
-    with db.pool.connection() as conn:
-        removed = conn.execute(
-            "DELETE FROM user_sources WHERE user_id = %s AND source = ANY(%s) RETURNING source",
-            (user.id, sorted(set(body.remove) - set(body.add))),
-        ).fetchall()
-        added = conn.execute(
-            "INSERT INTO user_sources (user_id, source) SELECT %s, unnest(%s::text[]) "
-            "ON CONFLICT DO NOTHING RETURNING source",
-            (user.id, sorted(set(body.add))),
-        ).fetchall()
+    added, removed = source_selection.change(user.id, body.add, body.remove)
     enabled = [
         r["source"]
         for r in db.query(
@@ -282,8 +259,8 @@ def patch_sources(body: SourcesPatch, user: AuthedUser = Depends(require_user)) 
     visibility.request_refresh(user.id)
     return SourcesPatched(
         ok=True,
-        added=sorted(r["source"] for r in added),
-        removed=sorted(r["source"] for r in removed),
+        added=added,
+        removed=removed,
         enabled=enabled,
     )
 
@@ -291,12 +268,6 @@ def patch_sources(body: SourcesPatch, user: AuthedUser = Depends(require_user)) 
 @router.put("/user/sources")
 def put_sources(body: SourcesPut, user: AuthedUser = Depends(require_user)) -> SourcesReplaced:
     _check_names(user.id, set(body.enabled), set(body.enabled))
-    with db.pool.connection() as conn:
-        conn.execute("DELETE FROM user_sources WHERE user_id = %s", (user.id,))
-        for source in set(body.enabled):
-            conn.execute(
-                "INSERT INTO user_sources (user_id, source) VALUES (%s, %s)",
-                (user.id, source),
-            )
+    source_selection.replace(user.id, body.enabled)
     visibility.request_refresh(user.id)
     return SourcesReplaced(ok=True)

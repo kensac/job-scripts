@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends
 from psycopg.errors import UniqueViolation
 from pydantic import BaseModel, ConfigDict, Field
 
-from api import db, managed_board_runs
+from api import db, managed_board_runs, source_selection
 from api.auth import AuthedUser
 from api.models import Criteria
 from api.problem import refuse
@@ -280,11 +280,7 @@ def bootstrap_managed_boards(
                 ),
             )
             assert row is not None
-            if sources:
-                db.executemany(
-                    "INSERT INTO managed_board_sources (managed_board_id, source) VALUES (%s, %s)",
-                    [(row.id, source) for source in sources],
-                )
+            source_selection.set_board_sources(row.id, sources)
             board = _get(row.id)
             assert board is not None
             boards.append(board)
@@ -369,11 +365,7 @@ def create_managed_board(
                 ),
             )
             assert row is not None
-            if sources:
-                db.executemany(
-                    "INSERT INTO managed_board_sources (managed_board_id, source) VALUES (%s, %s)",
-                    [(row.id, source) for source in sources],
-                )
+            source_selection.set_board_sources(row.id, sources)
             board = _get(row.id)
             assert board is not None
     except UniqueViolation as exc:
@@ -425,12 +417,7 @@ def patch_managed_board(
                 raise refuse(409, "DUPLICATE_SLUG", "managed board slug exists")
         sources = _validate_sources(requested_sources) if requested_sources is not None else None
         if sources is not None:
-            db.execute("DELETE FROM managed_board_sources WHERE managed_board_id = %s", (board_id,))
-            if sources:
-                db.executemany(
-                    "INSERT INTO managed_board_sources (managed_board_id, source) VALUES (%s, %s)",
-                    [(board_id, source) for source in sources],
-                )
+            source_selection.set_board_sources(board_id, sources)
         effective_published = fields.get("published", existing.published)
         if effective_published:
             source_count = db.query_one_as(

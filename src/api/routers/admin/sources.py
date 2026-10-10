@@ -9,7 +9,7 @@ import time
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
-from api import db, hosts, scoping, task_admission
+from api import db, hosts, scoping, source_selection, task_admission
 from api import params as params_
 from api.auth import AuthedUser
 from api.problem import refuse
@@ -296,28 +296,9 @@ def upsert_source_group(
         unknown = [m for m in body.members if m not in known]
         if unknown:
             raise refuse(400, "UNKNOWN_SOURCE", f"unknown sources: {unknown}")
-    row = db.query_one_as(
-        SourceBundle,
-        """
-        INSERT INTO source_groups (name, members, description, active)
-        VALUES (%(name)s, COALESCE(%(members)s, '{}'), COALESCE(%(description)s, ''),
-                COALESCE(%(active)s, TRUE))
-        ON CONFLICT (name) DO UPDATE SET
-            members = COALESCE(%(members)s, source_groups.members),
-            description = COALESCE(%(description)s, source_groups.description),
-            active = COALESCE(%(active)s, source_groups.active)
-        RETURNING name, members, description, active, created_at
-        """,
-        {
-            "name": name,
-            "members": body.members,
-            "description": body.description,
-            "active": body.active,
-        },
+    return SourceBundle(
+        **source_selection.save_group(name, body.members, body.description, body.active)
     )
-    # The upsert always writes a row, so there is one to return.
-    assert row is not None
-    return row
 
 
 class BundleDeleted(BaseModel):
@@ -327,8 +308,7 @@ class BundleDeleted(BaseModel):
 
 @router.delete("/source-groups/{name}")
 def delete_source_group(name: str, user: AuthedUser = Depends(require_admin)) -> BundleDeleted:
-    row = db.query_one("DELETE FROM source_groups WHERE name = %s RETURNING name", (name,))
-    if not row:
+    if not source_selection.delete_group(name):
         raise refuse(404, "NOT_FOUND", "unknown group")
     return BundleDeleted(ok=True, deleted=name)
 
