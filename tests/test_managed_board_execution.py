@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from api import db, managed_board_runs
+from api import db, managed_board_runs, run_configs
 from core import pricing
 from core.filters import compute_filter_hash
 from core.store import add_ai_result
@@ -59,6 +59,11 @@ def test_run_admission_snapshots_board_candidates_and_refuses_overlap(
     assert payload["reasoning_effort"] == "low"
     assert payload["sources"] == ["managed-source"]
     assert payload["title_screens"] == []
+    config = db.query_one(
+        "SELECT kind, body FROM run_configs WHERE id = %s", (payload["config_id"],)
+    )
+    assert config["kind"] == "managed_board"
+    assert config["body"] == {key: payload[key] for key in run_configs.BOARD_KEYS}
     jobs = managed_board_runs.run_jobs(payload)
     assert [job["id"] for job in jobs] == [job_id]
     assert jobs[0]["source"] == "managed-source"
@@ -95,8 +100,12 @@ def test_sponsor_budget_reserves_across_managed_boards(client, admin_headers, f,
 
 
 @pytest.mark.asyncio
-async def test_handler_attributes_usage_and_atomically_replaces_projection(f, monkeypatch):
-    """A pre-cutover payload remains receivable through its original live path."""
+@pytest.mark.parametrize("stored_settings", [False, True])
+async def test_handler_attributes_usage_and_atomically_replaces_projection(
+    f, monkeypatch, stored_settings
+):
+    """A pre-cutover payload remains receivable through its original live path,
+    whether it copies the board's settings or names them by config_id."""
 
     monkeypatch.setattr("core.routing.server_key", lambda provider: "test-server-key")
     sponsor = f.make_user(groups=["infra-admins"])
@@ -137,6 +146,9 @@ async def test_handler_attributes_usage_and_atomically_replaces_projection(f, mo
             }
         ],
     }
+    if stored_settings:
+        settings = {key: payload.pop(key) for key in run_configs.BOARD_KEYS if key in payload}
+        payload["config_id"] = run_configs.intern(run_configs.BOARD, settings)
     task_id = f.make_task("run_managed_board", payload, status="running")
 
     async def fake_execute(task_id, cfg, snapshot, jobs, hooks):

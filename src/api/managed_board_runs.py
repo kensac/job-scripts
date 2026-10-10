@@ -11,7 +11,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from api import budget, db, events, task_jobs
+from api import budget, db, events, run_configs, task_jobs
 from api.board import criteria as board_criteria
 from api.board import eligibility
 from api.task_admission import ACTIVE_STATUSES, TaskProgress
@@ -480,6 +480,9 @@ def _plan(board_id: int) -> _Plan:
         "reserved_tokens": reserved,
         "candidate_count": len(jobs),
     }
+    payload["config_id"] = run_configs.intern(
+        run_configs.BOARD, {key: payload[key] for key in run_configs.BOARD_KEYS}
+    )
     if board.execution_mode == "managed_filter":
         payload.update(
             {

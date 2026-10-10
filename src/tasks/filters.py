@@ -6,7 +6,7 @@ import logging
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
-from api import budget, db, metrics, task_jobs
+from api import budget, db, metrics, run_configs, task_jobs
 from api.ai import verdicts
 from api.budget import load_config
 from api.model_calls import Payer
@@ -165,14 +165,19 @@ async def _run_filters(
         with ThreadPoolExecutor(max_workers=MAX_CONNECTIONS) as executor:
             refs = list(executor.map(store.put_verified, batch_lists))
     batch_refs = iter(refs)
+    configs: dict[int, int] = {}
     for mode, flt, jobs in units:
+        snapshot = {k: flt[k] for k in ("name", "prompt", "on_ambiguous", "prompt_hash")}
+        if flt["id"] not in configs:
+            configs[flt["id"]] = run_configs.intern(run_configs.FILTER, snapshot)
         enqueue(
             "run_filter_batch_chunk" if mode == "batch" else "run_filter_chunk",
             {
                 "parent_id": task_id,
                 "user_id": user_id,
                 "filter_id": flt["id"],
-                "filter": {k: flt[k] for k in ("name", "prompt", "on_ambiguous", "prompt_hash")},
+                "config_id": configs[flt["id"]],
+                "filter": snapshot,
                 **(
                     task_jobs.reference(task_jobs.FILTER_CHUNKS, jobs, next(batch_refs))
                     if mode == "batch"
@@ -195,7 +200,7 @@ async def handle_run_filter_chunk(task_id: int, payload: dict[str, Any]) -> None
         payload["user_id"],
         ent,
         cfg,
-        payload["filter"],
+        run_configs.filter_of(payload),
         run_jobs(payload),
         parent_id=payload["parent_id"],
     )
@@ -206,7 +211,7 @@ async def handle_run_filter_batch_chunk(task_id: int, payload: dict[str, Any]) -
     OpenAI Batch API (core/batch.py enforces the enqueued-token budget in
     waves) and records every verdict when results land."""
     user_id = payload["user_id"]
-    flt = payload["filter"]
+    flt = run_configs.filter_of(payload)
     jobs = run_jobs(payload)
     parent_id = payload["parent_id"]
     existing = has_batch_work(task_id)
