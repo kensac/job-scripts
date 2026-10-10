@@ -14,6 +14,7 @@ from pydantic import BaseModel
 from api import budget, db, events, queue, task_jobs
 from api.board import criteria as board_criteria
 from api.board import eligibility
+from api.review_gate import load_policy
 from api.task_admission import ACTIVE_STATUSES, TaskProgress
 from api.task_jobs import run_jobs
 from core import providers, routing, verdict_reads
@@ -293,7 +294,6 @@ def verification_questions(
     answers them, and the board's run applies them to the cached verdict as it
     applies them to its own.
     """
-    from api.review_gate import load_policy
     from core.filters import custom_criteria_instructions
     from core.store import decided_custom_urls
 
@@ -417,6 +417,7 @@ def _plan(board_id: int) -> _Plan:
     reasoning_effort: object | None = None
     cap: int | None = None
     reserved = 0
+    recipe = None
     if board.execution_mode == "sponsor_filter_reuse":
         try:
             _entitlement, config = budget.load_config(sponsor.id, ignore_budget=True)
@@ -447,7 +448,14 @@ def _plan(board_id: int) -> _Plan:
                 "requested model cannot execute managed-board batches",
             ) from exc
         reasoning_effort = choice.params.get("reasoning_effort")
-        candidates = _candidates(board)
+        # Screened postings never enter the run: they have no verdict, and the
+        # projection shows only what the run holds.
+        recipe = load_policy().title_recipes().get(board.prompt_hash)
+        candidates = [
+            candidate
+            for candidate in _candidates(board)
+            if not (recipe and screen(recipe, title=candidate.title, source=candidate.source).skip)
+        ]
         title_gate = TitleGateConfig.model_validate(board.title_gate) if board.title_gate else None
     decisions = [
         screen(title_gate.recipe, title=candidate.title, source=candidate.source)
@@ -493,6 +501,7 @@ def _plan(board_id: int) -> _Plan:
         "sources": board.sources,
         "criteria": board.criteria,
         "title_gate": title_gate.model_dump(mode="json") if title_gate else None,
+        "title_recipe": recipe,
         "published": board.published,
         "reserved_tokens": reserved,
         "candidate_count": len(jobs),

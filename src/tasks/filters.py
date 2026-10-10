@@ -6,12 +6,13 @@ import logging
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
-from api import budget, db, metrics, task_jobs
+from api import budget, db, metrics, review_gate, task_jobs
 from api.ai import verdicts
 from api.budget import load_config
 from api.model_calls import Payer
 from api.task_jobs import run_jobs
 from core.payload_objects import MAX_CONNECTIONS, PayloadStore
+from core.screening import screen
 from core.store import decided_custom_urls, get_contents
 from tasks import batch_policy
 from tasks.board import (
@@ -125,10 +126,18 @@ async def _run_filters(
     units: list[tuple] = []
     chunk_size = int(db.get_config("filter_chunk_size"))
     batch_chunk_size = int(db.get_config("filter_batch_chunk_size"))
+    recipes = review_gate.load_policy().title_recipes()
     for flt in filters:
         decided = decided_custom_urls(urls, flt["prompt_hash"], cfg.model)
         todo = [j for j in candidates if j["url"] not in decided]
         metrics.CACHED_VERDICTS.inc(len(candidates) - len(todo))
+        # A screened posting has no verdict, so without this every run chunked
+        # it, read its page and skipped it again: 3,501 of 3,802 batch chunks
+        # in the 7 days to 2026-10-10 did only that.
+        if recipe := recipes.get(flt["prompt_hash"]):
+            todo = [
+                j for j in todo if not screen(recipe, title=j["title"], source=j["source"]).skip
+            ]
         if use_batch and todo:
             for start in range(0, len(todo), batch_chunk_size):
                 units.append(("batch", flt, todo[start : start + batch_chunk_size]))

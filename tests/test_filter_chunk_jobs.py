@@ -256,6 +256,37 @@ async def test_a_split_writes_each_batch_chunk_list_as_a_verified_object(
 
 
 @pytest.mark.asyncio
+async def test_a_title_the_review_gate_screens_is_never_chunked(
+    set_config, f, monkeypatch, objects
+):
+    """A screened posting has no verdict. Left in the candidates, every run
+    chunked it, read its page and skipped it again."""
+    uid, flt, _jobs, parent = _split(f, monkeypatch, 0)
+    nurse, engineer = (
+        db.query_one(
+            "SELECT url, company, title, source FROM jobs WHERE id = %s", (f.make_job(title=t),)
+        )
+        for t in ("Registered Nurse", "Software Engineer")
+    )
+    monkeypatch.setattr(filters, "candidates_for", lambda _uid: [nurse, engineer])
+    scope = {flt["prompt_hash"]: {"title_recipe": "nontechnical_occupations_v1"}}
+    set_config("filter_review_gate", {"title_mode": "enforce", "scopes": scope})
+
+    await filters._run_filters(parent, uid, [flt], batched=True)
+
+    (child,) = db.query("SELECT payload FROM tasks WHERE parent_id = %s", (parent,))
+    assert child["payload"]["urls"] == [engineer["url"]]
+
+    # Switching the stage off returns the posting on the next run.
+    set_config("filter_review_gate", {"title_mode": "off", "scopes": scope})
+    again = make_task("run_all_filters", {"user_id": uid, "batched": True}, status="running")
+    db.execute("UPDATE tasks SET status = 'done' WHERE parent_id = %s", (parent,))
+    await filters._run_filters(again, uid, [flt], batched=True)
+    (child,) = db.query("SELECT payload FROM tasks WHERE parent_id = %s", (again,))
+    assert child["payload"]["urls"] == [nurse["url"], engineer["url"]]
+
+
+@pytest.mark.asyncio
 async def test_a_storage_outage_at_split_enqueues_no_chunk(set_config, f, monkeypatch, objects):
     set_config("filter_batch_chunk_size", 2)
     uid, flt, _jobs, parent = _split(f, monkeypatch, 3)

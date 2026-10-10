@@ -242,3 +242,24 @@ def test_a_source_over_the_keep_rate_is_read():
     job = f.make_job(source=source)
 
     assert job in _reachable(), "2 keeps in 100 is above a 1% rate"
+
+
+def test_a_title_the_review_gate_screens_is_not_read_for_its_prompt():
+    _enable()
+    source = f.make_source()
+    scope = {_scoped_target(source): {"title_recipe": "nontechnical_occupations_v1"}}
+    nurse = f.make_job(source=source, title="Registered Nurse")
+    engineer = f.make_job(source=source, title="Software Engineer")
+
+    _review_gate({"title_mode": "enforce", "scopes": scope})
+    assert _reachable() == {engineer}
+    _review_gate({"title_mode": "off", "scopes": scope})
+    assert _reachable() == {nurse, engineer}
+
+
+def _review_gate(value: dict) -> None:
+    db.execute(
+        "INSERT INTO app_config (key, value) VALUES ('filter_review_gate', %s) "
+        "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+        (db.jsonb(value),),
+    )
