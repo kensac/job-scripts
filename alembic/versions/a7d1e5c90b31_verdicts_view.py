@@ -19,7 +19,7 @@ idx_ai_queries_latest_custom, whose predicates the view's own WHERE implies.
 Creating it takes ACCESS SHARE on ai_queries only.
 
 Revision ID: a7d1e5c90b31
-Revises: ce29f52b5f6b
+Revises: bc1978f126b4
 Create Date: 2026-10-09 23:30:00.000000
 
 """
@@ -29,7 +29,7 @@ from collections.abc import Sequence
 from alembic import op
 
 revision: str = "a7d1e5c90b31"
-down_revision: str | None = "ce29f52b5f6b"
+down_revision: str | None = "bc1978f126b4"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
