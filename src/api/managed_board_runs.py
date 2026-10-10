@@ -643,15 +643,7 @@ SELECT (SELECT count(*) FROM target) AS n
 
 
 def replace_projection(payload: dict[str, Any], jobs: list[dict[str, Any]] | None = None) -> int:
-    all_jobs = run_jobs(payload) if jobs is None else jobs
-    # A run planned before screened postings left the list carries them with
-    # title_gate_keep false under an enforced gate (until such runs drain).
-    config = payload.get("title_gate")
-    jobs = [
-        job
-        for job in all_jobs
-        if not config or config["mode"] == "shadow" or job.get("title_gate_keep", True)
-    ]
+    jobs = run_jobs(payload) if jobs is None else jobs
     ids = [job["id"] for job in jobs]
     sort_at = [job["sort_at"] for job in jobs]
     with db.transaction():
