@@ -34,6 +34,7 @@ from pydantic import BaseModel
 
 from api import db, signals
 from api.auth import AuthedUser
+from api.board.person_state import PERSON_STATE
 from api.problem import refuse
 from api.rates import DEFAULT_MIN_SAMPLE, Rate
 from api.rates import rate as _rate
@@ -184,6 +185,24 @@ WHERE NOT uj.hidden
 GROUP BY j.source
 """
 
+# The three labelled populations per source (phase 2b), as (user, posting)
+# pairs: acted on (person state), picked by filters (working set), and on a
+# computed board (board_visible). board_rows above is the old overloaded
+# count, kept until the frontend reads these.
+_POPULATIONS_SQL = f"""
+SELECT j.source AS source,
+       count(*) FILTER (WHERE p.population = 'acted_on') AS acted_on,
+       count(*) FILTER (WHERE p.population = 'working_set') AS working_set,
+       count(*) FILTER (WHERE p.population = 'visible') AS visible
+FROM (
+    SELECT uj.job_id, 'acted_on' AS population FROM user_jobs uj WHERE {PERSON_STATE}
+    UNION ALL SELECT job_id, 'working_set' FROM user_job_working_set
+    UNION ALL SELECT job_id, 'visible' FROM board_visible
+) p
+JOIN jobs j ON j.id = p.job_id
+GROUP BY j.source
+"""
+
 # Overlap keys on (company, title) because a url cannot express it: jobs.url is
 # unique table-wide, so a posting belongs to exactly one source by
 # construction and cross-source duplication is invisible at the url level.
@@ -282,6 +301,12 @@ class _YieldRow(_SourceKeyed):
     with_status: int
     applied: int
     users: int
+
+
+class _PopulationsRow(_SourceKeyed):
+    acted_on: int
+    working_set: int
+    visible: int
 
 
 class _OverlapRow(_SourceKeyed):
@@ -428,6 +453,9 @@ class BoardYield(BaseModel):
     applied: int
     users: int
     apply_rate: Rate
+    acted_on: int
+    working_set: int
+    visible: int
 
 
 class BoardDrill(BaseModel):
@@ -542,6 +570,7 @@ def _source_row(
     spend: list[_SpendRow],
     ingest: _IngestRow | None,
     board: _YieldRow | None,
+    populations: _PopulationsRow | None,
     overlap: _OverlapRow | None,
 ) -> BoardAnalytics:
     total = inventory.total if inventory else 0
@@ -630,6 +659,9 @@ def _source_row(
             applied=applied,
             users=board.users if board else 0,
             apply_rate=_rate(applied, board_rows, min_sample),
+            acted_on=populations.acted_on if populations else 0,
+            working_set=populations.working_set if populations else 0,
+            visible=populations.visible if populations else 0,
         ),
         drill=_drill(source),
     )
@@ -684,6 +716,7 @@ def _collect(min_sample: int) -> list[BoardAnalytics]:
     first_closed = _by_source(db.query_as(_FirstClosedRow, _FIRST_CLOSED_SQL))
     ingest = _by_source(db.query_as(_IngestRow, _INGEST_SQL))
     board = _by_source(db.query_as(_YieldRow, _YIELD_SQL))
+    populations = _by_source(db.query_as(_PopulationsRow, _POPULATIONS_SQL))
     overlap = _by_source(db.query_as(_OverlapRow, _OVERLAP_SQL))
 
     funnel: dict[str, dict[str, _FunnelRow]] = {}
@@ -710,6 +743,7 @@ def _collect(min_sample: int) -> list[BoardAnalytics]:
             spend=spend.get(name, []),
             ingest=ingest.get(name),
             board=board.get(name),
+            populations=populations.get(name),
             overlap=overlap.get(name),
         )
         for name in sorted(names)
