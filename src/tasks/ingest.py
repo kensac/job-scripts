@@ -116,7 +116,6 @@ async def handle_ingest_source(task_id: int, payload: dict[str, Any]) -> None:
         source["name"],
         source["title_pattern"] or "",
         {p.url for p in pattern_matched},
-        int(db.get_config("screened_retention_days")),
         int(db.get_config("listings_seen_refresh_hours")),
     )
     if listings_inline:
@@ -288,7 +287,11 @@ async def handle_retire_switched_off(task_id: int, payload: dict[str, Any]) -> N
     from core import catalog
 
     enforced = bool(db.get_config("source_title_patterns_enabled"))
-    retired = await asyncio.to_thread(catalog.retire_switched_off, enforced)
+    retired = await asyncio.to_thread(
+        catalog.retire_switched_off,
+        enforced,
+        int(db.get_config("listings_seen_refresh_hours")),
+    )
     for source, n in retired.items():
         metrics.INGEST_JOBS.labels(source, "retired").inc(n)
     total = sum(retired.values())

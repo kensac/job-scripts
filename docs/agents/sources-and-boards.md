@@ -244,8 +244,19 @@ title, location and the cleaned body (L3Harris posting 1407143600: 4,312
 characters against the page's 4,243-character job description, ending on the
 same line, 2026-10-05).
 
-Rows are aged out by `screened_retention_days` after the board stops listing
-them.
+A row stays after the board stops listing it; nothing deletes `listings`
+rows (see "Always retain all data" in
+[engineering-standards.md](engineering-standards.md)). So a row existing says
+only that some pull once listed the url. **A reader that means "the board
+lists it now" filters with `catalog.LISTED_NOW`:** the row's `last_seen_at`
+is no more than `listings_seen_refresh_hours` behind the newest `last_seen_at`
+of its source. A pull refreshes every row it lists that is older than that
+interval, so every listed row passes; a dropped row stops passing within the
+interval plus one pull; a source whose pulls fail keeps its rows current,
+because nothing newer moves its newest row. `retire_switched_off`, the admin
+screened list and the pattern preview's `would_add` and `would_drop` read it.
+The preview's title counts and samples read every row, so a candidate pattern
+is judged against every title the board has listed.
 
 **A pull rewrites a listings row only when the row would change.** Equal
 content is filtered out before the insert, so an unchanged row gets no new
@@ -273,13 +284,9 @@ that way, and a change to the upsert must keep all four:
   version.
 
 `last_seen_at` is refreshed only once it is older than
-`listings_seen_refresh_hours` (24 by default; retention counts whole days, so
-a day is the finest distinction it can draw). It can therefore lag the last
+`listings_seen_refresh_hours` (24 by default). It can therefore lag the last
 pull that listed the row by up to that interval. The admin screened list
-returns it with that lag. Retention counts from `last_seen_at` plus the
-interval, so a row is never deleted sooner than `screened_retention_days`
-after its last listing, and at most the interval later. A listed row is never
-deleted, because its pull refreshes it before the delete runs.
+returns it with that lag.
 
 **A listing points at the pattern that judged it; it does not copy it.**
 `title_patterns` holds each distinct pattern text once, keyed by the SHA-256
@@ -345,7 +352,7 @@ catalog upsert and the page caching that ride on it, for an archive nothing
 downstream reads. Nothing stays half moved: an inline value never equals a
 referenced one in the change check, so the next pull that lists the row moves
 it, and the backfill reaches rows no pull lists again (switched-off sources,
-rows waiting out retention). An empty description cannot be compared, so a
+rows no board lists any more). An empty description cannot be compared, so a
 pull without text leaves a stored inline description to the backfill.
 
 **Rollout order.** Deploy the compatible reader (the release that added the
@@ -598,8 +605,9 @@ The exception is a url that a switched-on source lists and would admit: its
 pattern or pattern enforcement is off. That source's next pull would put the
 row straight back and queue a re-check. A posting is therefore active while
 some source that is still pulled says so, whichever source first stored it.
-A url's `listings` row outlives its last listing by `screened_retention_days`,
-so a row the other source stops listing retires up to that much later.
+Only a `listings` row its source still lists counts (`catalog.LISTED_NOW`), so
+a row the other source stops listing retires within
+`listings_seen_refresh_hours` plus one of that source's pulls.
 
 Retirement follows the ordinary path from there: inactive rows leave boards
 through `demote_closed`, which removes only rows nobody has touched, so a
@@ -774,8 +782,7 @@ delivers nothing is visible as exactly that.
 
 The knobs above (`fetch_retry_after_hours`, `fetch_retry_max_hours`,
 `fetch_give_up_after_failures`, `ingest_retry_max_hours`,
-`ingest_give_up_after_failures`, `screened_retention_days`,
-`listings_seen_refresh_hours`, `queue_stall_minutes`, `ingest_backlog_cycles`) are `app_config` rows, not
+`ingest_give_up_after_failures`, `listings_seen_refresh_hours`, `queue_stall_minutes`, `ingest_backlog_cycles`) are `app_config` rows, not
 constants; see [engineering-standards.md](engineering-standards.md).
 
 ## Public availability from ATS detail endpoints

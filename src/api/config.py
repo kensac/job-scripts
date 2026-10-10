@@ -353,20 +353,10 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
         value_type=PositiveInt,
         help="Minutes a running task may go without changing its reported progress, counted from its last progress or its current claim, whichever is later, before it counts as stalled.",
     ),
-    # How long a posting a title pattern screened out stays on record after
-    # its board stops listing it. Long enough to evaluate a new pattern
-    # against a month of what the boards actually posted.
-    "screened_retention_days": ConfigKey(
-        section="Catalog",
-        default=30,
-        value_type=PositiveInt,
-        help="Days a posting a title pattern screened out stays on record after its "
-        "board stops listing it.",
-    ),
     # How stale a listing's last_seen_at may get before a pull that still
-    # lists it rewrites the row only to move it. Retention is the one thing
-    # the timestamp decides, and it is counted in whole days, so a day is the
-    # finest distinction it can draw. Refreshed every pull instead, the
+    # lists it rewrites the row only to move it. It is also how far behind its
+    # source's newest row a listing may fall and still count as listed now
+    # (core.catalog.LISTED_NOW). Refreshed every pull instead, the
     # timestamp alone rewrote 1.17M rows a day, 99.2% of them otherwise
     # unchanged (pg_stat_statements, 2026-10-03).
     "listings_seen_refresh_hours": ConfigKey(
@@ -374,8 +364,8 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
         default=24,
         value_type=PositiveInt,
         help="Hours a listed posting's last-seen time may lag before a pull rewrites the row "
-        "just to update it. A posting is kept between screened_retention_days and that plus "
-        "this many hours after its board last listed it.",
+        "just to update it. A posting further than this behind its board's most recently "
+        "seen posting counts as no longer listed.",
     ),
     "source_title_patterns_enabled": ConfigKey(
         section="Catalog",

@@ -351,20 +351,21 @@ class TitlePattern(Base):
 
 
 class Listing(Base):
-    """Every posting a board returned on its last pull, kept by the title
-    pattern or not, with the text the listing call carried and the raw record
-    minus that text. Rewritten by a pull only when it changed or its
-    last_seen_at is older than listings_seen_refresh_hours, and aged out by
-    screened_retention_days after the board stops listing it. Never read by
+    """Every posting a board has returned, kept by the title pattern or
+    not, with the text the listing call carried and the raw record minus that
+    text. Rewritten by a pull only when it changed or its last_seen_at is
+    older than listings_seen_refresh_hours. Never deleted: a row the board
+    stopped listing stays, and core.catalog.LISTED_NOW says which rows are
+    on their source's latest pull. Never read by
     visibility or the checks: a backtest or a backfill reads it so that no
     board is re-fetched and no page re-scraped for data already in hand."""
 
     __tablename__ = "listings"
     # source alone, not (source, last_seen_at): an index on a column every
     # refresh moves makes every update a new index entry in every index
-    # (860 HOT of 1.17M updates a day, 2026-10-03). Every reader and the
-    # retention delete filter by source; the delete re-reads that source's
-    # rows, which its own upsert has just read. Fillfactor is in 507fe2f38949.
+    # (860 HOT of 1.17M updates a day, 2026-10-03). Every reader filters by
+    # source, and LISTED_NOW reads a source's newest last_seen_at through it.
+    # Fillfactor is in 507fe2f38949.
     __table_args__ = (
         Index("idx_listings_by_source", "source"),
         *(

@@ -266,7 +266,7 @@ def resolve_report(
         ReportResolved,
         "UPDATE reports SET status = %s, resolution_note = %s, resolved_at = now() "
         "WHERE id = %s RETURNING id, status",
-        (body.action, body.note[:2000] or None, report_id),
+        (body.action, body.note or None, report_id),
     )
     if not row:
         raise refuse(404, "NOT_FOUND", "unknown report")

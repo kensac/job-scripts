@@ -70,27 +70,16 @@ def _contend(table: LiteralString, write: Callable[[], object]) -> None:
 
 
 def test_listings_upsert_locks_in_url_order():
-    catalog.record_listings(
-        [_posting(LAST, "v1"), _posting(FIRST, "v1")], "board-a", "", set(), 30, 24
-    )
+    catalog.record_listings([_posting(LAST, "v1"), _posting(FIRST, "v1")], "board-a", "", set(), 24)
     # Board order, last url first: the order the upsert used to lock in.
     _contend(
         "listings",
         lambda: catalog.record_listings(
-            [_posting(LAST, "v2"), _posting(FIRST, "v2")], "board-b", "", set(), 30, 24
+            [_posting(LAST, "v2"), _posting(FIRST, "v2")], "board-b", "", set(), 24
         ),
     )
     titles = {r["url"]: r["title"] for r in db.query("SELECT url, title FROM listings")}
     assert titles == {FIRST: "v2", LAST: "v2"}
-
-
-def test_listings_retention_delete_locks_in_url_order():
-    # Inserted last url first, so a scan meets them in that order.
-    catalog.record_listings([_posting(LAST, "v1")], "board-a", "", set(), 30, 24)
-    catalog.record_listings([_posting(FIRST, "v1")], "board-a", "", set(), 30, 24)
-    db.execute("UPDATE listings SET last_seen_at = now() - interval '90 days'")
-    _contend("listings", lambda: catalog.record_listings([], "board-a", "", set(), 30, 24))
-    assert db.query("SELECT url FROM listings") == []
 
 
 def test_retiring_unlisted_jobs_locks_in_url_order():

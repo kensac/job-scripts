@@ -46,7 +46,7 @@ def report_job(
             user.id,
             job_id,
             body.kind,
-            body.message[:2000],
+            body.message,
             db.jsonb(body.corrections) if body.corrections is not None else None,
         ),
     )

@@ -46,7 +46,7 @@ def test_switched_off_source_postings_are_retired_unless_an_active_source_admits
     # Its own listing, which is no evidence: the source is off.
     _listed("https://jobs.test/by-off", "off", kept=True)
 
-    assert catalog.retire_switched_off(patterns_enforced=True) == {"off": 3}
+    assert catalog.retire_switched_off(patterns_enforced=True, refresh_hours=24) == {"off": 3}
 
     assert not _active(alone) and not _active(screened) and not _active(by_off)
     assert _active(shared), "a url an active source admits is still listed"
@@ -55,7 +55,7 @@ def test_switched_off_source_postings_are_retired_unless_an_active_source_admits
     assert _events(shared) == []
 
     # Idempotent: the next cycle has nothing to do.
-    assert catalog.retire_switched_off(patterns_enforced=True) == {}
+    assert catalog.retire_switched_off(patterns_enforced=True, refresh_hours=24) == {}
 
 
 def test_without_enforcement_any_listing_by_an_active_source_keeps_the_row(f):
@@ -64,8 +64,34 @@ def test_without_enforcement_any_listing_by_an_active_source_keeps_the_row(f):
     screened = f.make_job(source="off", url="https://jobs.test/screened")
     _listed("https://jobs.test/screened", "on", kept=False)
 
-    assert catalog.retire_switched_off(patterns_enforced=False) == {}
+    assert catalog.retire_switched_off(patterns_enforced=False, refresh_hours=24) == {}
     assert _active(screened), "with enforcement off the pull admits every listed posting"
+
+
+def test_a_listing_the_active_source_dropped_does_not_keep_the_row(f):
+    """Listings are never deleted, so a row an active source stopped listing
+    is still there. It must not keep a switched-off source's posting active:
+    that source's next pull would not put it back. A row as far behind its
+    source's newest row as refresh_hours no longer counts; one inside it does."""
+    f.make_source("off", active=False)
+    f.make_source("on", active=True)
+    dropped = f.make_job(source="off", url="https://jobs.test/dropped")
+    listed = f.make_job(source="off", url="https://jobs.test/listed")
+    _listed("https://jobs.test/dropped", "on", kept=True)
+    _listed("https://jobs.test/listed", "on", kept=True)
+    _listed("https://jobs.test/newest", "on", kept=True)
+    db.execute(
+        "UPDATE listings SET last_seen_at = now() - interval '25 hours' "
+        "WHERE url = 'https://jobs.test/dropped'"
+    )
+    db.execute(
+        "UPDATE listings SET last_seen_at = now() - interval '23 hours' "
+        "WHERE url = 'https://jobs.test/listed'"
+    )
+
+    assert catalog.retire_switched_off(patterns_enforced=False, refresh_hours=24) == {"off": 1}
+    assert not _active(dropped)
+    assert _active(listed)
 
 
 def test_re_enabled_source_pull_puts_its_postings_back(f, monkeypatch):
@@ -75,7 +101,7 @@ def test_re_enabled_source_pull_puts_its_postings_back(f, monkeypatch):
 
     f.make_source("off", active=False)
     job = f.make_job(source="off", url="https://jobs.test/back")
-    catalog.retire_switched_off(patterns_enforced=True)
+    catalog.retire_switched_off(patterns_enforced=True, refresh_hours=24)
     assert not _active(job)
 
     db.execute("UPDATE sources SET active = true WHERE name = 'off'")
@@ -122,7 +148,7 @@ def test_a_row_an_ingest_holds_is_skipped_and_retired_next_cycle(f):
     free = f.make_job(source="off", url="https://jobs.test/free")
     with pool.connection() as holder:
         holder.execute("SELECT 1 FROM jobs WHERE id = %s FOR UPDATE", (held,))
-        assert catalog.retire_switched_off(patterns_enforced=True) == {"off": 1}
+        assert catalog.retire_switched_off(patterns_enforced=True, refresh_hours=24) == {"off": 1}
     assert _active(held) and not _active(free)
-    assert catalog.retire_switched_off(patterns_enforced=True) == {"off": 1}
+    assert catalog.retire_switched_off(patterns_enforced=True, refresh_hours=24) == {"off": 1}
     assert not _active(held)

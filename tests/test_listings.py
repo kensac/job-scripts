@@ -51,7 +51,7 @@ def _ingest(monkeypatch, f, listed):
     asyncio.run(ingest.handle_ingest_source(task_id, {"source": "acme"}))
 
 
-def test_what_the_pattern_drops_is_kept_and_ages_out_when_the_board_stops_listing_it(
+def test_what_the_pattern_drops_is_kept_and_stays_kept_when_the_board_stops_listing_it(
     monkeypatch, f
 ):
     f.make_source("acme")
@@ -78,17 +78,17 @@ def test_what_the_pattern_drops_is_kept_and_ages_out_when_the_board_stops_listin
     assert screened["Software Engineer"]["company"] == "Acme"
 
     # The board drops one; a later pull refreshes the rest and the dropped
-    # one lingers only for the retention window.
+    # one is still on record, however long ago it was last listed.
     db.execute(
-        "UPDATE listings SET last_seen_at = now() - interval '40 days' "
+        "UPDATE listings SET last_seen_at = now() - interval '400 days' "
         "WHERE title = 'Quantitative Researcher'"
     )
-    db.execute("UPDATE app_config SET value = '30' WHERE key = 'screened_retention_days'")
     _ingest(monkeypatch, f, LISTED[:3])
     assert {r["title"] for r in db.query("SELECT title FROM listings")} == {
         "Software Engineer, New Grad",
         "Software Engineer",
         "Senior Software Engineer",
+        "Quantitative Researcher",
     }
 
     # A wider pattern admits a screened posting on the next pull, no backfill.
@@ -229,15 +229,6 @@ def test_every_listing_is_stored_with_its_text_and_the_text_becomes_the_content(
     )
     assert content is not None and content["input_content"] == kept.description
     assert content["reason"] == "listing text"
-
-
-def test_retention_is_admin_config(client, admin_headers):
-    cfg = client.get("/v1/admin/config", headers=admin_headers).json()["config"]
-    assert cfg["screened_retention_days"] == 30
-    r = client.put(
-        "/v1/admin/config/screened_retention_days", json={"value": 0}, headers=admin_headers
-    )
-    assert r.status_code == 400
 
 
 # Digests do not compress, so these are stored out of line in TOAST: the case
@@ -388,34 +379,43 @@ def test_last_seen_refreshes_once_the_refresh_interval_has_passed(monkeypatch, f
     assert _versions()[fresh] == before[fresh]
 
 
-def test_retention_deletes_what_the_board_stopped_listing_and_never_earlier(monkeypatch, f):
-    """A row's last_seen_at may lag the last pull that listed it by up to the
-    refresh interval, so the age-out counts from that lag's far end: a row is
-    held at least screened_retention_days after the board last listed it, as
-    before, and at most the refresh interval longer. A row still listed is
-    never deleted, however old its last_seen_at, because the pull refreshes
-    it before the delete runs."""
+def test_a_dropped_listing_is_kept_and_read_as_no_longer_listed(
+    monkeypatch, f, client, admin_headers
+):
+    """Rows are never deleted, so a reader that means "the board lists it"
+    cannot read existence: the screened list and the preview's would_add and
+    would_drop count only rows on the source's latest pull, which a row the
+    board dropped falls out of once it is refresh_hours behind the source's
+    newest row. A row still listed counts however old its last_seen_at was,
+    because the pull refreshes it."""
     f.make_source("acme")
-    db.execute("UPDATE app_config SET value = '30' WHERE key = 'screened_retention_days'")
+    db.execute("UPDATE sources SET title_pattern = 'new grad' WHERE name = 'acme'")
     db.execute("UPDATE app_config SET value = '24' WHERE key = 'listings_seen_refresh_hours'")
     _ingest(monkeypatch, f, LISTED)
-    still_listed, gone, lagging = LISTED[0].url, LISTED[1].url, LISTED[2].url
-    for url, age in (
-        (still_listed, "40 days"),
-        (gone, "31 days 1 hour"),
-        (lagging, "30 days 1 hour"),
-    ):
+    still_listed, gone, lagging = LISTED[1].url, LISTED[2].url, LISTED[3].url
+    for url, age in ((still_listed, "40 days"), (gone, "25 hours"), (lagging, "23 hours")):
         db.execute(
             "UPDATE listings SET last_seen_at = now() - %s::interval WHERE url = %s", (age, url)
         )
 
-    _ingest(monkeypatch, f, [LISTED[0], LISTED[3]])
+    _ingest(monkeypatch, f, [LISTED[0], LISTED[1]])
 
-    assert {r["url"] for r in db.query("SELECT url FROM listings")} == {
-        still_listed,
-        lagging,
-        LISTED[3].url,
-    }
+    assert {r["url"] for r in db.query("SELECT url FROM listings")} == {p.url for p in LISTED}
+    r = client.get("/v1/admin/sources/acme/screened", headers=admin_headers)
+    assert r.status_code == 200, r.text
+    assert {row["url"] for row in r.json()["rows"]} == {still_listed, lagging}
+    assert r.json()["total"] == 2
+
+    # "senior" lets in two screened titles; only one is still listed. The
+    # dropped one is still judged as a title the board has listed.
+    r = client.post(
+        "/v1/admin/sources/acme/pattern-preview",
+        json={"title_pattern": "senior|software engineer$"},
+        headers=admin_headers,
+    )
+    assert r.status_code == 200, r.text
+    assert (r.json()["titles"], r.json()["admitted"]) == (4, 2)
+    assert (r.json()["would_add"], r.json()["would_drop"]) == (1, 1)
 
 
 def test_the_refresh_interval_is_admin_config(client, admin_headers):

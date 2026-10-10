@@ -54,7 +54,7 @@ def store_form(url: str, questions: list[forms.Question] | None, error: str | No
             "INSERT INTO application_forms (url, questions, error, fetched_at) "
             "VALUES (%s, NULL, %s, now()) ON CONFLICT (url) DO UPDATE "
             "SET error = EXCLUDED.error, fetched_at = now()",
-            (url, error[:300]),
+            (url, error),
         )
         return
     payload = None if questions is None else [q.as_dict() for q in questions]

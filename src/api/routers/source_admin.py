@@ -28,6 +28,7 @@ from api import db, source_selection
 from api.auth import AuthedUser
 from api.problem import refuse
 from api.routers.admin import require_admin
+from core import catalog
 from core.fetching import boards
 
 logger = logging.getLogger(__name__)
@@ -155,7 +156,8 @@ class PatternSamples(BaseModel):
 class PatternPreview(BaseModel):
     """What a candidate pattern would admit, against every title this board
     has listed. `would_add` is screened titles it lets in, `would_drop` is
-    catalog titles it turns away. Nothing is written."""
+    catalog titles it turns away, both among the titles the board lists now.
+    Nothing is written."""
 
     source: str
     title_pattern: str
@@ -582,26 +584,28 @@ def pattern_preview(
     except re.error as exc:
         raise refuse(400, "BAD_TITLE_PATTERN", f"title_pattern: {exc}") from exc
     titles = db.query(
-        """
-        SELECT url, title, CASE WHEN kept THEN 'catalog' ELSE 'screened' END AS held_in
-        FROM listings WHERE source = %(name)s
-        ORDER BY title
+        f"""
+        SELECT l.url, l.title, CASE WHEN l.kept THEN 'catalog' ELSE 'screened' END AS held_in,
+               {catalog.LISTED_NOW.format(listing="l", source="%(name)s")} AS listed_now
+        FROM listings l WHERE l.source = %(name)s
+        ORDER BY l.title
         """,
-        {"name": name},
+        {"name": name, "refresh_hours": int(db.get_config("listings_seen_refresh_hours"))},
     )
     admitted = [t for t in titles if candidate.search(t["title"])]
     excluded = [t for t in titles if not candidate.search(t["title"])]
     # The catalog side is what the LIVE pattern admitted; a candidate that
     # excludes some of it is narrowing, one that admits screened rows is
-    # widening. Both counts, so the change reads as what it is.
+    # widening. Both counts, so the change reads as what it is. Both count
+    # only titles the board lists now: the next pull acts on nothing else.
     return PatternPreview(
         source=name,
         title_pattern=body.title_pattern,
         titles=len(titles),
         admitted=len(admitted),
         excluded=len(excluded),
-        would_add=sum(1 for t in admitted if t["held_in"] == "screened"),
-        would_drop=sum(1 for t in excluded if t["held_in"] == "catalog"),
+        would_add=sum(1 for t in admitted if t["listed_now"] and t["held_in"] == "screened"),
+        would_drop=sum(1 for t in excluded if t["listed_now"] and t["held_in"] == "catalog"),
         samples=PatternSamples(
             admitted=[t["title"] for t in admitted[: body.samples]],
             excluded=[t["title"] for t in excluded[: body.samples]],
@@ -616,19 +620,27 @@ def screened_postings(
     """The postings this board lists that its title pattern did not admit,
     newest listing first, so an admin can see what a pattern is costing."""
     limit = max(1, min(limit, 500))
+    # Listings outlive the board's listing of them, so "lists" is LISTED_NOW.
+    listed_now = catalog.LISTED_NOW.format(listing="l", source="%(name)s")
+    params = {
+        "name": name,
+        "refresh_hours": int(db.get_config("listings_seen_refresh_hours")),
+        "limit": limit,
+        "offset": max(0, offset),
+    }
     total = db.query_one(
-        "SELECT count(*) AS n FROM listings "
-        "WHERE source = %s AND NOT kept AND pattern_id IS NOT NULL",
-        (name,),
+        f"SELECT count(*) AS n FROM listings l "
+        f"WHERE l.source = %(name)s AND NOT l.kept AND {listed_now}",
+        params,
     )
     rows = db.query_as(
         ScreenedPosting,
         "SELECT l.url, l.company, l.title, l.locations, l.date_posted, t.pattern, "
         "l.first_seen_at, l.last_seen_at "
         "FROM listings l JOIN title_patterns t ON t.id = l.pattern_id "
-        "WHERE l.source = %s AND NOT l.kept "
-        "ORDER BY l.date_posted DESC NULLS LAST, l.title LIMIT %s OFFSET %s",
-        (name, limit, max(0, offset)),
+        f"WHERE l.source = %(name)s AND NOT l.kept AND {listed_now} "
+        "ORDER BY l.date_posted DESC NULLS LAST, l.title LIMIT %(limit)s OFFSET %(offset)s",
+        params,
     )
     n = total["n"] if total else 0
     return ScreenedPostings(source=name, rows=rows, total=n, has_more=offset + len(rows) < n)
