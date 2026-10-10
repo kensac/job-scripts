@@ -149,6 +149,9 @@ STRUCTURAL = frozenset(
         "job_requirements.content_hash",
         "job_embeddings.url",
         "job_embeddings.content_hash",
+        "job_comp.url",
+        "job_comp.content_hash",
+        "job_comp.content_row_id",
         "user_filters.prompt_hash",
         "user_sources.source",
         "tasks.dedupe_key",
@@ -561,7 +564,7 @@ def _profile_column(
     return out
 
 
-def measure(url: str) -> dict[str, Any]:
+def measure(url: str, only: str | None = None) -> dict[str, Any]:
     profile: dict[str, Any] = {
         "measured_at": datetime.datetime.now(tz=datetime.UTC).isoformat(),
         "tables": {},
@@ -589,7 +592,7 @@ def measure(url: str) -> dict[str, Any]:
                 "SELECT table_name FROM information_schema.tables "
                 "WHERE table_schema = 'public' AND table_type = 'BASE TABLE' ORDER BY 1"
             ).fetchall()
-            if r["table_name"] not in SKIP_TABLES
+            if r["table_name"] not in SKIP_TABLES and only in (None, r["table_name"])
         ]
         for table in tables:
             columns = [
@@ -788,6 +791,13 @@ def main() -> int:
         ),
     )
     ap.add_argument(
+        "--table",
+        help=(
+            "measure only this table and merge it into the committed profile, leaving "
+            "every other measurement alone: a new table without a full re-measure"
+        ),
+    )
+    ap.add_argument(
         "--check",
         action="store_true",
         help="compare production against the committed profile and fail on drift",
@@ -802,6 +812,13 @@ def main() -> int:
 
     if args.value_types_only:
         return _merge_value_types(url)
+
+    if args.table:
+        profile = json.loads(PROFILE_PATH.read_text())
+        profile["tables"][args.table] = measure(url, only=args.table)["tables"][args.table]
+        PROFILE_PATH.write_text(json.dumps(profile, indent=1, sort_keys=True) + "\n")
+        print(f"\nmerged {args.table} into {PROFILE_PATH}")
+        return 0
 
     print("measuring production...", file=sys.stderr)
     current = measure(url)

@@ -91,14 +91,6 @@ class Job(Base):
     date_posted: Mapped[datetime.datetime | None]
     uploaded_by: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id"))
     extraction_status: Mapped[str | None] = mapped_column(Text)
-    comp_min: Mapped[int | None] = mapped_column(BigInteger)
-    comp_max: Mapped[int | None] = mapped_column(BigInteger)
-    comp_text: Mapped[str | None] = mapped_column(Text)
-    comp_period: Mapped[str | None] = mapped_column(Text)
-    comp_currency: Mapped[str | None] = mapped_column(Text)
-    comp_basis: Mapped[str | None] = mapped_column(Text)
-    comp_content_row_id: Mapped[int | None] = mapped_column(BigInteger)
-    comp_extracted: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
 
 

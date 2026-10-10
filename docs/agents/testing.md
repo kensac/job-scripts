@@ -79,6 +79,13 @@ silence it by widening a range by hand. Every number in that file is supposed
 to be a fact about production, and once one of them is typed rather than
 measured, none of them can be trusted.
 
+A new table can be measured on its own:
+`python scripts/measure_profile.py --table <name>` measures that one table and
+merges it into the committed profile, leaving every other measurement as it
+was. Its row count is then from a later day than the rest of the profile. The
+generator caps a table keyed by its parent's url at one row per parent, so a
+count that outgrew the older parent count still builds.
+
 The profile never carries identifying values. A column's literal values are
 recorded only when it is low-cardinality, short, absent from
 `measure_profile.IDENTIFYING`, and free of anything that looks like an address

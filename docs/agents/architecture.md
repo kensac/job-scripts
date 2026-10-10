@@ -237,8 +237,10 @@ not personal demand. Verification and content-generation guards still apply.
 The hourly sweep discovers newly selected jobs without a backfill. Already
 submitted batch results are consumed even if demand disappears meanwhile.
 
-`jobs.comp_content_row_id` records the exact cached content used by a successful
-compensation extraction. Writes verify that source in the update statement;
+`job_comp.content_row_id` records the exact cached content used by a successful
+compensation extraction, and `job_comp.content_hash` the text it read, so an
+unchanged re-fetch is re-stamped rather than paid for again. Writes verify that
+source in the insert statement;
 subsequent content changes make known older generations eligible again. A null
 source is unknown legacy provenance, not proof that the compensation is current.
 It does not itself trigger extraction, and must not be backfilled by guessing
