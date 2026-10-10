@@ -152,3 +152,29 @@ def test_a_board_is_recomputed_only_for_someone_who_can_have_one(f):
         )
     }
     assert subscribed in queued and uploader in queued and bare not in queued
+
+
+def test_a_person_with_a_recompute_still_queued_gets_no_second_one(f):
+    """The dedupe key is per board_refresh_minutes bucket, so a queue that
+    fell behind grew by one recompute per person per bucket: 66 were pending
+    for three people on 2026-10-10. A running one does not block, because it
+    may have read the board before what changed."""
+    from api import worker
+    from api.board import visibility
+
+    f.make_source("s1")
+    queued = f.make_user(sub="queued")
+    running = f.make_user(sub="running")
+    for uid in (queued, running):
+        db.execute("INSERT INTO user_sources (user_id, source) VALUES (%s, %s)", (uid, "s1"))
+    f.make_task("recompute_board", {"user_id": queued, "cycle": "old"}, status="pending")
+    f.make_task("recompute_board", {"user_id": running, "cycle": "old"}, status="running")
+
+    worker.schedule_ingest_cycle()
+    visibility.request_refresh(queued)
+
+    pending = db.query(
+        "SELECT payload->>'user_id' AS uid FROM tasks "
+        "WHERE kind = 'recompute_board' AND status = 'pending'"
+    )
+    assert sorted(int(r["uid"]) for r in pending) == sorted([queued, running])

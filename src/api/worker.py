@@ -29,7 +29,7 @@ from api import (
     queue,
     telemetry,
 )
-from api.board import user_job_split
+from api.board import user_job_split, visibility
 from api.mail import match as mail_match
 from api.queue import enqueue
 from core.env import env_list
@@ -335,15 +335,22 @@ def schedule_ingest_cycle() -> None:
     # board row and no upload admits nothing under the predicate, and one
     # such row (a probe that signed in once) drew 825 full recomputes in a
     # day, 60 percent of the real person's, each producing zero rows.
+    #
+    # A person with a recompute already pending gets no second one: the
+    # pending one reads everything as of when it runs, so a second has nothing
+    # of its own to do. Without this a queue that falls behind grows by one
+    # per person per bucket; on 2026-10-10 66 were stacked for three people.
+    # A running one does not block, because it may have read what changed.
     refresh = max(1, int(db.get_config("board_refresh_minutes")))
     rbucket = now.replace(minute=(now.minute // refresh) * refresh, second=0, microsecond=0)
     rcycle = rbucket.strftime("%Y-%m-%dT%H:%M")
     for u in db.query(
-        """
+        f"""
         SELECT id FROM users u
-        WHERE EXISTS (SELECT 1 FROM user_source_set s WHERE s.user_id = u.id)
-           OR EXISTS (SELECT 1 FROM user_jobs j WHERE j.user_id = u.id)
-           OR EXISTS (SELECT 1 FROM jobs j WHERE j.uploaded_by = u.id)
+        WHERE (EXISTS (SELECT 1 FROM user_source_set s WHERE s.user_id = u.id)
+               OR EXISTS (SELECT 1 FROM user_jobs j WHERE j.user_id = u.id)
+               OR EXISTS (SELECT 1 FROM jobs j WHERE j.uploaded_by = u.id))
+          AND NOT {visibility.RECOMPUTE_PENDING}
         ORDER BY id
         """
     ):

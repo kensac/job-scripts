@@ -195,10 +195,20 @@ def computed_at(user_id: int) -> datetime.datetime | None:
     return row["at"] if row else None
 
 
+# A recompute for user u.id is waiting to be claimed. One waiting is enough:
+# it reads everything as of when it runs. A running one is not, because it may
+# have read the board before what prompted the request.
+RECOMPUTE_PENDING = """EXISTS (
+    SELECT 1 FROM tasks t WHERE t.kind = 'recompute_board' AND t.status = 'pending'
+      AND t.payload->>'user_id' = u.id::text)"""
+
+
 def request_refresh(user_id: int) -> None:
     """Ask for a recompute soon: at most one task per person per minute,
-    so a burst of preference edits is one recompute, and the fleet's five
-    second poll is the latency."""
+    and none while one is already waiting, so a burst of preference edits is
+    one recompute, and the fleet's five second poll is the latency."""
 
+    if db.query_one(f"SELECT 1 FROM users u WHERE u.id = %s AND {RECOMPUTE_PENDING}", (user_id,)):
+        return
     bucket = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M")
     enqueue("recompute_board", {"user_id": user_id}, dedupe_key=f"board:{user_id}:{bucket}")

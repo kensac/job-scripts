@@ -37,8 +37,12 @@ preference write asks for a recompute within a minute, and the scheduler asks
 every `board_refresh_minutes` (persisted config, seeded 3) for everyone the
 predicate can admit anything for: a subscription, an acted-on row or an
 upload. A users row with none of those is skipped; one such row drew 825
-recomputes in a day for zero rows. A posting the person uploaded or acted on
-is visible without waiting.
+recomputes in a day for zero rows. Neither asks while a recompute for that
+person is pending (`visibility.RECOMPUTE_PENDING`): the pending one reads
+everything as of when it runs. A running one does not count, because it may
+have read the board before the change. Without this a queue that fell behind
+held 66 pending recomputes for three people on 2026-10-10. A posting the
+person uploaded or acted on is visible without waiting.
 
 **Never write a fresh "can this user see this" predicate, and never evaluate
 FULL on a request.**
