@@ -13,6 +13,7 @@ import datetime
 import pytest
 
 from api import db
+from tests import mail_log
 from tests.conftest import _auth_headers
 
 
@@ -30,12 +31,12 @@ def _other_user_application(f) -> tuple[int, int, int]:
         "'Their private subject', %s, 'their private body') RETURNING id",
         (uid, datetime.datetime(2026, 1, 1, tzinfo=datetime.UTC)),
     )
-    match = db.query_one(
+    match = mail_log.query_one(
         "INSERT INTO application_matches (message_id, application_id, method, confidence) "
         "VALUES (%s, %s, 'company_name', 'high') RETURNING id",
         (msg["id"], app["id"]),
     )
-    event = db.query_one(
+    event = mail_log.query_one(
         "INSERT INTO email_events (message_id, kind, confidence) "
         "VALUES (%s, 'rejection', 'high') RETURNING id",
         (msg["id"],),

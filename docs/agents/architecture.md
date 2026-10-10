@@ -52,15 +52,19 @@ pointer lags after a backfill has finished, which means something appended
 another way. A rule that writes an event with no model names itself in
 `model` (`rule:self_sent`), because no model and no person is a bug.
 
-**"Latest row per message" has one owner, `api/mail/current.py`.** A
-statement that needs the current event or current match of many messages
-takes its subquery from `current_event(...)` or `current_match(...)`, naming
-the columns it reads; one message's current match is `match.latest`.
-`tests/test_mail_current.py` fails on a `DISTINCT ON (message_id)` written
-anywhere else. There were 36 such copies in nine files. Named columns, not
-every column and not a database view, because a CTE referenced twice is
-materialized whole and a view referenced twice is computed twice: the module
-docstring has the production measurements.
+**The current event and match are read through the message's pointers.** A
+statement holding the message row joins `email_events e ON e.id =
+m.current_event_id` (or `application_matches` on `current_match_id`). One
+that needs the current rows of many messages without the message takes its
+subquery from `api/mail/current.py` (`current_event(...)`,
+`current_match(...)`), naming the columns it reads; one message's current
+match is `match.latest`. `tests/test_mail_current.py` fails on a "newest row
+per message" (`DISTINCT ON (message_id)`) written anywhere else: there were
+36 such copies in nine files. Join on the pointer alone, not on the pointer
+and the message id together: the planner multiplies the two and expects one
+row (the module docstring has the production measurements). Test fixtures
+that write a log directly go through `tests/mail_log.py`, which moves the
+pointer the way the writers do.
 
 **A matcher sweep starts from what changed since the last finished sweep.**
 `api/mail/match.last_sweep_start` is the cutoff: the start of the newest

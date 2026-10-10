@@ -14,6 +14,7 @@ import pytest
 from api import db
 from api.mail import match as mail_match
 from api.mail import pipeline as mail_pipeline
+from tests import mail_log
 from tests.conftest import _auth_headers
 
 
@@ -25,7 +26,7 @@ def _msg(uid: int, mid: str, kind: str, company: str | None, thread: str | None 
         (uid, mid, thread, datetime.datetime(2026, 1, 1, tzinfo=datetime.UTC)),
     )
     assert row is not None
-    db.execute(
+    mail_log.execute(
         "INSERT INTO email_events (message_id, kind, confidence, detail, model) "
         "VALUES (%s, %s, 'high', %s, 'gpt-5-nano')",
         (row["id"], kind, db.jsonb({"company": company})),
@@ -124,7 +125,7 @@ def test_not_job_related_retracts_the_match_as_well_as_the_kind(client, me):
         (uid,),
     )
     mid = _msg(uid, "<njr@x>", "rejection", "Acme")
-    db.execute(
+    mail_log.execute(
         "INSERT INTO application_matches (message_id, application_id, method, confidence) "
         "VALUES (%s, %s, 'company_name', 'high')",
         (mid, app["id"]),
@@ -266,7 +267,7 @@ def _app(uid: int, company: str) -> int:
 
 
 def _attach(mid: int, app_id: int) -> None:
-    db.execute(
+    mail_log.execute(
         "INSERT INTO application_matches (message_id, application_id, method, confidence) "
         "VALUES (%s, %s, 'company_name', 'high')",
         (mid, app_id),
@@ -321,7 +322,7 @@ def test_ranking_happens_before_paging(client, me):
         "RETURNING id",
         (uid, datetime.datetime(2020, 1, 1, tzinfo=datetime.UTC)),
     )
-    db.execute(
+    mail_log.execute(
         "INSERT INTO email_events (message_id, kind, confidence, detail, model) "
         "VALUES (%s, 'rejection', 'high', %s, 'gpt-5-nano')",
         (old["id"], db.jsonb({"company": "Acme"})),
@@ -376,7 +377,7 @@ def test_nothing_is_hidden_from_the_queue(client, me):
 
 
 def _event(message_id: int, kind: str = "rejection") -> int:
-    row = db.query_one(
+    row = mail_log.query_one(
         "INSERT INTO email_events (message_id, kind, confidence, occurred_at) "
         "VALUES (%s, %s, 'high', now()) RETURNING id",
         (message_id, kind),

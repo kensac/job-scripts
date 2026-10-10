@@ -19,6 +19,7 @@ import pytest
 from api import db
 from api.mail import pipeline as mail_pipeline
 from api.resolve import queue, queue_items
+from tests import mail_log
 from tests import resolve_queue_oracle as oracle
 
 _T0 = datetime.datetime(2026, 1, 1, tzinfo=datetime.UTC)
@@ -33,7 +34,7 @@ def _msg(uid, n, events, *, company="Acme", sent=None, thread=None):
     ids = []
     for kind in events:
         ids.append(
-            db.query_one(
+            mail_log.query_one(
                 "INSERT INTO email_events (message_id, kind, confidence, detail, model) "
                 "VALUES (%s, %s, 'high', %s, 'gpt-5-nano') RETURNING id",
                 (row["id"], kind, db.jsonb({"company": company, "role_title": f"role {n}"})),
@@ -43,7 +44,7 @@ def _msg(uid, n, events, *, company="Acme", sent=None, thread=None):
 
 
 def _match(mid, app, method="ats_company", actor=None):
-    db.execute(
+    mail_log.execute(
         "INSERT INTO application_matches (message_id, application_id, method, confidence, "
         "rationale, actor_user_id) VALUES (%s, %s, %s, 'high', 'why', %s)",
         (mid, app, method, actor),

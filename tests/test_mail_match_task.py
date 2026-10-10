@@ -16,6 +16,7 @@ import pytest
 from api import db
 from api.board.person_state import write_board_row
 from tasks import mail_match as task
+from tests import mail_log
 
 _seq = itertools.count(1)
 
@@ -54,7 +55,7 @@ def _event(message_id: int, kind: str, *, company=None, title=None) -> int:
         detail["company"] = company
     if title:
         detail["role_title"] = title
-    row = db.query_one(
+    row = mail_log.query_one(
         "INSERT INTO email_events (message_id, kind, confidence, detail) "
         "VALUES (%s, %s, 'high', %s) RETURNING id",
         (message_id, kind, db.jsonb(detail)),
@@ -304,7 +305,7 @@ def test_an_approach_already_attached_is_corrected(f):
     )["id"]
     msg = _message(uid)
     _event(msg, "recruiter_outreach", company="RippleMatch", title="Software Engineer")
-    db.execute(
+    mail_log.execute(
         "INSERT INTO application_matches (message_id, application_id, method, confidence) "
         "VALUES (%s,%s,'ats_company','medium')",
         (msg, app),

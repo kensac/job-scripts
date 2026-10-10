@@ -13,6 +13,7 @@ import datetime
 import pytest
 
 from api import db
+from tests import mail_log
 from tests.conftest import _auth_headers
 
 
@@ -29,7 +30,7 @@ def _owner_with_message(f) -> tuple[int, int, int]:
         "RETURNING id",
         (uid, datetime.datetime(2026, 1, 2, tzinfo=datetime.UTC)),
     )
-    db.execute(
+    mail_log.execute(
         "INSERT INTO email_events (message_id, kind, confidence, detail, model) "
         "VALUES (%s, 'acknowledgement', 'high', %s, 'gpt-5-nano')",
         (msg["id"], db.jsonb({"company": "Acme", "role_title": "Engineer"})),
@@ -103,7 +104,7 @@ def test_the_owner_is_told_a_correction_was_an_administrators(client, admin, f):
     derived rather than stored twice."""
     _headers, admin_id = admin
     uid, app_id, msg_id = _owner_with_message(f)
-    db.execute(
+    mail_log.execute(
         "INSERT INTO application_matches (message_id, application_id, method, confidence, "
         "actor_user_id) VALUES (%s, %s, 'manual', 'high', %s)",
         (msg_id, app_id, admin_id),

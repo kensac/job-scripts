@@ -27,6 +27,7 @@ from api import db
 from api.mail import store as mail_store
 from api.mail.store import ImportedMessage
 from tasks import mail_classify
+from tests import mail_log
 from tests.factories import finished
 
 
@@ -95,7 +96,7 @@ class TestAResumeReachesCollection:
         returned before run_batched. The provider had already been paid."""
         mid, _ = _msg(f)
         tid = _task([mid], batch_ids=["batch_paid_for"])
-        db.execute(
+        mail_log.execute(
             "INSERT INTO email_events (message_id, kind, confidence, detail, model) "
             "VALUES (%s, 'not_job_related', 'high', '{}'::jsonb, 'm')",
             (mid,),

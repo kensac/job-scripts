@@ -12,6 +12,7 @@ from __future__ import annotations
 import datetime
 
 from api import db
+from tests import mail_log
 
 
 def _msg(uid: int, mid: str, **kw) -> int:
@@ -58,7 +59,9 @@ def test_requires_admin(client, user_headers):
 def test_lists_with_the_current_verdict(client, admin_headers):
     uid = _uid(admin_headers)
     mid = _msg(uid, "<dbg1@x>")
-    db.execute("INSERT INTO email_events (message_id, kind) VALUES (%s, %s)", (mid, "rejection"))
+    mail_log.execute(
+        "INSERT INTO email_events (message_id, kind) VALUES (%s, %s)", (mid, "rejection")
+    )
     body = client.get("/v1/admin/mail", headers=admin_headers).json()
     row = next(r for r in body["rows"] if r["id"] == mid)
     assert row["kind"] == "rejection"
@@ -70,8 +73,10 @@ def test_only_the_newest_classification_shows(client, admin_headers):
     the superseded one as if it were current."""
     uid = _uid(admin_headers)
     mid = _msg(uid, "<dbg2@x>")
-    db.execute("INSERT INTO email_events (message_id, kind) VALUES (%s, %s)", (mid, "rejection"))
-    db.execute(
+    mail_log.execute(
+        "INSERT INTO email_events (message_id, kind) VALUES (%s, %s)", (mid, "rejection")
+    )
+    mail_log.execute(
         "INSERT INTO email_events (message_id, kind) VALUES (%s, %s)", (mid, "interview_invite")
     )
     body = client.get("/v1/admin/mail", headers=admin_headers).json()
@@ -83,7 +88,7 @@ def test_unmatched_is_filterable(client, admin_headers):
     nothing' - so it is a value to filter ON, not an absence to skip."""
     uid = _uid(admin_headers)
     mid = _msg(uid, "<dbg3@x>")
-    db.execute(
+    mail_log.execute(
         "INSERT INTO application_matches (message_id, application_id, method) VALUES (%s, %s, %s)",
         (mid, None, "unmatched"),
     )
@@ -99,11 +104,11 @@ def test_detail_shows_full_history_not_just_current(client, admin_headers):
     uid = _uid(admin_headers)
     mid = _msg(uid, "<dbg4@x>")
     app = _app(uid)
-    db.execute(
+    mail_log.execute(
         "INSERT INTO application_matches (message_id, application_id, method) VALUES (%s, %s, %s)",
         (mid, None, "unmatched"),
     )
-    db.execute(
+    mail_log.execute(
         "INSERT INTO application_matches (message_id, application_id, method) VALUES (%s, %s, %s)",
         (mid, app, "ats_company"),
     )
@@ -128,7 +133,7 @@ def test_override_appends_rather_than_edits(client, admin_headers):
     uid = _uid(admin_headers)
     mid = _msg(uid, "<dbg6@x>")
     app = _app(uid)
-    db.execute(
+    mail_log.execute(
         "INSERT INTO application_matches (message_id, application_id, method) VALUES (%s, %s, %s)",
         (mid, None, "unmatched"),
     )
@@ -162,8 +167,10 @@ def test_pipeline_hides_closed_by_default(client, user_headers):
     uid = _uid(user_headers)
     live, dead = _app(uid, "LiveCo"), _app(uid, "DeadCo")
     mid = _msg(uid, "<dbg8@x>")
-    db.execute("INSERT INTO email_events (message_id, kind) VALUES (%s, %s)", (mid, "rejection"))
-    db.execute(
+    mail_log.execute(
+        "INSERT INTO email_events (message_id, kind) VALUES (%s, %s)", (mid, "rejection")
+    )
+    mail_log.execute(
         "INSERT INTO application_matches (message_id, application_id, method) VALUES (%s, %s, %s)",
         (mid, dead, "ats_company"),
     )
@@ -194,12 +201,12 @@ def test_analytics_reports_where_the_matcher_refuses(client, admin_headers, f):
             "now(),TRUE) RETURNING id",
             (uid, f"an-{kind}-{method}"),
         )["id"]
-        db.execute(
+        mail_log.execute(
             "INSERT INTO email_events (message_id, kind, confidence, model, detail) "
             "VALUES (%s,%s,'high','gpt-5.6-luna',%s)",
             (mid, kind, db.jsonb({"company": "Acme"})),
         )
-        db.execute(
+        mail_log.execute(
             "INSERT INTO application_matches (message_id, application_id, method, confidence) "
             "VALUES (%s, NULL, %s, 'none')",
             (mid, method),
@@ -228,7 +235,7 @@ def test_analytics_measures_what_a_prefilter_gate_would_have_cost(client, admin_
             "RETURNING id",
             (uid, f"pf-{hit}-{kind}", hit),
         )["id"]
-        db.execute(
+        mail_log.execute(
             "INSERT INTO email_events (message_id, kind, confidence) VALUES (%s,%s,'high')",
             (mid, kind),
         )
@@ -282,7 +289,7 @@ def test_each_section_ships_the_population_it_counts(client, admin_headers, f):
             "RETURNING id",
             (uid, f"pop-{i}", f"a@d{i}.com"),
         )["id"]
-        db.execute(
+        mail_log.execute(
             "INSERT INTO email_events (message_id, kind, confidence) VALUES (%s,%s,'high')",
             (mid, kind),
         )
@@ -324,11 +331,11 @@ def _msg_with(f, uid, kind, method, mid_suffix):
         "sent_at) VALUES (%s,%s,'takeout','a@b.com','s',now()) RETURNING id",
         (uid, f"filt-{mid_suffix}"),
     )["id"]
-    db.execute(
+    mail_log.execute(
         "INSERT INTO email_events (message_id, kind, confidence) VALUES (%s,%s,'high')", (mid, kind)
     )
     if method is not None:
-        db.execute(
+        mail_log.execute(
             "INSERT INTO application_matches (message_id, application_id, method, confidence) "
             "VALUES (%s, NULL, %s, 'none')",
             (mid, method),

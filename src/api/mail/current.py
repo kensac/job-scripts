@@ -2,20 +2,23 @@
 
 `email_events` and `application_matches` are append-only, and the newest row
 per message is the one in force: a reclassification retracts the old kind and
-a rematch moves the message off its old application. Every statement that
-reads "the current one" for many messages takes its subquery from here, and
-`tests/test_mail_current.py` fails on a copy written anywhere else. One
-message's current match is `match.latest`, an index probe.
+a rematch moves the message off its old application. Its writer stores the
+newest id on the message (`email_messages.current_event_id`,
+`current_match_id`), so the current row is a join, not a pass over the log.
 
-The caller names the columns it reads, rather than this module selecting
-every column, because of how Postgres plans the two shapes (measured on
-production 2026-10-10, 83,846 events, 15,151 matches). Referenced once, the
-subquery is inlined and unused columns are dropped, so a wide list costs
-nothing: about 200 ms either way. Referenced twice, as the resolve queue
-does, a CTE is materialized whole: the queue measured a median 227 ms with
-its narrow lists against 297 ms with every column. A database view was
-rejected for the same reason: each reference to it is planned separately,
-so the queue paid for the pass twice, a median 299 ms.
+A statement that already has the message row joins through the pointer
+itself (`JOIN email_events e ON e.id = m.current_event_id`), as the resolve
+queue does. One that wants the current rows of many messages without one
+takes its subquery from here. `tests/test_mail_current.py` fails on a
+"newest row per message" written anywhere else, and holds this module equal
+to it.
+
+Measured on production 2026-10-10 after the fill (69,318 messages, 83,846
+events, 15,151 matches), medians of six: the resolve queue 163 ms through the
+pointers against 231 ms for the newest-row pass; the funnel 94 ms against
+105 ms; a whole-mailbox count by current kind 144 ms against 267 ms. Joining
+the queue on both the message id and the pointer made the planner expect one
+row and fall back to nested loops (340 ms), so it joins on the pointer alone.
 """
 
 from __future__ import annotations
@@ -45,19 +48,17 @@ def stale_pointers() -> int:
     return int(row["n"]) if row else 0
 
 
-def _newest(table: str, columns: tuple[str, ...]) -> str:
-    return (
-        f"SELECT DISTINCT ON (message_id) {', '.join(('message_id', *columns))} "
-        f"FROM {table} ORDER BY message_id, id DESC"
-    )
+def _through(pointer: str, table: str, columns: tuple[str, ...]) -> str:
+    listed = ", ".join(("p.id AS message_id", *(f"r.{c}" for c in columns)))
+    return f"SELECT {listed} FROM email_messages p JOIN {table} r ON r.id = p.{pointer}"
 
 
 def current_event(*columns: str) -> str:
     """The newest `email_events` row per message: `message_id` and `columns`."""
-    return _newest("email_events", columns)
+    return _through("current_event_id", "email_events", columns)
 
 
 def current_match(*columns: str) -> str:
     """The newest `application_matches` row per message: `message_id` and
     `columns`. A null `application_id` is a recorded outcome, not an absence."""
-    return _newest("application_matches", columns)
+    return _through("current_match_id", "application_matches", columns)

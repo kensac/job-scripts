@@ -8,6 +8,7 @@ import itertools
 
 from api import db
 from api.mail import pipeline as mail_pipeline
+from tests import mail_log
 
 _seq = itertools.count(1)
 
@@ -29,13 +30,13 @@ def _msg(uid):
 
 
 def _event(mid, kind):
-    db.execute(
+    mail_log.execute(
         "INSERT INTO email_events (message_id, kind, confidence) VALUES (%s,%s,'high')", (mid, kind)
     )
 
 
 def _match(mid, app_id, method="ats_company"):
-    db.execute(
+    mail_log.execute(
         "INSERT INTO application_matches (message_id, application_id, method, confidence) "
         "VALUES (%s,%s,%s,'high')",
         (mid, app_id, method),
@@ -257,7 +258,7 @@ def test_candidates_lead_with_what_the_matcher_refused_to_choose(client, user_he
     _app(uid, company="Tesla", title="Autopilot Engineer")
     _app(uid, company="Unrelated Co", title="Engineer")
     mid = _msg(uid)
-    db.execute(
+    mail_log.execute(
         "INSERT INTO email_events (message_id, kind, confidence, detail) "
         "VALUES (%s,'rejection','high',%s)",
         (mid, db.jsonb({"company": "Tesla, Inc.", "role_title": "Engineer"})),
@@ -382,7 +383,7 @@ def test_a_match_carries_what_it_was_decided_from(client, user_headers):
             "with your application to Tesla for the Frontend role. " + ("more " * 200),
         ),
     )["id"]
-    db.execute(
+    mail_log.execute(
         "INSERT INTO email_events (message_id, kind, confidence, detail, model) "
         "VALUES (%s,'rejection','high',%s,'gpt-5.6-luna')",
         (mid, db.jsonb({"company": "Tesla", "role_title": "Frontend Engineer"})),
@@ -447,7 +448,7 @@ def test_the_mention_says_when_the_company_is_not_in_the_body(client, user_heade
             "Thanks for applying.",
         ),
     )["id"]
-    db.execute(
+    mail_log.execute(
         "INSERT INTO email_events (message_id, kind, confidence, detail) "
         "VALUES (%s,'acknowledgement','high',%s)",
         (mid, db.jsonb({"company": "Acme Corporation"})),
@@ -469,7 +470,7 @@ def _mail(uid, *, subject="s", sender="a@b.com", kind=None, company=None):
         (uid, f"um-{next(_seq)}", subject, sender),
     )["id"]
     if kind:
-        db.execute(
+        mail_log.execute(
             "INSERT INTO email_events (message_id, kind, confidence, detail) "
             "VALUES (%s,%s,'high',%s)",
             (mid, kind, db.jsonb({"company": company} if company else {})),
@@ -708,7 +709,7 @@ def _threaded(uid, thread, n, kind="rejection", company="Acme"):
             "VALUES (%s,%s,%s,'gmail',%s,'a@acme.com',now()) RETURNING id",
             (uid, f"th-{next(_seq)}", thread, f"msg {i}"),
         )["id"]
-        db.execute(
+        mail_log.execute(
             "INSERT INTO email_events (message_id, kind, confidence, detail) "
             "VALUES (%s,%s,'high',%s)",
             (mid, kind, db.jsonb({"company": company})),
@@ -932,7 +933,7 @@ def test_a_correction_can_be_reverted_to_what_the_model_said(client, user_header
     # A MODEL-authored event, which is what a revert restores. The helper
     # writes model=NULL, and NULL is exactly how a human correction is told
     # apart from a model's answer.
-    db.execute(
+    mail_log.execute(
         "INSERT INTO email_events (message_id, kind, confidence, detail, model) "
         "VALUES (%s,'acknowledgement','high',%s,'gpt-5.6-luna')",
         (mid, db.jsonb({"company": "Acme"})),
@@ -963,7 +964,7 @@ def test_reverting_with_nothing_to_restore_is_refused(client, user_headers):
         "VALUES (%s,%s,'gmail','s',now()) RETURNING id",
         (uid, f"norev-{next(_seq)}"),
     )["id"]
-    db.execute(
+    mail_log.execute(
         "INSERT INTO email_events (message_id, kind, confidence, model) "
         "VALUES (%s,'rejection','high',NULL)",
         (mid,),
@@ -1096,7 +1097,7 @@ def test_the_pipeline_sorts_on_the_set_not_the_page(client, user_headers):
             "VALUES (%s,%s,'gmail','s',%s) RETURNING id",
             (uid, f"srt-{next(_seq)}", when),
         )["id"]
-        db.execute(
+        mail_log.execute(
             "INSERT INTO email_events (message_id, kind, confidence) VALUES (%s,'acknowledgement','high')",
             (mid,),
         )
@@ -1232,7 +1233,7 @@ def test_silence_is_a_filter_because_it_is_the_question_people_ask(client, user_
         "VALUES (%s,%s,'gmail','hi', now() - interval '1 day') RETURNING id",
         (uid, f"quiet-{next(_seq)}"),
     )["id"]
-    db.execute(
+    mail_log.execute(
         "INSERT INTO email_events (message_id, kind, confidence) "
         "VALUES (%s,'acknowledgement','high')",
         (mid,),
@@ -1261,7 +1262,7 @@ def test_a_finished_application_is_not_silent(client, user_headers):
         "VALUES (%s,%s,'gmail','no', now() - interval '250 days') RETURNING id",
         (uid, f"done-{next(_seq)}"),
     )["id"]
-    db.execute(
+    mail_log.execute(
         "INSERT INTO email_events (message_id, kind, confidence) VALUES (%s,'rejection','high')",
         (mid,),
     )
@@ -1282,7 +1283,7 @@ def test_conversations_sort_on_the_set(client, user_headers):
             "RETURNING id",
             (uid, f"ts-{next(_seq)}", key, when),
         )["id"]
-        db.execute(
+        mail_log.execute(
             "INSERT INTO email_events (message_id, kind, confidence) "
             "VALUES (%s,'acknowledgement','high')",
             (mid,),
@@ -1309,7 +1310,7 @@ def test_the_unmatched_queue_is_work_not_the_whole_mailbox(client, user_headers)
         (uid, f"unclass-{next(_seq)}"),
     )
     approach = _mail(uid, subject="Still looking?", kind="recruiter_outreach", company="Globex")
-    db.execute(
+    mail_log.execute(
         "INSERT INTO application_matches (message_id, application_id, method, confidence) "
         "VALUES (%s, NULL, 'not_an_application', 'none')",
         (approach,),
