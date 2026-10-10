@@ -21,9 +21,8 @@ from api import db
 from api.ai import verdicts
 from api.board import criteria as board_criteria
 from core import verdict_reads
-from core.managed_board_title_gate import TitleGateConfig
-from core.managed_board_title_gate import evaluate as evaluate_title_gate
-from core.review_gate import OCCUPATION_SQL_PATTERN, TECHNICAL_SQL_PATTERN, VolumeGate
+from core.review_gate import VolumeGate
+from core.screening import TitleGateConfig, screen
 
 Outcome = Literal["passed", "failed", "skipped", "pending", "info"]
 
@@ -295,17 +294,14 @@ def _volume_step(job: dict[str, Any], gate: VolumeGate, prompt_hash: str) -> Pat
 
 def _volume_decision(job: dict[str, Any], gate: VolumeGate) -> PathStep | None:
     row = db.query_one(
-        "SELECT (j.title !~* %(tech)s AND j.title ~* %(occ)s) AS occupation, "
-        "abs(hashtext(j.url)) %% 100 < %(audit)s AS audited FROM jobs j WHERE j.id = %(jid)s",
-        {
-            "tech": TECHNICAL_SQL_PATTERN,
-            "occ": OCCUPATION_SQL_PATTERN,
-            "audit": gate.audit_percent,
-            "jid": job["id"],
-        },
+        "SELECT abs(hashtext(j.url)) %% 100 < %(audit)s AS audited FROM jobs j WHERE j.id = %(jid)s",
+        {"audit": gate.audit_percent, "jid": job["id"]},
     )
     assert row is not None
-    if gate.occupation_titles and row["occupation"]:
+    if (
+        gate.occupation_titles
+        and screen("occupation_words_v1", title=job["title"], source=job["source"]).skip
+    ):
         return PathStep(
             stage="volume",
             outcome="skipped",
@@ -506,19 +502,19 @@ def _managed_board(job: dict[str, Any], board: dict[str, Any], gate: VolumeGate)
             steps.append(volume)
         if board["title_gate"]:
             config = TitleGateConfig.model_validate(board["title_gate"])
-            decision = evaluate_title_gate(config, title=job["title"] or "", source=job["source"])
+            decision = screen(config.recipe, title=job["title"], source=job["source"])
             steps.append(
                 PathStep(
                     stage="title_gate",
                     outcome="passed"
-                    if decision.keep
+                    if not decision.skip
                     else ("skipped" if config.mode == "enforce" else "info"),
                     label=(
                         f"Title gate {config.recipe}: "
-                        + ("kept" if decision.keep else "dropped")
+                        + ("dropped" if decision.skip else "kept")
                         + (
                             " (shadow, not applied)"
-                            if config.mode == "shadow" and not decision.keep
+                            if config.mode == "shadow" and decision.skip
                             else ""
                         )
                     ),

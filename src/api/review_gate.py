@@ -27,7 +27,8 @@ from core.payload_objects import (
     parse_ref,
 )
 from core.pool import in_transaction
-from core.review_gate import ReviewGatePolicy, profile_rejection, title_rejection
+from core.review_gate import ReviewGatePolicy, profile_rejection
+from core.screening import screen
 from core.store import get_contents
 
 logger = logging.getLogger(__name__)
@@ -224,11 +225,12 @@ def partition(
                 logger.exception("Review gate profile evidence unavailable; retaining review")
         for job in jobs:
             url = job["url"]
-            title_reason = (
-                title_rejection(job.get("title") or "")
+            title = (
+                screen(scope.title_recipe, title=job.get("title"), source=job.get("source"))
                 if policy.title_mode != "off" and scope.title_recipe
                 else None
             )
+            title_reason = title.reason if title and title.skip else None
             evidence = profiles.get(url)
             profile_reason = (
                 profile_rejection(evidence[1], job.get("title") or "") if evidence else None
