@@ -24,7 +24,7 @@ async def test_paid_compensation_result_survives_demand_disappearing(f, monkeypa
 
     monkeypatch.setattr("tasks.derive.run_batched", collect)
     await comp.PAY.handle(f.make_task("extract_comp"), {})
-    assert db.query_one("SELECT comp_extracted FROM jobs WHERE id=%s", (job,))["comp_extracted"]
+    assert db.query_one("SELECT url FROM job_comp WHERE url = %s", (url,))
 
 
 @pytest.mark.asyncio

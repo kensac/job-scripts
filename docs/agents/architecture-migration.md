@@ -434,7 +434,10 @@ A switched-off feature stays registered; its `switch` keeps the scheduler from
 enqueuing it and a hand-started run from submitting, while paid batches are
 still collected. Identity stays what phase 4's drop left it: the answer is
 keyed by what it describes, and the recipe version re-derives only where the
-table stores it (`job_profiles.classifier_version`).
+table stores it (`job_profiles.classifier_version`). Pay is `job_comp`, keyed
+by url like the other derived tables; a reader joins it on `j.url` (the
+board's `visibility.FAST` already does, as `pay`), and `jobs` holds only what
+listings say.
 `jobs.near_copy_key` is not a registration: it costs nothing, is computed in
 process before verify submits, and records the text verification read, so a
 staleness rule recomputing it from a newer page would match a twin on text

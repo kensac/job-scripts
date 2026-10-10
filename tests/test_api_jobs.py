@@ -492,9 +492,9 @@ def test_comp_amounts_are_served_with_their_currency(client, user_headers, f):
     means we never captured a unit. It does not mean USD."""
     user_id = db.query_one("SELECT id FROM users WHERE sub = 'test-user'")
     assert user_id is not None
-    job_id, _ = f.make_ready_job(source="comped", comp_min=90000, comp_max=120000)
+    job_id, url = f.make_ready_job(source="comped", comp_min=90000, comp_max=120000)
     f.make_board_row(user_id["id"], job_id)
-    db.execute("UPDATE jobs SET comp_currency = 'CAD' WHERE id = %s", (job_id,))
+    db.execute("UPDATE job_comp SET comp_currency = 'CAD' WHERE url = %s", (url,))
 
     row = next(
         r
@@ -532,9 +532,9 @@ def test_comp_carries_the_period_and_basis_it_was_derived_from(client, user_head
     _subscribe(uid, "src-comp")
     job_id = _insert_job("src-comp", "https://comp.test/1")
     db.execute(
-        "UPDATE jobs SET comp_min = 94000, comp_max = 94000, comp_text = '$45/hr', "
-        "comp_currency = 'USD', comp_period = 'hourly', comp_basis = 'base' WHERE id = %s",
-        (job_id,),
+        "INSERT INTO job_comp (url, comp_min, comp_max, comp_text, comp_currency, comp_period, "
+        "comp_basis) VALUES (%s, 94000, 94000, '$45/hr', 'USD', 'hourly', 'base')",
+        ("https://comp.test/1",),
     )
     _pass_closed("https://comp.test/1")
 

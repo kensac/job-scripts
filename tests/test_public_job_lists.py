@@ -21,11 +21,16 @@ def test_public_discovery_filters_apply_before_pagination(client, query, expecte
     board = _published_board()
     now = datetime.datetime.now(datetime.UTC)
     ids = [_job(board, i, now) for i in range(1, 4)]
+    db.execute("UPDATE jobs SET locations=ARRAY['Toronto Remote'] WHERE id=%s", (ids[1],))
     db.execute(
-        "UPDATE jobs SET locations=ARRAY['Toronto Remote'], comp_currency='CAD' WHERE id=%s",
+        "UPDATE job_comp SET comp_currency='CAD' FROM jobs WHERE jobs.url = job_comp.url "
+        "AND jobs.id=%s",
         (ids[1],),
     )
-    db.execute("UPDATE jobs SET comp_max=NULL WHERE id=%s", (ids[2],))
+    db.execute(
+        "UPDATE job_comp SET comp_max=NULL FROM jobs WHERE jobs.url = job_comp.url AND jobs.id=%s",
+        (ids[2],),
+    )
     db.execute(
         "INSERT INTO locations (text, remote) VALUES ('Toronto Remote', true), ('New York', false)"
     )
@@ -92,24 +97,29 @@ def _job(
     comp_max: int | None = 150000,
     date_posted: datetime.datetime | None = None,
 ) -> int:
+    url = f"https://boards.greenhouse.io/example/jobs/{index}"
     job = db.query_one(
         "INSERT INTO jobs "
         "(url, raw_url, company, title, locations, terms, source, active, date_posted, "
-        "comp_min, comp_max, comp_currency, comp_period, comp_basis, comp_text, created_at) "
+        "created_at) "
         "VALUES (%s, 'private-raw-url', %s, %s, ARRAY['New York'], %s, "
-        "'public-test', true, %s, 100000, %s, 'USD', 'year', 'base', '$100k-$150k', %s) "
+        "'public-test', true, %s, %s) "
         "RETURNING id",
         (
-            f"https://boards.greenhouse.io/example/jobs/{index}",
+            url,
             company or f"Company {index}",
             title or f"Role {index}",
             terms or ["full-time"],
             date_posted if date_posted is not None else sort_at,
-            comp_max,
             sort_at,
         ),
     )
     assert job is not None
+    db.execute(
+        "INSERT INTO job_comp (url, comp_min, comp_max, comp_currency, comp_period, comp_basis, "
+        "comp_text) VALUES (%s, 100000, %s, 'USD', 'year', 'base', '$100k-$150k')",
+        (url, comp_max),
+    )
     db.execute(
         "INSERT INTO managed_board_jobs (managed_board_id, job_id, sort_at) VALUES (%s, %s, %s)",
         (board_id, job["id"], sort_at),

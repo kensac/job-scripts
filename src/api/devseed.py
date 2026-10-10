@@ -104,26 +104,20 @@ def seed() -> dict[str, int]:
         url = f"https://devboard.test/job/{i}"
         job_id = _one(
             """
-            INSERT INTO jobs (url, raw_url, source, company, title, active, date_posted,
-                              comp_min, comp_max, comp_currency, comp_extracted)
-            VALUES (%s, %s, 'devboard', %s, %s, %s, %s, %s, %s, %s, %s)
-            ON CONFLICT (url) DO UPDATE SET active = EXCLUDED.active,
-                comp_currency = EXCLUDED.comp_currency
+            INSERT INTO jobs (url, raw_url, source, company, title, active, date_posted)
+            VALUES (%s, %s, 'devboard', %s, %s, %s, %s)
+            ON CONFLICT (url) DO UPDATE SET active = EXCLUDED.active
             RETURNING id
             """,
-            (
-                url,
-                url,
-                company,
-                title,
-                active,
-                _days_ago(i * 9 + 2),
-                low,
-                high,
-                currency,
-                low is not None,
-            ),
+            (url, url, company, title, active, _days_ago(i * 9 + 2)),
         )
+        if low is not None:
+            db.execute(
+                "INSERT INTO job_comp (url, comp_min, comp_max, comp_currency) "
+                "VALUES (%s, %s, %s, %s) ON CONFLICT (url) DO UPDATE SET "
+                "comp_currency = EXCLUDED.comp_currency",
+                (url, low, high, currency),
+            )
         job_ids.append(job_id)
         counts["jobs"] += 1
         for check in ("closed", "clearance"):

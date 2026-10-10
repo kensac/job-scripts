@@ -24,12 +24,8 @@ _RAW = re.compile(
 # Each entry leaves when its write moves; test_allowed_writers_still_write
 # fails once a file here no longer writes, so the list cannot go stale.
 _ALLOWED = {
-    # Stream G is moving pay off jobs into a derived table; the comp_* write
-    # moves with it rather than into the catalog first.
-    "tasks/comp.py": "comp_* columns, owned by the derived facts move",
-    # Seeds a disposable database only (make dev-api refuses any other), and
-    # writes the comp columns the derived facts move owns.
-    "api/devseed.py": "dev seed of comp columns, owned by the derived facts move",
+    # Seeds a disposable database only (make dev-api refuses any other).
+    "api/devseed.py": "dev seed of postings in a disposable database",
 }
 
 
