@@ -55,25 +55,78 @@ _VOLUME_SKIP = (
 """
 )
 
-REACHABLE = f"""
-(
+# The postings every target reads (no sources row, or someone tracks it). With
+# the gate off, the broad legacy predicate, and no target reads anything else.
+# Formatted over a `jobs` row aliased j; reachable()'s pool carries it.
+EVERY_TARGET = f"""
     (NOT %(verification_reachability_gate_enabled)s AND {AI_ELIGIBLE_JOB.format(job="j")})
     OR (%(verification_reachability_gate_enabled)s AND (
-    NOT EXISTS (SELECT 1 FROM sources source WHERE source.name = j.source)
-    OR {ON_A_BOARD.format(job="j")}
-    OR EXISTS (
-        SELECT 1 FROM verification_targets target
-        WHERE target.source = j.source
-        {criteria.json_sql("target.criteria")}
-        {_TITLE_SQL}
-        {_VOLUME_SKIP}
-    )))
-)
+        NOT EXISTS (SELECT 1 FROM sources source WHERE source.name = j.source)
+        OR {ON_A_BOARD.format(job="j")}))
 """
 
-# The broad legacy predicate remains explicit in the disabled branch. This is
-# useful in measurements and guards accidental widening if its semantics grow.
-LEGACY_REACHABLE = AI_ELIGIBLE_JOB.format(job="j")
+# A target's criteria split by what a check costs. The places probe the
+# locations table for each of a posting's locations; the rest compare columns.
+_PLACES = ("excluded_locations", "included_locations")
+_COLUMNS = tuple(name for name in criteria.CONDITIONS if name not in _PLACES)
+
+
+def reachable(pool: str) -> str:
+    """SELECT id, date_posted of the postings in `pool` the verification gate
+    admits. `pool` is a relation of (id, every_target), every_target being
+    EVERY_TARGET over the posting. Needs TARGETS in the WITH.
+
+    The same predicate as one EXISTS per posting over the targets, staged for
+    volume. As that EXISTS it ran as a subplan per posting, re-expanding the
+    targets each time, and the verify sweep's candidate query ran past 14
+    minutes on production (2026-10-10), holding locks that a deploy's DROP
+    VIEW queued behind. Each stage is a fenced CTE, because the planner
+    otherwise runs the costliest checks first on the most rows. Criteria
+    depend on the posting and the criteria alone, and the three published
+    boards share one, so they are checked per distinct (source, criteria)
+    before the targets are expanded for the title checks. On that day:
+    - 435,000 postings in the pool; every_target was read in the scan that
+      built it;
+    - the checks that compare columns kept 272,000 (posting, criteria) rows;
+    - the place checks, about 0.05 ms each, ran once per distinct (criteria,
+      locations): 67,000 times rather than 272,000. 119,000 rows passed;
+    - the title checks ran on the 282,000 (posting, target) pairs those
+      expand to, and admitted 40,000 postings.
+    """
+    return f"""
+    SELECT j.id, j.date_posted FROM jobs j
+    WHERE j.id IN (SELECT id FROM {pool} WHERE every_target)
+    UNION
+    SELECT targeted.id, targeted.date_posted FROM (
+        WITH reader AS MATERIALIZED (
+            SELECT DISTINCT source, criteria FROM verification_targets
+        ),
+        dated AS MATERIALIZED (
+            SELECT j.id, j.locations, reader.source, reader.criteria
+            FROM jobs j JOIN reader ON reader.source = j.source
+            WHERE j.id IN (SELECT id FROM {pool})
+                AND %(verification_reachability_gate_enabled)s
+                {criteria.json_sql("reader.criteria", _COLUMNS)}
+        ),
+        placed AS MATERIALIZED (
+            SELECT j.criteria, j.locations
+            FROM (SELECT DISTINCT criteria, locations FROM dated) j
+            WHERE TRUE {criteria.json_sql("j.criteria", _PLACES)}
+        ),
+        matched AS MATERIALIZED (
+            SELECT id, source, criteria FROM dated
+            WHERE (criteria, locations) IN (SELECT criteria, locations FROM placed)
+        )
+        SELECT j.id, j.date_posted
+        FROM matched
+        JOIN jobs j ON j.id = matched.id
+        JOIN verification_targets target
+          ON target.source = matched.source AND target.criteria = matched.criteria
+        WHERE TRUE
+            {_TITLE_SQL}
+            {_VOLUME_SKIP}
+    ) targeted
+    """
 
 
 def unproductive_titles(gate: VolumeGate) -> list[str]:
