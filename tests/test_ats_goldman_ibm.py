@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import datetime
 
+import requests
+
 from core.fetching import ats
 from core.mail.prefilter import looks_job_related
 
@@ -54,12 +56,12 @@ class _Resp:
         return self._body
 
 
-def _goldman(monkeypatch, body):
+def _goldman(monkeypatch, body, status_code=200):
     asked: list[dict] = []
 
     def post(url, json, **kw):
         asked.append({"url": url, **json["variables"]})
-        return _Resp(body)
+        return _Resp(body, status_code)
 
     monkeypatch.setattr(ats._session, "post", post)
     return asked
@@ -85,6 +87,28 @@ def test_a_role_goldman_cannot_find_is_an_error_never_a_closure(monkeypatch):
     answer, so the page tiers and the board pull decide, not this."""
     _goldman(monkeypatch, GS_ERROR)
     assert ats.resolve(GS_URL).status is ats.Status.ERROR
+
+
+def test_a_goldman_status_is_about_the_endpoint_never_the_role(monkeypatch):
+    """A missing role answers 200 with INTERNAL_ERROR and a wrong path 401
+    (2026-10-10), so a 404 is the gateway moving, not a closed role. Read
+    through the shared status mapping it would close every Goldman posting."""
+    for status in (404, 410, 503):
+        _goldman(monkeypatch, {}, status)
+        assert ats.resolve(GS_URL).status is ats.Status.ERROR
+
+
+def test_a_resolver_request_that_got_no_answer_is_an_error(monkeypatch):
+    def down(url, **kw):
+        raise requests.ConnectionError("refused")
+
+    monkeypatch.setattr(ats._session, "post", down)
+    monkeypatch.setattr(ats._session, "get", down)
+    assert ats.resolve(GS_URL).status is ats.Status.ERROR
+    assert (
+        ats.resolve("https://careers.ibm.com/careers/JobDetail?jobId=87273").status
+        is ats.Status.ERROR
+    )
 
 
 def test_a_goldman_role_without_text_or_not_posted_offers_none(monkeypatch):

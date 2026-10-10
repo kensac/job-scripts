@@ -204,6 +204,14 @@ the `Ibm` resolver reports that closure, and a closed posting can stay in an
 authoritative pull until it does. An open IBM posting is UNSUPPORTED there,
 and its text comes from the browser.
 
+Every resolver asks through `AtsResolver.get` or `post`, so a request that got
+no answer is ERROR the same way everywhere. `from_response` (404 and 410 are
+GONE) is for an endpoint whose path names the posting. A resolver whose
+endpoint does not (Goldman's GraphQL gateway answers a missing role 200 and a
+wrong path 401, measured 2026-10-10; IBM answers with a redirect) maps the
+status itself, because a 404 there is the endpoint moving, and reading it as
+GONE would close every posting on the board at once.
+
 **A listing's text is stored only when it is the whole posting.** Ingest stores
 a non-empty `description` as the posting's content and never fetches the page,
 so a partial text is judged as if it were complete. IBM's index carries a
