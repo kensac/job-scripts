@@ -295,19 +295,6 @@ def schedule_ingest_cycle() -> None:
         "AND status IN ('pending', 'running') LIMIT 1"
     ):
         enqueue("move_page_fetches", {"cycle": cycle}, dedupe_key=f"page-fetch-move:{cycle}")
-    # listings.pattern is emptied (tasks.listing_patterns), one run at a
-    # time, until a run starts with none left. Asked of tasks rather than
-    # listings: whether any row is left is a scan of the table.
-    if not db.query_one(
-        "SELECT 1 FROM tasks WHERE kind = 'drop_listing_pattern_copies' "
-        "AND (status IN ('pending', 'running') "
-        "     OR (status = 'done' AND progress->>'total' = '0')) LIMIT 1"
-    ):
-        enqueue(
-            "drop_listing_pattern_copies",
-            {"cycle": cycle},
-            dedupe_key=f"listing-pattern-copies:{cycle}",
-        )
     # Messages whose current event or match pointer lags its log
     # (tasks.mail_pointers). Counting them is a pass over every message,
     # 0.9 s on production on 2026-10-10, so the task counts once a cycle

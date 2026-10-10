@@ -27,7 +27,6 @@ from tasks.filters import (
 from tasks.health import handle_data_health
 from tasks.ingest import handle_ingest_source, handle_retire_switched_off
 from tasks.job_profiles import handle_classify_job_profiles
-from tasks.listing_patterns import handle_drop_listing_pattern_copies
 from tasks.locations import handle_classify_locations
 from tasks.mail_classify import handle_classify_mail
 from tasks.mail_match import handle_match_mail
@@ -79,7 +78,6 @@ HANDLERS = {
     "run_managed_board_batch": handle_run_managed_board_batch,
     "classify_job_profiles": handle_classify_job_profiles,
     "move_page_fetches": handle_move_page_fetches,
-    "drop_listing_pattern_copies": handle_drop_listing_pattern_copies,
     "backfill_mail_pointers": handle_backfill_mail_pointers,
     "merge_olm_twins": handle_merge_olm_twins,
 }
