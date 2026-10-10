@@ -106,7 +106,7 @@ def resolve_source_request(
         SourceRequestResolved,
         "UPDATE source_requests SET status = %s, resolution_note = %s, resolved_at = now() "
         "WHERE id = %s RETURNING id, status",
-        (body.action, body.note[:2000] or None, request_id),
+        (body.action, body.note or None, request_id),
     )
     if not row:
         raise refuse(404, "NOT_FOUND", "unknown request")

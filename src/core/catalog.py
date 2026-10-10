@@ -113,7 +113,30 @@ def set_near_copy_keys(keys: dict[str, str]) -> None:
         )
 
 
-def retire_switched_off(patterns_enforced: bool) -> dict[str, int]:
+# Whether listings row {listing} is on its source's latest pull. Rows are
+# never deleted, so existence says only that some pull once listed the url.
+# A pull refreshes every row it lists whose last_seen_at is older than
+# refresh_hours, so right after a pull every row it listed is at most
+# refresh_hours older than that pull; the source's newest last_seen_at is no
+# later than its latest pull, so a listed row is never older than that minus
+# refresh_hours. A row the board dropped falls behind within refresh_hours
+# plus one pull interval. A source whose pulls fail keeps its rows current,
+# because nothing newer moves its newest row. Measured on production
+# 2026-10-10: 1.6 s for retire_switched_off's select with it, 0.6 s without,
+# reading each candidate source's rows once per candidate. {source} is the
+# row's source column, or a parameter when the reader is one source's rows:
+# correlated to the row, the max is re-read for every row, which over one
+# source's 25k rows did not finish in 120 s; a parameter makes it one
+# InitPlan.
+# ponytail: max() per source scans that source's rows; a per-source
+# latest-pull column is the upgrade if a source's listings outgrow it.
+LISTED_NOW: LiteralString = (
+    "{listing}.last_seen_at >= (SELECT max(newest.last_seen_at) FROM listings newest "
+    "WHERE newest.source = {source}) - make_interval(hours => %(refresh_hours)s)"
+)
+
+
+def retire_switched_off(patterns_enforced: bool, refresh_hours: int) -> dict[str, int]:
     """Marks inactive every active row whose source is switched off, unless a
     switched-on source lists the url and would admit it. A switched-off source
     is never pulled, so nothing else ever retires its rows: on 2026-10-04
@@ -123,6 +146,9 @@ def retire_switched_off(patterns_enforced: bool) -> dict[str, int]:
     off: that source's next pull would put it back, and every return queues a
     re-check (371 rows on that day). Re-enabled, the source's own pull
     reactivates its rows through upsert_postings, so this is reversible.
+    Only a listings row its source still lists counts (LISTED_NOW): rows are
+    kept after the board drops them, and a dropped one would otherwise keep
+    the posting active forever.
 
     Runs every cycle and is a no-op once the catalog agrees, which is what
     reaches every way a source is switched off: the sources page, a bundle
@@ -138,7 +164,8 @@ def retire_switched_off(patterns_enforced: bool) -> dict[str, int]:
                 SELECT j.id FROM jobs j JOIN sources s ON s.name = j.source AND NOT s.active
                 WHERE j.active AND NOT EXISTS (
                     SELECT 1 FROM listings l JOIN sources o ON o.name = l.source AND o.active
-                    WHERE l.url = j.url AND (l.kept OR NOT %(enforced)s))
+                    WHERE l.url = j.url AND (l.kept OR NOT %(enforced)s)
+                      AND {LISTED_NOW.format(listing="l", source="l.source")})
                 ORDER BY j.url {_LOCK_ORDER} FOR UPDATE OF j SKIP LOCKED
             ),
             retired AS (
@@ -152,7 +179,7 @@ def retire_switched_off(patterns_enforced: bool) -> dict[str, int]:
             )
             SELECT source, count(*) AS n FROM retired GROUP BY source
             """,
-            {"enforced": patterns_enforced},
+            {"enforced": patterns_enforced, "refresh_hours": refresh_hours},
         ).fetchall()
     return {r["source"]: r["n"] for r in rows}
 
@@ -752,11 +779,10 @@ def record_listings(
     source: str,
     pattern: str,
     kept: set[str],
-    retention_days: int,
     refresh_hours: int,
 ) -> int:
     """Keeps everything a board listed: the title (so a candidate pattern is
-    judged against a month of real titles), the posting text when the
+    judged against every title the board has listed), the posting text when the
     listing call carried it (so a backfill never scrapes a page the board
     already handed over), and the raw record minus that text (so a backtest
     can read a field nobody mapped). `kept` names the URLs the stored title
@@ -776,11 +802,8 @@ def record_listings(
     write: 1,174 bytes of WAL a row against 0 for the filter, measured on
     3,000 rows after a checkpoint.
 
-    Rows the board stopped listing age out retention_days after the pull
-    that last listed them, counted from last_seen_at plus refresh_hours
-    because last_seen_at can lag that pull by up to refresh_hours. So a row
-    is never deleted sooner than before and at most refresh_hours later. A
-    row still listed is never deleted: the pull refreshes it first.
+    A row the board stopped listing is kept, like every row: all data is
+    retained. A reader that means "listed now" says so with LISTED_NOW.
 
     The text and the raw record are written by reference to verified bundle
     objects uploaded before the upsert (listing_payloads.reference_columns).
@@ -822,17 +845,4 @@ def record_listings(
             # pointer; a value from EXCLUDED is a fresh copy, written out again
             # chunk by chunk.
             cur.executemany(_RECORD_LISTINGS, rows)
-    # Its own transaction, locking in the same order. Inside the upsert's it
-    # was a second ascending pass after the first, which is not one order:
-    # it waited on a stale row another board was upserting while holding
-    # rows that board would reach next. It deletes only rows no pull has
-    # listed in retention_days, so nothing needs it atomic with the upsert.
-    with pool.connection() as conn:
-        conn.execute(
-            "DELETE FROM listings WHERE url IN ("
-            "  SELECT url FROM listings WHERE source = %s "
-            "  AND last_seen_at < now() - make_interval(days => %s, hours => %s) "
-            f"  ORDER BY url {_LOCK_ORDER} FOR UPDATE)",
-            (source, retention_days, refresh_hours),
-        )
     return inline
