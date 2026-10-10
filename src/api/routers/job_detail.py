@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from api import db, signals
 from api.auth import AuthedUser, require_user
 from api.board.access import require_visible_job
+from api.mail import applications
 from core import verdict_reads
 from core.comp import CompBasis, CompPeriod
 
@@ -151,9 +152,10 @@ def job_detail(job_id: int, user: AuthedUser = Depends(require_user)) -> JobDeta
         signals=signals.signals_for(job),
         row=db.query_one_as(
             OwnRow,
-            "SELECT status, date_applied, notes, size, recruiter, connection1, "
-            "connection2, documents, hidden, created_at, updated_at "
-            "FROM user_jobs WHERE user_id = %s AND job_id = %s",
+            f"SELECT uj.status, {applications.applied_on('uj')} AS date_applied, uj.notes, "
+            "uj.size, uj.recruiter, uj.connection1, uj.connection2, uj.documents, uj.hidden, "
+            "uj.created_at, uj.updated_at "
+            "FROM user_jobs uj WHERE uj.user_id = %s AND uj.job_id = %s",
             (user.id, job_id),
         ),
         history=db.query_as(

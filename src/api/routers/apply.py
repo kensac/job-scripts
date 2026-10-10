@@ -28,7 +28,7 @@ from api.apply import fill_answers, posting_context
 from api.apply import policy as extension_policy
 from api.apply import recipes as extension_recipes
 from api.auth import AuthedUser, require_user
-from api.board.person_state import touchable_job_ids
+from api.board.person_state import board_row, touchable_job_ids
 from api.board.person_state import write_board_row as _write_board_row
 from api.mail import applications
 from api.models import Ok
@@ -358,7 +358,7 @@ def apply_context(
     """
     job = db.query_one_as(
         MatchedPosting,
-        "SELECT j.id, j.company, j.title, uj.status, uj.date_applied, "
+        f"SELECT j.id, j.company, j.title, uj.status, {applications.applied_on('uj')} AS date_applied, "
         "(SELECT MAX(f.submitted_at) FROM application_fills f "
         " WHERE f.user_id = %s AND f.job_id = j.id) AS submitted_at "
         "FROM jobs j LEFT JOIN user_jobs uj ON uj.job_id = j.id AND uj.user_id = %s "
@@ -623,7 +623,7 @@ def fill_submitted(
         if job_id is not None:
             # The board write records the application with the status.
             _write_board_row(user.id, job_id, {"status": SUBMITTED_STATUS}, publish=False)
-            application_id = applications.from_board(user.id, job_id, None)
+            application_id = applications.from_board(user.id, job_id, None, set_date=False)
         else:
             application_id = applications.from_form(
                 user.id, forms.board_of(fill["url"]), submitted["submitted_at"]
@@ -633,11 +633,7 @@ def fill_submitted(
             (application_id, fill_id),
         )
     if job_id is not None:
-        row = db.query_one(
-            "SELECT status, date_applied, hidden FROM user_jobs WHERE user_id = %s AND job_id = %s",
-            (user.id, job_id),
-        )
-        events.publish_board_row(user.id, job_id, row or {})
+        events.publish_board_row(user.id, job_id, board_row(user.id, job_id))
     _seen(
         "apply_form_submitted",
         user,

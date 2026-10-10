@@ -295,7 +295,8 @@ def proposals_for(user_id: int) -> list[Proposal]:
         )
         SELECT DISTINCT ON (a.id, e.kind)
                a.id AS application_id, a.company_name, a.title, a.job_id,
-               uj.status AS board_status, uj.date_applied,
+               uj.status AS board_status,
+               (a.applied_at AT TIME ZONE 'UTC')::date AS date_applied,
                uj.user_id IS NOT NULL AS board_updatable,
                e.id AS event_id, e.kind,
                e.detail->>'company' AS company, e.detail->>'role_title' AS role_title,

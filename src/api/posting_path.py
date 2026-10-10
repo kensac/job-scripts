@@ -20,6 +20,7 @@ from pydantic import BaseModel
 from api import db, user_settings
 from api.ai import verdicts
 from api.board import criteria as board_criteria
+from api.mail import applications
 from core import verdict_reads
 from core.screening import Recipe, TitleGateConfig, screen
 from core.volume_gate import VolumeGate
@@ -583,9 +584,9 @@ def _board(job: dict[str, Any], user_id: int) -> ConsumerPath:
     """The person's own board: which branch of the visibility predicate admits it."""
     row = db.query_one(
         "SELECT (SELECT computed_at FROM board_visible WHERE user_id = %(uid)s AND job_id = %(jid)s) "
-        "AS member, (SELECT COALESCE(status, '') <> '' OR COALESCE(notes, '') <> '' "
-        "OR date_applied IS NOT NULL FROM user_jobs WHERE user_id = %(uid)s AND job_id = %(jid)s) "
-        "AS acted_on",
+        "AS member, (SELECT COALESCE(uj.status, '') <> '' OR COALESCE(uj.notes, '') <> '' "
+        f"OR {applications.applied_on('uj')} IS NOT NULL FROM user_jobs uj "
+        "WHERE uj.user_id = %(uid)s AND uj.job_id = %(jid)s) AS acted_on",
         {"uid": user_id, "jid": job["id"]},
     )
     assert row is not None

@@ -195,7 +195,7 @@ def _by_company(
 
     A TRACKER APPLICATION'S DATE IS A DAY, NOT AN INSTANT, and the day of
     slack below is that fact rather than a tolerance anyone tuned.
-    `user_jobs.date_applied` is a `date` - a calendar day in a timezone nobody
+    The board's applied day is a `date` - a calendar day in a timezone nobody
     recorded - and storing it as `applied_at` casts it to midnight UTC,
     inventing an hour, a minute and a second it never had. That invented
     precision then vetoes the acknowledgement of the application it describes:

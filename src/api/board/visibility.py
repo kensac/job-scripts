@@ -30,13 +30,14 @@ from api import db
 from api.board import criteria
 from api.board import eligibility as board_eligibility
 from api.board.eligibility import settings_params
+from api.mail import applications
 from api.queue import enqueue
 from core import verdict_reads
 
 logger = logging.getLogger(__name__)
 
-_ACTED_ON = """(COALESCE(uj.status, '') <> '' OR COALESCE(uj.notes, '') <> ''
-               OR uj.date_applied IS NOT NULL)"""
+_ACTED_ON = f"""(COALESCE(uj.status, '') <> '' OR COALESCE(uj.notes, '') <> ''
+               OR {applications.applied_on("uj")} IS NOT NULL)"""
 
 _LATEST_FILTER = verdict_reads.latest_per(
     "v.url, v.prompt_hash",

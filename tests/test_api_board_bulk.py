@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from api import db
+from api.mail import applications
 from tests.factories import make_job
 
 
@@ -16,7 +17,9 @@ def _rows(uid: int) -> dict[int, dict]:
     return {
         r["job_id"]: r
         for r in db.query(
-            "SELECT job_id, status, date_applied, notes FROM user_jobs WHERE user_id = %s", (uid,)
+            f"SELECT uj.job_id, uj.status, {applications.applied_on('uj')} AS date_applied, "
+            "uj.notes FROM user_jobs uj WHERE uj.user_id = %s",
+            (uid,),
         )
     }
 
@@ -24,22 +27,23 @@ def _rows(uid: int) -> dict[int, dict]:
 def test_bulk_patch_applies_one_patch_to_every_selected_row(client, user_headers):
     uid = _user_id()
     ids = [make_job(url=f"https://x.test/{i}") for i in range(3)]
+    status = "Application Submitted"
     r = client.patch(
         "/v1/user/jobs",
-        json={"job_ids": ids, "patch": {"status": "applied", "notes": "batch"}},
+        json={"job_ids": ids, "patch": {"status": status, "notes": "batch"}},
         headers=user_headers,
     )
     assert r.status_code == 200, r.text
     assert r.json()["updated"] == 3
     rows = _rows(uid)
-    assert all(rows[i]["status"] == "applied" and rows[i]["notes"] == "batch" for i in ids)
-    # Setting a status stamps date_applied once, as the single-row write does.
+    assert all(rows[i]["status"] == status and rows[i]["notes"] == "batch" for i in ids)
+    # Setting a status dates the application once, as the single-row write does.
     assert all(rows[i]["date_applied"] is not None for i in ids)
     history = db.query(
         "SELECT job_id, new_status FROM user_job_history WHERE user_id = %s ORDER BY job_id",
         (uid,),
     )
-    assert [(h["job_id"], h["new_status"]) for h in history] == [(i, "applied") for i in ids]
+    assert [(h["job_id"], h["new_status"]) for h in history] == [(i, status) for i in ids]
 
 
 def test_bulk_patch_skips_what_the_caller_may_not_touch_and_refuses_an_empty_patch(

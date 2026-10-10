@@ -11,6 +11,7 @@ from api import params as params_
 from api.auth import AuthedUser, require_user
 from api.board import column_filters as column_filters_
 from api.board import visibility
+from api.mail import applications
 from api.reports import ReportKind, report_kinds
 from core import verdict_reads
 from core.comp import CompBasis, CompPeriod
@@ -87,7 +88,7 @@ _JOB_ROW = f"""
     j.extraction_status, j.comp_min, j.comp_max, j.comp_text, j.comp_currency,
     j.comp_period, j.comp_basis,
     {verdict_reads.closed_verdict("j.url")} AS closed_verdict,
-    uj.status, uj.date_applied, uj.notes, uj.size, uj.recruiter,
+    uj.status, {applications.applied_on("uj")} AS date_applied, uj.notes, uj.size, uj.recruiter,
     uj.connection1, uj.connection2, uj.documents,
     COALESCE(uj.hidden, FALSE) AS hidden
 """
@@ -98,7 +99,7 @@ _SORTABLE = {
     "id": "j.id",
     "added_at": "j.created_at",
     "date_posted": "j.date_posted",
-    "date_applied": "uj.date_applied",
+    "date_applied": applications.applied_on("uj"),
     "company": "lower(j.company)",
     "title": "lower(j.title)",
     "source": "j.source",

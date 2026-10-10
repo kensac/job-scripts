@@ -34360,18 +34360,6 @@
             ],
             "title": "Url"
           },
-          "date_applied": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Date Applied"
-          },
           "status": {
             "anyOf": [
               {
@@ -34390,7 +34378,6 @@
           "company",
           "title",
           "url",
-          "date_applied",
           "status"
         ],
         "title": "CandidateJob",
