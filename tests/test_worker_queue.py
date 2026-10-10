@@ -7,7 +7,7 @@ from core.store import add_ai_result
 from tasks import content as tasks_content
 from tasks import runtime as tasks_runtime
 from tasks import verify as tasks_verify
-from tests.factories import finished, make_batch_result, make_task
+from tests.factories import finished, make_batch_result, make_source, make_task
 
 # ---------------------------------------------------------------------------
 # enqueue / dedupe
@@ -51,6 +51,41 @@ def test_claim_task_claims_in_id_order():
     second_id = tasks_runtime.enqueue("run_filter", {"a": 2})
     assert worker._claim_task()["id"] == first_id
     assert worker._claim_task()["id"] == second_id
+
+
+def _pull(source: str, *, age_hours: float = 0) -> int:
+    """A scheduled pull as the scheduler writes it: its payload names a host."""
+    task_id = tasks_runtime.enqueue("ingest_source", {"source": source, "host": "pull.test"})
+    db.execute(
+        "UPDATE tasks SET created_at = now() - make_interval(secs => %s) WHERE id = %s",
+        (age_hours * 3600, task_id),
+    )
+    return task_id
+
+
+def test_claim_puts_a_backlog_of_pulls_behind_poll_batches():
+    source = make_source()
+    db.execute("UPDATE sources SET ingest_interval_hours = 24 WHERE name = %s", (source,))
+    for _ in range(50):
+        _pull(source, age_hours=0.5)
+    poll_id = tasks_runtime.enqueue("poll_batches", {})
+    assert worker._claim_task()["id"] == poll_id
+    assert worker._claim_task()["kind"] == "ingest_source"
+
+
+def test_claim_still_takes_a_pull_older_than_its_source_interval():
+    source = make_source()
+    db.execute("UPDATE sources SET ingest_interval_hours = 1 WHERE name = %s", (source,))
+    aged_id = _pull(source, age_hours=2)
+    tasks_runtime.enqueue("poll_batches", {})
+    assert worker._claim_task()["id"] == aged_id
+
+
+def test_claim_does_not_shift_a_pull_a_person_asked_for():
+    """An admin pull carries no host, so it keeps its place by age."""
+    manual_id = tasks_runtime.enqueue("ingest_source", {"source": make_source()})
+    tasks_runtime.enqueue("poll_batches", {})
+    assert worker._claim_task()["id"] == manual_id
 
 
 def test_claim_task_leaves_a_kind_this_image_cannot_run_for_one_that_can():
