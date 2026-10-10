@@ -31,6 +31,7 @@ from tasks.listing_patterns import handle_drop_listing_pattern_copies
 from tasks.locations import handle_classify_locations
 from tasks.mail_classify import handle_classify_mail
 from tasks.mail_match import handle_match_mail
+from tasks.mail_pointers import handle_backfill_mail_pointers
 from tasks.mail_sync import (
     handle_import_archive,
     handle_probe_credentials,
@@ -82,6 +83,7 @@ HANDLERS = {
     "move_page_fetches": handle_move_page_fetches,
     "backfill_model_calls": handle_backfill_model_calls,
     "drop_listing_pattern_copies": handle_drop_listing_pattern_copies,
+    "backfill_mail_pointers": handle_backfill_mail_pointers,
 }
 
 __all__ = ["HANDLERS"]

@@ -375,11 +375,19 @@ def record(message_id: int, match: Match, *, actor_user_id: int | None = None) -
             and current.confidence == match.confidence
         ):
             return
+    # The append and the pointer in one statement, as `events.append` does,
+    # and GREATEST for the same reason: two appends can commit in either order.
     db.execute(
         """
-        INSERT INTO application_matches
-            (message_id, application_id, method, confidence, rationale, actor_user_id)
-        VALUES (%s, %s, %s, %s, %s, %s)
+        WITH appended AS (
+            INSERT INTO application_matches
+                (message_id, application_id, method, confidence, rationale, actor_user_id)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            RETURNING id, message_id
+        )
+        UPDATE email_messages m
+        SET current_match_id = GREATEST(m.current_match_id, a.id)
+        FROM appended a WHERE m.id = a.message_id
         """,
         (
             message_id,

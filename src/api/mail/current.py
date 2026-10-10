@@ -20,6 +20,30 @@ so the queue paid for the pass twice, a median 299 ms.
 
 from __future__ import annotations
 
+from api import db
+
+# Per message, the newest id of each log beside the pointer meant to hold it.
+# The pointers are set by the writers (`events.append`, `match.record`); this
+# is what checks them, and what the backfill fills them from.
+NEWEST_IDS = """
+SELECT m.id AS message_id, m.current_event_id, m.current_match_id,
+       (SELECT max(e.id) FROM email_events e WHERE e.message_id = m.id) AS event_id,
+       (SELECT max(am.id) FROM application_matches am WHERE am.message_id = m.id) AS match_id
+FROM email_messages m
+"""
+
+
+def stale_pointers() -> int:
+    """Messages whose pointer is not the newest row of its log."""
+    row = db.query_one(
+        f"""
+        SELECT count(*) AS n FROM ({NEWEST_IDS}) p
+        WHERE p.current_event_id IS DISTINCT FROM p.event_id
+           OR p.current_match_id IS DISTINCT FROM p.match_id
+        """
+    )
+    return int(row["n"]) if row else 0
+
 
 def _newest(table: str, columns: tuple[str, ...]) -> str:
     return (

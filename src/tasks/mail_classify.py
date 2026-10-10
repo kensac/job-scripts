@@ -23,6 +23,7 @@ from pydantic import BaseModel
 
 from api import db
 from api.ai.batch_results import progress_counts
+from api.mail import events as mail_events
 from api.mail.current import current_event
 from api.task_config import configured_shape
 from core.shapes import BACKFILL_TASK, ONGOING_TASK
@@ -456,12 +457,12 @@ def _heal_self_sent(identities: list[str]) -> int:
         {"identities": identities},
     )
     for row in rows:
-        db.execute(
-            """
-            INSERT INTO email_events (message_id, kind, confidence, detail, model)
-            VALUES (%s, 'not_job_related', 'high', %s, NULL)
-            """,
-            (row["id"], db.jsonb({"reason": "self_sent", "superseded": True})),
+        mail_events.append(
+            row["id"],
+            "not_job_related",
+            confidence="high",
+            detail={"reason": "self_sent", "superseded": True},
+            model=mail_events.SELF_SENT_RULE,
         )
     return len(rows)
 
@@ -585,12 +586,12 @@ async def handle_classify_mail(task_id: int, payload: dict[str, Any]) -> None:
     corrected = [r for r in rows if r["self_sent"]]
     rows = [r for r in rows if not r["self_sent"]]
     for row in corrected:
-        db.execute(
-            """
-            INSERT INTO email_events (message_id, kind, confidence, detail, model)
-            VALUES (%s, 'not_job_related', 'high', %s, NULL)
-            """,
-            (row["id"], db.jsonb({"reason": "self_sent"})),
+        mail_events.append(
+            row["id"],
+            "not_job_related",
+            confidence="high",
+            detail={"reason": "self_sent"},
+            model=mail_events.SELF_SENT_RULE,
         )
     if corrected:
         logger.info(f"Task {task_id}: corrected {len(corrected)} self-sent message(s)")
@@ -697,25 +698,17 @@ def _record_result(res, receipt) -> None:
         detail["when_precision"] = (
             None if when is None else ("instant" if when.is_instant else "date")
         )
-    db.execute(
-        """
-        INSERT INTO email_events (
-            message_id, kind, confidence, occurred_at, deadline_at,
-            deadline_inferred, detail, model
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-        """,
-        (
-            int(key),
-            parsed.kind,
-            parsed.confidence,
-            occurred_at,
-            deadline_at,
-            # Inferred if the model said so, OR if we resolved a
-            # missing year ourselves. Either way it is not a date the
-            # email stated outright.
-            deadline_at is not None and (year_inferred or not parsed.deadline_is_explicit),
-            db.jsonb(detail),
-            res.model,
-        ),
+    mail_events.append(
+        int(key),
+        parsed.kind,
+        confidence=parsed.confidence,
+        occurred_at=occurred_at,
+        deadline_at=deadline_at,
+        # Inferred if the model said so, OR if we resolved a missing year
+        # ourselves. Either way it is not a date the email stated outright.
+        deadline_inferred=deadline_at is not None
+        and (year_inferred or not parsed.deadline_is_explicit),
+        detail=detail,
+        model=res.model,
     )
     receipt.outcome = "written"

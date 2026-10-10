@@ -664,7 +664,7 @@ async def test_repairing_a_self_sent_message_corrects_it_without_a_model(monkeyp
     events = _events(mid)
     assert len(events) == 2, "append-only: the wrong event is superseded, not deleted"
     assert events[-1]["kind"] == "not_job_related"
-    assert events[-1]["model"] is None, "no model was paid for a header fact"
+    assert events[-1]["model"] == "rule:self_sent", "no model was paid for a header fact"
     assert events[-1]["detail"]["reason"] == "self_sent"
     assert called is False, "no AI call is made for a message the header already settles"
 

@@ -33,6 +33,7 @@ SWEEP_KINDS = frozenset(
         "fetch_missing_content",
         "move_page_fetches",
         "drop_listing_pattern_copies",
+        "backfill_mail_pointers",
     }
 )
 
