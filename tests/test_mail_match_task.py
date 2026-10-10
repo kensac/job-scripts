@@ -714,3 +714,87 @@ async def test_one_users_sweep_advances_progress_as_it_goes(f, monkeypatch):
         f"matching user {uid}: applications 0/3",
         f"matching user {uid}: applications 2/3",
     ]
+
+
+def test_a_finished_sweep_is_not_repeated_when_nothing_changed(f):
+    """`record` keeps an unchanged verdict's timestamp where it was, so any
+    application newer than the verdict re-selected the message on every sweep:
+    245 runs and 200.5 worker-hours in 14 days on production, 244 of them
+    writing nothing. The last finished sweep's start is the cutoff now."""
+    uid = f.make_user()
+    mid = _message(uid, sent_at=datetime.datetime(2026, 3, 2, tzinfo=datetime.UTC))
+    _event(mid, "rejection", company="Nowhere", title="Role")
+    task.match_pending(uid)
+    _application(uid, company="Elsewhere", title="Other")
+
+    # Without a cutoff the message is decided again every time.
+    assert task.match_pending(uid) == {task.mail_match.UNMATCHED: 1}
+    assert task.match_pending(uid) == {task.mail_match.UNMATCHED: 1}
+
+    finished = f.make_task("match_mail", {}, status="done")
+    db.execute("UPDATE tasks SET started_at = now() WHERE id = %s", (finished,))
+    since = task.mail_match.last_sweep_start(uid)
+    assert since is not None
+    assert task.match_pending(uid, since=since) == {}
+    assert not task.mail_match.changed_since(since, uid)
+    assert not task.mail_match.changed_since(task.mail_match.last_sweep_start())
+
+    # A new candidate is a reason to look again.
+    _application(uid, company="Another", title="Role")
+    assert task.mail_match.changed_since(since, uid)
+    assert task.mail_match.changed_since(task.mail_match.last_sweep_start())
+    assert task.match_pending(uid, since=since) == {task.mail_match.UNMATCHED: 1}
+
+
+@pytest.mark.asyncio
+async def test_an_unchanged_user_is_skipped_by_the_handler(f):
+    uid = f.make_user()
+    mid = _message(uid, sent_at=datetime.datetime(2026, 3, 2, tzinfo=datetime.UTC))
+    _event(mid, "rejection", company="Nowhere", title="Role")
+    _application(uid, company="Elsewhere", title="Other")
+    first = f.make_task("match_mail", {"user_id": uid})
+    await task.handle_match_mail(first, {"user_id": uid})
+    db.execute("UPDATE tasks SET status = 'done', started_at = now() WHERE id = %s", (first,))
+    second = f.make_task("match_mail", {"user_id": uid})
+    await task.handle_match_mail(second, {"user_id": uid})
+    label = db.query_one("SELECT progress->>'label' AS l FROM tasks WHERE id = %s", (second,))
+    assert "0 messages swept" in label["l"]
+    assert "1 unchanged since the last sweep" in label["l"]
+
+
+def test_a_partial_sweep_is_not_a_cutoff(f):
+    uid = f.make_user()
+    for payload in ({"limit": 5}, {"user_id": uid + 1}):
+        other = f.make_task("match_mail", payload, status="done")
+        db.execute("UPDATE tasks SET started_at = now() WHERE id = %s", (other,))
+    assert task.mail_match.last_sweep_start(uid) is None
+    assert task.mail_match.last_sweep_start() is None
+
+
+def test_action_items_are_resynced_only_where_something_moved(f):
+    uid = f.make_user()
+    old = _application(uid, company="Old")
+    mid = _message(uid)
+    _event(mid, "rejection", company="Moved")
+    moved = _application(uid, company="Moved")
+    db.execute(
+        "INSERT INTO application_matches (message_id, application_id, method, confidence) "
+        "VALUES (%s, %s, 'manual', 'high')",
+        (mid, old),
+    )
+    db.execute("UPDATE applications SET created_at = now() - interval '1 day'")
+    db.execute(
+        "UPDATE application_matches SET created_at = now() - interval '1 day'; "
+        "UPDATE email_events SET created_at = now() - interval '1 day'"
+    )
+    since = datetime.datetime.now(datetime.UTC) - datetime.timedelta(hours=1)
+    untouched = _application(uid, company="Untouched")
+    assert task._applications_touched(uid, since) == [untouched]
+    db.execute(
+        "INSERT INTO application_matches (message_id, application_id, method, confidence) "
+        "VALUES (%s, %s, 'manual', 'high')",
+        (mid, moved),
+    )
+    # The application the message left is resynced too, to close what it strands.
+    assert task._applications_touched(uid, since) == sorted([old, moved, untouched])
+    assert len(task._applications_touched(uid, None)) == 3

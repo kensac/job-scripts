@@ -29,6 +29,7 @@ from api import (
     queue,
     telemetry,
 )
+from api.mail import match as mail_match
 from api.queue import enqueue
 from core.env import env_list
 from core.fetching.hosts import pace_key
@@ -340,10 +341,12 @@ def schedule_ingest_cycle() -> None:
         "AND status IN ('pending', 'running', 'waiting', 'awaiting_batch') LIMIT 1"
     ):
         enqueue("classify_mail", {"cycle": cycle}, dedupe_key=f"mailclassify:{cycle}")
+    # And only when something a sweep reads has changed since the last one
+    # started: otherwise it would decide everything exactly as before.
     if not db.query_one(
         "SELECT 1 FROM tasks WHERE kind = 'match_mail' "
         "AND status IN ('pending', 'running', 'waiting') LIMIT 1"
-    ):
+    ) and mail_match.changed_since(mail_match.last_sweep_start()):
         enqueue("match_mail", {"cycle": cycle}, dedupe_key=f"mailmatch:{cycle}")
     # Its own kind and its own key, NOT folded into the sync. Dead-credential
     # detection is discovery-on-use, so if it only happened inside the sync
