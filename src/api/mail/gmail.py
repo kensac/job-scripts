@@ -4,10 +4,9 @@ Scope is gmail.readonly and the code here issues list and get only. There is
 deliberately no send, no modify, and no delete path - not as policy but as
 absence, so no future edit can quietly acquire one.
 
-Incremental sync uses Gmail's historyId rather than a date window. A window
-re-fetches everything near its edge on every run and still misses anything
-that arrives out of order; a historyId is the provider's own "what changed
-since" cursor and cannot skip.
+Incremental sync is a date window, `after:` some days before the newest
+message held (tasks/mail_sync._since), not Gmail's historyId cursor. The
+overlap re-reads a few messages, which dedupe on write.
 """
 
 from __future__ import annotations
@@ -173,8 +172,3 @@ def list_message_ids(user_id: int, *, after: str | None = None) -> Iterator[str]
 def fetch_message(user_id: int, message_id: str) -> ImportedMessage:
     token = oauth.get_access_token(user_id)
     return to_imported(_get(f"/messages/{message_id}", token, format="full"))
-
-
-def profile(user_id: int) -> dict[str, Any]:
-    """Mailbox identity and the current historyId, which is the sync cursor."""
-    return _get("/profile", oauth.get_access_token(user_id))
