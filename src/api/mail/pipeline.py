@@ -643,10 +643,10 @@ def sender_signal(user_id: int) -> dict[int, SenderSignal]:
     cases, and a fourth would have needed a fifth.
     """
     rows = db.query(
-        """
+        f"""
         WITH first_message AS (
             SELECT DISTINCT ON (am.application_id) am.application_id, m.from_email
-            FROM application_matches am
+            FROM ({current_match("application_id")}) am
             JOIN email_messages m ON m.id = am.message_id
             JOIN applications a ON a.id = am.application_id
             WHERE am.application_id IS NOT NULL AND a.user_id = %(user_id)s
@@ -706,10 +706,10 @@ def intermediary_domains() -> list[str]:
     reading and the per-company one.
     """
     rows = db.query(
-        """
+        f"""
         WITH first_message AS (
             SELECT DISTINCT ON (am.application_id) am.application_id, m.from_email
-            FROM application_matches am
+            FROM ({current_match("application_id")}) am
             JOIN email_messages m ON m.id = am.message_id
             WHERE am.application_id IS NOT NULL
             ORDER BY am.application_id, m.sent_at ASC
