@@ -120,7 +120,7 @@ reader:
    the derivation scopes) leaves those out, because the answer is already
    listed.
    - `content_row_id` on `job_profiles`, `job_requirements`,
-     `job_embeddings` and `jobs.comp_content_row_id` has no foreign key: some
+     `job_embeddings` and `job_comp` has no foreign key: some
      rows name a copy on an answer in ai_queries (on 2026-10-10: 3,502 of
      84,052 profiles, 6,610 of 59,645 requirements, 6,749 of 217,212
      embeddings, 52 of 48,239 comp rows). Such a row is not a url's newest

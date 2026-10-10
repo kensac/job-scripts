@@ -76,28 +76,3 @@ async def test_an_unchanged_refetch_is_restamped_and_a_changed_one_is_read_again
     f.make_fetch(url, content="Salary USD 90,000 a year. " * 40)
     await _run(f)
     assert len(asked) == 2
-
-
-@pytest.mark.asyncio
-async def test_clearing_empties_the_pay_on_jobs_and_leaves_job_comp(f):
-    from core import catalog
-    from tasks import comp_clear
-
-    _, url = f.make_ready_job(comp_min=90000, comp_max=100000)
-    _, other = f.make_ready_job()
-    db.execute(
-        "UPDATE jobs SET comp_extracted = true, comp_min = 90000, comp_text = '$90k' "
-        "WHERE url = %s",
-        (url,),
-    )
-    db.execute("UPDATE jobs SET comp_extracted = true WHERE url = %s", (other,))
-    task_id = f.make_task("clear_jobs_pay", status="running")
-    await comp_clear.handle_clear_jobs_pay(task_id, {})
-
-    left = db.query_one(f"SELECT count(*) AS n FROM jobs WHERE {catalog.PAY_ON_JOBS}")
-    assert left["n"] == 0
-    progress = db.query_one("SELECT progress FROM tasks WHERE id = %s", (task_id,))["progress"]
-    assert progress["cleared"] == 2
-    assert db.query_one("SELECT comp_min FROM job_comp WHERE url = %s", (url,)) == {
-        "comp_min": 90000
-    }

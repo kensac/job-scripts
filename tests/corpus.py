@@ -77,8 +77,10 @@ LINKS = {
     ("job_skills", "url"): ("jobs", "url"),
     ("job_requirements", "url"): ("jobs", "url"),
     ("job_embeddings", "url"): ("jobs", "url"),
+    ("job_comp", "url"): ("jobs", "url"),
     ("job_requirements", "content_row_id"): ("page_fetches", "id"),
     ("job_embeddings", "content_row_id"): ("page_fetches", "id"),
+    ("job_comp", "content_row_id"): ("page_fetches", "id"),
     # Verdicts are keyed to a filter by the HASH of its prompt, not by its id.
     # Drawn from anywhere else, no custom verdict would ever match an enabled
     # filter and every user's board would be permanently empty.
@@ -368,7 +370,14 @@ class _Generator:
             return len(shapes[pk[0]]["values"])
         if not recorded:
             return 0  # empty in production; the profile has no shapes to use
-        return max(MIN_ROWS, round(recorded * self.scale))
+        n = max(MIN_ROWS, round(recorded * self.scale))
+        # A table keyed by an undeclared link to its parent (job_comp.url)
+        # holds at most one row per parent. Its count can outgrow the parent's
+        # when the two were measured at different times: job_comp was measured
+        # on 2026-10-10 against a jobs count from 2026-09-04.
+        if len(pk) == 1 and (parent := LINKS.get((table, pk[0]))):
+            n = min(n, len(self.pools.get(parent, [])))
+        return n
 
     def load_pool(self, table: str, column: str) -> None:
         """Read the values another table can point at, and SHUFFLE them.
@@ -517,9 +526,6 @@ def _specialise(table: str, rows: list[dict[str, Any]], gen: _Generator) -> None
         for i, row in enumerate(rows):
             row["url"] = f"https://corpus.invalid/{row['source']}/{i}"
             row["raw_url"] = row["url"] + "?utm_source=corpus"
-            lo, hi = row.get("comp_min"), row.get("comp_max")
-            if lo is not None and hi is not None and lo > hi:
-                row["comp_min"], row["comp_max"] = hi, lo
     elif table == "user_filters":
         from core.filters import build_custom_instructions, compute_prompt_hash
 
@@ -607,6 +613,11 @@ def _specialise(table: str, rows: list[dict[str, Any]], gen: _Generator) -> None
             row["embedding"] = str(vector)
             row["model"] = EMBEDDING_MODEL
             row["content_hash"] = f"corpus-{gen._next():08x}"
+    elif table == "job_comp":
+        for row in rows:
+            lo, hi = row.get("comp_min"), row.get("comp_max")
+            if lo is not None and hi is not None and lo > hi:
+                row["comp_min"], row["comp_max"] = hi, lo
 
 
 def _pair_verdicts_into_sweeps(rows: list[dict[str, Any]], gen: _Generator) -> None:

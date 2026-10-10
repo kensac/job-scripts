@@ -1554,6 +1554,158 @@
    "rows": 3,
    "sampled": 3
   },
+  "job_comp": {
+   "columns": {
+    "comp_basis": {
+     "kind": "categorical",
+     "null_rate": 0.68027,
+     "values": {
+      "base": 0.93889,
+      "stipend": 0.009986,
+      "total": 0.044343,
+      "unspecified": 0.006781
+     }
+    },
+    "comp_currency": {
+     "kind": "categorical",
+     "null_rate": 0.674347,
+     "values": {
+      "AUD": 0.000641,
+      "BRL": 0.000501,
+      "CAD": 0.036545,
+      "CHF": 5.6e-05,
+      "CNY": 0.000111,
+      "COP": 0.000808,
+      "CRC": 2.8e-05,
+      "CZK": 0.000167,
+      "DKK": 8.4e-05,
+      "EGP": 2.8e-05,
+      "EUR": 0.023147,
+      "GBP": 0.015264,
+      "GTQ": 5.6e-05,
+      "HUF": 0.000195,
+      "ILS": 2.8e-05,
+      "INR": 0.004457,
+      "JPY": 0.000641,
+      "KRW": 8.4e-05,
+      "MXN": 0.000696,
+      "MYR": 5.6e-05,
+      "NOK": 2.8e-05,
+      "PHP": 0.000195,
+      "PKR": 2.8e-05,
+      "PLN": 0.002312,
+      "RON": 2.8e-05,
+      "SEK": 0.000139,
+      "SGD": 0.000613,
+      "THB": 2.8e-05,
+      "TWD": 0.000195,
+      "USD": 0.912621,
+      "VND": 0.000167,
+      "ZAR": 5.6e-05
+     }
+    },
+    "comp_max": {
+     "kind": "numeric",
+     "null_rate": 0.625582,
+     "quantiles": [
+      5000.0,
+      36192.0,
+      48880.0,
+      91104.0,
+      153000.0,
+      290000.0,
+      5000000.0
+     ]
+    },
+    "comp_min": {
+     "kind": "numeric",
+     "null_rate": 0.627604,
+     "quantiles": [
+      5000.0,
+      31200.0,
+      39520.0,
+      65000.0,
+      104000.0,
+      180000.0,
+      5000000.0
+     ]
+    },
+    "comp_period": {
+     "kind": "categorical",
+     "null_rate": 0.674483,
+     "values": {
+      "biweekly": 0.000474,
+      "daily": 0.000195,
+      "hourly": 0.38444,
+      "monthly": 0.017695,
+      "one_time": 0.011843,
+      "semimonthly": 0.000195,
+      "weekly": 0.006186,
+      "yearly": 0.578972
+     }
+    },
+    "comp_text": {
+     "binary": false,
+     "charclasses": [
+      " -9",
+      " -9A",
+      " -9Aa",
+      " -9a",
+      " 9Aa",
+      "-9",
+      "-9A",
+      "-9Aa",
+      "-9a"
+     ],
+     "kind": "text",
+     "lengths": [
+      3,
+      7,
+      13,
+      15,
+      17,
+      25,
+      89
+     ],
+     "null_rate": 0.617881
+    },
+    "content_hash": {
+     "kind": "key",
+     "null_rate": 1.0
+    },
+    "content_row_id": {
+     "kind": "key",
+     "null_rate": 0.56243
+    },
+    "extracted_at": {
+     "age_days": [
+      0.156,
+      0.156,
+      0.156,
+      0.156,
+      0.156,
+      0.156,
+      0.156
+     ],
+     "kind": "timestamp",
+     "naive_rate": 0.0,
+     "null_rate": 0.0
+    },
+    "model": {
+     "binary": false,
+     "charclasses": [],
+     "kind": "text",
+     "lengths": [],
+     "null_rate": 1.0
+    },
+    "url": {
+     "kind": "key",
+     "null_rate": 0.0
+    }
+   },
+   "rows": 110243,
+   "sampled": 4000
+  },
   "job_embeddings": {
    "columns": {
     "content_hash": {
@@ -1852,92 +2004,6 @@
      "kind": "boolean",
      "null_rate": 0.0,
      "true_rate": 0.57425
-    },
-    "comp_basis": {
-     "kind": "categorical",
-     "null_rate": 0.929763,
-     "values": {
-      "base": 0.993538,
-      "stipend": 0.002693,
-      "total": 0.003231,
-      "unspecified": 0.000539
-     }
-    },
-    "comp_currency": {
-     "kind": "categorical",
-     "null_rate": 0.929574,
-     "values": {
-      "CAD": 0.023093,
-      "GBP": 0.002417,
-      "USD": 0.97449
-     }
-    },
-    "comp_extracted": {
-     "kind": "boolean",
-     "null_rate": 0.0,
-     "true_rate": 0.36275
-    },
-    "comp_max": {
-     "kind": "numeric",
-     "null_rate": 0.779057,
-     "quantiles": [
-      5000.0,
-      34320.0,
-      47008.0,
-      70000.0,
-      102000.0,
-      176800.0,
-      4160000.0
-     ]
-    },
-    "comp_min": {
-     "kind": "numeric",
-     "null_rate": 0.780741,
-     "quantiles": [
-      5000.0,
-      31200.0,
-      39520.0,
-      54000.0,
-      72000.0,
-      110000.0,
-      4160000.0
-     ]
-    },
-    "comp_period": {
-     "kind": "categorical",
-     "null_rate": 0.929593,
-     "values": {
-      "biweekly": 0.001612,
-      "hourly": 0.525651,
-      "monthly": 0.007252,
-      "one_time": 0.001612,
-      "weekly": 0.00188,
-      "yearly": 0.461993
-     }
-    },
-    "comp_text": {
-     "binary": false,
-     "charclasses": [
-      " -9",
-      " -9A",
-      " -9Aa",
-      " -9a",
-      "-9",
-      "-9A",
-      "-9Aa",
-      "-9a"
-     ],
-     "kind": "text",
-     "lengths": [
-      3,
-      6,
-      11,
-      16,
-      18,
-      22,
-      53
-     ],
-     "null_rate": 0.77692
     },
     "company": {
      "binary": false,

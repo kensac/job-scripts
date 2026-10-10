@@ -132,10 +132,10 @@ def test_a_numeric_range_moving_past_the_profile_fails_the_check(recorded):
     made the column unsortable, and a corpus built to the old floor cannot
     produce a new one."""
     current = copy.deepcopy(recorded)
-    quantiles = current["tables"]["jobs"]["columns"]["comp_min"]["quantiles"]
-    current["tables"]["jobs"]["columns"]["comp_min"]["quantiles"] = [600.0, *quantiles[1:]]
+    quantiles = current["tables"]["job_comp"]["columns"]["comp_min"]["quantiles"]
+    current["tables"]["job_comp"]["columns"]["comp_min"]["quantiles"] = [600.0, *quantiles[1:]]
     findings = mp.drift(recorded, current)
-    assert any("jobs.comp_min" in f and "range moved" in f for f in findings), findings
+    assert any("job_comp.comp_min" in f and "range moved" in f for f in findings), findings
 
 
 def test_timestamps_reverting_to_naive_local_time_fails_the_check(recorded):
