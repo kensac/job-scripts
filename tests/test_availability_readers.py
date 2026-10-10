@@ -21,15 +21,16 @@ _FEED_STATE = {
 }
 
 # Readers whose meaning is availability and that have not moved yet. Each
-# entry leaves with the change that moves it.
+# entry leaves with the change that moves it. api/routers/filters.py (the
+# preset coverage counts) waits on cost: per verdict row, IS_AVAILABLE took
+# its eligible count from 4.3 s to 7.0 s on production for 111 of 198,319
+# postings (2026-10-10), on a request a person waits for.
 _NOT_YET_MOVED = {
-    "api/board/eligibility.py",
     "api/board/column_filters.py",
     "api/routers/filters.py",
     "api/routers/job_board.py",
     "api/routers/job_detail.py",
     "api/routers/public_job_lists.py",
-    "tasks/board.py",
 }
 
 

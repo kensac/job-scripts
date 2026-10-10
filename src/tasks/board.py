@@ -20,7 +20,7 @@ from typing import Any
 from api import db, metrics
 from api.board import criteria
 from api.board import eligibility as board_eligibility
-from core import verdict_reads
+from core import catalog, verdict_reads
 
 logger = logging.getLogger(__name__)
 
@@ -183,12 +183,12 @@ def demote_closed() -> int:
                 FROM user_job_working_set membership
                 JOIN jobs j ON j.id = membership.job_id
                 WHERE (
-                -- A posting that vanished from its source feed is gone even
-                -- if no closed-check ever ran on it. Keying only on the
+                -- A posting no longer available (catalog.IS_AVAILABLE) is gone
+                -- even if no closed-check ever ran on it. Keying only on the
                 -- verdict left dead postings sitting in the intake view
                 -- forever, because ingest marks them inactive and the sweep
                 -- never looks at them again.
-                NOT j.active
+                NOT {catalog.IS_AVAILABLE.format(job="j")}
                 OR {verdict_reads.latest_status("j.url", "closed")} = 'rejected'
                 )
                 ORDER BY membership.user_id, membership.job_id
