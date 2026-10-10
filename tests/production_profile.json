@@ -2943,20 +2943,6 @@
      "naive_rate": 0.0,
      "null_rate": 0.0
     },
-    "date_applied": {
-     "age_days": [
-      0.142,
-      26.142,
-      101.142,
-      347.142,
-      385.142,
-      416.142,
-      467.142
-     ],
-     "kind": "timestamp",
-     "naive_rate": 0.0,
-     "null_rate": 0.557007
-    },
     "documents": {
      "binary": false,
      "charclasses": [],

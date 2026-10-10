@@ -7,7 +7,6 @@ import datetime
 from sqlalchemy import (
     BigInteger,
     Boolean,
-    Date,
     ForeignKey,
     Identity,
     Index,
@@ -76,7 +75,6 @@ class UserJob(Base):
         BigInteger, ForeignKey("jobs.id", ondelete="CASCADE"), primary_key=True
     )
     status: Mapped[str | None] = mapped_column(Text)
-    date_applied: Mapped[datetime.date | None] = mapped_column(Date)
     notes: Mapped[str | None] = mapped_column(Text)
     size: Mapped[str | None] = mapped_column(Text)
     recruiter: Mapped[str | None] = mapped_column(Text)
