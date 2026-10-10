@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from api import ai, budget, db
 from api.ai import verdicts
 from api.budget import load_config
+from core import catalog
 from core.answers import JobExtract
 from core.store import get_content
 
@@ -41,7 +42,7 @@ async def handle_extract_upload(payload: dict[str, Any]) -> None:
             context="upload",
         )
     if not content:
-        db.execute("UPDATE jobs SET extraction_status = 'failed' WHERE id = %s", (job.id,))
+        catalog.set_extraction_status(job.id, "failed")
         raise RuntimeError("could not extract page content")
 
     with budget.record_parse_failures(payload["user_id"], cfg.key_source, "extract", cfg.model):
@@ -64,13 +65,6 @@ async def handle_extract_upload(payload: dict[str, Any]) -> None:
         usage,
     )
     if not parsed:
-        db.execute("UPDATE jobs SET extraction_status = 'failed' WHERE id = %s", (job.id,))
+        catalog.set_extraction_status(job.id, "failed")
         raise RuntimeError("extraction returned no parsed output")
-    db.execute(
-        """
-        UPDATE jobs SET company = %s, title = %s, locations = %s, terms = %s,
-                        extraction_status = 'done'
-        WHERE id = %s
-        """,
-        (parsed.company, parsed.title, parsed.locations, parsed.terms, job.id),
-    )
+    catalog.record_extraction(job.id, parsed.company, parsed.title, parsed.locations, parsed.terms)

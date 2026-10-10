@@ -3,20 +3,13 @@
 from api import db, events, task_admission
 from api.board.person_state import track_board_row
 from api.problem import refuse
+from core import catalog
 
 
 def save_posting(user_id: int, url: str, raw_url: str) -> dict:
     """The caller validates the public URL before entering a transaction."""
     with db.transaction():
-        row = db.query_one(
-            "INSERT INTO jobs (url, raw_url, source, uploaded_by, extraction_status) "
-            "VALUES (%s, %s, 'upload', %s, 'pending') "
-            "ON CONFLICT (url) DO UPDATE SET extraction_status = "
-            "CASE WHEN jobs.extraction_status = 'failed' THEN 'pending' ELSE jobs.extraction_status END "
-            "RETURNING id, extraction_status, uploaded_by",
-            (url, raw_url, user_id),
-        )
-        assert row
+        row = catalog.add_upload(url, raw_url, user_id)
         if row["uploaded_by"] not in (None, user_id):
             raise refuse(403, "PRIVATE_POSTING", "This posting belongs to another user.")
         tracked = track_board_row(user_id, row["id"])

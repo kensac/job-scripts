@@ -7,6 +7,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict
 
 from api import db, events
+from core import catalog
 
 
 class TaskProgress(BaseModel):
@@ -118,10 +119,7 @@ def enqueue(
                 return Admission()
         if kind == "extract_upload":
             if payload.get("force"):
-                db.execute(
-                    "UPDATE jobs SET extraction_status = 'pending' WHERE id = %s",
-                    (subject["job_id"],),
-                )
+                catalog.set_extraction_status(subject["job_id"], "pending")
             elif owner["extraction_status"] != "pending":
                 return Admission()
         row = db.query_one(
