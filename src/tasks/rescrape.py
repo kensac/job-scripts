@@ -33,6 +33,7 @@ logger = logging.getLogger(__name__)
 _RESTAMP: dict[str, LiteralString] = {
     "job_embeddings": "UPDATE job_embeddings SET content_row_id = %s WHERE url = %s",
     "job_requirements": "UPDATE job_requirements SET content_row_id = %s WHERE url = %s",
+    "job_comp": "UPDATE job_comp SET content_row_id = %s WHERE url = %s",
 }
 STAMPABLE = frozenset(_RESTAMP)
 

@@ -250,8 +250,7 @@ def _verify_deployed(urls: list[str], params: Params) -> Deployed:
 
 def _comp_deployed(urls: list[str], params: Params) -> Deployed:
     rows = db.query(
-        "SELECT url, comp_min, comp_max, comp_period, comp_text FROM jobs "
-        "WHERE url = ANY(%s) AND comp_extracted",
+        "SELECT url, comp_min, comp_max, comp_period, comp_text FROM job_comp WHERE url = ANY(%s)",
         (urls,),
     )
     return {

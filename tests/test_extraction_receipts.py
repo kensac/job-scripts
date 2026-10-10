@@ -68,9 +68,8 @@ async def test_saved_extraction_result_collects_without_new_candidates(
     await module.handle(task_id, {})
     assert called == [task_id]
     if family == "comp":
-        row = db.query_one("SELECT comp_extracted, comp_min FROM jobs WHERE id = %s", (job_id,))
-        assert row["comp_extracted"] is (not changed)
-        assert row["comp_min"] == (None if changed else 100000)
+        row = db.query_one("SELECT comp_min FROM job_comp WHERE url = %s", (url,))
+        assert row == (None if changed else {"comp_min": 100000})
     else:
         row = db.query_one(
             "SELECT yoe_min, model, content_row_id FROM job_requirements WHERE url = %s", (url,)

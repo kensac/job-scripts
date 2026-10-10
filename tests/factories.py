@@ -68,16 +68,26 @@ def make_job(
     url = url or f"https://jobs.test/{_next('j')}"
     row = db.query_one(
         """
-        INSERT INTO jobs (url, raw_url, source, company, title, active, uploaded_by,
-                          comp_min, comp_max)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        INSERT INTO jobs (url, raw_url, source, company, title, active, uploaded_by)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (url) DO UPDATE SET active = EXCLUDED.active
         RETURNING id
         """,
-        (url, url, source, company, title, active, uploaded_by, comp_min, comp_max),
+        (url, url, source, company, title, active, uploaded_by),
     )
     assert row is not None
+    if comp_min is not None or comp_max is not None:
+        make_comp(url, comp_min=comp_min, comp_max=comp_max)
     return row["id"]
+
+
+def make_comp(url: str, **fields: Any) -> None:
+    """The pay the comp derivation read off a posting (job_comp)."""
+    columns = ["url", *fields]
+    db.execute(
+        f"INSERT INTO job_comp ({', '.join(columns)}) VALUES ({', '.join(['%s'] * len(columns))})",
+        (url, *fields.values()),
+    )
 
 
 def make_verdict(

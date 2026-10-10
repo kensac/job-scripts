@@ -134,7 +134,7 @@ _SORT_EXPRESSIONS: dict[PublicSort, str] = {
     "added": "j.created_at",
     "company": "lower(j.company)",
     "title": "lower(j.title)",
-    "comp": "j.comp_max",
+    "comp": "pay.comp_max",
 }
 
 
@@ -239,7 +239,7 @@ _CARD_COLUMNS = f"""
 mj.job_id, {{sort_expression}} AS sort_value, j.company, j.title, j.locations, j.terms,
 j.source, ({ATS_SQL}) AS ats, j.date_posted, j.created_at AS added_at, j.active,
 {verdict_reads.closed_verdict("j.url")} AS closed_verdict,
-j.comp_min, j.comp_max, j.comp_currency, j.comp_period, j.comp_basis, j.comp_text, j.url
+pay.comp_min, pay.comp_max, pay.comp_currency, pay.comp_period, pay.comp_basis, pay.comp_text, j.url
 """
 
 
@@ -325,7 +325,7 @@ def get_public_job_list(
         params["remote"] = remote
     if min_comp is not None:
         filters.append(
-            "AND COALESCE(j.comp_max, j.comp_min) >= %(min_comp)s AND j.comp_currency = %(comp_currency)s AND j.comp_period = %(comp_period)s"
+            "AND COALESCE(pay.comp_max, pay.comp_min) >= %(min_comp)s AND pay.comp_currency = %(comp_currency)s AND pay.comp_period = %(comp_period)s"
         )
         params.update(min_comp=min_comp, comp_currency=comp_currency, comp_period=comp_period)
     if hide_restricted:
@@ -343,6 +343,7 @@ def get_public_job_list(
     SELECT {_CARD_COLUMNS.format(sort_expression=expression)}
     FROM managed_board_jobs mj
     JOIN jobs j ON j.id = mj.job_id
+    LEFT JOIN job_comp pay ON pay.url = j.url
     JOIN managed_boards b ON b.id = mj.managed_board_id AND b.published
     WHERE mj.managed_board_id = %(board_id)s {" ".join(filters)}
     ORDER BY {expression} {order} NULLS LAST, mj.job_id {order}
@@ -358,6 +359,7 @@ def get_public_job_list(
         params["board_id"] = board.id
         count = db.query_one(
             "SELECT count(*) AS n FROM managed_board_jobs mj JOIN jobs j ON j.id=mj.job_id "
+            "LEFT JOIN job_comp pay ON pay.url = j.url "
             f"WHERE mj.managed_board_id = %(board_id)s {selection}",
             params,
         )
@@ -418,6 +420,7 @@ def get_public_job(slug: str, job_id: int, response: Response) -> PublicJobDetai
            content.input_content AS content, content.created_at AS content_fetched_at
     FROM managed_board_jobs mj
     JOIN jobs j ON j.id = mj.job_id
+    LEFT JOIN job_comp pay ON pay.url = j.url
     JOIN managed_boards b ON b.id = mj.managed_board_id AND b.published
     LEFT JOIN LATERAL (
         SELECT q.input_content, q.created_at FROM page_texts q

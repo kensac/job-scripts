@@ -223,6 +223,6 @@ class TestUnchangedRescrapes:
     def test_a_table_it_does_not_know_is_refused_rather_than_formatted_into_sql(self):
         from tasks import rescrape
 
-        assert {"job_embeddings", "job_requirements"} == rescrape.STAMPABLE
+        assert {"job_comp", "job_embeddings", "job_requirements"} == rescrape.STAMPABLE
         with pytest.raises(ValueError, match="not a re-stampable table"):
             rescrape.drop_unchanged([], table="jobs", limit=10)

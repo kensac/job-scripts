@@ -114,8 +114,8 @@ def job_detail(job_id: int, user: AuthedUser = Depends(require_user)) -> JobDeta
         user,
         job_id,
         "j.id, j.url, j.raw_url, j.company, j.title, j.locations, j.terms, j.source, "
-        "j.active, j.date_posted, j.comp_min, j.comp_max, j.comp_text, j.comp_currency, "
-        "j.comp_period, j.comp_basis, "
+        "j.active, j.date_posted, pay.comp_min, pay.comp_max, pay.comp_text, pay.comp_currency, "
+        "pay.comp_period, pay.comp_basis, "
         "j.created_at, "
         f"{verdict_reads.closed_verdict('j.url')} AS closed_verdict",
     )

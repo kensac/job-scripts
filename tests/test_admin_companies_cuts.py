@@ -22,7 +22,9 @@ def _names(body: dict) -> set[str]:
 def test_applied_has_comp_and_repost_cut_the_list_and_the_total(client, admin_headers):
     admin = _uid(admin_headers)
     paid = _insert_job("src-cc", "https://x.test/cc1", company="Payco")
-    db.execute("UPDATE jobs SET comp_extracted = true, comp_min = 100000 WHERE id = %s", (paid,))
+    db.execute(
+        "INSERT INTO job_comp (url, comp_min) SELECT url, 100000 FROM jobs WHERE id = %s", (paid,)
+    )
     _insert_job("src-cc", "https://x.test/cc2", company="Appco")
     db.execute(
         "INSERT INTO applications (user_id, company_name, source_provenance, applied_at) "
