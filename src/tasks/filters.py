@@ -6,7 +6,7 @@ import logging
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
-from api import budget, db, events, metrics, task_jobs
+from api import budget, db, metrics, task_jobs
 from api.ai import verdicts
 from api.budget import load_config
 from api.task_jobs import run_jobs
@@ -32,6 +32,7 @@ from tasks.runtime import (
     enqueue,
     has_batch_work,
     parent_cancelled,
+    park_waiting,
     set_progress,
     submit_or_collect,
     update_parent_progress,
@@ -171,14 +172,7 @@ async def _run_filters(
                 "scheduled": batched,
             },
         )
-    db.execute(
-        "UPDATE tasks SET status = 'waiting', progress = %s WHERE id = %s AND status = 'running'",
-        (
-            db.jsonb({"done": 0, "total": total, "label": f"{len(units)} chunks across the fleet"}),
-            task_id,
-        ),
-    )
-    events.publish_task(task_id)
+    park_waiting(task_id, total, f"{len(units)} chunks across the fleet")
 
 
 async def handle_run_filter_chunk(task_id: int, payload: dict[str, Any]) -> None:

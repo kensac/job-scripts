@@ -9,7 +9,7 @@ from typing import Any
 
 from api import db, events
 from api.board.person_state import UNTOUCHED, USER_JOB_SPLIT_CHECKPOINT
-from tasks.runtime import cancelled, claim_guard
+from tasks.runtime import cancelled, checkpoint, claim_guard
 
 logger = logging.getLogger(__name__)
 
@@ -72,24 +72,13 @@ def _process_batch(task_id: int) -> tuple[dict[str, int], bool] | None:
             },
         )
         if not rows:
-            final_progress = {
-                "done": sum(counts.values()) - counts["working_set_inserted"],
-                "total": int(payload["total"]),
-                "label": "legacy job split complete",
-                **counts,
-            }
-            checkpointed = db.execute_count(
-                f"UPDATE tasks SET progress = %(progress)s, last_heartbeat = now(), "
-                f"progress_at = CASE WHEN progress IS DISTINCT FROM %(progress)s "
-                f"                   THEN now() ELSE progress_at END "
-                f"WHERE id = %(tid)s AND status = 'running'{owned}",
-                {
-                    "progress": db.jsonb(final_progress),
-                    "tid": task_id,
-                    **owned_params,
-                },
-            )
-            if checkpointed != 1:
+            if not checkpoint(
+                task_id,
+                sum(counts.values()) - counts["working_set_inserted"],
+                int(payload["total"]),
+                "legacy job split complete",
+                counts,
+            ):
                 raise RuntimeError("lost task claim while finishing user job split")
             return counts, True
         keys = [(row.user_id, row.job_id) for row in rows]
@@ -144,31 +133,14 @@ def _process_batch(task_id: int) -> tuple[dict[str, int], bool] | None:
             "job_id": last.job_id,
             **counts,
         }
-        checkpointed = db.execute_count(
-            f"""
-            UPDATE tasks SET
-                payload = jsonb_set(payload, '{{{CHECKPOINT_KEY}}}', %(state)s),
-                progress = %(progress)s,
-                last_heartbeat = now(),
-                progress_at = CASE WHEN progress IS DISTINCT FROM %(progress)s
-                                   THEN now() ELSE progress_at END
-            WHERE id = %(tid)s AND status = 'running'{owned}
-            """,
-            {
-                "state": db.jsonb(next_state),
-                "progress": db.jsonb(
-                    {
-                        "done": sum(counts.values()) - counts["working_set_inserted"],
-                        "total": int(payload["total"]),
-                        "label": "splitting legacy job rows",
-                        **counts,
-                    }
-                ),
-                "tid": task_id,
-                **owned_params,
-            },
-        )
-        if checkpointed != 1:
+        if not checkpoint(
+            task_id,
+            sum(counts.values()) - counts["working_set_inserted"],
+            int(payload["total"]),
+            "splitting legacy job rows",
+            counts,
+            payload={CHECKPOINT_KEY: next_state},
+        ):
             raise RuntimeError("lost task claim while checkpointing user job split")
         return counts, len(rows) < BATCH_SIZE
 
