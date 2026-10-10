@@ -6,7 +6,7 @@ still running during that roll. No code since names either, and every host
 runs a release that does not, so both go.
 
 Revision ID: 7d32a6ece505
-Revises: 213749d456b4
+Revises: 1276e94618f8
 Create Date: 2026-10-10 19:10:00.000000
 
 """
@@ -16,7 +16,7 @@ from collections.abc import Sequence
 from alembic import op
 
 revision: str = "7d32a6ece505"
-down_revision: str | None = "213749d456b4"
+down_revision: str | None = "1276e94618f8"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
