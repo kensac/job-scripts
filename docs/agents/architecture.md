@@ -13,7 +13,10 @@ Import → classify → match → derive.
 
 - `email_messages`: the message as it arrived. Body text and body HTML are
   both retained; the text is derived from the HTML, so the HTML must be stored
-  before anything re-derives the text.
+  before anything re-derives the text. `provider_message_id` is the
+  Message-ID as the header spells it, angle brackets included, whatever the
+  source, because it is how one message imported from two archives dedupes.
+  The .olm export drops the brackets and the importer puts them back.
 - `email_events`: append-only. Latest row per message wins on read.
 - `application_matches`: append-only. Latest row per message wins on read.
 - `applications`: `job_id` is nullable. **Never synthesise a job row from an

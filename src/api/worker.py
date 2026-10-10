@@ -307,6 +307,14 @@ def schedule_ingest_cycle() -> None:
         "AND status IN ('pending', 'running') LIMIT 1"
     ):
         enqueue("backfill_mail_pointers", {"cycle": cycle}, dedupe_key=f"mail-pointers:{cycle}")
+    # The .olm copies of messages Takeout also holds (tasks.mail_olm_twins):
+    # one run does all of it in one transaction, so it is offered until one
+    # has finished.
+    if not db.query_one(
+        "SELECT 1 FROM tasks WHERE kind = 'merge_olm_twins' "
+        "AND status IN ('pending', 'running', 'done') LIMIT 1"
+    ):
+        enqueue("merge_olm_twins", {"cycle": cycle}, dedupe_key=f"olm-twins:{cycle}")
     # Board membership for every person who can have one, every
     # board_refresh_minutes, so new verdicts reach a board without anyone
     # touching a preference. Bucketed like the ingest cycle; a person's own

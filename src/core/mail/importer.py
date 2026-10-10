@@ -393,6 +393,15 @@ def _olm_parse(raw: bytes) -> ElementTree.Element | None:
         return None
 
 
+def _bracketed(message_id: str | None) -> str | None:
+    """A Message-ID as the header spells it, inside angle brackets. Outlook's
+    export drops them, so the same message imported from .olm and from
+    Takeout stored twice under two ids: 227 pairs on 2026-10-10."""
+    if not message_id or message_id.startswith("<"):
+        return message_id
+    return f"<{message_id}>"
+
+
 def _olm_entries(raw: bytes, *, source: str, origin: str) -> Iterator[ImportedMessage]:
     root = _olm_parse(raw)
     if root is None:
@@ -411,7 +420,7 @@ def _olm_entries(raw: bytes, *, source: str, origin: str) -> Iterator[ImportedMe
         sender = _olm_sender(node)
         yield ImportedMessage(
             provider_message_id=(
-                _clean_header(_olm_text(node, "OPFMessageCopyMessageID"))
+                _bracketed(_clean_header(_olm_text(node, "OPFMessageCopyMessageID")))
                 or f"{source}-{origin}-{idx}"
             ),
             source=source,
