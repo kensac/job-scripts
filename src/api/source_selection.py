@@ -10,10 +10,6 @@ fails on one anywhere else, and on a read of `user_sources` too.
 A person's sources are the view `user_source_set`: their picks plus every
 active member of every bundle they follow, so a member added to a bundle
 later reaches its followers (Kanishk, 2026-10-10). Readers read the view.
-
-Joining a bundle still also copies its members into `user_sources`, so a
-server from before the view reads the same set while both run; the copying
-stops once every server reads the view.
 """
 
 from __future__ import annotations
@@ -22,15 +18,6 @@ from collections.abc import Iterable
 from typing import Any
 
 from api import db
-
-# The active members of a bundle, as rows of `name`, for a statement that
-# binds the bundle's name as {group}.
-_ACTIVE_MEMBERS = """
-    SELECT s.name FROM source_groups g
-    CROSS JOIN LATERAL unnest(g.members) AS m(name)
-    JOIN sources s ON s.name = m.name AND s.active
-    WHERE g.name = {group}
-"""
 
 
 def held(user_id: int) -> list[str]:
@@ -138,12 +125,6 @@ def join_group(user_id: int, group: str, *, only: bool) -> None:
             "INSERT INTO user_source_groups (user_id, group_name) VALUES (%s, %s) "
             "ON CONFLICT DO NOTHING",
             (user_id, group),
-        )
-        db.execute(
-            "INSERT INTO user_sources (user_id, source) SELECT %(uid)s, name FROM ("
-            + _ACTIVE_MEMBERS.format(group="%(group)s")
-            + ") members ON CONFLICT DO NOTHING",
-            {"uid": user_id, "group": group},
         )
 
 
