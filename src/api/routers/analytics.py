@@ -142,7 +142,10 @@ _FIRST_CLOSED_SQL = signals.first_closed_sql()
 # paid calls at 100 percent with the same dollars.
 #
 # A batch item's custom_id is the posting's url for the check purposes; a live
-# call backfilled from its verdict reaches the url through that verdict. A
+# call backfilled from its verdict reaches the url through that verdict, by
+# primary key: two arms rather than one join with a COALESCE, because the
+# single join hashed all of ai_queries (11.0 s on production on 2026-10-10,
+# against 6.2 s for the two arms and 5.4 s for the old read of every row). A
 # live call recorded since the ledger began names no url and is not counted
 # here (about ten a week on 2026-10-10).
 #
@@ -155,17 +158,24 @@ _FIRST_CLOSED_SQL = signals.first_closed_sql()
 # saying so (found by personal-portfolio-e3). All-time is the right window
 # HERE: whether a board has earned its keep is a question about its whole life.
 _SPEND_SQL = """
-SELECT j.source AS source, m.model,
-       sum(m.requests) AS calls,
-       coalesce(sum(m.requests) FILTER (WHERE m.cost_usd IS NOT NULL), 0) AS priced_calls,
-       sum(m.total_tokens) AS total_tokens,
-       sum(m.cost_usd) AS cost_usd
-FROM model_calls m
-LEFT JOIN ai_queries q
-       ON m.source = 'verdict' AND m.provider_batch_id IS NULL AND q.id = m.source_id
-JOIN jobs j ON j.url = COALESCE(m.custom_id, q.url)
-WHERE m.purpose IN ('verify', 'reverify', 'filter', 'managed_board', 'manual')
-GROUP BY j.source, m.model
+WITH calls AS (
+    SELECT m.model, m.requests, m.cost_usd, m.total_tokens, m.custom_id AS url
+    FROM model_calls m
+    WHERE m.purpose IN ('verify', 'reverify', 'filter', 'managed_board', 'manual')
+      AND m.custom_id IS NOT NULL
+    UNION ALL
+    SELECT m.model, m.requests, m.cost_usd, m.total_tokens, q.url
+    FROM model_calls m JOIN ai_queries q ON q.id = m.source_id
+    WHERE m.purpose IN ('verify', 'reverify', 'filter', 'managed_board', 'manual')
+      AND m.source = 'verdict' AND m.provider_batch_id IS NULL
+)
+SELECT j.source AS source, c.model,
+       sum(c.requests) AS calls,
+       coalesce(sum(c.requests) FILTER (WHERE c.cost_usd IS NOT NULL), 0) AS priced_calls,
+       sum(c.total_tokens) AS total_tokens,
+       sum(c.cost_usd) AS cost_usd
+FROM calls c JOIN jobs j ON j.url = c.url
+GROUP BY j.source, c.model
 """
 
 # last_success_at is when the ingest last ran cleanly; jobs.last_loaded_at (from
