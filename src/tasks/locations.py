@@ -8,7 +8,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from api import db
+from api import db, user_settings
 from api.ai.batch_results import progress_counts
 from api.locations import LocationExtract, Place, store
 from core.shapes import LOCATIONS_TASK
@@ -55,19 +55,13 @@ _INSTRUCTIONS = (
 # Strings from every active posting plus every user's exclusion criteria (a
 # criterion is a location string too, and it is matched as a place the same
 # way), minus the ones already classified.
-_CANDIDATES = """
+_CANDIDATES = f"""
     WITH raw AS (
         SELECT DISTINCT btrim(loc) AS text
         FROM jobs j, unnest(j.locations) AS loc
         WHERE j.active AND btrim(loc) <> ''
         UNION
-        SELECT DISTINCT btrim(e)
-        FROM user_settings s,
-             jsonb_array_elements_text(
-                 COALESCE(s.criteria->'excluded_locations', '[]'::jsonb)
-                 || COALESCE(s.criteria->'included_locations', '[]'::jsonb)) AS e
-        WHERE btrim(e) <> ''
-    )
+{user_settings.CRITERIA_LOCATIONS_SQL}    )
     SELECT r.text FROM raw r
     LEFT JOIN locations l ON l.text = r.text
     WHERE l.text IS NULL

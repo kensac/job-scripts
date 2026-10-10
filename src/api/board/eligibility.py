@@ -7,7 +7,7 @@ while visibility grants uploads and acted-on rows independently of these gates.
 
 from typing import Any
 
-from api import db
+from api import user_settings
 from api.board import criteria
 from core import verdict_reads
 
@@ -41,12 +41,9 @@ STRUCTURAL = """
 
 
 def settings_params(user_id: int) -> dict[str, Any]:
-    settings = db.query_one(
-        "SELECT bypass_sponsorship_filter, criteria FROM user_settings WHERE user_id = %s",
-        (user_id,),
-    )
+    settings = user_settings.criteria(user_id)
     return {
         "uid": user_id,
-        "bypass_sponsorship": settings["bypass_sponsorship_filter"] if settings else True,
-        **criteria.params(settings),
+        "bypass_sponsorship": settings.bypass_sponsorship_filter,
+        **criteria.params({"criteria": settings.criteria}),
     }

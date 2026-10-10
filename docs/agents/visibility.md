@@ -294,6 +294,23 @@ answer disagrees with the standing verdict, and whenever a person files a
 day. The fleet's answer is the one boards read. `tests/test_cross_user_writes.py`
 pins it.
 
+## A person's settings have one owner
+
+`user_settings` is read and written only by `api/user_settings.py`. It holds
+six kinds of a person's data in one row: board layout and page preferences,
+their own AI credentials, their criteria, digest state, the apply profile and
+their writing style. Each kind has a typed read (`criteria`, `credentials`,
+`prefs`, `profile`, `writing_style`, `digest_recipients`); a statement that
+needs settings beside other tables takes its SQL piece from the module
+(`join`, `has_own_key_sql`, `CRITERIA_LOCATIONS_SQL`). The defaults a person
+without a row reads live there once. `tests/test_user_settings_owner.py`
+fails on SQL naming the table anywhere else.
+
+The kinds stay in one table. Measured 2026-10-10: two rows, no stored API
+key, every kind read by person id. A table per kind adds a join to every
+reader and removes nothing; revisit when a kind gains a reader that is not
+by person, or a second row per person.
+
 ## Authorisation
 
 **Route-level authorisation says nothing about object-level authorisation.**

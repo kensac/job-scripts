@@ -10,7 +10,7 @@ from typing import Any
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
-from api import db, scoping, sorting
+from api import db, scoping, sorting, user_settings
 from api.auth import AuthedUser
 from api.models import Ok
 from api.problem import PROVIDER_REFUSALS, refuse
@@ -107,7 +107,7 @@ def list_users(
                COALESCE((SELECT SUM(a.total_tokens) FROM api_usage a
                          WHERE a.user_id = u.id AND a.key_source = 'owner'
                            AND a.created_at > now() - interval '7 days'), 0) AS owner_tokens_week
-        FROM users u LEFT JOIN user_settings s ON s.user_id = u.id
+        FROM users u {user_settings.join("s", "u.id")}
         {scope}
         ORDER BY {sorting.clause(sorts, _USERS_SORTABLE)}, u.id LIMIT %(limit)s OFFSET %(offset)s
         """,
@@ -245,11 +245,11 @@ class UserDetail(BaseModel):
 def user_detail(user_id: int, user: AuthedUser = Depends(require_admin)) -> UserDetail:
     u = db.query_one_as(
         UserProfile,
-        """
+        f"""
         SELECT u.id, u.sub, u.email, u.name, u.groups, u.created_at, u.last_seen_at,
                s.ai_provider, s.ai_model, s.ai_params, s.bypass_sponsorship_filter,
                s.criteria, s.api_key_enc IS NOT NULL AS has_byo_key
-        FROM users u LEFT JOIN user_settings s ON s.user_id = u.id
+        FROM users u {user_settings.join("s", "u.id")}
         WHERE u.id = %s
         """,
         (user_id,),

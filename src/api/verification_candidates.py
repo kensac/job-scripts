@@ -1,6 +1,6 @@
 """Shared, cheap admission boundary for new-posting verification."""
 
-from api import db
+from api import db, user_settings
 from api.board import criteria
 from api.review_gate import load_policy
 from core import screening
@@ -16,15 +16,15 @@ _TITLE_SQL = (
     + screening.skips_sql("%(review_title_recipes)s::jsonb ->> target.prompt_hash")
 )
 
-TARGETS = """
+TARGETS = f"""
 verification_targets AS (
-    SELECT us.source, COALESCE(settings.criteria, '{}'::jsonb) AS criteria,
+    SELECT us.source, COALESCE(settings.criteria, '{{}}'::jsonb) AS criteria,
            NULL::jsonb AS title_gate, filter.prompt_hash
     FROM users u
     JOIN user_sources us ON us.user_id = u.id
     JOIN user_filters filter ON filter.user_id = u.id AND filter.enabled
-    LEFT JOIN user_settings settings ON settings.user_id = u.id
-    WHERE settings.api_key_enc IS NOT NULL
+    {user_settings.join("settings", "u.id")}
+    WHERE {user_settings.has_own_key_sql("u.id")}
        OR u.groups && ARRAY(SELECT group_name FROM group_budgets)::text[]
     UNION
     SELECT source.source, board.criteria, board.title_gate, board.prompt_hash

@@ -11,7 +11,7 @@ import logging
 import re
 from typing import Any
 
-from api import db, filter_runs, hosts, metrics, queue, telemetry
+from api import db, filter_runs, hosts, metrics, queue, telemetry, user_settings
 from api.ai import verdicts
 from core import page_fetches
 from core.fetching.hosts import pace_key
@@ -269,12 +269,11 @@ def schedule_filter_runs(cycle: str) -> None:
     2026-09-04.
     """
     users = db.query(
-        """
+        f"""
         SELECT DISTINCT u.id FROM users u
         JOIN user_sources us ON us.user_id = u.id
         JOIN user_filters uf ON uf.user_id = u.id AND uf.enabled
-        LEFT JOIN user_settings s ON s.user_id = u.id
-        WHERE s.api_key_enc IS NOT NULL
+        WHERE {user_settings.has_own_key_sql("u.id")}
            OR u.groups && ARRAY(SELECT group_name FROM group_budgets)::text[]
         """
     )

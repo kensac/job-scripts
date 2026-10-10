@@ -7,7 +7,7 @@ from urllib.parse import urlparse
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
-from api import ai, budget, crypto, db
+from api import ai, budget, crypto, db, user_settings
 from api.auth import AuthedUser, is_admin, require_service, require_user
 from api.board import visibility
 from api.models import ApiKeyPut, Criteria, Ok, SettingsPut
@@ -103,10 +103,7 @@ def _grants(user: AuthedUser) -> Grants:
 
 @router.post("/users/bootstrap")
 def bootstrap(user: AuthedUser = Depends(require_user)) -> Bootstrap:
-    db.execute(
-        "INSERT INTO user_settings (user_id) VALUES (%s) ON CONFLICT (user_id) DO NOTHING",
-        (user.id,),
-    )
+    user_settings.ensure(user.id)
     return Bootstrap(
         user=BootstrappedUser(id=user.id, sub=user.sub, email=user.email, name=user.name),
         grants=_grants(user),
@@ -289,15 +286,11 @@ def models(user: AuthedUser = Depends(require_user)):
     exists and what would unlock it instead of a list that silently shrank.
     """
     ent = budget.get_entitlement(user)
-    settings = db.query_one(
-        "SELECT ai_provider, api_key_enc IS NOT NULL AS has_key "
-        "FROM user_settings WHERE user_id = %s",
-        (user.id,),
-    )
+    creds = user_settings.credentials(user.id)
     providers = []
     owner_allowed: list = []
-    if settings and settings["has_key"]:
-        provider = settings["ai_provider"] or "openai"
+    if creds.has_key:
+        provider = creds.ai_provider
         providers.append(_provider_entry(provider, _catalog(provider)))
     else:
         # Every provider the fleet models, not a hardcoded pair. This said
@@ -415,14 +408,7 @@ def _effective_model(user: AuthedUser) -> EffectiveModel:
 
 @router.get("/user/settings")
 def get_settings(user: AuthedUser = Depends(require_user)) -> UserSettings:
-    row = db.query_one(
-        "SELECT column_layout, prefs, ai_provider, ai_base_url, ai_model, ai_params, "
-        "bypass_sponsorship_filter, criteria, email_digest, writing_style, "
-        "api_key_enc IS NOT NULL AS has_byo_key "
-        "FROM user_settings WHERE user_id = %s",
-        (user.id,),
-    )
-    settings = {**(row or _SETTINGS_DEFAULTS)}
+    settings = user_settings.served(user.id)
     # New accounts and resets use the same configured board layout.
     if settings.get("column_layout") is None:
         settings["column_layout"] = db.get_config("board_default_column_layout") or None
@@ -437,21 +423,6 @@ def get_settings(user: AuthedUser = Depends(require_user)) -> UserSettings:
     return UserSettings(
         **settings, default_style=DEFAULT_STYLE, **_effective_model(user).model_dump()
     )
-
-
-_SETTINGS_DEFAULTS = {
-    "column_layout": None,
-    "prefs": {},
-    "ai_provider": "openai",
-    "ai_base_url": None,
-    "ai_model": None,
-    "ai_params": {},
-    "bypass_sponsorship_filter": True,
-    "criteria": {},
-    "email_digest": False,
-    "writing_style": None,
-    "has_byo_key": False,
-}
 
 
 # A person who is not an admin keeps postings at most this many days old:
@@ -472,21 +443,14 @@ def put_settings(body: SettingsPut, user: AuthedUser = Depends(require_user)) ->
             )
         if body.criteria.max_age_days is None:
             body.criteria.max_age_days = MAX_AGE_CAP_DAYS
-    row = None
-    if body.ai_params is not None or body.ai_model is not None:
-        row = db.query_one(
-            "SELECT ai_provider, api_key_enc IS NOT NULL AS has_key "
-            "FROM user_settings WHERE user_id = %s",
-            (user.id,),
-        )
-    provider = (row or {}).get("ai_provider") or "openai"
+    creds = user_settings.credentials(user.id)
+    provider = creds.ai_provider
     if body.ai_params is not None:
         error = ai.validate_params(provider, body.ai_params, body.ai_model)
         if error:
             raise refuse(400, "INVALID_PARAMS", error)
     if body.ai_model is not None:
-        has_key = bool(row and row["has_key"])
-        if has_key:
+        if creds.has_key:
             catalog = {m["model"] for m in ai.MODEL_CATALOG[provider]}
             valid = provider == "openai_compatible" or body.ai_model in catalog
         else:
@@ -494,56 +458,23 @@ def put_settings(body: SettingsPut, user: AuthedUser = Depends(require_user)) ->
             valid = ent.owner_key and body.ai_model in budget.owner_allowed_models(user.groups)
         if not valid:
             raise refuse(400, "INVALID_MODEL", "that model is not available with your current key")
-    db.execute(
-        """
-        INSERT INTO user_settings (user_id, column_layout, prefs, ai_model, ai_params,
-                                   bypass_sponsorship_filter, criteria,
-                                   email_digest, writing_style, updated_at)
-        VALUES (%(uid)s, %(layout)s, COALESCE(%(prefs)s, '{}'::jsonb),
-                %(model)s, COALESCE(%(params)s, '{}'::jsonb),
-                COALESCE(%(bypass)s, TRUE), COALESCE(%(criteria)s, '{}'::jsonb),
-                COALESCE(%(digest)s, FALSE), NULLIF(%(style)s, ''), now())
-        ON CONFLICT (user_id) DO UPDATE SET
-            -- Presence distinguishes an explicit reset from an omitted field.
-            column_layout = CASE WHEN %(layout_set)s THEN EXCLUDED.column_layout
-                                 ELSE user_settings.column_layout END,
-            prefs = COALESCE(%(prefs)s, user_settings.prefs),
-            ai_model = CASE WHEN %(model_set)s THEN EXCLUDED.ai_model
-                            ELSE user_settings.ai_model END,
-            ai_params = COALESCE(%(params)s, user_settings.ai_params),
-            bypass_sponsorship_filter = COALESCE(%(bypass)s, user_settings.bypass_sponsorship_filter),
-            criteria = COALESCE(%(criteria)s, user_settings.criteria),
-            email_digest = COALESCE(%(digest)s, user_settings.email_digest),
-            -- Null and an empty string both clear the saved override.
-            writing_style = CASE WHEN %(style_set)s THEN EXCLUDED.writing_style
-                                 ELSE user_settings.writing_style END,
-            updated_at = now()
-        """,
-        {
-            "uid": user.id,
-            "layout": db.jsonb(body.column_layout) if body.column_layout is not None else None,
-            "layout_set": "column_layout" in body.model_fields_set,
-            "prefs": db.jsonb(body.prefs) if body.prefs is not None else None,
-            "model": body.ai_model,
-            "model_set": "ai_model" in body.model_fields_set,
-            "params": db.jsonb(body.ai_params) if body.ai_params is not None else None,
-            "bypass": body.bypass_sponsorship_filter,
-            "criteria": db.jsonb(body.criteria.model_dump(mode="json"))
-            if body.criteria is not None
-            else None,
-            "digest": body.email_digest,
-            "style": body.writing_style.strip() if body.writing_style is not None else None,
-            "style_set": "writing_style" in body.model_fields_set,
-        },
+    sent = body.model_fields_set
+    user_settings.save(
+        user.id,
+        user_settings.Update(
+            column_layout=body.column_layout,
+            column_layout_set="column_layout" in sent,
+            prefs=body.prefs,
+            ai_model=body.ai_model,
+            ai_model_set="ai_model" in sent,
+            ai_params=body.ai_params,
+            bypass_sponsorship_filter=body.bypass_sponsorship_filter,
+            criteria=body.criteria.model_dump(mode="json") if body.criteria is not None else None,
+            email_digest=body.email_digest,
+            writing_style=body.writing_style,
+            writing_style_set="writing_style" in sent,
+        ),
     )
-    if body.email_digest:
-        import secrets as _secrets
-
-        db.execute(
-            "UPDATE user_settings SET digest_token = %s "
-            "WHERE user_id = %s AND digest_token IS NULL",
-            (_secrets.token_urlsafe(24), user.id),
-        )
     # The saved settings, in the shape GET serves them, so a client can read
     # what the write did from the write.
     visibility.request_refresh(user.id)
@@ -559,12 +490,7 @@ def digest_unsubscribe(token: str, _: None = Depends(require_service)) -> Ok:
     a page that wrote on render would unsubscribe people who never clicked.
     The mail's List-Unsubscribe-Post header already makes one-click clients
     POST. GET stays only until the page has moved its write behind POST."""
-    row = db.query_one(
-        "UPDATE user_settings SET email_digest = FALSE, updated_at = now() "
-        "WHERE digest_token = %s RETURNING user_id",
-        (token,),
-    )
-    if not row:
+    if not user_settings.unsubscribe_digest(token):
         raise refuse(404, "NOT_FOUND", "unknown token")
     return Ok()
 
@@ -586,27 +512,11 @@ def put_api_key(body: ApiKeyPut, user: AuthedUser = Depends(require_user)) -> Ok
                 error = str(exc)
         if error:
             raise refuse(400, "INVALID_BASE_URL", error)
-    db.execute(
-        """
-        INSERT INTO user_settings (user_id, api_key_enc, ai_provider, ai_base_url, updated_at)
-        VALUES (%s, %s, %s, %s, now())
-        ON CONFLICT (user_id) DO UPDATE SET
-            api_key_enc = EXCLUDED.api_key_enc,
-            ai_provider = EXCLUDED.ai_provider,
-            ai_base_url = EXCLUDED.ai_base_url,
-            ai_model = NULL,
-            updated_at = now()
-        """,
-        (user.id, crypto.encrypt(body.api_key), body.provider, body.base_url),
-    )
+    user_settings.save_api_key(user.id, crypto.encrypt(body.api_key), body.provider, body.base_url)
     return Ok()
 
 
 @router.delete("/user/settings/api-key")
 def delete_api_key(user: AuthedUser = Depends(require_user)) -> Ok:
-    db.execute(
-        "UPDATE user_settings SET api_key_enc = NULL, ai_base_url = NULL, "
-        "ai_provider = 'openai', ai_model = NULL, updated_at = now() WHERE user_id = %s",
-        (user.id,),
-    )
+    user_settings.clear_api_key(user.id)
     return Ok()

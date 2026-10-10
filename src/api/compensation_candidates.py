@@ -1,5 +1,6 @@
 """Compensation is bought only after a board or a person needs the posting."""
 
+from api import user_settings
 from api.board import criteria
 from api.board.person_state import UNTOUCHED
 from core import verdict_reads
@@ -26,7 +27,7 @@ compensation_demand AS MATERIALIZED (
     JOIN jobs j ON j.url = verdict.url
     JOIN user_filters f ON f.prompt_hash = verdict.prompt_hash AND f.enabled
     JOIN user_sources s ON s.user_id = f.user_id AND s.source = j.source
-    LEFT JOIN user_settings settings ON settings.user_id = f.user_id
+    {user_settings.join("settings", "f.user_id")}
     WHERE verdict.status = 'passed'
     {criteria.json_sql("settings.criteria")}
     UNION
