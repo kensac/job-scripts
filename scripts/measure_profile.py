@@ -107,6 +107,7 @@ IDENTIFYING = frozenset(
         # is a laptop named after its owner, and the corpus does not need real
         # ones to exercise "which worker holds this task".
         "ai_queries.worker",
+        "page_fetches.worker",
         "tasks.worker",
         "worker_status.name",
     }
@@ -115,11 +116,11 @@ IDENTIFYING = frozenset(
 # Columns whose value set only makes sense conditioned on another column.
 #
 # ai_queries.reason has 20,151 distinct values under check_type='custom' - free
-# text a model wrote - and exactly three under 'content': 'scraped', 'ats
-# text', 'content cached'. Those three are the shape the ATS-collapse detector
-# divides by, and the shape no fixture ever produced. Measured unconditionally
-# the column is "long free text" and the detector's input vanishes from the
-# corpus; measured per check_type it is reproducible.
+# text a model wrote - and a short list under 'extraction'. Measured
+# unconditionally the column is "long free text" and the short list vanishes
+# from the corpus; measured per check_type it is reproducible. (How a page was
+# fetched, which the ATS-collapse detector divides by, is page_fetches.method,
+# a plain categorical.)
 PARTITIONED = {"ai_queries.reason": "check_type"}
 
 # Columns whose value is decided by the corpus's own structure rather than by

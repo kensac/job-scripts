@@ -131,8 +131,7 @@ def test_every_measured_value_appears_somewhere_in_the_corpus():
         rows = _one(f"SELECT count(*) FROM {table}")
         for column, column_shape in shape["columns"].items():
             # Partitions too, not just plain categoricals: ai_queries.reason
-            # only has a value set once conditioned on check_type, and its
-            # three 'content' values are the named awkward case.
+            # only has a value set once conditioned on check_type.
             wanted: dict[str, set[str]] = {}
             if column_shape["kind"] == "categorical":
                 wanted[""] = set(column_shape["values"])
@@ -165,10 +164,9 @@ def test_the_awkward_cases_the_tests_were_written_for_are_present():
     assert _one("SELECT count(*) FROM jobs WHERE comp_period = 'weekly'") > 0, (
         "no weekly-pay posting; that shape is why sort=comp was meaningless"
     )
-    assert (
-        _one("SELECT count(*) FROM ai_queries WHERE check_type = 'content' AND reason = 'ats text'")
-        > 0
-    ), "no 'ats text' content row; the ATS collapse detector divides by these"
+    assert _one("SELECT count(*) FROM page_fetches WHERE method = 'ats text'") > 0, (
+        "no 'ats text' fetch; the ATS collapse detector divides by these"
+    )
     assert (
         _one("SELECT count(*) FROM ai_queries WHERE created_at < now() - interval '30 days'") > 0
     ), "every verdict is recent; no window query is exercised over old rows"

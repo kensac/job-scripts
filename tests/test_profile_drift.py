@@ -111,10 +111,10 @@ def test_a_new_categorical_value_fails_the_check(recorded):
 
 def test_a_new_value_inside_a_partition_fails_the_check(recorded):
     """ai_queries.reason is measured per check_type, because unconditionally it
-    is 20,151 strings of free text and conditioned on 'content' it is the three
-    values the ATS collapse detector divides by."""
+    is 20,151 strings of free text and conditioned on 'extraction' it is a
+    short list of values."""
     current = copy.deepcopy(recorded)
-    part = current["tables"]["ai_queries"]["columns"]["reason"]["parts"]["content"]
+    part = current["tables"]["ai_queries"]["columns"]["reason"]["parts"]["extraction"]
     part["values"]["rendered by the browser"] = 0.01
     findings = mp.drift(recorded, current)
     assert any("rendered by the browser" in f for f in findings), findings
