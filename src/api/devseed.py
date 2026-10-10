@@ -36,6 +36,7 @@ import datetime
 from typing import Any
 
 from api import db, source_selection
+from api.mail import applications
 from api.mail import events as mail_events
 from api.mail import match as mail_match
 from core.disposable_db import require_disposable_name
@@ -260,14 +261,9 @@ def seed() -> dict[str, int]:
             model="gpt-6-luna",
         )
 
-    application_id = _one(
-        """
-        INSERT INTO applications (user_id, job_id, company_name, title, source_provenance,
-                                  applied_at)
-        VALUES (%s, %s, 'Northwind', 'Backend Engineer', 'tracker', %s) RETURNING id
-        """,
-        (user_id, job_ids[0], _days_ago(40)),
-    )
+    # Through the one writer, which is idempotent per posting, so a second
+    # seed finds the application the first made.
+    application_id = applications.from_board(user_id, job_ids[0], _days_ago(40).date())
     counts["applications"] += 1
     mail_match.record(
         message_ids[0],

@@ -61,11 +61,6 @@ HUMAN_METHODS = frozenset({MANUAL, DETACHED})
 # which had drifted.
 UNATTACHABLE_KINDS = frozenset({"recruiter_outreach"})
 
-# The tracker statuses that mean an application exists. "No Longer Interested"
-# is excluded: it is the status this user assigns to postings they decided
-# against, and 634 of them would otherwise become applications never made.
-APPLIED_STATUSES = ("Application Submitted", "Follow-up")
-
 _URL_RE = re.compile(r"https?://[^\s<>\"')\]]+", re.IGNORECASE)
 
 
@@ -480,9 +475,10 @@ def last_sweep_start(user_id: int | None = None) -> datetime.datetime | None:
 
 # What a sweep reads that can change its answer: a new application (a
 # candidate that was missing), a new event (a reclassified message), a new
-# match (a person's decision, or a sweep's own), and a board row moving into
-# an applied status (a tracker application to seed). Nothing else does, so a
-# sweep after none of these would decide everything exactly as the last one.
+# match (a person's decision, or a sweep's own). A board row moving into
+# an applied status creates its application as it is written. Nothing else
+# does, so a sweep after none of these would decide everything exactly as the
+# last one.
 _CHANGED_SINCE = """
 SELECT EXISTS (
            SELECT 1 FROM applications
@@ -493,10 +489,6 @@ SELECT EXISTS (
     OR EXISTS (
            SELECT 1 FROM application_matches am JOIN email_messages m ON m.id = am.message_id
            WHERE am.created_at > %(since)s AND (%(user)s::bigint IS NULL OR m.user_id = %(user)s))
-    OR EXISTS (
-           SELECT 1 FROM user_jobs
-           WHERE updated_at > %(since)s AND status = ANY(%(statuses)s)
-             AND (%(user)s::bigint IS NULL OR user_id = %(user)s))
     AS changed
 """
 
@@ -506,6 +498,6 @@ def changed_since(since: datetime.datetime | None, user_id: int | None = None) -
         return True
     row = db.query_one(
         _CHANGED_SINCE,
-        {"since": since, "user": user_id, "statuses": list(APPLIED_STATUSES)},
+        {"since": since, "user": user_id},
     )
     return bool(row and row["changed"])

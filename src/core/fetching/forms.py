@@ -213,6 +213,20 @@ def posting_urls(url: str) -> list[str]:
     return [base, base + "/"]
 
 
+def board_of(url: str) -> str | None:
+    """The employer's board name in an applicant-tracking form url: the
+    `for` of an embedded Greenhouse form, otherwise the first path segment
+    (job-boards.greenhouse.io/stripe/..., jobs.ashbyhq.com/ivo-inc/...,
+    jobs.lever.co/acme/...). None for a host this module cannot read. The
+    same rule as the SQL in migration 54630f36d8b8, which applied it to the
+    fills already submitted."""
+    if reader_for(url) is None:
+        return None
+    parts = urlsplit(url)
+    board = dict(parse_qsl(parts.query)).get("for") or parts.path.strip("/").split("/")[0]
+    return board or None
+
+
 def reader_for(url: str):
     host = hostname(url)
     return next((fn for suffix, fn in _READERS.items() if host.endswith(suffix)), None)

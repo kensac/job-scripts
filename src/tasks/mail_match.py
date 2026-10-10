@@ -6,14 +6,16 @@ whole outcome side of the product stayed dark while 67k messages classified.
 
 Two populations feed it, and the order they run in is load-bearing:
 
-1. The tracker's own applications, which have a job and a date.
+1. The tracker's own applications, which have a job and a date. The board
+   write that moves a row into an applied status records them
+   (api/mail/applications.from_board), so they exist before any sweep.
 2. Applications that only email knows about - the 2022-era ones whose posting
    was never in this catalog and never will be.
 
-Tracker first, then match, then create from what stayed unmatched. Creating
-before matching would manufacture a second application at a company that
-already had one, and `_by_company` refuses to choose between two candidates -
-so the wrong order poisons the matcher permanently and silently.
+Match first, then create from what stayed unmatched. Creating before matching
+would manufacture a second application at a company that already had one,
+and `_by_company` refuses to choose between two candidates - so the wrong
+order poisons the matcher permanently and silently.
 """
 
 from __future__ import annotations
@@ -82,34 +84,6 @@ PROGRESS_EVERY = 100
 # honest state: we looked, and we are not confident enough to name an
 # application. The evidence remains in the log for a later adjudication pass.
 CAP_FLOOR = 15
-
-
-def seed_from_tracker(user_id: int) -> int:
-    """One application per tracked application, carrying its job.
-
-    Idempotent on (user_id, job_id) so a re-run adds nothing. company and
-    title are copied rather than joined at read time because the job row can
-    be deleted - `applications.job_id` is ON DELETE SET NULL - and an
-    application that loses its posting must not also lose its identity.
-    """
-    rows = db.query(
-        """
-        INSERT INTO applications (user_id, job_id, company_name, title,
-                                  source_provenance, applied_at)
-        SELECT uj.user_id, uj.job_id, j.company, j.title, 'tracker', uj.date_applied
-        FROM user_jobs uj
-        JOIN jobs j ON j.id = uj.job_id
-        WHERE uj.user_id = %(user)s
-          AND uj.status = ANY(%(statuses)s)
-          AND NOT EXISTS (
-              SELECT 1 FROM applications a
-              WHERE a.user_id = uj.user_id AND a.job_id = uj.job_id
-          )
-        RETURNING id
-        """,
-        {"user": user_id, "statuses": list(mail_match.APPLIED_STATUSES)},
-    )
-    return len(rows)
 
 
 def _unmatched_applied_messages(user_id: int) -> list[dict[str, Any]]:
@@ -569,20 +543,17 @@ async def handle_match_mail(task_id: int, payload: dict[str, Any]) -> None:
     if requested:
         user_ids = [int(requested)]
     else:
-        # Users with mail OR with tracked applications. Scoping to mail alone
-        # would leave anyone who has not connected Gmail with an empty
-        # applications table and therefore no funnel at all, which reads as
-        # "you have applied to nothing" rather than "we have no mail for you".
+        # Users with mail OR with applications: a person whose applications
+        # come only from the board still has their action items resynced.
         user_ids = [
             r["user_id"]
             for r in db.query(
                 """
                 SELECT user_id FROM email_messages
                 UNION
-                SELECT user_id FROM user_jobs WHERE status = ANY(%s)
+                SELECT user_id FROM applications
                 ORDER BY user_id
-                """,
-                (list(mail_match.APPLIED_STATUSES),),
+                """
             )
         ]
     if not user_ids:
@@ -598,7 +569,6 @@ async def handle_match_mail(task_id: int, payload: dict[str, Any]) -> None:
     # was taken as evidence that a working change had recovered nothing and
     # came within one decision of reverting 1,506 corrections.
     totals = {
-        "tracked": 0,
         "derived": 0,
         "swept": 0,
         "attached": 0,
@@ -616,7 +586,6 @@ async def handle_match_mail(task_id: int, payload: dict[str, Any]) -> None:
         if not mail_match.changed_since(since, user_id):
             skipped += 1
             continue
-        totals["tracked"] += seed_from_tracker(user_id)
         totals["detached"] += detach_unattachable(user_id)
         # Before matching, so a floor lowered now releases its messages in the
         # same sweep rather than the next one.
@@ -648,7 +617,7 @@ async def handle_match_mail(task_id: int, payload: dict[str, Any]) -> None:
             totals["resolved"] += result["resolved"]
 
     summary = (
-        f"{len(user_ids)} user(s): {totals['tracked']} tracked + {totals['derived']} derived "
+        f"{len(user_ids)} user(s): {totals['derived']} derived "
         f"applications, {totals['swept']} messages swept "
         f"({totals['attached']} now attached), "
         f"{totals['detached']} detached, "

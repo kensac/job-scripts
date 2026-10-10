@@ -115,6 +115,12 @@ class ApplicationFill(Base):
     fields: Mapped[Any] = mapped_column(JSONB)
     created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
     submitted_at: Mapped[datetime.datetime | None]
+    # The application this submit recorded. Set at submit, with the job's
+    # application or, for a form whose posting is not on the board, one of
+    # provenance `apply`.
+    application_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("applications.id", ondelete="SET NULL")
+    )
 
 
 class ApplicationReport(Base):
