@@ -51,11 +51,13 @@ CONDITIONS: dict[str, str] = {
 SQL = "".join(f"\n        AND {condition}" for condition in CONDITIONS.values()) + "\n"
 
 
-def json_sql(criteria: str) -> str:
+def json_sql(criteria: str, names: tuple[str, ...] = tuple(CONDITIONS)) -> str:
     """Bind the same predicate to stored criteria instead of one user's params.
 
     Only trusted SQL expressions belong here. Values remain in the database,
     and list normalization matches params(), including blank entries.
+    `names` picks some of the CONDITIONS, for a caller that runs them in
+    stages (api.verification_candidates.reachable).
     """
     bindings = {
         "crit_date": f"({criteria}->>'date_posted_after')",
@@ -73,7 +75,8 @@ def json_sql(criteria: str) -> str:
         )
         bindings[f"crit_{suffix}"] = values
         bindings[f"crit_has_{suffix}"] = f"(cardinality({values}) > 0)"
-    return SQL % {key: value for key, value in bindings.items()}
+    sql = "".join(f"\n        AND {CONDITIONS[name]}" for name in names) + "\n"
+    return sql % {key: value for key, value in bindings.items()}
 
 
 def params(settings_row: dict[str, Any] | None) -> dict[str, Any]:

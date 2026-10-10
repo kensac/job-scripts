@@ -143,6 +143,30 @@ per-cut SQL as the reference in the equality test (`tests/test_spend_stats_singl
 rows locally (3.2 s against 2.6 s), because it sorts per set and spilled to
 disk.
 
+**A query that puts most of the catalog through costly checks runs them as
+stages, cheapest first, each a `MATERIALIZED` CTE.** Written as one predicate,
+an `EXISTS` under an `OR` becomes a subplan run per row, and the planner
+orders the remaining checks by its own row estimates, which are wrong across
+CTE boundaries. The verify sweep's candidate query (`tasks/verify.candidates_sql`
+and `api/verification_candidates.reachable`) ran past 14 minutes on
+production on 2026-10-10 and held locks a deploy's `DROP VIEW` queued behind.
+Staged, it read 21 s warm and 35 to 43 s with a cold cache. Three rules came out of it:
+- a check that depends on a few of a row's values runs once per distinct
+  value, not per row: the place checks ran 67,000 times rather than 272,000;
+- a check that must run per surviving row goes in a scalar subquery, which
+  the planner never turns into a join. As a join, it drove the check from all
+  840,000 fetched urls;
+- read wide columns (page text) only for the rows the `LIMIT` keeps.
+Keep the old SQL as the reference in the equality test, built from the same
+fragments, and give the fixture a row for every branch
+(`tests/test_verification_candidates.py`).
+
+**Measure a large statement with JIT on and off.** Above `jit_above_cost`
+PostgreSQL compiles the whole plan. For the verify candidate query that cost
+more than the query itself: 78 s with JIT, 24 s without, most of the
+difference inside one hash aggregate of 16,000 rows. Such a statement runs
+in a transaction with `SET LOCAL jit = off`.
+
 Prompt changes require before/after output-token and decision-quality evaluation
 on the same inputs. Schema and parsing tests establish compatibility, not outcome
 quality or savings. Keep evaluation costs explicitly bounded. `api.run_experiment`

@@ -183,7 +183,7 @@ filter review gate's title stage did until 2026-10-10, and 3,501 of 3,802
 filter batch chunks in the 7 days before read pages only to skip them again.
 Each screen applies where candidates are chosen: `tasks.filters._run_filters`
 per filter, `managed_board_runs._plan` per board run (the run payload records
-`title_screens`), and `verification_candidates.REACHABLE` per target. It is
+`title_screens`), and `verification_candidates.reachable` per target. It is
 evaluated on every run, so switching it off returns the posting on the next.
 
 **A board's title gate is the cheap rung before the model.** A gate that is
@@ -236,7 +236,7 @@ Grad agreed in 673, Aerospace in 674, closed in 672 and clearance in 671
 is most of what a posting costs, and since the Workday paging fix (2026-10-05)
 most new volume is store, clinic and warehouse roles reposted under the same
 titles. `verification_volume_gate` lists the prompt hashes that opt in; for
-those targets `verification_candidates.REACHABLE` skips a posting whose (source,
+those targets `verification_candidates.reachable` skips a posting whose (source,
 title) was judged `title_min_judged` (50) times in `window_days` with no keep by
 any board or filter, except a fixed `audit_percent` sample of urls so a title
 that starts producing keeps comes back by itself, and a posting whose title

@@ -1,4 +1,10 @@
 from api import db, verification_candidates
+from api.board import criteria
+from api.locations import LocationExtract
+from api.locations import store as store_location
+from core import catalog, verdict_reads
+from core.store import AI_ELIGIBLE_JOB, CONTENT_LATERAL, ON_A_BOARD
+from tasks import verify as tasks_verify
 from tests import factories as f
 
 
@@ -25,9 +31,12 @@ def test_another_personal_target_can_admit_a_job_outside_one_users_window():
 def _reachable() -> set[int]:
     rows = db.query(
         f"""
-        WITH {verification_candidates.TARGETS}
-        SELECT j.id FROM jobs j
-        WHERE j.active AND {verification_candidates.REACHABLE}
+        WITH {verification_candidates.TARGETS},
+        pool AS (
+            SELECT j.id, ({verification_candidates.EVERY_TARGET}) AS every_target
+            FROM jobs j WHERE j.active
+        )
+        SELECT id FROM ({verification_candidates.reachable("pool")}) r
         """,
         verification_candidates.params(),
     )
@@ -179,7 +188,12 @@ def test_a_title_judged_often_with_no_keep_is_skipped_except_its_audit_sample():
         url = db.query_one("SELECT url FROM jobs WHERE id = %s", (job,))["url"]
         f.make_verdict(url, "custom", "rejected")
         db.execute("UPDATE jobs SET active = false WHERE id = %s", (job,))
-    same = {f.make_job(source=source, title="store associate") for _ in range(40)}
+    # Named urls: the factory's counter runs across the whole session, so its
+    # urls, and which of them hash into the audit sample, depend on test order.
+    same = {
+        f.make_job(source=source, title="store associate", url=f"https://jobs.test/title-audit-{i}")
+        for i in range(40)
+    }
     other = f.make_job(source=source, title="Software Engineer")
     urls = {
         r["id"]: r["url"]
@@ -213,7 +227,10 @@ def test_a_source_boards_never_keep_is_skipped_except_its_audit_sample():
     source = f.make_source()
     _gate([_scoped_target(source)], title_min_judged=0, occupation_titles=False)
     _judged(source, 50)
-    jobs = {f.make_job(source=source) for _ in range(60)}
+    # Named urls, five of which hash into the 5% sample. With the factory's
+    # session-wide counter the sample depended on test order, and about one
+    # order in twenty drew none of 60 and failed the second assertion.
+    jobs = {f.make_job(source=source, url=f"https://jobs.test/source-audit-{i}") for i in range(60)}
     urls = {
         r["id"]: r["url"]
         for r in db.query("SELECT id, url FROM jobs WHERE id = ANY(%s)", (list(jobs),))
@@ -260,3 +277,189 @@ def _title_screens(value: dict) -> None:
         "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
         (db.jsonb(value),),
     )
+
+
+# The verify sweep's candidate query as it stood before it was restructured
+# around verification_candidates.reachable(): a correlated EXISTS per posting
+# under an OR, and the page text read for every eligible posting before the
+# sort. It ran past 14 minutes on production. Kept as the oracle the new query
+# must agree with, built from the same fragments so only the shape differs.
+_OLD_REACHABLE = f"""
+(
+    (NOT %(verification_reachability_gate_enabled)s AND {AI_ELIGIBLE_JOB.format(job="j")})
+    OR (%(verification_reachability_gate_enabled)s AND (
+    NOT EXISTS (SELECT 1 FROM sources source WHERE source.name = j.source)
+    OR {ON_A_BOARD.format(job="j")}
+    OR EXISTS (
+        SELECT 1 FROM verification_targets target
+        WHERE target.source = j.source
+        {criteria.json_sql("target.criteria")}
+        {verification_candidates._TITLE_SQL}
+        {verification_candidates._VOLUME_SKIP}
+    )))
+)
+"""
+
+_OLD_CANDIDATES = f"""
+    WITH {verification_candidates.TARGETS}, candidates AS (
+    SELECT j.url, j.source, j.company, j.title, q.input_content,
+           q.id AS page_fetch_id,
+           NOT {verdict_reads.has_verdict("j.url", "closed")} AS needs_closed,
+           NOT {verdict_reads.has_verdict("j.url", "clearance")} AS needs_clearance
+    FROM jobs j
+    {CONTENT_LATERAL.format(url="j.url", columns="id, input_content")}
+    WHERE {catalog.IS_AVAILABLE.format(job="j")} AND {_OLD_REACHABLE}
+      AND NOT (j.url = ANY(%(in_flight)s::text[])) AND (
+        NOT {verdict_reads.has_verdict("j.url", "closed")}
+        OR NOT {verdict_reads.has_verdict("j.url", "clearance")}
+    )
+    ORDER BY j.date_posted DESC NULLS LAST
+    LIMIT %(cap)s
+    )
+    SELECT * FROM candidates
+"""
+
+
+def _posting(
+    source: str, title: str, days_ago: int | None, places: list[str] | None = None, **verdicts: str
+) -> tuple[int, str]:
+    job, url = f.make_ready_job(
+        source=source, title=title, **{"closed": "", "clearance": "", **verdicts}
+    )
+    db.execute(
+        "UPDATE jobs SET date_posted = current_date - %s::int, locations = %s WHERE id = %s",
+        (days_ago, places or [], job),
+    )
+    return job, url
+
+
+def test_the_restructured_sweep_selects_exactly_what_the_old_one_did():
+    """Every arm of the gate, and every filter in front of it, on one catalog:
+    the new candidate query returns the old one's rows, in its order, with the
+    gate on and off and with a cap that cuts the list. Two people read one
+    source with different places, so a posting one refuses the other admits,
+    and postings share location lists, which the new query checks once."""
+    for text, place in {
+        "United States": LocationExtract(country="US"),
+        "Austin, TX": LocationExtract(country="US", region="TX"),
+        "Canada": LocationExtract(country="CA"),
+        "Toronto": LocationExtract(country="CA", city="Toronto"),
+        "London": LocationExtract(country="GB", city="London"),
+    }.items():
+        store_location(text, place, "t")
+    subscribed, board_source, lonely = f.make_source(), f.make_source(), f.make_source()
+    user_id = _paid_personal_target(
+        subscribed,
+        {
+            "max_age_days": 30,
+            "included_locations": ["United States"],
+            "excluded_locations": ["Austin, TX"],
+        },
+    )
+    # Another prompt, outside the volume gate's scopes: it reads the nurse's
+    # title, and its places refuse the nurse's location.
+    other = f.make_user()
+    f.subscribe(other, subscribed)
+    f.make_filter(other, prompt="must be a data role")
+    db.execute(
+        "INSERT INTO user_settings (user_id, api_key_enc, criteria) VALUES (%s, %s, %s)",
+        (other, b"paid", db.jsonb({"max_age_days": 30, "included_locations": ["Canada"]})),
+    )
+    sponsor = f.make_user()
+    board = db.query_one(
+        """
+        INSERT INTO managed_boards
+            (slug, name, sponsor_user_id, prompt, prompt_hash, requested_model,
+             title_gate, criteria, published, public_revision, published_at)
+        VALUES ('interns', 'Interns', %s, 'internships', 'hash', 'gpt-5-mini',
+                %s, %s, TRUE, 1, now())
+        RETURNING id
+        """,
+        (
+            sponsor,
+            db.jsonb({"recipe": "internship_v1", "mode": "enforce"}),
+            db.jsonb({"included_locations": ["Canada"]}),
+        ),
+    )
+    db.execute(
+        "INSERT INTO managed_board_sources (managed_board_id, source) VALUES (%s, %s)",
+        (board["id"], board_source),
+    )
+    personal_prompt = db.query_one(
+        "SELECT prompt_hash FROM user_filters WHERE user_id = %s", (user_id,)
+    )["prompt_hash"]
+    _gate([personal_prompt])
+
+    us = ["United States"]
+    _posting(subscribed, "personal target match", 1, us)
+    _posting(subscribed, "Registered Nurse", 2, us)
+    _posting(subscribed, "closed answered", 3, us, closed="passed")
+    _posting(subscribed, "both answered", 4, us, closed="passed", clearance="passed")
+    _, in_flight = _posting(subscribed, "in flight", 5, us)
+    inactive, _ = _posting(subscribed, "inactive", 6, us)
+    db.execute("UPDATE jobs SET active = false WHERE id = %s", (inactive,))
+    no_text = f.make_job(source=subscribed, title="no page text")
+    db.execute("UPDATE jobs SET date_posted = current_date - 7 WHERE id = %s", (no_text,))
+    _posting(board_source, "Software Engineering Intern", 8)
+    _posting(board_source, "Staff Software Engineer", 9)
+    _posting("source-with-no-row", "no sources row", 10)
+    tracked, _ = _posting(lonely, "tracked", 11)
+    f.make_board_row(user_id, tracked)
+    working, _ = _posting(lonely, "working set", 12)
+    db.execute(
+        "INSERT INTO user_job_working_set (user_id, job_id) VALUES (%s, %s)", (user_id, working)
+    )
+    _posting(lonely, "nobody reads", 13)
+    _posting(subscribed, "in Austin", 14, ["Austin, TX"])
+    _posting(subscribed, "in Toronto", 15, ["Toronto"])
+    _posting(subscribed, "in London", 16, ["London"])
+    _posting(subscribed, "no location", 17)
+    _posting(subscribed, "London and Austin", 18, ["London", "Austin, TX"])
+    _posting(subscribed, "same places as the first", 19, us)
+    _posting(board_source, "Software Engineering Intern London", 20, ["London"])
+    _posting(board_source, "Software Engineering Intern Toronto", 21, ["Toronto"])
+    _posting(subscribed, "outside the personal window", 60, us)
+    _posting(subscribed, "no date", None, us)
+
+    expected = {
+        True: [
+            "personal target match",
+            "closed answered",
+            "Software Engineering Intern",
+            "no sources row",
+            "tracked",
+            "working set",
+            "in Toronto",
+            "no location",
+            "same places as the first",
+            "Software Engineering Intern Toronto",
+            "no date",
+        ],
+        False: [
+            "personal target match",
+            "Registered Nurse",
+            "closed answered",
+            "no sources row",
+            "tracked",
+            "working set",
+            "in Austin",
+            "in Toronto",
+            "in London",
+            "no location",
+            "London and Austin",
+            "same places as the first",
+            "outside the personal window",
+            "no date",
+        ],
+    }
+    for gate in (True, False):
+        db.execute(
+            "UPDATE app_config SET value = %s WHERE key = 'verification_reachability_gate_enabled'",
+            (db.jsonb(gate),),
+        )
+        for cap in (100, 3):
+            params = {**verification_candidates.params(), "cap": cap, "in_flight": [in_flight]}
+            old = db.query(_OLD_CANDIDATES, params)
+            new = db.query(tasks_verify.candidates_sql(), params)
+            assert new == old, (gate, cap)
+            assert [row["title"] for row in new] == expected[gate][:cap], (gate, cap)
