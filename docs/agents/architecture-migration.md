@@ -102,7 +102,12 @@ through a view, so changing the storage behind a kind changes the view and no
 reader:
 
 1. `verdicts`: decided answers. Done.
-2. Page text, the same way, after the 11,157 urls get a content row.
+2. `page_texts`: page text, the same way. Done. It excludes a custom
+   filter's input, which wraps the page with the company and title, and
+   `on_verdict` marks text that older verification stored only on its
+   answer. Reads of fetch attempts and failures (`check_type = 'content'`
+   with any status) are a fetch log, a fourth kind, and stay on the table
+   until step 3 gives them a home.
 3. Page text as its own table; an answer points at the page it judged
    instead of copying it.
 4. Call usage as one ledger that other tables point at instead of copying

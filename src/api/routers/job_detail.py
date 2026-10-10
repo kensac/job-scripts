@@ -120,8 +120,8 @@ def job_detail(job_id: int, user: AuthedUser = Depends(require_user)) -> JobDeta
         " ORDER BY q.id DESC LIMIT 1) AS closed_verdict",
     )
     content_row = db.query_one(
-        "SELECT input_content, created_at FROM ai_queries "
-        "WHERE url = %s AND check_type = 'content' AND input_content IS NOT NULL "
+        "SELECT input_content, created_at FROM page_texts "
+        "WHERE url = %s AND NOT on_verdict "
         "ORDER BY id DESC LIMIT 1",
         (job["url"],),
     )

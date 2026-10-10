@@ -13,7 +13,6 @@ _ELIGIBLE = f"""
     {CONTENT_LATERAL.format(url="j.url", columns="id AS content_row_id, input_content")}
     WHERE {AI_ELIGIBLE_JOB.format(job="j")}
       AND {VERIFIED_OPEN.format(url="j.url")}
-      AND q.input_content IS NOT NULL AND q.input_content <> ''
       AND NOT EXISTS (
         SELECT 1 FROM job_profiles p
         WHERE p.content_row_id = q.content_row_id

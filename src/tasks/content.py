@@ -12,7 +12,7 @@ from typing import Any
 
 from api import db
 from api.ai import verdicts
-from core.store import SUBSCRIBED_SOURCE
+from core.store import MIN_CONTENT_CHARS, SUBSCRIBED_SOURCE
 from tasks.board import fetch_retry_interval
 from tasks.runtime import SCRAPE_CONCURRENCY, AdaptiveLimiter, cancelled, set_progress
 
@@ -32,8 +32,8 @@ async def handle_fetch_missing_content(task_id: int, payload: dict[str, Any]) ->
         SELECT j.url, j.company, j.title FROM jobs j
         WHERE j.active AND {SUBSCRIBED_SOURCE.format(source="j.source")}
           AND NOT EXISTS (
-            SELECT 1 FROM ai_queries q WHERE q.url = j.url
-              AND q.input_content IS NOT NULL AND length(q.input_content) > 200)
+            SELECT 1 FROM page_texts q WHERE q.url = j.url
+              AND length(q.input_content) > {MIN_CONTENT_CHARS})
           -- Any attempt waits out the base window, including one that
           -- stored too little text to count above; without this the backlog
           -- was the same dead postings every cycle.

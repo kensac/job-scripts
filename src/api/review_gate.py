@@ -58,7 +58,7 @@ def proven_profiles(
         db.execute("SELECT set_config('statement_timeout', %s, true)", (f"{timeout_ms}ms",))
         rows = db.query(
             "SELECT DISTINCT ON (p.url) p.* FROM job_profiles p "
-            "JOIN ai_queries c ON c.id=p.content_row_id "
+            "JOIN page_texts c ON c.id=p.content_row_id "
             "JOIN unnest(%s::text[], %s::text[]) AS i(url, content) "
             "ON i.url=p.url AND i.content=c.input_content "
             "WHERE p.classifier_version=%s AND p.model=%s ORDER BY p.url,p.id DESC",

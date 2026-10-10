@@ -176,8 +176,7 @@ def content_ready_urls(urls: list[str]) -> set:
     if not urls:
         return set()
     rows = db.query(
-        "SELECT DISTINCT url FROM ai_queries WHERE url = ANY(%s) "
-        "AND check_type != 'custom' AND input_content IS NOT NULL AND input_content != ''",
+        "SELECT DISTINCT url FROM page_texts WHERE url = ANY(%s)",
         (urls,),
     )
     return {r["url"] for r in rows}

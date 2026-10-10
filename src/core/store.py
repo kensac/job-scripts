@@ -240,8 +240,9 @@ MIN_CONTENT_CHARS = 200
 
 # The one spelling of "which stored page text feeds the AI for this url".
 #
-# Prefers a raw 'content' row over the copy attached to a check, then takes the
-# newest. Formatted with the url expression to join against, so a sweep over
+# Reads page_texts, which already excludes a custom filter's wrapped input.
+# Prefers a fetched page row over the copy older verification wrote onto its
+# answer (on_verdict), then takes the newest. Formatted with the url expression to join against, so a sweep over
 # jobs passes 'j.url' and a sweep over ai_queries itself passes its own alias;
 # every caller gets the same row for the same url either way.
 #
@@ -258,12 +259,11 @@ MIN_CONTENT_CHARS = 200
 CONTENT_LATERAL = (
     """
         JOIN LATERAL (
-            SELECT {columns} FROM ai_queries q
-            WHERE q.url = {url} AND q.input_content IS NOT NULL
-              AND length(q.input_content) > """
+            SELECT {columns} FROM page_texts q
+            WHERE q.url = {url} AND length(q.input_content) > """
     + str(MIN_CONTENT_CHARS)
     + """
-            ORDER BY (q.check_type = 'content') DESC, q.id DESC LIMIT 1
+            ORDER BY q.on_verdict, q.id DESC LIMIT 1
         ) q ON TRUE
 """
 )
@@ -374,34 +374,26 @@ VERIFIED_OPEN = """
 """
 
 
-# Custom verdicts contain wrapped input, so they cannot supply raw page text.
-_RAW_CONTENT = "check_type != 'custom' AND input_content IS NOT NULL AND input_content != ''"
-
-
 def get_contents(urls: list[str]) -> dict[str, str]:
     """Newest raw cached content per URL, with the same eligibility as get_content."""
     if not urls:
         return {}
     with connection() as conn:
         rows = conn.execute(
-            "SELECT DISTINCT ON (url) url, input_content FROM ai_queries "
-            "WHERE url = ANY(%s) AND " + _RAW_CONTENT + " ORDER BY url, id DESC",
+            "SELECT DISTINCT ON (url) url, input_content FROM page_texts "
+            "WHERE url = ANY(%s) ORDER BY url, id DESC",
             (urls,),
         ).fetchall()
     return {row["url"]: row["input_content"] for row in rows}
 
 
 def get_content(url: str) -> str | None:
-    """Most recent non-empty raw scraped content stored for a url.
-
-    Excludes 'custom' rows: those store the wrapped _build_custom_input() text
-    (company/title prefix), not raw page content, so reusing them would re-wrap
-    the content on every subsequent custom filter.
-    """
+    """Most recent page text stored for a url (page_texts, which excludes a
+    custom filter's wrapped input: reusing it would re-wrap the content on
+    every subsequent custom filter)."""
     with connection() as conn:
         row = conn.execute(
-            "SELECT input_content FROM ai_queries WHERE url = %s "
-            "AND " + _RAW_CONTENT + " ORDER BY id DESC LIMIT 1",
+            "SELECT input_content FROM page_texts WHERE url = %s ORDER BY id DESC LIMIT 1",
             (url,),
         ).fetchone()
     return row["input_content"] if row else None

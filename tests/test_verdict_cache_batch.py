@@ -242,5 +242,5 @@ async def test_live_execution_reads_cache_and_content_once_for_n_candidates(f, m
 
     assert sorted(checked) == sorted(job["url"] for i, job in enumerate(jobs) if not i % 2)
     assert len(_cache_reads(statements)) == 1
-    content_reads = [s for s in statements if "input_content" in s and "ai_queries" in s]
+    content_reads = [s for s in statements if "FROM page_texts" in s]
     assert len(content_reads) == 1
