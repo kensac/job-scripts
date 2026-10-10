@@ -12,6 +12,7 @@ import datetime
 import pytest
 
 from api import db
+from tests import mail_log
 from tests.conftest import _auth_headers
 
 BODY = "Thank you for applying. " * 20
@@ -24,7 +25,7 @@ def _msg(uid: int, mid: str, body: str, kind: str, sender: str = "hr@acme.test")
         (uid, mid, sender, datetime.datetime(2026, 1, 1, tzinfo=datetime.UTC), body),
     )
     assert row is not None
-    db.execute(
+    mail_log.execute(
         "INSERT INTO email_events (message_id, kind, confidence, model) "
         "VALUES (%s, %s, 'high', 'gpt-5-nano')",
         (row["id"], kind),

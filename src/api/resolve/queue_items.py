@@ -7,7 +7,6 @@ from typing import Any, NamedTuple
 from api import db
 from api.mail import match as mail_match
 from api.mail import pipeline as mail_pipeline
-from api.mail.current import current_event, current_match
 from api.resolve.choice_policy import _choice, choices_for_message
 from api.resolve.contracts import (
     ACCEPT_STATUS,
@@ -76,24 +75,21 @@ class QueueEvent(NamedTuple):
 # Ties on `sent_at` are ordered newest message first. Each of the four
 # statements this replaces ordered by `sent_at` alone, so the order among
 # equal timestamps was whatever the plan produced, not a property of the data.
-_CURRENT_SQL = f"""
-WITH current_event AS (
-    {current_event("id", "kind")}
-),
-current_match AS (
-    {current_match("id", "application_id", "method", "actor_user_id")}
-),
-answered AS (
+_CURRENT_SQL = """
+WITH answered AS (
     SELECT DISTINCT event_id FROM event_answers WHERE question = 'status'
 )
-SELECT cm.message_id, m.sent_at, e.id AS event_id, e.kind, NULL AS company,
+-- Through the pointers, from rows already in hand: the owner's applications
+-- reach their matches by index, and a match counts only while it is its
+-- message's current one. No pass over every message or every event.
+SELECT m.id AS message_id, m.sent_at, e.id AS event_id, e.kind, NULL AS company,
        cm.id AS match_id, cm.actor_user_id, a.id AS application_id,
        uj.status AS board_status, uj.user_id IS NOT NULL AS on_board,
        sr.event_id IS NOT NULL AS answered
-FROM current_match cm
-JOIN applications a ON a.id = cm.application_id
-JOIN email_messages m ON m.id = cm.message_id
-LEFT JOIN current_event e ON e.message_id = cm.message_id
+FROM applications a
+JOIN application_matches cm ON cm.application_id = a.id
+JOIN email_messages m ON m.current_match_id = cm.id
+LEFT JOIN email_events e ON e.id = m.current_event_id
 LEFT JOIN user_jobs uj ON uj.job_id = a.job_id AND uj.user_id = a.user_id
 LEFT JOIN answered sr ON sr.event_id = e.id
 WHERE a.user_id = %(user)s
@@ -101,12 +97,11 @@ WHERE a.user_id = %(user)s
 UNION ALL
 -- What the matcher read the sender as is how an unmatched message finds its
 -- candidates, so these rows carry it.
-SELECT m.id, m.sent_at, e.id, e.kind, ev.detail->>'company',
+SELECT m.id, m.sent_at, e.id, e.kind, e.detail->>'company',
        NULL, NULL, NULL, NULL, false, false
 FROM email_messages m
-JOIN current_event e ON e.message_id = m.id
-JOIN email_events ev ON ev.id = e.id
-LEFT JOIN current_match cm ON cm.message_id = m.id
+JOIN email_events e ON e.id = m.current_event_id
+LEFT JOIN application_matches cm ON cm.id = m.current_match_id
 WHERE m.user_id = %(user)s
   AND e.kind = ANY(%(kinds)s)
   AND cm.application_id IS NULL

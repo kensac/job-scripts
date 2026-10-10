@@ -7,6 +7,7 @@ import datetime
 
 from api import db
 from tasks import runtime as tasks_runtime
+from tests import mail_log
 from tests.test_api_pipeline import _app
 
 
@@ -82,7 +83,7 @@ def test_admin_mail_takes_lists_on_kind_method_and_source(client, admin_headers,
             "VALUES (%s, %s, %s, 's', %s) RETURNING id",
             (uid, f"reg-{key}", source, sent),
         )["id"]
-        db.execute("INSERT INTO email_events (message_id, kind) VALUES (%s, %s)", (mid, kind))
+        mail_log.execute("INSERT INTO email_events (message_id, kind) VALUES (%s, %s)", (mid, kind))
         ids[key] = mid
     body = client.get(
         "/v1/admin/mail",

@@ -12,6 +12,7 @@ import datetime
 
 from api import db
 from api.mail import pipeline as mail_pipeline
+from tests import mail_log
 
 
 def _app(user_id: int, **kw) -> int:
@@ -34,7 +35,7 @@ def _message(user_id: int, mid: str, sent_at=None) -> int:
 
 
 def _event(message_id: int, kind: str, deadline=None) -> int:
-    row = db.query_one(
+    row = mail_log.query_one(
         "INSERT INTO email_events (message_id, kind, deadline_at) VALUES (%s, %s, %s) RETURNING id",
         (message_id, kind, deadline),
     )
@@ -58,7 +59,7 @@ def _event_row(event_id: int, kind: str) -> mail_pipeline.ApplicationEvent:
 
 
 def _match(message_id: int, application_id: int | None) -> None:
-    db.execute(
+    mail_log.execute(
         "INSERT INTO application_matches (message_id, application_id, method) VALUES (%s, %s, %s)",
         (message_id, application_id, "ats_company"),
     )
@@ -104,7 +105,9 @@ def test_reclassifying_a_message_changes_the_state(f):
     assert mail_pipeline.state_of(app).stage == "rejected"
 
     # Same message, same kind, newer row: the earlier verdict is superseded.
-    db.execute("INSERT INTO email_events (message_id, kind) VALUES (%s, %s)", (mid, "rejection"))
+    mail_log.execute(
+        "INSERT INTO email_events (message_id, kind) VALUES (%s, %s)", (mid, "rejection")
+    )
     assert mail_pipeline.state_of(app).stage == "rejected"
 
     # A correction: the same message reclassified. The rejection must be

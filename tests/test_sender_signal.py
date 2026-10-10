@@ -13,6 +13,7 @@ import datetime
 from api import db
 from api.mail import pipeline as mail_pipeline
 from core.fetching import ats
+from tests import mail_log
 
 
 def _app(f, uid: int, company: str, domain: str, day: int) -> int:
@@ -33,7 +34,7 @@ def _app(f, uid: int, company: str, domain: str, day: int) -> int:
         ),
     )
     assert msg is not None
-    db.execute(
+    mail_log.execute(
         "INSERT INTO application_matches (message_id, application_id, method, confidence) "
         "VALUES (%s, %s, 'company_name', 'high')",
         (msg["id"], row["id"]),
