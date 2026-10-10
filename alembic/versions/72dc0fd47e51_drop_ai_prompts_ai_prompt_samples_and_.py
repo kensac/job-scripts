@@ -1,7 +1,7 @@
 """drop ai_prompts, ai_prompt_samples and unread batch and board columns
 
 Revision ID: 72dc0fd47e51
-Revises: 40e76006134a
+Revises: 5a7c2e9d1b40
 Create Date: 2026-10-10 01:07:43.917065
 
 The contract half of #846 and #854. Nothing reads any of these:
@@ -38,7 +38,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 revision: str = '72dc0fd47e51'
-down_revision: Union[str, None] = '40e76006134a'
+down_revision: Union[str, None] = '5a7c2e9d1b40'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
