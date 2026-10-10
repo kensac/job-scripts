@@ -332,31 +332,20 @@ async def execute_batch(
         else f"batch of {len(specs)} submitted (half price)",
     )
 
-    async def heartbeat() -> None:
-        while True:
-            await asyncio.sleep(60)
-            db.execute("UPDATE tasks SET last_heartbeat = now() WHERE id = %s", (task_id,))
-            if hooks.cancelled():
-                raise asyncio.CancelledError
-
     hook = batch_event_hook(task_id, purpose, cfg.model if cfg else None, charged_to_user=True)
-    heartbeat_task = asyncio.create_task(heartbeat())
-    try:
-        if existing:
-            logger.info("Task %s: collecting previously submitted results", task_id)
-            results = await collect(task_id, hook)
-        else:
-            assert cfg is not None
-            results = await submit(
-                task_id,
-                specs,
-                cfg.model,
-                cfg.params.get("reasoning_effort", "medium"),
-                max_output_tokens,
-                hook,
-            )
-    finally:
-        heartbeat_task.cancel()
+    if existing:
+        logger.info("Task %s: collecting previously submitted results", task_id)
+        results = await collect(task_id, hook)
+    else:
+        assert cfg is not None
+        results = await submit(
+            task_id,
+            specs,
+            cfg.model,
+            cfg.params.get("reasoning_effort", "medium"),
+            max_output_tokens,
+            hook,
+        )
     for start in range(0, len(results), COLLECT_CHUNK):
         chunk = results[start : start + COLLECT_CHUNK]
         try:
