@@ -346,6 +346,20 @@ control from the former. An endpoint with no user dimension (fleet workers,
 the shared checks, source analytics) leaves `user` out of `filterable` rather
 than pretending.
 
+**Lists page in one of four shapes, and a new list uses the first.** They
+are not unified because each is a published contract the frontend reads.
+
+| Shape | In | Out | Where |
+|---|---|---|---|
+| Page number | `page`, `page_size` | `page`, `page_size`, `total`, `has_more` | `api.pagination.Page`: admin queries and jobs, catalog reports, review gates, review decisions |
+| Id or keyset cursor | `limit` and `before_id` or `cursor` | `has_more`, and `next_cursor` where there is a cursor | the task queue (`before_id`), `GET /user/jobs` (`cursor` is the last id, legacy), public job lists (opaque keyset on the sort value and id) |
+| Offset cursor | `limit`, `cursor` (an offset as a string) | `has_more`, `next_cursor` | `/admin/companies` only |
+| Limit and offset | `limit`, `offset` | `has_more`, sometimes `total` | `GET /user/jobs` without a cursor, and older admin lists: users, sources, screened postings, batch rows, spend rows, filter insights, the catalog |
+
+Use a page number unless rows arrive while someone is paging and a skipped
+or repeated row would matter; then use an id or keyset cursor. Do not add
+the last two shapes.
+
 Page-number lists use `api.pagination.Page` for bounds, offsets and metadata.
 Rows, totals and summaries share the same selection; pagination never narrows
 a total or summary. The user board's legacy cursor orders by descending ID
