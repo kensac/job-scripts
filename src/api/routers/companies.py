@@ -35,7 +35,7 @@ from api import db, rates, signals, sorting
 from api import params as params_
 from api.auth import AuthedUser
 from api.mail import pipeline as mail_pipeline
-from api.mail.current import current_event
+from api.mail.current import current_event, current_match
 from api.problem import refuse
 from api.rates import Rate
 from api.routers.admin import require_admin
@@ -184,7 +184,7 @@ WITH scoped AS (
       -- (No percent sign in this comment on purpose: psycopg reads a bare one
       -- as a placeholder and the query fails to prepare.)
       AND NOT EXISTS (
-          SELECT 1 FROM application_matches am2
+          SELECT 1 FROM ({current_match("application_id")}) am2
           JOIN email_messages m2 ON m2.id = am2.message_id
           WHERE am2.application_id = a.id
             AND lower(COALESCE(NULLIF(split_part(m2.from_email, '@', 2), ''), ''))
@@ -200,7 +200,7 @@ per_app AS (
            count(*) FILTER (WHERE e.kind = ANY(%(outcomes)s)) AS outcomes,
            min(m.sent_at) FILTER (WHERE e.kind = ANY(%(outcomes)s)) AS first_outcome_at
     FROM scoped s
-    LEFT JOIN application_matches am ON am.application_id = s.id
+    LEFT JOIN ({current_match("application_id")}) am ON am.application_id = s.id
     LEFT JOIN email_messages m ON m.id = am.message_id
     LEFT JOIN latest_event e ON e.message_id = m.id
     GROUP BY s.id, s.company_key, s.applied_at, s.source_provenance

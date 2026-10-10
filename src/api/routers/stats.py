@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from api import db
 from api.auth import AuthedUser, require_user
 from api.board import populations, visibility
+from api.mail.current import current_event, current_match
 
 router = APIRouter()
 
@@ -173,11 +174,15 @@ _EXCLUDED_STAGES = {
 # is marked applied, and that has mostly happened for one source.
 _MIN_SOURCE_SAMPLE = 30
 
-_FUNNEL_SQL = """
+# The current event of each message whose current match is the application,
+# the rule events_for applies. Every event joined to every match counted a
+# kind a message was later corrected away from, and a stage for an
+# application the message had been moved off.
+_FUNNEL_SQL = f"""
 WITH ev AS (
     SELECT DISTINCT am.application_id, e.kind
-    FROM email_events e
-    JOIN application_matches am ON am.message_id = e.message_id
+    FROM ({current_event("kind")}) e
+    JOIN ({current_match("application_id")}) am ON am.message_id = e.message_id
     WHERE am.application_id IS NOT NULL
 )
 SELECT ap.id, j.source, array_agg(DISTINCT ev.kind) FILTER (WHERE ev.kind IS NOT NULL) AS kinds

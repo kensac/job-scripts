@@ -275,6 +275,50 @@ def test_a_stage_reached_then_superseded_still_counts(client, user_headers, f):
     assert stages["rejected"] == 1
 
 
+def test_a_corrected_kind_and_a_moved_message_reach_no_stage(client, user_headers, f):
+    """A stage is reached through a message's CURRENT event and CURRENT match,
+    as the board reads it. Joining every event to every match counted the
+    interview a message was corrected away from, and the offer of a message
+    moved to another application: 114 of 2,589 applications on production
+    (2026-10-10) read different stages."""
+    from api import db
+
+    uid = db.query_one("SELECT id FROM users WHERE sub = 'test-user'")["id"]
+    job_id = f.make_job(source="board-c")
+    _apply_event(f, uid, job_id, "interview_invite")
+    app = db.query_one("SELECT id FROM applications WHERE job_id = %s", (job_id,))
+    msg = db.query_one(
+        "SELECT id FROM email_messages WHERE provider_message_id = %s", (f"fn-{job_id}",)
+    )
+    db.execute(
+        "INSERT INTO email_events (message_id, kind, confidence) VALUES (%s, 'rejection', 'high')",
+        (msg["id"],),
+    )
+    moved = db.query_one(
+        "INSERT INTO email_messages (user_id, provider_message_id, source, from_email, "
+        "subject, sent_at) VALUES (%s, 'fn-moved', 'takeout', 'a@b.com', 's', now()) RETURNING id",
+        (uid,),
+    )
+    db.execute(
+        "INSERT INTO email_events (message_id, kind, confidence) VALUES (%s, 'assessment_invite', 'high')",
+        (moved["id"],),
+    )
+    for application_id in (app["id"], None):
+        db.execute(
+            "INSERT INTO application_matches (message_id, application_id, method, confidence) "
+            "VALUES (%s, %s, 'ats_company', 'high')",
+            (moved["id"], application_id),
+        )
+
+    stages = {
+        s["stage"]: s["reached"]
+        for s in client.get("/v1/user/funnel", headers=user_headers).json()["overall"]["stages"]
+    }
+    assert stages["rejected"] == 1
+    assert stages["interview"] == 0, "the message was corrected to a rejection"
+    assert stages["assessment"] == 0, "the message was moved off the application"
+
+
 def test_per_source_funnel_flags_a_sample_too_small_to_read(client, user_headers, f):
     """The board->outcome number is thin by construction: an application is
     created when a TRACKED posting is marked applied, and that has happened
