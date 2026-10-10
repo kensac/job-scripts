@@ -146,21 +146,12 @@ def _reuse_unchanged(model: str, fetched: list[tuple[str, str]], jobs: dict[str,
     }
     if not questions:
         return set()
-    latest: dict[str, dict[str, dict[str, Any]]] = {}
-    for row in db.query(
-        verdict_reads.latest_per(
-            "url, check_type",
-            "url, check_type, status, reason, request_sha256",
-            "url = ANY(%s) AND check_type IN ('closed', 'clearance')",
-        ),
-        (list(questions),),
-    ):
-        latest.setdefault(row["url"], {})[row["check_type"]] = row
+    latest = verdict_reads.latest_checks(list(questions))
     rows = [
         ai_result_row(
             url,
-            verdict["status"],
-            verdict["reason"],
+            verdict.status,
+            verdict.reason,
             check,
             company=jobs[url]["company"],
             job_title=jobs[url]["title"],
@@ -169,7 +160,7 @@ def _reuse_unchanged(model: str, fetched: list[tuple[str, str]], jobs: dict[str,
         )
         for url, checks in latest.items()
         if len(checks) == 2
-        and all(verdict["request_sha256"] == questions[url] for verdict in checks.values())
+        and all(verdict.request_sha256 == questions[url] for verdict in checks.values())
         for check, verdict in checks.items()
     ]
     add_ai_results(rows)
@@ -403,7 +394,7 @@ async def handle_reverify_open(task_id: int, payload: dict[str, Any]) -> None:
         rows = db.query(
             f"""
             SELECT j.url, j.company, j.title FROM jobs j
-            WHERE j.active AND {AI_ELIGIBLE_JOB.format(job="j")} AND {verdict_reads.has_verdict("j.url", "closed", "passed")}
+            WHERE j.active AND {AI_ELIGIBLE_JOB.format(job="j")} AND {verdict_reads.latest_status("j.url", "closed")} = 'passed'
             ORDER BY j.id
             """
         )
@@ -555,17 +546,7 @@ def _reuse_near_copies(task_id: int, rows: list[dict[str, Any]]) -> list[dict[st
 
 def _copy_twin_verdicts(reuse: list[tuple[dict[str, Any], str]]) -> None:
     twin_urls = sorted({twin for _, twin in reuse})
-    checks = {
-        (row["url"], row["check_type"]): row
-        for row in db.query(
-            verdict_reads.latest_per(
-                "url, check_type",
-                "url, check_type, status, reason",
-                "url = ANY(%s) AND check_type IN ('closed', 'clearance')",
-            ),
-            (twin_urls,),
-        )
-    }
+    checks = verdict_reads.latest_checks(twin_urls)
     customs: dict[str, list[dict[str, Any]]] = {}
     for row in db.query(
         verdict_reads.latest_per(
@@ -589,13 +570,13 @@ def _copy_twin_verdicts(reuse: list[tuple[dict[str, Any], str]]) -> None:
     rows = []
     for job, twin in reuse:
         for check in ("closed", "clearance"):
-            verdict = checks.get((twin, check))
+            verdict = checks.get(twin, {}).get(check)
             if job[f"needs_{check}"] and verdict:
                 rows.append(
                     ai_result_row(
                         job["url"],
-                        verdict["status"],
-                        verdict["reason"],
+                        verdict.status,
+                        verdict.reason,
                         check,
                         company=job["company"],
                         job_title=job["title"],

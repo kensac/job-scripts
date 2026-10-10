@@ -77,17 +77,18 @@ def closed_verdict(url: str) -> str:
     return f"({latest(url, 'closed', shown)})"
 
 
-def has_verdict(url: str, check: str, status: str | None = None) -> str:
-    """EXISTS any answer to `check` (of `status`, when given), at any time.
+def has_verdict(url: str, check: str) -> str:
+    """EXISTS an answer to `check`: the check has been answered at all.
 
-    This is not the latest answer: a posting rejected once and passed since
-    still has a rejected answer."""
-    where = f"vany.url = {url} AND vany.check_type = {_check(check)}"
-    if status is not None:
-        if status not in ("passed", "rejected"):
-            raise ValueError(f"not a decided status {status!r}")
-        where += f" AND vany.status = '{status}'"
-    return f"EXISTS (SELECT 1 FROM verdicts vany WHERE {where})"
+    It takes no status on purpose. "Ever rejected" and "ever passed" read as
+    the latest answer and were not: the content sweep skipped 99 active
+    postings rejected as closed once and open since, and the full re-check
+    re-ran 214 passed once and closed since (production, 2026-10-10). Ask
+    `latest_status` for what a posting is now."""
+    return (
+        f"EXISTS (SELECT 1 FROM verdicts vany "
+        f"WHERE vany.url = {url} AND vany.check_type = {_check(check)})"
+    )
 
 
 # A posting whose latest closed and clearance verdicts both passed. The
@@ -119,6 +120,10 @@ class LatestVerdict:
     config_name: str | None
     model: str | None
     created_at: datetime.datetime
+    request_sha256: str | None
+
+
+_COLUMNS = "status, reason, config_name, model, created_at, request_sha256"
 
 
 def read_latest(
@@ -129,7 +134,7 @@ def read_latest(
     sql = latest(
         "%(url)s",
         check,
-        "status, reason, config_name, model, created_at",
+        _COLUMNS,
         prompt_hash=None if prompt_hash is None else "%(prompt_hash)s",
         model=None if model is None else "%(model)s",
     )
@@ -137,3 +142,21 @@ def read_latest(
     with connection() as conn:
         row = conn.execute(cast("LiteralString", sql), params).fetchone()
     return LatestVerdict(**row) if row else None
+
+
+def latest_checks(
+    urls: list[str], checks: tuple[str, ...] = ("closed", "clearance")
+) -> dict[str, dict[str, LatestVerdict]]:
+    """The latest answer to each of `checks` per posting, as url -> check ->
+    answer. A url or check nothing has answered is absent."""
+    sql = latest_per(
+        "url, check_type",
+        f"url, check_type, {_COLUMNS}",
+        f"url = ANY(%s) AND check_type IN ({', '.join(_check(c) for c in checks)})",
+    )
+    out: dict[str, dict[str, LatestVerdict]] = {}
+    with connection() as conn:
+        for row in conn.execute(cast("LiteralString", sql), (urls,)).fetchall():
+            url, check = row.pop("url"), row.pop("check_type")
+            out.setdefault(url, {})[check] = LatestVerdict(**row)
+    return out

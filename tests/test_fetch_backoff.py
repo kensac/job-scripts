@@ -158,6 +158,33 @@ async def test_the_content_backfill_does_not_fetch_a_given_up_posting(monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_the_content_backfill_reads_the_latest_closed_answer(monkeypatch, f):
+    """Gone, then listed again: the board shows it open, so it has a page."""
+    from tasks import content
+
+    source = f.make_source("bf-src")
+    f.subscribe(f.make_user(), source)
+    f.make_job(url="https://b.test/reopened", source=source)
+    f.make_verdict("https://b.test/reopened", "closed", "rejected")
+    f.make_verdict("https://b.test/reopened", "closed", "passed")
+    f.make_job(url="https://b.test/gone", source=source)
+    f.make_verdict("https://b.test/gone", "closed", "passed")
+    f.make_verdict("https://b.test/gone", "closed", "rejected")
+    fetched = []
+
+    async def no_page(url):
+        fetched.append(url)
+        return None, False
+
+    monkeypatch.setattr(ats, "resolve", lambda url: ats.UNSUPPORTED)
+    monkeypatch.setattr(fetching, "fetch_page", no_page)
+
+    await content.handle_fetch_missing_content(f.make_task("fetch_missing_content"), {})
+
+    assert fetched == ["https://b.test/reopened"]
+
+
+@pytest.mark.asyncio
 async def test_filter_preparation_does_not_fetch_a_given_up_posting(f):
     from tasks import filter_execution
 

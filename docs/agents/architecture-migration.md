@@ -140,10 +140,12 @@ are answers instead of reading the view.
 
 How an answer is read is `core/verdict_reads.py`'s: the latest answer to a
 check for a posting (`latest`, `latest_status`, `read_latest`), the latest
-answer per key (`latest_per`, keyed on `jobs.id` where a url key would sort
-text), what a closed
-answer shows a person (`closed_verdict`), whether any answer exists
-(`has_verdict`), and verified-open (`verified_open`). The same test fails
+answer per key (`latest_per`, `latest_checks`, keyed on `jobs.id` where a url
+key would sort text), what a closed answer shows a person (`closed_verdict`),
+whether a check has been answered at all (`has_verdict`), and verified-open
+(`verified_open`). What a posting is now is its latest answer, never "ever
+rejected" or "ever passed": two readers that asked that disagreed with the
+board about 313 active postings until 2026-10-10. The same test fails
 when a module outside it writes a latest-answer shape (`ORDER BY id DESC`
 over the view, or an `EXISTS` on one posting's answers); its allow-list
 names each exception and why.
