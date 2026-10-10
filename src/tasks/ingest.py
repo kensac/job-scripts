@@ -294,14 +294,21 @@ async def handle_retire_switched_off(task_id: int, payload: dict[str, Any]) -> N
     total = sum(retired.values())
     # Right after the legacy rule has run, so jobs.active is as current as it
     # gets. Phase 3's shadow comparison (docs/agents/architecture-migration.md);
-    # it goes with the jobs.active fallback in catalog.IS_AVAILABLE.
+    # it goes with the jobs.active fallback in catalog.IS_AVAILABLE. The
+    # reconcile first, so the shadow reads the stored value as current.
+    reconciled = await asyncio.to_thread(catalog.reconcile_available)
     shadow = _summarise(await asyncio.to_thread(catalog.availability_shadow))
     set_progress(
         task_id,
         total,
         total,
         f"retired {total} postings of {len(retired)} switched-off sources",
-        extra={"retired": total, "sources": len(retired), "availability_shadow": shadow},
+        extra={
+            "retired": total,
+            "sources": len(retired),
+            "available_reconciled": reconciled,
+            "availability_shadow": shadow,
+        },
     )
 
 

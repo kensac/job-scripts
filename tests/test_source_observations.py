@@ -213,3 +213,37 @@ def test_the_shadow_counts_each_disagreement_once(f):
         "legacy=False projected=True": 1,
     }
     assert cells["legacy=False projected=True"]["sources"] == {"board": 1}
+
+
+def _stored(url: str) -> bool | None:
+    return db.query_one("SELECT available FROM jobs WHERE url = %s", (url,))["available"]
+
+
+def test_the_stored_projection_follows_observations_corrections_and_switches(f):
+    f.make_source("board")
+    _pull("board", [_posting(A)], {A}, "unlisted")
+    assert _stored(A) is True, "observe writes what it changed"
+    _pull("board", [], set(), "unlisted")
+    assert _stored(A) is False
+    job_id = db.query_one("SELECT id FROM jobs WHERE url = %s", (A,))["id"]
+    catalog.set_active(job_id, True)
+    assert _stored(A) is True, "a correction writes it in its transaction"
+    _pull("board", [_posting(A)], {A}, "unlisted")
+    # A switch changes availability without an observation: the reconcile
+    # catches it, and writes nothing the next time.
+    db.execute("UPDATE sources SET active = false WHERE name = 'board'")
+    assert _stored(A) is True
+    assert catalog.reconcile_available() == 1
+    assert _stored(A) is False
+    assert catalog.reconcile_available() == 0
+    # Every row agrees with the definition afterwards, NULL included.
+    f.make_job(url=B)
+    catalog.reconcile_available()
+    available = catalog.AVAILABLE.format(job="j")
+    assert (
+        db.query_one(
+            f"SELECT count(*) AS n FROM jobs j WHERE j.available IS DISTINCT FROM {available}"
+        )["n"]
+        == 0
+    )
+    assert _stored(B) is None
