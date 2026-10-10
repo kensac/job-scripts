@@ -138,6 +138,46 @@ def retire_switched_off(patterns_enforced: bool) -> dict[str, int]:
 _ADMITTED = frozenset({"appeared", "reappeared"})
 
 
+# Whether job {job} is available, as source_observations say: true when some
+# switched-on source's latest observation of it admits it, false when it has
+# observations and none of them do, NULL (cannot tell) when no source has
+# observed it. not_listed is aggregator absence, which never closes anything;
+# filtered admits only while title patterns are not enforced, the same rule
+# retire_switched_off applies to listings.kept. One definition, for the
+# shadow comparison now and for the readers of jobs.active after cutover.
+AVAILABLE: LiteralString = """(
+    CASE WHEN EXISTS (
+            SELECT 1 FROM (
+                SELECT DISTINCT ON (o.source) o.source, o.kind FROM source_observations o
+                WHERE o.job_id = {job}.id ORDER BY o.source, o.id DESC) latest
+            JOIN sources s ON s.name = latest.source AND s.active
+            WHERE latest.kind IN ('appeared', 'reappeared', 'not_listed')
+               OR (latest.kind = 'filtered' AND NOT %(enforced)s))
+         THEN true
+         WHEN EXISTS (SELECT 1 FROM source_observations o WHERE o.job_id = {job}.id)
+         THEN false
+    END)"""
+
+
+def availability_shadow(patterns_enforced: bool) -> list[dict]:
+    """jobs.active against AVAILABLE over the whole catalog, in one snapshot:
+    a count per (legacy, projected, owning source) with up to three example
+    job ids. Read-only. Run beside retire_switched_off until the readers of
+    jobs.active move, so each cycle leaves one comparison on its task."""
+    available = AVAILABLE.format(job="j")
+    with pool.connection() as conn:
+        return conn.execute(
+            f"""
+            SELECT legacy, projected, source, count(*) AS n,
+                   (array_agg(id ORDER BY id))[1:3] AS examples
+            FROM (SELECT j.id, j.source, j.active AS legacy, {available} AS projected
+                  FROM jobs j) p
+            GROUP BY legacy, projected, source
+            """,
+            {"enforced": patterns_enforced},
+        ).fetchall()
+
+
 def observe(
     source: str,
     run_id: int | None,
