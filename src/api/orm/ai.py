@@ -182,6 +182,11 @@ class AiBatch(Base):
     __table_args__ = (
         Index("idx_ai_batches_status", "status", "id"),
         Index("idx_ai_batches_task", "task_id"),
+        CheckConstraint(
+            "payer IN ('fleet', 'user', 'managed_board') "
+            "AND (payer = 'fleet') = (payer_id IS NULL)",
+            name="ck_ai_batches_payer",
+        ),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
@@ -203,6 +208,11 @@ class AiBatch(Base):
     submitted_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
     updated_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
     completed_at: Mapped[datetime.datetime | None]
+    # Who pays for the batch's requests, recorded by whoever submits it.
+    # NULL is a batch from before this was recorded, which is not the fleet:
+    # its calls are left to the ledger backfill rather than guessed.
+    payer: Mapped[str | None] = mapped_column(Text)
+    payer_id: Mapped[int | None] = mapped_column(BigInteger)
 
 
 class BatchRequest(Base):
@@ -318,3 +328,53 @@ class ApiUsage(Base):
     # NULL means the model had no published price, which must stay distinct
     # from a call that genuinely cost nothing.
     cost_usd: Mapped[Any | None] = mapped_column(Numeric(12, 6))
+
+
+class ModelCall(Base):
+    """One paid provider request, written only by api.model_calls.record.
+
+    A batch item is identified by (provider_batch_id, custom_id), so a
+    replayed receipt adds nothing; a live call has no provider identity and
+    leaves both NULL. docs/agents/architecture-migration.md ("The ledger of
+    paid model calls") is the design and the measurements behind it.
+    """
+
+    __tablename__ = "model_calls"
+    __table_args__ = (
+        UniqueConstraint("provider_batch_id", "custom_id", name="uq_model_calls_batch_item"),
+        Index("idx_model_calls_created", "created_at"),
+        Index("idx_model_calls_user_created", "user_id", "created_at"),
+        Index("idx_model_calls_managed_board_created", "managed_board_id", "created_at"),
+        CheckConstraint(
+            "user_id IS NULL OR managed_board_id IS NULL", name="ck_model_calls_single_payer"
+        ),
+        CheckConstraint(
+            "(provider_batch_id IS NULL) = (custom_id IS NULL)", name="ck_model_calls_batch_item"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+    purpose: Mapped[str] = mapped_column(Text)
+    model: Mapped[str | None] = mapped_column(Text)
+    # Both NULL: the fleet pays. The delete rules are api_usage's, which this
+    # replaces, so a person's or a board's removal behaves as it does today.
+    user_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="CASCADE")
+    )
+    managed_board_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("managed_boards.id", ondelete="RESTRICT")
+    )
+    key_source: Mapped[str] = mapped_column(Text)
+    task_id: Mapped[int | None] = mapped_column(BigInteger)
+    provider_batch_id: Mapped[str | None] = mapped_column(Text)
+    custom_id: Mapped[str | None] = mapped_column(Text)
+    prompt_tokens: Mapped[int] = mapped_column(BigInteger)
+    completion_tokens: Mapped[int] = mapped_column(BigInteger)
+    total_tokens: Mapped[int] = mapped_column(BigInteger)
+    cached_tokens: Mapped[int] = mapped_column(BigInteger)
+    # NULL: the provider did not say, which is not zero writes.
+    cache_write_tokens: Mapped[int | None] = mapped_column(BigInteger)
+    reasoning_tokens: Mapped[int] = mapped_column(BigInteger)
+    # NULL: the model has no published price, never a free call.
+    cost_usd: Mapped[Decimal | None] = mapped_column(Numeric(12, 6))

@@ -25,6 +25,7 @@ from api.apply import writes as application_writes
 from api.apply.drafting import Draft, instructions, question_input, resume_text, writing_style
 from api.board import visibility
 from api.budget import load_config
+from api.model_calls import Payer
 from core.fetching import forms
 from core.fetching.hosts import pace_key
 from core.shapes import APPLICATION_TASK
@@ -153,7 +154,9 @@ def _set_draft_progress(task_id: int, label: str, minimum_total: int) -> None:
 async def _batch_drafts(
     task_id: int, user_id: int, specs: list, kind: str, *, resumed: bool
 ) -> int:
-    results, chosen = await run_batched(task_id, APPLICATION_TASK, specs, charged_to_user=True)
+    results, chosen = await run_batched(
+        task_id, APPLICATION_TASK, specs, payer=Payer(user_id=user_id)
+    )
     done = 0
     for res in results:
         with consume_result(task_id, res) as receipt:

@@ -21,6 +21,7 @@ from api.orm.ai import (
     ApiUsage,
     BatchRequest,
     BatchResultReceipt,
+    ModelCall,
 )
 from api.orm.apply import (
     ApplicationAnswer,
@@ -128,6 +129,7 @@ __all__ = [
     "ManagedBoard",
     "ManagedBoardJob",
     "ManagedBoardSource",
+    "ModelCall",
     "Report",
     "ReviewGateDecision",
     "ReviewGateDecisionBody",

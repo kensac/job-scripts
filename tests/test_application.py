@@ -295,8 +295,8 @@ class TestDrafting:
         _owner_config(monkeypatch)
         submitted = []
 
-        async def fake_run_batched(task_id, shape, specs, *, charged_to_user=False):
-            submitted.append((shape.purpose, charged_to_user))
+        async def fake_run_batched(task_id, shape, specs, *, payer=None):
+            submitted.append((shape.purpose, payer.kind))
             return [
                 f.make_batch_result(
                     task_id,
@@ -318,7 +318,7 @@ class TestDrafting:
 
         # Through the standard caller, on its own shape, with the tokens
         # booked to the person rather than the fleet.
-        assert submitted == [("application", True)]
+        assert submitted == [("application", "user")]
         body = client.get(f"/v1/user/jobs/{job_id}/application", headers=user_headers).json()
         assert body["form"]["questions"] == 2 and body["form"]["error"] is None
         by_key = {q["key"]: q for q in body["questions"]}
@@ -366,7 +366,7 @@ class TestDrafting:
         )
         _owner_config(monkeypatch)
 
-        async def fake_run_batched(task_id, shape, specs, *, charged_to_user=False):
+        async def fake_run_batched(task_id, shape, specs, *, payer=None):
             return [
                 f.make_batch_result(
                     task_id, s, text=json.dumps({"answer": "GPUs."}), model="gpt-5.6-luna"

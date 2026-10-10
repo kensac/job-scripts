@@ -7,6 +7,7 @@ from typing import Any
 
 from api import ai, db
 from api import managed_board_runs as runs
+from api.model_calls import Payer
 from core.filters import compute_filter_hash
 from core.store import decided_custom_urls
 from tasks.filter_execution import ExecutionHooks, FilterSnapshot, execute_batch, execute_live
@@ -127,6 +128,7 @@ async def _handle_managed_filter(
     hooks = ExecutionHooks(
         verdict_label=f"managed-board:{board_id}",
         key_source="owner",
+        payer=Payer(managed_board_id=board_id),
         record_failure=lambda model: runs.record_parse_failures(board_id, model),
         record_usage=lambda usage, model, batched: runs.record_tokens(
             board_id, usage, model, batched=batched

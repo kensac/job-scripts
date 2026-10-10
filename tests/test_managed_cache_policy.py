@@ -4,6 +4,7 @@ import pytest
 
 from api import ai, db
 from api.ai.batch_results import snapshot_specs
+from api.model_calls import Payer
 from core import batch
 from core.answers import FilterDecision
 from tasks import filter_execution
@@ -43,6 +44,7 @@ async def test_only_new_managed_requests_receive_cache_control(f):
     hooks = filter_execution.ExecutionHooks(
         verdict_label="filter",
         key_source="owner",
+        payer=Payer(user_id=1),
         record_failure=lambda _: nullcontext(),
         record_usage=lambda *_: None,
         budget_exceeded=lambda: False,

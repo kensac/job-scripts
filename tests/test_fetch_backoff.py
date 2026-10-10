@@ -18,6 +18,7 @@ import pytest
 
 from api import ai, db, fetching
 from api.ai import verdicts
+from api.model_calls import Payer
 from core.fetching import ats
 
 
@@ -193,6 +194,7 @@ async def test_a_live_filter_run_does_not_fetch_a_given_up_posting(f, monkeypatc
     hooks = filter_execution.ExecutionHooks(
         verdict_label="managed:test",
         key_source="owner",
+        payer=Payer(user_id=1),
         record_failure=lambda _model: nullcontext(),
         record_usage=lambda usage, model, batched: None,
         budget_exceeded=lambda: False,

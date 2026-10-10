@@ -113,9 +113,22 @@ Application drafts share request construction and result persistence in
 For these user-charged paths, `api.ai.batch_usage` normalises provider usage and
 `api.budget.record_tokens` writes the user ledger with explicit batch pricing
 and cached-token counts, including consumed calls that produced no valid answer.
-The batch event hook must use `charged_to_user=True` to avoid booking the same
-call to the fleet. Historical user ledger rows have no request or batch linkage;
-do not infer their transport from timestamps or rewrite their prices on read.
+The batch event hook takes the `payer` (`api.model_calls.Payer`): a user's or a
+board's batch passes it, which keeps the hook from booking the same call to the
+fleet and records the payer on `ai_batches` at submission. Historical user ledger
+rows have no request or batch linkage; do not infer their transport from
+timestamps or rewrite their prices on read.
+
+**Every paid call is one row in `model_calls`, written by
+`api.model_calls.record`.** A batch item is written by the receipt checkpoint
+with its receipt, from the batch's payer, purpose and model, so a consumer that
+writes nothing for an item has not left it unbooked; a batch whose payer was
+never recorded writes nothing, and the task collecting it records its payer.
+Live calls are written by `budget.record_tokens` and
+`budget.record_managed_board_tokens` when not batched, and the admin re-check
+by its route. Nothing reads the table yet: it is the expand step of the ledger
+in architecture-migration.md, and `tests/test_model_calls.py` holds its rows
+equal to their batch and fails on a second writer.
 
 On resume, `collect_pending` attaches model provenance from each `ai_batches`
 row. `run_batched` resolves routing only for new submissions; absent persisted
