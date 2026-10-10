@@ -167,9 +167,11 @@ async def _run_filters(
     batch_refs = iter(refs)
     configs: dict[int, int] = {}
     for mode, flt, jobs in units:
-        snapshot = {k: flt[k] for k in ("name", "prompt", "on_ambiguous", "prompt_hash")}
         if flt["id"] not in configs:
-            configs[flt["id"]] = run_configs.intern(run_configs.FILTER, snapshot)
+            configs[flt["id"]] = run_configs.intern(
+                run_configs.FILTER,
+                {k: flt[k] for k in ("name", "prompt", "on_ambiguous", "prompt_hash")},
+            )
         enqueue(
             "run_filter_batch_chunk" if mode == "batch" else "run_filter_chunk",
             {
@@ -177,7 +179,6 @@ async def _run_filters(
                 "user_id": user_id,
                 "filter_id": flt["id"],
                 "config_id": configs[flt["id"]],
-                "filter": snapshot,
                 **(
                     task_jobs.reference(task_jobs.FILTER_CHUNKS, jobs, next(batch_refs))
                     if mode == "batch"
