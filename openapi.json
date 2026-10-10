@@ -44390,7 +44390,6 @@
         "properties": {
           "title_pattern": {
             "type": "string",
-            "maxLength": 500,
             "title": "Title Pattern"
           },
           "samples": {
@@ -52052,8 +52051,7 @@
           "title_pattern": {
             "anyOf": [
               {
-                "type": "string",
-                "maxLength": 500
+                "type": "string"
               },
               {
                 "type": "null"
