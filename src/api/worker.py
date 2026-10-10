@@ -315,6 +315,19 @@ def schedule_ingest_cycle() -> None:
         "AND status IN ('pending', 'running', 'done') LIMIT 1"
     ):
         enqueue("merge_olm_twins", {"cycle": cycle}, dedupe_key=f"olm-twins:{cycle}")
+    # Receipt vectors still in version 1 gzip objects are written again as
+    # version 2 (tasks.receipt_vector_format), one run at a time, until a run
+    # starts with none left; then the gzip reader can go.
+    if not db.query_one(
+        "SELECT 1 FROM tasks WHERE kind = 'rewrite_receipt_vectors_v1' "
+        "AND (status IN ('pending', 'running') "
+        "     OR (status = 'done' AND progress->>'total' = '0')) LIMIT 1"
+    ):
+        enqueue(
+            "rewrite_receipt_vectors_v1",
+            {"cycle": cycle},
+            dedupe_key=f"receipt-vectors-v1:{cycle}",
+        )
     # Board membership for every person who can have one, every
     # board_refresh_minutes, so new verdicts reach a board without anyone
     # touching a preference. Bucketed like the ingest cycle; a person's own
