@@ -750,8 +750,9 @@ over 17,733 chunks (81 MB of payload text) and 22 distinct board copies over
 950 runs (88 MB, almost all the `sources` list). What changes per run (the
 revision, the resolved model, the reservation, `urls`) stays in the payload.
 Handlers read the settings through `api.run_configs.filter_of` and
-`with_board_settings`, which also accept a payload that still holds the old
-copy; `tasks.board.submission_exclusions` is the one SQL reader.
+`with_board_settings`; `tasks.board.submission_exclusions` is the one SQL
+reader. Tasks written before 2026-10-10 were converted to `config_id` in
+production, so no payload holds the old copy.
 
 ## Embedding receipt vectors
 

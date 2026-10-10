@@ -4,6 +4,7 @@ import pytest
 
 from api import ai, db
 from tasks import filters
+from tests.factories import filter_config
 
 
 @pytest.fixture
@@ -17,7 +18,7 @@ def setup(f, monkeypatch):
     job_id = f.make_job()
     job = db.query_one("SELECT id, url, company, title FROM jobs WHERE id = %s", (job_id,))
     parent = f.make_task("run_all_filters", {"user_id": uid, "batched": True}, status="running")
-    payload = {"parent_id": parent, "user_id": uid, "filter": flt, "jobs": [job]}
+    payload = {"parent_id": parent, "user_id": uid, "config_id": filter_config(flt), "jobs": [job]}
     return uid, cfg, flt, job, parent, payload
 
 

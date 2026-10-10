@@ -17,7 +17,7 @@ from core.store import add_ai_result
 from tasks import filters as tasks_filters
 from tasks import ingest as tasks_ingest
 from tasks.board import in_flight_urls
-from tests.factories import make_task
+from tests.factories import filter_config, make_task
 
 
 def _user_id() -> int:
@@ -129,7 +129,7 @@ async def test_a_chunk_publishes_its_passes_before_the_parent_finishes(monkeypat
         {
             "parent_id": parent,
             "user_id": uid,
-            "filter": flt,
+            "config_id": filter_config(flt),
             "jobs": [{"url": url, "company": "co", "title": "SWE"}],
         },
         status="running",

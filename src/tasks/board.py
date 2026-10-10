@@ -118,12 +118,10 @@ def submission_exclusions(
             WHERE t.id < %(tid)s
               AND t.kind IN ('run_filter_chunk', 'run_filter_batch_chunk')
               AND (t.payload->>'user_id')::bigint = %(uid)s
-              -- A chunk names its filter by config_id (api.run_configs), or,
-              -- written before config_id, holds a copy.
-              AND (t.payload->'filter'->>'prompt_hash' = %(hash)s
-                   OR (t.payload->>'config_id')::bigint IN (
-                     SELECT id FROM run_configs
-                     WHERE kind = 'filter' AND body->>'prompt_hash' = %(hash)s))
+              -- A chunk names its filter by config_id (api.run_configs).
+              AND (t.payload->>'config_id')::bigint IN (
+                SELECT id FROM run_configs
+                WHERE kind = 'filter' AND body->>'prompt_hash' = %(hash)s)
               AND (t.status IN ('pending', 'running', 'waiting', 'awaiting_batch')
                    OR jsonb_array_length(COALESCE(t.payload->'batch_ids', '[]'::jsonb)) > 0)
         )

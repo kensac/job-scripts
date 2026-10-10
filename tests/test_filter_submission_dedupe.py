@@ -7,12 +7,24 @@ from core.store import add_ai_result
 from tests.factories import make_task
 
 
+def _filter(prompt_hash: str) -> int:
+    return run_configs.intern(
+        run_configs.FILTER,
+        {
+            "name": "test",
+            "prompt": "criteria",
+            "on_ambiguous": "filter",
+            "prompt_hash": prompt_hash,
+        },
+    )
+
+
 def _chunk(uid=7, prompt_hash="criteria", status="running"):
     return make_task(
         "run_filter_batch_chunk",
         {
             "user_id": uid,
-            "filter": {"prompt_hash": prompt_hash},
+            "config_id": _filter(prompt_hash),
             "jobs": [{"url": "https://posting"}],
         },
         status=status,
@@ -94,7 +106,6 @@ async def test_handler_rechecks_after_content_preparation(monkeypatch):
     task = _chunk()
     payload = db.query_one("SELECT payload FROM tasks WHERE id=%s", (task,))["payload"]
     payload.update(parent_id=None, scheduled=True)
-    payload["filter"].update(name="test", prompt="criteria", on_ambiguous="filter")
     cfg = ai.AIConfig("openai", "test", "owner", "gpt-6-luna")
     monkeypatch.setattr(filters, "load_config", lambda *args: (None, cfg))
     monkeypatch.setattr(filters.batch_policy, "transport", lambda *args: "batch")

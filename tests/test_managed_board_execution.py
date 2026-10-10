@@ -10,6 +10,7 @@ from core import pricing
 from core.filters import compute_filter_hash
 from core.store import add_ai_result
 from tasks import managed_boards as managed_task
+from tests.factories import board_config
 
 
 def test_worker_registry_declares_managed_board_handler():
@@ -59,7 +60,7 @@ def test_run_admission_snapshots_board_candidates_and_refuses_overlap(
     assert payload["reasoning_effort"] == "low"
     assert payload["title_screens"] == []
     # The board's settings are stored once, not copied into the run.
-    assert not set(run_configs.BOARD_KEYS) & set(payload)
+    assert not {"prompt", "prompt_hash", "on_ambiguous", "sources", "criteria"} & set(payload)
     assert run_configs.with_board_settings(payload)["sources"] == ["managed-source"]
     jobs = managed_board_runs.run_jobs(payload)
     assert [job["id"] for job in jobs] == [job_id]
@@ -97,12 +98,8 @@ def test_sponsor_budget_reserves_across_managed_boards(client, admin_headers, f,
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("stored_settings", [False, True])
-async def test_handler_attributes_usage_and_atomically_replaces_projection(
-    f, monkeypatch, stored_settings
-):
-    """A pre-cutover payload remains receivable through its original live path,
-    whether it copies the board's settings or names them by config_id."""
+async def test_handler_attributes_usage_and_atomically_replaces_projection(f, monkeypatch):
+    """A pre-cutover payload remains receivable through its original live path."""
 
     monkeypatch.setattr("core.routing.server_key", lambda provider: "test-server-key")
     sponsor = f.make_user(groups=["infra-admins"])
@@ -143,9 +140,7 @@ async def test_handler_attributes_usage_and_atomically_replaces_projection(
             }
         ],
     }
-    if stored_settings:
-        settings = {key: payload.pop(key) for key in run_configs.BOARD_KEYS if key in payload}
-        payload["config_id"] = run_configs.intern(run_configs.BOARD, settings)
+    payload = board_config(payload)
     task_id = f.make_task("run_managed_board", payload, status="running")
 
     async def fake_execute(task_id, cfg, snapshot, jobs, hooks):
@@ -218,6 +213,7 @@ async def test_new_execution_contract_uses_batch_only_and_prices_batch(f, monkey
             }
         ],
     }
+    payload = board_config(payload)
     task_id = f.make_task("run_managed_board_batch", payload, status="running")
 
     async def fake_batch(task_id, cfg, snapshot, jobs, hooks, **kwargs):

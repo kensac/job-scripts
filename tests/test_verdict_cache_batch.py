@@ -23,6 +23,7 @@ from core.query_instructions import InstructionUnavailable
 from core.store import add_ai_result
 from tasks import filter_execution
 from tasks import managed_boards as managed_task
+from tests.factories import board_config
 
 
 def _per_job(url: str, prompt_hash: str, model: str | None = None) -> bool:
@@ -188,6 +189,7 @@ async def test_managed_batch_admission_reads_the_cache_once_for_n_candidates(f, 
         "reserved_tokens": 1000,
         "jobs": jobs,
     }
+    payload = board_config(payload)
     task_id = f.make_task("run_managed_board_batch", payload, status="running")
     submitted = []
 

@@ -176,6 +176,25 @@ def make_board_row(user_id: int, job_id: int, *, status: str | None = "Saved") -
     )
 
 
+def filter_config(flt: dict[str, Any]) -> int:
+    """The config_id a chunk of this filter carries (api.run_configs)."""
+    from api import run_configs
+
+    return run_configs.intern(
+        run_configs.FILTER, {k: flt[k] for k in ("name", "prompt", "on_ambiguous", "prompt_hash")}
+    )
+
+
+def board_config(payload: dict[str, Any]) -> dict[str, Any]:
+    """A board run payload with its board settings moved behind config_id."""
+    from api import run_configs
+
+    keys = ("prompt", "prompt_hash", "on_ambiguous", "fail_closed", "sources", "criteria")
+    settings = {k: payload[k] for k in keys if k in payload}
+    rest = {k: v for k, v in payload.items() if k not in settings}
+    return {**rest, "config_id": run_configs.intern(run_configs.BOARD, settings)}
+
+
 def make_task(kind: str, payload: dict[str, Any] | None = None, *, status: str = "pending") -> int:
     row = db.query_one(
         "INSERT INTO tasks (kind, payload, status) VALUES (%s, %s, %s) RETURNING id",
