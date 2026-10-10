@@ -400,6 +400,26 @@ answer tables. Verdicts do not fit that helper, which updates one row per url
 while `ai_queries` is append-only, but the pattern is there to extend the day
 a measurement asks for it.
 
+**A derived fact is one registration.** `tasks.DERIVATIONS` lists every
+answer a model derives from data we already hold (pay, requirements, job
+profiles, embeddings, locations), each a `tasks.derive.Derivation` naming its
+table, its input (page text cut to `input_chars`, or not page text), its
+recipe version, its model routing, its staleness rule (`select`) and its
+store. `tasks.derive.sweep` is the one skeleton: switch, one pass in flight,
+selection, the unchanged-page skip, batch submit and collect through
+`tasks.runtime`, the page-currency check, parse, store. The worker schedules
+and dispatches every entry from the list, so a new derivation touches neither.
+A switched-off feature stays registered; its `switch` keeps the scheduler from
+enqueuing it and a hand-started run from submitting, while paid batches are
+still collected. Identity stays what phase 4's drop left it: the answer is
+keyed by what it describes, and the recipe version re-derives only where the
+table stores it (`job_profiles.classifier_version`).
+`jobs.near_copy_key` is not a registration: it costs nothing, is computed in
+process before verify submits, and records the text verification read, so a
+staleness rule recomputing it from a newer page would match a twin on text
+its verdict never judged (2 of 3,000 sampled keys differed from the current
+page on 2026-10-10).
+
 Phase 2 still brings its numbers before it merges: it decides what gets paid
 for.
 

@@ -32,7 +32,7 @@ async def test_new_embedding_submissions_follow_visibility(f, monkeypatch):
 
     monkeypatch.setattr(batch, "submit_responses_batches", submit)
     with pytest.raises(runtime.AwaitingBatch):
-        await embeddings.handle_embed_postings_batch(task, {})
+        await embeddings.EMBEDDINGS.handle(task, {})
     actual = {row["url"] for spec in submitted for row in spec.context["rows"]}
     assert actual == set(urls[:3])
 

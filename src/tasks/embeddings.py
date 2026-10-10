@@ -8,10 +8,8 @@ import os
 from typing import Any
 
 from api import db
-from api.ai import batch_results
 from api.board import visibility
-from api.task_admission import ACTIVE_STATUSES
-from core.batch import BatchSpec
+from core.batch import BatchResult, BatchSpec
 from core.embeddings import (
     EMBEDDING_BATCH_SIZE,
     EMBEDDING_DIMENSIONS,
@@ -19,14 +17,7 @@ from core.embeddings import (
     EMBEDDING_MODEL,
 )
 from core.store import CONTENT_LATERAL
-from tasks import rescrape
-from tasks.runtime import (
-    batch_event_hook,
-    consume_result,
-    has_batch_work,
-    set_progress,
-    submit_or_collect,
-)
+from tasks.derive import Derivation, Row
 
 logger = logging.getLogger(__name__)
 
@@ -97,103 +88,99 @@ def _store(rows: list[dict[str, Any]]) -> int:
     )
 
 
-async def handle_embed_postings_batch(task_id: int, payload: dict[str, Any]) -> None:
-    specs = []
-    if not has_batch_work(task_id):
-        if not os.environ.get("OPENAI_API_KEY"):
-            set_progress(task_id, 0, 0, "no api key")
-            return
-        earlier = db.query_one(
-            "SELECT id FROM tasks WHERE kind='embed_postings_batch' AND id<%s "
-            "AND status=ANY(%s) ORDER BY id LIMIT 1",
-            (task_id, list(ACTIVE_STATUSES)),
-        )
-        if earlier:
-            # One embedding batch in flight at a time. A cycle therefore waits
-            # for the previous batch to come back before it submits, so a
-            # backfill drains one provider turnaround per cycle, not hourly;
-            # the hourly cadence holds only once the backlog is gone.
-            set_progress(task_id, 0, 0, f"embedding task {earlier['id']} is still in flight")
-            return
-        candidates = rescrape.drop_unchanged(
-            db.query(_CANDIDATES, {"cap": db.get_config("embed_postings_per_cycle")}),
-            table="job_embeddings",
-            limit=EMBEDDING_INPUT_CHARS,
-        )
-        for start in range(0, len(candidates), EMBEDDING_BATCH_SIZE):
-            wave = candidates[start : start + EMBEDDING_BATCH_SIZE]
-            specs.append(
-                BatchSpec(
-                    f"embeddings:{start // EMBEDDING_BATCH_SIZE}",
-                    inputs=[row["input_content"][:EMBEDDING_INPUT_CHARS] for row in wave],
-                    endpoint="/v1/embeddings",
-                    context={
-                        "dimensions": EMBEDDING_DIMENSIONS,
-                        "rows": [
-                            {
-                                "url": row["url"],
-                                "content_row_id": row["content_row_id"],
-                                "content_hash": row["content_hash"],
-                            }
-                            for row in wave
-                        ],
-                    },
-                )
-            )
-        if not specs:
-            set_progress(task_id, 0, 0, "nothing to embed")
-            return
-        set_progress(task_id, 0, len(specs), "embedding requests submitted")
+def _select(cap: int, payload: dict[str, Any]) -> list[Row]:
+    if not os.environ.get("OPENAI_API_KEY"):
+        logger.info("no api key; nothing embedded")
+        return []
+    return db.query(_CANDIDATES, {"cap": cap})
 
-    hook = batch_event_hook(task_id, "embedding", EMBEDDING_MODEL)
-    results = await submit_or_collect(task_id, specs, EMBEDDING_MODEL, "", 0, hook)
-    for result in results:
-        with consume_result(task_id, result) as receipt:
-            if not receipt.pending:
-                continue
-            request = result.request
-            context = request.context if request else None
-            if request is None or not context or request.endpoint != "/v1/embeddings":
-                receipt.outcome = "unknown_request"
-                continue
-            if not result.model:
-                receipt.outcome = "unknown_model"
-                continue
-            vectors = result.embedding_vectors
-            originals = context["rows"]
-            if result.error or vectors is None or len(vectors) != len(originals):
-                receipt.outcome = "failed"
-                continue
-            current = {
-                row["url"]: row["id"]
-                for row in db.query(
-                    "SELECT page.url,q.id FROM unnest(%s::text[]) AS page(url) "
-                    + CONTENT_LATERAL.format(url="page.url", columns="id"),
-                    ([row["url"] for row in originals],),
-                )
+
+def _requests(rows: list[Row]) -> list[BatchSpec]:
+    specs = []
+    for start in range(0, len(rows), EMBEDDING_BATCH_SIZE):
+        wave = rows[start : start + EMBEDDING_BATCH_SIZE]
+        specs.append(
+            BatchSpec(
+                f"embeddings:{start // EMBEDDING_BATCH_SIZE}",
+                inputs=[row["input_content"][:EMBEDDING_INPUT_CHARS] for row in wave],
+                endpoint="/v1/embeddings",
+                context={
+                    "dimensions": EMBEDDING_DIMENSIONS,
+                    "rows": [
+                        {
+                            "url": row["url"],
+                            "content_row_id": row["content_row_id"],
+                            "content_hash": row["content_hash"],
+                        }
+                        for row in wave
+                    ],
+                },
+            )
+        )
+    return specs
+
+
+def _store_result(result: BatchResult, context: dict[str, Any], _: None) -> str:
+    """One request carries up to EMBEDDING_BATCH_SIZE postings, so the page
+    currency check is per posting here, in one statement for the request."""
+    request = result.request
+    if request is None or request.endpoint != "/v1/embeddings":
+        return "unknown_request"
+    if not result.model:
+        return "unknown_model"
+    vectors = result.embedding_vectors
+    originals = context["rows"]
+    if result.error or vectors is None or len(vectors) != len(originals):
+        return "failed"
+    current = {
+        row["url"]: row["id"]
+        for row in db.query(
+            "SELECT page.url,q.id FROM unnest(%s::text[]) AS page(url) "
+            + CONTENT_LATERAL.format(url="page.url", columns="id"),
+            ([row["url"] for row in originals],),
+        )
+    }
+    # The packed request's usage is the call ledger's (model_calls), booked
+    # with its receipt. A posting's equal share of it was a guess nothing
+    # read, and it is no longer stored.
+    rows = []
+    for original, vector in zip(originals, vectors, strict=True):
+        if len(vector) != context["dimensions"] or any(
+            isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v)
+            for v in vector
+        ):
+            continue
+        if current.get(original["url"]) != original["content_row_id"]:
+            continue
+        rows.append(
+            {
+                "url": original["url"],
+                "embedding": str(vector),
+                "model": result.model,
+                "hash": original["content_hash"],
+                "row_id": original["content_row_id"],
             }
-            # The packed request's usage is the call ledger's (model_calls),
-            # booked with its receipt. A posting's equal share of it was a
-            # guess nothing read, and it is no longer stored.
-            rows = []
-            for original, vector in zip(originals, vectors, strict=True):
-                if len(vector) != context["dimensions"] or any(
-                    isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v)
-                    for v in vector
-                ):
-                    continue
-                if current.get(original["url"]) != original["content_row_id"]:
-                    continue
-                rows.append(
-                    {
-                        "url": original["url"],
-                        "embedding": str(vector),
-                        "model": result.model,
-                        "hash": original["content_hash"],
-                        "row_id": original["content_row_id"],
-                    }
-                )
-            written = _store(rows) if rows else 0
-            receipt.outcome = "written" if written else "discarded"
-    done, total = batch_results.progress_counts(task_id)
-    set_progress(task_id, done, total, "embedding requests applied")
+        )
+    written = _store(rows) if rows else 0
+    return "written" if written else "discarded"
+
+
+# One pass in flight at a time (the shared sweep's guard), so a backfill
+# drains one provider turnaround per cycle, not hourly; the hourly cadence
+# holds only once the backlog is gone. The model is the recipe: the table
+# stores it, and nothing re-embeds when it changes.
+EMBEDDINGS = Derivation(
+    kind="embed_postings_batch",
+    purpose="embedding",
+    noun="embedding",
+    table="job_embeddings",
+    per_cycle_key="embed_postings_per_cycle",
+    select=_select,
+    requests=_requests,
+    store=_store_result,
+    input_chars=EMBEDDING_INPUT_CHARS,
+    recipe=None,
+    model=EMBEDDING_MODEL,
+    context_keys=("rows",),
+    skip_unchanged=True,
+)

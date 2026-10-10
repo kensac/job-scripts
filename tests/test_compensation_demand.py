@@ -22,8 +22,8 @@ async def test_paid_compensation_result_survives_demand_disappearing(f, monkeypa
         ]
         return results, SimpleNamespace()
 
-    monkeypatch.setattr(comp, "run_batched", collect)
-    await comp.handle_extract_comp(f.make_task("extract_comp"), {})
+    monkeypatch.setattr("tasks.derive.run_batched", collect)
+    await comp.PAY.handle(f.make_task("extract_comp"), {})
     assert db.query_one("SELECT comp_extracted FROM jobs WHERE id=%s", (job,))["comp_extracted"]
 
 
@@ -50,13 +50,14 @@ async def test_comp_waits_for_current_filter_pass_or_personal_tracking(f, monkey
         asked.extend(s.custom_id for s in specs)
         return [], SimpleNamespace()
 
-    monkeypatch.setattr(comp, "run_batched", collect)
-    await comp.handle_extract_comp(f.make_task("extract_comp"), {})
+    monkeypatch.setattr("tasks.derive.run_batched", collect)
+    await comp.PAY.handle(f.make_task("extract_comp"), {})
     assert set(asked) == {passed, tracked}
     assert not set(asked) & {rejected, untouched, unknown}
     db.execute("UPDATE user_filters SET enabled=false WHERE id=%s", (enabled["id"],))
     asked.clear()
-    await comp.handle_extract_comp(f.make_task("extract_comp"), {})
+    db.execute("UPDATE tasks SET status = 'done' WHERE status <> 'done'")
+    await comp.PAY.handle(f.make_task("extract_comp"), {})
     assert asked == [tracked]
 
 
@@ -82,10 +83,11 @@ async def test_comp_admits_a_published_managed_board_without_personal_subscripti
         asked.extend(s.custom_id for s in specs)
         return [], SimpleNamespace()
 
-    monkeypatch.setattr(comp, "run_batched", collect)
-    await comp.handle_extract_comp(f.make_task("extract_comp"), {})
+    monkeypatch.setattr("tasks.derive.run_batched", collect)
+    await comp.PAY.handle(f.make_task("extract_comp"), {})
     assert asked == [url]
     db.execute("UPDATE managed_boards SET published=false WHERE id=%s", (board["id"],))
     asked.clear()
-    await comp.handle_extract_comp(f.make_task("extract_comp"), {})
+    db.execute("UPDATE tasks SET status = 'done' WHERE status <> 'done'")
+    await comp.PAY.handle(f.make_task("extract_comp"), {})
     assert asked == []

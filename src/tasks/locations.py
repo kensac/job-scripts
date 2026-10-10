@@ -3,18 +3,15 @@
 from __future__ import annotations
 
 import hashlib
-import logging
 from typing import Any
 
 from pydantic import BaseModel
 
 from api import db, user_settings
-from api.ai.batch_results import progress_counts
 from api.locations import LocationExtract, Place, store
+from core.batch import BatchResult, BatchSpec, structured_response_spec
 from core.shapes import LOCATIONS_TASK
-from tasks.runtime import consume_result, has_batch_work, run_batched, set_progress
-
-logger = logging.getLogger(__name__)
+from tasks.derive import Derivation, Row
 
 
 class LocationAnswer(BaseModel):
@@ -74,60 +71,53 @@ def _custom_id(text: str) -> str:
     return hashlib.sha1(text.encode("utf-8"), usedforsecurity=False).hexdigest()
 
 
-async def handle_classify_locations(task_id: int, payload: dict[str, Any]) -> None:
-    from core.batch import structured_response_spec
+def _select(cap: int, payload: dict[str, Any]) -> list[Row]:
+    if payload.get("reclassify"):
+        return db.query(
+            "SELECT text FROM locations WHERE model <> 'admin' ORDER BY text LIMIT %(cap)s",
+            {"cap": cap},
+        )
+    return db.query(_CANDIDATES, {"cap": cap})
 
-    specs = []
-    if not has_batch_work(task_id):
-        cap = int(db.get_config("classify_locations_per_cycle"))
-        if payload.get("reclassify"):
-            texts = [
-                r["text"]
-                for r in db.query(
-                    "SELECT text FROM locations WHERE model <> 'admin' ORDER BY text LIMIT %(cap)s",
-                    {"cap": cap},
-                )
-            ]
-        else:
-            texts = [r["text"] for r in db.query(_CANDIDATES, {"cap": cap})]
-        if not texts:
-            set_progress(task_id, 0, 0, "nothing to classify")
-            return
-        specs = [
-            structured_response_spec(
-                _custom_id(text),
-                _INSTRUCTIONS,
-                text,
-                LocationAnswer,
-                context={"text": text},
-            )
-            for text in texts
-        ]
-        set_progress(task_id, 0, len(specs), "locations batch submitted")
-    results, _ = await run_batched(task_id, LOCATIONS_TASK, specs)
-    for res in results:
-        with consume_result(task_id, res) as receipt:
-            if not receipt.pending:
-                continue
-            context = res.request.context if res.request else None
-            if not context or "text" not in context:
-                receipt.outcome = "unknown_request"
-                continue
-            if not res.text or res.error:
-                receipt.outcome = "failed"
-                continue
-            try:
-                answer = LocationAnswer.model_validate_json(res.text)
-            except ValueError:
-                logger.warning("location parse failed for %r", context["text"])
-                receipt.outcome = "invalid_output"
-                continue
-            written = store(
-                context["text"],
-                LocationExtract(places=answer.places, remote=answer.remote),
-                res.model,
-                preserve_manual=True,
-            )
-            receipt.outcome = "written" if written else "superseded"
-    done, total = progress_counts(task_id)
-    set_progress(task_id, done, total, f"{done} location(s) classified")
+
+def _requests(rows: list[Row]) -> list[BatchSpec]:
+    return [
+        structured_response_spec(
+            _custom_id(r["text"]),
+            _INSTRUCTIONS,
+            r["text"],
+            LocationAnswer,
+            context={"text": r["text"]},
+        )
+        for r in rows
+    ]
+
+
+def _store(result: BatchResult, context: dict[str, Any], answer: LocationAnswer) -> str:
+    written = store(
+        context["text"],
+        LocationExtract(places=answer.places, remote=answer.remote),
+        result.model,
+        preserve_manual=True,
+    )
+    return "written" if written else "superseded"
+
+
+# The input is a location string, not page text: a string is classified once
+# and never goes stale, so the staleness rule is "not classified yet" (or every
+# non-admin row, for a reclassify run).
+LOCATIONS = Derivation(
+    kind="classify_locations",
+    purpose=LOCATIONS_TASK.purpose,
+    noun="location",
+    table="locations",
+    per_cycle_key="classify_locations_per_cycle",
+    select=_select,
+    requests=_requests,
+    store=_store,
+    input_chars=None,
+    recipe=None,
+    shape=LOCATIONS_TASK,
+    answer=LocationAnswer,
+    context_keys=("text",),
+)

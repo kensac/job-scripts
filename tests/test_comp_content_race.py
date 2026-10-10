@@ -4,13 +4,13 @@ from types import SimpleNamespace
 import pytest
 
 from api import db
-from tasks import comp
+from tasks import comp, rescrape
 
 
 @pytest.mark.asyncio
 async def test_content_committed_after_guard_does_not_leave_stale_comp_complete(f, monkeypatch):
     job_id, _url = f.make_ready_job(content="Salary USD 100000 yearly. " * 20)
-    old_guard = comp.rescrape.content_is_current
+    old_guard = rescrape.content_is_current
 
     def guard_then_concurrent_scrape(url, content_row_id):
         current = old_guard(url, content_row_id)
@@ -37,9 +37,9 @@ async def test_content_committed_after_guard_does_not_leave_stale_comp_complete(
             for spec in specs
         ], SimpleNamespace(model="test-model")
 
-    monkeypatch.setattr(comp, "run_batched", answer)
-    monkeypatch.setattr(comp.rescrape, "content_is_current", guard_then_concurrent_scrape)
-    await comp.handle_extract_comp(f.make_task("extract_comp", status="running"), {})
+    monkeypatch.setattr("tasks.derive.run_batched", answer)
+    monkeypatch.setattr(rescrape, "content_is_current", guard_then_concurrent_scrape)
+    await comp.PAY.handle(f.make_task("extract_comp", status="running"), {})
     row = db.query_one("SELECT comp_min, comp_extracted FROM jobs WHERE id = %s", (job_id,))
     assert row != {"comp_min": 100000, "comp_extracted": True}
 
@@ -69,14 +69,16 @@ async def test_known_compensation_source_changes_are_selected_again(f, monkeypat
             for spec in specs
         ], SimpleNamespace(model="test-model")
 
-    monkeypatch.setattr(comp, "run_batched", answer)
-    await comp.handle_extract_comp(f.make_task("extract_comp", status="running"), {})
+    monkeypatch.setattr("tasks.derive.run_batched", answer)
+    await comp.PAY.handle(f.make_task("extract_comp", status="running"), {})
     assert len(requested) == 1
     f.make_fetch(url, content="Salary USD 200000 yearly. " * 20)
-    await comp.handle_extract_comp(f.make_task("extract_comp", status="running"), {})
+    db.execute("UPDATE tasks SET status = 'done' WHERE status <> 'done'")
+    await comp.PAY.handle(f.make_task("extract_comp", status="running"), {})
     assert len(requested) == 2
     assert db.query_one("SELECT comp_min FROM jobs WHERE id = %s", (job_id,))["comp_min"] == 200000
-    await comp.handle_extract_comp(f.make_task("extract_comp", status="running"), {})
+    db.execute("UPDATE tasks SET status = 'done' WHERE status <> 'done'")
+    await comp.PAY.handle(f.make_task("extract_comp", status="running"), {})
     assert len(requested) == 2
 
 
@@ -92,5 +94,5 @@ async def test_unknown_legacy_source_does_not_trigger_bulk_reextraction(f, monke
     async def unexpected(*args):
         pytest.fail("Unknown legacy source must not trigger extraction")
 
-    monkeypatch.setattr(comp, "run_batched", unexpected)
-    await comp.handle_extract_comp(f.make_task("extract_comp", status="running"), {})
+    monkeypatch.setattr("tasks.derive.run_batched", unexpected)
+    await comp.PAY.handle(f.make_task("extract_comp", status="running"), {})
