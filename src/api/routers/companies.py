@@ -31,7 +31,7 @@ import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from api import db, rates, signals
+from api import db, rates, signals, sorting
 from api import params as params_
 from api.auth import AuthedUser
 from api.mail import pipeline as mail_pipeline
@@ -594,6 +594,8 @@ class CompanyList(BaseModel):
     caveats: list[str]
     filters: dict[str, list[str]]
     filterable: list[str]
+    sorts: list[dict[str, str]]
+    sortable: list[str]
 
 
 def _bucket[R: _CompanyKeyed](rows: list[R]) -> dict[str, list[R]]:
@@ -768,12 +770,11 @@ def list_companies(
 ) -> CompanyList:
     limit = max(1, min(limit, _MAX_LIMIT))
     offset = _offset_from(cursor)
-    column = _SORTABLE.get(sort, "total_postings_seen")
-    direction = "ASC" if dir == "asc" else "DESC"
     # Sorting is applied to the whole aggregate before the page is cut, not
     # within the slice - a page-local sort would reorder 50 rows and call it a
     # ranking of 7,564.
-    order = f"{column} {direction} NULLS LAST"
+    sorts = sorting.parse(sort, dir, _SORTABLE, "total_postings_seen")
+    order = sorting.clause(sorts, _SORTABLE)
     pattern = f"%{q.strip().lower()}%" if q and q.strip() else None
     params = {
         "q": pattern,
@@ -876,4 +877,6 @@ def list_companies(
             repost=["true"] if repost else [],
         ),
         filterable=["q", "applied", "has_comp", "repost"],
+        sorts=sorts,
+        sortable=sorted(_SORTABLE),
     )

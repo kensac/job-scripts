@@ -249,6 +249,26 @@ def test_sorting_is_applied_across_the_whole_set_not_the_page(client, admin_head
     assert [i["company_key"] for i in ascending] == ["small"]
 
 
+def test_sorting_takes_several_columns_and_echoes_them(client, admin_headers, f):
+    """The shared multi-column sort: ties on the first key break on the second,
+    an unknown key is dropped, and the response says what it applied."""
+    for name in ("Beta", "Alpha", "Solo"):
+        f.make_job(source="s", company=name, title="a")
+    f.make_job(source="s", company="Solo", title="b")
+
+    resp = client.get(
+        f"{ENDPOINT}?sort=total_postings_seen,nope,company_name&dir=desc,asc",
+        headers=admin_headers,
+    )
+    body = resp.json()
+    assert [i["company_key"] for i in body["items"]] == ["solo", "alpha", "beta"]
+    assert body["sorts"] == [
+        {"key": "total_postings_seen", "dir": "desc"},
+        {"key": "company_name", "dir": "asc"},
+    ]
+    assert "company_name" in body["sortable"]
+
+
 def test_paging_walks_the_whole_set_without_repeating(client, admin_headers, f):
     for i in range(7):
         f.make_job(source="s", company=f"Co{i:02d}", title="a")

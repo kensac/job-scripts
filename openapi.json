@@ -36568,6 +36568,23 @@
             },
             "type": "array",
             "title": "Filterable"
+          },
+          "sorts": {
+            "items": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Sorts"
+          },
+          "sortable": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Sortable"
           }
         },
         "type": "object",
@@ -36579,7 +36596,9 @@
           "total_names",
           "caveats",
           "filters",
-          "filterable"
+          "filterable",
+          "sorts",
+          "sortable"
         ],
         "title": "CompanyList",
         "description": "`total_names` counts what the lenses show rather than the whole catalog:\nsame CTEs, same cuts, no page. `next_cursor` is an offset and says so."
