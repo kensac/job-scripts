@@ -145,22 +145,6 @@ async def test_packed_write_and_receipt_rollback_together(f, monkeypatch):
     assert len(batch_results.unconsumed(task_id)) == 1
 
 
-def test_older_worker_cannot_claim_embedding_batches(f, monkeypatch):
-    task_id = f.make_task("embed_postings_batch", {})
-    monkeypatch.setattr(worker, "HANDLERS", {"embed_postings": embeddings.handle_embed_postings})
-    assert worker._claim_task() is None
-    assert db.query_one("SELECT status FROM tasks WHERE id=%s", (task_id,))["status"] == "pending"
-
-
-@pytest.mark.asyncio
-async def test_legacy_task_only_queues_new_kind(f, monkeypatch):
-    task_id = f.make_task("embed_postings", {"cycle": 42})
-    await embeddings.handle_embed_postings(task_id, {"cycle": 42})
-    await embeddings.handle_embed_postings(task_id, {"cycle": 42})
-    rows = db.query("SELECT kind,payload FROM tasks WHERE id<>%s", (task_id,))
-    assert rows == [{"kind": "embed_postings_batch", "payload": {"cycle": 42}}]
-
-
 @pytest.mark.asyncio
 async def test_submission_parks_packed_requests_and_respects_existing_work(f, monkeypatch):
     owner = f.make_user()

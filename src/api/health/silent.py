@@ -29,7 +29,6 @@ SWEEP_KINDS = frozenset(
         "run_managed_board_batch",
         "classify_locations",
         "classify_mail",
-        "embed_postings",
         "embed_postings_batch",
         "fetch_missing_content",
     }

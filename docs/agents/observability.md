@@ -607,9 +607,8 @@ separately. Persist result acknowledgement with answer changes and usage in one
 transaction so a replay cannot append duplicate turns or charge the ledger twice.
 
 
-Scheduled embeddings use `embed_postings_batch`, with the legacy
-`embed_postings` handler only enqueueing that kind. The worker claims only
-registered kinds, so an older image cannot consume the new batch snapshots.
+Scheduled embeddings use `embed_postings_batch`. The worker claims only
+registered kinds, so an older image cannot consume a kind it does not know.
 Embedding batches retain the provider request's packed inputs and indexed
 vectors in the shared request snapshots and result receipts. Each packed
 request applies its current vectors and acknowledges its receipt in one
