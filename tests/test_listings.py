@@ -63,7 +63,11 @@ def test_what_the_pattern_drops_is_kept_and_ages_out_when_the_board_stops_listin
         "Software Engineer, New Grad"
     }
     screened = {
-        r["title"]: r for r in db.query("SELECT * FROM listings WHERE source = 'acme' AND NOT kept")
+        r["title"]: r
+        for r in db.query(
+            "SELECT l.*, t.pattern FROM listings l JOIN title_patterns t ON t.id = l.pattern_id "
+            "WHERE l.source = 'acme' AND NOT l.kept"
+        )
     }
     assert set(screened) == {
         "Software Engineer",

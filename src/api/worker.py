@@ -284,6 +284,19 @@ def schedule_ingest_cycle() -> None:
             user_job_split.admit()
         except user_job_split.NoEligibleWorker:
             logger.info("user job split not admitted: no current-release worker may claim it")
+    # listings.pattern is emptied (tasks.listing_patterns), one run at a
+    # time, until a run starts with none left. Asked of tasks rather than
+    # listings: whether any row is left is a scan of the table.
+    if not db.query_one(
+        "SELECT 1 FROM tasks WHERE kind = 'drop_listing_pattern_copies' "
+        "AND (status IN ('pending', 'running') "
+        "     OR (status = 'done' AND progress->>'total' = '0')) LIMIT 1"
+    ):
+        enqueue(
+            "drop_listing_pattern_copies",
+            {"cycle": cycle},
+            dedupe_key=f"listing-pattern-copies:{cycle}",
+        )
     # Board membership for every person who can have one, every
     # board_refresh_minutes, so new verdicts reach a board without anyone
     # touching a preference. Bucketed like the ingest cycle; a person's own
