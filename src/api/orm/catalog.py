@@ -95,6 +95,29 @@ class Job(Base):
     created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
 
 
+class PostingUpload(Base):
+    """A posting a person added by url, and where reading it stands.
+
+    One row per upload, so the catalog row carries no per-person state. A
+    forced reparse of a posting nobody uploaded writes no row: its outcome is
+    its task's. Replaces jobs.uploaded_by and jobs.extraction_status, which
+    stay written until every reader has moved.
+    """
+
+    __tablename__ = "posting_uploads"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'done', 'failed')", name="ck_posting_uploads_status"
+        ),
+        Index("idx_posting_uploads_uploaded_by", "uploaded_by"),
+    )
+
+    job_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("jobs.id"), primary_key=True)
+    uploaded_by: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"))
+    status: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+
+
 class JobRequirements(Base):
     """What a posting says it requires, keyed by url rather than by job id.
 
