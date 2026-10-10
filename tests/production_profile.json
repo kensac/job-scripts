@@ -2212,10 +2212,6 @@
      ],
      "null_rate": 0.0
     },
-    "uploaded_by": {
-     "kind": "key",
-     "null_rate": 0.999981
-    },
     "url": {
      "kind": "key",
      "null_rate": 0.0
