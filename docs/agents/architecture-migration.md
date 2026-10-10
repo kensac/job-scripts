@@ -125,10 +125,6 @@ reader:
      84,052 profiles, 6,610 of 59,645 requirements, 6,749 of 217,212
      embeddings, 52 of 48,239 comp rows). Such a row is not a url's newest
      fetch, so it does not name the url's current text.
-   - For the release that renamed the table, a view `page_fetch_rows` over
-     `page_fetches` and an always-false `page_texts.on_verdict` serve the
-     images still running during the roll. No code names either; the next
-     release drops both.
    - Next: an answer points at the fetch it judged, and the copies of page
      text on answers are cleared.
 4. Call usage as one ledger that other tables point at instead of copying
