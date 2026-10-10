@@ -30,6 +30,7 @@ from tasks.job_profiles import handle_classify_job_profiles
 from tasks.locations import handle_classify_locations
 from tasks.mail_classify import handle_classify_mail
 from tasks.mail_match import handle_match_mail
+from tasks.mail_pointers import handle_backfill_mail_pointers
 from tasks.mail_sync import (
     handle_import_archive,
     handle_probe_credentials,
@@ -78,6 +79,7 @@ HANDLERS = {
     "run_managed_board_batch": handle_run_managed_board_batch,
     "classify_job_profiles": handle_classify_job_profiles,
     "move_page_fetches": handle_move_page_fetches,
+    "backfill_mail_pointers": handle_backfill_mail_pointers,
 }
 
 __all__ = ["HANDLERS"]

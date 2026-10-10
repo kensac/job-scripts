@@ -36,6 +36,8 @@ import datetime
 from typing import Any
 
 from api import db
+from api.mail import events as mail_events
+from api.mail import match as mail_match
 from core.disposable_db import require_disposable_name
 
 DEV_SUB = "dev-user"
@@ -253,15 +255,12 @@ def seed() -> dict[str, int]:
         )
         message_ids.append(message_id)
         counts["messages"] += 1
-        db.execute(
-            "INSERT INTO email_events (message_id, kind, confidence, detail, model) "
-            "VALUES (%s, %s, %s, %s, 'gpt-6-luna')",
-            (
-                message_id,
-                kind,
-                confidence,
-                db.jsonb({"company": subject.split()[-1], "role_title": role}),
-            ),
+        mail_events.append(
+            message_id,
+            kind,
+            confidence=confidence,
+            detail={"company": subject.split()[-1], "role_title": role},
+            model="gpt-6-luna",
         )
 
     application_id = _one(
@@ -273,10 +272,9 @@ def seed() -> dict[str, int]:
         (user_id, job_ids[0], _days_ago(40)),
     )
     counts["applications"] += 1
-    db.execute(
-        "INSERT INTO application_matches (message_id, application_id, method, confidence) "
-        "VALUES (%s, %s, 'ats_company', 'high')",
-        (message_ids[0], application_id),
+    mail_match.record(
+        message_ids[0],
+        mail_match.Match(application_id, mail_match.ATS_COMPANY, "high", "dev seed"),
     )
     # Historical and unresolvable: no open action item in the real corpus has a
     # future deadline, and respond_to_offer has never once auto-resolved.
