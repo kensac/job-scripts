@@ -26,17 +26,21 @@ async def handle_send_digests(task_id: int, payload: dict[str, Any]) -> None:
     sent = 0
     for u in users:
         try:
+            # A digest announces postings that newly became visible to the
+            # person (phase 2b): a board_visible row's computed_at is when the
+            # posting joined the board. A working-set row is scope for paid
+            # sweeps, and the person cannot open a posting they cannot see.
             since_clause = (
-                "uj.created_at > now() - interval '1 day'"
+                "bv.computed_at > now() - interval '1 day'"
                 if force
-                else "uj.created_at > COALESCE(%(since)s, now() - interval '1 day')"
+                else "bv.computed_at > COALESCE(%(since)s, now() - interval '1 day')"
             )
             rows = db.query(
                 f"""
                 SELECT j.company, j.title, j.locations, j.comp_text
-                FROM user_jobs uj JOIN jobs j ON j.id = uj.job_id
-                WHERE uj.user_id = %(uid)s AND {since_clause}
-                ORDER BY uj.created_at DESC
+                FROM board_visible bv JOIN jobs j ON j.id = bv.job_id
+                WHERE bv.user_id = %(uid)s AND {since_clause}
+                ORDER BY bv.computed_at DESC, j.id DESC
                 """,
                 {"uid": u.user_id, "since": u.last_digest_at},
             )
