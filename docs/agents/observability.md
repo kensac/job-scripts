@@ -741,7 +741,13 @@ Run `python -m api.ai.migrate_receipt_payloads copy --limit N` with the private
 `JOBTRACKER_S3_ENDPOINT`, `REGION`, `BUCKET`, `ACCESS_KEY_ID` and
 `SECRET_ACCESS_KEY` variables (each with the `JOBTRACKER_S3_` prefix).
 New objects use version 2 uncompressed JSON; the reader also accepts historical
-version 1 gzip objects. Deploy version 2 readers everywhere before writing new
+version 1 gzip objects, which 501 receipts still named on 2026-10-10.
+`rewrite_receipt_vectors_v1` (`tasks/receipt_vector_format.py`), queued every
+cycle until a run starts with none left, reads each such object, writes it
+again as version 2 with `put_verified` outside any transaction, and swaps the
+reference only if the row still holds the one it read. An unavailable object
+is counted and left for the next run. Once none are left, the gzip reader is
+removed. Deploy version 2 readers everywhere before writing new
 references. Both formats verify the canonical JSON byte size and SHA-256.
 Copy retains inline vectors and verifies a GET before attaching the reference.
 `verify` checks existing references without database writes. All modes have
