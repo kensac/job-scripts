@@ -208,6 +208,15 @@ class PageFetch(Base):
     __table_args__ = (
         CheckConstraint("status IN ('passed', 'failed')", name="ck_page_fetches_status"),
         Index("idx_page_fetches_url_id", "url", text("id DESC")),
+        # The fetches page_texts' readers want: text longer than
+        # core.store.MIN_CONTENT_CHARS. Index-only for CONTENT_LATERAL's id
+        # and the content backfill's gap check (migration 1276e94618f8).
+        Index(
+            "idx_page_fetches_url_text",
+            "url",
+            text("id DESC"),
+            postgresql_where=text("content <> '' AND length(content) > 200"),
+        ),
         Index("idx_page_fetches_created_at", "created_at"),
         # The admin ledger's filter options skip-scan distinct values through
         # ledger_rows, as they do on ai_queries (routers/admin/queries.py).

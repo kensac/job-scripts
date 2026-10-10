@@ -229,6 +229,7 @@ def decided_custom_urls(urls: list[str], prompt_hash: str, model: str | None = N
 # A page shorter than this is a login wall, an error stub or a cookie banner,
 # not a posting. It is the threshold every content-consuming sweep already
 # used inline; naming it here keeps the three of them from drifting apart.
+# idx_page_fetches_url_text's predicate repeats the number: change both.
 MIN_CONTENT_CHARS = 200
 
 

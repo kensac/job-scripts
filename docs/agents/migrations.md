@@ -159,7 +159,12 @@ view is inlined by the planner, so partial indexes whose predicate the view
 implies still serve its readers (checked with EXPLAIN on production for
 `idx_ai_queries_latest_verdict` and `idx_ai_queries_latest_custom`). Define
 the view by what it excludes when the included set is a registry, so a new
-registration is included without a migration. Autogenerate does not see
+registration is included without a migration. A partial index makes a
+reader of a view index-only only when its predicate states every condition
+of the view that names a column outside the index: the planner drops a
+condition the predicate implies, and it proves little (`length(content) > 200`
+does not imply `content <> ''`). `1276e94618f8` is the example, and
+`tests/test_page_texts_view.py` fails when its plan stops being index-only. Autogenerate does not see
 views, and the test corpus and sync tools read base tables only.
 
 ## Derived state is not schema
