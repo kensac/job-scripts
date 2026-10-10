@@ -18,18 +18,20 @@ _READ = re.compile(r"\bj\.active\b")
 # Files that read the feed's own flag on purpose.
 _FEED_STATE = {
     "core/catalog.py": "writes jobs.active and compares it (retire, upsert, shadow)",
+    # The one deliberate exception (decided 2026-10-10). The preset coverage
+    # counts mean availability, but IS_AVAILABLE took each of the two from
+    # 4.3 s to 7.0 s on production, on a request a person waits for, for a
+    # difference of 111 of 198,319 postings.
+    "api/routers/filters.py": "preset coverage counts, kept on the flag for cost",
 }
 
 # Readers whose meaning is availability and that have not moved yet. Each
 # entry leaves with the change that moves it.
 _NOT_YET_MOVED = {
-    "api/board/eligibility.py",
     "api/board/column_filters.py",
-    "api/routers/filters.py",
     "api/routers/job_board.py",
     "api/routers/job_detail.py",
     "api/routers/public_job_lists.py",
-    "tasks/board.py",
 }
 
 

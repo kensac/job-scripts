@@ -239,3 +239,25 @@ def test_a_board_row_is_what_keeps_a_posting_worth_checking(user_headers):
     assert not eligible(), "nobody subscribes to its source, so nothing should pay to check it"
     db.execute("INSERT INTO user_jobs (user_id, job_id) VALUES (%s, %s)", (user_id, job_id))
     assert eligible(), "somebody keeps it, so it is checked: that is what the row is for"
+
+
+def test_demote_closed_reads_availability_not_the_feed_flag(user_headers, f):
+    """A pair goes when its posting is no longer available
+    (catalog.IS_AVAILABLE), not when the last feed to upsert it said inactive."""
+    user_id = _user_id()
+    f.make_source("still-lists-it")
+    listed = _make_passing_job(user_id, "https://jobs.example.com/board-still-listed")
+    _picked(user_id, listed)
+    db.execute(
+        "INSERT INTO source_observations (job_id, source, kind) VALUES (%s, 'still-lists-it', 'appeared')",
+        (listed,),
+    )
+    # A JSON feed's inactive record wrote the flag last; another source lists it.
+    db.execute("UPDATE jobs SET active = false WHERE id = %s", (listed,))
+    # sheet_import is a switched-off source: its flag says active, it is not.
+    imported = f.make_job(url="https://jobs.example.com/board-imported", source="sheet_import")
+    _picked(user_id, imported)
+
+    assert tasks_board.demote_closed() == 1
+    assert _working_set_row(user_id, listed) is not None
+    assert _working_set_row(user_id, imported) is None
