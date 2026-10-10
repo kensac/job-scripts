@@ -1,7 +1,10 @@
+import datetime
+
 import pytest
 
 from api import db
 from api.board import visibility
+from api.mail import applications
 
 
 def _nodes(plan):
@@ -49,10 +52,10 @@ def test_membership_branches_deduplicate_and_keep_private_state_scoped(f):
         (owner, overlap, owner, hidden, other, foreign),
     )
     db.execute(
-        "INSERT INTO user_jobs(user_id,job_id,notes,status,date_applied,hidden) VALUES "
-        "(%s,%s,'mine','saved',NULL,FALSE), (%s,%s,'note',NULL,NULL,FALSE), "
-        "(%s,%s,NULL,NULL,CURRENT_DATE,FALSE), (%s,%s,NULL,NULL,NULL,FALSE), "
-        "(%s,%s,'private',NULL,NULL,FALSE), (%s,%s,'hidden','saved',NULL,TRUE)",
+        "INSERT INTO user_jobs(user_id,job_id,notes,status,hidden) VALUES "
+        "(%s,%s,'mine','saved',FALSE), (%s,%s,'note',NULL,FALSE), "
+        "(%s,%s,NULL,NULL,FALSE), (%s,%s,NULL,NULL,FALSE), "
+        "(%s,%s,'private',NULL,FALSE), (%s,%s,'hidden','saved',TRUE)",
         (
             owner,
             overlap,
@@ -68,6 +71,7 @@ def test_membership_branches_deduplicate_and_keep_private_state_scoped(f):
             hidden,
         ),
     )
+    applications.from_board(owner, applied, datetime.date(2026, 9, 1), set_date=True)
     rows = db.query(
         visibility.FAST.format(
             columns="j.id, uj.notes", extra="AND NOT COALESCE(uj.hidden,FALSE) ORDER BY j.id"

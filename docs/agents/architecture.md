@@ -27,7 +27,11 @@ Import → classify → match → derive.
   `apply`, written by an extension submit whose posting is not on the board
   (the fill's `application_id` names it, and a submit on a board posting
   names that posting's application); and `email`, written by the matcher. A
-  posting has at most one application per person (a unique index).
+  posting has at most one application per person (a unique index). The
+  board's applied day is that application's `applied_at` as a UTC date
+  (`applications.applied_on`); a board patch that sets or clears
+  `date_applied` writes the application, and a row moving into an applied
+  status dates it once. No board row stores its own copy.
 - Asks ("schedule the interview", "respond to the offer") and status
   proposals are derived when read (`mail.pipeline.action_items`,
   `proposals_for`) from each message's current event on its current

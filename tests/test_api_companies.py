@@ -107,7 +107,6 @@ def test_applications_carry_their_status_breakdown(client, admin_headers, f):
     user_id = db.query_one("SELECT id FROM users WHERE sub = %s", ("test-admin",))["id"]
     job_id = f.make_job(source="s", company="Applied", title="a")
     f.make_board_row(user_id, job_id, status="Application Submitted")
-    db.execute("UPDATE user_jobs SET date_applied = now() WHERE job_id = %s", (job_id,))
     db.execute(
         "INSERT INTO applications (user_id, job_id, company_name, title, source_provenance, "
         "applied_at) VALUES (%s, %s, 'Applied', 'a', 'tracker', now())",

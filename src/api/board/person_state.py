@@ -10,8 +10,8 @@ from api.mail import applications
 # The legacy row is machine-shaped only when every person-editable field still
 # has its exact default. Kept here so migration tasks and live board writers
 # classify the same row without importing one task handler from another.
-UNTOUCHED = """
-    (uj.status IS NULL OR uj.status = '') AND uj.date_applied IS NULL
+UNTOUCHED = f"""
+    (uj.status IS NULL OR uj.status = '') AND {applications.applied_on("uj")} IS NULL
     AND COALESCE(uj.notes, '') = '' AND COALESCE(uj.size, '') = ''
     AND COALESCE(uj.recruiter, '') = '' AND COALESCE(uj.connection1, '') = ''
     AND COALESCE(uj.connection2, '') = '' AND COALESCE(uj.documents, '') = ''
@@ -24,17 +24,27 @@ UNTOUCHED = """
 PERSON_STATE = f"(uj.person_touched_at IS NOT NULL OR NOT ({UNTOUCHED}))"
 
 
-def track_board_row(user_id: int, job_id: int) -> dict:
-    """Record tracking intent without changing application status or dates."""
+def board_row(user_id: int, job_id: int) -> dict:
+    """The status, applied day and hidden flag of one board row as they now
+    stand: what an open board is told when the row changes."""
     return (
         db.query_one(
-            "INSERT INTO user_jobs (user_id, job_id, person_touched_at) VALUES (%s, %s, now()) "
-            "ON CONFLICT (user_id, job_id) DO UPDATE SET person_touched_at = now(), updated_at = now() "
-            "RETURNING status, date_applied, hidden",
+            f"SELECT uj.status, {applications.applied_on('uj')} AS date_applied, uj.hidden "
+            "FROM user_jobs uj WHERE uj.user_id = %s AND uj.job_id = %s",
             (user_id, job_id),
         )
         or {}
     )
+
+
+def track_board_row(user_id: int, job_id: int) -> dict:
+    """Record tracking intent without changing application status or dates."""
+    db.execute(
+        "INSERT INTO user_jobs (user_id, job_id, person_touched_at) VALUES (%s, %s, now()) "
+        "ON CONFLICT (user_id, job_id) DO UPDATE SET person_touched_at = now(), updated_at = now()",
+        (user_id, job_id),
+    )
+    return board_row(user_id, job_id)
 
 
 def touchable_job_ids(user_id: int, job_ids: list[int]) -> set[int]:
@@ -60,22 +70,26 @@ def write_board_row(user_id: int, job_id: int, patch: dict, *, publish: bool = T
     rows: the per-row publish is a synchronous post, and the bulk endpoint
     exists so a large selection is one request."""
     fields = dict(patch)
+    # The applied day belongs to the application, not to the board row.
+    day_given = "date_applied" in fields
+    day = fields.pop("date_applied", None)
     autofilled = {}
     existing = None
-    if "status" in fields or "date_applied" not in fields:
+    if "status" in fields:
         existing = db.query_one(
-            "SELECT status, date_applied FROM user_jobs WHERE user_id = %s AND job_id = %s",
+            "SELECT status FROM user_jobs WHERE user_id = %s AND job_id = %s",
             (user_id, job_id),
         )
-    # Setting any real status implies the user acted on the job; stamp
-    # date_applied once so they never have to fill it by hand.
-    if fields.get("status") and "date_applied" not in fields:
-        if not existing or existing["date_applied"] is None:
+    # Moving a row into an applied status dates its application once, so
+    # nobody has to fill the day in by hand.
+    if fields.get("status") in applications.APPLIED_STATUSES and not day_given:
+        if applications.board_day(user_id, job_id) is None:
             # UTC, not the container's local date. The containers run
             # TZ=America/New_York, so date.today() silently decided
             # "today" in Eastern for every user regardless of theirs.
-            fields["date_applied"] = datetime.datetime.now(datetime.UTC).date()
-            autofilled["date_applied"] = fields["date_applied"].isoformat()
+            day = datetime.datetime.now(datetime.UTC).date()
+            day_given = True
+            autofilled["date_applied"] = day.isoformat()
     if "status" in fields:
         old_status = existing["status"] if existing else None
         if (old_status or "") != (fields["status"] or ""):
@@ -84,26 +98,32 @@ def write_board_row(user_id: int, job_id: int, patch: dict, *, publish: bool = T
                 "VALUES (%s, %s, %s, %s)",
                 (user_id, job_id, old_status, fields["status"]),
             )
-    cols = ", ".join(f"{key} = %({key})s" for key in fields)
-    insert_cols = ", ".join(fields)
-    insert_vals = ", ".join(f"%({key})s" for key in fields)
+    insert_cols = "".join(f", {key}" for key in fields)
+    insert_vals = "".join(f", %({key})s" for key in fields)
+    cols = "".join(f"{key} = %({key})s, " for key in fields)
     with db.transaction():
         written = db.query_one(
             f"""
-            INSERT INTO user_jobs (user_id, job_id, person_touched_at, {insert_cols})
-            VALUES (%(uid)s, %(jid)s, now(), {insert_vals})
+            INSERT INTO user_jobs (user_id, job_id, person_touched_at{insert_cols})
+            VALUES (%(uid)s, %(jid)s, now(){insert_vals})
             ON CONFLICT (user_id, job_id) DO UPDATE SET
-                {cols}, person_touched_at = now(), updated_at = now()
-            RETURNING status, date_applied, hidden
+                {cols}person_touched_at = now(), updated_at = now()
+            RETURNING status
             """,
             {"uid": user_id, "jid": job_id, **fields},
         )
-        # A row moving into an applied status is the person saying they
-        # applied, and the application is recorded with it, not by a sweep.
-        if written and written["status"] in applications.APPLIED_STATUSES:
-            applications.from_board(user_id, job_id, written["date_applied"])
+        # A day the person gave, or a row moving into an applied status, is
+        # the person saying they applied, and the application is recorded
+        # with it, not by a sweep. Clearing the day keeps the application.
+        if day_given and day is not None:
+            applications.from_board(user_id, job_id, day, set_date=True)
+        else:
+            if day_given:
+                applications.clear_board_day(user_id, job_id)
+            if written and written["status"] in applications.APPLIED_STATUSES:
+                applications.from_board(user_id, job_id, None, set_date=False)
     # Every path that writes a board row ends here, so this is the one place
     # an open board learns of the change without a reload.
     if publish:
-        events.publish_board_row(user_id, job_id, written or fields)
+        events.publish_board_row(user_id, job_id, board_row(user_id, job_id))
     return autofilled

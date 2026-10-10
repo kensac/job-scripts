@@ -258,9 +258,8 @@ def test_accepting_moves_a_board_that_exists(client, me, f):
     headers, uid = me
     job, _url = f.make_ready_job()
     db.execute(
-        "INSERT INTO user_jobs (user_id, job_id, status, date_applied) "
-        "VALUES (%s, %s, 'Application Submitted', %s)",
-        (uid, job, SENT.date()),
+        "INSERT INTO user_jobs (user_id, job_id, status) VALUES (%s, %s, 'Application Submitted')",
+        (uid, job),
     )
     app = _app(uid, job_id=job)
     mid = _msg(uid, "<board@x>", "rejection", "Acme")
@@ -292,9 +291,8 @@ def test_a_proposal_carries_what_a_person_needs_to_check_it(client, me, f):
     headers, uid = me
     job, _url = f.make_ready_job()
     db.execute(
-        "INSERT INTO user_jobs (user_id, job_id, status, date_applied) "
-        "VALUES (%s, %s, 'Application Submitted', %s)",
-        (uid, job, SENT.date()),
+        "INSERT INTO user_jobs (user_id, job_id, status) VALUES (%s, %s, 'Application Submitted')",
+        (uid, job),
     )
     app = _app(uid, job_id=job)
     _attach(_msg(uid, "<ack@x>", "acknowledgement", "Acme"), app)
@@ -349,9 +347,8 @@ def test_one_response_carries_all_four_kinds(client, me, f):
     headers, uid = me
     job, _url = f.make_ready_job()
     db.execute(
-        "INSERT INTO user_jobs (user_id, job_id, status, date_applied) "
-        "VALUES (%s, %s, 'Application Submitted', %s)",
-        (uid, job, SENT.date()),
+        "INSERT INTO user_jobs (user_id, job_id, status) VALUES (%s, %s, 'Application Submitted')",
+        (uid, job),
     )
     app = _app(uid, job_id=job)
     _attach(_msg(uid, "<all1@x>", "rejection", "Acme"), app)

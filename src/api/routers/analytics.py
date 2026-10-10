@@ -35,6 +35,7 @@ from pydantic import BaseModel
 from api import db, signals
 from api.auth import AuthedUser
 from api.board.person_state import PERSON_STATE
+from api.mail import applications
 from api.problem import refuse
 from api.rates import DEFAULT_MIN_SAMPLE, Rate
 from api.rates import rate as _rate
@@ -194,11 +195,11 @@ WHERE kind = 'ingest_source' AND payload->>'source' IS NOT NULL
 GROUP BY payload->>'source'
 """
 
-_YIELD_SQL = """
+_YIELD_SQL = f"""
 SELECT j.source AS source,
        count(*) AS board_rows,
        count(*) FILTER (WHERE uj.status IS NOT NULL AND uj.status <> '') AS with_status,
-       count(*) FILTER (WHERE uj.date_applied IS NOT NULL) AS applied,
+       count(*) FILTER (WHERE {applications.applied_on("uj")} IS NOT NULL) AS applied,
        count(DISTINCT uj.user_id) AS users
 FROM user_jobs uj
 JOIN jobs j ON j.id = uj.job_id

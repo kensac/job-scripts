@@ -198,7 +198,6 @@ class CandidateJob(BaseModel):
     company: str | None
     title: str | None
     url: str | None
-    date_applied: datetime.date | None
     status: str | None
 
 
@@ -292,14 +291,14 @@ def _candidates_payload(
     jobs = db.query_as(
         CandidateJob,
         """
-        SELECT j.id, j.company, j.title, j.url, uj.date_applied, uj.status
+        SELECT j.id, j.company, j.title, j.url, uj.status
         FROM user_jobs uj JOIN jobs j ON j.id = uj.job_id
         WHERE uj.user_id = %(user)s
           AND NOT EXISTS (
               SELECT 1 FROM applications a WHERE a.user_id = uj.user_id AND a.job_id = uj.job_id
           )
           AND (%(q)s::text IS NULL OR lower(j.company) LIKE %(like)s OR lower(j.title) LIKE %(like)s)
-        ORDER BY uj.date_applied DESC NULLS LAST
+        ORDER BY uj.updated_at DESC, j.id DESC
         LIMIT %(limit)s
         """,
         {"user": owner_id, "q": q, "like": f"%{needle}%", "limit": limit},

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import datetime
+
 import pytest
 
 from api import db
+from api.mail import applications
 
 ENDPOINT = "/v1/analytics/sources"
 
@@ -196,7 +199,7 @@ def test_board_yield_counts_applications_per_source(client, admin_headers, f):
     # An untouched row, the kind the worker materialises: counted as a board
     # row but not as a status.
     f.make_board_row(user_id, tracked, status=None)
-    db.execute("UPDATE user_jobs SET date_applied = now() WHERE job_id = %s", (applied,))
+    applications.from_board(user_id, applied, datetime.date(2026, 9, 1), set_date=True)
 
     row = _row(client.get(f"{ENDPOINT}?min_sample=1", headers=admin_headers).json(), "yielding")
     assert row["board_yield"]["board_rows"] == 2

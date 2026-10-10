@@ -530,7 +530,7 @@ def _board(uid, company, title, status="Application Submitted"):
         (f"https://s/{next(_seq)}", f"https://s/{next(_seq)}", company, title),
     )["id"]
     db.execute(
-        "INSERT INTO user_jobs (user_id, job_id, status, date_applied) VALUES (%s,%s,%s,now())",
+        "INSERT INTO user_jobs (user_id, job_id, status) VALUES (%s,%s,%s)",
         (uid, job, status),
     )
     app_id = db.query_one(

@@ -4,6 +4,7 @@ remembers what the person typed, and the report that says what to fix."""
 from __future__ import annotations
 
 from api import apply, db
+from api.mail import applications
 from tests.test_api_jobs import _insert_job, _uid
 
 
@@ -146,10 +147,11 @@ def test_a_form_is_filled_from_profile_drafts_and_bank_and_the_bank_learns(clien
     ).json()
     assert done["job_id"] == job_id
     row = db.query_one(
-        "SELECT status, date_applied FROM user_jobs WHERE user_id = %s AND job_id = %s",
+        "SELECT status FROM user_jobs WHERE user_id = %s AND job_id = %s",
         (uid, job_id),
     )
-    assert row and row["status"] == "Application Submitted" and row["date_applied"]
+    assert row and row["status"] == "Application Submitted"
+    assert applications.board_day(uid, job_id)
 
     # The next form with the same label is filled from the bank.
     second = client.post("/v1/user/apply/resolve", json=body, headers=user_headers).json()
