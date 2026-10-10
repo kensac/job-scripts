@@ -429,10 +429,16 @@ uploaded a posting, or of its extraction status, reads `posting_uploads`;
 a predicate takes the non-correlated form `j.id IN (SELECT job_id FROM
 posting_uploads ...)`, which plans as one hashed subplan (the board reads
 measured the same rows and buffers as on the jobs columns, production,
-2026-10-10). While `jobs.uploaded_by` and `jobs.extraction_status` are still
-written beside it, every write sets both, jobs first, and
-`backfill_posting_uploads` repairs each cycle what a server on the older
-release wrote to jobs alone.
+2026-10-10). `jobs.uploaded_by` and `jobs.extraction_status` are not
+written. `clear_upload_columns` empties the copies uploads left in them,
+every cycle until the migration that proves `uploaded_by` empty drops it. It
+clears a row only where `posting_uploads` holds it and names the same person,
+and counts an uploader it does not as `unmatched`. It never touches
+`extraction_status` on a row with no upload row: the sheet import's `done`
+stamp and the one forced reparse are recorded nowhere else, and all data is
+retained, so that column is frozen with those values rather than dropped. A takeover is found by reading which listed urls are still
+uploads before the upsert, since afterwards their source is the feed's. A
+writer of both tables takes the jobs row first.
 
 ## A company board's pull is the closure signal for its rows
 

@@ -30,8 +30,8 @@ def _insert_job(
 ) -> int:
     row = db.query_one(
         """
-        INSERT INTO jobs (url, raw_url, company, title, locations, terms, source, active, date_posted, uploaded_by)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        INSERT INTO jobs (url, raw_url, company, title, locations, terms, source, active, date_posted)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING id
         """,
         (
@@ -44,7 +44,6 @@ def _insert_job(
             source,
             active,
             date_posted,
-            uploaded_by,
         ),
     )
     if uploaded_by is not None:
